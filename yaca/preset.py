@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from yaca.presets import PRESETS
+from yaca.actions import PRESETS
 from yaca.types import Preset
 
 
