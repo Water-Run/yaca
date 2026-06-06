@@ -1,0 +1,1484 @@
+coding-style.txt
+
+Project coding style for LLM coding agents
+
+Target project:
+Lua, C, HTM, TUI mixed project
+
+Author:
+WaterRun
+
+Purpose:
+This file defines the mandatory coding style for all LLM-generated code in this repository.
+
+This repository targets old systems, old terminals, old browsers, and conservative toolchains.
+
+The main rule is:
+Prefer simple, classic, portable, readable code.
+
+Do not modernize the project silently.
+Do not introduce frameworks, transpilers, package managers, terminal UI libraries, browser libraries, or build systems unless explicitly requested.
+
+============================================================
+
+1. General rules
+   ============================================================
+
+1.1 File encoding
+
+Use UTF-8 without BOM unless an old compiler, tool, editor, or runtime in the project requires another encoding.
+
+When targeting Windows XP console output, remember that the console code page may not be UTF-8. Do not assume Unicode output works correctly in old conhost.
+
+Line endings should follow the existing repository style. If unclear, use LF for source files.
+
+1.2 Formatting
+
+Use spaces instead of tabs unless modifying an existing file that already uses tabs.
+
+Keep indentation consistent inside each file.
+
+Avoid long lines. Prefer lines under 100 columns where practical.
+
+Do not place multiple statements on one line.
+
+Prefer explicit control flow.
+
+1.3 Naming
+
+Use clear and descriptive names.
+
+Avoid abbreviations unless they are already used in the repository or are standard for the language.
+
+Follow the naming style of the surrounding file when editing existing code.
+
+1.4 Comments
+
+Comments should explain purpose, contract, edge cases, compatibility requirements, and non-obvious design decisions.
+
+Do not add comments that merely repeat the code.
+
+Public functions, exported symbols, reusable tables, modules, structs, important constants, and important TUI drawing routines must be documented.
+
+1.5 Compatibility
+
+Compatibility is more important than novelty.
+
+Avoid modern language features, terminal features, browser features, compiler features, and operating system APIs unless explicitly requested.
+
+Do not assume new Windows Terminal behavior.
+Do not assume ANSI escape sequence support on Windows XP conhost.
+Do not assume Unicode, emoji, box-drawing characters, true color, or 256-color support.
+Do not assume a UTF-8 locale on old Linux systems.
+Do not assume a large terminal size.
+
+1.6 LLM change discipline
+
+When modifying existing code:
+
+Preserve existing behavior unless the user explicitly asks for behavior changes.
+
+Keep patches minimal and local.
+
+Do not rename files, functions, variables, public APIs, command options, or data formats without explicit instruction.
+
+Do not reformat unrelated code.
+
+Do not introduce speculative abstractions.
+
+Do not delete comments or documentation unless they are wrong and replaced with correct text.
+
+Do not add TODO comments unless the user explicitly asks for them.
+
+Do not invent unverified runtime behavior.
+
+If behavior is unclear, keep the implementation conservative.
+
+============================================================
+2. Lua style
+============
+
+2.1 Lua version
+
+Target Lua version:
+Lua 5.5.0
+
+Follow Lua 5.5.0 language rules and standard library behavior.
+
+Do not use LuaJIT-specific extensions.
+
+Do not use non-standard libraries unless they already exist in the project.
+
+Do not assume compatibility with Lua 5.1, Lua 5.2, Lua 5.3, or Lua 5.4 unless explicitly required.
+
+2.2 Lua file header
+
+Every Lua file must start with this block comment:
+
+--[[
+File:
+Date:
+Author: WaterRun
+Description:
+]]
+
+Example:
+
+--[[
+File: config.lua
+Date: 2026-06-06
+Author: WaterRun
+Description: Loads and validates project configuration.
+]]
+
+Keep fields accurate.
+
+If the exact file purpose is unclear, use a conservative description.
+
+2.3 Lua module structure
+
+Prefer simple modules based on local tables.
+
+Example:
+
+local config = {}
+
+function config.load(path)
+return nil
+end
+
+return config
+
+Avoid global variables.
+
+All module-level helpers should be local unless intentionally exported.
+
+2.4 Lua documentation comments
+
+Every public function must have detailed documentation.
+
+Use this style:
+
+--- Short description.
+-- Longer description if needed.
+-- @param name type Description.
+-- @param value type Description.
+-- @return type Description.
+function module.name(name, value)
+return value
+end
+
+For local helper functions, document them when they contain non-trivial logic.
+
+Example:
+
+--- Reads a text file completely.
+-- Opens the file in binary mode to avoid newline conversion.
+-- @param path string File path.
+-- @return string|nil File content when successful.
+-- @return string|nil Error message when failed.
+local function read_file(path)
+local file, err = io.open(path, "rb")
+if not file then
+return nil, err
+end
+
+```
+local data = file:read("*a")
+file:close()
+
+return data, nil
+```
+
+end
+
+2.5 Lua table documentation
+
+Important tables must be documented.
+
+Example:
+
+--- Runtime configuration table.
+-- @field root_dir string Project root directory.
+-- @field port number HTTP server port.
+-- @field debug boolean Whether debug mode is enabled.
+local default_config = {
+root_dir = ".",
+port = 8080,
+debug = false
+}
+
+2.6 Lua naming
+
+Use snake_case for local variables and functions.
+
+Use lower_snake_case for module names.
+
+Use UPPER_SNAKE_CASE for constants.
+
+Example:
+
+local max_retry_count = 3
+local DEFAULT_TIMEOUT = 30
+
+local function parse_config_line(line)
+return line
+end
+
+2.7 Lua indentation
+
+Use 4 spaces.
+
+Example:
+
+if enabled then
+run_task()
+else
+stop_task()
+end
+
+2.8 Lua control flow
+
+Prefer explicit checks.
+
+Good:
+
+if value == nil then
+return nil, "value is nil"
+end
+
+Avoid clever boolean chains when they reduce clarity.
+
+Avoid:
+
+local name = user and user.name or "unknown"
+
+Prefer:
+
+local name = "unknown"
+if user ~= nil and user.name ~= nil then
+name = user.name
+end
+
+2.9 Lua error handling
+
+Prefer explicit nil plus error returns for recoverable errors.
+
+Example:
+
+return nil, "failed to open file"
+
+Use error only for programmer errors or unrecoverable internal violations.
+
+Do not silently ignore errors.
+
+2.10 Lua globals
+
+Do not create globals.
+
+Always use local.
+
+Avoid:
+
+count = 0
+
+Prefer:
+
+local count = 0
+
+If a global is required for integration with existing code, document why.
+
+2.11 Lua dependencies
+
+Do not require external modules unless they already exist in the project or the user explicitly requests them.
+
+2.12 Lua string style
+
+Use double quotes for normal strings.
+
+Use long brackets for large multiline text.
+
+Example:
+
+local name = "WaterRun"
+
+local text = [[
+line one
+line two
+]]
+
+2.13 Lua function style
+
+Prefer small functions with a single responsibility.
+
+Avoid deeply nested functions.
+
+Return early for invalid input.
+
+Example:
+
+local function normalize_name(name)
+if name == nil then
+return nil, "name is nil"
+end
+
+```
+if name == "" then
+    return nil, "name is empty"
+end
+
+return string.lower(name), nil
+```
+
+end
+
+2.14 Lua compatibility discipline
+
+Do not use experimental, non-standard, or implementation-specific behavior.
+
+Do not depend on table iteration order unless the table is explicitly sorted.
+
+Do not assume file system behavior is portable unless the surrounding code already does so.
+
+============================================================
+3. C style
+==========
+
+3.1 C style target
+
+Use a classic C style close to the Lua source code style.
+
+The code should be plain, conservative, and portable.
+
+Prefer ANSI C or ISO C-compatible code unless the existing project clearly uses a newer C standard.
+
+Do not use C++.
+
+Do not use compiler-specific extensions unless required by existing code.
+
+3.2 C braces
+
+Opening braces must be placed on their own line.
+
+Example:
+
+static int read_value(lua_State *L)
+{
+int value;
+
+value = luaL_checkinteger(L, 1);
+lua_pushinteger(L, value);
+
+return 1;
+}
+
+For control statements:
+
+if (value == 0)
+{
+return 0;
+}
+else
+{
+return 1;
+}
+
+while (running)
+{
+step();
+}
+
+3.3 C indentation
+
+Use 2 spaces for new C files.
+
+When editing existing C files, follow the surrounding file style.
+
+Do not mix tabs and spaces.
+
+3.4 C naming
+
+Follow Lua-style C naming when writing Lua bindings or Lua-related internals.
+
+Examples:
+
+static int l_open(lua_State *L);
+static int l_close(lua_State *L);
+static int l_read(lua_State *L);
+
+Use short but clear names for local variables.
+
+Use lowercase names for static helper functions.
+
+Use uppercase names for macros.
+
+3.5 C file structure
+
+A C source file should generally use this order:
+
+1. File header comment.
+2. Includes.
+3. Macros.
+4. Type definitions.
+5. Static function declarations.
+6. Static helper functions.
+7. Public or exported functions.
+8. Lua registration table if applicable.
+
+3.6 C file header
+
+Every C file should start with this comment block:
+
+/*
+** File:
+** Date:
+** Author: WaterRun
+** Description:
+*/
+
+Example:
+
+/*
+** File: lconfig.c
+** Date: 2026-06-06
+** Author: WaterRun
+** Description: Lua bindings for project configuration.
+*/
+
+3.7 C comments
+
+Use classic C comments.
+
+Prefer:
+
+/*
+** Explanation.
+*/
+
+For function documentation:
+
+/*
+** Opens a configuration file.
+**
+** path:
+**   Path to the configuration file.
+**
+** returns:
+**   0 on success.
+**   Non-zero on failure.
+*/
+
+Do not over-comment obvious statements.
+
+3.8 C includes
+
+Include only what is needed.
+
+Prefer standard headers first, Lua headers second, and project headers last.
+
+Example:
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "lua.h"
+#include "lauxlib.h"
+
+#include "config.h"
+
+3.9 C memory management
+
+Always check allocation results.
+
+Always define clear ownership rules.
+
+Do not leak memory.
+
+Do not return pointers to stack memory.
+
+Example:
+
+char *buffer;
+
+buffer = malloc(size);
+if (buffer == NULL)
+{
+return NULL;
+}
+
+3.10 C error handling
+
+Use explicit return codes for C internal functions.
+
+Use luaL_error only when reporting Lua-facing errors.
+
+Do not ignore return values from functions that can fail.
+
+3.11 C Lua API rules
+
+When writing Lua C API code:
+
+Keep stack usage simple.
+
+Document expected stack arguments.
+
+Validate arguments with luaL_check functions where appropriate.
+
+Return the exact number of Lua return values.
+
+Avoid leaving temporary values on the Lua stack.
+
+Keep Lua-facing functions small.
+
+Example:
+
+/*
+** Lua:
+**   value = module.echo(value)
+**
+** Stack:
+**   1: value
+**
+** Returns:
+**   1 value.
+*/
+static int l_echo(lua_State *L)
+{
+lua_settop(L, 1);
+return 1;
+}
+
+3.12 C macros
+
+Use macros sparingly.
+
+Macro names must be UPPER_SNAKE_CASE.
+
+Avoid complex macros with hidden side effects.
+
+3.13 C portability
+
+Do not assume POSIX unless the file is clearly POSIX-only.
+
+Do not assume Windows-only APIs unless the file is clearly Windows-only.
+
+Avoid variable length arrays.
+
+Avoid non-standard integer types unless required and included correctly.
+
+Prefer explicit buffer sizes.
+
+3.14 C forbidden patterns
+
+Avoid C++ syntax.
+
+Avoid compiler-specific attributes without guards.
+
+Avoid unchecked malloc, calloc, or realloc.
+
+Avoid hidden global mutable state.
+
+Avoid complex pointer arithmetic without documentation.
+
+Avoid large functions with mixed responsibilities.
+
+Avoid silent truncation of strings or buffers.
+
+============================================================
+4. HTM style
+============
+
+4.1 Browser target
+
+Target browser compatibility:
+Internet Explorer 6
+
+Files may use the .htm extension.
+
+Use classic HTML, CSS, and JavaScript.
+
+Do not use modern HTML5-only features.
+
+Do not use modern JavaScript features if IE6 compatibility is required.
+
+Do not introduce frontend frameworks.
+
+4.2 HTM document style
+
+Prefer simple, classic markup.
+
+Use a conservative doctype.
+
+Example:
+
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+
+<html>
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <title>Page Title</title>
+    <link rel="stylesheet" type="text/css" href="style.css">
+</head>
+<body>
+
+</body>
+</html>
+
+4.3 HTM naming
+
+Use lowercase tag names and attribute names.
+
+Use simple class names.
+
+Prefer hyphen-separated class names.
+
+Example:
+
+<div class="main-panel">
+</div>
+
+4.4 HTM layout
+
+For strict IE6 compatibility, prefer classic layout techniques.
+
+Allowed techniques:
+
+Simple tables for layout when necessary.
+Floats.
+Fixed-width layouts.
+Simple positioning.
+Basic inline styles when matching legacy code.
+
+Avoid:
+
+Flexbox.
+Grid.
+CSS variables.
+Media queries.
+calc.
+rem units.
+Viewport units.
+HTML5 semantic tags such as section, article, nav, header, footer, and main.
+Canvas.
+SVG as required UI.
+Modern form input types.
+
+4.5 CSS style
+
+Use CSS compatible with IE6.
+
+Prefer external CSS files.
+
+Use simple selectors.
+
+Good:
+
+#header {
+width: 960px;
+height: 60px;
+}
+
+.main-panel {
+padding: 10px;
+}
+
+Avoid complex selectors:
+
+div > ul li:first-child
+input[type="text"]
+.container .item:nth-child(2)
+
+Avoid CSS hacks unless the project already uses them.
+
+If a hack is required, document it clearly.
+
+4.6 JavaScript style for HTM
+
+Use classic JavaScript compatible with IE6.
+
+Use var.
+
+Do not use let.
+
+Do not use const.
+
+Use function declarations.
+
+Do not use arrow functions.
+
+Do not use Promise, fetch, class, template strings, modules, querySelector, or modern browser APIs unless compatibility wrappers exist.
+
+Prefer:
+
+var el = document.getElementById("status");
+
+if (el) {
+el.innerHTML = "Ready";
+}
+
+For events, use compatibility helpers.
+
+Example:
+
+function attachEventCompat(el, name, fn)
+{
+if (!el) {
+return;
+}
+
+```
+if (el.attachEvent) {
+    el.attachEvent("on" + name, fn);
+} else if (el.addEventListener) {
+    el.addEventListener(name, fn, false);
+} else {
+    el["on" + name] = fn;
+}
+```
+
+}
+
+4.7 HTM comments
+
+Use comments to explain compatibility decisions.
+
+Example:
+
+<!-- Table layout is used here for IE6 compatibility. -->
+
+Do not add excessive comments around obvious markup.
+
+4.8 HTM assets
+
+Use simple image formats.
+
+Prefer GIF, JPG, and PNG with compatibility checked.
+
+Avoid relying on alpha-transparent PNG behavior in IE6 unless handled explicitly.
+
+4.9 HTM forbidden patterns
+
+Do not use HTML5-only elements as required structure.
+
+Do not use CSS flexbox.
+
+Do not use CSS grid.
+
+Do not use CSS variables.
+
+Do not use ES6 or newer JavaScript syntax.
+
+Do not use frontend frameworks.
+
+Do not use TypeScript.
+
+Do not use JSX.
+
+Do not use Web Components.
+
+Do not use fetch.
+
+Do not use Promise.
+
+Do not use localStorage or sessionStorage as required storage.
+
+Do not use modern browser APIs without fallback.
+
+============================================================
+5. TUI style
+============
+
+5.1 TUI compatibility target
+
+The TUI must target old consoles and terminals.
+
+Primary Windows target:
+Windows XP classic console.
+
+Also consider:
+Windows 7 classic console.
+Old conhost behavior.
+Classic cmd.exe behavior.
+Terminals from roughly the Windows XP and early 2000s Linux era.
+Old xterm-compatible terminals.
+Linux console.
+Basic VT100-like or ANSI-like terminals when available.
+
+The exact Linux distribution is not fixed. Treat the Linux target as old mainstream Linux systems from the same general era as Windows XP.
+
+Do not assume modern terminal emulators.
+
+Do not assume Windows Terminal.
+
+Do not assume PowerShell terminal behavior.
+
+Do not assume Unicode rendering.
+
+Do not assume ANSI escape sequences work on Windows XP.
+
+Do not assume terminal true color.
+
+Do not assume 256 colors.
+
+Do not assume mouse input.
+
+Do not assume alternate screen buffer.
+
+Do not assume terminal resizing events.
+
+Do not assume emoji or icon fonts.
+
+5.2 TUI output philosophy
+
+The TUI must remain usable in plain text.
+
+Every visual element should degrade cleanly to ASCII.
+
+The interface must be readable without color.
+
+The interface must be readable without box-drawing characters.
+
+The interface must be readable when the terminal is small.
+
+The interface must not depend on cursor animation.
+
+The interface must not require non-ASCII symbols.
+
+5.3 Character set
+
+Default safe character set:
+ASCII only.
+
+Preferred safe border characters:
+
+*
+
+-
+
+|
+
+Preferred safe markers:
+
+*
+
+>
+
+!
+?
+x
+o
+
+Avoid by default:
+
+Unicode box drawing characters.
+Emoji.
+Powerline symbols.
+Nerd Font icons.
+Full-width decorative symbols.
+Combining characters.
+Ambiguous-width characters.
+
+Chinese text may be used for user-facing content when required, but layout calculations must not assume every character has width 1.
+
+If alignment matters, avoid mixing CJK text and ASCII in fixed-width columns unless display width is handled explicitly.
+
+5.4 Color
+
+Color is optional.
+
+The TUI must work correctly with no color.
+
+Use color only as an enhancement.
+
+Never use color as the only way to communicate state.
+
+If color is used, provide a no-color path.
+
+Respect NO_COLOR when practical.
+
+Allow color to be disabled with a plain option if the program has command line options.
+
+Use only the basic 8 colors unless the existing project proves broader support.
+
+Avoid bright color assumptions.
+
+Avoid 256-color and true-color output unless explicitly requested.
+
+5.5 ANSI escape sequences
+
+Do not emit ANSI escape sequences unconditionally.
+
+On Windows XP conhost, ANSI escape sequences are not reliably supported by default.
+
+On old Linux terminals, basic ANSI sequences may work, but the TERM value may be missing, wrong, or too limited.
+
+Before using ANSI sequences, check capability or use an explicit compatibility mode.
+
+The safest default output mode should use plain lines without cursor movement.
+
+If using ANSI, keep to basic sequences only:
+
+Clear screen only when necessary.
+Move cursor only when necessary.
+Set basic foreground color only when necessary.
+Reset attributes after colored output.
+
+Avoid advanced sequences:
+
+True color.
+256-color palette.
+Hyperlinks.
+Bracketed paste.
+Mouse tracking.
+Alternate screen.
+Complex cursor save and restore.
+OSC sequences.
+
+5.6 Screen updating
+
+Prefer simple full-line redraws.
+
+Avoid complex partial redraw systems unless required.
+
+Do not depend on flicker-free redraw on old consoles.
+
+Do not require high refresh rates.
+
+Avoid animations by default.
+
+If progress display is needed, prefer simple text:
+
+[====      ] 40%
+Processing 12 of 30
+
+Avoid spinner-only progress because some terminals do not render it well.
+
+If using a spinner, use ASCII frames only:
+
+*
+
+
+|
+/
+
+5.7 Layout
+
+Assume minimum terminal width may be 80 columns.
+
+Assume terminal height may be 24 rows.
+
+Do not require more than 80 columns for core information.
+
+Long text must wrap or truncate safely.
+
+Do not rely on dynamic terminal size detection.
+
+If terminal size detection is unavailable, default to 80 columns and 24 rows.
+
+Avoid deeply nested panels.
+
+Avoid dense dashboards that become unreadable in small terminals.
+
+Use simple vertical lists and tables.
+
+5.8 Keyboard input
+
+Prefer line-based input.
+
+Use stdin reading when possible.
+
+Avoid requiring raw mode.
+
+Avoid requiring arrow keys.
+
+Avoid requiring function keys.
+
+Avoid requiring mouse input.
+
+Avoid requiring Ctrl-key combinations except common ones like Ctrl+C.
+
+For menu choices, prefer simple numeric or letter input.
+
+Example:
+
+1. Open file
+2. Save file
+3. Exit
+
+Choice:
+
+For yes or no prompts, accept clear ASCII input:
+
+y
+n
+yes
+no
+
+5.9 Windows XP console rules
+
+For Windows XP compatibility:
+
+Do not depend on ENABLE_VIRTUAL_TERMINAL_PROCESSING.
+
+Do not depend on modern console APIs introduced after Windows XP.
+
+Do not assume UTF-8 console code page.
+
+Do not assume WriteConsoleW layout matches byte-oriented output.
+
+Do not assume ANSI escape sequences are interpreted.
+
+Do not use emoji, Unicode borders, or fancy symbols by default.
+
+Prefer plain ASCII output.
+
+Use \r\n for direct Windows console output when appropriate.
+
+Avoid relying on console window resize events.
+
+Avoid very long single-line output.
+
+Avoid background colors unless tested.
+
+5.10 Old Linux terminal rules
+
+For old Linux compatibility:
+
+Do not assume UTF-8 locale.
+
+Do not assume ncurses is installed.
+
+Do not assume terminfo is complete.
+
+Do not assume xterm-256color.
+
+Do not assume 256 colors.
+
+Do not assume mouse support.
+
+Do not assume alternate screen support.
+
+Prefer TERM=dumb compatible output when possible.
+
+When TERM is dumb, unknown, or empty, use plain text output only.
+
+5.11 TUI documentation
+
+Every non-trivial TUI function must document:
+
+What it draws.
+Whether it uses ANSI escape sequences.
+Whether it requires cursor movement.
+Whether it works in plain ASCII mode.
+Whether it assumes a terminal width.
+What happens when color is disabled.
+
+Lua TUI function documentation example:
+
+--- Draws a plain ASCII progress bar.
+-- This function does not use ANSI escape sequences.
+-- It is safe for Windows XP conhost and TERM=dumb output.
+-- @param current number Current progress value.
+-- @param total number Total progress value.
+-- @param width number Bar width in characters.
+-- @return string Rendered progress bar.
+local function draw_progress_bar(current, total, width)
+return ""
+end
+
+C TUI function documentation example:
+
+/*
+** Draws a plain ASCII horizontal line.
+**
+** This function does not use ANSI escape sequences.
+** It is safe for Windows XP conhost and old Linux terminals.
+**
+** width:
+**   Number of characters to write.
+**
+** returns:
+**   0 on success.
+**   Non-zero on failure.
+*/
+
+5.12 TUI fallback modes
+
+If the TUI has modes, provide at least these conceptual output levels:
+
+Plain mode:
+ASCII only.
+No color.
+No ANSI cursor movement.
+Line-based output.
+
+Basic ANSI mode:
+ASCII text.
+Optional basic colors.
+Minimal cursor movement.
+
+Enhanced mode:
+Only when explicitly enabled or safely detected.
+May use better colors or layout.
+Must still avoid Unicode unless explicitly enabled.
+
+The program must not fail just because enhanced terminal features are unavailable.
+
+5.13 TUI forbidden patterns
+
+Do not use Unicode icons as required UI.
+
+Do not use emoji.
+
+Do not require Nerd Fonts.
+
+Do not require Powerline fonts.
+
+Do not require mouse support.
+
+Do not require alternate screen.
+
+Do not require 256 colors.
+
+Do not require true color.
+
+Do not require raw keyboard mode for basic operation.
+
+Do not require ncurses unless the project already depends on it.
+
+Do not require Windows 10 virtual terminal processing.
+
+Do not clear the whole screen repeatedly unless necessary.
+
+Do not hide important information behind color-only indicators.
+
+============================================================
+6. Mixed Lua, C, HTM, and TUI project rules
+===========================================
+
+6.1 Boundaries
+
+Lua should handle scripting, configuration, routing, templates, TUI orchestration, and application logic.
+
+C should handle low-level bindings, performance-sensitive parts, Lua integration, and platform-specific console support when necessary.
+
+HTM should remain simple, static, and IE6-compatible.
+
+TUI should remain plain, ASCII-first, and compatible with old consoles.
+
+Do not move logic across languages unless explicitly requested.
+
+6.2 Interop
+
+When Lua calls C:
+
+Keep the Lua API simple.
+
+Document argument types.
+
+Document return values.
+
+Keep error messages clear.
+
+When HTM calls Lua-backed endpoints:
+
+Keep request and response formats simple.
+
+Prefer plain text, query strings, form posts, or simple JSON if the existing code supports it.
+
+Avoid modern browser-only request mechanisms.
+
+When TUI code calls Lua or C helpers:
+
+Keep rendering separate from business logic.
+
+Keep terminal capability detection separate from drawing code.
+
+Allow plain output fallback.
+
+6.3 Generated code
+
+Generated code must be deterministic.
+
+Do not include timestamps unless required by the file header.
+
+Do not include machine-specific paths.
+
+Do not include hidden dependencies.
+
+6.4 Security
+
+Validate input at boundaries.
+
+Do not trust file paths, query strings, form data, terminal input, environment variables, or Lua table contents from external sources.
+
+Avoid shell execution.
+
+If shell execution is required, document why and validate inputs strictly.
+
+6.5 Error messages
+
+Error messages should be plain and useful.
+
+Good:
+
+failed to open config file: path is empty
+
+Bad:
+
+oops
+
+Bad:
+
+something went wrong
+
+============================================================
+7. Documentation requirements
+=============================
+
+7.1 Public API documentation
+
+Every public API must document:
+
+Purpose.
+Parameters.
+Return values.
+Error behavior.
+Side effects.
+Compatibility notes if relevant.
+
+7.2 Internal function documentation
+
+Internal functions should be documented when:
+
+The logic is not obvious.
+The function touches files, memory, network, process state, terminal state, browser state, or Lua stack.
+The function exists for compatibility.
+The function has strict input assumptions.
+
+7.3 Table and struct documentation
+
+Important Lua tables and C structs must document their fields.
+
+Lua example:
+
+--- Parsed request table.
+-- @field method string HTTP method.
+-- @field path string Request path.
+-- @field query table Query parameters.
+-- @field body string Raw request body.
+
+C example:
+
+/*
+** Request object.
+**
+** method:
+**   HTTP method string.
+**
+** path:
+**   Request path string.
+**
+** body:
+**   Raw request body.
+*/
+
+============================================================
+8. Examples
+===========
+
+8.1 Lua example
+
+--[[
+File: example.lua
+Date: 2026-06-06
+Author: WaterRun
+Description: Example Lua module following project style.
+]]
+
+local example = {}
+
+--- Adds two numbers.
+-- @param a number First number.
+-- @param b number Second number.
+-- @return number Sum of a and b.
+function example.add(a, b)
+return a + b
+end
+
+--- Builds a normalized name.
+-- @param name string Raw name.
+-- @return string|nil Normalized name.
+-- @return string|nil Error message when failed.
+function example.normalize_name(name)
+if name == nil then
+return nil, "name is nil"
+end
+
+```
+if name == "" then
+    return nil, "name is empty"
+end
+
+return string.lower(name), nil
+```
+
+end
+
+return example
+
+8.2 C example
+
+/*
+** File: lexample.c
+** Date: 2026-06-06
+** Author: WaterRun
+** Description: Example Lua C module following project style.
+*/
+
+#include <string.h>
+
+#include "lua.h"
+#include "lauxlib.h"
+
+/*
+** Lua:
+**   result = example.len(value)
+**
+** Stack:
+**   1: value string
+**
+** Returns:
+**   1 integer.
+*/
+static int l_len(lua_State *L)
+{
+const char *value;
+size_t len;
+
+value = luaL_checklstring(L, 1, &len);
+lua_pushinteger(L, (lua_Integer)len);
+
+return 1;
+}
+
+static const luaL_Reg example_funcs[] =
+{
+{"len", l_len},
+{NULL, NULL}
+};
+
+int luaopen_example(lua_State *L)
+{
+luaL_newlib(L, example_funcs);
+return 1;
+}
+
+8.3 HTM example
+
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+
+<html>
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <title>Example</title>
+    <link rel="stylesheet" type="text/css" href="style.css">
+    <script type="text/javascript">
+    function setStatus(text)
+    {
+        var el = document.getElementById("status");
+
+```
+    if (!el) {
+        return;
+    }
+
+    el.innerHTML = text;
+}
+</script>
+```
+
+</head>
+<body>
+    <table width="960" border="0" cellspacing="0" cellpadding="0">
+        <tr>
+            <td id="status">Ready</td>
+        </tr>
+    </table>
+</body>
+</html>
+
+8.4 TUI plain output example
+
+Status:
+File: config.lua
+Result: OK
+
+Progress:
+[======    ] 60%
+
+Actions:
+
+1. Continue
+2. Retry
+3. Exit
+
+Choice:
+
+8.5 TUI Lua rendering example
+
+--[[
+File: tui.lua
+Date: 2026-06-06
+Author: WaterRun
+Description: Plain ASCII TUI helpers for old consoles.
+]]
+
+local tui = {}
+
+--- Draws a plain ASCII progress bar.
+-- This function does not use ANSI escape sequences.
+-- It is safe for Windows XP conhost and TERM=dumb output.
+-- @param current number Current progress value.
+-- @param total number Total progress value.
+-- @param width number Bar width in characters.
+-- @return string Rendered progress bar.
+function tui.progress_bar(current, total, width)
+local filled
+local empty
+local percent
+
+```
+if total <= 0 then
+    total = 1
+end
+
+if current < 0 then
+    current = 0
+end
+
+if current > total then
+    current = total
+end
+
+percent = current / total
+filled = math.floor(width * percent)
+empty = width - filled
+
+return "[" .. string.rep("=", filled) .. string.rep(" ", empty) .. "]"
+```
+
+end
+
+return tui
+
+============================================================
+9. Final rule
+=============
+
+When in doubt, choose the simpler, older, clearer, and more compatible solution.
+
+This project is not a place for unnecessary modernization.
+
+The safest output must remain useful on Windows XP conhost, old cmd.exe, old Linux terminals, IE6-era browsers, and plain text environments.
