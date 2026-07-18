@@ -55,3 +55,9 @@ v0.1 不承诺旧 macOS，当前兼容性工作集中在旧 Windows 与旧 Linux
 状态：已确认
 
 v0.1 的 Windows 客户端验证连续覆盖 Windows XP SP3、Vista SP2、7 SP1、8、8.1、10 和 11。XP 是最低兼容基线并执行完整闭环；其余版本至少执行阻断发布的启动、模型请求、工具调用、上下文保存与恢复冒烟验证。Windows Server、Windows 2000 与 ReactOS 不在当前承诺范围。
+
+## D-010 Windows CPU 架构
+
+状态：已确认
+
+Windows v0.1 只提供 Win32 x86 32 位发布物。一套 x86 产物覆盖 XP 至 11；在 x64 Windows 上通过系统的 32 位兼容环境运行。不提供原生 x64 或 ARM 构建，也不承诺 Windows on ARM。
