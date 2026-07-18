@@ -91,3 +91,9 @@ yaca 采用“多个窄模块与显式依赖”的轻量 ports/adapters 架构�
 状态：已确认
 
 Windows x86 与 Linux x86_64 是独立发行包，各自在对应目标平台使用 luainstaller 原生打包。项目不生成跨平台通用二进制，也不把另一平台的可执行工具或 native runtime 混入发行包。
+
+## D-016 统一 Lua 入口
+
+状态：已确认
+
+所有平台发行包共用一个 `main.lua` 和同一份业务源码。Windows/Linux 的差异仅存在于注入的后端、luainstaller 原生产物和外层资源装配。项目不维护 `main_windows.lua` / `main_linux.lua` 双入口，也不在构建时生成入口源码。允许两个很小的纯 Lua 后端同时被静态发现并嵌入，但运行时只实例化当前平台后端。

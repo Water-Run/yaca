@@ -12,6 +12,7 @@
 - 在其外层组装 yaca 发布目录，避免修改 luainstaller 所有权清单管理的生成树。
 - 每个平台和架构原生构建，不假装跨平台产物。
 - Windows x86 与 Linux x86_64 使用同一份 Lua 业务源码，但分别运行 luainstaller，产生互不混用的 native launcher、Lua runtime 和工具资源。
+- 两个平台共用 `main.lua`；发布脚本不生成或维护平台专用 Lua 入口。
 - 运行验证时清除系统 Lua 模块路径并避免宿主工具掩盖缺失资源。
 
 ## 硬门槛
