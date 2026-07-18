@@ -19,8 +19,9 @@
 - Vista、7、8、8.1、10、11 使用同一能力接口；能力差异通过探测或保守降级处理，不在上层堆叠版本判断。
 - Windows 只编译 Win32 x86 目标，不设计原生 x64/ARM 分支；整数与文件大小仍使用不依赖指针位数的明确表示。
 - CentOS 7 的 locale、`/proc`、文件权限和旧 glibc 基线。
+- Linux 只编译 x86_64 目标，不为 i686 或 ARM 添加发布分支。
 - v0.1 不承诺旧 macOS，不添加旧 macOS 专用分支；公共 POSIX 代码仍避免无必要的 Linux 独占假设。
 
 ## 待讨论
 
-先确定 Linux CPU 架构矩阵。随后再讨论平台抽象采用一个聚合模块，还是按 `path`、`fs`、`text`、`terminal_capabilities` 拆分。
+先确定 Linux 通用产物与发行版构建策略。随后再讨论平台抽象采用一个聚合模块，还是按 `path`、`fs`、`text`、`terminal_capabilities` 拆分。

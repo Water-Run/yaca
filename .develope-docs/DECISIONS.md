@@ -61,3 +61,9 @@ v0.1 的 Windows 客户端验证连续覆盖 Windows XP SP3、Vista SP2、7 SP1�
 状态：已确认
 
 Windows v0.1 只提供 Win32 x86 32 位发布物。一套 x86 产物覆盖 XP 至 11；在 x64 Windows 上通过系统的 32 位兼容环境运行。不提供原生 x64 或 ARM 构建，也不承诺 Windows on ARM。
+
+## D-011 Linux CPU 架构
+
+状态：已确认
+
+Linux v0.1 只提供 x86_64 发布物。CentOS 7 x86_64 保持完整兼容硬门槛，Debian 13 x86_64 保持现代冒烟目标。不提供 i686、ARM 或其他 Linux 架构。
