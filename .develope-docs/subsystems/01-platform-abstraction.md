@@ -16,9 +16,10 @@
 ## 旧系统重点
 
 - Windows XP 路径、代码页、长路径限制和非 ANSI 终端。
+- Vista、7、8、8.1、10、11 使用同一能力接口；能力差异通过探测或保守降级处理，不在上层堆叠版本判断。
 - CentOS 7 的 locale、`/proc`、文件权限和旧 glibc 基线。
 - v0.1 不承诺旧 macOS，不添加旧 macOS 专用分支；公共 POSIX 代码仍避免无必要的 Linux 独占假设。
 
 ## 待讨论
 
-平台抽象采用一个聚合模块还是按 `path`、`fs`、`text`、`terminal_capabilities` 拆分；错误返回格式也需统一。
+先确定 Windows 发布物是仅 x86 还是同时包含 x64。随后再讨论平台抽象采用一个聚合模块，还是按 `path`、`fs`、`text`、`terminal_capabilities` 拆分。

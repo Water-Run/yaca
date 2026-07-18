@@ -19,6 +19,10 @@
 - CentOS 7 x86_64。
 - 无系统 Lua 仍可运行完整最小闭环。
 
+## Windows 发布验证
+
+XP SP3 执行完整闭环。Vista SP2、7 SP1、8、8.1、10 和 11 至少执行启动、模型请求、工具调用以及上下文保存与恢复冒烟；任一失败都阻断发布。CPU 架构与产物数量仍待确认。
+
 ## 风险
 
 luainstaller 当前没有 Windows XP 公开验证契约；编译器、CRT、Lua DLL、PowerShell 构建依赖和单文件提取器都需要单独验证。

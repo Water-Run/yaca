@@ -49,3 +49,9 @@ Windows XP SP3 x86 与 CentOS 7 x86_64 都必须通过 v0.1 的原生打包与�
 状态：已确认
 
 v0.1 不承诺旧 macOS，当前兼容性工作集中在旧 Windows 与旧 Linux。平台边界可以保持普通 POSIX 可移植性，但不为旧 macOS 增加专用实现、构建产物或发布测试门槛。
+
+## D-009 Windows 客户端支持矩阵
+
+状态：已确认
+
+v0.1 的 Windows 客户端验证连续覆盖 Windows XP SP3、Vista SP2、7 SP1、8、8.1、10 和 11。XP 是最低兼容基线并执行完整闭环；其余版本至少执行阻断发布的启动、模型请求、工具调用、上下文保存与恢复冒烟验证。Windows Server、Windows 2000 与 ReactOS 不在当前承诺范围。
