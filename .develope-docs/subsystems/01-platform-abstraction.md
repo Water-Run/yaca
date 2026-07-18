@@ -17,7 +17,7 @@
 
 - Windows XP 路径、代码页、长路径限制和非 ANSI 终端。
 - CentOS 7 的 locale、`/proc`、文件权限和旧 glibc 基线。
-- 旧 macOS 的最低版本与 CPU 架构等待 00 号确认。
+- v0.1 不承诺旧 macOS，不添加旧 macOS 专用分支；公共 POSIX 代码仍避免无必要的 Linux 独占假设。
 
 ## 待讨论
 

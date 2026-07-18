@@ -15,7 +15,7 @@
 ## 旧系统重点
 
 - Windows 命令行转义和 CreateProcess 语义。
-- 旧 Linux/macOS 信号、超时和子进程树清理。
+- CentOS 7 的 POSIX 信号、超时和子进程树清理。
 - 输出代码页、二进制输出及 CRLF/LF。
 - 随包工具版本、完整性和替换边界。
 

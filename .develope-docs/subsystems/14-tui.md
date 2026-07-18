@@ -15,7 +15,7 @@
 ## 旧系统重点
 
 - Windows XP conhost 不假设 ANSI、UTF-8、VT 输入或宽字符正确显示。
-- 旧 Linux/macOS 不假设 256 色、true color、鼠标或大窗口。
+- CentOS 7 终端不假设 256 色、true color、鼠标或大窗口。
 - 任何全屏模式都必须有逐行纯文本后备。
 
 ## 待讨论
