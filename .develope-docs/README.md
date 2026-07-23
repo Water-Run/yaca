@@ -23,11 +23,13 @@
 ## 文件索引
 
 - `TRACKING.md`：阶段、子系统状态和下一步。
+- `OWNER-QUESTIONS-01.md`：已经回答并冻结的负责人集中问卷；保留 29 题收到回复时的候选语境。
+- `DECISION-PROJECTION-BATCH-06.md`：把集中答复确定展开为 248 个 atomic `PR-006-*` 传播记录。
 - `CURRENT-STATE.md`：仓库与打包基础设施现状。
 - `SYSTEM-MAP.md`：子系统导航、依赖和建议顺序。
 - `DECISIONS.md`：已经确认的项目级决策。
 - `DESIGN-DECISION-ROADMAP.md`：解释原子题库、十个 owner packet、跨 packet 分批队列与实施就绪门的全局关系。
-- `DECISION-BATCH-QUEUE.md`：把全部正式问题按真实依赖重组为 49 个可逐批回复的批次；不按 packet 文件顺序机械作答。
+- `DECISION-BATCH-QUEUE.md`：保留把全部正式问题按真实依赖重组后的 49 个旧原子审计批次；当前不再要求负责人逐批作答。
 - `ARCHITECTURE-READINESS.md`：区分题库、决定、规格与计划，列出进入实施计划前必须通过的 P0/P1 门和证据。
 - `DECISION-RESOLUTION-PROTOCOL.md`：规定负责人回复怎样逐项归档、消解冲突并提升为可实施规格。
 - `DECISION-REGISTER.md`：`decision-inventory-v9` 的 270 组正式问题唯一实时状态、条件、回复证据和决定/规格/gate 传播登记；从这里恢复当前进度。
@@ -38,11 +40,13 @@
 - `CONFIG-SCHEMA-CANDIDATE.md`：完整配置逐字段候选、XML 覆盖、INI 往返、秘密生命周期与连续 `CV-001` 至 `CV-076` 跨字段校验底稿。
 - `DATA-CLASSIFICATION-CANDIDATE.md`：逐类说明数据能否进入不同 Model purpose、TUI、XML、stderr、support 和跨 endpoint 请求的审阅底稿。
 - `QUESTIONS.md`：`AQ-001` 至 `AQ-437` 原子设计决策题库；用于防遗漏和追踪，不再直接作为主要问答页面。
-- `DESIGN-CHECKLIST.md`：覆盖全产品的待决策主题、优先级和讨论顺序。
+- `DESIGN-CHECKLIST.md`：覆盖全产品的设计主题与历史讨论顺序；现行选择只看 register/decisions。
 - `DISCUSSION-BATCH-01.md`：首批 20 个高杠杆综合问题及项目负责人的原始回复；保留为决策证据，不把其中的推荐自动视为确认。
 - `DISCUSSION-BATCH-02.md`：正式 PJ/CX 首轮回复原话、编号解释与原子断言。
 - `DISCUSSION-BATCH-03.md`：`PJ-18` 单 root、镜像父目录权威来源，以及 `AutoRenameDisabled` 手工名称优先级补缝的原话与断言。
 - `DISCUSSION-BATCH-04.md`：本轮增量批注原话；无启动头 master、`.model` picker/direct、逐 turn 配置 generation、Context 排序/self-test/锁，以及仍待细化的 Permission/DoubleCheck 目标。
+- `DISCUSSION-BATCH-05.md`：luainstaller x86 证据口径修正，以及“原子登记不再直接充当负责人问卷”的流程决定。
+- `DISCUSSION-BATCH-06.md`：集中问卷原话、逐项确认、条件重算和冲突归一；负责人产品补问现为零。
 - `decision-packets/02-*.md` 至 `10-*.md`：九个通俗、成套、带 ASCII 页面/状态/替代方案的主决策包。
 - `decision-packets/11-cross-system-operational-seams.md`：持续收口跨系统外改、等待、恢复、秘密删除、管理事务、扩展关闭及其后续运行接缝。
 - `references/agent-loop-reference-study.md`：五个开源 AgentLoop 固定提交的源码核对与可借鉴问题。
@@ -59,6 +63,6 @@
 
 ## 当前阅读入口
 
-先看 [`DECISION-REGISTER.md`](DECISION-REGISTER.md) 的“当前进度与下一批”，再按 [`DECISION-BATCH-QUEUE.md`](DECISION-BATCH-QUEUE.md) 打开当前批涉及的 owner sections；packet 编号不是回答顺序。路线图解释全局边界，实时登记表会链接当前问题正文。现行 `decision-inventory-v9` 在十个包中共有 270 组负责人决定，分布为 `PJ 19 / PP 18 / TU 32 / M05 57 / AL06 49 / TS 35 / CX 16 / ED 14 / RF 14 / F4 16`；当前有 21 个 active group 已选、1 个条件组 not-applicable、248 个 unanswered，另有 384 个 checklist ID、`AQ-001..AQ-437`、`CV-001..CV-076` 和 49 个回复批次。题库中的推荐、候选 schema 和 ASCII 文案都不会因写入仓库自动升级为决定。
+当前先读 [`DECISION-REGISTER.md`](DECISION-REGISTER.md) 的状态汇总、[`DECISIONS.md`](DECISIONS.md) 的 D-049 至 D-057，以及 [`ARCHITECTURE-READINESS.md`](ARCHITECTURE-READINESS.md)。`OWNER-QUESTIONS-01.md` 的 29 题已经全部答复，现行 `decision-inventory-v9` 为 `unanswered=0`；270 组、384 个 checklist ID、`AQ-001..AQ-437`、`CV-001..CV-076` 和 49 个旧批次继续保留为审计证据。负责人选择完成不等于技术证明、owner 规格或实施计划完成；P0 门通过前仍不开始编码。
 
-本轮新增拆分继续把 composer 输入召回、配置秘密文件权限、raw shell 继承环境、完整 model-yield 后续接、direct 文件属性、ignore/隐藏项、`exec` cwd、输出解码与 canonical 保留、active XML 外改恢复等交给独立 owner。最新反向审计又补出 M05-57..59、AL06-50/51 与 TS-40：资源简称、per-Model retry 配置面、过短 secret 保证、stuck 阈值、跨 Endpoint 同意寿命和 reserved tree 精确读取不再由候选表格或邻近安全说明暗定；各组推荐仍只是讨论材料，不是项目决定。
+本轮新增拆分把 composer 输入召回、配置秘密文件权限、raw shell 继承环境、完整 model-yield 后续接、direct 文件属性、ignore/隐藏项、`exec` cwd、输出解码与 canonical 保留、active XML 外改恢复等交给独立 owner。M05-57..59、AL06-50/51 与 TS-40 等原子组也已随 Batch 06 收口；旧 packet 中的推荐仍只是收到回复前的历史候选，现行选择只看登记表和 D-049 至 D-057。

@@ -2,7 +2,9 @@
 
 更新日期：2026-07-22
 
-状态：讨论材料；尚未得到项目负责人明确回复的推荐均不是决定
+状态：负责人答复前的历史路线图；270 组现已全部收口，本文件不再指向下一批问卷
+
+> 现行状态只看 [`DECISION-REGISTER.md`](DECISION-REGISTER.md)、[`DECISIONS.md`](DECISIONS.md) 与 [`ARCHITECTURE-READINESS.md`](ARCHITECTURE-READINESS.md)。本文件保留当时如何组织问题和区分产品选择/技术证明的理由；其中“当前批次”“未回答”和候选推荐都是收到 Batch 06 之前的历史语境，不能覆盖 D-049 至 D-057。
 
 ## 这份路线图解决什么问题
 
@@ -23,7 +25,7 @@
 
 ## 决策流怎么进行
 
-每次以登记表指出的当前 `Bxx` 为单位讨论；一批可以跨越多个 owner packet，因此只打开这一批涉及的正式 group 正文，而不是先把某个 packet 全部答完。项目负责人可以这样回复：
+负责人问卷阶段曾以登记表指出的 `Bxx` 为单位讨论；一批可以跨越多个 owner packet，因此只打开这一批涉及的正式 group 正文，而不是先把某个 packet 全部答完。当时的回复 grammar 如下：
 
 ```text
 PJ-01 选 A。
@@ -31,7 +33,7 @@ PJ-04 接受推荐，但“最近 Context”只提示，不默认选中。
 PJ-05 暂缓；先解释内存候选与第一次持久化的差异。
 ```
 
-收到回复后依次做五件事；逐条状态、回复 grammar、冲突处理和规格提升规则以 [`DECISION-RESOLUTION-PROTOCOL.md`](DECISION-RESOLUTION-PROTOCOL.md) 为准：
+收到回复后的归档事务仍适用于未来被证据重新打开的最小差异；逐条状态、回复 grammar、冲突处理和规格提升规则以 [`DECISION-RESOLUTION-PROTOCOL.md`](DECISION-RESOLUTION-PROTOCOL.md) 为准：
 
 1. 把原话按 inventory 锁定到 `DISCUSSION-BATCH-NN.md`，更新 `DECISION-REGISTER.md`；没有回答的项继续 `unanswered`。
 2. 把明确选择归档或链接到 `DECISIONS.md`，例外/冲突/取代保持可追踪。
@@ -47,7 +49,7 @@ PJ-05 暂缓；先解释内存候选与第一次持久化的差异。
 
 最新拆分继续覆盖 composer 输入召回、配置秘密文件权限、raw shell 继承环境、完整 model-yield 后续接、direct 文件属性、ignore/隐藏项、`exec` cwd、输出解码与 canonical 保留，以及 active XML 外部移动/替换/改写恢复。最终五个去捆绑轴是 TU-32 chat dot-command root、TU-33 输入提示符、TU-34 审批动作 grammar、M05-56 SensitiveRead 字段存在性和 AL06-49 termination-review Model 来源；它们分别独立于顶层 CLI、正文标签、空 Enter、安全 outside 粒度和 action-review Model。所有推荐均未因进入 inventory 而成为决定。
 
-原子题库比负责人决定更多，是因为一个产品选择常常需要同时约束多个字段、失败分支和测试点；不要求负责人机械回答 437 个 AQ。反过来，270 也不是必须一次答完的考试；默认按分批队列每次讨论 3--6 个共同旅程/依赖的组，未明确回复的编号保持 `unanswered`。当前批次只以实时登记表为准。
+原子题库比负责人决定更多，是因为一个产品选择常常需要同时约束多个字段、失败分支和测试点；不要求负责人机械回答 437 个 AQ。270 组已经通过集中问卷全部收口：现行登记为 265 个 active、5 个 `not-applicable`、0 个 `unanswered/conflict`。旧分批节奏只作审计证据，下一步是机械展开 owner 规格和技术证明，不是继续按 49 批提问。
 
 | 包 | 负责人真正决定什么 | 必须随包可见的材料 | 主要原子问题 |
 | --- | --- | --- | --- |
@@ -159,9 +161,9 @@ Key 留在 INI 已得到方向性回复，但它仍需要从 Lua 安全到达 cu
 
 只有 [实施就绪门](ARCHITECTURE-READINESS.md) 中的 P0 全部通过，才调用 planning 流程编写逐系统实施计划。现在仍处于设计讨论期，不开始编码。
 
-## 当前外部硬阻塞
+## 当前发布证据阻塞
 
-- 相邻 `../luainstaller` 1.0 明确拒绝 Windows x86；在得到单独授权并为其建立 Win32/XP profile 前，yaca 无法同时兑现“XP x86 + Lua 5.5 + luainstaller”。记录阻塞不等于授权修改兄弟仓库。
+- 相邻 `../luainstaller` 1.0 的默认 Windows profile guard 拒绝非 x86_64，随附构建/测试路径也固定为 x64；这说明当前路径尚不能交付 yaca x86 包，但不证明底层 launcher/bundler 无法适配，也不证明 XP 不兼容。应先取得 qualification 授权，按证据做必要适配并完成 XP 至 11 验收。记录缺口不等于预判必须重写兄弟仓库。
 - 当前 Linux `bin/` 是 ELF32，其中 curl 为 x32 ABI；不是目标的普通 CentOS 7 x86_64 发行输入。
 - 当前 Win32 `curl.exe` 经 UPX 压缩，现有静态 imports 主要是解压 stub；PE 头 4.0 不能证明真实 XP 兼容。
 

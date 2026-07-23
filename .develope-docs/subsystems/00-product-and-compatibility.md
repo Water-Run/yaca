@@ -12,11 +12,29 @@
 
 - yaca 是单 Agent、terminal-only 的 Coding Agent；主体使用官方 Lua 5.5 语言级别与 ABI。
 - Lua 程序由 `../luainstaller` 打包；发布物不得依赖系统已安装 Lua。
-- Windows XP SP3、Vista SP2、7 SP1、8、8.1、10、11 使用 Win32 x86 32 位产物并逐个完整测试；不提供原生 Windows x64、ARM 或 Windows on ARM 产物。
-- Linux 使用 x86_64 产物，CentOS 7 x86_64 是最低硬基线；最终支持的其他发行版仍需用实际发行候选完成完整测试。
+- Windows 有两个彼此独立的正式产物：Win32 x86 32 位包覆盖 XP SP3、Vista SP2、7 SP1、8、8.1、10、11；Win64 x86_64 包覆盖 7 SP1、8、8.1、10、11。每个包都必须在自己的完整版本矩阵中独立验收和放行，不能用 Win32 结果替代 Win64，也不能反向替代。
+- Linux 使用独立的 x86_64 产物，CentOS 7 x86_64 是最低硬基线；最终支持的其他发行版仍需用实际发行候选完成完整测试。
 - v0.1 不承诺旧 macOS，也不建立 macOS 专用实现或发布矩阵。
-- 每个平台/架构使用独立 zip；不能用现代系统 smoke test 推断旧系统兼容。
+- v0.1 不提供 ARM、Windows on ARM 原生产物或其他未列出的 OS/架构。正式发布恰好包含 Win32 x86、Win64 x86_64、Linux x86_64 三个独立 zip；不能用现代系统 smoke test 推断旧系统兼容。
 - 程序固定文案、命令、配置键和机器字段使用 English/ASCII；路径、用户 Context 名、消息、模型正文和 XML 使用 UTF-8 保真。Windows 文件系统必须经宽字符端口访问，终端显示降级不得改变真实路径或 hash 输入。
+
+## 发布包与数据位置
+
+Windows 两个 zip 使用相同的外层目录契约，根目录固定包含：
+
+```text
+yaca.exe
+Install.cmd
+README.txt
+LICENSE
+docs/
+```
+
+`yaca.exe` 在解压位置原地运行，Lua runtime 与运行所需依赖由 luainstaller 嵌入，不依赖系统 Lua。`__yaca__` 永远与实际运行的 `yaca.exe` 相邻；从其他当前目录或经 PATH 启动都不能把数据根漂移到调用目录。Linux zip 使用对应的 `yaca`、`Install.sh`、`README.txt`、`LICENSE`、`docs/` 布局，并遵守相同的原地运行、依赖嵌入和相邻 `__yaca__` 规则。
+
+`Install.cmd`/`Install.sh` 只是薄安装辅助：从脚本自身位置确定发行目录，简单检查主程序存在、能够启动并完成无网络基础检查，以及发行目录是否适合且可写；目录不合适时先询问用户，确认后只把该发行目录加入 PATH。它们不复制程序、不建立安装数据库、不计算 MD5 或其他完整性摘要，也不承担更新、回滚或卸载管理。
+
+每个 zip 独立生成 SHA-256、component/license manifest、SBOM、构建摘要和完整测试摘要，缺少任一所需证据就不放行该包。v0.1 不做代码签名，也不内置检查、下载或安装更新；用户通过外部渠道手工取得和替换 zip。
 
 ## v0.1 的简单完整产品形态
 
@@ -62,7 +80,7 @@ Context 列表/浏览器另有两个全局显示偏好：`ListSortBy=created|upd
 
 ## 单一 workspace root 与显式 Context 管理
 
-每个 Context 恰好绑定一个 workspace root。该 root 不作为权威 work-directory/root 字段重复写入 XML；yaca 在打开 Context 时，从该 XML 在 `__yaca__/CONTEXT/` 镜像树中的父目录解码当前 root。新 Context 建立时究竟使用传入目录还是显式选定的其他单一边界，仍只由 `F4-14` 决定；一旦发布，镜像位置就是当前绑定。
+每个 Context 恰好绑定一个 workspace root。新 Context 的唯一 root 就是用户传入且已经证明存在、可进入的真实目录；上级 Git root 只可作为 status/diff 等证据元数据，不能自动提升或扩大文件、Prompt、Permission 边界。该 root 不作为权威 work-directory/root 字段重复写入 XML；新 Context 发布到传入目录对应的 `__yaca__/CONTEXT/` 镜像位置，之后 yaca 从 XML 的镜像父目录解码当前 root。
 
 - 父目录无法无损解码、解码 root 不存在/不可进入或 identity 不匹配时停止打开，不能留在调用目录继续执行，也不能猜同名路径。
 - rebind 只是 context-repl 中的显式 self-fix 事务：在复核源/目标后，把 XML 以 no-replace、可恢复移动到目标 workspace 的镜像目录。只有发布成功才更新活动句柄；逻辑路径和 16 位 hash 随位置立即改变，旧 hash 失效。
@@ -76,7 +94,7 @@ model-repl、config-repl、context-repl 各自提供本领域的 `self-fix-progr
 - context-repl 浏览和管理 Context，并修复 XML、镜像路径/root 映射与可证明陈旧的本地状态；
 - self-test 负责诊断，不自动修改配置或 Context。
 
-显式打开损坏、不兼容或具有 unknown operation 的 Context 时，程序显示实际问题、已保存范围和正确 self-fix 入口后退出，不自动重放副作用。活动 writer 存在时，第二进程不得打开正文；只显示 busy 元数据和可证明的 PID，且在锁释放前不能 rename、rebind、delete、archive、repair 或修改 Context metadata，不能仅凭锁龄 force unlock。
+显式打开损坏、不兼容或具有 unknown operation 的 Context 时，程序显示实际问题、已保存范围和正确 self-fix 入口后退出，不自动重放副作用。活动 writer 存在时，第二进程不得打开正文；只显示 busy 元数据和可证明的 PID，且在锁释放前不能 rename、rebind、delete、repair 或修改 Context metadata，不能仅凭锁龄 force unlock。
 
 chat 中无参数 `.model` 打开有界 Model picker，`.model <selector>` 直接选择；两者调用同一 typed action，只切换已存在、enabled 且有效的 Model。`.context` 只执行显式 Context 选择/切换。它们都不是管理 REPL，也不能复制 REPL 的编辑器。每个 TUI 领域动作都必须有 CLI 等价投影。
 
@@ -88,10 +106,10 @@ Model/config INI 使用独立的短期提交锁，可以在 chat 持有 Context 
 
 “直接退出”是用户体验，不是跳过正确性：已经产生的 Context 仍要尽力提交最终事实、释放 writer、清理临时资源并恢复终端。来不及证明的外部副作用必须记为 unknown，不能伪装成未发生或已完成。
 
-## 仍待下游冻结的产品边界
+## 仍待下游冻结的技术边界
 
-PJ-18 的单 root 与 PJ-12 的手工命名标记已收口。`F4-14` 仍需决定**新建** Context 时传入目录与上级 Git 根之间如何选出这唯一 root；它不能引入多 root，也不能改变旧 Context 从当前镜像路径解码 root 的规则。本文仍只记录设计目标，不将它写成“已实现”。
+单 root、手工命名标记和 `F4-14` 已收口：新 Context 使用传入且可进入的真实目录，Git root 只作证据。下游仍需冻结 Windows drive/UNC、Linux root、链接与文件系统 identity 的规范化和 golden vectors；这些技术细节不能重新引入 Git-root 自动提升、多 root 或 XML 内第二份 root authority。本文仍只记录设计目标，不将它写成“已实现”。
 
 ## 发布验收方向
 
-每个正式支持的平台至少要用对应发行 zip 走通：配置/修复入口、可选启动前 self-test、新 Context 第一消息原子创建、一次模型请求、至少一个工具调用、XML 保存、显式 Context 继续、锁冲突、损坏目标 self-fix 路由和有界退出。排除能力还要有 no-empty-shell 检查，证明配置、help、schema、Runtime 和 zip 中不存在可触发残留。
+Win32 x86、Win64 x86_64 和 Linux x86_64 三个正式 zip 必须各自走通完整发布测试，并分别作出放行决定。每个包至少覆盖：解压后无系统 Lua 启动、薄安装脚本、配置/修复入口、可选启动前 self-test、新 Context 第一消息原子创建、一次模型请求、至少一个工具调用、XML 保存、显式 Context 继续、锁冲突、损坏目标 self-fix 路由、相邻 `__yaca__` 和有界退出。排除能力还要有 no-empty-shell 检查，证明配置、help、schema、Runtime 和 zip 中不存在可触发残留。

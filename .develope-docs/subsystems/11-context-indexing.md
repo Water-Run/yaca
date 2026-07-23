@@ -1,12 +1,12 @@
 # 11 上下文定位、实时索引与交互式浏览器
 
-状态：讨论中
+状态：Resolver、recent/full、永久删除与 stale fail-stop 产品语义已确认；路径/碰撞/搜索细节待技术规格冻结
 
 ## 为什么这是一个独立子系统
 
 上下文 XML 的内容由 10 号存储系统负责，但“用户给出一个名称或 hash 后，到底连接哪个 XML”是另一类问题。它同时涉及路径映射、实时目录扫描、搜索范围、歧义、重命名后的身份变化、CLI/TUI 一致性和旧系统性能，不能散落在各条命令里分别实现。
 
-本系统建立一个统一的上下文目录与定位服务，供 `continue`、context-select、重命名、删除、列表、浏览器和后续带上下文选择器的 semantic actions 共同使用；CLI/dot-command 的精确拼写由 TU-18/TU-32 投影。
+本系统建立一个统一的上下文目录与定位服务，供 `continue`、context-select、重命名、删除、列表、浏览器和后续带上下文选择器的 semantic actions 共同使用；CLI、TUI 和点命令的投影统一来自 13 号 action registry。
 
 ## 命名说明
 
@@ -20,7 +20,7 @@
 - 把工作目录、物理 XML 路径和规范逻辑路径相互转换。
 - 根据当前逻辑路径实时计算固定 16 位 hash。
 - 以统一规则解析名称/hash 选择器，并报告唯一命中、歧义、碰撞、不完整扫描或未找到。
-- 为上下文浏览器提供目录树、搜索、排序、选择和刷新语义。
+- 为 `recent` 快速列表和 `full` 完整目录树两个浏览器入口提供查看、搜索、排序、选择和刷新语义。
 - 为重命名、rebind 与删除提供经过重新校验的目标，但把 XML metadata/内容更新交给 10 号系统。
 - 向 current-context-status semantic action 提供当前绑定路径的实时 hash 计算，不通过全局搜索反查当前会话。
 
@@ -58,7 +58,7 @@ hash 输入：   /C/Program Files/我的任务.xml
 - hash 不是可跨重命名引用的永久外键。日志可以把当时的路径/hash 保存为历史快照，但不能据此假装它以后仍指向同一个文件。
 - 单个 XML 内的 turn、message、tool call 等关系仍可拥有局部序号或事件 ID；这属于 10 号 schema，不等于为上下文恢复永久身份。
 
-由 yaca 自己执行重命名时，可以在成功后把当前运行时句柄更新到新路径。若外部程序偷偷移动或重命名活动 XML，在没有永久 ID 的前提下，yaca 不应按内容猜测哪个新文件是原会话；候选行为是把当前句柄标记为失效并要求用户重新连接。
+由 yaca 自己执行重命名时，可以在成功后把当前运行时句柄更新到新路径。若外部程序移动、删除、替换或改写活动 XML，当前句柄必须立即标记为 stale 并 fail-stop；程序停止新的模型请求、工具和 XML 提交，不能按名称、hash 或内容猜测哪个文件是原会话。用户只能显式 refresh/self-fix/rebind/recovery/exit，取得新快照和必要锁后再继续。
 
 ### 实时派生
 
@@ -135,7 +135,7 @@ Resolver 结果/浏览器选中项 ------> ContextTargetVerifier
 
 - 流式遍历指定搜索环，避免一次把整棵树载入 Win32 x86 内存。
 - 读取目录项和识别候选所需的最少 XML 头部，不为搜索完整解析长对话。
-- 排除临时写入、备份、回收区和非已提交文件；精确规则依赖 10 号提交协议。
+- 排除临时写入、恢复中间产物和非已提交文件；v0.1 不建立 Context 回收区。
 - 报告不可读目录、损坏候选、扫描期间变化和越界链接，而不是静默把它们当作不存在。
 - 输出顺序不能决定解析结果；排序由上层显式完成。
 
@@ -184,7 +184,8 @@ Resolver 结果/浏览器选中项 ------> ContextTargetVerifier
 
 ### `ContextBrowserController`
 
-- 保存当前目录节点、展开状态、搜索条件、排序、分页/选择和待确认动作。
+- 接受必选初始 view `recent|full`：`recent` 直接产生快速最近列表，`full` 产生完整目录树/全部 Context；二者只改变初始投影，不建立两套 Catalog 或 mutation 服务。
+- 保存当前 view、目录节点、展开状态、搜索条件、排序、分页/选择和待确认动作。
 - 接收 renderer 产生的 `OpenNode`、`SelectContext`、`RenameContext`、`RebindContext`、`SetAutoRenameDisabled`、`DeleteContext`、`Refresh` 等语义动作。`SetAutoRenameDisabled` 只接受 typed boolean，不引入通用 flags bag。
 - 输出新的可渲染视图状态、确认请求或调用目录/打开/修改应用服务的意图。
 - 不知道 ANSI、颜色、方向键或鼠标，也不直接操作 XML。
@@ -215,7 +216,7 @@ header_state        valid / corrupt / unavailable / changed
 | --- | --- | --- |
 | 精确选择器 | `continue(X)`、`context-select(X)`、`context-rename(X, ...)`、`context-delete(X)` | 调用统一 Resolver |
 | 当前会话操作 | `current-context-status`、`current-context-mutation`，以及仅在上游启用时存在的 `manual-compaction` | 使用 CurrentContextHandle，不搜索；chat root 只由 TU-32 投影；若以后增加 selector 参数才调用 Resolver |
-| 列表枚举 | `context-list(scope)`、`context-repl` | 取得 Catalog 快照，不把列表每一项再解析一次 |
+| 列表枚举 | `context-list(scope)`、`context-repl(recent|full)` | 取得 Catalog 快照，不把列表每一项再解析一次 |
 | 浏览器手工精确输入 | 输入完整名称或 16 位 hash | 调用统一 Resolver |
 | 浏览器选中一行 | `select 7` 或 enhanced 中确认 | 携带该快照条目的直接定位信息，TargetVerifier 复核后由 OpenService 连接，不按名称重新搜索 |
 | 浏览器普通搜索 | 名称/逻辑路径的前缀或包含搜索 | 过滤/排序快照，只展示结果，不自动连接 |
@@ -355,7 +356,8 @@ Resolver 结束后还有三组不同结果，不能继续塞回 `ResolveResult`�
 
 ### 交互式浏览器
 
-- 打开浏览器时为当前节点建立带扫描时间的有界页快照，不读取整棵树。
+- `recent` 入口直接为按配置排序的最近 Context 建立快速有界页，不先绘制或物化完整目录树；`full` 入口从 `CONTEXT` 根建立完整目录树/全部 Context 的惰性视图。两者共用后续查看、搜索和 mutation controller actions。
+- 打开浏览器时为当前 view/node 建立带扫描时间的有界页快照，不把整棵树无界载入内存。
 - 展开节点时惰性扫描该节点；折叠、分页、排序和普通搜索可以复用未过期页，避免每次按键访问磁盘。
 - 全局搜索流式扫描，只保留有上限的结果页；后续页使用稳定排序游标重新扫描或继续受控扫描，不能把全部命中无限保存在内存。
 - `refresh` 显式重扫。
@@ -366,6 +368,15 @@ Resolver 结束后还有三组不同结果，不能继续塞回 `ResolveResult`�
 快照复用不违背实时派生，因为它有界、可淘汰且随时可以丢弃，文件树仍是唯一事实源。页大小、最大展开节点数、结果上限、单次扫描 hard cap 和游标格式属于版本化 Runtime/browser 契约；目标旧机复杂度与内存测试把不可放宽的 cap 冻结进发行 manifest，不生成 `MaxScanEntries` INI/XML 字段。浏览器、status 与 self-test 只读显示当前 cap；命中后返回 incomplete/`ScanLimit`，不能把未扫描范围当作不存在。
 
 ## 交互式上下文浏览器
+
+### 两个明确入口
+
+`context-repl` 必须显式选择一个入口：
+
+- `recent`：快速打开最近 Context 列表。它按下面已经确认的 Context 排序配置投影最近页，不展示目录树，也不改变裸 `yaca` 的启动路线。
+- `full`：打开 `CONTEXT` 的完整目录树/全部 Context。实现仍按目录/页惰性扫描并服从发行 hard cap；“完整”表示这是覆盖全部 Catalog 的正式入口，不允许静默只看工作区或 recent 子集。
+
+两个入口进入同一个 `ContextBrowserController`，都能查看详情、搜索、选择连接、重命名、rebind、管理 `AutoRenameDisabled`、永久删除和刷新。入口只决定初始视图，Resolver、TargetVerifier、锁、确认与写入规则完全相同。普通 `yaca`/`yaca .` 不调用任何一个入口，不扫描 Catalog，也不提示 recent Context；只有用户显式调用 context action 才访问历史。
 
 ### 用户能做什么
 
@@ -378,7 +389,7 @@ Resolver 结束后还有三组不同结果，不能继续塞回 `ResolveResult`�
 - 重命名上下文。
 - 查看当前 root 与专用 `AutoRenameDisabled` 状态，添加/取消该标记；取消不立即发起命名。
 - 通过 self-fix 把 Context rebind 到另一个明确 workspace 的镜像目录；这是移动 XML 的独立动作，不是增加第二 root。
-- 删除上下文；软删除还是永久删除尚未确认。
+- 永久删除上下文；不提供软删除、trash 或 restore。
 - 手动刷新并查看扫描警告。
 - 取消操作并返回原会话，不产生副作用。
 
@@ -484,13 +495,9 @@ rebind 不在 XML 内修改一个 root/workdir 字段，而是由 context-repl �
 
 ### 删除
 
-删除动作已确认必须存在，但以下语义尚未确认：
+v0.1 的 `delete` 是直接、不可恢复的永久删除；不建立回收区，不注册 soft-delete、trash、restore 或 empty-trash action。删除前必须显示完整逻辑路径、当前 16 位 hash 和明确的 permanent warning，取得用户确认后再由 `ContextTargetVerifier` 重新校验并取得修改锁。损坏或过期快照不能指向另一个文件；目标已变化就失败并要求刷新。
 
-- 默认移动到不参与 Resolver 扫描的回收区，还是直接永久删除。
-- 删除当前已连接会话后立即结束、建立新会话，还是保留只读视图。
-- 回收区保留期、恢复和彻底清除命令。
-
-无论最终选择哪种方式，都必须显示完整目标、明确确认、最终复核，并保证损坏或过期快照不会指向另一个文件。当前推荐软删除，永久清除作为另一项明确操作，但这不是已确认决定。
+活动 Context 持有 writer lock，因此另一个管理入口不能删除它；返回 typed `LockConflict`，不提供按锁龄强制解锁。成功删除后立即废弃相关快照，后续名称/hash 查找不再命中。发布、崩溃和文件系统错误怎样证明“已删除/未删除/结果未知”由 10 号存储协议收口，但不能用隐藏 trash 冒充永久删除。
 
 ## Self-Test Stage 1 的 Catalog 检查
 
@@ -531,7 +538,7 @@ Stage 1 还必须报告 Catalog 数量、实际扫描范围、hash 计算数、�
 - 大型目录树使用流式内存上限，适配 Win32 x86。
 - rename 后 `.status` 显示新 hash，旧 hash 无法连接。
 - 扫描与确认之间替换、移动或删除文件时安全失败。
-- 不可读目录、损坏 XML、临时文件、回收区和链接循环。
+- 不可读目录、损坏 XML、临时/恢复中间文件和链接循环；确认不存在可触发的 trash/restore 表面。
 - 浏览器选择、目录导航、搜索、刷新、取消、重命名和删除确认。
 - `created|updated|name` 与正序/倒序的六种组合只读取 XML canonical metadata；相同主键始终以 `LogicalPath` 稳定收口，打乱目录枚举和文件系统时间不改变结果。
 - 活动 writer 存在时，TUI 与 CLI/context-repl 的 rename、rebind、delete、marker 修改都得到相同 `LockConflict`，释放后同一 semantic action 才可成功。
@@ -549,10 +556,8 @@ Stage 1 还必须报告 Catalog 数量、实际扫描范围、hash 计算数、�
 4. Windows/Linux 路径规范化、UNC、根目录、链接、Unicode 与非法名称。
 5. 损坏但名称匹配的 XML 是否阻止继续搜索。
 6. 重命名是否只允许改变 basename；跨目录移动是否是另一个动作。
-7. 删除默认软删除还是永久删除，以及当前会话被删除后的状态。
-8. 浏览器普通搜索的默认范围、是否显示损坏 XML、是否提供模糊搜索。
-9. 活动 XML 被外部移动/删除时是否立即进入失效状态并要求重新连接。
+7. 浏览器普通搜索在 `recent` 初始视图中的精确默认范围、是否显示损坏 XML、是否提供模糊搜索。
 
 ## 当前讨论入口
 
-Q-015 已确认统一 Resolver 的范围、裁决与最低遍历算法。下一步继续确认同环歧义、路径规范化、浏览器修改语义与上下文 XML 内容。
+Q-015 已确认统一 Resolver 的范围、裁决与最低遍历算法，D-053 已确认 recent/full、永久删除和活动 XML 外改后的 stale fail-stop。下一步只冻结同环歧义、路径规范化、recent 搜索投影和上下文 XML 技术细节，不重新开放这些产品语义。

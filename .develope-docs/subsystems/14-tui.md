@@ -1,6 +1,6 @@
 # 14 兼容 TUI
 
-状态：候选
+状态：规范逐行界面、输入后备与 Context 浏览器语义已确认；精确页面 chrome 和旧终端渲染待技术规格冻结
 
 ## 职责
 
@@ -27,12 +27,25 @@
 
 这些组合键不能作为所有终端唯一入口。Windows 的 `KEY_EVENT_RECORD` 可以携带虚拟键与 modifier 状态，但 cooked `ReadConsole` 会由系统处理回车和控制键；POSIX canonical mode 只按完整行交付输入；xterm 的 modified-key 编码也是可选能力而非普遍默认。参考：[Windows console modes](https://learn.microsoft.com/en-us/windows/console/high-level-console-modes)、[KEY_EVENT_RECORD](https://learn.microsoft.com/en-us/windows/console/key-event-record-str)、[POSIX terminal interface](https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap11.html)、[xterm modified keys](https://invisible-island.net/xterm/modified-keys.html)。
 
-因此候选契约是：
+因此已确认契约是：
 
 - 能力足够时由原生/raw 输入后端识别上述固定快捷键。
-- cooked line、`TERM=dumb`、SSH/终端不报告 modifier 或重定向时，所有语义都有固定 ASCII 文本入口；候选词根是 `.steer`、`.ask`、`.cancel` 与显式多行开始/结束命令。
+- cooked line、`TERM=dumb`、SSH/终端不报告 modifier 或重定向时，所有语义都有固定 ASCII 文本入口：`.queue`、`.immediate`、`.side`、`.multiline` 和 `.cancel`。
 - 后备入口不是另一种产品模式；它提交与快捷键相同的领域动作，XML、权限、预算和结果完全一致。
 - help 只列出当前环境实际可用的按键及其固定文本等价入口，不允许重新绑定。
+
+固定映射如下：
+
+| 用户意图 | 快捷键 | ASCII 点命令 |
+| --- | --- | --- |
+| 忙时排队 | 普通 `Enter` | `.queue <message>` |
+| 查看/删除/排序/编辑/清空待执行队列 | 无 | `.queue list\|delete\|move\|edit\|clear` |
+| 插队/steer 当前工作 | `Ctrl+Enter` | `.immediate <message>` |
+| 发起一次只读旁问 | `Alt+Enter` | `.side <message>` |
+| 输入多行消息 | `Shift+Enter` | `.multiline` |
+| 取消当前最内层可取消活动 | `Esc` | `.cancel` |
+
+`.immediate` 是正式拼写，不保留 `.immidiate`。队列条目标识、move/edit 参数和多行结束 delimiter 仍由各自 grammar 冻结；renderer 不得用这些未决细节创造另一组动作。
 
 ## 当前设计缺口
 
@@ -41,7 +54,7 @@
 - 启动、恢复、待输入、模型生成、工具调用、等待确认、重试、取消、压缩、失败和退出的界面状态。
 - 用户、Agent、工具、状态、警告、错误和确认在无颜色 transcript 中的稳定文本语法。
 - 状态是常驻区域、可更新的一行、每次变化追加一行，还是只由 `.status` 查询。
-- Ctrl+C、EOF、生成期间输入、排队/steer 和多行输入语义。
+- Ctrl+C、EOF 与 broken-pipe 的退出/取消边界；排队、steer、旁问和多行的核心入口已经冻结。
 - 长路径、长命令、工具输出、CJK、控制字符和 terminal injection 的处理。
 - Model picker 的分页/挤占细节，以及 Permission/Context 选择器、配置编辑器和确认框的编号、分页、取消与默认项。
 - 自动能力降级、原生 Windows 颜色与基本终端颜色如何保持相同文字语义。
@@ -58,7 +71,7 @@ yaca: Yet Another Coding Agent.
 
 隐藏某个字段只改变本次启动 chrome，不删除状态事实，也不改变 `.status`、XML 或错误诊断。错误、warning 和 action-required 永远不能被逐字段开关隐藏；配置、help 和 renderer 都不得重新引入 `StartupHeader`、`ShowStartupHeader` 或等价 master。这里不增加 theme、vivid、mode 或第二套 renderer。
 
-上游同时给出 chat 输入提示符 `>>`。但正式 `TU-33` 在当前 inventory 中仍是 unanswered，且现有 A/B/C answer-set 没有 `>>`；因此本节只记录必须消费的上游字面常量，不能伪造 TU-33 已正式选择，也不能据此猜 approval、recovery 和各管理 REPL 的提示符。后续 inventory repair 必须修订 TU-33 的题面/投影并重新生成 parser、help 和 golden transcript；决策包在该修订前仍保持原样。
+chat 输入提示符固定为负责人给出的 ASCII `>>`；`TU-33` 已按 Batch 06 归档为 A 并由 `AS-006-04` 细化这个精确字面量。approval、self-fix 和三个管理 REPL 的提示符仍需由同一 TUI grammar 技术规格冻结，但不能改变 chat 的 `>>` 或另建第二套输入语义。
 
 最小启动投影示意为：
 
@@ -100,30 +113,33 @@ chat 内 `.model` 只有选择职责，不进入独立 `model-repl`：
 
 交互式上下文浏览器的目录树、搜索、选择、重命名、删除和刷新语义由 11 号 `ContextBrowserController` 统一提供。TUI 只负责把用户输入翻译为语义动作并显示结果：
 
+- 顶层有两个明确入口：`recent` 直接显示快速最近列表，`full` 显示完整目录树/全部 Context。二者只是同一 controller 的初始 view，进入后共用查看、搜索、选择、重命名、rebind、永久删除和刷新动作。
 - 规范入口使用编号与 `open/select/search/rename/delete/up/root/refresh/quit` 一类逐行命令，不要求 raw mode、ANSI 或方向键。
 - 能力足够时可以让固定方向键、颜色、高亮和临时状态行调用相同 controller action，但不增加鼠标、可重绑定按键或不同默认选择。
 - 任一内部 renderer 对同一快照和动作序列必须选中同一候选、触发相同确认并得到相同错误。
 - 普通搜索只过滤候选列表，不自动连接；精确名称/hash 输入调用统一 Resolver。
 - 列表排序从 XML canonical metadata 读取 `created`、`updated` 或名称，并按 `ascending|descending` 投影；默认 `updated` + `descending`。文件系统 ctime/mtime 不能作为这些字段的替代；主键相同时始终按 canonical `LogicalPath` 升序，绝不随主方向反转。改变排序不改变 Resolver，也不使裸启动扫描或提示 recent Context。
 - 重命名或删除确认必须显示完整逻辑路径与当前 16 位 hash，不能只显示可能重复的名称。
+- `delete` 是不可恢复的永久删除；TUI 不显示 trash、soft-delete、restore 或 empty-trash 入口。确认必须明确写出永久性，活动 writer 锁定的目标仍返回 `LockConflict`。
 - 快照过期、扫描不完整、XML 损坏和目标已变化都要有稳定文字提示，颜色不能承担唯一含义。
 - 活动 writer 已锁定的 Context 只能显示无需解析正文即可取得的 name、logical path、busy 和可证明 PID（否则 unknown）元数据；不进入 read-only Context view，也不把 `inspect` 映射为正文读取。外部 rename、delete、rebind 和 `AutoRenameDisabled` 等 metadata mutation 显示 typed `LockConflict`，不提供按锁龄 force unlock。释放锁后用户必须重新取得/复核 Catalog 快照再读取或修改。
 
-`.status` 显示的当前 hash 从活动 ContextHandle 的最新逻辑路径实时计算，不为显示状态扫描整棵 `CONTEXT`。如果活动 XML 已被外部移动或删除，候选体验是同时显示 `stale`/失效状态，不能只显示一个看似仍可恢复的旧 hash。
+`.status` 显示的当前 hash 从活动 ContextHandle 的最新逻辑路径实时计算，不为显示状态扫描整棵 `CONTEXT`。如果活动 XML 已被外部移动、删除、替换或改写，TUI 必须显示 `stale`/失效状态和 fail-stop 原因，停止投影新的模型请求、工具或提交动作；不能只显示一个看似仍可恢复的旧 hash，也不能按名称/hash/内容自动追踪新文件。
 
 ## self-test 投影
 
 self-test 页面只投影诊断服务的 stable check registry 和 typed results，不在 renderer 内复制检查逻辑：
 
 - Stage 1 除配置/依赖的静态检查外，必须显示 Context XML codec/schema、镜像路径对应 workspace 是否存在且可进入、Catalog traversal、实时 hash derivation，以及扫描耗时、cap 与 `partial`。目录不存在、Context 过多或遍历超过预算都要给出具体 check ID、范围与 self-fix 入口，不能折叠成笼统的 `failed`。
+- Stage 1 静态报告 input backend 能否区分 `Ctrl+Enter`、`Shift+Enter`、`Alt+Enter` 和 `Esc`。只有用户显式启动且运行在真实交互 TTY 的 self-test 才提供逐项按键检查；启动前自动 self-test 不等待用户按键。组合键不可辨认时显示对应 `.immediate`、`.multiline`、`.side` 或 `.cancel` 后备，不把增强能力缺失误报为核心失败。
 - Stage 3 显示 Permission 名称、Description、有限 Prompt 与实际能力矩阵的语义一致性建议，并可指出面向用户的自然语言拼写问题；例如名称暗示 readonly 而矩阵允许写入时必须明确列出实际配置。这些结果标为 advisory，不能覆盖 Stage 1/2 的确定性结论，也不能直接修改 Permission。
 - TUI 中的阶段选择、check list、合法排除和 self-fix 入口，与 CLI 使用同一 typed action/check IDs；TUI 不拥有额外的隐藏检查或默认排除。
 
 ## 主界面总体方向
 
-### A. 追加式逐行对话 REPL（当前规范候选）
+### A. 追加式逐行对话 REPL（已确认规范）
 
-每个语义事件以稳定文本块追加。当前领先视觉词汇是 `[YACA]`、`[USER]`、`[TOOL #12]`、`[STATUS]`、`[QUEUE #2]`、`[STEER #3]`、`[SIDE #1]`、`[WARNING]`、`[ERROR ID]`、`[ACTION]`；精确选择留给视觉决策包。输入始终在最后，chat 的上游目标字面量为 `>>`，选择和确认使用各自正式 grammar；plain 模式完全不移动光标。TU-33 inventory 修订前不得把 `>>` 外推为所有 focus 的已决提示符。
+每个语义事件以稳定文本块追加。当前待技术冻结的视觉词汇是 `[YACA]`、`[USER]`、`[TOOL #12]`、`[STATUS]`、`[QUEUE #2]`、`[STEER #3]`、`[SIDE #1]`、`[WARNING]`、`[ERROR ID]`、`[ACTION]`；它们需要 transcript fixture 证明一致性，不再返回负责人选择。输入始终在最后，chat 使用固定 `>>`，选择和确认使用各自正式 grammar；plain 模式完全不移动光标。`>>` 不外推为其他 focus 的提示符。
 
 它最适合 XP conhost、`TERM=dumb`、终端 scrollback、屏幕阅读器和纯文本快照测试。代价是状态不够紧凑，流式输出和长工具日志容易产生较多行。
 
@@ -159,9 +175,9 @@ self-test 页面只投影诊断服务的 stable check registry 和 typed results
 
 追加式 transcript 仍有一个不能由样式掩盖的 full-duplex 问题：在 cooked/canonical 输入中，renderer 看不到用户尚未提交的系统编辑缓冲；此时直接打印模型/tool delta 会穿过输入行。
 
-候选契约是：raw/native editor 保存并重绘 draft；cooked 后备把高频异步 delta 暂存/合并到安全换行，用户提交一行后再追加，并用一条 status 表明有积压。不能清空 draft、让输出覆盖输入，或声称 cooked 终端能识别普通粘贴中的回车。粘贴保护在 raw/bracketed-paste 环境启用；后备使用显式 `.begin/.end` 或 `.paste` 语法。
+候选渲染协议是：raw/native editor 保存并重绘 draft；cooked 后备把高频异步 delta 暂存/合并到安全换行，用户提交一行后再追加，并用一条 status 表明有积压。不能清空 draft、让输出覆盖输入，或声称 cooked 终端能识别普通粘贴中的回车。粘贴保护在 raw/bracketed-paste 环境启用；规范多行后备从 `.multiline` 进入，精确结束 delimiter 仍待 grammar 冻结。
 
-`Esc` 只是可用环境中的快捷键，规范后备是 `.cancel request|tool|side|turn|exit`。不采用“短时间按两次 Esc”的核心协议，因为 cooked 终端可能根本不交付该按键。
+`Esc` 只是可用环境中的快捷键，规范后备是无参数 `.cancel`，二者都取消当前最内层可取消活动。不采用“短时间按两次 Esc”的核心协议，因为 cooked 终端可能根本不交付该按键。
 
 ## 终端-only 零表面
 
@@ -169,7 +185,7 @@ v0.1 不提供 Web、图像/clipboard-media/screenshot、音频/麦克风、公�
 
 ## 需要逐项确认的体验
 
-1. 已给出的启动头字段/Slogan/`>>` 怎样在 inventory repair 后与 TU-33、角色标签、留白和整体信息密度形成唯一 projection；不再重新选择另一套欢迎页。
+1. 已确认的启动头字段、Slogan 和 chat `>>` 怎样与角色标签、留白和整体信息密度形成唯一 projection；不再重新选择另一套欢迎页。
 2. 常驻最小状态、`.status` 详情，以及模型/权限/context hash/队列/当前动作的字段顺序。
 3. 模型流式文本、provisional 文本、工具调用、shell 输出、Git diff 与完成报告的块样式。
 4. queue、steer、旁问和取消的可见状态、序号、插入点与持久化提示。
@@ -186,4 +202,4 @@ v0.1 不提供 Web、图像/clipboard-media/screenshot、音频/麦克风、公�
 
 ## 当前讨论入口
 
-在产品负责人已要求简单、无鼠标、基本色彩后，当前推荐把追加式逐行 REPL 作为所有平台规范，basic ANSI/原生颜色只增强标签与 diff；不再把全屏作为同等首版候选。下一步先修订 TU-33 inventory 以接纳上游 `>>` 常量，再通过 80×24、40 列、XP 无色、忙时 draft、审批、Git diff、error/recovery、三个 REPL 和 self-test 的完整 ASCII transcript 决定其余页面细节。
+追加式逐行 REPL 已确认为所有平台规范；程序 chrome、标签和交互 grammar 使用 ASCII，用户路径、Context 名与对话正文仍按真实 Unicode 数据投影。basic ANSI/原生颜色只增强标签与 diff，全屏不再是同等首版候选。下一步通过 80×24、40 列、XP 无色、忙时 draft、审批、Git diff、error/recovery、三个 REPL 和 self-test 的完整 ASCII chrome transcript 冻结其余页面细节。

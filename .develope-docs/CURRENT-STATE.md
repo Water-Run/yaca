@@ -20,7 +20,7 @@ yaca 当前是“产品说明、配置草案、模块骨架和本地运行工具
 - 没有可运行入口、模块接口、测试、安装脚本或发布脚本。
 - README 目前描述的是目标行为，尚不能视为已实现契约。
 - CLI 短参数存在冲突：`-dc` 和 `-rc` 各自对应两个操作。
-- 旧 README 曾混用 `_yaca_` 与 `__yaca__`；设计与公开文档现已统一为逻辑根名 `__yaca__`，但它最终位于用户数据目录、安装目录旁还是便携目录仍待确认。
+- 旧 README 曾混用 `_yaca_` 与 `__yaca__`；现行设计统一为 executable 相邻的 `__yaca__`，三个便携 zip 都不建立另一套系统用户数据根。
 - README 的模型预设清单与配置模板中的模型条目不一致。
 - `_CONFIG_.ini` 仍包含 `[Permission.Cautious]` 和 profile 内 `DoubleCheck`，尚未迁移到 D-021 的全局默认开关与 `.cautious` 会话覆盖设计。
 - `_CONTEXT_.xml` 仍只有头部注释，尚未表达 D-022 的镜像路径、完整对话、会话参数元数据和实时索引契约。
@@ -39,7 +39,7 @@ yaca 当前是“产品说明、配置草案、模块骨架和本地运行工具
 - 每个顶层 main/side turn admission 前完整读取并比较 INI bytes；变化时整份验证后原子激活 immutable generation，当前 turn 及其工具/复核/重试/压缩不热换。Stage 1 self-test 检查 Context 镜像、workspace 与 Catalog 扫描完整性/性能，Stage 3 只 advisory 检查 Model/Permission 名称、说明、Prompt 与实际配置的明显错配和拼写。
 - Permission 是命名 typed profile，`SystemPrompt` 不参与授权；普通对话没有独立 plan state。
 
-本轮 PJ 产品问题和手工名称补缝已经全部收到回复；后续增量批注又收口 `TU-32=A`、`F4-01=custom` 及上述跨系统不变量。下一批回到 `F4-15` 的每进程 active Context 数量和 `F4-14` 的初始唯一 root 选择；它们不改变已确认的单 Context 单 root 与镜像父目录权威来源。
+`OWNER-QUESTIONS-01.md` 的 29 个集中问题已经全部答复并由 `DISCUSSION-BATCH-06.md` 归档。现行 register 为 `unanswered=0/conflict=0`；D-049 至 D-057 已冻结四层 Prompt、双 Model 协议、typed AgentLoop、完整 Tool/Permission、单 XML 提交基线、统一 CLI/TUI action registry，以及 Win32 x86、Win64 x86_64、Linux x86_64 三个独立 zip。负责人输入门已经关闭，但 owner 规格、技术证明和完整实施计划尚未全部通过，因此仍不进入编码。
 
 ### `bin/` 不是可直接发布的依赖集合
 
@@ -64,7 +64,7 @@ yaca 当前是“产品说明、配置草案、模块骨架和本地运行工具
 - 打包必须在目标平台家族上原生完成，不提供跨平台编译。
 - Lua 5.5 安装路径要求 LuaRocks 3.13.0 或更新版本。
 
-但它当前不能直接完成已经确认的 Windows 发布目标：`luainstaller` 1.0 的 Windows native profile 只接受 x86_64，源码会拒绝 Windows x86。yaca 的“Windows XP SP3 x86 + Win32 x86 单一产物 + 使用 luainstaller”三项约束因此存在明确前置阻塞；需要先扩展相邻项目的 Win32/XP profile 与验证契约，不能把“尚未公开测试”误写成“已经可以打包、以后再测”。
+但当前检出的 1.0 默认路径还不能直接完成全部 Windows 发布目标：它能识别 `x86`，随后由 Windows profile guard 对非 x86_64 返回 `UnsupportedPlatformError`，随附 MSVC recipe 和测试矩阵也固定为 x64。这证明当前未修改路径不能直接交付 yaca 的 x86/XP 包，但不证明 launcher/bundler 的底层设计无法支持 x86，也不构成 XP 不兼容结论。x64 默认路线同样没有证明 Windows 7 SP1 最低系统、Lua 5.5 与 yaca 最终依赖闭包。正确前置是在最后打包阶段分别 qualification，再按证据判断无需修改或只做必要的 guard/toolchain/profile 适配；取得 Win32 XP--11、Win64 7 SP1--11 的最终产物与完整证据前，两条 Windows release 都保持 `evidence-blocked`。
 
 ## XML 库候选现状
 
@@ -72,19 +72,13 @@ yaca 当前是“产品说明、配置草案、模块骨架和本地运行工具
 
 ## 与 yaca 的接入结论
 
-luainstaller 负责把 Lua 入口与 Lua 模块变成原生可执行程序，但不能自动代替 yaca 的完整发布装配：
-
-- yaca 的 curl、BusyBox、CA 证书等普通资源需要单独进入发布目录。
-- luainstaller 的 `--include` 面向 Lua 依赖，不是通用资源打包接口。
-- yaca 应先采用目录式发布装配：luainstaller 产物加受控的 `bin/` 和默认模板。
-- 是否提供单文件版本应在目录包稳定后单独决策。
-- 发布脚本不应直接修改 luainstaller 生成目录中的所有权清单；更稳妥的做法是把它作为一个组件放进更外层的 yaca 发布目录。
+luainstaller 负责把 Lua 入口、Lua/C 模块和最终确认的最小运行依赖打进平台 executable；D-056 已固定最终 zip 根不暴露历史 `bin/` 依赖树。Windows 根只有 `yaca.exe`、`Install.cmd`、`README.txt`、`LICENSE`、`docs/`，Linux 对应 `yaca`/`Install.sh`。随包 curl/CA 等能力若被最终实现需要，必须由 luainstaller 的资源/嵌入路线或经批准的最小适配兑现，不能把当前候选 `bin/` 整体复制到 zip、也不能临时增加未确认的根级文件。该能力在最后打包阶段 qualification；当前不修改兄弟仓库。
 
 ## 主要风险
 
 ### 旧 Windows
 
-luainstaller 当前公开验证的是现代 Windows x86_64 + MSVC，并明确拒绝 Windows x86；它不是一个当前可用但未测试 XP 的打包器。解除架构限制后，目录 launcher 是否能在 XP 上运行还取决于编译器、CRT、最低 Win32 API、Lua DLL、LuaExpat/Expat 和依赖工具。单文件提取器还包含更复杂的权限与文件安全逻辑，风险更高。
+luainstaller 当前公开验证的是现代 Windows x86_64 + MSVC，默认入口的 profile guard 会拒绝 Windows x86。这个门禁与 x64-only recipe 是当前发布路径事实，不是底层 x86 不可行证明；代码中也没有发现 XP 专用版本拒绝。Win32 x86/XP 能力仍须通过 qualification 得出，目录 launcher 能否在 XP 上运行取决于编译器、CRT、最低 Win32 API、Lua DLL、LuaExpat/Expat 和依赖工具；Win64 路线还需证明 Windows 7 SP1 下的同一闭包。yaca v0.1 采用目录 zip/原地 executable，不采用更复杂的单文件自解压产品形态。
 
 ### CentOS 7
 

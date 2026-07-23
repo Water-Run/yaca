@@ -2,9 +2,9 @@
 
 更新日期：2026-07-22
 
-每个子系统都有独立文档。文档先作为讨论草案，经逐段确认后才成为设计契约。
+每个子系统都有独立 owner 文档。产品选择已经收口；这些文档是现行设计依据，但在精确 schema、状态/错误矩阵与技术证明完成前仍不构成可直接编码的实施规格。
 
-负责人讨论入口见 [设计决策路线图](DESIGN-DECISION-ROADMAP.md) 与 `decision-packets/`；原子完整性见 [设计问题题库](QUESTIONS.md) 和 [全产品设计决策清单](DESIGN-CHECKLIST.md)；[配置 schema 候选](CONFIG-SCHEMA-CANDIDATE.md) 与 [数据分类候选](DATA-CLASSIFICATION-CANDIDATE.md) 提供横切字段/数据流底稿；能否进入实施计划由 [架构实施就绪门](ARCHITECTURE-READINESS.md) 判断。子系统地图说明最终权威规格归属，决策包负责通俗问答，题库负责防遗漏。
+历史问题语义见 [设计决策路线图](DESIGN-DECISION-ROADMAP.md) 与 `decision-packets/`；原子完整性见 [设计问题题库](QUESTIONS.md) 和 [全产品设计决策清单](DESIGN-CHECKLIST.md)；[配置 schema 候选](CONFIG-SCHEMA-CANDIDATE.md) 与 [数据分类候选](DATA-CLASSIFICATION-CANDIDATE.md) 提供横切字段/数据流底稿；能否进入实施计划由 [架构实施就绪门](ARCHITECTURE-READINESS.md) 判断。子系统地图说明权威规格归属，冻结决策包负责语义证据，题库负责防遗漏。
 
 ## 基线层
 

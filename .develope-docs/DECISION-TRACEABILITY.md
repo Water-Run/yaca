@@ -2,7 +2,9 @@
 
 更新日期：2026-07-18
 
-状态：第四轮反向追踪审计；本文件只说明覆盖事实、责任和缺口，不把推荐升级为已确认决定
+状态：第四轮反向追踪历史快照；不再表示现行未答项或当前题库数量
+
+> 本文件冻结 2026-07-18 的 `335/360/101` 基线，用来解释后续为何扩大题库和建立唯一 owner。第 7 节的“尚未进入决定日志”已经由 Batch 02 至 Batch 06 解决，不能作为当前待办；现行状态只看 [`DECISION-REGISTER.md`](DECISION-REGISTER.md)、[`DECISIONS.md`](DECISIONS.md) 与 [`ARCHITECTURE-READINESS.md`](ARCHITECTURE-READINESS.md)。
 
 计数口径：下列 335/360/101 是修复开始前的可复现基线。随后新增的 checklist/AQ/11 号包和关联修复不回写这份证据快照；修复后的分类与验收结果见 `DECISION-COVERAGE-REPAIR.md`。
 
@@ -237,7 +239,7 @@ owner 是最终规范的唯一修改责任，不等于只有该系统能引用�
 
 | 事实/风险 | 当前证据 | 仍需的 proof |
 | --- | --- | --- |
-| luainstaller Windows x86 | 相邻仓库 `src/platform.lua` 当前明确拒绝 Windows x86 | 单独授权并完成 Win32/XP profile；同一最终 x86 包在 XP--11 验收 |
+| luainstaller Windows x86 | 当前 profile guard 拒绝非 x86_64，随附 MSVC recipe/tests 固定为 x64；这不证明底层 launcher/bundler 无法适配 x86，XP 也未验证 | 先 qualification 现有设计，按证据做必要 guard/toolchain/profile 适配；同一最终 x86 包在 XP--11 验收 |
 | 当前 Linux `bin/` ABI | 现有工具为 ELF32/i386，curl 是 x32 ABI，不是目标普通 x86_64 | 从最小 allowlist 重建 ELF64/x86_64 资源并在 CentOS 7 验收 |
 | Win32 curl/UPX | PE32 方向正确，但 UPX stub 遮蔽真实 imports | 审计未压缩来源、CRT/API/TLS/DLL，再对最终包装物重测 |
 | Lua 5.5 XML binding | LuaExpat 1.5.2 + Expat 2.8.2 现代 Linux smoke 可构建；上游公开支持止于 Lua 5.4 | Windows x86/XP 与 CentOS 7 原生构建、ABI、DTD/entity off、资源攻击 corpus |

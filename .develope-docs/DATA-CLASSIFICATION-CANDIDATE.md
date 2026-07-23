@@ -2,11 +2,13 @@
 
 更新日期：2026-07-22
 
-状态：候选审阅底稿；不是已确认隐私承诺
+状态：Batch 06 前的候选审阅底稿；不是现行隐私规格，待按已选路线重建最终矩阵
+
+> 所有产品分支已经回答。本文件中仍出现的 `pending`、A/B/C、B/C 条件发送面或“排位待决”仅保留当时的数据风险分析，不能覆盖 D-049 至 D-056。现行基线至少包括：M05-59=A、四层 Prompt 固定构造、特殊 purpose 只继承 Global/Model instruction、外来 XML 历史授权 audit-only、无 secret-bearing backup/export、无 telemetry/diagnostic upload/update/media/remote。进入编码前必须把这些结果生成一张无候选分支的权威数据矩阵；在此之前本文件本身就是 AR-P0-08 的明确规格债务。
 
 ## 目的
 
-“Key 不进 XML”只解决一种秘密。typed config-secret registry 当前至少登记 Key、proxy credential、`SecretHeader`、`EnvironmentSet` value，以及任何 adapter 后续注册为 secret 的字段；这个集合是开放的，消费者不能另写一份只认识前三项的排除名单。用户也可能把 token 粘进聊天，工作区可能有私钥，shell 输出可能打印 ambient 环境或凭据工具的结果，ContextPrompt 也可能包含内部规则。M05-59 还必须选择：当 config-secret 短到低于技术可证明的安全扫描门槛时，是禁用它的精确 consumer、允许 consumer 但收缩普通正文 exact-scan 保证，还是继续扫描任意长度并接受误阻断；本表不能把其中任一路线预写成已确认承诺。
+“Key 不进 XML”只解决一种秘密。typed config-secret registry 当前至少登记 Key、proxy credential、`SecretHeader`、`EnvironmentSet` value，以及任何 adapter 后续注册为 secret 的字段；这个集合是开放的，消费者不能另写一份只认识前三项的排除名单。用户也可能把 token 粘进聊天，工作区可能有私钥，shell 输出可能打印 ambient 环境或凭据工具的结果，ContextPrompt 也可能包含内部规则。M05-59 已选择 A：低于技术证明门槛的 config-secret 不得进入精确 consumer；门槛与 matcher 仍由目标平台证据冻结。
 
 本表统一回答一类数据是否可以：
 

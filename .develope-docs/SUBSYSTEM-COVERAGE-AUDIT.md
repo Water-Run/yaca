@@ -150,7 +150,7 @@
 ### 15 至 18：诊断、发布、暂缓界面与 Prompt
 
 - **15 诊断与日志**：当前职责远大于篇幅。需要统一 Error、Diagnostic、SelfTestCheck、SelfTestRun、SupportReport schema；三阶段状态机、根因去重、LogLevel 与 durable fact 分界、stderr/XML 路由、脱敏和页面/非 TTY 输出也未规范化。
-- **16 打包与发布**：平台目标和 luainstaller 硬阻塞记录准确；仍缺 ArtifactManifest、资源 allowlist 的机器契约、build/assemble/verify/package 状态、数据根、zip/安装、升级/降级/卸载、回滚、发布证据和用户文档同步门。
+- **16 打包与发布**：平台目标、luainstaller 当前 x86 guard 和 x86/XP qualification/发布证据缺口已记录；不能再把当前 guard 外推为底层不支持。仍缺 ArtifactManifest、资源 allowlist 的机器契约、build/assemble/verify/package 状态、数据根、zip/安装、升级/降级/卸载、回滚、发布证据和用户文档同步门。
 - **17 Web**：v0.1 暂缓是合理的。只需确认它是“明确排除”还是“未排期”，并给出恢复设计前的触发条件；不需要为 IE6、HTTP、安全和页面补虚假设计。
 - **18 Prompt/工作区指令**：信任分层、bundle、失败表和不可越权边界很强；缺最终工作区根、文件名/发现、优先级、作用域、freeze/reload、snapshot 内容、token 上限和注入测试。
 

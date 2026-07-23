@@ -14,7 +14,7 @@
 - readiness 只由 [`ARCHITECTURE-READINESS.md`](ARCHITECTURE-READINESS.md) 维护；readiness 的 `主要来源` 是实施依赖投影，不是负责人 owner。
 - 本文件只保存可重算的 route projection、窄例外及其来源锚点。
 
-所以 orphan 为零只表示没有“无人负责的题”，不表示 270 组已经回复、技术证明已经通过或实现可以开始。
+所以 orphan 为零只表示没有“无人负责的题”。270 组的负责人输入现已收口，但这仍不表示 owner 规格、技术证明已经通过或实现可以开始。
 
 ## 本轮修正了什么
 
@@ -449,7 +449,7 @@ assert len(set(cv_raw)) == EXPECTED_CV
 assert cv_raw == expected_cv_sequence, (cv_raw[:3], cv_raw[-3:])
 
 decision_raw = re.findall(r'^## (D-\d+)\b', (root / 'DECISIONS.md').read_text(), re.M)
-assert decision_raw == [f'D-{number:03d}' for number in range(1, 49)], decision_raw
+assert decision_raw == [f'D-{number:03d}' for number in range(1, 58)], decision_raw
 
 discussion3_text = (root / 'DISCUSSION-BATCH-03.md').read_text()
 rb003_raw = re.findall(r'^## (RB-003-\d{2})：', discussion3_text, re.M)
@@ -636,11 +636,10 @@ for group, topic, recommendation, sem, active_when, _state, *_mutable in registe
 
 register_states = collections.Counter(row[5] for row in register_rows)
 expected_register_states = collections.Counter({
-    'unanswered': 248,
-    'selected': 7,
-    'selected-with-exception': 9,
+    'selected': 110,
+    'selected-with-exception': 150,
     'excluded': 5,
-    'not-applicable': 1,
+    'not-applicable': 5,
 })
 assert register_states == expected_register_states, register_states
 
@@ -650,7 +649,7 @@ for row in register_rows:
     if state == 'unanswered':
         assert projection == '—', (group, state, projection)
         continue
-    projection_match = re.fullmatch(r'`(PR-\d{3}-\d{2})`', projection)
+    projection_match = re.fullmatch(r'`(PR-\d{3}-(?:\d{2}|[A-Z0-9-]+))`', projection)
     assert projection_match, (group, state, projection)
     projected_groups[group] = projection_match.group(1)
 
@@ -672,9 +671,38 @@ assert len(projection_rows) == len(expected_projection_ids), projection_rows
 assert len({projection_id for projection_id, _group in projection_rows}) == len(projection_rows)
 assert len({group for _projection_id, group in projection_rows}) == len(projection_rows)
 assert {projection_id for projection_id, _group in projection_rows} == expected_projection_ids
+legacy_projected_groups = {
+    group: projection_id
+    for group, projection_id in projected_groups.items()
+    if not projection_id.startswith('PR-006-')
+}
 assert {
     group: projection_id for projection_id, group in projection_rows
-} == projected_groups, (projection_rows, projected_groups)
+} == legacy_projected_groups, (projection_rows, legacy_projected_groups)
+
+# Batch 06 uses a deterministic per-group expansion instead of copying 248
+# identical PR metadata rows into the register. Its member set must exactly
+# equal the frozen OWNER-QUESTIONS coverage and each ID must encode its group.
+owner_questions_text = (root / 'OWNER-QUESTIONS-01.md').read_text()
+batch06_coverage = []
+for coverage_line in re.findall(r'^覆盖：(.*)$', owner_questions_text, re.M):
+    batch06_coverage.extend(re.findall(r'`(' + GROUP_PATTERN + r')`', coverage_line))
+assert len(batch06_coverage) == 248, len(batch06_coverage)
+assert len(set(batch06_coverage)) == 248
+batch06_projected_groups = {
+    group: projection_id
+    for group, projection_id in projected_groups.items()
+    if projection_id.startswith('PR-006-')
+}
+assert set(batch06_projected_groups) == set(batch06_coverage), (
+    sorted(set(batch06_coverage) - set(batch06_projected_groups)),
+    sorted(set(batch06_projected_groups) - set(batch06_coverage)),
+)
+for group, projection_id in batch06_projected_groups.items():
+    assert projection_id == f'PR-006-{group}', (group, projection_id)
+batch06_projection_text = (root / 'DECISION-PROJECTION-BATCH-06.md').read_text()
+assert 'PR-006-<GROUP-ID>' in batch06_projection_text
+assert '对于下表某行的每个覆盖 group `G`' in batch06_projection_text
 
 
 # Queue membership comes only from the `formal groups` cell of B01..B49.
@@ -853,7 +881,7 @@ FIXED_GATES = {
         ('TECHNICAL-PROOF-BACKLOG.md', '### TP-024 CLI、dot command 与非 TTY grammar'),
     ],
     'ProcessPortABI': [
-        ('subsystems/02-process-and-resources.md', '必须共享一套可轮询/可通知的运行时 ABI'),
+        ('subsystems/02-process-and-resources.md', '必须接入同一可轮询/可通知的运行时端口'),
         ('subsystems/02-process-and-resources.md', '取消后如何等待真实完成'),
     ],
     'TP-029-BundledToolSearch': [
@@ -868,11 +896,11 @@ FIXED_GATES = {
         ('decision-packets/08-context-xml-index-recovery.md', '确定性 writer 与重建测试'),
     ],
     'TypedSchemaSource': [
-        ('subsystems/05-configuration.md', '长期配置来源已经收敛为内置 typed schema'),
-        ('subsystems/05-configuration.md', '配置 schema 候选'),
+        ('subsystems/05-configuration.md', '长期来源只有：'),
+        ('subsystems/05-configuration.md', '逐字段 schema 的正式实现必须从以下已确认表面生成'),
     ],
     'ToolRegistryVersion': [
-        ('subsystems/07-tool-system.md', '工具版本、规范参数摘要'),
+        ('subsystems/07-tool-system.md', '完整 registry、每个 schema version 和 registry digest'),
         ('decision-packets/07-tools-safety-process-runtime.md', '首版 tool registry、TS-23 所选 input carrier/schema、TS-37 cwd state、版本'),
     ],
     'ContextIdentityDigest': [

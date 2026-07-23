@@ -2,7 +2,9 @@
 
 更新日期：2026-07-22
 
-状态：候选讨论稿；不是已确认决定，也不是可直接使用的 config.ini 模板
+状态：冻结的答复前候选审计；不是现行 schema，也不是可直接使用的 config.ini 模板
+
+> 2026-07-22 状态说明：本文件保留 `decision-inventory-v9` 收到答复前的完整候选空间、条件字段与 `CV-*` 校验依据，内部出现的 DirectHttp、DirectNetwork、细分 Outside、SensitiveRead、Autonomy、Notification、金额、强 undo、`Model.CustomPrompt` 等分支不再是现行产品配置。负责人集中答复后的唯一产品配置 owner 是 [`subsystems/05-configuration.md`](subsystems/05-configuration.md)，现行决定为 D-049 至 D-056；实现字段注册表必须从该 owner 规格继续冻结精确拼写/默认/迁移，不能把本文件的互斥候选合并回 INI。
 
 ## 本文解决什么
 

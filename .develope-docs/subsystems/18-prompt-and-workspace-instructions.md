@@ -1,178 +1,119 @@
-# 18 Prompt、指令与工作区发现
+# 18 Prompt、指令与工作区说明
 
-状态：候选
+状态：四层 Prompt 与不自动发现项目规则的产品契约已确认；长度上限和 wire 投影待技术证明
 
 ## 为什么需要独立子系统
 
-Prompt 不是若干字符串的随意拼接。内置规则、当前用户输入、用户级偏好、项目约定、目录级约定、压缩摘要和工具输出具有不同的来源、作用域与信任级别。如果发现、优先级和冻结时点散落在配置、AgentLoop、文件工具与各模型适配器中，同一任务会因入口、当前目录或恢复时机不同而得到不同规则，也容易把仓库内容或工具输出误当成高优先级指令。
+yaca 的 Prompt 不是一个会被后写字段覆盖的字符串。全局、Model、Permission 和 Context 四层都由用户分别配置、分别保存，并在请求建立时确定性合并。Runtime 的完整性规则、purpose 契约、真实 Permission、工具 schema、历史事实和当前用户消息又各有自己的来源；若让配置 parser 或 provider adapter 临时拼接，同一个 Context 会因入口或 Model 不同而失去可解释性。
 
-本文件承接 [`../DESIGN-CHECKLIST.md`](../DESIGN-CHECKLIST.md) 中的 `INSTR-*` 与 `LOOP-19`。所有内容都是候选设计，尚未写入已确认决策。
+本系统只拥有 Prompt component 的装配、来源标记、冻结和快照。它不把普通仓库文件升级成指令，也不从 Prompt 文本推导权限或 Runtime 功能。
 
 ## 职责
 
-- 从明确的起始目录和配置视图中发现用户级、项目级与目录级指令源。
-- 为每个指令源标注来源、规范路径、适用目录、信任级别、顺序、内容摘要和读取诊断。
-- 按确定性规则合成一个工作区 **instruction bundle**，供 AgentLoop 与当前用户输入一起在 turn 开始时冻结。
-- 明确区分“可影响行为的指令”和“只能作为数据引用的不可信内容”。
-- 向上下文系统提供足以恢复、审计和解释本 turn 实际规则的快照信息。
-- 在指令缺失、变化、冲突、超限或无法读取时产生结构化诊断，而不是静默改变 Prompt。
-- 按 PP-03 × PP-11 的最终组合装配 `SystemPrompt`、`ContextPrompt`、adopted project rules 与条件 `Model.CustomPrompt`；Model 配置层不能自行发明另一套优先级。
-- 将当前 Permission 的候选 `SystemPrompt` 作为来源独立的有界组件投影给 `main`；其 PP-03 精确排位未正式决定，不能在本系统内暗定。
+- 接收已经验证的 Global、Model、Permission 与 Context 四层 Prompt component。
+- 按 request purpose 选择允许的组件，加入不可覆盖的 Runtime/purpose 契约，并产生不可变 `PromptBundle`。
+- 为每个实际发送的组件保存 kind、来源、配置 generation、原文、digest、顺序和是否作为 instruction/data 使用。
+- 在组件缺失、过大、编码无效或总请求超限时，于网络请求前返回 typed error。
+- 向 AgentLoop、模型协议和 Context Store 提供同一份 bundle；任何下游都不能重排或再次合并。
 
-## 边界
+## 已确认的四层 Prompt
 
-- **05 配置系统**决定启用哪些来源、显式工作区、大小上限和用户偏好；本系统不拥有配置合并。
-- **01 文件系统/路径能力**负责规范路径、读取文件、识别目录和报告平台能力；本系统不自行散落 Windows/Linux 分支。
-- **07 工具系统**执行工作区文件读取；普通仓库文件和工具结果仍是数据，不能因被工具读出而升级成指令。
-- **08 权限系统**是路径、命令、联网和秘密访问的最终决策者。项目指令只能要求 Agent 申请某项动作，不能自行授权、扩大工具集或改变 sandbox 承诺。
-- **09 AgentLoop**决定何时冻结 bundle、如何与用户输入、压缩摘要和工具结果装配为模型视图；本系统不驱动采样循环。
-- **10 上下文系统**负责保存指令快照或引用；本系统只提供内容、来源、摘要及敏感性标记。
-- **12 压缩系统**决定模型视图预算。不得把高优先级安全规则压缩成含义不稳定的摘要。
-- **06 模型协议层**只负责把已经装配的模型视图编码给 provider，不应重新解释指令优先级。
+四层是彼此独立的正式配置面：
 
-## 当前现状与缺口
+1. `Global.SystemPrompt`：主 INI 中的全局默认，对所有 LLM request 生效。
+2. `Model.<Name>.SystemPrompt`：当前完整 Model 实例自己的默认，对使用该 Model 的所有 request 生效。
+3. `Permission.<Name>.SystemPrompt`：当前 Permission 的模型行为说明，只对 `main` 与 `side` 作为指令生效；它不是 capability。
+4. `ContextPrompt`：当前 Context 的上下文说明，只对 `main` 与 `side` 作为指令生效；通过 chat `.prompt` 或 `context-repl` 事务式查看和编辑，保存在 Context XML。
 
-当前文档已经提出 Prompt 装配、项目指令安全边界和 turn 冻结，但尚未形成统一契约：
+旧 `Model.CustomPrompt` 不再形成第五层或 compatibility hint；目标 schema 使用正式的 `Model.SystemPrompt`。旧配置的迁移必须保留原文并明确迁入对应 Model 层，不能悄然改成 Global 或 Context scope。
 
-- D-026 已确认 CLI 提供显式目录或默认 `.` 作为统一初始位置；工作区根是否严格等于该目录、提升到版本库根或使用其他标记仍未定义。
-- 没有定义用户级、项目根和嵌套目录指令能否同时存在，以及冲突时谁覆盖谁。
-- 没有定义目录级指令究竟只约束其子树内文件操作，还是一经发现就影响整个 turn。
-- 没有区分“被选择为正式指令源的文件”与普通 README、源码注释、命令输出中的自然语言。
-- 没有规定符号链接、短文件名、路径大小写、ignore、编码、BOM、超大文件和读取失败的处理。
-- 没有规定指令在 Agent 工作中途变化后何时生效，也没有定义恢复旧 turn 时如何解释已消失的来源。
-- 没有确定上下文保存完整指令内容、只保存引用与摘要，还是按来源采取不同策略。
-- 没有可解释输出，用户无法知道“本轮究竟加载了哪些规则、哪些被忽略以及为什么”。
+当前用户消息始终是独立 user message，不是第五个 System Prompt。Prompt assembler 不把四段字符串覆盖成一个“最终值”，而是按下列稳定顺序装配并保持 component 边界：
 
-## 候选概念模型
+```text
+immutable runtime + request-purpose contract
+Global.SystemPrompt
+Model.SystemPrompt
+[main/side only] Permission.SystemPrompt
+[main/side only] ContextPrompt
+current user message / purpose input
+```
 
-### 指令来源
+后出现、更具体的用户层可以补充或收窄先前偏好，但自然语言冲突不改变 Runtime 完整性规则、真实 Permission、workspace、工具 registry、硬预算或人工审批。Permission 的名称、Description 与 SystemPrompt 都不能授予能力。
 
-完整 Prompt 的装配需要区分以下类别；类别本身不等于最终文件名，其中当前用户指令由 AgentLoop 提供而不是从文件发现：
+## 默认交流与澄清原则
 
-1. **不可变运行规则**：产品、运行时和安全不变量，由发行物提供。
-2. **当前用户指令**：用户为当前任务直接给出的目标、纠正和限制。
-3. **用户级持久指令**：跨项目偏好，由用户配置位置提供。
-4. **项目根指令**：工作区整体约定。
-5. **目录级指令**：只对声明作用域内的文件和动作生效的局部约定。
-6. **不可信数据**：普通仓库内容、网页、命令输出、模型生成文本和工具返回值。
+默认 Prompt 引导模型跟随用户消息语言、结果优先并保持简洁；复杂任务只在阶段变化、需要等待或出现风险时给短进度，最终回复如实列出结果、改动、验证和未知事项。这个风格由有效 Prompt 和模型执行，不是 TUI/Runtime 对自然语言的硬编码；用户消息或四层 Prompt 可以要求更详细、教学式或更精简的表达。
 
-第 6 类即使包含“忽略上面的规则”等文字，也只能作为数据送入模型。正式指令源也不是完全可信：项目/目录指令可以描述项目工作流，却不能覆盖运行时安全边界或冒充用户授权。
+模型只有在不同答案会实质改变目标、安全、费用、不可逆副作用或公开结果时必须停下来询问。其他不完整信息采用最小风险假设继续，并把假设讲清楚。该原则不代替 Runtime 必须取得的 Permission/endpoint/费用 consent，也不授权模型跨过 hard cap 或 safety invariant。
 
-当前 Permission 还可以提供一个独立的 `permission-system-prompt` 候选组件。它来自完整 Permission logical name 与当前 config generation，是 `user-content`，不是 capability 描述本身；名称、`Description` 和该文本都不能改变真实能力。Runtime 生成的 effective capability/tool manifest 与这段文本分离，并始终由 08 号系统强制。
+## request purpose 继承矩阵
 
-### Instruction bundle
+所有 LLM request 都继承冻结 generation 中的 Global 与所选 Model Prompt；其余组件由 Runtime 按 purpose 固定，不能由配置自由扩张：
 
-候选 bundle 中每个条目至少需要以下语义字段，具体编码以后再定：
-
-- 稳定的来源类别与来源身份。
-- 原始或规范化路径，以及路径适用范围。
-- 内容、编码结果、字节长度与内容摘要。
-- 确定性的优先级和同级顺序。
-- 信任级别与可影响的规则范围。
-- 读取结果、忽略原因和冲突诊断。
-- 本 turn 冻结时观察到的版本信息。
-
-bundle 是 AgentLoop 的只读输入，不是全局可变单例。相同工作区身份、配置快照和文件内容应产生相同的顺序与摘要。
-
-### `Model.CustomPrompt` 的条件位置
-
-`Model.CustomPrompt` 是否存在只由 PP-11 决定，不能因为旧 INI 有该字段就默认把它加入 bundle：
-
-- PP-11 A 删除这一层。迁移到 SystemPrompt/指定 ContextPrompt 后，它只具有目标层权威，不保留隐藏 Model scope；迁移前后的历史 request 各自保存准确 component snapshot。
-- PP-11 B 保留 Model-specific 用户默认。PP-03 A/B 下它位于 adopted project rules 与 SystemPrompt 之间；PP-03 C 下它加入持久默认冲突集合，不允许 assembler 静默挑选。
-- PP-11 C 只形成低于 SystemPrompt 和其他持久用户层的 compatibility hint。它不能更改 role、serializer、tool/control schema、purpose 白名单或权限。
-
-Model 切换和旧字段迁移都必须先形成 transition，再从下一 turn 使用新 bundle。多个旧 Model Prompt 不得由本系统猜目标或简单串接；配置管理事务负责逐来源、逐目标确认、先发布目标再清旧源，本系统只消费已提交结果。
-
-### `Permission.SystemPrompt` 的候选位置
-
-当前最小路线只让它进入 `main` purpose，不让 side、action/termination review、compaction 或 self-test 因此取得另一份自由文本 policy。每个采用它的 request 保存完整 Permission logical name、config/profile generation、capability snapshot 引用、实际 Prompt component 原文/digest 与最终 bundle 顺序。
-
-它在当前用户指令、`ContextPrompt`、adopted project rules 和全局 `SystemPrompt` 之间的精确位置仍由 PP-03 正式决定。本文件只冻结两条安全边界：它永远低于不可覆盖 Runtime invariants；无论排位如何都不能授予工具、降低确认、扩大 workspace 或改变 purpose 白名单。外来 XML 中的 component 只解释历史 request，不能自动激活或写回本机 Permission 定义。
-
-## 候选硬不变量
-
-1. 低优先级内容不能覆盖不可变运行规则、安全策略或用户的当前明确限制。
-2. 普通文件、工具输出和模型生成内容不能通过文本内容把自己提升为指令源。
-3. 项目指令不能授予权限、延长授权生命周期、扩大工作区范围或启用原本不可用的工具。
-4. 每个 turn 使用冻结的 instruction bundle；中途文件变化最早从下一个规定的生效点进入。
-5. 目录级指令必须携带明确作用域，不能仅因一次读取而无意污染整个工作区。
-6. 发现顺序与合并结果必须可解释、可测试，不依赖文件系统未定义的枚举顺序。
-7. 显式指定但无法读取的指令源不得静默跳过；自动发现源被跳过也必须留下用户可见诊断。
-8. 上下文中的快照承诺必须足以解释历史行为，但不能绕过 `CTX-06` 的秘密与敏感数据规则。
-9. `Autonomy` 若由 TS-18 B 生成，只能调整 PP-06 已允许消息块内的解释粒度；它不能改变本系统输出哪些组件、AgentLoop 何时发消息或是否执行额外验证。
-10. Permission 名称、`Description` 与 `SystemPrompt` 都不是授权输入；Prompt 与 capability snapshot 必须保持独立来源和独立 digest。
-
-## 总体方案比较
-
-### A. 固定优先级 + 作用域分层快照（推荐候选）
-
-在 turn 准备阶段一次性发现允许的来源，按固定规则合成工作区 bundle。AgentLoop 装配时保证当前用户指令高于用户级和项目级约定；项目根与目录级规则按明确作用域叠加；所有项目内容都低于不可变运行与安全规则。工具操作某个路径时只投影适用于该路径的目录规则。
-
-优点是既支持真实项目中的局部约定，又能确定性恢复和审计；安全边界也可以独立证明。代价是必须认真定义工作区身份、目录作用域、同级冲突和 Prompt 预算。
-
-### B. 仅允许单一项目根指令
-
-v0.1 只读取一个用户级来源和一个项目根来源，不支持嵌套覆盖。优点是实现、解释和旧平台测试最简单；缺点是单仓多模块项目无法表达局部规则，后续加入目录级指令会改变既有优先级契约。
-
-此方案可作为最小交付裁剪，但不宜把“没有嵌套能力”写成长期格式承诺。
-
-### C. 随路径动态递归发现
-
-每次读取或修改文件时，从该路径向上动态寻找指令，并立即加入活动 Prompt。它最灵活，也最接近文件级即时上下文；但同一 turn 的规则可能在执行过程中变化，容易出现先执行后发现限制、Prompt 顺序不稳定和恢复无法复现的问题。
-
-不建议把此方案作为默认行为。若未来需要动态发现，也应只产生“下一采样待采用的候选变更”，由 AgentLoop 显式冻结新版本。
-
-## 发现与装配流程候选
-
-1. CLI/AgentLoop 提供 D-026 定义的起始目录和本 turn 配置快照。
-2. 本系统从该起点确定一个规范工作区身份；根目录选择规则仍需单独确认。
-3. 按已启用来源收集候选文件，先验证路径作用域，再读取和规范化文本。
-4. 为每个来源计算摘要、标记信任与作用域，按稳定规则排序并生成诊断。
-5. 返回不可变 bundle；AgentLoop 记录其身份并装配当前用户输入、上下文模型视图和工具 schema。
-6. 对具体目录或文件动作，AgentLoop 只选择全局规则与覆盖该路径的局部规则，不重新提升普通文件内容。
-7. 下一个生效点到来时重新发现；若 bundle 改变，应向用户显示来源变化而不是静默替换。
-
-## 失败与恢复问题
-
-| 情况 | 推荐候选行为 | 必须留下的证据 |
+| purpose | 作为指令继承的用户 Prompt | 固定规则 |
 | --- | --- | --- |
-| 内置运行规则缺失或损坏 | 启动/turn 准备失败，不以降级规则继续 | 发行版本、来源身份、校验错误 |
-| 显式指定的用户或项目指令不可读 | 在请求模型前阻塞并要求修正或明确忽略 | 规范路径、系统错误、用户决定 |
-| 自动发现来源不可读 | 默认排除该来源并显著警告；若其存在性已确定但内容未知，不声称已完整遵守项目规则 | 路径、发现方式、排除原因 |
-| 编码无效、内容过大或包含二进制数据 | 不静默截断后当作完整指令；拒绝或在用户明确接受的规则下受限加载 | 原始大小、限制、摘要、处理结果 |
-| 指令在 turn 中途改变 | 当前冻结 bundle 不变；在下一个生效点报告变更并生成新版本 | 旧/新摘要、生效 turn |
-| 恢复时来源已移动、删除或改变 | 先用历史快照解释旧 turn；继续执行前展示差异并重新确认运行视图 | 历史来源、当前来源、差异类别 |
-| 同级规则冲突 | 按确定性规则选择或合并，同时产生冲突诊断；不能依赖目录枚举顺序 | 冲突来源、采用顺序、最终条目 |
-| 路径经符号链接、短文件名或大小写别名逃逸 | 交给路径/安全能力规范化；身份不确定时不加载为工作区指令 | 输入路径、规范身份、拒绝原因 |
-| 指令快照持久化失败 | 在首个模型请求前停止 turn；不能执行一个未来无法解释的 Prompt | bundle 身份、存储错误、未执行声明 |
+| `main` | Global + Model + Permission + Context | 加入 main control/tool/persistence 契约和当前用户消息 |
+| `side` | Global + Model + Permission + Context | 加入只读、无工具、单次直接回复契约 |
+| `action-review` | Global + Model | 加入固定 action-review schema；动作、Permission 和证据只作为有界 quoted data |
+| `termination-review` | Global + Model | 加入固定 finish-review schema；目标、验收标准、历史和证据只作为有界 quoted data |
+| `compaction` | Global + Model | 加入固定 summary schema；被压缩事实和旧 Prompt 只作为有界 quoted data |
+| `self-test capability/semantic` | Global + Model | 加入固定 self-test schema；Permission/配置文本只作为脱敏、有边界 data |
+| `context-name` | Global + Model | 加入固定无工具命名 schema；Context 内容只作为有界 data |
 
-自动重试只适合短暂的文件读取错误，且不得跨越 turn 冻结点偷偷改变 bundle。恢复后的 Prompt 必须明确是“复用历史快照”还是“采用当前来源”，不能混合两者后伪装成原始执行环境。
+因此特殊 purpose 不继承 Permission/SystemPrompt 或 ContextPrompt 的指令权威。它们可以为了审阅、摘要或命名看到必要内容，但这些内容必须放进明确的数据槽，不能改变 purpose 的工具白名单、输出 schema 或安全边界。仅在 Prompt 中写“不要调用工具”不构成限制；Runtime 和 provider adapter 必须实际提供对应的空/受限工具 schema。
 
-## 安全、隐私与兼容性
+## 装配与生命周期
 
-- 项目指令本身可能包含秘密、内网地址或恶意文本；是否持久化全文、是否发给模型、是否允许导出分别服从数据分类矩阵。
-- 路径判断必须覆盖 Windows 大小写、盘符、UNC/短文件名、重解析点，以及 Linux 符号链接；字符串前缀不能证明作用域。
-- 文本入口应有明确编码与换行规范。无法可靠解码时应诊断，不使用平台本地代码页默默改变语义。
-- 总字节、单来源字节、来源数量和装配后 token 都需要独立上限；超限策略不能删除高优先级安全规则。
-- 旧终端只需展示来源清单、警告和摘要，不要求依赖全屏树形浏览。
-- 程序生成的 component kind、source tag、role 和字段名固定为 ASCII；Prompt、路径与用户正文仍按严格 UTF-8 保存。Windows 控制台或字体无法显示字符时可以使用 ASCII escape 投影，但该投影不能回流成 Prompt 原文、digest、路径或身份。
+1. 22 号 Runtime 在顶层 `main`/`side` admission 前发布完整、已验证、不可变的 `ConfigGeneration`。
+2. AgentLoop 冻结当前 Model、Permission、Context、workspace 与 purpose，调用本系统建立 `PromptBundle`。
+3. 本系统逐组件验证 UTF-8、字节/token 上限和来源，按固定顺序产生 component manifest 与 public digest。
+4. Context Store 在首个模型请求前保存足以完整接盘的实际 component 原文、来源、顺序、generation 与 digest；配置中 registered secret 仍不得因 bundle snapshot 进入 XML。
+5. 06 号 provider adapter 只编码 bundle，不增删、拼接或重新解释层级。
+6. 同一 turn 的 retry、工具循环、action/termination review 和 compaction 使用 admission 时冻结的 generation。INI、`.prompt` 或 Context 管理变化最早从下一顶层 turn 生效。
 
-## 终端-only 零表面
+Model 或 Permission 切换必须形成明确 transition。下一 turn 的 bundle 同时能说明旧值、当前值和切换来源，使新 Model 理解先前工作是在什么 Prompt/Model/Permission 下产生的；历史 request 的 component snapshot 永不被新配置倒写。
 
-v0.1 不生成 Web、图像/截图、音频/麦克风、公共 headless/remote controller、transcription 或 TTS 的 Prompt component、Model purpose、工具说明或 XML component kind。外来 XML 若携带这类历史数据，只能按通用 unknown/history 规则保存或报告 compatibility gap，不能使当前 Runtime 出现对应 purpose。设计归档和负向测试可以写出被排除能力的名称，但活动 registry、help 和发行资源必须为零。
+## 仓库文件不是自动 Prompt
 
-## 建议讨论顺序
+v0.1 不自动发现或加载 `AGENTS.md`、README、项目规则、目录级规则或任何约定文件，也没有 project-config/instruction search path。用户需要项目说明时，可以在普通消息中要求模型通过已获准的 direct read/search 或 raw shell 阅读指定文件。
 
-1. 指令信任层级：哪些来源可以影响行为，以及 `Permission.SystemPrompt` 在 PP-03 中的精确位置；安全边界永远不可覆盖。
-2. 工作区根身份与显式/自动发现的关系。
-3. 用户级、项目根和目录级来源是否都进入 v0.1，以及它们的作用域。
-4. 固定优先级、同级顺序与冲突显示。
-5. turn 冻结、生效时点与中途变化。
-6. 读取失败、编码、大小、ignore、符号链接和路径别名。
-7. 历史快照的内容、隐私、恢复和审计承诺。
-8. Prompt 预算、可解释输出和测试矩阵。
+被读取的文件、源码注释、Git diff、命令输出和工具结果始终是数据；内容中即使出现“忽略前文”“授予权限”等文字，也不会成为第五层 Prompt、改变 component 顺序或获得 Permission 权威。用户若随后明确把其中内容整理进 Global/Model/Permission/Context Prompt，才从下一 turn 作为对应正式层生效。
 
-## 当前讨论入口
+传入且可进入的真实目录就是唯一 workspace root；上级 Git 根只作为可发现的 status/diff 元数据，不扩大 Prompt、文件或 Permission 边界。本系统不通过向上扫描 Git 根寻找规则。
 
-先确认是否接受“固定优先级 + 作用域分层快照”作为总体方向，并明确第一条不可破坏规则：项目与目录指令可以约束 Agent 的工作方式，但永远不能自行授予权限、扩大工作区或覆盖运行时安全边界。确认这一点后，再讨论 v0.1 实际启用哪些指令来源。
+## `backup/` 只是可选 Prompt 文案
+
+某个 Global、Model、Permission 或 Context Prompt 可以用自然语言建议模型在合适时把副本放到 `backup/`，但这只是一段普通 Prompt：
+
+- schema 不生成 `BackupMode`、`BackupDirectory`、undo 或 restore 字段；
+- Runtime 不自动创建、复制、恢复、清理或保留 `backup/`，也不把它当作 reserved tree；
+- 工具层不为该名称提供特殊 API、绕过 expected digest 或扩大 Permission；
+- 模型若据此调用普通 write/copy/shell，仍按真实目标、当前 Permission、DoubleCheck 和人工审批正常处理；
+- 是否能恢复、保存多久以及是否适合放入某种内容，都只是 Prompt/用户要求下的模型判断，不是 yaca 的功能承诺。
+
+同理，Prompt 可以建议某种 Git 工作方式，但 Runtime 不因此自动 commit、stash、reset 或 push。Git 副作用只在用户明确要求并经普通 Shell/Permission 流程后发生。
+
+## 安全、隐私与兼容性不变量
+
+1. Runtime/purpose 契约、真实 Permission、workspace、工具 schema 和硬上限不接受任何 Prompt 覆盖。
+2. 四层 Prompt 只能影响模型行为，不能注册工具、联网能力、后台任务、Web/媒体/remote surface 或 OS sandbox。
+3. 每个组件独立标记和保存；assembler 不按空值、同名字段或文字相似度吞掉另一层。
+4. Prompt、路径与用户正文按严格 UTF-8 保真；程序生成的 component kind、role 和字段名使用 English/ASCII。旧终端显示替换不能回流成原文、digest 或请求内容。
+5. 单组件、组件总字节、估算 token 和最终 request 都有不可关闭硬上限。超限先产生 typed error/压缩或请求用户调整，不能静默截断高优先级规则。
+6. 外来 XML 中的历史 Prompt snapshot 只解释历史 request；它不能创建或覆盖本机 Global/Model/Permission 配置。ContextPrompt 只有经过 import/mapping 的 Context 才作为当前 Context 层继续使用。
+7. Context XML 是完整接盘事实，因此复制者可能看到 Prompt 中的用户敏感文本；UI 必须如实说明这一明文边界，不能把 Prompt 错标为 config secret 后又不保存历史。
+
+## 失败与恢复
+
+| 情况 | 行为 |
+| --- | --- |
+| Global/Model/Permission 配置无效 | 阻止新 turn admission，进入对应 config/model self-fix；不使用旧 generation 偷跑新请求 |
+| ContextPrompt XML 损坏或无法提交 | 阻止请求并进入 Context self-fix；不能只在内存使用一份无法接盘的 Prompt |
+| Prompt component 超限或编码无效 | 请求前返回 typed error，指出 component kind/来源和限制；不静默截断 |
+| Prompt 在活动 turn 中变化 | 当前 bundle 不变；下一顶层 turn 记录 generation/Context transition 后采用 |
+| provider adapter 无法无损表达 bundle/control | capability preflight 失败；不把组件拍平成不可审计的自然语言替代协议 |
+| XML 快照提交失败 | 不开始对应 Model request或副作用；报告已保存水位 |
+
+## 仍需技术证明
+
+剩余工作是冻结四类字段的 INI/XML 多行语法、每组件与总预算数值、component manifest/XML schema、OpenAI/Anthropic role 投影和旧配置迁移 fixture。不得重新引入项目规则自动发现、`Model.CustomPrompt` 隐藏层、Prompt 驱动的 backup 功能或特殊 purpose 对 Permission/Context Prompt 的指令继承。

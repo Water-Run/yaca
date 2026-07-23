@@ -2,13 +2,17 @@
 
 更新日期：2026-07-22
 
-状态：依赖队列继续生效；`DISCUSSION-BATCH-02/03/04` 已回答全部 PJ 组、`CX-13`、`TU-32` 与 `F4-01`，选择结果以登记表为准
+状态：保留为原子覆盖与依赖审计；不再作为项目负责人当前问卷
+
+## 当前负责人入口
+
+项目负责人认为 248 个原子问题过多，因此通过 [`OWNER-QUESTIONS-01.md`](OWNER-QUESTIONS-01.md) 的 28 个集中选择和 1 个 DoubleCheck 补问一次完成答复。`DISCUSSION-BATCH-06.md` 已归档回复，`DECISION-PROJECTION-BATCH-06.md` 已回投全部覆盖 ID；本文件的 49 批现在只用于证明旧 270 group 没有丢失、重复或违反依赖，不再是待答队列。
 
 ## 这份队列解决什么
 
-270 组正式问题不应让项目负责人一次作答，也不应只按文件顺序回答。某些跨系统问题实际是后续三个包的前置：例如一个进程允许几个 active Context，会直接改变 AgentLoop、writer lease、TUI 和关闭流程。
+270 组正式问题不应让项目负责人逐组作答，也不应只按文件顺序回答。某些跨系统问题实际是后续三个包的前置：例如一个进程允许几个 active Context，会直接改变 AgentLoop、writer lease、TUI 和关闭流程。
 
-本文把当前十个 owner packet 回复模板中的 270 个 formal groups 每 3--6 组组成一批，且每个 group 恰好登记一次。owner 分布为 `PJ=19, PP=18, TU=32, M05=57, AL06=49, TS=35, CX=16, ED=14, RF=14, F4=16`；对应原子题库为 `AQ-001..AQ-437`，主题清单为 384 个唯一 ID。它只决定“下一步问什么”；实时状态、当前批、原话和传播仍只由 [`DECISION-REGISTER.md`](DECISION-REGISTER.md) 拥有。每批回复后都必须重算条件组与冲突；本队列可以因已选结果而调整，但不能跳过仍 active 的组。
+本文把当前十个 owner packet 回复模板中的 270 个 formal groups 每 3--6 组组成一批，且每个 group 恰好登记一次。owner 分布为 `PJ=19, PP=18, TU=32, M05=57, AL06=49, TS=35, CX=16, ED=14, RF=14, F4=16`；对应原子题库为 `AQ-001..AQ-437`，主题清单为 384 个唯一 ID。它现在只承担旧原子依赖与覆盖审计；实时状态、当前集中问题、原话和传播仍由 [`DECISION-REGISTER.md`](DECISION-REGISTER.md)、`OWNER-QUESTIONS-01.md` 与 discussion archive 连接。每次集中回复后都必须重算条件组与冲突，不能因为问卷变短就跳过仍 active 的产品保证。
 
 ## 回复节奏
 

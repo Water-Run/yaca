@@ -2,11 +2,13 @@
 
 更新日期：2026-07-22
 
-状态：现行设计流程记录；21 个 active group 已收到选择，1 个条件组为 `not-applicable`，248 组仍为 `unanswered`
+状态：现行原子审计记录；265 个 active group 已收到选择/排除，5 个条件组为 `not-applicable`，`unanswered=0`；集中负责人问卷已经关闭
 
 ## 这份文件负责什么
 
 本表是项目负责人回复之后的唯一**实时状态登记簿**。十个 [决策包](decision-packets/README.md) 仍拥有问题正文、A/B/C、推荐与代价；[`DECISIONS.md`](DECISIONS.md) 仍拥有已经确认的产品结论；各 `subsystems/` 最终规格拥有可实施契约；[`ARCHITECTURE-READINESS.md`](ARCHITECTURE-READINESS.md) 和技术证明拥有 gate/证据。本表只连接这些层，不复制或替代其中任何一层。
+
+`DISCUSSION-BATCH-06.md` 已保存 [`OWNER-QUESTIONS-01.md`](OWNER-QUESTIONS-01.md) 的 28 个产品/风险选择、1 个 DoubleCheck 语义补问及逐项收口原话。248 个原先的 `unanswered` 已按集中问题覆盖表投影，条件重新计算后没有遗留产品补问或 conflict。每个 `PR-006-<GROUP-ID>` 的确定展开由 [`DECISION-PROJECTION-BATCH-06.md`](DECISION-PROJECTION-BATCH-06.md) 维护；atomic register 仍保留收到回复时的 v9 语义，不把技术证明状态伪装成实现完成。
 
 因此：
 
@@ -14,6 +16,7 @@
 - `DISCUSSION-BATCH-01.md` 形成于本套正式编号之前，是 D-001..D-039 的历史答复证据，不会自动把本表任一组标成已答。下一次正式包回复从 `DISCUSSION-BATCH-02.md` 开始按原话追加归档。
 - 逐组的长例外会进入稀疏 assertion/冲突记录；主表只保存状态、选择、原话引用和传播引用，避免复制 270 份选项正文。
 - 本表的 `State` 只描述负责人答复状态；`Projection` 引用独立 PR 记录，不能把 `selected`、`specified` 和 `release-proven` 混成一个状态。
+- 冻结的 `decision-inventory-v9` 保留收到回复时的历史候选语义。其 RF-04/luainstaller 文本中“当前 guard 拒绝 x86”仍是代码事实，但不得再外推为底层 x86/XP 不可行；现行证据口径由 `AS-005-01` 修正，详见 `DISCUSSION-BATCH-05.md`。
 
 ## 锁定的问卷清单
 
@@ -28,7 +31,7 @@
 | Activation split | `22 conditional / 248 always` |
 | Checklist IDs | 384 |
 | Atomic questions | `AQ-001..AQ-437` |
-| Current state | `7 selected / 9 selected-with-exception / 5 excluded / 1 not-applicable / 248 unanswered`；完整状态计数见下表 |
+| Current state | `110 selected / 150 selected-with-exception / 5 excluded / 5 not-applicable / 0 unanswered`；完整状态计数见下表 |
 
 structural stream 也按 owner packet 文件名升序、packet 内 group 数字后缀升序；成员只取该 packet 底部推荐回复模板，标题取其正式 H2/H3 中 group ID 及分隔符后的完整原文。每条精确为 `<group_id><TAB><title><TAB><recommended_letter><LF>`，270 条 UTF-8 record 直接连接，无头、尾或额外空行。
 
@@ -49,13 +52,13 @@ active_when<TAB><condition|always>
 
 | State | Count |
 | --- | ---: |
-| `unanswered` | 248 |
+| `unanswered` | 0 |
 | `explaining` | 0 |
-| `selected` | 7 |
-| `selected-with-exception` | 9 |
+| `selected` | 110 |
+| `selected-with-exception` | 150 |
 | `deferred` | 0 |
 | `excluded` | 5 |
-| `not-applicable` | 1 |
+| `not-applicable` | 5 |
 | `technical-proof` | 0 |
 | `superseded` | 0 |
 | `conflict` | 0 |
@@ -65,38 +68,38 @@ active_when<TAB><condition|always>
 
 | 包 | 总数 | Active 已收口 | N/A | 未收口 | 下一步 |
 | --- | ---: | ---: | ---: | ---: | --- |
-| [PJ：产品旅程与表面](decision-packets/02-product-journey-and-surfaces.md) | 19 | 18 | 1 | 0 | 十九组及 `PJ-12` 手工名称补缝已全部收到回复；继续传播 B03 |
-| [PP：Prompt、人格与指令](decision-packets/03-prompt-personality-and-instructions.md) | 18 | 0 | 0 | 18 | 等待上游/前包 |
-| [TU：TUI、输入与 CLI 体验](decision-packets/04-tui-visual-input-cli-experience.md) | 32 | 1 | 0 | 31 | `TU-32 A` 已由 `.model` 平坦 root 批注确认；其余等待上游/前包 |
-| [M05：Model、配置、网络与 Self-Test](decision-packets/05-model-configuration-network-selftest.md) | 57 | 0 | 0 | 57 | 等待上游/前包 |
-| [AL06：AgentLoop、DoubleCheck 与压缩](decision-packets/06-agentloop-busy-doublecheck-compaction.md) | 49 | 0 | 0 | 49 | 等待上游/前包 |
-| [TS：Tool、安全、进程与运行时](decision-packets/07-tools-safety-process-runtime.md) | 35 | 0 | 0 | 35 | 等待上游/前包 |
-| [CX：Context XML、索引与恢复](decision-packets/08-context-xml-index-recovery.md) | 16 | 1 | 0 | 15 | `CX-13 B` 已捕获；其余等待依赖批次 |
-| [ED：错误、诊断与兼容体验](decision-packets/09-errors-diagnostics-compatibility.md) | 14 | 0 | 0 | 14 | 等待上游/前包 |
-| [RF：发布、测试与冻结](decision-packets/10-release-testing-and-readiness-freeze.md) | 14 | 0 | 0 | 14 | 等待上游/前包 |
-| [F4：跨系统运行接缝](decision-packets/11-cross-system-operational-seams.md) | 16 | 1 | 0 | 15 | `F4-01 custom` 已确认；其余等待上游/前包 |
-| **总计** | **270** | **21** | **1** | **248** | 回到依赖队列最早的 `F4-15`/`F4-14` |
+| [PJ：产品旅程与表面](decision-packets/02-product-journey-and-surfaces.md) | 19 | 18 | 1 | 0 | 产品旅程已收口；继续完成 owner 规格/测试投影 |
+| [PP：Prompt、人格与指令](decision-packets/03-prompt-personality-and-instructions.md) | 18 | 18 | 0 | 0 | 四层 Prompt owner 规格与 golden request 证明 |
+| [TU：TUI、输入与 CLI 体验](decision-packets/04-tui-visual-input-cli-experience.md) | 32 | 31 | 1 | 0 | action registry/旧终端按键证明 |
+| [M05：Model、配置、网络与 Self-Test](decision-packets/05-model-configuration-network-selftest.md) | 57 | 57 | 0 | 0 | schema、adapter 与目标网络证明 |
+| [AL06：AgentLoop、DoubleCheck 与压缩](decision-packets/06-agentloop-busy-doublecheck-compaction.md) | 49 | 48 | 1 | 0 | 完整状态表、预算与 compaction fixtures |
+| [TS：Tool、安全、进程与运行时](decision-packets/07-tools-safety-process-runtime.md) | 35 | 34 | 1 | 0 | Tool/Permission/进程矩阵与目标机证明 |
+| [CX：Context XML、索引与恢复](decision-packets/08-context-xml-index-recovery.md) | 16 | 16 | 0 | 0 | XML schema/提交/恢复与性能证明 |
+| [ED：错误、诊断与兼容体验](decision-packets/09-errors-diagnostics-compatibility.md) | 14 | 13 | 1 | 0 | error/close/self-test 输出矩阵 |
+| [RF：发布、测试与冻结](decision-packets/10-release-testing-and-readiness-freeze.md) | 14 | 14 | 0 | 0 | 三目标最终包 qualification/完整测试 |
+| [F4：跨系统运行接缝](decision-packets/11-cross-system-operational-seams.md) | 16 | 16 | 0 | 0 | 跨 owner fault/transition 证明 |
+| **总计** | **270** | **265** | **5** | **0** | 负责人选择阶段关闭；进入规格/技术证明阶段 |
 
 包级表只是导航派生值：`Active 已收口 = (active_when=always 或 Current=true) 且 state 属于 selected / selected-with-exception / excluded / technical-proof`；上游未决时的 activation-pending pre-answer 进入 `未收口`，不能伪装成 active 决定；`N/A = not-applicable`；其余现行 state 进入 `未收口`。三列之和必须等于总数，完整真相始终是上面的协议状态计数；传播是否完成另看 PR 记录。
 
-负责人在 `DISCUSSION-BATCH-02.md` 一次覆盖了 B01 与多个后续 PJ 组，并提前选择 `CX-13`；`DISCUSSION-BATCH-03.md` 又收口 `PJ-18` 和 `PJ-12` 的手工名称优先级；`DISCUSSION-BATCH-04.md` 进一步修订启动头、选择 `TU-32 A` 与 `F4-01 custom`，并补充排序/self-test/锁不变量。下一次回到 [`DECISION-BATCH-QUEUE.md`](DECISION-BATCH-QUEUE.md) 中尚未回答的最早依赖 owner（`F4-15`、`F4-14`），不能重复询问已经捕获的组。
+负责人在 `DISCUSSION-BATCH-02.md` 至 `04` 收口产品旅程和早期跨系统补缝；`DISCUSSION-BATCH-05.md` 修正 luainstaller x86 证据口径并建立集中问卷；`DISCUSSION-BATCH-06.md` 已回答全部 29 个集中问题并完成条件/冲突收口。后续只在技术证明确实失败且替代路线会改变用户保证时，重新提出最小产品差异；不能回到旧 49 批重复询问。
 
 ## 条件组与预先回答
 
 | 条件组 | `active_when` | Current | Basis | False 时的 no-projection ref |
 | --- | --- | --- | --- | --- |
 | PJ-19 | `choice(PJ-16) in [B,C]` | `false` | PJ-16=A；`B02/RB-002-02` | `PR-002-18`：零 transcription 配置/CLI/Model purpose/XML/Runtime/test 表面 |
-| TU-30 | `choice(TU-27) in [B,C]` | `unknown` | TU-27 unanswered | — |
-| ED-14 | `choice(ED-07) in [A,B]` | `unknown` | ED-07 unanswered | — |
-| M05-26 | `choice(M05-03) in [A,C]` | `unknown` | M05-03 unanswered | — |
-| M05-55 | `choice(M05-15) in [A,B]` | `unknown` | M05-15 unanswered | — |
-| AL06-08 / AL06-24 / AL06-25 | `choice(AL06-07) in [A,B]` | `unknown` | AL06-07 unanswered | — |
-| AL06-30 / AL06-31 / AL06-34 | `choice(AL06-11) == A` | `unknown` | AL06-11 unanswered | — |
-| AL06-39 / AL06-47 | `choice(AL06-11) in [A,B]` | `unknown` | AL06-11 unanswered | — |
-| AL06-43 | `choice(M05-50) == C` | `unknown` | M05-50 unanswered | — |
-| TS-21 | `choice(M05-56) == B` | `unknown` | M05-56 unanswered | — |
-| TS-25 / TS-26 / TS-34 / TS-35 | `choice(TS-02) in [A,C]` | `unknown` | TS-02 unanswered | — |
-| TS-28 / TS-29 / TS-31 | `choice(TS-02) == A` | `unknown` | TS-02 unanswered | — |
+| TU-30 | `choice(TU-27) in [B,C]` | `false` | TU-27=A；`B06/AS-006-04` | `PR-006-TU-30`：零 notification 配置/事件/Runtime 表面 |
+| ED-14 | `choice(ED-07) in [A,B]` | `false` | ED-07=C；`B06/AS-006-15` | `PR-006-ED-14`：零 diagnostic-upload artifact/endpoint/command 表面 |
+| M05-26 | `choice(M05-03) in [A,C]` | `true` | M05-03=A；`B06/AS-006-06/07` | — |
+| M05-55 | `choice(M05-15) in [A,B]` | `true` | M05-15=A；`B06/AS-006-12` | — |
+| AL06-08 / AL06-24 / AL06-25 | `choice(AL06-07) in [A,B]` | `true` | AL06-07=A；`B06/AS-006-10` | — |
+| AL06-30 / AL06-31 / AL06-34 | `choice(AL06-11) == A` | `true` | AL06-11=A；`B06/AS-006-11` | — |
+| AL06-39 / AL06-47 | `choice(AL06-11) in [A,B]` | `true` | AL06-11=A；`B06/AS-006-11` | — |
+| AL06-43 | `choice(M05-50) == C` | `false` | M05-50=A；`B06/AS-006-11` | `PR-006-AL06-43`：零 amount/price/admission 配置与事件表面 |
+| TS-21 | `choice(M05-56) == B` | `false` | M05-56=A；`B06/AS-006-12` | `PR-006-TS-21`：零 SensitiveRead 字段/classifier/page 表面 |
+| TS-25 / TS-26 / TS-34 / TS-35 | `choice(TS-02) in [A,C]` | `true` | TS-02=A；`B06/AS-006-12` | — |
+| TS-28 / TS-29 / TS-31 | `choice(TS-02) == A` | `true` | TS-02=A；`B06/AS-006-12` | — |
 
 共 22 个 conditional group；其余 248 个 group 的 `active_when=always`。固定 grammar 只有 `always`、`choice(<GROUP-ID>) == <LETTER>` 和 `choice(<GROUP-ID>) in [<COMMA-SEPARATED-LETTERS>]`；GROUP-ID/letter 大小写敏感、列表按 A/B/C 顺序、不得嵌套或使用自然语言。`Current` 只允许 `unknown|true|false`。false 时必须引用上游 reply 和一条 PR no-projection 记录；true 时必须引用使其激活的上游 reply。
 
@@ -191,297 +194,297 @@ assertion_ids:
 
 | Group | Topic | Rec | Sem | Active when | State | Selection | Reply | Projection |
 | --- | --- | :---: | --- | --- | --- | --- | --- | --- |
-| `PP-01` | 默认 Agent 人格 | A | `11b66fa15126e4e0` | `always` | `unanswered` | — | — | — |
-| `PP-02` | 回复语言策略 | A | `712aa38d3298479b` | `always` | `unanswered` | — | — | — |
-| `PP-03` | 指令权威链和用户 Prompt 的替换边界 | A | `74239870941afa42` | `always` | `unanswered` | — | — | — |
-| `PP-04` | 项目规则怎样成为指令 | A | `1241fa8dd6d8549e` | `always` | `unanswered` | — | — | — |
-| `PP-05` | 六个核心 purpose 是否使用独立契约 | A | `608f349e775b3862` | `always` | `unanswered` | — | — | — |
-| `PP-06` | 复杂任务的进度更新时点 | A | `8cc624c343b3d1cf` | `always` | `unanswered` | — | — | — |
-| `PP-07` | role flattening 与注入 delimiter | A | `f3c686b672c0f3b0` | `always` | `unanswered` | — | — | — |
-| `PP-08` | yaca/Prompt 升级后的新 turn 使用什么 | A | `801bbc989fcbd771` | `always` | `unanswered` | — | — | — |
-| `PP-09` | Prompt 超限和切换到小窗口 Model | A | `2c9b1548c8269ed7` | `always` | `unanswered` | — | — | — |
-| `PP-11` | 旧 `Model.CustomPrompt` 怎样收口 | A | `f9826b1d99a8a352` | `always` | `unanswered` | — | — | — |
-| `PP-12` | `.prompt` 的交互形态与事务边界 | A | `49a4fbec19b36b1b` | `always` | `unanswered` | — | — | — |
-| `PP-13` | AdoptedRuleTransition：已采用项目规则发生变化时怎么办 | A | `30b509c277cdffc8` | `always` | `unanswered` | — | — | — |
-| `PP-14` | 工具动作的模型叙述密度 | A | `49cb4335cd675afb` | `always` | `unanswered` | — | — | — |
-| `PP-15` | 完成时最终报告的结构 | A | `6e78edad0b1d1d16` | `always` | `unanswered` | — | — | — |
-| `PP-16` | 普通回答与设计讲解的默认详略 | A | `21dcdf194ff88443` | `always` | `unanswered` | — | — | — |
-| `PP-17` | 何时澄清，何时带假设继续 | A | `7bbce24591c271fa` | `always` | `unanswered` | — | — | — |
-| `PP-18` | 普通用户指令的生命周期 | A | `6314e96c525ef288` | `always` | `unanswered` | — | — | — |
-| `PP-19` | 内置 Prompt bundle 的文本冻结政策 | A | `e19769396e58278a` | `always` | `unanswered` | — | — | — |
+| `PP-01` | 默认 Agent 人格 | A | `11b66fa15126e4e0` | `always` | `selected-with-exception` | custom:A + Prompt-directed; `AS-006-01` | `B06/RB-006-01` | `PR-006-PP-01` |
+| `PP-02` | 回复语言策略 | A | `712aa38d3298479b` | `always` | `selected-with-exception` | custom:A + Prompt-directed; `AS-006-01` | `B06/RB-006-01` | `PR-006-PP-02` |
+| `PP-03` | 指令权威链和用户 Prompt 的替换边界 | A | `74239870941afa42` | `always` | `selected-with-exception` | custom:four-layer Prompt; `AS-006-02` | `B06/RB-006-01; RB-006-03` | `PR-006-PP-03` |
+| `PP-04` | 项目规则怎样成为指令 | A | `1241fa8dd6d8549e` | `always` | `selected-with-exception` | custom:four-layer Prompt; `AS-006-02` | `B06/RB-006-01; RB-006-03` | `PR-006-PP-04` |
+| `PP-05` | 六个核心 purpose 是否使用独立契约 | A | `608f349e775b3862` | `always` | `selected-with-exception` | custom:four-layer Prompt; `AS-006-02` | `B06/RB-006-01; RB-006-03` | `PR-006-PP-05` |
+| `PP-06` | 复杂任务的进度更新时点 | A | `8cc624c343b3d1cf` | `always` | `selected-with-exception` | custom:A + Prompt-directed; `AS-006-01` | `B06/RB-006-01` | `PR-006-PP-06` |
+| `PP-07` | role flattening 与注入 delimiter | A | `f3c686b672c0f3b0` | `always` | `selected-with-exception` | custom:four-layer Prompt; `AS-006-02` | `B06/RB-006-01; RB-006-03` | `PR-006-PP-07` |
+| `PP-08` | yaca/Prompt 升级后的新 turn 使用什么 | A | `801bbc989fcbd771` | `always` | `selected-with-exception` | custom:four-layer Prompt; `AS-006-02` | `B06/RB-006-01; RB-006-03` | `PR-006-PP-08` |
+| `PP-09` | Prompt 超限和切换到小窗口 Model | A | `2c9b1548c8269ed7` | `always` | `selected-with-exception` | custom:four-layer Prompt; `AS-006-02` | `B06/RB-006-01; RB-006-03` | `PR-006-PP-09` |
+| `PP-11` | 旧 `Model.CustomPrompt` 怎样收口 | A | `f9826b1d99a8a352` | `always` | `selected-with-exception` | custom:four-layer Prompt; `AS-006-02` | `B06/RB-006-01; RB-006-03` | `PR-006-PP-11` |
+| `PP-12` | `.prompt` 的交互形态与事务边界 | A | `49a4fbec19b36b1b` | `always` | `selected-with-exception` | custom:four-layer Prompt; `AS-006-02` | `B06/RB-006-01; RB-006-03` | `PR-006-PP-12` |
+| `PP-13` | AdoptedRuleTransition：已采用项目规则发生变化时怎么办 | A | `30b509c277cdffc8` | `always` | `selected-with-exception` | custom:four-layer Prompt; `AS-006-02` | `B06/RB-006-01; RB-006-03` | `PR-006-PP-13` |
+| `PP-14` | 工具动作的模型叙述密度 | A | `49cb4335cd675afb` | `always` | `selected-with-exception` | custom:A + Prompt-directed; `AS-006-01` | `B06/RB-006-01` | `PR-006-PP-14` |
+| `PP-15` | 完成时最终报告的结构 | A | `6e78edad0b1d1d16` | `always` | `selected-with-exception` | custom:A + Prompt-directed; `AS-006-01` | `B06/RB-006-01` | `PR-006-PP-15` |
+| `PP-16` | 普通回答与设计讲解的默认详略 | A | `21dcdf194ff88443` | `always` | `selected-with-exception` | custom:A + Prompt-directed; `AS-006-01` | `B06/RB-006-01` | `PR-006-PP-16` |
+| `PP-17` | 何时澄清，何时带假设继续 | A | `7bbce24591c271fa` | `always` | `selected` | A; `AS-006-01` | `B06/RB-006-01` | `PR-006-PP-17` |
+| `PP-18` | 普通用户指令的生命周期 | A | `6314e96c525ef288` | `always` | `selected-with-exception` | custom:four-layer Prompt; `AS-006-02` | `B06/RB-006-01; RB-006-03` | `PR-006-PP-18` |
+| `PP-19` | 内置 Prompt bundle 的文本冻结政策 | A | `e19769396e58278a` | `always` | `selected-with-exception` | custom:four-layer Prompt; `AS-006-02` | `B06/RB-006-01; RB-006-03` | `PR-006-PP-19` |
 
 ### [TU：TUI、输入与 CLI 体验](decision-packets/04-tui-visual-input-cli-experience.md)
 
 | Group | Topic | Rec | Sem | Active when | State | Selection | Reply | Projection |
 | --- | --- | :---: | --- | --- | --- | --- | --- | --- |
-| `TU-01` | 单一逐行 transcript 的信息密度 | A | `283b923be116308e` | `always` | `unanswered` | — | — | — |
-| `TU-02` | 自动能力降级下采用哪种有限色彩策略 | A | `f53add790548a65c` | `always` | `unanswered` | — | — | — |
-| `TU-03` | Streaming 到达时怎样保护 draft | A | `7bfc3a04100187af` | `always` | `unanswered` | — | — | — |
-| `TU-04` | 五种固定输入意图怎样显示结果 | A | `682ec8dbb313e5d3` | `always` | `unanswered` | — | — | — |
-| `TU-05` | 五种输入意图在弱终端怎样后备 | A | `c90fb0a41dbd0f7e` | `always` | `unanswered` | — | — | — |
-| `TU-06` | 工具、Markdown、代码和 diff 默认显示多少 | A | `2dc606b45749c3c6` | `always` | `unanswered` | — | — | — |
-| `TU-07` | 审批 prompt 的空 Enter 做什么 | A | `f616069f1fc261e4` | `always` | `unanswered` | — | — | — |
-| `TU-08` | 错误、retry 和 recovery 的下一步动作怎样输入 | A | `78ff07bfbc474af1` | `always` | `unanswered` | — | — | — |
-| `TU-10` | 规范命令已经固定后，简称采用什么政策 | A | `6ab52dfbba889d88` | `always` | `unanswered` | — | — | — |
-| `TU-11` | 非 composer command x AgentState 结果怎样反馈 | A | `ee171d9e9d95a1c9` | `always` | `unanswered` | — | — | — |
-| `TU-13` | 非 TTY 能力范围与 stdin 所有权 | A | `a503caa73da5d670` | `always` | `unanswered` | — | — | — |
-| `TU-14` | 哪些状态在逐行 transcript 中显示 | A | `f4d1966cf68a52bb` | `always` | `unanswered` | — | — | — |
-| `TU-15` | Context 管理采用哪种编辑确认流程 | A | `75516da16594793d` | `always` | `unanswered` | — | — | — |
-| `TU-16` | 异步事件怎样在 append-only transcript 中交错 | A | `15a17321c680ba7a` | `always` | `unanswered` | — | — | — |
-| `TU-17` | 审批后参数被编辑时怎样使旧授权失效 | A | `0b2f770938fd9cad` | `always` | `unanswered` | — | — | — |
-| `TU-18` | canonical 顶层 CLI 采用 flags、subcommands 还是混合 | A | `ae5e3da1062560eb` | `always` | `unanswered` | — | — | — |
-| `TU-19` | chat composer 的 multiline、intent 参数与点开头正文 grammar | A | `bd4e4ab758e047a3` | `always` | `unanswered` | — | — | — |
-| `TU-20` | TranscriptChrome 的正文标签采用哪套词汇 | A | `aaa49172a7348eb2` | `always` | `unanswered` | — | — | — |
-| `TU-21` | 非 TTY machine output 的格式与流式边界 | A | `6dd1f3ab5032e69d` | `always` | `unanswered` | — | — | — |
-| `TU-22` | 非 composer prompt 怎样调用本地动作与全局命令 | A | `a9c62d9b6a587605` | `always` | `unanswered` | — | — | — |
-| `TU-23` | stdin/stdout/stderr 拓扑与 human/machine output 怎样选择 | A | `57e8d4aafce8d5a9` | `always` | `unanswered` | — | — | — |
-| `TU-24` | help 的 surface/topic grammar 与发现层级 | A | `60b7699e54b33083` | `always` | `unanswered` | — | — | — |
-| `TU-25` | cooked-line 下关键事件怎样在有界时间内可见 | A | `41833d313c0d9ff1` | `always` | `unanswered` | — | — | — |
-| `TU-26` | self-test 的逐行页面结构 | A | `e45cd77a54073c3f` | `always` | `unanswered` | — | — | — |
-| `TU-27` | 是否提供终端/系统通知渠道 | A | `8a306f9ac92c197d` | `always` | `unanswered` | — | — | — |
-| `TU-28` | 终端能力降级在什么时候提示 | A | `a6925b95aa5dd615` | `always` | `unanswered` | — | — | — |
-| `TU-29` | 长工具输出在完成前怎样 preview | B | `298534c69ef052be` | `always` | `unanswered` | — | — | — |
-| `TU-30` | 通知功能启用后覆盖哪些事件 | A | `9de8c97ea6c61347` | `choice(TU-27) in [B,C]` | `unanswered` | — | — | — |
-| `TU-31` | composer 输入召回的来源与生命周期 | A | `3b5cbe613b6bfd1b` | `always` | `unanswered` | — | — | — |
+| `TU-01` | 单一逐行 transcript 的信息密度 | A | `283b923be116308e` | `always` | `selected` | A; `AS-006-04` | `B06/RB-006-01` | `PR-006-TU-01` |
+| `TU-02` | 自动能力降级下采用哪种有限色彩策略 | A | `f53add790548a65c` | `always` | `selected` | A; `AS-006-04` | `B06/RB-006-01` | `PR-006-TU-02` |
+| `TU-03` | Streaming 到达时怎样保护 draft | A | `7bfc3a04100187af` | `always` | `selected-with-exception` | custom:A + text fallbacks/queue management; `AS-006-04` | `B06/RB-006-01` | `PR-006-TU-03` |
+| `TU-04` | 五种固定输入意图怎样显示结果 | A | `682ec8dbb313e5d3` | `always` | `selected-with-exception` | custom:A + text fallbacks/queue management; `AS-006-04` | `B06/RB-006-01` | `PR-006-TU-04` |
+| `TU-05` | 五种输入意图在弱终端怎样后备 | A | `c90fb0a41dbd0f7e` | `always` | `selected-with-exception` | custom:A + text fallbacks/queue management; `AS-006-04` | `B06/RB-006-01` | `PR-006-TU-05` |
+| `TU-06` | 工具、Markdown、代码和 diff 默认显示多少 | A | `2dc606b45749c3c6` | `always` | `selected` | A; `AS-006-04` | `B06/RB-006-01` | `PR-006-TU-06` |
+| `TU-07` | 审批 prompt 的空 Enter 做什么 | A | `f616069f1fc261e4` | `always` | `selected-with-exception` | custom:A + text fallbacks/queue management; `AS-006-04` | `B06/RB-006-01` | `PR-006-TU-07` |
+| `TU-08` | 错误、retry 和 recovery 的下一步动作怎样输入 | A | `78ff07bfbc474af1` | `always` | `selected-with-exception` | custom:A + text fallbacks/queue management; `AS-006-04` | `B06/RB-006-01` | `PR-006-TU-08` |
+| `TU-10` | 规范命令已经固定后，简称采用什么政策 | A | `6ab52dfbba889d88` | `always` | `selected-with-exception` | custom:A + canonical short aliases; `AS-006-05` | `B06/RB-006-01; RB-006-08` | `PR-006-TU-10` |
+| `TU-11` | 非 composer command x AgentState 结果怎样反馈 | A | `ee171d9e9d95a1c9` | `always` | `selected-with-exception` | custom:A + canonical short aliases; `AS-006-05` | `B06/RB-006-01; RB-006-08` | `PR-006-TU-11` |
+| `TU-13` | 非 TTY 能力范围与 stdin 所有权 | A | `a503caa73da5d670` | `always` | `selected-with-exception` | custom:A + canonical short aliases; `AS-006-05` | `B06/RB-006-01; RB-006-08` | `PR-006-TU-13` |
+| `TU-14` | 哪些状态在逐行 transcript 中显示 | A | `f4d1966cf68a52bb` | `always` | `selected` | A; `AS-006-04` | `B06/RB-006-01` | `PR-006-TU-14` |
+| `TU-15` | Context 管理采用哪种编辑确认流程 | A | `75516da16594793d` | `always` | `selected-with-exception` | custom:A + text fallbacks/queue management; `AS-006-04` | `B06/RB-006-01` | `PR-006-TU-15` |
+| `TU-16` | 异步事件怎样在 append-only transcript 中交错 | A | `15a17321c680ba7a` | `always` | `selected-with-exception` | custom:A + text fallbacks/queue management; `AS-006-04` | `B06/RB-006-01` | `PR-006-TU-16` |
+| `TU-17` | 审批后参数被编辑时怎样使旧授权失效 | A | `0b2f770938fd9cad` | `always` | `selected-with-exception` | custom:A + text fallbacks/queue management; `AS-006-04` | `B06/RB-006-01` | `PR-006-TU-17` |
+| `TU-18` | canonical 顶层 CLI 采用 flags、subcommands 还是混合 | A | `ae5e3da1062560eb` | `always` | `selected-with-exception` | custom:A + canonical short aliases; `AS-006-05` | `B06/RB-006-01; RB-006-08` | `PR-006-TU-18` |
+| `TU-19` | chat composer 的 multiline、intent 参数与点开头正文 grammar | A | `bd4e4ab758e047a3` | `always` | `selected-with-exception` | custom:A + canonical short aliases; `AS-006-05` | `B06/RB-006-01; RB-006-08` | `PR-006-TU-19` |
+| `TU-20` | TranscriptChrome 的正文标签采用哪套词汇 | A | `aaa49172a7348eb2` | `always` | `selected` | A; `AS-006-04` | `B06/RB-006-01` | `PR-006-TU-20` |
+| `TU-21` | 非 TTY machine output 的格式与流式边界 | A | `6dd1f3ab5032e69d` | `always` | `selected-with-exception` | custom:A + canonical short aliases; `AS-006-05` | `B06/RB-006-01; RB-006-08` | `PR-006-TU-21` |
+| `TU-22` | 非 composer prompt 怎样调用本地动作与全局命令 | A | `a9c62d9b6a587605` | `always` | `selected-with-exception` | custom:A + canonical short aliases; `AS-006-05` | `B06/RB-006-01; RB-006-08` | `PR-006-TU-22` |
+| `TU-23` | stdin/stdout/stderr 拓扑与 human/machine output 怎样选择 | A | `57e8d4aafce8d5a9` | `always` | `selected-with-exception` | custom:A + canonical short aliases; `AS-006-05` | `B06/RB-006-01; RB-006-08` | `PR-006-TU-23` |
+| `TU-24` | help 的 surface/topic grammar 与发现层级 | A | `60b7699e54b33083` | `always` | `selected-with-exception` | custom:A + canonical short aliases; `AS-006-05` | `B06/RB-006-01; RB-006-08` | `PR-006-TU-24` |
+| `TU-25` | cooked-line 下关键事件怎样在有界时间内可见 | A | `41833d313c0d9ff1` | `always` | `selected-with-exception` | custom:A + text fallbacks/queue management; `AS-006-04` | `B06/RB-006-01` | `PR-006-TU-25` |
+| `TU-26` | self-test 的逐行页面结构 | A | `e45cd77a54073c3f` | `always` | `selected` | A; `AS-006-04` | `B06/RB-006-01` | `PR-006-TU-26` |
+| `TU-27` | 是否提供终端/系统通知渠道 | A | `8a306f9ac92c197d` | `always` | `selected` | A; `AS-006-04` | `B06/RB-006-01` | `PR-006-TU-27` |
+| `TU-28` | 终端能力降级在什么时候提示 | A | `a6925b95aa5dd615` | `always` | `selected-with-exception` | custom:A + text fallbacks/queue management; `AS-006-04` | `B06/RB-006-01` | `PR-006-TU-28` |
+| `TU-29` | 长工具输出在完成前怎样 preview | B | `298534c69ef052be` | `always` | `selected` | A; `AS-006-04` | `B06/RB-006-01` | `PR-006-TU-29` |
+| `TU-30` | 通知功能启用后覆盖哪些事件 | A | `9de8c97ea6c61347` | `choice(TU-27) in [B,C]` | `not-applicable` | derived inactive: TU-27=A | `B06/RB-006-01` | `PR-006-TU-30` |
+| `TU-31` | composer 输入召回的来源与生命周期 | A | `3b5cbe613b6bfd1b` | `always` | `selected-with-exception` | custom:A + text fallbacks/queue management; `AS-006-04` | `B06/RB-006-01` | `PR-006-TU-31` |
 | `TU-32` | chat dot-command 使用平坦 roots 还是紧凑 namespace | A | `7971ca9cebe070d6` | `always` | `selected` | A；`.model` picker/direct selector 等价；`AS-004-02` | `B04/RB-004-03` | `PR-004-01` |
-| `TU-33` | 输入提示符采用短符号、全词状态还是统一名称 | A | `6491d875f9723de2` | `always` | `unanswered` | — | — | — |
-| `TU-34` | 审批动作使用文字、编号还是短字母 | A | `0577636a0567e4cb` | `always` | `unanswered` | — | — | — |
+| `TU-33` | 输入提示符采用短符号、全词状态还是统一名称 | A | `6491d875f9723de2` | `always` | `selected` | A; `AS-006-04` | `B06/RB-006-01` | `PR-006-TU-33` |
+| `TU-34` | 审批动作使用文字、编号还是短字母 | A | `0577636a0567e4cb` | `always` | `selected-with-exception` | custom:A + text fallbacks/queue management; `AS-006-04` | `B06/RB-006-01` | `PR-006-TU-34` |
 
 ### [M05：Model、配置、网络与 Self-Test](decision-packets/05-model-configuration-network-selftest.md)
 
 | Group | Topic | Rec | Sem | Active when | State | Selection | Reply | Projection |
 | --- | --- | :---: | --- | --- | --- | --- | --- | --- |
-| `M05-01` | v0.1 协议范围 | A | `96eab8df5873519c` | `always` | `unanswered` | — | — | — |
-| `M05-02` | AuthMode、空 Key 与鉴权边界 | A | `a1ef1f8152968867` | `always` | `unanswered` | — | — | — |
-| `M05-03` | Tools 能力的协议边界 | A | `e6ae61909ce93e7f` | `always` | `unanswered` | — | — | — |
-| `M05-04` | timeout、retry-by-phase 与资源上限 | A | `65438263ac92c714` | `always` | `unanswered` | — | — | — |
-| `M05-05` | Model 可调请求参数的范围 | A | `5cbff683430b978a` | `always` | `unanswered` | — | — | — |
-| `M05-06` | 配置层级与 XML override 白名单 | A | `bde855f7d4c90b9a` | `always` | `unanswered` | — | — | — |
-| `M05-07` | 手工 INI、多行与 unknown 字段 | A | `9d48b3fc706814f8` | `always` | `unanswered` | — | — | — |
-| `M05-08` | 默认顺序、disabled Model 草稿与删除 | A | `e8c2ab86f9a6ba82` | `always` | `unanswered` | — | — | — |
-| `M05-09` | model-repl 与 config-repl 的责任分工 | A | `a8362c0cbb7e28b5` | `always` | `unanswered` | — | — | — |
-| `M05-11` | Self-Test Stage 2 的真实检查范围 | A | `4839c8437029ab7d` | `always` | `unanswered` | — | — | — |
-| `M05-12` | Self-Test Stage 3 的 reviewer 与结果地位 | A | `93b76dd81856378b` | `always` | `unanswered` | — | — | — |
-| `M05-13` | 明文 HTTP Endpoint 与 Key 的组合 | A | `3d0fbf95e1f0dcce` | `always` | `unanswered` | — | — | — |
-| `M05-14` | 传输资源上限是否成为用户配置 | A | `03bdd1e51d9af40b` | `always` | `unanswered` | — | — | — |
-| `M05-15` | raw shell 的环境配置面 | A | `604d698fddc99a59` | `always` | `unanswered` | — | — | — |
-| `M05-16` | Permission 的 workspace 外能力采用粗粒度还是分动作 | A | `079c8806df051229` | `always` | `unanswered` | — | — | — |
-| `M05-17` | `LogLevel` 是否保留以及写到哪里 | A | `947940d05fb8f867` | `always` | `unanswered` | — | — | — |
-| `M05-18` | `config reset` 只重置哪些配置字段 | A | `5c6892aaacb39e7c` | `always` | `unanswered` | — | — | — |
-| `M05-19` | optional 值的唯一语法 | A | `a89c6720c1c12794` | `always` | `unanswered` | — | — | — |
-| `M05-20` | conditional metadata 在 XML、reviewer 与支持输出中的可见性 | A | `195148d2c4652f07` | `always` | `unanswered` | — | — | — |
-| `M05-21` | Model/Permission 是否配置自定义颜色 | A | `faa4b2d386e55efb` | `always` | `unanswered` | — | — | — |
-| `M05-22` | 是否提供 generic CLI 一次性 override | A | `cec9ebdc2558986b` | `always` | `unanswered` | — | — | — |
-| `M05-23` | 自定义 request header/body 的扩展面 | A | `f4fa22141a448d6d` | `always` | `unanswered` | — | — | — |
-| `M05-25` | `Streaming=try` 的 fallback 边界 | A | `7900016712541f38` | `always` | `unanswered` | — | — | — |
-| `M05-26` | `Tools=off` 的 Model 能否当主 Agent | A | `3a9c721d014fab4e` | `choice(M05-03) in [A,C]` | `unanswered` | — | — | — |
-| `M05-27` | `.cautious` 的 tri-state 与生效点 | A | `8d37e84e418255a1` | `always` | `unanswered` | — | — | — |
-| `M05-28` | unknown/deprecated 字段的读取与迁移 | A | `27380d680be76de1` | `always` | `unanswered` | — | — | — |
-| `M05-29` | config-repl 首页与 typed effective field view | A | `bf7af24f14e174cf` | `always` | `unanswered` | — | — | — |
-| `M05-30` | 第一份配置的事务发布 | A | `b8214cff916a3381` | `always` | `unanswered` | — | — | — |
-| `M05-31` | Stage 2 部分失败后是否继续检查其余 Model | A | `759ed669ea4138d6` | `always` | `unanswered` | — | — | — |
-| `M05-32` | Context XML 中的 Endpoint 投影精度 | A | `dcb8827040b83067` | `always` | `unanswered` | — | — | — |
-| `M05-33` | Endpoint 的物理写法 | A | `2694c823c30e8568` | `always` | `unanswered` | — | — | — |
-| `M05-34` | 删除或重命名仍被 Context 引用的 Model | A | `2a91576b8c158833` | `always` | `unanswered` | — | — | — |
-| `M05-35` | self-test 报告是否持久化 | A | `48cd78d9d3d66a8e` | `always` | `unanswered` | — | — | — |
-| `M05-36` | 全局 ProxyMode 的来源 | A | `2e62b4dcefe3dc17` | `always` | `unanswered` | — | — | — |
-| `M05-37` | CA trust source | A | `255f5de1740db882` | `always` | `unanswered` | — | — | — |
-| `M05-38` | HTTP redirect policy | A | `f9f1c2ab873e79f3` | `always` | `unanswered` | — | — | — |
-| `M05-39` | 新配置的 `DoubleCheck` 默认值 | A | `8778252a7ffb09fe` | `always` | `unanswered` | — | — | — |
-| `M05-40` | provider 公开 reasoning 内容怎样进入产品 | A | `c7eeeb74ed7fedab` | `always` | `unanswered` | — | — | — |
-| `M05-41` | Self-Test Stage 2 是否复现配置的 retry 与 streaming fallback | A | `84b077017698e7f3` | `always` | `unanswered` | — | — | — |
-| `M05-42` | 是否提供含配置秘密的 backup/export | A | `0d0b5e3e62765be8` | `always` | `unanswered` | — | — | — |
-| `M05-43` | Model/Permission Description 的 Context XML 投影 | A | `bb7e505d20c4f7a8` | `always` | `unanswered` | — | — | — |
-| `M05-44` | model-repl 列表的字段密度 | A | `d93fd80769e728f3` | `always` | `unanswered` | — | — | — |
-| `M05-45` | Add Model 的交互节奏 | A | `5b5b9276c75b79d2` | `always` | `unanswered` | — | — | — |
-| `M05-46` | Self-Test Stage 2 联网 consent 的批次边界 | A | `eede4e8061e841c1` | `always` | `unanswered` | — | — | — |
-| `M05-47` | Add Model 是否提供 clone existing | A | `584346a8f3af419d` | `always` | `unanswered` | — | — | — |
-| `M05-48` | Permission profile 的管理面 | A | `d93fa2b981848fcf` | `always` | `unanswered` | — | — | — |
-| `M05-49` | 活动 Context 执行 Permission-switch semantic action 时怎样确认 | A | `4395b7cd7070382c` | `always` | `unanswered` | — | — | — |
-| `M05-50` | 金额价格从哪里来 | A | `c9914976cadbb5c2` | `always` | `unanswered` | — | — | — |
-| `M05-51` | 全局 Exec 配置表面 | A | `00d87157464c8088` | `always` | `unanswered` | — | — | — |
-| `M05-52` | idle Model-switch semantic action 的兼容与隐私确认 | A | `3e984c08c72b9c38` | `always` | `unanswered` | — | — | — |
-| `M05-53` | Self-Test 的 rerun 选择范围 | B | `cca6ba1b96653028` | `always` | `unanswered` | — | — | — |
-| `M05-54` | 明文秘密配置文件权限不足时的运行政策 | A | `e9a9fef90428489b` | `always` | `unanswered` | — | — | — |
-| `M05-55` | raw shell 的 inherit baseline 到底包含什么 | A | `8589d6c36c145baf` | `choice(M05-15) in [A,B]` | `unanswered` | — | — | — |
-| `M05-56` | 是否提供独立 `SensitiveRead` 能力 | A | `f25887cfe7f74b26` | `always` | `unanswered` | — | — | — |
-| `M05-57` | Model/Permission 资源 selector 是否提供 Abbreviation | A | `40be12ff6d003df5` | `always` | `unanswered` | — | — | — |
-| `M05-58` | per-Model retry 配置面采用数字字段还是策略预设 | A | `0cee0ed1da49a935` | `always` | `unanswered` | — | — | — |
-| `M05-59` | 过短 config-secret 的兼容与 scanner 保证 | A | `2596e807f07a6e10` | `always` | `unanswered` | — | — | — |
+| `M05-01` | v0.1 协议范围 | A | `96eab8df5873519c` | `always` | `selected-with-exception` | B; `AS-006-06` | `B06/RB-006-01` | `PR-006-M05-01` |
+| `M05-02` | AuthMode、空 Key 与鉴权边界 | A | `a1ef1f8152968867` | `always` | `selected-with-exception` | B; `AS-006-06` | `B06/RB-006-01` | `PR-006-M05-02` |
+| `M05-03` | Tools 能力的协议边界 | A | `e6ae61909ce93e7f` | `always` | `selected` | A; `AS-006-06` | `B06/RB-006-01` | `PR-006-M05-03` |
+| `M05-04` | timeout、retry-by-phase 与资源上限 | A | `65438263ac92c714` | `always` | `selected-with-exception` | custom:explicit HTTP + bundled TLS/stunnel guidance; `AS-006-08` | `B06/RB-006-01; RB-006-04` | `PR-006-M05-04` |
+| `M05-05` | Model 可调请求参数的范围 | A | `5cbff683430b978a` | `always` | `selected-with-exception` | custom:A + Model.SystemPrompt; `AS-006-07` | `B06/RB-006-01` | `PR-006-M05-05` |
+| `M05-06` | 配置层级与 XML override 白名单 | A | `bde855f7d4c90b9a` | `always` | `selected-with-exception` | custom:A + Model.SystemPrompt; `AS-006-07` | `B06/RB-006-01` | `PR-006-M05-06` |
+| `M05-07` | 手工 INI、多行与 unknown 字段 | A | `9d48b3fc706814f8` | `always` | `selected-with-exception` | custom:A + Model.SystemPrompt; `AS-006-07` | `B06/RB-006-01` | `PR-006-M05-07` |
+| `M05-08` | 默认顺序、disabled Model 草稿与删除 | A | `e8c2ab86f9a6ba82` | `always` | `selected-with-exception` | custom:A + Model.SystemPrompt; `AS-006-07` | `B06/RB-006-01` | `PR-006-M05-08` |
+| `M05-09` | model-repl 与 config-repl 的责任分工 | A | `a8362c0cbb7e28b5` | `always` | `selected-with-exception` | custom:A + Model.SystemPrompt; `AS-006-07` | `B06/RB-006-01` | `PR-006-M05-09` |
+| `M05-11` | Self-Test Stage 2 的真实检查范围 | A | `4839c8437029ab7d` | `always` | `selected` | A; `AS-006-09` | `B06/RB-006-01` | `PR-006-M05-11` |
+| `M05-12` | Self-Test Stage 3 的 reviewer 与结果地位 | A | `93b76dd81856378b` | `always` | `selected` | A; `AS-006-09` | `B06/RB-006-01` | `PR-006-M05-12` |
+| `M05-13` | 明文 HTTP Endpoint 与 Key 的组合 | A | `3d0fbf95e1f0dcce` | `always` | `selected-with-exception` | custom:explicit HTTP + bundled TLS/stunnel guidance; `AS-006-08` | `B06/RB-006-01; RB-006-04` | `PR-006-M05-13` |
+| `M05-14` | 传输资源上限是否成为用户配置 | A | `03bdd1e51d9af40b` | `always` | `selected-with-exception` | custom:explicit HTTP + bundled TLS/stunnel guidance; `AS-006-08` | `B06/RB-006-01; RB-006-04` | `PR-006-M05-14` |
+| `M05-15` | raw shell 的环境配置面 | A | `604d698fddc99a59` | `always` | `selected` | A; `AS-006-12` | `B06/RB-006-01` | `PR-006-M05-15` |
+| `M05-16` | Permission 的 workspace 外能力采用粗粒度还是分动作 | A | `079c8806df051229` | `always` | `selected-with-exception` | B; `AS-006-12` | `B06/RB-006-01` | `PR-006-M05-16` |
+| `M05-17` | `LogLevel` 是否保留以及写到哪里 | A | `947940d05fb8f867` | `always` | `selected-with-exception` | custom:A + Model.SystemPrompt; `AS-006-07` | `B06/RB-006-01` | `PR-006-M05-17` |
+| `M05-18` | `config reset` 只重置哪些配置字段 | A | `5c6892aaacb39e7c` | `always` | `selected-with-exception` | custom:A + Model.SystemPrompt; `AS-006-07` | `B06/RB-006-01` | `PR-006-M05-18` |
+| `M05-19` | optional 值的唯一语法 | A | `a89c6720c1c12794` | `always` | `selected-with-exception` | custom:A + Model.SystemPrompt; `AS-006-07` | `B06/RB-006-01` | `PR-006-M05-19` |
+| `M05-20` | conditional metadata 在 XML、reviewer 与支持输出中的可见性 | A | `195148d2c4652f07` | `always` | `selected-with-exception` | custom:A + Model.SystemPrompt; `AS-006-07` | `B06/RB-006-01` | `PR-006-M05-20` |
+| `M05-21` | Model/Permission 是否配置自定义颜色 | A | `faa4b2d386e55efb` | `always` | `selected-with-exception` | custom:A + Model.SystemPrompt; `AS-006-07` | `B06/RB-006-01` | `PR-006-M05-21` |
+| `M05-22` | 是否提供 generic CLI 一次性 override | A | `cec9ebdc2558986b` | `always` | `selected-with-exception` | custom:A + Model.SystemPrompt; `AS-006-07` | `B06/RB-006-01` | `PR-006-M05-22` |
+| `M05-23` | 自定义 request header/body 的扩展面 | A | `f4fa22141a448d6d` | `always` | `selected-with-exception` | B; `AS-006-06` | `B06/RB-006-01` | `PR-006-M05-23` |
+| `M05-25` | `Streaming=try` 的 fallback 边界 | A | `7900016712541f38` | `always` | `selected-with-exception` | B; `AS-006-06` | `B06/RB-006-01` | `PR-006-M05-25` |
+| `M05-26` | `Tools=off` 的 Model 能否当主 Agent | A | `3a9c721d014fab4e` | `choice(M05-03) in [A,C]` | `selected-with-exception` | B; `AS-006-06` | `B06/RB-006-01` | `PR-006-M05-26` |
+| `M05-27` | `.cautious` 的 tri-state 与生效点 | A | `8d37e84e418255a1` | `always` | `selected-with-exception` | custom:A + Model.SystemPrompt; `AS-006-07` | `B06/RB-006-01` | `PR-006-M05-27` |
+| `M05-28` | unknown/deprecated 字段的读取与迁移 | A | `27380d680be76de1` | `always` | `selected-with-exception` | custom:A + Model.SystemPrompt; `AS-006-07` | `B06/RB-006-01` | `PR-006-M05-28` |
+| `M05-29` | config-repl 首页与 typed effective field view | A | `bf7af24f14e174cf` | `always` | `selected-with-exception` | custom:A + Model.SystemPrompt; `AS-006-07` | `B06/RB-006-01` | `PR-006-M05-29` |
+| `M05-30` | 第一份配置的事务发布 | A | `b8214cff916a3381` | `always` | `selected-with-exception` | custom:A + Model.SystemPrompt; `AS-006-07` | `B06/RB-006-01` | `PR-006-M05-30` |
+| `M05-31` | Stage 2 部分失败后是否继续检查其余 Model | A | `759ed669ea4138d6` | `always` | `selected` | A; `AS-006-09` | `B06/RB-006-01` | `PR-006-M05-31` |
+| `M05-32` | Context XML 中的 Endpoint 投影精度 | A | `dcb8827040b83067` | `always` | `selected-with-exception` | custom:A + Model.SystemPrompt; `AS-006-07` | `B06/RB-006-01` | `PR-006-M05-32` |
+| `M05-33` | Endpoint 的物理写法 | A | `2694c823c30e8568` | `always` | `selected-with-exception` | custom:A + Model.SystemPrompt; `AS-006-07` | `B06/RB-006-01` | `PR-006-M05-33` |
+| `M05-34` | 删除或重命名仍被 Context 引用的 Model | A | `2a91576b8c158833` | `always` | `selected-with-exception` | custom:A + Model.SystemPrompt; `AS-006-07` | `B06/RB-006-01` | `PR-006-M05-34` |
+| `M05-35` | self-test 报告是否持久化 | A | `48cd78d9d3d66a8e` | `always` | `selected` | A; `AS-006-09` | `B06/RB-006-01` | `PR-006-M05-35` |
+| `M05-36` | 全局 ProxyMode 的来源 | A | `2e62b4dcefe3dc17` | `always` | `selected-with-exception` | custom:explicit HTTP + bundled TLS/stunnel guidance; `AS-006-08` | `B06/RB-006-01; RB-006-04` | `PR-006-M05-36` |
+| `M05-37` | CA trust source | A | `255f5de1740db882` | `always` | `selected-with-exception` | custom:explicit HTTP + bundled TLS/stunnel guidance; `AS-006-08` | `B06/RB-006-01; RB-006-04` | `PR-006-M05-37` |
+| `M05-38` | HTTP redirect policy | A | `f9f1c2ab873e79f3` | `always` | `selected-with-exception` | custom:explicit HTTP + bundled TLS/stunnel guidance; `AS-006-08` | `B06/RB-006-01; RB-006-04` | `PR-006-M05-38` |
+| `M05-39` | 新配置的 `DoubleCheck` 默认值 | A | `8778252a7ffb09fe` | `always` | `selected-with-exception` | custom:A corrected; finish review mandatory; `AS-006-10` | `B06/RB-006-01` | `PR-006-M05-39` |
+| `M05-40` | provider 公开 reasoning 内容怎样进入产品 | A | `c7eeeb74ed7fedab` | `always` | `selected-with-exception` | B; `AS-006-06` | `B06/RB-006-01` | `PR-006-M05-40` |
+| `M05-41` | Self-Test Stage 2 是否复现配置的 retry 与 streaming fallback | A | `84b077017698e7f3` | `always` | `selected` | A; `AS-006-09` | `B06/RB-006-01` | `PR-006-M05-41` |
+| `M05-42` | 是否提供含配置秘密的 backup/export | A | `0d0b5e3e62765be8` | `always` | `selected-with-exception` | custom:A + Model.SystemPrompt; `AS-006-07` | `B06/RB-006-01` | `PR-006-M05-42` |
+| `M05-43` | Model/Permission Description 的 Context XML 投影 | A | `bb7e505d20c4f7a8` | `always` | `selected-with-exception` | custom:A + Model.SystemPrompt; `AS-006-07` | `B06/RB-006-01` | `PR-006-M05-43` |
+| `M05-44` | model-repl 列表的字段密度 | A | `d93fd80769e728f3` | `always` | `selected-with-exception` | custom:A + Model.SystemPrompt; `AS-006-07` | `B06/RB-006-01` | `PR-006-M05-44` |
+| `M05-45` | Add Model 的交互节奏 | A | `5b5b9276c75b79d2` | `always` | `selected-with-exception` | custom:A + Model.SystemPrompt; `AS-006-07` | `B06/RB-006-01` | `PR-006-M05-45` |
+| `M05-46` | Self-Test Stage 2 联网 consent 的批次边界 | A | `eede4e8061e841c1` | `always` | `selected` | A; `AS-006-09` | `B06/RB-006-01` | `PR-006-M05-46` |
+| `M05-47` | Add Model 是否提供 clone existing | A | `584346a8f3af419d` | `always` | `selected-with-exception` | custom:A + Model.SystemPrompt; `AS-006-07` | `B06/RB-006-01` | `PR-006-M05-47` |
+| `M05-48` | Permission profile 的管理面 | A | `d93fa2b981848fcf` | `always` | `selected-with-exception` | B; `AS-006-12` | `B06/RB-006-01` | `PR-006-M05-48` |
+| `M05-49` | 活动 Context 执行 Permission-switch semantic action 时怎样确认 | A | `4395b7cd7070382c` | `always` | `selected-with-exception` | B; `AS-006-12` | `B06/RB-006-01` | `PR-006-M05-49` |
+| `M05-50` | 金额价格从哪里来 | A | `c9914976cadbb5c2` | `always` | `selected` | A; `AS-006-11` | `B06/RB-006-01` | `PR-006-M05-50` |
+| `M05-51` | 全局 Exec 配置表面 | A | `00d87157464c8088` | `always` | `selected` | A; `AS-006-12` | `B06/RB-006-01` | `PR-006-M05-51` |
+| `M05-52` | idle Model-switch semantic action 的兼容与隐私确认 | A | `3e984c08c72b9c38` | `always` | `selected-with-exception` | custom:A + Model.SystemPrompt; `AS-006-07` | `B06/RB-006-01` | `PR-006-M05-52` |
+| `M05-53` | Self-Test 的 rerun 选择范围 | B | `cca6ba1b96653028` | `always` | `selected` | A; `AS-006-09` | `B06/RB-006-01` | `PR-006-M05-53` |
+| `M05-54` | 明文秘密配置文件权限不足时的运行政策 | A | `e9a9fef90428489b` | `always` | `selected-with-exception` | custom:A + Model.SystemPrompt; `AS-006-07` | `B06/RB-006-01` | `PR-006-M05-54` |
+| `M05-55` | raw shell 的 inherit baseline 到底包含什么 | A | `8589d6c36c145baf` | `choice(M05-15) in [A,B]` | `selected` | A; `AS-006-12` | `B06/RB-006-01` | `PR-006-M05-55` |
+| `M05-56` | 是否提供独立 `SensitiveRead` 能力 | A | `f25887cfe7f74b26` | `always` | `selected` | A; `AS-006-12` | `B06/RB-006-01` | `PR-006-M05-56` |
+| `M05-57` | Model/Permission 资源 selector 是否提供 Abbreviation | A | `40be12ff6d003df5` | `always` | `selected-with-exception` | custom:A + Model.SystemPrompt; `AS-006-07` | `B06/RB-006-01` | `PR-006-M05-57` |
+| `M05-58` | per-Model retry 配置面采用数字字段还是策略预设 | A | `0cee0ed1da49a935` | `always` | `selected-with-exception` | custom:explicit HTTP + bundled TLS/stunnel guidance; `AS-006-08` | `B06/RB-006-01; RB-006-04` | `PR-006-M05-58` |
+| `M05-59` | 过短 config-secret 的兼容与 scanner 保证 | A | `2596e807f07a6e10` | `always` | `selected-with-exception` | custom:A + Model.SystemPrompt; `AS-006-07` | `B06/RB-006-01` | `PR-006-M05-59` |
 
 ### [AL06：AgentLoop、DoubleCheck 与压缩](decision-packets/06-agentloop-busy-doublecheck-compaction.md)
 
 | Group | Topic | Rec | Sem | Active when | State | Selection | Reply | Projection |
 | --- | --- | :---: | --- | --- | --- | --- | --- | --- |
-| `AL06-01` | 总体 Loop 状态所有权 | A | `e70b3d2382fb0e8e` | `always` | `unanswered` | — | — | — |
-| `AL06-02` | typed control 的模型可见 carrier | A | `f6a7acc27c7a0956` | `always` | `unanswered` | — | — | — |
-| `AL06-04` | queue 的 terminal outcome 自动启动门 | A | `4a857fd30b7e84ed` | `always` | `unanswered` | — | — | — |
-| `AL06-05` | steer 对当前活动的抢占边界 | A | `ebb95cd204eb0871` | `always` | `unanswered` | — | — | — |
-| `AL06-06` | side 的活动容量与 main 忙时调度 | A | `59d40daa8b21db02` | `always` | `unanswered` | — | — | — |
-| `AL06-07` | DoubleCheck action-review 的动作范围 | A | `672918c0a1633f1e` | `always` | `unanswered` | — | — | — |
-| `AL06-08` | action-review 使用哪个 Model | A | `7dd60c3972354276` | `choice(AL06-07) in [A,B]` | `unanswered` | — | — | — |
-| `AL06-09` | 通用预算层级 | A | `5fd2cc9a10745f3f` | `always` | `unanswered` | — | — | — |
-| `AL06-10` | active turn 中 model-switch semantic action 的生效方式 | A | `93984e9ecd8cfeea` | `always` | `unanswered` | — | — | — |
-| `AL06-11` | 压缩后的 main model-view 结构 | A | `78e60e30474b57ce` | `always` | `unanswered` | — | — | — |
-| `AL06-12` | 历史大窗口 Model 之后的候选展示范围 | A | `9aeadf22d610f2d2` | `always` | `unanswered` | — | — | — |
-| `AL06-13` | text/tool block 顺序与 length 截断后的续写 | A | `a15d7ee898f098b5` | `always` | `unanswered` | — | — | — |
-| `AL06-14` | queue 管理能力集合 | A | `56735ab324d6ea9f` | `always` | `unanswered` | — | — | — |
-| `AL06-15` | 存在明确验证命令时的执行策略 | A | `f5c161658f1e0aa3` | `always` | `unanswered` | — | — | — |
-| `AL06-16` | 单个 atomic group 大于 Model 窗口时的产品行为 | A | `c635cefca2dacd76` | `always` | `unanswered` | — | — | — |
-| `AL06-17` | 系统 suspend/resume 后的活动请求处理 | A | `a8944615c65092e4` | `always` | `unanswered` | — | — | — |
-| `AL06-18` | 完整 response 中无效 tool batch 的接收结果 | A | `49517fbd52416bdc` | `always` | `unanswered` | — | — | — |
-| `AL06-19` | 模型协议纠错请求的自动次数 | A | `cb6f9f376df8818c` | `always` | `unanswered` | — | — | — |
-| `AL06-20` | queue 满时的新输入处理 | A | `8a7e10238d66eb6b` | `always` | `unanswered` | — | — | — |
-| `AL06-22` | side 的请求/token 预算归账 | A | `cbb22f66e166e5f0` | `always` | `unanswered` | — | — | — |
-| `AL06-23` | side 结果进入 main model view 的显式方式 | A | `451ca1c8cba864f0` | `always` | `unanswered` | — | — | — |
-| `AL06-24` | action-review verdict 的人工 override 范围 | A | `c91f82329471d53c` | `choice(AL06-07) in [A,B]` | `unanswered` | — | — | — |
-| `AL06-25` | action-review 请求失败后的安全降级 | A | `e28e7fef11de56e7` | `choice(AL06-07) in [A,B]` | `unanswered` | — | — | — |
-| `AL06-26` | termination-review 非 finish verdict 的控制流 | A | `f53c9899d08d3819` | `always` | `unanswered` | — | — | — |
-| `AL06-27` | action/termination review 的预算池关系 | A | `268fb8d2898d2d31` | `always` | `unanswered` | — | — | — |
-| `AL06-28` | 检测到无进展循环后的收口策略 | A | `e24e102251229c45` | `always` | `unanswered` | — | — | — |
-| `AL06-29` | 恢复时旧 Model 缺失的映射体验 | A | `364c9ed2e104fc8b` | `always` | `unanswered` | — | — | — |
-| `AL06-30` | compaction request 使用哪个 Model | A | `9c02a32e27b1c72a` | `choice(AL06-11) == A` | `unanswered` | — | — | — |
-| `AL06-31` | compaction schema 无效或无收益后的重试 | A | `e3ea9fd4e8a2adbd` | `choice(AL06-11) == A` | `unanswered` | — | — | — |
-| `AL06-32` | 崩溃后 unfinished main turn 的恢复边界 | A | `2850f7ab274ac08e` | `always` | `unanswered` | — | — | — |
-| `AL06-33` | 多条 queue item 怎样组成后续 turn | A | `96bd6e8b7f1a1334` | `always` | `unanswered` | — | — | — |
-| `AL06-34` | 达到阈值后的 compaction 许可体验 | A | `4c70bb608c75287c` | `choice(AL06-11) == A` | `unanswered` | — | — | — |
-| `AL06-35` | Esc 在多活动面中的目标选择 | A | `87b8c49b0420e7d5` | `always` | `unanswered` | — | — | — |
-| `AL06-36` | `finish(partial)` 是否构成真实终态 | A | `402614dd6577a145` | `always` | `unanswered` | — | — | — |
-| `AL06-37` | 合法 mixed text + tool response 的展示与模型历史 | A | `72f98e4e8b48c6a1` | `always` | `unanswered` | — | — | — |
-| `AL06-38` | 普通无 control 回复怎样收口 | A | `e48dd601468ada72` | `always` | `unanswered` | — | — | — |
-| `AL06-39` | 手动 compaction 的生命周期 | A | `79e8e7571ace7921` | `choice(AL06-11) in [A,B]` | `unanswered` | — | — | — |
-| `AL06-40` | termination-review 进入人工解算后能否接受 finish | A | `a7d74ac13d9f5c25` | `always` | `unanswered` | — | — | — |
-| `AL06-41` | termination-review 人工解算后能否重试 review | A | `389e473013bcb536` | `always` | `unanswered` | — | — | — |
-| `AL06-42` | turn hard budget 是可配置还是发行版固定 | A | `e8736ffd3fcd75a6` | `always` | `unanswered` | — | — | — |
-| `AL06-43` | 本地金额估算怎样形成门 | A | `efd2fe936134b189` | `choice(M05-50) == C` | `unanswered` | — | — | — |
-| `AL06-44` | pending approval 是否随时间过期 | A | `52f3fbbc310447d1` | `always` | `unanswered` | — | — | — |
-| `AL06-45` | 崩溃恢复后的 pending approval 怎样重新进入流程 | A | `5dd0b83c80f38361` | `always` | `unanswered` | — | — | — |
-| `AL06-46` | 完成前默认承担多强的验证义务 | B | `e925c063ed3034dd` | `always` | `unanswered` | — | — | — |
-| `AL06-47` | 压缩摘要的查看与纠正入口 | A | `32043e0b9552a1b8` | `choice(AL06-11) in [A,B]` | `unanswered` | — | — | — |
-| `AL06-48` | 完整 model-yield 之后怎样继续 | A | `5961b9af4ae8ae14` | `always` | `unanswered` | — | — | — |
-| `AL06-49` | termination-review 使用哪个 Model | A | `5be1cf3224a777d1` | `always` | `unanswered` | — | — | — |
-| `AL06-50` | stuck/no-progress 阈值的配置来源 | B | `b5cb1b7ac160f47c` | `always` | `unanswered` | — | — | — |
-| `AL06-51` | 特殊 purpose 跨 endpoint 的确认 cadence | C | `fa9bad854f4a44a6` | `always` | `unanswered` | — | — | — |
+| `AL06-01` | 总体 Loop 状态所有权 | A | `e70b3d2382fb0e8e` | `always` | `selected` | A; `AS-006-10` | `B06/RB-006-01` | `PR-006-AL06-01` |
+| `AL06-02` | typed control 的模型可见 carrier | A | `f6a7acc27c7a0956` | `always` | `selected` | A; `AS-006-10` | `B06/RB-006-01` | `PR-006-AL06-02` |
+| `AL06-04` | queue 的 terminal outcome 自动启动门 | A | `4a857fd30b7e84ed` | `always` | `selected` | A; `AS-006-10` | `B06/RB-006-01` | `PR-006-AL06-04` |
+| `AL06-05` | steer 对当前活动的抢占边界 | A | `ebb95cd204eb0871` | `always` | `selected` | A; `AS-006-10` | `B06/RB-006-01` | `PR-006-AL06-05` |
+| `AL06-06` | side 的活动容量与 main 忙时调度 | A | `59d40daa8b21db02` | `always` | `selected` | A; `AS-006-10` | `B06/RB-006-01` | `PR-006-AL06-06` |
+| `AL06-07` | DoubleCheck action-review 的动作范围 | A | `672918c0a1633f1e` | `always` | `selected-with-exception` | custom:A corrected; finish review mandatory; `AS-006-10` | `B06/RB-006-01` | `PR-006-AL06-07` |
+| `AL06-08` | action-review 使用哪个 Model | A | `7dd60c3972354276` | `choice(AL06-07) in [A,B]` | `selected-with-exception` | custom:A corrected; finish review mandatory; `AS-006-10` | `B06/RB-006-01` | `PR-006-AL06-08` |
+| `AL06-09` | 通用预算层级 | A | `5fd2cc9a10745f3f` | `always` | `selected` | A; `AS-006-11` | `B06/RB-006-01` | `PR-006-AL06-09` |
+| `AL06-10` | active turn 中 model-switch semantic action 的生效方式 | A | `93984e9ecd8cfeea` | `always` | `selected` | A; `AS-006-11` | `B06/RB-006-01` | `PR-006-AL06-10` |
+| `AL06-11` | 压缩后的 main model-view 结构 | A | `78e60e30474b57ce` | `always` | `selected` | A; `AS-006-11` | `B06/RB-006-01` | `PR-006-AL06-11` |
+| `AL06-12` | 历史大窗口 Model 之后的候选展示范围 | A | `9aeadf22d610f2d2` | `always` | `selected` | A; `AS-006-11` | `B06/RB-006-01` | `PR-006-AL06-12` |
+| `AL06-13` | text/tool block 顺序与 length 截断后的续写 | A | `a15d7ee898f098b5` | `always` | `selected` | A; `AS-006-10` | `B06/RB-006-01` | `PR-006-AL06-13` |
+| `AL06-14` | queue 管理能力集合 | A | `56735ab324d6ea9f` | `always` | `selected` | A; `AS-006-10` | `B06/RB-006-01` | `PR-006-AL06-14` |
+| `AL06-15` | 存在明确验证命令时的执行策略 | A | `f5c161658f1e0aa3` | `always` | `selected` | A; `AS-006-11` | `B06/RB-006-01` | `PR-006-AL06-15` |
+| `AL06-16` | 单个 atomic group 大于 Model 窗口时的产品行为 | A | `c635cefca2dacd76` | `always` | `selected` | A; `AS-006-11` | `B06/RB-006-01` | `PR-006-AL06-16` |
+| `AL06-17` | 系统 suspend/resume 后的活动请求处理 | A | `a8944615c65092e4` | `always` | `selected` | A; `AS-006-11` | `B06/RB-006-01` | `PR-006-AL06-17` |
+| `AL06-18` | 完整 response 中无效 tool batch 的接收结果 | A | `49517fbd52416bdc` | `always` | `selected` | A; `AS-006-10` | `B06/RB-006-01` | `PR-006-AL06-18` |
+| `AL06-19` | 模型协议纠错请求的自动次数 | A | `cb6f9f376df8818c` | `always` | `selected` | A; `AS-006-10` | `B06/RB-006-01` | `PR-006-AL06-19` |
+| `AL06-20` | queue 满时的新输入处理 | A | `8a7e10238d66eb6b` | `always` | `selected` | A; `AS-006-10` | `B06/RB-006-01` | `PR-006-AL06-20` |
+| `AL06-22` | side 的请求/token 预算归账 | A | `cbb22f66e166e5f0` | `always` | `selected` | A; `AS-006-10` | `B06/RB-006-01` | `PR-006-AL06-22` |
+| `AL06-23` | side 结果进入 main model view 的显式方式 | A | `451ca1c8cba864f0` | `always` | `selected` | A; `AS-006-10` | `B06/RB-006-01` | `PR-006-AL06-23` |
+| `AL06-24` | action-review verdict 的人工 override 范围 | A | `c91f82329471d53c` | `choice(AL06-07) in [A,B]` | `selected-with-exception` | custom:A corrected; finish review mandatory; `AS-006-10` | `B06/RB-006-01` | `PR-006-AL06-24` |
+| `AL06-25` | action-review 请求失败后的安全降级 | A | `e28e7fef11de56e7` | `choice(AL06-07) in [A,B]` | `selected-with-exception` | custom:A corrected; finish review mandatory; `AS-006-10` | `B06/RB-006-01` | `PR-006-AL06-25` |
+| `AL06-26` | termination-review 非 finish verdict 的控制流 | A | `f53c9899d08d3819` | `always` | `selected-with-exception` | custom:A corrected; finish review mandatory; `AS-006-10` | `B06/RB-006-01` | `PR-006-AL06-26` |
+| `AL06-27` | action/termination review 的预算池关系 | A | `268fb8d2898d2d31` | `always` | `selected-with-exception` | custom:A corrected; finish review mandatory; `AS-006-10` | `B06/RB-006-01` | `PR-006-AL06-27` |
+| `AL06-28` | 检测到无进展循环后的收口策略 | A | `e24e102251229c45` | `always` | `selected` | A; `AS-006-11` | `B06/RB-006-01` | `PR-006-AL06-28` |
+| `AL06-29` | 恢复时旧 Model 缺失的映射体验 | A | `364c9ed2e104fc8b` | `always` | `selected` | A; `AS-006-11` | `B06/RB-006-01` | `PR-006-AL06-29` |
+| `AL06-30` | compaction request 使用哪个 Model | A | `9c02a32e27b1c72a` | `choice(AL06-11) == A` | `selected` | A; `AS-006-11` | `B06/RB-006-01` | `PR-006-AL06-30` |
+| `AL06-31` | compaction schema 无效或无收益后的重试 | A | `e3ea9fd4e8a2adbd` | `choice(AL06-11) == A` | `selected` | A; `AS-006-11` | `B06/RB-006-01` | `PR-006-AL06-31` |
+| `AL06-32` | 崩溃后 unfinished main turn 的恢复边界 | A | `2850f7ab274ac08e` | `always` | `selected-with-exception` | custom:C + recent/full; `AS-006-14` | `B06/RB-006-01; RB-006-07` | `PR-006-AL06-32` |
+| `AL06-33` | 多条 queue item 怎样组成后续 turn | A | `96bd6e8b7f1a1334` | `always` | `selected` | A; `AS-006-10` | `B06/RB-006-01` | `PR-006-AL06-33` |
+| `AL06-34` | 达到阈值后的 compaction 许可体验 | A | `4c70bb608c75287c` | `choice(AL06-11) == A` | `selected` | A; `AS-006-11` | `B06/RB-006-01` | `PR-006-AL06-34` |
+| `AL06-35` | Esc 在多活动面中的目标选择 | A | `87b8c49b0420e7d5` | `always` | `selected` | A; `AS-006-10` | `B06/RB-006-01` | `PR-006-AL06-35` |
+| `AL06-36` | `finish(partial)` 是否构成真实终态 | A | `402614dd6577a145` | `always` | `selected` | A; `AS-006-10` | `B06/RB-006-01` | `PR-006-AL06-36` |
+| `AL06-37` | 合法 mixed text + tool response 的展示与模型历史 | A | `72f98e4e8b48c6a1` | `always` | `selected` | A; `AS-006-10` | `B06/RB-006-01` | `PR-006-AL06-37` |
+| `AL06-38` | 普通无 control 回复怎样收口 | A | `e48dd601468ada72` | `always` | `selected` | A; `AS-006-10` | `B06/RB-006-01` | `PR-006-AL06-38` |
+| `AL06-39` | 手动 compaction 的生命周期 | A | `79e8e7571ace7921` | `choice(AL06-11) in [A,B]` | `selected` | A; `AS-006-11` | `B06/RB-006-01` | `PR-006-AL06-39` |
+| `AL06-40` | termination-review 进入人工解算后能否接受 finish | A | `a7d74ac13d9f5c25` | `always` | `selected-with-exception` | custom:A corrected; finish review mandatory; `AS-006-10` | `B06/RB-006-01` | `PR-006-AL06-40` |
+| `AL06-41` | termination-review 人工解算后能否重试 review | A | `389e473013bcb536` | `always` | `selected-with-exception` | custom:A corrected; finish review mandatory; `AS-006-10` | `B06/RB-006-01` | `PR-006-AL06-41` |
+| `AL06-42` | turn hard budget 是可配置还是发行版固定 | A | `e8736ffd3fcd75a6` | `always` | `selected` | A; `AS-006-11` | `B06/RB-006-01` | `PR-006-AL06-42` |
+| `AL06-43` | 本地金额估算怎样形成门 | A | `efd2fe936134b189` | `choice(M05-50) == C` | `not-applicable` | derived inactive: M05-50=A | `B06/RB-006-01` | `PR-006-AL06-43` |
+| `AL06-44` | pending approval 是否随时间过期 | A | `52f3fbbc310447d1` | `always` | `selected-with-exception` | custom:A corrected; finish review mandatory; `AS-006-10` | `B06/RB-006-01` | `PR-006-AL06-44` |
+| `AL06-45` | 崩溃恢复后的 pending approval 怎样重新进入流程 | A | `5dd0b83c80f38361` | `always` | `selected-with-exception` | custom:A corrected; finish review mandatory; `AS-006-10` | `B06/RB-006-01` | `PR-006-AL06-45` |
+| `AL06-46` | 完成前默认承担多强的验证义务 | B | `e925c063ed3034dd` | `always` | `selected` | A; `AS-006-11` | `B06/RB-006-01` | `PR-006-AL06-46` |
+| `AL06-47` | 压缩摘要的查看与纠正入口 | A | `32043e0b9552a1b8` | `choice(AL06-11) in [A,B]` | `selected` | A; `AS-006-11` | `B06/RB-006-01` | `PR-006-AL06-47` |
+| `AL06-48` | 完整 model-yield 之后怎样继续 | A | `5961b9af4ae8ae14` | `always` | `selected` | A; `AS-006-10` | `B06/RB-006-01` | `PR-006-AL06-48` |
+| `AL06-49` | termination-review 使用哪个 Model | A | `5be1cf3224a777d1` | `always` | `selected-with-exception` | custom:A corrected; finish review mandatory; `AS-006-10` | `B06/RB-006-01` | `PR-006-AL06-49` |
+| `AL06-50` | stuck/no-progress 阈值的配置来源 | B | `b5cb1b7ac160f47c` | `always` | `selected` | A; `AS-006-11` | `B06/RB-006-01` | `PR-006-AL06-50` |
+| `AL06-51` | 特殊 purpose 跨 endpoint 的确认 cadence | C | `fa9bad854f4a44a6` | `always` | `selected-with-exception` | custom:A corrected; finish review mandatory; `AS-006-10` | `B06/RB-006-01` | `PR-006-AL06-51` |
 
 ### [TS：Tool、安全、进程与运行时](decision-packets/07-tools-safety-process-runtime.md)
 
 | Group | Topic | Rec | Sem | Active when | State | Selection | Reply | Projection |
 | --- | --- | :---: | --- | --- | --- | --- | --- | --- |
-| `TS-02` | 首版 exact tool set | A | `0a406df68bb842dc` | `always` | `unanswered` | — | — | — |
-| `TS-04` | Permission 预设 | A | `3baadacd59c9a13d` | `always` | `unanswered` | — | — | — |
-| `TS-05` | 人工授权记忆 | A | `0a504d3f4e583d2d` | `always` | `unanswered` | — | — | — |
-| `TS-07` | direct file 的链接/特殊文件政策 | A | `320dae04692d72d1` | `always` | `unanswered` | — | — | — |
-| `TS-08` | v0.1 undo 承诺 | A | `d09a495e02ccb4e3` | `always` | `unanswered` | — | — | — |
-| `TS-10` | 工具并行 | A | `a8f7c4a36a01d92d` | `always` | `unanswered` | — | — | — |
-| `TS-11` | 是否提供 direct HTTP tool | A | `44ef8fa34e179702` | `always` | `unanswered` | — | — | — |
-| `TS-12` | unknown operation 的用户解算 | A | `1302b9d71496922b` | `always` | `unanswered` | — | — | — |
-| `TS-13` | Process/raw-shell 的方言来源 | A | `a3163a4dafdb677e` | `always` | `unanswered` | — | — | — |
-| `TS-14` | 威胁后果限制与 workspace 提醒 | A | `b6e6f8bd2542673a` | `always` | `unanswered` | — | — | — |
-| `TS-16` | direct tool canonical result 的实际保留边界 | A | `6d7f444f2f3f765a` | `always` | `unanswered` | — | — | — |
-| `TS-17` | `list`/`search` 的首版精确语义 | A | `7976fe401f77be45` | `always` | `unanswered` | — | — | — |
-| `TS-18` | 是否再增加独立 Autonomy 模式 | A | `5904a3b9ed5e26cc` | `always` | `unanswered` | — | — | — |
-| `TS-19` | Git 是证据增强还是工作流控制 | A | `937f824a6b1bc299` | `always` | `unanswered` | — | — | — |
-| `TS-20` | accepted tool batch 中途失败 | A | `89520f1a90600eba` | `always` | `unanswered` | — | — | — |
-| `TS-21` | `SensitiveRead` 的分类来源与求值规则 | A | `36182f902e6de9f6` | `choice(M05-56) == B` | `unanswered` | — | — | — |
-| `TS-22` | stdout/stderr 的 canonical 跨通道顺序 | A | `11e71a85390d9a8e` | `always` | `unanswered` | — | — | — |
-| `TS-23` | raw shell 与 direct tool 的输入 schema 边界 | A | `f34f677dd2a1dc3e` | `always` | `unanswered` | — | — | — |
-| `TS-24` | foreground `exec` 何时算收口 | A | `4d65d6d08c92d918` | `always` | `unanswered` | — | — | — |
-| `TS-25` | direct `write` 的 create/replace 契约 | A | `c993ebff8ec7ea4e` | `choice(TS-02) in [A,C]` | `unanswered` | — | — | — |
-| `TS-26` | direct `patch` 的输入方言 | A | `c0756872625f5144` | `choice(TS-02) in [A,C]` | `unanswered` | — | — | — |
-| `TS-27` | direct `read` 的范围语义 | A | `4945a1fc9c68b1aa` | `always` | `unanswered` | — | — | — |
-| `TS-28` | direct `rename` 的目标冲突策略 | A | `1bb53bf36b84b20a` | `choice(TS-02) == A` | `unanswered` | — | — | — |
-| `TS-29` | direct `rename` 的跨设备行为 | A | `b943736014143305` | `choice(TS-02) == A` | `unanswered` | — | — | — |
-| `TS-30` | 是否提供一等 tracked background jobs | A | `5410958cff5a3c18` | `always` | `unanswered` | — | — | — |
-| `TS-31` | direct `delete` 是否允许递归目录树 | A | `9bd9901c15bd45cb` | `choice(TS-02) == A` | `unanswered` | — | — | — |
-| `TS-32` | direct 文件的文本编码契约 | B | `0b9162635f1834b6` | `always` | `unanswered` | — | — | — |
-| `TS-33` | direct 二进制内容的读取表面 | A | `eb57b92ff55da5b0` | `always` | `unanswered` | — | — | — |
-| `TS-34` | direct 二进制文件的修改表面 | A | `1d3db01b8cac256f` | `choice(TS-02) in [A,C]` | `unanswered` | — | — | — |
-| `TS-35` | direct 文件属性的保真与修改表面 | A | `1230eb94c7874c7f` | `choice(TS-02) in [A,C]` | `unanswered` | — | — | — |
-| `TS-36` | `list`/`search` 的 ignore 与隐藏项政策 | A | `e6604df11411cc0c` | `always` | `unanswered` | — | — | — |
-| `TS-37` | `exec` 的 cwd 是否是逐调用状态 | A | `b12a67cb8a711e50` | `always` | `unanswered` | — | — | — |
-| `TS-38` | `exec` 输出怎样解码以及何时成为 binary | A | `75e788ea57d68632` | `always` | `unanswered` | — | — | — |
-| `TS-39` | `exec` canonical output 在上限内保留哪一部分 | A | `df16c6c852a2e01c` | `always` | `unanswered` | — | — | — |
-| `TS-40` | `__yaca__` reserved tree 的 direct exact-read 边界 | A | `ed04f7250e9c68c0` | `always` | `unanswered` | — | — | — |
+| `TS-02` | 首版 exact tool set | A | `0a406df68bb842dc` | `always` | `selected` | A; `AS-006-12` | `B06/RB-006-01` | `PR-006-TS-02` |
+| `TS-04` | Permission 预设 | A | `3baadacd59c9a13d` | `always` | `selected-with-exception` | B; `AS-006-12` | `B06/RB-006-01` | `PR-006-TS-04` |
+| `TS-05` | 人工授权记忆 | A | `0a504d3f4e583d2d` | `always` | `selected-with-exception` | B; `AS-006-12` | `B06/RB-006-01` | `PR-006-TS-05` |
+| `TS-07` | direct file 的链接/特殊文件政策 | A | `320dae04692d72d1` | `always` | `selected-with-exception` | B; `AS-006-12` | `B06/RB-006-01` | `PR-006-TS-07` |
+| `TS-08` | v0.1 undo 承诺 | A | `d09a495e02ccb4e3` | `always` | `selected-with-exception` | custom:A; no undo; backup Prompt only; `AS-006-13` | `B06/RB-006-01; RB-006-09` | `PR-006-TS-08` |
+| `TS-10` | 工具并行 | A | `a8f7c4a36a01d92d` | `always` | `selected` | A; `AS-006-12` | `B06/RB-006-01` | `PR-006-TS-10` |
+| `TS-11` | 是否提供 direct HTTP tool | A | `44ef8fa34e179702` | `always` | `selected` | A; `AS-006-12` | `B06/RB-006-01` | `PR-006-TS-11` |
+| `TS-12` | unknown operation 的用户解算 | A | `1302b9d71496922b` | `always` | `selected` | A; `AS-006-12` | `B06/RB-006-01` | `PR-006-TS-12` |
+| `TS-13` | Process/raw-shell 的方言来源 | A | `a3163a4dafdb677e` | `always` | `selected` | A; `AS-006-12` | `B06/RB-006-01` | `PR-006-TS-13` |
+| `TS-14` | 威胁后果限制与 workspace 提醒 | A | `b6e6f8bd2542673a` | `always` | `selected-with-exception` | B; `AS-006-12` | `B06/RB-006-01` | `PR-006-TS-14` |
+| `TS-16` | direct tool canonical result 的实际保留边界 | A | `6d7f444f2f3f765a` | `always` | `selected` | A; `AS-006-12` | `B06/RB-006-01` | `PR-006-TS-16` |
+| `TS-17` | `list`/`search` 的首版精确语义 | A | `7976fe401f77be45` | `always` | `selected` | A; `AS-006-12` | `B06/RB-006-01` | `PR-006-TS-17` |
+| `TS-18` | 是否再增加独立 Autonomy 模式 | A | `5904a3b9ed5e26cc` | `always` | `selected` | A; `AS-006-01` | `B06/RB-006-01` | `PR-006-TS-18` |
+| `TS-19` | Git 是证据增强还是工作流控制 | A | `937f824a6b1bc299` | `always` | `selected-with-exception` | custom:A; no undo; backup Prompt only; `AS-006-13` | `B06/RB-006-01; RB-006-09` | `PR-006-TS-19` |
+| `TS-20` | accepted tool batch 中途失败 | A | `89520f1a90600eba` | `always` | `selected` | A; `AS-006-12` | `B06/RB-006-01` | `PR-006-TS-20` |
+| `TS-21` | `SensitiveRead` 的分类来源与求值规则 | A | `36182f902e6de9f6` | `choice(M05-56) == B` | `not-applicable` | derived inactive: M05-56=A | `B06/RB-006-01` | `PR-006-TS-21` |
+| `TS-22` | stdout/stderr 的 canonical 跨通道顺序 | A | `11e71a85390d9a8e` | `always` | `selected` | A; `AS-006-12` | `B06/RB-006-01` | `PR-006-TS-22` |
+| `TS-23` | raw shell 与 direct tool 的输入 schema 边界 | A | `f34f677dd2a1dc3e` | `always` | `selected` | A; `AS-006-12` | `B06/RB-006-01` | `PR-006-TS-23` |
+| `TS-24` | foreground `exec` 何时算收口 | A | `4d65d6d08c92d918` | `always` | `selected` | A; `AS-006-12` | `B06/RB-006-01` | `PR-006-TS-24` |
+| `TS-25` | direct `write` 的 create/replace 契约 | A | `c993ebff8ec7ea4e` | `choice(TS-02) in [A,C]` | `selected-with-exception` | custom:A; no undo; backup Prompt only; `AS-006-13` | `B06/RB-006-01; RB-006-09` | `PR-006-TS-25` |
+| `TS-26` | direct `patch` 的输入方言 | A | `c0756872625f5144` | `choice(TS-02) in [A,C]` | `selected-with-exception` | custom:A; no undo; backup Prompt only; `AS-006-13` | `B06/RB-006-01; RB-006-09` | `PR-006-TS-26` |
+| `TS-27` | direct `read` 的范围语义 | A | `4945a1fc9c68b1aa` | `always` | `selected` | A; `AS-006-12` | `B06/RB-006-01` | `PR-006-TS-27` |
+| `TS-28` | direct `rename` 的目标冲突策略 | A | `1bb53bf36b84b20a` | `choice(TS-02) == A` | `selected-with-exception` | custom:A; no undo; backup Prompt only; `AS-006-13` | `B06/RB-006-01; RB-006-09` | `PR-006-TS-28` |
+| `TS-29` | direct `rename` 的跨设备行为 | A | `b943736014143305` | `choice(TS-02) == A` | `selected-with-exception` | custom:A; no undo; backup Prompt only; `AS-006-13` | `B06/RB-006-01; RB-006-09` | `PR-006-TS-29` |
+| `TS-30` | 是否提供一等 tracked background jobs | A | `5410958cff5a3c18` | `always` | `selected` | A; `AS-006-12` | `B06/RB-006-01` | `PR-006-TS-30` |
+| `TS-31` | direct `delete` 是否允许递归目录树 | A | `9bd9901c15bd45cb` | `choice(TS-02) == A` | `selected-with-exception` | custom:A; no undo; backup Prompt only; `AS-006-13` | `B06/RB-006-01; RB-006-09` | `PR-006-TS-31` |
+| `TS-32` | direct 文件的文本编码契约 | B | `0b9162635f1834b6` | `always` | `selected` | A; `AS-006-12` | `B06/RB-006-01` | `PR-006-TS-32` |
+| `TS-33` | direct 二进制内容的读取表面 | A | `eb57b92ff55da5b0` | `always` | `selected` | A; `AS-006-12` | `B06/RB-006-01` | `PR-006-TS-33` |
+| `TS-34` | direct 二进制文件的修改表面 | A | `1d3db01b8cac256f` | `choice(TS-02) in [A,C]` | `selected-with-exception` | custom:A; no undo; backup Prompt only; `AS-006-13` | `B06/RB-006-01; RB-006-09` | `PR-006-TS-34` |
+| `TS-35` | direct 文件属性的保真与修改表面 | A | `1230eb94c7874c7f` | `choice(TS-02) in [A,C]` | `selected-with-exception` | custom:A; no undo; backup Prompt only; `AS-006-13` | `B06/RB-006-01; RB-006-09` | `PR-006-TS-35` |
+| `TS-36` | `list`/`search` 的 ignore 与隐藏项政策 | A | `e6604df11411cc0c` | `always` | `selected` | A; `AS-006-12` | `B06/RB-006-01` | `PR-006-TS-36` |
+| `TS-37` | `exec` 的 cwd 是否是逐调用状态 | A | `b12a67cb8a711e50` | `always` | `selected` | A; `AS-006-12` | `B06/RB-006-01` | `PR-006-TS-37` |
+| `TS-38` | `exec` 输出怎样解码以及何时成为 binary | A | `75e788ea57d68632` | `always` | `selected` | A; `AS-006-12` | `B06/RB-006-01` | `PR-006-TS-38` |
+| `TS-39` | `exec` canonical output 在上限内保留哪一部分 | A | `df16c6c852a2e01c` | `always` | `selected` | A; `AS-006-12` | `B06/RB-006-01` | `PR-006-TS-39` |
+| `TS-40` | `__yaca__` reserved tree 的 direct exact-read 边界 | A | `ed04f7250e9c68c0` | `always` | `selected-with-exception` | B; `AS-006-12` | `B06/RB-006-01` | `PR-006-TS-40` |
 
 ### [CX：Context XML、索引与恢复](decision-packets/08-context-xml-index-recovery.md)
 
 | Group | Topic | Rec | Sem | Active when | State | Selection | Reply | Projection |
 | --- | --- | :---: | --- | --- | --- | --- | --- | --- |
-| `CX-01` | 单 XML 的物理提交路线 | A | `804ac1bdefbe31fd` | `always` | `unanswered` | — | — | — |
-| `CX-02` | “复制 XML 接盘”与第三方写入边界 | A | `6b90f0a514b9d1b3` | `always` | `unanswered` | — | — | — |
-| `CX-05` | temp、lock、previous-valid 与 recovery 默认动作 | A | `228e8851b12f3254` | `always` | `unanswered` | — | — | — |
-| `CX-07` | 外来 XML 信任、approval 与 import mapping | A | `2821ea411a409625` | `always` | `unanswered` | — | — | — |
-| `CX-08` | 16 字符 hash 使用哪个可见字母表 | A | `168b53f8e105abc3` | `always` | `unanswered` | — | — | — |
-| `CX-09` | context-repl 搜索、浏览与 stale selection | A | `2014193d2f856fe3` | `always` | `unanswered` | — | — | — |
-| `CX-10` | rename、路径/hash 与活动 writer | A | `481396fe0c34657d` | `always` | `unanswered` | — | — | — |
-| `CX-11` | quota、保留与单 XML 硬门 | A | `ee0111d03cdbde78` | `always` | `unanswered` | — | — | — |
+| `CX-01` | 单 XML 的物理提交路线 | A | `804ac1bdefbe31fd` | `always` | `selected` | A; `AS-006-14` | `B06/RB-006-01` | `PR-006-CX-01` |
+| `CX-02` | “复制 XML 接盘”与第三方写入边界 | A | `6b90f0a514b9d1b3` | `always` | `selected-with-exception` | B; `AS-006-14` | `B06/RB-006-01` | `PR-006-CX-02` |
+| `CX-05` | temp、lock、previous-valid 与 recovery 默认动作 | A | `228e8851b12f3254` | `always` | `selected` | A; `AS-006-14` | `B06/RB-006-01` | `PR-006-CX-05` |
+| `CX-07` | 外来 XML 信任、approval 与 import mapping | A | `2821ea411a409625` | `always` | `selected-with-exception` | B; `AS-006-14` | `B06/RB-006-01` | `PR-006-CX-07` |
+| `CX-08` | 16 字符 hash 使用哪个可见字母表 | A | `168b53f8e105abc3` | `always` | `selected-with-exception` | custom:C + recent/full; `AS-006-14` | `B06/RB-006-01; RB-006-07` | `PR-006-CX-08` |
+| `CX-09` | context-repl 搜索、浏览与 stale selection | A | `2014193d2f856fe3` | `always` | `selected-with-exception` | custom:C + recent/full; `AS-006-14` | `B06/RB-006-01; RB-006-07` | `PR-006-CX-09` |
+| `CX-10` | rename、路径/hash 与活动 writer | A | `481396fe0c34657d` | `always` | `selected-with-exception` | custom:C + recent/full; `AS-006-14` | `B06/RB-006-01; RB-006-07` | `PR-006-CX-10` |
+| `CX-11` | quota、保留与单 XML 硬门 | A | `ee0111d03cdbde78` | `always` | `selected` | A; `AS-006-14` | `B06/RB-006-01` | `PR-006-CX-11` |
 | `CX-13` | 第二 writer 遇到活动 Context 时怎样收口 | A | `2a144c6fee37a2ed` | `always` | `selected` | B；显示可证明 PID/unknown，`AS-002-08` | `B02/RB-002-02` | `PR-002-08` |
-| `CX-14` | 导入后 Permission/DoubleCheck 安全覆盖怎样激活 | A | `7df0efe61f611860` | `always` | `unanswered` | — | — | — |
-| `CX-15` | archive、trash/restore 与 purge 哪些进入 v0.1 | A | `afe5ce58f29062fa` | `always` | `unanswered` | — | — | — |
-| `CX-16` | Context XML 明文、OS 权限与第三方 reader 的隐私边界 | A | `0cad962e5024b6a6` | `always` | `unanswered` | — | — | — |
-| `CX-17` | 导入后 ContextPrompt 怎样激活 | A | `1134c6e6b6d89810` | `always` | `unanswered` | — | — | — |
-| `CX-18` | compatibility gap 的继续门 | B | `18e4febcc65328c2` | `always` | `unanswered` | — | — | — |
-| `CX-19` | context-repl 的 landing | A | `4435564284c66b7c` | `always` | `unanswered` | — | — | — |
-| `CX-20` | active XML 外部移动、替换或改写后的恢复 | A | `1a83fcfef67ffd47` | `always` | `unanswered` | — | — | — |
+| `CX-14` | 导入后 Permission/DoubleCheck 安全覆盖怎样激活 | A | `7df0efe61f611860` | `always` | `selected-with-exception` | B; `AS-006-14` | `B06/RB-006-01` | `PR-006-CX-14` |
+| `CX-15` | archive、trash/restore 与 purge 哪些进入 v0.1 | A | `afe5ce58f29062fa` | `always` | `selected-with-exception` | custom:C + recent/full; `AS-006-14` | `B06/RB-006-01; RB-006-07` | `PR-006-CX-15` |
+| `CX-16` | Context XML 明文、OS 权限与第三方 reader 的隐私边界 | A | `0cad962e5024b6a6` | `always` | `selected-with-exception` | B; `AS-006-14` | `B06/RB-006-01` | `PR-006-CX-16` |
+| `CX-17` | 导入后 ContextPrompt 怎样激活 | A | `1134c6e6b6d89810` | `always` | `selected-with-exception` | B; `AS-006-14` | `B06/RB-006-01` | `PR-006-CX-17` |
+| `CX-18` | compatibility gap 的继续门 | B | `18e4febcc65328c2` | `always` | `selected-with-exception` | B; `AS-006-14` | `B06/RB-006-01` | `PR-006-CX-18` |
+| `CX-19` | context-repl 的 landing | A | `4435564284c66b7c` | `always` | `selected-with-exception` | custom:C + recent/full; `AS-006-14` | `B06/RB-006-01; RB-006-07` | `PR-006-CX-19` |
+| `CX-20` | active XML 外部移动、替换或改写后的恢复 | A | `1a83fcfef67ffd47` | `always` | `selected-with-exception` | custom:C + recent/full; `AS-006-14` | `B06/RB-006-01; RB-006-07` | `PR-006-CX-20` |
 
 ### [ED：错误、诊断与兼容体验](decision-packets/09-errors-diagnostics-compatibility.md)
 
 | Group | Topic | Rec | Sem | Active when | State | Selection | Reply | Projection |
 | --- | --- | :---: | --- | --- | --- | --- | --- | --- |
-| `ED-01` | 稳定 error ID 的兼容粒度 | A | `32a933435c5857cf` | `always` | `unanswered` | — | — | — |
-| `ED-02` | severity 与 waiting-user | A | `b1632224a9cd07f4` | `always` | `unanswered` | — | — | — |
-| `ED-03` | 同一根因显示几次 | A | `53d501254e72207d` | `always` | `unanswered` | — | — | — |
-| `ED-04` | Retry 的可见与取消 | A | `75178606540cae45` | `always` | `unanswered` | — | — | — |
-| `ED-05` | Ctrl+C、EOF、broken pipe 与 graceful-exit action | A | `631c4ffb1d161ed5` | `always` | `unanswered` | — | — | — |
-| `ED-06` | 持久化失败 | A | `f3ddd5f9a3057eb6` | `always` | `unanswered` | — | — | — |
-| `ED-07` | support 输出的本地内容与生成形态 | A | `83a0e39f256efc0f` | `always` | `unanswered` | — | — | — |
-| `ED-08` | English UI 与 Unicode 数据 | A | `938ca9e8b63db55d` | `always` | `unanswered` | — | — | — |
-| `ED-09` | terminal control 与能力降级 | A | `891dce9bf5852fa1` | `always` | `unanswered` | — | — | — |
-| `ED-10` | error 详情交互 | A | `ab7cfa3cd93d64f4` | `always` | `unanswered` | — | — | — |
-| `ED-11` | Context 建立前或 writer 已 faulted 时的崩溃报告 | A | `74c8613f749a685d` | `always` | `unanswered` | — | — | — |
-| `ED-12` | 多阶段或 batch 的部分成功怎样显示 | A | `f2e9c3a93df74e29` | `always` | `unanswered` | — | — | — |
-| `ED-13` | Aggregate telemetry 的发送策略 | A | `21de2edecc160542` | `always` | `unanswered` | — | — | — |
-| `ED-14` | 是否提供一次性诊断上传 | A | `70cae0b3a0e9d066` | `choice(ED-07) in [A,B]` | `unanswered` | — | — | — |
+| `ED-01` | 稳定 error ID 的兼容粒度 | A | `32a933435c5857cf` | `always` | `selected-with-exception` | custom:A outcome; ED-07=C; `AS-006-15` | `B06/RB-006-01` | `PR-006-ED-01` |
+| `ED-02` | severity 与 waiting-user | A | `b1632224a9cd07f4` | `always` | `selected-with-exception` | custom:A outcome; ED-07=C; `AS-006-15` | `B06/RB-006-01` | `PR-006-ED-02` |
+| `ED-03` | 同一根因显示几次 | A | `53d501254e72207d` | `always` | `selected-with-exception` | custom:A outcome; ED-07=C; `AS-006-15` | `B06/RB-006-01` | `PR-006-ED-03` |
+| `ED-04` | Retry 的可见与取消 | A | `75178606540cae45` | `always` | `selected-with-exception` | custom:A outcome; ED-07=C; `AS-006-15` | `B06/RB-006-01` | `PR-006-ED-04` |
+| `ED-05` | Ctrl+C、EOF、broken pipe 与 graceful-exit action | A | `631c4ffb1d161ed5` | `always` | `selected-with-exception` | custom:A outcome; ED-07=C; `AS-006-15` | `B06/RB-006-01` | `PR-006-ED-05` |
+| `ED-06` | 持久化失败 | A | `f3ddd5f9a3057eb6` | `always` | `selected-with-exception` | custom:A outcome; ED-07=C; `AS-006-15` | `B06/RB-006-01` | `PR-006-ED-06` |
+| `ED-07` | support 输出的本地内容与生成形态 | A | `83a0e39f256efc0f` | `always` | `selected-with-exception` | custom:A outcome; ED-07=C; `AS-006-15` | `B06/RB-006-01` | `PR-006-ED-07` |
+| `ED-08` | English UI 与 Unicode 数据 | A | `938ca9e8b63db55d` | `always` | `selected-with-exception` | custom:A outcome; ED-07=C; `AS-006-15` | `B06/RB-006-01` | `PR-006-ED-08` |
+| `ED-09` | terminal control 与能力降级 | A | `891dce9bf5852fa1` | `always` | `selected-with-exception` | custom:A outcome; ED-07=C; `AS-006-15` | `B06/RB-006-01` | `PR-006-ED-09` |
+| `ED-10` | error 详情交互 | A | `ab7cfa3cd93d64f4` | `always` | `selected-with-exception` | custom:A outcome; ED-07=C; `AS-006-15` | `B06/RB-006-01` | `PR-006-ED-10` |
+| `ED-11` | Context 建立前或 writer 已 faulted 时的崩溃报告 | A | `74c8613f749a685d` | `always` | `selected-with-exception` | custom:A outcome; ED-07=C; `AS-006-15` | `B06/RB-006-01` | `PR-006-ED-11` |
+| `ED-12` | 多阶段或 batch 的部分成功怎样显示 | A | `f2e9c3a93df74e29` | `always` | `selected-with-exception` | custom:A outcome; ED-07=C; `AS-006-15` | `B06/RB-006-01` | `PR-006-ED-12` |
+| `ED-13` | Aggregate telemetry 的发送策略 | A | `21de2edecc160542` | `always` | `selected-with-exception` | custom:A outcome; ED-07=C; `AS-006-15` | `B06/RB-006-01` | `PR-006-ED-13` |
+| `ED-14` | 是否提供一次性诊断上传 | A | `70cae0b3a0e9d066` | `choice(ED-07) in [A,B]` | `not-applicable` | derived inactive: ED-07=C | `B06/RB-006-01` | `PR-006-ED-14` |
 
 ### [RF：发布、测试与冻结](decision-packets/10-release-testing-and-readiness-freeze.md)
 
 | Group | Topic | Rec | Sem | Active when | State | Selection | Reply | Projection |
 | --- | --- | :---: | --- | --- | --- | --- | --- | --- |
-| `RF-01` | zip 的正式程序入口 | A | `87a1aa2243b40359` | `always` | `unanswered` | — | — | — |
-| `RF-02` | `__yaca__` 数据根与多副本规则 | A | `38fb484799a8234c` | `always` | `unanswered` | — | — | — |
-| `RF-03` | 升级、降级、迁移与卸载 | A | `3aa7ff170df021b5` | `always` | `unanswered` | — | — | — |
-| `RF-04` | luainstaller Win32/x86/XP 前置 | A | `64568e7832830a53` | `always` | `unanswered` | — | — | — |
-| `RF-05` | 依赖 allowlist、现有 `bin/` 与 UPX | A | `71b3a08b9ccf9a5b` | `always` | `unanswered` | — | — | — |
-| `RF-06` | 公开发布完整性材料 | A | `dee5aa28d1b7e2b9` | `always` | `unanswered` | — | — | — |
-| `RF-08` | “每个平台完整测试”的放行语义 | A | `d4f4e2e696c5852f` | `always` | `unanswered` | — | — | — |
-| `RF-09` | 跨平台性能预算采用什么结构 | A | `aeea3fb690c2a618` | `always` | `unanswered` | — | — | — |
-| `RF-10` | 故障注入与长会话 soak 的执行节奏 | A | `59a447ffd65f8236` | `always` | `unanswered` | — | — | — |
-| `RF-11` | readiness 证据保留期 | A | `c7b64bdb5383d42b` | `always` | `unanswered` | — | — | — |
-| `RF-12` | 项目维护到哪一层 Model fixture/adapter support contract | A | `ca74eb0765562f08` | `always` | `unanswered` | — | — | — |
-| `RF-14` | Windows x86 发行包的 CPU ISA 基线 | A | `e81dfaaf35c82ab2` | `always` | `unanswered` | — | — | — |
-| `RF-15` | Release 来源身份签名 | A | `f9d9b20e49943362` | `always` | `unanswered` | — | — | — |
-| `RF-16` | 更新发现与下载策略 | A | `c0a20dbe564530b4` | `always` | `unanswered` | — | — | — |
+| `RF-01` | zip 的正式程序入口 | A | `87a1aa2243b40359` | `always` | `selected-with-exception` | custom:portable adjacent-data layout; `AS-006-16` | `B06/RB-006-01; RB-006-05/07` | `PR-006-RF-01` |
+| `RF-02` | `__yaca__` 数据根与多副本规则 | A | `38fb484799a8234c` | `always` | `selected-with-exception` | custom:portable adjacent-data layout; `AS-006-16` | `B06/RB-006-01; RB-006-05/07` | `PR-006-RF-02` |
+| `RF-03` | 升级、降级、迁移与卸载 | A | `3aa7ff170df021b5` | `always` | `selected-with-exception` | custom:portable adjacent-data layout; `AS-006-16` | `B06/RB-006-01; RB-006-05/07` | `PR-006-RF-03` |
+| `RF-04` | luainstaller Win32/x86/XP 前置 | A | `64568e7832830a53` | `always` | `selected` | A; `AS-006-17` | `B06/RB-006-01` | `PR-006-RF-04` |
+| `RF-05` | 依赖 allowlist、现有 `bin/` 与 UPX | A | `71b3a08b9ccf9a5b` | `always` | `selected` | A; `AS-006-17` | `B06/RB-006-01; RB-006-06` | `PR-006-RF-05` |
+| `RF-06` | 公开发布完整性材料 | A | `dee5aa28d1b7e2b9` | `always` | `selected` | A; `AS-006-17` | `B06/RB-006-01; RB-006-06` | `PR-006-RF-06` |
+| `RF-08` | “每个平台完整测试”的放行语义 | A | `d4f4e2e696c5852f` | `always` | `selected` | A; `AS-006-17` | `B06/RB-006-01; RB-006-06` | `PR-006-RF-08` |
+| `RF-09` | 跨平台性能预算采用什么结构 | A | `aeea3fb690c2a618` | `always` | `selected` | A; `AS-006-17` | `B06/RB-006-01; RB-006-06` | `PR-006-RF-09` |
+| `RF-10` | 故障注入与长会话 soak 的执行节奏 | A | `59a447ffd65f8236` | `always` | `selected` | A; `AS-006-17` | `B06/RB-006-01; RB-006-06` | `PR-006-RF-10` |
+| `RF-11` | readiness 证据保留期 | A | `c7b64bdb5383d42b` | `always` | `selected` | A; `AS-006-17` | `B06/RB-006-01; RB-006-06` | `PR-006-RF-11` |
+| `RF-12` | 项目维护到哪一层 Model fixture/adapter support contract | A | `ca74eb0765562f08` | `always` | `selected` | A; `AS-006-17` | `B06/RB-006-01; RB-006-06` | `PR-006-RF-12` |
+| `RF-14` | Windows x86 发行包的 CPU ISA 基线 | A | `e81dfaaf35c82ab2` | `always` | `selected` | A; `AS-006-17` | `B06/RB-006-01` | `PR-006-RF-14` |
+| `RF-15` | Release 来源身份签名 | A | `f9d9b20e49943362` | `always` | `selected` | A; `AS-006-17` | `B06/RB-006-01; RB-006-06` | `PR-006-RF-15` |
+| `RF-16` | 更新发现与下载策略 | A | `c0a20dbe564530b4` | `always` | `selected` | A; `AS-006-17` | `B06/RB-006-01; RB-006-06` | `PR-006-RF-16` |
 
 ### [F4：跨系统运行接缝](decision-packets/11-cross-system-operational-seams.md)
 
 | Group | Topic | Rec | Sem | Active when | State | Selection | Reply | Projection |
 | --- | --- | :---: | --- | --- | --- | --- | --- | --- |
 | `F4-01` | 运行中外部修改配置何时生效 | A | `94605c4d516c0bca` | `always` | `selected-with-exception` | custom：每个新顶层 turn 自动观察并完整载入有效变化；`AS-004-09` | `B04/RB-004-10` | `PR-011-01` |
-| `F4-02` | 同一个 Model 的并发、请求间隔与冷却 | B | `02d33e038aef29f5` | `always` | `unanswered` | — | — | — |
-| `F4-03` | 回答 `ask-user` 是旧 turn 继续还是新 turn | B | `2162b655a66da60f` | `always` | `unanswered` | — | — | — |
-| `F4-04` | 用户主动 retry 到底重试什么 | B | `445fdae91ae5827e` | `always` | `unanswered` | — | — | — |
-| `F4-05` | 未发送 draft 是否属于“完整 Context” | A | `821a6749b9f76a3c` | `always` | `unanswered` | — | — | — |
-| `F4-06` | history 与 details 语义动作能恢复到什么程度 | B | `5109de4985db3675` | `always` | `unanswered` | — | — | — |
-| `F4-07` | 模型 raw `exec` 的 stdin 来源 | A | `7e9ecd4b2be0f86e` | `always` | `unanswered` | — | — | — |
-| `F4-08` | Context 误存秘密后提供哪种删除承诺 | A | `6a6aec088db43be8` | `always` | `unanswered` | — | — | — |
-| `F4-09` | config/model/context 的破坏动作是否共用管理事务 | B | `9a522c6fb37540ff` | `always` | `unanswered` | — | — | — |
-| `F4-10` | Context 数据根与 workspace 的文件系统保证 | B | `da333ce95e2924f0` | `always` | `unanswered` | — | — | — |
-| `F4-11` | raw shell 命令超过长度或编码边界时怎么办 | A | `b246aaa0ad211bf0` | `always` | `unanswered` | — | — | — |
-| `F4-12` | active turn 中工作目录消失或变成另一个对象 | A | `5a7b5d879b3778a7` | `always` | `unanswered` | — | — | — |
-| `F4-14` | 传入目录与上级 Git 根怎样确定工作区边界 | A | `aa895c355908621c` | `always` | `unanswered` | — | — | — |
-| `F4-15` | 同一进程的 active Context 数量 | A | `75b94d32290b9d71` | `always` | `unanswered` | — | — | — |
-| `F4-16` | 一个 Context 可积累几个 pending question | A | `fe724daceb92ffba` | `always` | `unanswered` | — | — | — |
-| `F4-17` | 普通 Enter 怎样与 pending question 绑定 | A | `0d3ee868a5bb730c` | `always` | `unanswered` | — | — | — |
+| `F4-02` | 同一个 Model 的并发、请求间隔与冷却 | B | `02d33e038aef29f5` | `always` | `selected` | A; `AS-006-10` | `B06/RB-006-01` | `PR-006-F4-02` |
+| `F4-03` | 回答 `ask-user` 是旧 turn 继续还是新 turn | B | `2162b655a66da60f` | `always` | `selected` | A; `AS-006-10` | `B06/RB-006-01` | `PR-006-F4-03` |
+| `F4-04` | 用户主动 retry 到底重试什么 | B | `445fdae91ae5827e` | `always` | `selected` | A; `AS-006-11` | `B06/RB-006-01` | `PR-006-F4-04` |
+| `F4-05` | 未发送 draft 是否属于“完整 Context” | A | `821a6749b9f76a3c` | `always` | `selected-with-exception` | custom:A + text fallbacks/queue management; `AS-006-04` | `B06/RB-006-01` | `PR-006-F4-05` |
+| `F4-06` | history 与 details 语义动作能恢复到什么程度 | B | `5109de4985db3675` | `always` | `selected-with-exception` | custom:A + text fallbacks/queue management; `AS-006-04` | `B06/RB-006-01` | `PR-006-F4-06` |
+| `F4-07` | 模型 raw `exec` 的 stdin 来源 | A | `7e9ecd4b2be0f86e` | `always` | `selected` | A; `AS-006-12` | `B06/RB-006-01` | `PR-006-F4-07` |
+| `F4-08` | Context 误存秘密后提供哪种删除承诺 | A | `6a6aec088db43be8` | `always` | `selected-with-exception` | custom:C + recent/full; `AS-006-14` | `B06/RB-006-01; RB-006-07` | `PR-006-F4-08` |
+| `F4-09` | config/model/context 的破坏动作是否共用管理事务 | B | `9a522c6fb37540ff` | `always` | `selected-with-exception` | custom:A + text fallbacks/queue management; `AS-006-04` | `B06/RB-006-01` | `PR-006-F4-09` |
+| `F4-10` | Context 数据根与 workspace 的文件系统保证 | B | `da333ce95e2924f0` | `always` | `selected` | A; `AS-006-14` | `B06/RB-006-01` | `PR-006-F4-10` |
+| `F4-11` | raw shell 命令超过长度或编码边界时怎么办 | A | `b246aaa0ad211bf0` | `always` | `selected` | A; `AS-006-12` | `B06/RB-006-01` | `PR-006-F4-11` |
+| `F4-12` | active turn 中工作目录消失或变成另一个对象 | A | `5a7b5d879b3778a7` | `always` | `selected` | A; `AS-006-03` | `B06/RB-006-01` | `PR-006-F4-12` |
+| `F4-14` | 传入目录与上级 Git 根怎样确定工作区边界 | A | `aa895c355908621c` | `always` | `selected` | A; `AS-006-03` | `B06/RB-006-01` | `PR-006-F4-14` |
+| `F4-15` | 同一进程的 active Context 数量 | A | `75b94d32290b9d71` | `always` | `selected` | A; `AS-006-03` | `B06/RB-006-01` | `PR-006-F4-15` |
+| `F4-16` | 一个 Context 可积累几个 pending question | A | `fe724daceb92ffba` | `always` | `selected` | A; `AS-006-10` | `B06/RB-006-01` | `PR-006-F4-16` |
+| `F4-17` | 普通 Enter 怎样与 pending question 绑定 | A | `0d3ee868a5bb730c` | `always` | `selected` | A; `AS-006-10` | `B06/RB-006-01` | `PR-006-F4-17` |
 
 ## 稀疏 assertion、冲突与重新打开记录
 
@@ -582,7 +585,7 @@ propagation_status:      pending | complete | conflict
 | `PR-002-07` | PJ-06 | D-042 | `subsystems/00-product-and-compatibility.md#单一-workspace-root-与显式-context-管理` | `13-cli#bootstrap 与独立管理入口`; `10-context-storage#导入信任边界` | AR-P0-01/13/15 | pending:self-fix routing matrix | n/a | n/a:active | n/a | pending:exact REPL command choices |
 | `PR-002-08` | CX-13 | D-041 | `subsystems/10-context-storage.md#已确认的新-context-建立与打开边界` | `00-product#单一-workspace-root-与显式-context-管理`; `13-cli#bootstrap 与独立管理入口`; `22-runtime#并发基线候选` | AR-P0-10/15 | pending:XP/Linux active/stale-lock + zero-management-mutation proof | n/a | n/a:active | AS-004-08 narrows active-lock edit surface | pending:CX lock format/proof |
 | `PR-002-09` | PJ-08 | D-042 | `subsystems/00-product-and-compatibility.md#单一-workspace-root-与显式-context-管理` | `13-cli#bootstrap 与独立管理入口`; `14-tui#需要逐项确认的体验` | AR-P0-01/13 | pending:six-surface navigation/help matrix | n/a | n/a:active | n/a | pending:exact CLI/TUI grammar |
-| `PR-002-10` | PJ-13 | D-041/D-045 | `subsystems/00-product-and-compatibility.md#单一-workspace-root-与显式-context-管理` | `10-context-storage#已确认的新-context-建立与打开边界`; `11-context-indexing#镜像布局与-hash-输入`; `22-runtime#启动顺序候选` | AR-P0-10/11 | pending:mirror-parent identity/rebind/cross-machine matrix | n/a | n/a:active | n/a | design propagated; F4-14 and physical proof pending |
+| `PR-002-10` | PJ-13 | D-041/D-045/D-057 | `subsystems/00-product-and-compatibility.md#单一-workspace-root-与显式-context-管理` | `10-context-storage#已确认的新-context-建立与打开边界`; `11-context-indexing#镜像布局与-hash-输入`; `22-runtime#启动顺序候选` | AR-P0-10/11 | pending:mirror-parent identity/rebind/cross-machine matrix | n/a | n/a:active | n/a | design propagated; F4-14=A confirmed, physical proof pending |
 | `PR-002-11` | PJ-09 | D-042 | `subsystems/00-product-and-compatibility.md#单一-workspace-root-与显式-context-管理` | `13-cli#bootstrap 与独立管理入口`; `14-tui#需要逐项确认的体验` | AR-P0-13 | pending:chat-command/top-level registry + active-lock action matrix | n/a | n/a:active | TU-32 closed separately by PR-004-01 | pending:TU-18 and remaining state choices |
 | `PR-002-12` | PJ-10 | D-042 | `subsystems/00-product-and-compatibility.md#退出承诺` | `22-application-runtime-and-concurrency#关闭顺序候选` | AR-P0-02/15 | pending:close deadline/unknown fault matrix | n/a | n/a:active | n/a | pending:AL/ED close details |
 | `PR-002-13` | PJ-11 | D-042/D-043 | `subsystems/00-product-and-compatibility.md#v01-的简单完整产品形态` | `08-permission-and-safety#命名-typed-profile-与-systemprompt`; `18-prompt#permission-systemprompt-的候选位置` | AR-P0-06; AR-P1-05 | pending:no-plan registry + Permission prompt enforcement | n/a | n/a:active | n/a | pending:PP-03/TS-04 details |
@@ -592,11 +595,11 @@ propagation_status:      pending | complete | conflict
 | `PR-002-17` | PJ-17 | D-044 | `subsystems/00-product-and-compatibility.md#v01-的简单完整产品形态` | config/CLI/TUI/Runtime/network/release zero-controller consumers | AR-P0-01/04/05/16 | pending:zero-listener/IPC/RPC scan | n/a | n/a:active | n/a | pending:release proof |
 | `PR-002-18` | PJ-19 | n/a:derived-from-PJ-16=A | n/a:inactive-branch | n/a:no-current-consumer | n/a:inactive | n/a:negative registry scan owned by D-044 | `B02/RB-002-02; PJ-16=A` | D-044 requires zero transcription command/purpose/config/XML/artifact/Runtime surface | n/a | complete |
 | `PR-002-19` | PJ-20 | D-044 | `subsystems/00-product-and-compatibility.md#v01-的简单完整产品形态` | config/CLI/TUI/Model/XML/release zero-TTS consumers | AR-P0-01/03/05/08/16 | pending:zero-speech/device/codec scan | n/a | n/a:active | n/a | pending:release proof |
-| `PR-002-20` | PJ-18 | D-045 | `subsystems/00-product-and-compatibility.md#单一-workspace-root-与显式-context-管理` | `10-context-storage#已确认的总体形态与剩余语义`; `11-context-indexing#镜像布局与-hash-输入`; `13-cli#主指令`; `22-runtime#启动顺序候选` | AR-P0-01/10/11; AR-P1-03 | pending:single-root/no-root-list/mirror-parent/rebind/hash vectors | n/a | n/a:active | n/a | design propagated; F4-14 and physical proof pending |
+| `PR-002-20` | PJ-18 | D-045/D-057 | `subsystems/00-product-and-compatibility.md#单一-workspace-root-与显式-context-管理` | `10-context-storage#已确认的总体形态与剩余语义`; `11-context-indexing#镜像布局与-hash-输入`; `13-cli#主指令`; `22-runtime#启动顺序候选` | AR-P0-01/10/11; AR-P1-03 | pending:single-root/no-root-list/mirror-parent/rebind/hash vectors | n/a | n/a:active | n/a | design propagated; F4-14=A confirmed, physical proof pending |
 | `PR-004-01` | TU-32 | D-042 | `subsystems/13-cli.md#chat-内-model-选择` | `14-tui#model-picker`; `06-model-protocols#capability-preflight 与兼容性结果` | AR-P0-05/13 | pending:picker/direct-selector/completion/narrow-terminal/state parity | n/a | n/a:active | n/a | design propagated; TU state choices and TP-024 proof pending |
 | `PR-011-01` | F4-01 | D-048 | `subsystems/05-configuration.md#配置-generation-与逐-turn-自动载入` | `subsystems/22-application-runtime-and-concurrency.md#config-generation-与逐-turn-载入`; `CONFIG-SCHEMA-CANDIDATE#配置-generation-与运行中-reload` | AR-P0-09; AR-P1-03 | pending:per-turn bytes/digest/atomic-generation/invalid-current-mapping/XP latency matrix | n/a | n/a:active | n/a | design propagated; TP-019/020 fault/performance proof pending |
 
-一个答复批次只有在每个非 unanswered 组都引用 PR、PR 的每个字段为真实引用或带原因的 typed sentinel、且所有产生现行行为的组都能机械计数为恰好一个 owner 时才能关闭。`selected` 只表示负责人选择已捕获；`propagation_status=complete` 才表示决定、owner、consumer、gate/test 已完成设计传播。
+一个答复批次只有在每个非 unanswered 组都引用 PR、PR 的每个字段为真实引用或带原因的 typed sentinel、且所有产生现行行为的组都能机械计数为恰好一个 owner 时才能关闭。Batch 02 至 04 使用下方稀疏 PR 表；Batch 06 的 248 条确定性展开由 [`DECISION-PROJECTION-BATCH-06.md`](DECISION-PROJECTION-BATCH-06.md) 保存，并与主表 `Projection` 一一对应。`selected` 只表示负责人选择已捕获；`propagation_status=complete` 才表示决定、owner、consumer、gate/test 已完成设计传播。
 
 ## 机械一致性门
 
@@ -604,11 +607,11 @@ propagation_status:      pending | complete | conflict
 
 - 十包正式 group 集合 = 推荐模板集合 = 本表集合 = 270，且逐包分布仍为 `19/18/32/57/49/35/16/14/14/16`。
 - 本表 `Rec` 与包内推荐模板一致；inventory canonical stream 覆盖完整选项 section、推荐、条件和关联，重算后与登记 digest 一致。
-- 384 个 checklist ID、`AQ-001..AQ-437`、`D-001..D-048`、配置文件声明的连续 `CV-*`、`TP-001..TP-030` 连续性/唯一性符合各自契约；历史审计快照不因 live 数量更新而被改写。
+- 384 个 checklist ID、`AQ-001..AQ-437`、`D-001..D-057`、配置文件声明的连续 `CV-*`、`TP-001..TP-030` 连续性/唯一性符合各自契约；历史审计快照不因 live 数量更新而被改写。
 - 状态计数等于 270；任何 `selected*` 都有原话和选择，任何 `not-applicable` 都有成立的上游条件及无投影结果。
 - D、spec、test、gate 引用真实存在；一项现行保证只有一个 owner，consumer 不复制另一份略有差异的枚举或默认。
 - 没有把候选/推荐写成已实现事实，没有开始实现代码。
 
 ## 恢复阅读位置
 
-下次继续时先看本表“当前进度与下一批”，然后打开 [当前批次 PJ-01..PJ-05](decision-packets/02-product-journey-and-surfaces.md#pj-01-裸启动的通用启动信息显示多少)。答完后先更新原话证据与本表，再由这里写入下一批；不依赖聊天记忆重建进度。
+下次继续时先看本表“当前进度与下一批”、[`DECISIONS.md`](DECISIONS.md) 的 D-049 至 D-057 和 [`ARCHITECTURE-READINESS.md`](ARCHITECTURE-READINESS.md)。当前没有下一批负责人问卷；继续完成 owner 规格、proof plan 和 gate。只有技术证明失败且退路会改变用户保证时，才从对应最小 group 重新进入答复事务，不依赖聊天记忆重建状态。

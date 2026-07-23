@@ -2,7 +2,7 @@
 
 更新日期：2026-07-22
 
-问题通常按依赖逐个深入并逐项归档。项目负责人要求集中盘点时，可以一次收到多个高层问题并分批回答；任何未明确回复的条目仍保持“待决”，不会因推荐方案自动成为决定。
+本文件保留原子查漏和追踪，不再直接作为项目负责人问卷。[`OWNER-QUESTIONS-01.md`](OWNER-QUESTIONS-01.md) 的 29 题已经全部答复并由 [`DISCUSSION-BATCH-06.md`](DISCUSSION-BATCH-06.md) 归档；现行选择/条件状态只看 [`DECISION-REGISTER.md`](DECISION-REGISTER.md)。本文件中的推荐与旧候选仍只用于审计，不能覆盖现行决定。
 
 ## 已确认 Q-001
 
@@ -20,13 +20,13 @@ Windows XP 与 CentOS 7 对首个发布版本属于硬性发布门槛、分级�
 
 现代 Windows 与现代 Linux 应属于同等硬性发布门槛、基础冒烟验证，还是首版不建立正式承诺？
 
-原结论后来由 D-012 修订：Windows 客户端矩阵包含 XP SP3、Vista SP2、7 SP1、8、8.1、10、11；所有最终声明支持的平台都执行完整测试，不设置只冒烟的支持层。Linux 的具体测试发行版以后确认。
+原结论后来由 D-012/D-056 修订：Win32 x86 客户端矩阵包含 XP SP3、Vista SP2、7 SP1、8、8.1、10、11；另发布 Win64 x86_64（Win7 SP1 至 Win11）和 Linux x86_64/CentOS 7 基线包。所有最终声明支持的平台都执行完整测试，不设置只冒烟的支持层。
 
 ## 已确认 Q-004
 
 Windows 发布物采用一套贯穿 XP 至 11 的 x86 构建，还是为现代 x64 系统额外提供原生 x64 构建？
 
-结论：Windows 只提供 Win32 x86 32 位构建，不提供原生 x64 或 ARM 构建。
+原结论已由 D-056 修订：Windows 同时发布 Win32 x86 与 Win64 x86_64 两个独立 zip；不发布 ARM。此题保留旧答复轨迹，现行发行矩阵以 D-056 为准。
 
 ## 已确认 Q-005
 
@@ -34,11 +34,11 @@ Linux 发布物也只支持 x86 32 位，还是保留当前 CentOS 7 / Debian 13
 
 结论：Linux 只支持 x86_64，不发布 i686 或 ARM 版本。原问题中的具体发行版清单后来依 D-012 延后确认。
 
-## 已暂挂 Q-006
+## 已转技术证明 Q-006
 
 Linux 是使用一套在 CentOS 7 x86_64 上构建的低 glibc 基线通用产物，还是为不同发行版分别构建？
 
-结论：这是 16 号打包发布系统的问题，延后讨论；无论选择何种构建策略，最终声明支持的平台都必须完整测试。
+结论：Linux 正式目标是独立的 x86_64/CentOS 7 基线便携 zip；具体 toolchain/glibc 构建配方属于 16 号系统和目标机证明，不再是负责人待答产品选择。最终声明支持的平台必须完整测试。
 
 ## 已确认 Q-007
 
@@ -1895,13 +1895,13 @@ AgentLoop 的“完成权”归谁：模型无工具调用即直接结束，Runt
 
 #### AQ-211 `luainstaller` 的 Windows x86/XP 发布前置
 
-状态：部分；阻塞事实已核对，处置待决。依赖：Q-001、Q-004、Q-009、AQ-044、AQ-206、AQ-207。
+状态：部分；当前 guard 与证据缺口已核对，底层 x86/XP 能力未决。依赖：Q-001、Q-004、Q-009、AQ-044、AQ-206、AQ-207。
 
-已核对事实：当前 `../luainstaller` 1.0 在 `src/platform.lua` 中只接受 Windows x86_64，并以 `UnsupportedPlatformError` 明确拒绝 Windows x86；其 `docs/PLATFORMS-NATIVE-LIMITS.adoc` 也把 Windows x86 和 ARM64 列为 1.0 拒绝目标。因此，“Windows XP SP3 x86 是硬门槛”“Windows 只发 x86 32 位”和“必须由 luainstaller 打包”三项在现状下不能同时直接兑现。
+已核对事实：当前 `../luainstaller` 1.0 能识别 x86，但默认 Windows profile guard 会对非 x86_64 返回 `UnsupportedPlatformError`；随附 MSVC recipe、文档与测试矩阵也只覆盖 x64。因此，“Windows XP SP3 x86 是硬门槛”“Windows 只发 x86 32 位”和“必须由 luainstaller 打包”三项不能由当前未修改路径直接兑现。这个 guard 不证明 launcher/bundler 底层无法适配 x86，代码中也没有 XP 专用拒绝；x86/XP 可行性必须由 qualification 得出。
 
-方案：A. 把扩展 `luainstaller` 的 Win32/x86/XP profile、工具链、生成代码、依赖审计和原生测试矩阵列为 yaca 发布前置子项目；B. 为 Windows x86 更换另一套打包链，仅其他平台继续用 luainstaller；C. 修改 yaca 的架构/XP/打包硬目标。
+方案：A. 把 `luainstaller` 的 Win32/x86/XP qualification 列为 yaca 发布前置：先验证现有设计，按结果做必要的 guard/toolchain/profile 适配和原生测试矩阵；B. 为 Windows x86 更换另一套打包链，仅其他平台继续用 luainstaller；C. 修改 yaca 的架构/XP/打包硬目标。
 
-推荐 A。理由：它保留项目负责人已经确认的三个硬约束，并把真正的阻塞显式纳入发布路径；但 `../luainstaller` 是兄弟仓库，修改它属于独立工作范围，必须另行获得授权、建立单独设计/测试计划，不能因本题推荐而自动开始改动。
+推荐 A。理由：它保留项目负责人已经确认的三个硬约束，也不把未验证误写成底层不支持；`../luainstaller` 是兄弟仓库，qualification 和证据表要求的修改仍须有明确范围、设计与测试，不能因本题推荐而自动开始改动。
 
 ## 逆向生命周期审阅追加问题
 

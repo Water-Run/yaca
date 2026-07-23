@@ -1,34 +1,40 @@
 # 06 模型协议适配
 
-状态：候选
+状态：v0.1 provider 范围与 canonical 控制已确认；wire fixture 和具体限额待技术证明
 
 ## 职责
 
-把内部统一的消息、工具和生成请求转换为已确认的 provider wire profile，并把响应转换回统一事件与结果。OpenAI-compatible 是当前领先的 v0.1 候选；Anthropic 原生协议尚未得到首版承诺，不能因为 README 出现品牌名称就自动进入范围。
+把内部统一的消息、工具、typed control 和 request purpose 转换为已注册 provider wire profile，并把响应转换回统一事件与结果。AgentLoop 永远只面对 canonical 接口，不读取厂商 JSON、SSE、finish reason 或错误体细节。
+
+## v0.1 正式协议范围
+
+v0.1 同时完整支持两套 adapter：
+
+- `openai-chat`：OpenAI Chat Completions compatible wire profile；
+- `anthropic-messages`：Anthropic Messages wire profile。
+
+`openai-responses` 不进入 v0.1，也不能把一个看似兼容的自定义 endpoint 自动猜成另一 adapter。每个 `Model.<Name>` 是完整 LLM 连接实例，显式选择 adapter，并带 endpoint、远端 model ID、明文 Key、能力、streaming、timeout/retry、输出限制、Description、SystemPrompt 和该 adapter 注册的 typed options。
+
+两套 adapter 必须分别通过 non-stream、stream、native structured tool calling、typed control、usage、refusal/filter、错误、取消、重试边界与资源超限 fixture；不能因为文本回复成功就宣称该 Model 可用于 Coding Agent main。
 
 ## 边界
 
-- HTTP 由 03 号子系统处理。
-- JSON 由 04 号子系统处理。
-- 模型选择和凭据由 05 号子系统提供。
-- Agent 循环只面向内部统一接口，不读取厂商响应细节。
+- HTTP、TLS、代理、CA 和传输 retry 由 03 号系统处理。
+- JSON/UTF-8/XML 基础能力由 04 号系统处理。
+- Model 选择、Prompt 字段和配置 generation 由 05 号系统提供。
+- AgentLoop 只消费 `NormalizedRequest`、`ProviderEvent` 和 `NormalizedResponse`。
+- adapter 不能新增工具、扩大 Permission、自动切换 Model/provider 或为特殊 purpose 改写 Prompt 继承规则。
 
-## 设计要求
+## canonical 请求与事件
 
-- 区分传输失败、HTTP 错误、协议错误、模型拒绝和内容截断。
-- 工具调用 ID、并行工具调用和结束原因必须规范化。
-- 自定义 endpoint 不能绕过秘密保护和超时限制。
-
-## 必须形成的 canonical 协议
-
-最终实现不直接把 provider JSON table 传进 AgentLoop。至少需要：
+实现不得把 provider JSON table 直接传给 AgentLoop。统一契约至少包含：
 
 ```text
 NormalizedRequest
-  local request ID, purpose, Model snapshot,
-  public effective config-generation digest / non-secret generation reference
-  model-view manifest, Prompt/tool-schema snapshot
-  streaming/output limits, bounded protocol options
+  local request ID, purpose, immutable Model/config snapshot
+  PromptBundle + model-view manifest
+  canonical tool/control schema snapshot
+  streaming, deadlines, retry and hard output limits
 
 ProviderEvent
   response-start, text-delta, reasoning-summary-delta
@@ -36,51 +42,57 @@ ProviderEvent
   usage-update, response-finish, transport/protocol-error
 
 NormalizedResponse
-  ordered content blocks, validated tool calls
-  usage, finish reason, refusal/filter/incomplete evidence
+  ordered content blocks, validated tool calls / typed control
+  usage, canonical finish class, refusal/filter/incomplete evidence
 ```
 
-工具参数只有在完整 response 合法结束、所有 call ID/JSON/schema/数量/大小通过验证且 canonical assistant response durable 后，才交给 AgentLoop 接受。断流前看似闭合的 JSON 不得提前执行。
+本地 request/message/tool-call/operation ID 由 yaca 分配并写入 XML；provider ID 只作为证据。工具参数只有在完整 response 合法结束、call ID/JSON/schema/数量/大小全部验证、canonical assistant response 已 durable 后，才交给 AgentLoop。断流前看似闭合的 JSON 绝不提前执行。
 
-本地 request/message/tool-call/operation ID 由 yaca 在 XML 内分配；provider 原始 ID 作为证据保存，不能因缺失或重复而成为本地关系身份。
+## 统一 Tool Calling 表面
 
-## 结束信号不是 provider finish reason
+v0.1 的 main tool registry 固定投影 `list/read/search/write/patch/rename/delete/exec`。direct tools 使用严格 typed fields；`exec` 只接收 opaque 原始 command string，并由 Permission 视为宽 `Shell`。
 
-provider 的正常 `stop` 只表示一次生成结束，不能区分“任务完成”“向用户提问”“部分进展”或“拒绝”。主模型需要版本化、无副作用的 typed control/envelope 表达 `finish`、`ask-user` 等任务意图；普通无工具回复只向用户 yield。Runtime 不搜索自然语言猜结局，`DoubleCheck` 只在明确 finish 后触发。精确 control 形式仍待 `AQ-251`/`AQ-252` 确认。
+不注册 Web、HTTP、network、clipboard、media、background-job、MCP、plugin 或第三方自定义 tool。模型在 Shell 获准后运行 curl 只是普通 `exec` 副作用，不成为 adapter 的 direct network 能力。OpenAI 与 Anthropic adapter 必须把同一份 canonical schema 映射到各自原生 structured tool calling；不使用自然语言标签或 JSON code block 模拟 tool call。
 
-六个核心 request purpose 是 `main`、`side`、`action-review`、`termination-review`、`compaction` 和 `self-test`；后者必须再带 `phase=capability|semantic`，使 Stage 2 的真实 synthetic probe 与 Stage 3 advisory 各有 request/usage/manifest，Stage 1 不发 Model 请求。另有条件性的 `context-name`：只有 `AutoNameEveryMainTurns>0`、已经 durable 收口的 main-turn 水位达到下一周期，且 Context XML 中 `AutoRenameDisabled` 缺失/`false` 时才能 admission；它不能复用 main/side/compaction 身份。把 marker 从 `true` 取消后，以取消时的 durable 水位建立新 baseline，不立即请求，也不追赶 marker 生效期间错过的周期。每类由 Runtime 强制不同的 tool schema、model view、预算与输出 schema；不能仅在 Prompt 中写“请勿调用工具”。
+## 已确认的 typed control
 
-每个顶层 `main`/`side` turn 在 admission 时绑定一个已完整验证、不可变的 config generation；该 turn 派生的 provider retry、action/termination review、compaction 和其他 child request 都沿用同一 generation、Model/Permission/Prompt/tool-schema snapshot。INI 在活动 turn 中变化不能重写已建立或正在流式传输的请求；下一顶层 turn 是否激活新 generation 由 22 号 Runtime 决定。协议 adapter 不监视配置文件，也不按时间间隔自行刷新。
+provider 的普通 `stop` 只表示一次生成结束，不能表示任务完成。Runtime 向 main Model 提供版本化、无副作用的 reserved typed controls：
 
-Stage 3 的 `self-test phase=semantic` 只能使用 Stage 2 已确认可用且由用户纳入范围的 Model。其受控输入可以包含 Permission 的逻辑名称、`Description`、有界 `SystemPrompt` 与确定性 capability matrix，用来识别拼写、命名和语义明显不一致；输出始终是 advisory，不能修改 profile、授予能力，或推翻 Stage 1/2 的确定性结果。
+- `finish`：主模型明确声明当前任务结果可以收口；
+- `ask-user`：需要用户信息或决定，进入可恢复 waiting-user；
+- `refuse`：主模型明确拒绝该请求，并保存理由与 typed refused outcome。
 
-## Capability preflight 与兼容性结果
+文本、工具和 control 可以按 canonical schema 合法组合；adapter 必须保持它们的原顺序和关联。一个完整回复没有任何 control 时保存为 `model-yield` 并进入 waiting-user，不能从自然语言或 provider stop 猜成 completed。`ask-user` 的回答继续同一 turn，一个 Context 同时最多一个普通 Enter 可回答的 pending question。
 
-chat 的 `.model` picker、`.model <selector>` 与 CLI 等价入口只负责把用户输入规范化为同一个 typed `select-model` action；协议层最终只接收已解析的完整 Model logical identity，不知道用户是按方向键、补全、直接名称还是 CLI 参数选中。所有入口必须得到同一个 enabled/valid/capability preflight、endpoint/privacy 提示、兼容性结果和 selection receipt。
+typed controls 通过 provider 原生结构化能力承载，再归一化为相同内部 envelope。无法无损提供该 envelope 或原生 structured tool calling 的 Model 不能作为完整 main Coding Model；self-test Stage 2 必须实际探测，而不是只相信配置名称。
 
-Model 切换不得按 INI 物理顺序 fallback，也不得因 picker/补全隐藏 invalid 项就绕过验证。新 Model 何时可在 busy turn 接纳、当前 Context 超出目标窗口时怎样处理，以及跨 endpoint 是否重新确认，仍分别由 AgentLoop/配置/安全 owner 决定；协议层不能以实现方便提前选择。被接纳的新选择只进入后续顶层 turn 的 immutable snapshot，绝不改写在途 request。
+## request purpose 与 Prompt
 
-## 无可执行工具 Model 的条件资格
+正式 purpose 包含 `main`、`side`、`action-review`、`termination-review`、`compaction`、`self-test`，以及条件性的 `context-name`。Stage 2/3 self-test 分别使用 `phase=capability|semantic`；Stage 1 不发 Model 请求。
 
-`Tools` 字段存在性由 M05-03 独占，main 资格由 M05-26/`MODEL-16` 独占，协议层不能把两者合并成“能返回文本所以能当 Agent”：
+所有 purpose 按 18 号契约继承 Global 与实际使用 Model 的 SystemPrompt。只有 `main`/`side` 再继承 Permission.SystemPrompt 和 ContextPrompt。review、compaction、self-test、context-name 使用 Runtime 固定 purpose prompt；所需 Permission、Context、配置、历史或 Prompt 内容只进入有边界的 quoted-data 槽，不能取得指令权威。adapter 不因 provider role 限制而静默丢层或重排，无法无损编码时 capability preflight 失败。
 
-- M05-03 A/C 才可能出现 `Tools=off`。若 M05-26 A，它不能用于 main；若选 B，也只有 adapter 原生承载 AL06-02 已选 control carrier 并通过 fixture 时才能用于受限 main chat，需要 Coding 工具闭环的任务在请求前阻断。
-- M05-03 B 完全没有 `Tools` 字段，注册 adapter 静态要求 native tool/control schema；M05-26 在该路线强制 `not-applicable`，协议层不得生成隐藏 no-tool-main 分支。
-- `side`、review、compaction 与条件 `context-name` 是否可使用某 Model，仍按各自 purpose 实际需要的 role/control/tool schema 验证，不能因“不是 main”就跳过 capability preflight。
+每个顶层 `main`/`side` admission 绑定不可变 config generation。该 turn 派生的 retry、tool loop、review 和 compaction 沿用同一 Model/Permission/Prompt/tool-schema snapshot；活动期间 INI 变化不能重写在途 request。
 
-## 已确认的跨系统请求类型：终止评估
+## DoubleCheck request
 
-D-020 与 D-027 共同确认：当前上下文的有效 `DoubleCheck` 开启时，主模型提出正常终止后需要另外发起一次完成复核请求。配置面已合并，但模型层仍必须让这次请求与主生成可区分：
+有效 `DoubleCheck=true` 时，主模型发出 `finish` 后必须发起独立 `termination-review`；finish review 不能由 target 列表或另一个配置字段关闭。高风险动作是否增加 `action-review` 是独立可配置项，`DoubleCheck=false` 时两类 review 都停用。
 
-- 请求具有独立 ID 和明确用途，不能伪装成主模型原请求的重试或续流。
-- 用量、延迟、结束原因和错误独立归一化，供 AgentLoop、日志和诊断识别。
-- 该请求只返回终止判断，不因复用统一生成接口而自动取得工具执行权。
-- 评估结果必须关联触发它的主模型终止意图，不能错误应用到另一个 turn 或后续生成。
+- 两类 review 默认使用当前 turn Model，也可分别配置 Termination/Action reviewer Model；不能共用一个含混 selector。
+- reviewer 跨 endpoint 首次使用前必须按已确认的 endpoint disclosure 规则取得同意。
+- review 有独立 request ID、purpose、PromptBundle、usage、错误、hard cap 和与被审对象的稳定关联，不是主请求 retry。
+- action verdict 只能维持或收紧 Permission 结果，不能把 `deny` 改成可执行。
+- termination verdict 指出明确缺口时回到同一 turn 继续；uncertain、协议失败、超时或达到 review 上限时进入 waiting-user，不能静默当作通过。
+- reviewer 没有工具权限；purpose-specific verdict 必须通过版本化 schema，普通 reviewer 文本不能被 Runtime 猜成允许。
 
-尚未确认：使用当前模型还是专用模型、发送哪些目标/消息/工具/验证证据、typed verdict schema、无效输出怎样分类，以及 provider 不支持所需能力时如何处理。这些属于 `MODEL-12`，AgentLoop 如何消费结果属于 `LOOP-25`。
+`DoubleCheckGoal` 只作为 finish review 的有界目标/验收标准 data；为空时由当前 task facts 构造。它不改变 action approval 或 Permission。
 
-## 待讨论
+## streaming、结束与错误归一化
 
-1. v0.1 精确支持的 wire profile、Endpoint/AuthMode、角色扁平化、SSE/tool-call delta 和 error body。
-2. typed finish/ask-user/refusal、文本+工具顺序、length continuation 和能力来源优先级。
-3. action/termination review 的模型选择、输入范围、Prompt、verdict 格式和错误分类。
+OpenAI/Anthropic 的 finish reason、stop reason、content block 和 usage 名称分别映射到 canonical 枚举；provider 正常停止、长度截断、内容过滤、明确拒绝、工具请求、取消和协议不完整必须可区分。任何 canonical response event 到达后，03 号系统不得自动重放整次 request。
+
+adapter 对 header、单 event、累计文本、reasoning summary、tool count、tool arguments、content blocks 和总响应实施不可关闭硬上限。达到上限返回 typed limit/incomplete result，并保持已经 durable 的事实，不把截断内容伪装成完整 assistant message。
+
+## 仍需技术证明
+
+冻结两套 adapter 的精确 API 版本/header、role 映射、stream delta 状态机、reserved control wire schema、usage/error 映射和 fixture corpus；同时证明旧系统 curl 流、取消和大 tool arguments 不会越过内存上限。产品范围不再重开 `openai-chat` vs Anthropic、自然语言 tool calling、direct Web tool 或 provider stop 隐式完成。

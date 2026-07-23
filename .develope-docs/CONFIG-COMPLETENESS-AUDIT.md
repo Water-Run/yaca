@@ -2,7 +2,9 @@
 
 更新日期：2026-07-22
 
-状态：第四轮审计底稿；缺口已经提升到 M05/F4/TS/AL06 正式组；本文末 `CCA-Q-*` 只保留题源追踪，不再作为并行回复入口
+状态：Batch 06 前的字段审计底稿；正式组均已回答，本文只保留题源/CV 追踪，不再拥有现行分支
+
+> 现行配置产品面只由 [`DECISIONS.md`](DECISIONS.md) D-049 至 D-056 与 [`subsystems/05-configuration.md`](subsystems/05-configuration.md) 拥有。本文件中仍出现的 `pending`、A/B/C、条件字段或“唯一待回复入口”是冻结的审计语境；必须按 [`DECISION-REGISTER.md`](DECISION-REGISTER.md) 的已选路线生成或删除，不能交给实现者再选。`CV-001..CV-076` 继续作为配置规格必须吸收的验证题源。
 
 ## 结论先行
 
@@ -16,7 +18,7 @@
 
 本审计建议把配置面收敛成八个核心区域：`General`、`Agent`、`Network`、`Exec`、`Context`、`TUI`、`Permission.*`、`Model.*`。`TUI` 始终存在，因为相互独立的启动信息逐字段开关已有明确消费者；不提供启动 master，只有通知字段仍由 TU-27/TU-30 条件生成。它不是旧空壳 `Tui` 的沿用，也不承载 theme/vivid/language/快捷键或输入提示符配置；chat 输入提示符固定为 `>>`。仍不新增 `Storage`、`Update`、`Plugin`、`Telemetry`、`Project` 或 `SelfTest` section；启动自检策略是 `General.StartupSelfTest`。必须存在但不适合用户调整的常量，进入版本化 Runtime limits/manifest，而不是藏成更多配置键。
 
-后续整合把本审计发现进一步拆成了独立 owner：M05-33/36/37/38 分别拥有 Endpoint、proxy、CA、redirect，M05-23 拥有 header/body，M05-16 只拥有 workspace 外权限的 coarse/split 字段形态，M05-56 独立决定是否存在 `SensitiveRead` 字段，M05-57 独占 Model/Permission 的完整名/简称选择器形态，M05-58 独占 per-Model retry 的数字或 preset 配置面，M05-59 独占过短 config-secret 的 consumer/scanner 产品保证；TS-21 独占 sensitive-read classifier/policy，TS-11 独立决定 direct HTTP 并因此决定 `DirectNetwork` 是否存在；F4-07 只拥有 raw exec stdin 的 EOF/有界 immutable payload 路线，两项都排除交互 PTY/console；TS-13 拥有 shell dialect，TS-22/38/39 分别拥有跨流顺序、严格 decode/binary 与 canonical retention，AL06-27 拥有 review 预算形态，AL06-50 独占 no-progress 阈值的条件配置面，AL06-51 独占特殊 purpose 跨 endpoint 外发的 consent cadence 与 session-state 投影。M05-40/41/42 又分别拆出了公开 reasoning、self-test retry/fallback 与 secret-bearing backup/export，M05-54/55 分别拥有 config-file secret ACL admission 与 inherit baseline。本文中的早期候选若与这些正式组不同，以正式组为唯一待回复入口；不能同时回答 `CCA-Q-*` 和另一个组来产生两份配置事实。
+后续整合把本审计发现进一步拆成了独立 owner：M05-33/36/37/38 分别拥有 Endpoint、proxy、CA、redirect，M05-23 拥有 header/body，M05-16/M05-56 拥有粗粒度 workspace 外权限与零 `SensitiveRead`，M05-57/M05-58/M05-59 拥有 selector、per-Model retry 和过短 secret 保证；TS/AL/F4 分别拥有工具、运行时与跨系统语义。它们现在都已经在 Batch 06 取得现行选择。本文中的早期候选若与正式登记不同，一律以正式登记和 owner 规格为准；`CCA-Q-*` 不再接收回复。
 
 ## 审计证据与边界
 
@@ -208,7 +210,7 @@ Git 官方文档说明普通命令默认读取 system/global/repository 配置�
 
 | 字段族 | 必要性与消费者 | 完整契约检查 | 迁移、UI/self-test 与旧平台风险 | 结论 |
 | --- | --- | --- | --- | --- |
-| mirror-derived single root（非配置字段） | Context open/resume、默认 tool cwd 和 Resolver 起点消费 | 每个 Context 恰好一个 root，由 active XML 在 `__yaca__/CONTEXT/` 下的镜像父目录解码；XML/INI 不保存 current root/workdir/root list/alias/selector。续接不自动 jump/ask/keep；显式 context-repl rebind 以 no-replace/可恢复协议移动 XML | context-repl/status 显示 derived root 与可用性；目录不存在/无权限时拒绝进入 Agent并给出修复路径；Windows 宽字符、junction、Linux bytes、移动后 hash/stale approval 需测 | D-045 已确认；F4-14 仍决定新建时怎样选出初始唯一 root，`D+T` |
+| mirror-derived single root（非配置字段） | Context open/resume、默认 tool cwd 和 Resolver 起点消费 | 新建时以用户传入且可进入的真实目录为唯一 root；打开时由 active XML 在 `__yaca__/CONTEXT/` 下的镜像父目录解码。XML/INI 不保存 current root/workdir/root list/alias/selector；上级 Git root只作证据。续接不自动 jump/ask/keep；显式 context-repl rebind 以 no-replace/可恢复协议移动 XML | context-repl/status 显示 derived root 与可用性；目录不存在/无权限时拒绝进入 Agent并给出修复路径；Windows 宽字符、junction、Linux bytes、移动后 hash/stale approval 需测 | D-045 与 F4-14=A/AS-006-03 已确认，剩余为 `T` |
 | `CompactThreshold` | 仅 AL06-11 A 的 structured-summary 或 B 的 deterministic-checkpoint trigger 消费 | ratio 严格 `(0,1)`；按有效 Model 窗口、Prompt/tool/output reserve 计算；C 下字段/override 不存在 | 旧字段只有 A/B 路线迁入；status 显示 consumer/threshold；未知 ContextLength 保守 | 条件字段，AL06-11 唯一 owner，`O+T` |
 | `AutoNameEveryMainTurns` + XML `AutoRenameDisabled` | D-041/D-046 低优先级 Context 周期自动命名 scheduler 消费 | interval 为 integer `0..RuntimeMax`、默认 `10`、`0` 全局关闭；INI only。专用 XML bool 缺失/false 允许、true 禁止当前 Context；二者都在 next-idle admission 检查 | XML 保存 effective interval、main-turn count、watermark、request/result/cancel、old/new name 与标记。手工 rename 成功事务默认置 true，自动 rename 不置；context-repl 可切换，取消从新基线等待完整间隔而不立即/追补命名 | 已确认字段与 metadata；不生成通用 flags bag、名称/目录编码或额外 INI precedence 开关，`D+T` |
 | `ListSortBy` / `ListSortDirection` | context-repl、`.context` 等 Context 列表 renderer 消费 | INI-only；`ListSortBy=created|updated|name` 默认 `updated`，`ListSortDirection=ascending|descending` 默认 `descending`；next list render。created/updated 只用 XML canonical `CreatedAt`/`UpdatedAt`：初次 durable 创建固定前者、每次成功 durable mutation 原子推进后者，失败/inspect 不推进；相等以 `LogicalPath` 稳定升序 tie-break，不读取文件系统 ctime/mtime | 缺失/非法 canonical time 显示 compatibility/self-fix，不用文件时间猜；XP/CentOS 的 Unicode/path、同时间戳、稳定顺序 fixture。排序仅投影列表，不改变 Resolver、搜索优先级或裸启动不扫描历史 | D-047 已确认字段族，`D+T` |

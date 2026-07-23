@@ -1,197 +1,164 @@
-# 19 改动事务、审阅与撤销
+# 19 改动归属、审阅与不可撤销边界
 
-状态：候选；强 preimage/自动 undo 尚未获项目负责人确认，不能视为 v0.1 基础保证
+状态：正式设计；`D-052` 已确认 v0.1 不提供 Runtime backup、undo 或 rollback
 
-## 为什么需要独立子系统
+## 结论
 
-“写文件成功”只说明一次工具调用完成，不代表用户已有改动得到保护，也不代表多文件任务可以整体审阅或崩溃后可以解释。是否进一步承诺自动撤销是独立产品选择，不能从“完整 Coding Agent”自动推导。Git 也不能自动解决这个问题：工作区可能不是仓库，启动前可能已经有未提交改动，任意命令还可能产生 Git 无法完整表达的外部副作用。
+v0.1 只承诺：安全 admission、expected raw-byte digest/identity、no-replace、单文件安全发布、operation/result 事实、改动归属、diff evidence 与诚实的 `unknown`。它不承诺自动 undo，不保存完整 preimage，不创建 checkpoint，不用 Git stash/commit 充当事务，也不把一组文件操作宣传成 ACID transaction。
 
-本文件承接 [`../DESIGN-CHECKLIST.md`](../DESIGN-CHECKLIST.md) 中的 `CHANGE-*`，并细化 `TOOL-02`、`TOOL-05`、`TOOL-09`、`TOOL-12`、`TOOL-15` 与 `LOOP-08`、`LOOP-13`、`CTX-03`、`CTX-17` 的交叉边界。所有内容都是候选设计。
+本文件名保留 `undo` 是为了记录明确的产品边界和将来重开条件，不表示存在撤销功能。
 
-## 条件职责
+## 职责
 
-不论是否提供自动 undo，本系统都负责 expected digest、新鲜度、Agent 改动归属、diff/review evidence、operation/result 和 unknown side effect。以下 preimage/checkpoint/补偿职责只有在项目负责人明确选择强 undo 后才进入 v0.1：
+本系统只负责：
 
-- 在 Agent 首次改变某个路径前，记录足以保护当时用户状态的 preimage、文件身份与属性。
-- 把一个或多个文件操作归入可审阅的逻辑 change transaction，并记录操作顺序和结果。
-- 为 Git 与非 Git 工作区生成“Agent 改了什么”的差异证据，而不是把仓库全部脏状态算作 Agent 改动。
-- 在当前内容仍符合预期时，以补偿操作撤销 Agent 自己的文件改动；遇到冲突时停止覆盖并展示证据。
-- 描述多文件部分成功、进程崩溃、磁盘满、外部并发修改和记录损坏后的恢复状态。
-- 向 AgentLoop 提供结构化改动摘要、可撤销范围和验证状态，供结束报告与恢复使用。
+- 把 direct mutation 的 intent/result 与 session、turn、tool call、operation、目标身份和 config/Permission generation 关联起来。
+- 从已保存的 old/new digest、规范文本和实际 postcondition 派生 Agent 可归属的 diff/review evidence。
+- 区分启动前既有内容、Agent 已证明发布的结果、后续外部修改和无法判定的副作用。
+- 描述串行多操作的 completed/failed/skipped/unknown 边界，供 TUI、结束报告、恢复和 self-fix 使用。
+- 保证 unknown operation 不被自动重放，并允许用户以后追加有证据的解算结论。
 
-## 边界
+本系统不负责：
 
-- **07 工具系统**验证具体写入、补丁、创建、删除和重命名参数，并执行单次文件操作；本系统不取代工具 schema。
-- **08 权限系统**决定某项修改是否允许。创建检查点、已有授权或“可撤销”都不能自动授予写、删、执行或外部路径权限。
-- **09 AgentLoop**分配 turn、tool call 与 operation ID，选择逻辑事务边界，并保证每个调用产生真实或合成结果。
-- **10 上下文系统**持久化改动意图、preimage 身份、结果、检查点和恢复标记；本系统定义语义，不直接决定活动存储格式。
-- **01 文件系统能力**提供原子替换、同步、路径身份和属性读写的真实能力；如果旧 Windows/Linux 后端不能提供某项保证，产品必须降低并公开承诺。
-- **02 进程系统**执行任意命令。命令可能修改未知文件、注册表、服务、数据库或远端系统，不能被本系统虚构成完整可撤销事务。
-- **Git**可以提供额外的 status/diff/identity 证据，但不是必需依赖，也不能授权自动 `reset`、`checkout`、`commit` 或覆盖用户改动。
-- 撤销文件不自动回退会话历史。上下文保留原事件，并追加“发生了补偿操作”的新事实。
+- 保存可恢复原内容的 preimage、reverse patch、快照或影子工作区。
+- 自动创建、管理、清理或恢复 `backup/`。
+- 把 Git status/diff 做成专用 Runtime hook/tool，或自动执行 stash/commit/reset/checkout/revert/push 等 Git 工作流。
+- 回滚 direct tool、raw shell、网络、进程、注册表、数据库、远端服务或其他外部副作用。
+- 把 Context 历史“撤销”。历史永远保留真实 operation/result；后续人工修复只是新的事实和新动作。
 
-## 当前现状与缺口
+## 与其他子系统的边界
 
-当前 07 号文档只提出改动审阅、冲突检测和可选检查点，尚未回答：
+- **07 工具系统**拥有 exact registry、typed schema、expected digest、no-replace、atomic/safe publish、rename/delete 和 `exec` 结果。本系统不重复实现文件工具。
+- **08 Permission**决定动作是否允许；“有 diff”“用户说可恢复”或 Prompt 中出现 `backup/` 都不产生授权。
+- **09 AgentLoop**决定 accepted batch 顺序并保证 call/result 配对；所有工具串行，首个失败后尚未开始的调用得到 `skipped`。
+- **10 Context**持久化 intent、result、diff evidence 与 unknown 解算；它不因本系统创建 preimage attachment 或长期 sidecar。
+- **01 文件系统**提供实际原语与身份复核；平台不能证明时必须返回 typed 降级/失败，不由本系统补成虚假事务。
+- **02 进程系统**收口 raw `exec`；opaque command 的未知文件或外部副作用不能按 workspace diff 推断为完整。
+- **Git**不是 Runtime 依赖或内部 adapter。模型可以通过普通获批 raw `exec` 使用只读 `git status`/`git diff` 作为证据；`commit`、`push`、`reset`、`stash` 等写入或工作流动作只有用户明确要求时才可调用。所有 Git command 都承担相同的宽副作用和 unknown 边界。
 
-- 如何区分启动前已有用户改动、Agent 改动和 Agent 执行后用户又做的改动。
-- 基线是在会话开始全量扫描，还是第一次触碰每个路径时惰性捕获。
-- 一次工具调用、一批并行调用、一个 turn 和整个任务中的哪一个叫“事务”。
-- 多文件修改到一半失败时，是保留成功部分、尝试回滚还是把整个 turn 标成失败。
-- 新建、删除、重命名、二进制文件、换行、BOM、编码、权限位与可执行位如何保存和恢复。
-- Agent 崩溃发生在“文件已变化、结果尚未持久化”窗口时，恢复如何判断动作是否已经发生。
-- 非 Git 工作区如何生成 diff 和撤销；Git 工作区存在 staged/unstaged/untracked 改动时如何避免误伤。
-- shell、测试、构建脚本修改了额外文件时，是否以及如何纳入改动记录。
-- 检查点可能复制秘密或大文件时，如何加密、限额、保留和删除。
+## v0.1 的事实模型
 
-## 候选概念模型
+### Operation
 
-### Operation 与 change transaction
+每个会产生副作用的 direct tool call 或 `exec` 都有唯一 operation ID。operation 至少关联：
 
-- **change operation**：一次结构化文件副作用，具有 operation ID、目标路径、动作类别、precondition、preimage、预期结果和最终状态。
-- **change transaction**：按用户可理解的边界把若干 operation 分组，用于审阅、结束报告和补偿撤销。
-- **checkpoint**：某一逻辑边界下，恢复这些 operation 所需的记录集合；它不是“任意外部世界的快照”。
-- **review view**：从 operation 与当前文件生成的派生 diff，可重建，不是事实源。
+- session、turn、本地 tool call 与 provider call evidence；
+- tool/schema/registry version 和 canonical accepted arguments；
+- 规范 target/cwd、动作类别、effective config/Permission generation；
+- 执行前 expected existence、ordinary-object identity、raw-byte digest，以及需要保留的 metadata snapshot；
+- 对 direct mutation 可预先计算时的 candidate/postimage digest；
+- durable intent、开始状态、真实或 synthetic result；
+- `success|failed|denied|cancelled|timeout|partial|unknown|skipped` outcome；
+- 实际 postcondition、old/new digest、diff 或无法产生 diff 的原因；
+- `exec` 的 exit/capture/descendant 证据与仍可能存在的外部副作用。
 
-“事务”在这里默认表示 **可记录、可审阅、可检测冲突并尽力补偿的逻辑事务**。除非后续证明所有目标平台都能提供同等能力，否则不能承诺跨多个文件和外部副作用的 ACID 原子性。
+operation record 是可审计事实，不是恢复副本。expected old digest 能防止覆盖 stale base，candidate digest 能帮助崩溃后判断发布是否发生；二者都不能还原原内容。
 
-### 建议记录的事实
+### Review group
 
-具体编码以后再定，但语义上至少需要：
+v0.1 不建立有 commit/rollback 方法的 `change transaction` 对象。UI 和结束报告可以把 operation 按以下只读视图分组：
 
-- session、turn、tool call、transaction 与 operation 的关联 ID。
-- 规范路径身份、动作类别，以及操作前“存在/不存在”的事实。
-- 操作前内容摘要、必要的完整 preimage 和文件属性。
-- 写入所依据的 expected hash/version，防止覆盖读取后被外部修改的文件。
-- 操作后预期摘要与实际摘要。
-- `planned`、`applied`、`failed`、`cancelled`、`unknown`、`compensated` 或 `conflicted` 等可恢复状态。
-- 是否可自动补偿、为何不可补偿，以及命令产生的未知副作用声明。
+- 本 operation；
+- 本 turn 中按执行顺序发生的 operations；
+- 当前 Context 中由 yaca 有证据归属的净变化。
 
-状态名称只是候选；关键是不能用一个 `success = true/false` 隐藏“可能已经发生”的结果未知状态。
+这些 group 只是派生 review view。多文件操作仍是一串独立、串行、各自收口的 operations；中途失败时先前成功项继续存在，后续项 `skipped`，不存在隐式 rollback。
 
-## 选择强 undo 后才成立的候选不变量
+## direct mutation 保证
 
-1. Agent 只能自动撤销其有证据归属自己的改动，不能把启动前用户改动恢复到 Git HEAD。
-2. 对可撤销的结构化写操作，足够的 preimage 与操作意图必须在实际副作用前 durable；保存失败则不开始修改。
-3. 每次写入都带新鲜度前提。当前文件与预期版本不一致时停止并报告冲突，不能静默覆盖。
-4. 单文件替换尽可能原子；多文件 transaction 默认允许“部分已应用”状态，不伪装成全有或全无。
-5. 撤销是按相反顺序追加补偿 operation。只有当前内容仍匹配该 Agent operation 的预期 postimage 时才能自动执行。
-6. 新建文件仅在路径仍是该 operation 产生的内容时自动删除；删除文件仅在路径仍空缺时自动恢复；重命名同时检查源与目标身份。
-7. 文件内容恢复还必须处理当时记录的属性；无法保真时明确报告降级，不声称完整撤销。
-8. 任意命令、网络和系统级副作用默认不在文件撤销保证内；不得因为 turn 有检查点就宣称它们已可逆。
-9. 每个改动工具调用仍遵守 `LOOP-13` 配对不变量；崩溃恢复需要真实或合成 tool result。
-10. 撤销不删除原上下文事实，也不把已经发送到远端、已经运行的命令或已产生的模型输入伪装成从未发生。
+`write`、`patch`、`rename` 和 `delete` 只消费 07 号系统冻结的简单语义：
 
-## 总体方案比较
+- `write(create)` 使用 no-replace；`write(replace)` 和 `patch` 要求 expected ordinary-file identity 与 raw-byte digest。
+- `patch` 全部 structured hunks 通过后才发布；任一 hunk 校验失败时正式文件零修改。
+- replace/patch 使用同目录受控 temp、flush、验证和平台已证明的 safe/atomic publish；发布后重新打开验证。
+- `rename` 永不覆盖、永不自动改名、永不把 cross-device copy+delete 冒充原子 rename。
+- `delete` 只处理一个 ordinary file 或空目录，不递归、不进入 trash、不保存内容副本。
+- direct mutation 不处理 binary，不接受任意文件属性修改；不能可靠保留/复核必要 metadata 时在副作用前拒绝。
 
-### A. 只依赖 Git 快照与回退
+“atomic”只描述技术证明覆盖的单文件发布临界点；不代表多个文件、一个 turn、一次模型回复或外部 command 具有全有或全无语义。
 
-在 Git 工作区通过 status/diff 和临时提交、stash 或 tree 对象记录改动，撤销时调用 Git。
+## 改动归属与 diff
 
-优点是成熟、diff 质量高、额外内容复制可能较少。缺点是排除非 Git 工作区，容易混淆用户 staged/unstaged/untracked 改动；自动 stash/reset 也会引入额外状态和旧 Git 依赖。命令对仓库外的副作用仍无法覆盖。
+归属以 operation evidence 为准，不以 Git HEAD、当前工作区脏状态或模型自述为准：
 
-Git 适合作为审阅证据适配器，不建议成为 v0.1 唯一正确性基础。
+1. direct mutation intent 保存 expected identity/digest 和 candidate digest。
+2. 发布后 result 保存实际 identity/digest、metadata 结果和 canonical diff。
+3. 当前文件仍等于该 postimage 时，可以报告“这项 Agent 改动仍在”。
+4. 当前文件后来变为另一 digest 时，报告“Agent 曾发布该 postimage，之后检测到外部变化”；不能把当前全部差异继续归给 Agent。
+5. 启动前已经存在但未被该 operation 改变的脏内容不算 Agent 成果。
+6. `exec` 只记录 command、cwd、进程输出和可观察结果。除非另一个 direct operation 提供证据，不扫描并宣称 opaque command 的全部文件副作用。
 
-### B. 每操作 preimage 日志 + 按 turn 逻辑分组（强 undo 候选）
+文本 diff 是审阅投影，不是事实源或恢复载荷。binary、超限、编码不支持、metadata-only 或 unknown 时，报告 digest/size/identity/范围与不能显示 diff 的原因；不能伪造文字 diff。
 
-每个结构化文件 operation 在执行前惰性保存目标路径的 preimage、属性和 expected hash，执行后记录 postimage 摘要；多个 operation 按 turn 或明确的 apply group 组成逻辑 transaction。diff 从 preimage、postimage 与当前状态派生，撤销按逆序执行带冲突检测的补偿操作。
+Git 不参与归属判定。模型可以通过 `exec` 运行只读 `git status`/`git diff` 并把输出作为普通 shell evidence；Runtime 不在模型调用之外自动运行 Git，也不把 Git 输出提升为比 operation/result 更高的事实权威。任何 Git 写入或工作流动作仍要求用户明确提出。
 
-优点是 Git/非 Git 语义一致，能精确保留 Agent 触碰前的用户脏状态，也能把崩溃窗口收口为可判定状态。代价是需要管理大文件、秘密、配额、重复 preimage 和持久化屏障；跨文件仍只能报告部分成功并补偿。
+## Prompt 中的 `backup/`
 
-它不再默认作为 v0.1 基础保证。采用前必须同时批准 preimage 放在哪里、是否仍满足长期只有 INI/XML、单 XML 体积/写放大、秘密与二进制、配额、导出和跨机迁移。
+`backup/` 只可能是某段用户自定义 Global、Model、Permission 或 Context Prompt 中的一句普通文字。它不是配置字段、模式、reserved directory、工具、自动动作、事务阶段、审阅事实或恢复保证。
 
-### C. 影子工作区/覆盖层中预演后一次应用
+如果模型受这段 Prompt 影响而提出创建副本，该调用仍只是普通 `write` 或 `exec`：目标、Permission、审批、expected digest、结果和失败处理完全与其他调用相同。Runtime 不自动创建目录、不选择文件、不验证备份完整性、不清理、不还原，也不因为 basename 是 `backup` 就赋予特殊含义。发行模板不依赖这段 Prompt 来兑现任何安全承诺。
 
-所有文件改动先进入 shadow workspace 或 overlay，模型、测试和审阅都面向该视图，用户批准后再应用到真实工作区。
+## Git 证据与用户明确的写操作
 
-它能提供很强的预览和隔离，也较容易丢弃未应用改动；但命令要在覆盖层中看到一致文件系统并不容易，Windows XP 与普通旧 Linux 上缺少统一原生 overlay，应用多个文件仍有冲突与部分失败窗口。路径、硬链接、大文件和外部工具还会显著增加复杂度。
+没有 Git-specific tool、adapter 或隐式工作流。模型可以把只读 `git status`/`git diff` 作为证据提出普通 raw `exec`；它们仍经过 Shell Permission、必要确认和 durable operation 屏障。`stash`、临时/正式 commit、checkpoint commit、reset、checkout、revert、merge、push 等写入或工作流操作只有用户明确要求时才可提出，Runtime 绝不自动执行。
 
-可以作为未来受控执行环境研究，不建议作为首版基础。
+即便用户要求，Git command 仍是 opaque shell 副作用：
 
-## 推荐候选的数据与流程
+- 它必须经过 `Shell` Permission、必要 DoubleCheck/人工确认和 durable operation barrier。
+- Runtime 不解析 command 来证明只触及当前 repository，也不把 Git 当 OS sandbox。
+- 现有 staged/unstaged/untracked 内容可能属于用户；模型与用户负责明确目标，Runtime 不自动整理或覆盖。
+- command 成败、输出、后代和 unknown 按普通 `exec` 收口；没有额外 rollback。
 
-本节描述“若选择强 undo”的完整流程，不代表当前 v0.1 已经选择它。
+## 故障与 unknown 矩阵
 
-### 结构化文件操作
+| 故障窗口 | 可证明的规范结果 | 后续行为 | 禁止行为 |
+| --- | --- | --- | --- |
+| admission/Permission/durable intent 前失败 | 未开始副作用；`failed` 或 `denied` | 可以由模型提出新的独立 call | 执行后补记录 |
+| intent durable、direct mutation 尚未开始时崩溃 | 目标仍匹配 expected old identity/digest 时记 `not-applied` synthetic result | 原 operation 关闭；是否重试必须成为新 operation | 自动重放旧 operation |
+| temp 已写、正式发布前失败 | 目标保持 old identity/digest；temp residue 单列 | 清理只按文件系统恢复协议；主目标不变 | 把 temp 当正式结果、删除旧目标 |
+| publish 返回成功但 result 未 durable | 目标匹配 exact candidate identity/digest 时追加 applied synthetic result | 保存真实已发生事实 | 当作失败后重写 |
+| publish 返回错误或进程崩溃，目标匹配 old | 收口 `not-applied/failed`，记录 API/残留证据 | 新动作需新 ID | 无条件 rollback |
+| publish 后目标既不匹配 old 也不匹配 candidate | `unknown/conflicted` | fail-stop；用户/self-fix 追加证据 | 猜测归属或覆盖当前内容 |
+| rename cross-device/target exists | typed conflict，证明 source/target 未按本 operation 改变 | Agent 获得结果后重新计划 | 自动 copy+delete、覆盖 target |
+| delete result 未 durable | exact target 缺失可证明 applied；原 identity 仍在可证明 not-applied；其余 unknown | 保存 synthetic result或等待解算 | 用同名新对象推断旧对象状态 |
+| 一个 batch 中第 N 项失败 | 1..N-1 保持各自结果，N 真实失败，N+1..end 各自 `skipped` | Agent 取得整批配对后决定下一步 | 回滚前项、继续执行剩余副作用 |
+| `exec` 退出/取消后仍有后代或外部效果 | 保存 observed result，标记 `external_effects_unsettled`/unknown | 等待用户证据或新动作 | 仅凭 root exit 宣称全部完成 |
+| operation/result XML 提交失败 | 立即阻止下一副作用；恢复时以 old/candidate/当前 identity 对照 | 生成真实或 synthetic result 后才能继续 | 在事实缺口上继续 AgentLoop |
+| 文件在 Agent 发布后被外部修改 | 原 operation 保留 applied；当前 drift 单独报告 | 新写必须基于新的 expected digest | 用旧 diff 覆盖、把 drift 归给 Agent |
 
-1. AgentLoop 创建 operation ID，并把已验证参数交给权限系统。
-2. 获得授权后，本系统规范化路径，读取当前身份、内容摘要和属性；与工具读取阶段的 expected hash 比较。
-3. 将操作意图、precondition 和足够的 preimage 提交并达到规定的 durable 屏障。
-4. 工具层执行单文件原子替换或其他明确动作。
-5. 重新读取目标身份与摘要，提交真实结果；若无法确认则记录 `unknown`，不自动重放。
-6. review view 更新；AgentLoop 决定继续、验证、等待用户还是结束 turn。
+unknown 是正式结果，不是待后台重试状态。用户可以在 context self-fix 中追加 `completed|not-completed|still-unknown` 和证据；原 intent、unknown result 与后续解算都保留。即使用户判断 old operation 已完成，任何再次执行仍必须使用新 operation ID、当前 Permission 和当前 target freshness。
 
-### 审阅
+## 明确删除的候选路线
 
-建议同时提供三个视图，但不要求 TUI 一次全部展示：
+下列旧草案不属于 v0.1 活动设计，只作为被拒绝方向的历史摘要保留：
 
-- **本 operation**：刚才具体改变了什么。
-- **本 turn/transaction**：本轮 Agent 累计改动及部分失败。
-- **相对启动状态**：整个任务由 Agent 产生的净变化，并单独标出启动前用户已有改动。
+- 每次修改前把完整 preimage/base64 attachment 写入 Context XML，再自动补偿撤销；
+- 按 turn 建立 checkpoint、reverse patch 或自动 compensation transaction；
+- 自动 Git stash/commit/reset/checkout/revert 作为统一 rollback；
+- shadow workspace、overlay 或“一次应用全部文件”；
+- 递归 direct delete 后依赖 trash/backup 恢复；
+- 扫描 raw shell 前后文件系统并宣称得到完整可撤销事务。
 
-Git diff 可以增强文本展示，但 operation journal 才决定归属与撤销资格。二进制或超限文件使用摘要、大小和属性变化报告，不伪造文本 diff。
+这些路线不能通过隐藏 sidecar、Prompt 约定、临时目录或“内部实现细节”回到首版。
 
-### 撤销
+## 将来显式重开条件
 
-撤销先生成计划：逐项比较当前身份与原 operation 的 postimage，再列出可补偿、已无变化、冲突和不可逆项。用户确认后，按逆序执行新的补偿 transaction；任一冲突不得自动覆盖，剩余安全项是继续还是停止需要单独决策。
+只有项目负责人针对具体用例显式重开，才可重新设计 undo/backup/transaction。重开不是给现有 operation 多加一个按钮，而必须同时回答：
 
-## Shell 与未知副作用
+- 精确覆盖哪些 direct tools，raw shell 是否永远排除；
+- preimage/attachment 放在哪里，怎样满足单 XML、Win32 x86 体积与写放大硬门；
+- 源码、binary、API Key、未知秘密、ACL/xattr/ADS/hardlink 的保存与清除；
+- 配额、跨机迁移、导出、损坏、磁盘满和崩溃窗口；
+- 外部并发修改时的冲突与补偿 Permission；
+- UI 怎样避免把 best-effort compensation 宣传成 ACID rollback。
 
-任意 shell 命令是本系统最重要的保证边界。候选处理方式有三种：
+在这些问题被重新确认并通过三平台测试前，公开帮助、配置 schema、Context schema 和发行包中都不得出现可触发的 undo/backup/checkpoint/rollback 空壳。
 
-1. **结构化工具内强保证（仅在选择强 undo 后）**：只有写入、补丁、删除、重命名等结构化工具进入完整 preimage/undo 契约；shell 显示“可能产生不可撤销副作用”，结束报告明确列出。
-2. **命令前后工作区扫描**：对允许的工作区做受限扫描，将检测到的文件变化纳入审阅。它可以补充证据，但会漏掉短暂变化、仓库外路径、元数据和外部系统，不能升级成完整撤销承诺。
-3. **受控影子环境执行**：命令只在 overlay/sandbox 中运行，再选择性应用变化。安全与实现成本最高，且与 `SAFE-17` 的真实 sandbox 承诺绑定。
+## 验收要求
 
-无论选择哪项，operation ID 只能防止 Runtime 自己盲目重放，不能让一个非幂等命令天然变得幂等。
-
-## 当前领先的 v0.1 最小保证
-
-为保持 raw tools、单 XML 和旧平台实现简单，当前建议先承诺：
-
-- direct write/patch/rename/delete 在执行前验证参数、文件类型、规范目标与 expected digest；目标变化则停止。
-- 单文件创建/替换/no-replace 尽可能使用经过平台证明的安全原语，失败不发布半文件。
-- 每个副作用有 operation ID、durable intent、真实/synthetic result、diff 或不可显示原因；崩溃后不自动重放 unknown。
-- Agent 只报告自己有 operation 证据的改动，不把工作区原有脏状态算成 Agent 成果。
-- Git status/diff 是只读增强；不自动 stash/reset/commit/push。
-- 不承诺 direct tool 的通用自动 undo，更不承诺 raw shell/网络/外部系统可回滚。
-
-这仍能保护用户不被模型基于旧版本静默覆盖，并提供审阅与恢复事实；它不需要把所有源码、私钥和大二进制 preimage 再复制进 Context XML。以后如果真实需求证明 undo 值得增加，再以新子系统范围设计附件/配额或其他存储，而不是把它藏在 write 工具里。
-
-## 失败与恢复问题
-
-| 崩溃或失败窗口 | 推荐候选行为 | 禁止行为 |
-| --- | --- | --- |
-| durable preimage 之前失败 | 不修改文件，operation 标记失败 | 先写文件再补检查点 |
-| preimage 已提交、实际修改前崩溃 | 比较当前摘要；仍等于 preimage 时安全收口为未执行/取消 | 无条件重新执行 |
-| 文件已修改、result 未提交时崩溃 | 若当前摘要等于预期 postimage，记录已应用并产生合成结果；否则进入 `unknown/conflicted` 等待处理 | 把它当失败后自动重放 |
-| 原子替换失败 | 保留原文件和临时证据，报告系统能力与清理状态 | 删除原文件后声称可恢复 |
-| 多文件中途失败 | 列出已应用、未执行和未知 operation；保留成功部分，允许用户选择安全补偿 | 把整个 transaction 简化成“没有改动” |
-| 写后被用户或其他进程修改 | 撤销停止于冲突，展示 preimage、Agent postimage 与当前摘要/差异 | 用旧 preimage 覆盖当前内容 |
-| checkpoint 磁盘满或损坏 | 停止新增可撤销改动；现有文件优先保持不变，诊断丢失范围 | 在无恢复证据时继续承诺可撤销 |
-| 撤销过程中再次失败 | 已完成的补偿本身持久化，剩余项保持明确状态，可再次规划 | 擦除原 transaction 或从头盲重放 |
-| session 恢复发现孤立 operation | 依据 pre/post 摘要确定 `not_applied/applied/unknown`，并补齐合成 tool result | 仅依据最后一条日志猜测文件状态 |
-
-## 安全、隐私与兼容性
-
-- preimage 可能复制源码、凭据、私钥或大二进制；保存、模型可见性、日志、导出、保留和彻底删除分别服从 `PROD-08`、`SAFE-09` 与 `CTX-06`，不能因它叫“检查点”就绕过数据分类。
-- 检查点目录必须在权限边界内受到保护；项目本身不应能把伪造记录注入为可信撤销依据。
-- Windows 的共享句柄、只读属性、ACL/权限近似、大小写与短路径，Linux 的权限位、符号链接和原子 rename 限制都需要能力化报告。
-- 内容层面应以原始字节保存 preimage，避免撤销时因换行、BOM 或本地代码页重新编码；文本 diff 是派生显示。
-- 大文件、单 operation、单 turn 和总检查点存储分别需要限额。无法保存完整 preimage 时，应在修改前降级为“不可自动撤销”并请求明确决定，而不是事后才说明。
-- 自动撤销本身是新的写/删动作，仍需遵守当前权限规则；历史授权是否覆盖补偿操作由 08 号系统决定。
-
-## 建议讨论顺序
-
-1. v0.1 的撤销保证只覆盖结构化文件工具，还是还要承诺追踪任意 shell 命令的文件副作用。
-2. 用户既有改动的基线与归属：全量启动快照、Git 辅助，还是按路径惰性 preimage。
-3. operation、turn transaction 和任务级净改动三个边界。
-4. preimage durable 屏障、expected hash 与单文件原子替换契约。
-5. 多文件部分成功、崩溃窗口与 `unknown` 状态恢复。
-6. 审阅时机、diff 视图和 TUI/CLI 呈现。
-7. 撤销冲突、补偿顺序与用户确认。
-8. 非 Git、文件属性、大文件、秘密、配额、保留与删除。
-
-## 当前讨论入口
-
-先回答 `AQ-312`：v0.1 是采用上述“安全写入 + 冲突检测 + 审阅证据，不保证自动 undo”，还是批准完整 preimage/补偿系统。当前推荐前者。若希望 direct tools 或 shell 进入强保证，就必须同时讨论存储、秘密、配额与受控执行环境，不能只靠命令前后 diff 宣称可逆。
+- direct create/replace/patch/rename/delete 在竞争、磁盘满、只读/共享占用、kill 和 publish 不确定时满足上述矩阵。
+- 每个 accepted mutation 和 `exec` 都有唯一 intent/result；首个失败后的剩余 batch 项全部得到 `skipped`，没有丢失配对。
+- diff 只归属有 operation 证据的内容；启动前 dirty 与发布后 drift 不被吞并。
+- unknown 不自动重放，用户解算只追加事实。
+- Runtime 不生成 preimage、checkpoint、reverse patch、trash、Git stash/commit 或 rollback。
+- `backup/` 只作为 Prompt 普通文字被处理；删除该文字不会留下任何 schema、tool、目录管理或恢复行为。
