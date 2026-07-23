@@ -32,7 +32,7 @@ As a Coding Agent, configuring a model is required. Use `yaca --model-repl` to e
 - `Poe`  
 - `Ollama`  
 
-> Do not manually modify the contents of the `_yaca_` directory under the installation directory.
+> Do not manually modify internal files under `__yaca__` except through documented configuration entry points. Its final user-data or portable location is still being designed.
 
 ## Configuration
 

@@ -4,7 +4,7 @@
 
 ## 职责
 
-以单个活动 XML 持久化完整对话、日志相关信息、会话级参数及关联工作目录；提供创建、加载、保存、归档、删除和恢复。完整对话包含哪些工具与模型事件仍待定义。
+以单个活动 XML 持久化可接盘的规范事实：完整对话、实际 model view 引用、工具与审批、日志相关信息、会话级参数、模型/Prompt 切换及关联工作目录；提供创建、加载、保存、归档、删除和恢复。这里的“完整”仍受公开 schema 与明确资源上限约束，不等于无限保存每个 token delta 和任意二进制原始字节。
 
 ## 边界
 
@@ -29,7 +29,7 @@ D-022 已确认以下总体形态：
 - 上下文 XML 保存完整对话、日志相关信息、会话级参数及其元数据；`.cautious` 的 `DoubleCheck` 会话覆盖属于这类元数据。
 - 索引由 11 号系统从当前 XML 树实时派生；缓存和重扫机制待定。
 
-仍需明确“完整对话”是否包括流式残片、推理内容、全部工具输出、权限记录、终止评估与压缩前原文；也需要决定压缩是否只改变模型视图、XML 是稳定公开格式还是内部可迁移格式，以及用户输入、工具副作用、完整 turn 在何时安全落盘。
+仍需明确 reasoning/refusal、超限工具输出、`DoubleCheck` 动作/完成复核和实际 model-view manifest 的精确 schema。当前候选不周期性写 token delta；完整 response 或明确 interrupted response 才成为 canonical 事实。压缩只改变模型 view，不能删除事实历史。
 
 路径 hash 包含 XML 文件名。D-023 已确认不建立永久 `ContextId`：当前逻辑路径是当前地址，固定 16 位 hash 由它运行时计算；重命名或移动改变逻辑路径后，新 hash 生效、旧 hash 立即失效。归档是否改变路径、软删除/彻底删除、备份和配额仍需讨论。
 
@@ -66,7 +66,9 @@ D-022 已确认以下总体形态：
 - **事实历史**：用户输入、完成的模型消息、工具调用/结果、权限决定和 turn 边界，只追加或显式标记撤销。
 - **运行视图**：下一次发送给模型的消息集合，可由压缩、截断和模型能力派生。
 - **实时索引投影**：名称、逻辑路径、hash、时间和状态，从当前 XML 树计算，不是独立事实源。
-- **用户导出**：可读、可脱敏的 XML/Markdown/JSON；是否直接复制活动 XML 仍待决定。
+- **用户导出**：正式会话文件仍是可读、可检查的 XML；Markdown/JSON 若未来需要只能作为显式 stdout/临时投影另行决定，不成为第三种长期事实格式。是否允许直接热复制活动 XML 仍待决定。
+
+事件序列应是唯一事实，current projection/摘要如存在必须记录覆盖到的 event seq/digest，失配时可丢弃重建。每个 XML 内需要局部单调身份，例如 event/turn/input/request/attempt/message/tool-call/operation/approval/compaction；无永久 ContextId 不影响这些局部关系。provider 原始 ID 不能替代本地身份。
 
 这种逻辑分离可以存在于同一个 XML 的不同 section 中，使压缩改变模型看到的内容而不必静默销毁用户历史。具体 schema 尚未确认。
 
@@ -81,11 +83,27 @@ D-022 已确认以下总体形态：
 - 创建新上下文时，临时 XML 不得参与 Catalog；完整写入、flush 和验证后才能使用 `publish_new_no_replace` 或等价能力发布，不能用“先检查、再普通 rename”冒险覆盖非协作程序刚创建的目标。
 - 创建或保存期间崩溃、磁盘满或验证失败不能发布半个正式 XML；临时残留的识别、清理和恢复协议仍需确认。
 
+## 单 XML 的物理限制
+
+well-formed XML 在根结束标签后不能原地追加新子元素。当前只有三类路线：
+
+1. 每个 canonical 边界流式生成完整新 XML、验证/flush 后 replace；正式文件始终合法，但长会话累计 I/O 是 O(n²)。
+2. 活动期间允许 durable recovery WAL/sidecar，安全点合并回 XML；性能更好，但暂时不再只有正式 XML 承载最新事实。
+3. 保持根未闭合或闭合后追加片段；文件不是始终合法 XML，直接排除。
+
+领先候选是先用路线 1 做正确性基线，不写周期性 token checkpoint，并在 XP x86/旧磁盘测试 1/10/50/100 MiB 等长会话。达到已确认大小/提交时延硬门后 fail-stop/只读/导出，而不是继续副作用。如果基准不达标，必须请负责人明确允许路线 2 或调整单 XML 承诺，不能由实现暗中引入第二事实源。
+
+同目录 temp、稳定 writer lock/lease 和最多一个 previous-valid generation 可以是有界恢复辅助，但它们必须被 Resolver 忽略并有完整真值表。锁旧 XML handle 后再 replace 不会自然锁住新路径，因此 stable lock 不能省略为“文件已打开”。Windows XP 可用的 replace/flush 原语也必须在目标文件系统上实测；库只负责 XML parse/write，不负责 durability。
+
+## 导入信任边界
+
+外部 XML 是不可信输入。DTD/external entity 必须禁用，深度/元素/属性/文本/总大小受限。历史 Permission、`DoubleCheck=false`、ContextPrompt 和 approval 要忠实显示，但不是目标机新授权：继续运行前用本机配置重新验证，审批永远 audit-only，任何降低本机安全默认的覆盖显著确认。公开 schema 的 v0.1 承诺优先是第三方可读、yaca 为受支持 writer；第三方原地写入可另行建立 conformance contract。
+
 ## 后续讨论顺序
 
 1. Windows/Linux 路径规范化、文件名编码、长路径与碰撞。
-2. “完整对话”、日志信息和会话参数元数据的 XML schema。
-3. 提交点、更新方式、崩溃恢复与副作用去重。
+2. “完整对话”、model-view manifest、局部 ID、日志信息和会话参数元数据的 XML schema。
+3. 提交点、完整重写基线、锁/temp/backup 真值表、崩溃恢复与副作用去重。
 4. 事实历史、模型视图、压缩和导出的关系。
 5. 敏感内容、保留、配额、归档和删除。
 6. 版本迁移、导入导出与损坏修复。

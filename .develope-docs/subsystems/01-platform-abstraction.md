@@ -169,6 +169,15 @@ Windows/Linux 各维护一套 path、fs、text、process、network、terminal。
 - `fs` 还需要为上下文 rename 提供 `move_no_replace(source, target)` 或等价恢复协议。禁止用“先检查目标不存在，再调用可能覆盖目标的普通 rename”模拟原子 no-replace；该检查存在 TOCTOU。
 - Windows/Linux 后端可以使用不同原语或带提交标记的恢复协议，但上层语义必须一致。某文件系统无法安全满足时应明确返回 capability/storage error，不能为了成功率降级为可能丢失用户文件的覆盖操作。
 
+## Windows XP 文件 API 可行性边界
+
+不能把“Windows wide API”写成一个没有版本差异的承诺。Microsoft 的官方要求表显示：
+
+- [`ReplaceFileW`](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-replacefilew)、[`MoveFileExW`](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-movefileexw) 和 [`FlushFileBuffers`](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-flushfilebuffers) 的最低客户端包含 Windows XP，为同卷替换/移动与 flush 提供候选原语；具体掉电、共享句柄、FAT/NTFS/网络盘语义仍需实测。
+- [`GetFinalPathNameByHandleW`](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getfinalpathnamebyhandlew) 最低是 Windows Vista，XP 后端不能用它实现审批后路径身份复核。
+
+因此“安全替换”与“最终路径/链接身份”要分别设计 capability。XP 的路径 fallback 可能需要父目录 handle、reparse point 查询、稳定文件身份或更保守地拒绝无法证明的 direct 操作；任何候选都要先在 XP/NTFS、FAT 和常见共享场景做原型，不能因为函数名带 `W` 就假定可用或原子。
+
 ## 当前问题
 
 建议采用扁平后缀模块，并且只在行为真正不同处拆平台文件。这个布局是否需要调整？

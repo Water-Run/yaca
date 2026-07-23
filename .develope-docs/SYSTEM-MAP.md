@@ -4,7 +4,7 @@
 
 每个子系统都有独立文档。文档先作为讨论草案，经逐段确认后才成为设计契约。
 
-完整待决策主题、优先级与建议讨论顺序见 [全产品设计决策清单](DESIGN-CHECKLIST.md)。子系统地图说明边界，清单负责避免遗漏用户体验、生命周期、失败恢复、安全、配置和验收问题。
+负责人讨论入口见 [设计决策路线图](DESIGN-DECISION-ROADMAP.md) 与 `decision-packets/`；原子完整性见 [设计问题题库](QUESTIONS.md) 和 [全产品设计决策清单](DESIGN-CHECKLIST.md)；[配置 schema 候选](CONFIG-SCHEMA-CANDIDATE.md) 与 [数据分类候选](DATA-CLASSIFICATION-CANDIDATE.md) 提供横切字段/数据流底稿；能否进入实施计划由 [架构实施就绪门](ARCHITECTURE-READINESS.md) 判断。子系统地图说明最终权威规格归属，决策包负责通俗问答，题库负责防遗漏。
 
 ## 基线层
 
@@ -26,27 +26,33 @@
 
 AgentLoop 的开源实现源码核对单独保存在 [参考研究](references/agent-loop-reference-study.md)，它只提供机制证据，不属于已确认设计。
 
+## 应用运行时横切层
+
+13. [应用运行时、生命周期与并发](subsystems/22-application-runtime-and-concurrency.md)
+
+22 号系统定义组合、生命周期、事件泵和背压，横跨端口与领域服务。把它列在这里是责任分组，不代表它能在 02/03、09/10、13/14 的契约或实现之前独立完成；其上游选择应提前讨论，最终装配在被组合服务可用后完成。
+
 ## 上下文层
 
-13. [上下文存储](subsystems/10-context-storage.md)
-14. [上下文定位、实时索引与交互式浏览器](subsystems/11-context-indexing.md)
-15. [上下文压缩](subsystems/12-context-compaction.md)
+14. [上下文存储](subsystems/10-context-storage.md)
+15. [上下文定位、实时索引与交互式浏览器](subsystems/11-context-indexing.md)
+16. [上下文压缩](subsystems/12-context-compaction.md)
 
 ## 交互、验证与交付层
 
-16. [CLI](subsystems/13-cli.md)
-17. [兼容 TUI](subsystems/14-tui.md)
-18. [诊断、自检与日志](subsystems/15-diagnostics-and-logging.md)
-19. [测试、Agent 评估与平台验收](subsystems/20-testing-and-agent-evaluation.md)
-20. [打包、安装与发布](subsystems/16-packaging-and-release.md)
+17. [CLI](subsystems/13-cli.md)
+18. [兼容 TUI](subsystems/14-tui.md)
+19. [诊断、自检与日志](subsystems/15-diagnostics-and-logging.md)
+20. [测试、Agent 评估与平台验收](subsystems/20-testing-and-agent-evaluation.md)
+21. [打包、安装与发布](subsystems/16-packaging-and-release.md)
 
 ## 横切与暂缓边界
 
-21. [扩展边界与未来兼容](subsystems/21-extension-boundary.md)
-22. [Web 界面](subsystems/17-web.md)（暂缓）
+22. [扩展边界与未来兼容](subsystems/21-extension-boundary.md)
+23. [Web 界面](subsystems/17-web.md)（暂缓）
 
 ## 依赖主线
 
-`产品契约` → `平台/进程/网络/数据` → `配置/模型/指令/工具/改动/权限` → `AgentLoop` → `上下文/索引/压缩` → `CLI/TUI/诊断` → `测试证据` → `发布`
+领域与端口的主线是：`产品契约` → `平台/进程/网络/数据` → `配置/模型/指令/工具/改动/权限` → `AgentLoop` → `上下文/索引/压缩` → `CLI/TUI/诊断`。22 号运行时负责组合并协调这些已定义契约，不反向取得它们的业务所有权；20 号消费所有核心契约形成测试证据，16 号依据证据发布。
 
 扩展边界是所有核心系统的约束，不代表 v0.1 实现扩展运行时。Web 是稳定核心之上的可选适配器，不复制 Agent、权限或上下文逻辑。
