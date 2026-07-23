@@ -43,19 +43,24 @@ The first model entry in the config file is the default when entering a session.
 
 ## Context Mechanism
 
-`yaca` stores contexts as `[name].xml` files under `__yaca__`, in a tree that mirrors the corresponding paths on disk.  
-A context file holds all metadata for the related conversation and can be used as a log. Each context has a display name and a hash derived from its directory. Use `yaca --dir-context` to list contexts under the current directory, and `yaca --global-context` for the global list.  
-Use `yaca --continue [hash]` to jump to a conversation, including ones outside the current directory (when `AutoJumpToDir` is enabled). You can also use `yaca --continue <name>` to jump by name, but name lookup only applies to contexts under the current directory. If a name happens to equal a hash, the hash wins. `yaca --delete-context` deletes a context with the same resolution rules as `continue`; `yaca --rename-context` renames with the same rules.  
-For simpler management, use interactive `yaca --manage-context` (list, delete, rename, and more).
+`yaca` stores each context as a `[name].xml` file under `__yaca__/CONTEXT/`, in a tree that mirrors the corresponding path on disk. For example, a Windows context may be stored as `CONTEXT/C/Program Files/我的任务.xml`.
+
+The hash input is the logical path from the `CONTEXT` root, with a leading `/`, `/` separators, and the XML filename included. The example above uses exactly `/C/Program Files/我的任务.xml` to compute a fixed 16-character hash. yaca does not store a permanent context ID: a rename or path change recomputes the hash in real time and immediately invalidates the old hash. Context lists and hash lookups are derived from the current XML tree.
+
+A context XML contains the complete conversation, log-related information, session-level parameters, and their metadata. Use `yaca --dir-context` to list contexts under the current directory, and `yaca --global-context` for the global list.
+
+`yaca --continue <selector>` accepts an exact context name or a fixed 16-character hash. Resume, rename, and delete entry points share one resolver: it starts at the mirror location for the current directory, then expands outward through recursive ancestor scopes to the `CONTEXT` root. Distance wins first; within one search scope, an exact name wins over a hash. The resolver checks both in one pass and stops after the current scope yields a conclusive result. `AutoJumpToDir` separately controls whether yaca changes the working directory after resolution.
+
+For simpler management, use interactive `yaca --manage-context` to browse the directory tree, search, select and connect, rename, delete, and refresh. It shares the same path, hash, and safety rules as the command-line interface.
 
 ## Permission Mechanism
 
-Permission groups live under `Permission` in the config. Four presets are provided: `Std`, `Cautious`, `TrustMeBro`, and `Readonly`. Names are customizable and do not by themselves define behavior.  
+Permission groups live under `Permission` in the config. Three presets are provided: `Std`, `TrustMeBro`, and `Readonly`. `Cautious` is not a separate permission mode; cautious review is controlled by the default `DoubleCheck` switch and may be overridden for the current session with `.cautious`. Names are customizable and do not by themselves define behavior.
 As with models, the first permission entry in the config is the default when entering a session. A context keeps the last permission used before exit; if that permission is no longer valid, it falls back to the default. In a session, switch permissions with `.permission`.
 
 ## Command Overview
 
-Running `yaca` directly enters the TUI in the current directory. The `yaca` binary accepts:
+The primary invocation is `yaca [directory]`. Bare `yaca` is exactly equivalent to `yaca .`: both enter the TUI with the current directory as the initial workspace location. `yaca <directory>` starts from the specified directory. The `yaca` binary also accepts:
 
 - `--help` / `-h`(Unix) / `/h`(Windows): Show help  
 - `--version` / `-v`(Unix) / `/v`(Windows): Show version  
@@ -66,7 +71,7 @@ Running `yaca` directly enters the TUI in the current directory. The `yaca` bina
 - `--global-context` / `-gc`(Unix) / `/gc`(Windows): List global contexts  
 - `--delete-context` / `-dc`(Unix) / `/dc`(Windows): Delete a context  
 - `--rename-context` / `-rc`(Unix) / `/rc`(Windows): Rename a context  
-- `--manage-context` / `-mc`(Unix) / `/mc`(Windows): Context manager  
+- `--manage-context` / `-mc`(Unix) / `/mc`(Windows): Browse, search, select, rename, and delete contexts
 - `--self-test` / `-st`(Unix) / `/st`(Windows): Run self-test. When an LLM is available, a deeper LLM-backed check may run.  
 - `--continue` / `-c`(Unix) / `/c`(Windows): Resume a session from a context  
 - `--set-default-permission` / `-sdp`(Unix) / `/sdp`(Windows): Set the default permission  
@@ -76,12 +81,13 @@ Running `yaca` directly enters the TUI in the current directory. The `yaca` bina
 In the TUI, invoke commands with a leading `.`:
 
 - `.quit`: Exit the program  
-- `.context`: Switch among available contexts. Bare `.context` opens a menu; or `.context <global-hash>` / `.context <name-under-cwd>`  
+- `.context`: Switch contexts. Bare `.context` opens the browser; `.context <name-or-16-character-hash>` uses the common resolver
 - `.archive`: Archive the current context (then start a clean session). `.archive rename` also triggers auto-rename  
 - `.ping`: Check model connectivity. Defaults to the current model, or `.ping <model-name>` for another  
 - `.index`: Override the current context name (auto or manual). `.index <name>` renames immediately  
 - `.compact`: Trigger context compaction  
 - `.model`: Switch model. Bare `.model` opens a menu, or `.model <name>` switches directly  
 - `.permission`: Switch permission. Bare `.permission` opens a menu, or `.permission <name>` switches directly  
-- `.status`: Status (context usage, etc.)  
+- `.cautious`: Change the current session's `DoubleCheck` override; the override is stored in the context XML
+- `.status`: Status, including the 16-character context hash computed from the current logical path
 - `.delete`: Delete this conversation's context  

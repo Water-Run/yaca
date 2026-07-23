@@ -19,6 +19,12 @@
 - 用户确认内容必须准确显示将要访问的路径、程序或主机。
 - LLM 二次检查失败时采用保守策略。
 
+## 已确认的模式边界
+
+`Cautious` 不再是独立权限模式或内置权限组。权限 profile 回答“哪些动作允许、拒绝或需要人工确认”；默认配置 `DoubleCheck` 和会话命令 `.cautious` 回答“是否启用额外谨慎复核”。因此 `.cautious` 不能暗中改变 `AllowWrite`、`AllowDelete`、`AllowNetwork` 或当前权限组。
+
+当前 `_CONFIG_.ini` 中的 `[Permission.Cautious]` 与每个 profile 内的 `DoubleCheck` 属于待迁移旧草案，不能继续作为目标 schema。`DoubleCheck` 究竟覆盖工具动作复核、终止评估器或其他复核行为，仍需由配置与 AgentLoop 共同确认。
+
 ## 待讨论
 
-现有四个权限预设的精确定义，以及“删除”是否是“写入”的子能力或独立能力。
+剩余权限预设的精确定义、LLM 风险检查与 `DoubleCheck` 的关系，以及“删除”是否是“写入”的子能力或独立能力。

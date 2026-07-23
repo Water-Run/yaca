@@ -22,6 +22,8 @@ yaca 当前是“产品说明、配置草案、模块骨架和本地运行工具
 - CLI 短参数存在冲突：`-dc` 和 `-rc` 各自对应两个操作。
 - 安装目录名存在 `_yaca_` 与 `__yaca__` 两种写法。
 - README 的模型预设清单与配置模板中的模型条目不一致。
+- `_CONFIG_.ini` 仍包含 `[Permission.Cautious]` 和 profile 内 `DoubleCheck`，尚未迁移到 D-021 的全局默认开关与 `.cautious` 会话覆盖设计。
+- `_CONTEXT_.xml` 仍只有头部注释，尚未表达 D-022 的镜像路径、完整对话、会话参数元数据和实时索引契约。
 - Web 目录只有占位内容，应与核心版本解耦。
 
 ## luainstaller 能力

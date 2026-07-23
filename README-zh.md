@@ -43,19 +43,24 @@ Yet Another Coding Agent.
 
 ## 上下文机制  
 
-`yaca`使用位于`__yaca__`下的, 结合实际对应位置的树形结构下的`[命名名称].xml`作为上下文文件.  
-上下文文件详细的存储了和对应对话有关的一切元数据, 可作日志使用. 上下文包括命名名称, 和结合目录计算的哈希. 使用`yaca --dir-context`输出目录下的上下文清单, `yaca --global--context`输出全局的上下文清单.  
-使用`yaca --continue [哈希值]`可跳转至对应的对话, 包括非当前目录下的对话(当启用`AutoJumpToDir`时). 也可以使用`yaca --continue 对话名称`直接跳转至对应对话, 不过这仅支持当前目录下的上下文. 当对话名称非常刚好的和哈希名一样时, 跳转至对应哈希名称. `yaca --delete-context`用于删除上下文, 对应逻辑和`continue`一致. `yaca --rename-context`重命名上下文也是如此.  
-更简易的上下文管理方式可以使用交互式的`yaca --manage-context`, 包括展示, 删除和重命名等.  
+`yaca`把每个上下文保存为`__yaca__/CONTEXT/`镜像路径树中的`[命名名称].xml`. 例如 Windows 上的一个上下文可以保存为`CONTEXT/C/Program Files/我的任务.xml`.
+
+哈希输入是从`CONTEXT`根开始的逻辑路径: 带前导`/`, 统一使用`/`分隔, 并包含 XML 文件名. 上述示例严格使用`/C/Program Files/我的任务.xml`计算固定 16 位哈希. yaca 不为上下文另存永久 ID; 名称或路径变化后哈希实时重算, 旧哈希立即失效. 上下文清单与哈希查找从当前 XML 树实时派生.
+
+上下文 XML 保存完整对话、日志相关信息、会话级参数及其元数据. 使用`yaca --dir-context`输出目录下的上下文清单, `yaca --global-context`输出全局的上下文清单.
+
+`yaca --continue <选择器>`接受上下文精确名称或固定 16 位哈希. 所有连接、重命名和删除入口共用一套解析器: 从当前目录对应的镜像位置开始, 再由近到远扩展到祖先的递归范围和`CONTEXT`根. 距离优先; 在同一个搜索范围内名称优先于哈希. 解析器单遍同时检查两者, 当前范围得到可裁决结果后不再扫描更远范围. 解析完成后是否切换工作目录再由`AutoJumpToDir`控制.
+
+更简易的上下文管理方式可以使用交互式`yaca --manage-context`: 访问目录树、搜索、选择并连接, 以及重命名、删除和刷新. 它与命令行共用同一套路径、哈希和安全复核规则.
 
 ## 权限机制  
 
-`yaca`的权限组位于配置文件的`Permission`下, 预设了四个权限: `Std`, `Cautious`, `TrustMeBro`和`Readonly`. 名称可在配置中自定义, 不代表权限的真实功能.  
+`yaca`的权限组位于配置文件的`Permission`下, 预设三个权限: `Std`, `TrustMeBro`和`Readonly`. `Cautious`不再是独立权限模式; 谨慎复核由默认配置`DoubleCheck`控制, 当前会话可以使用`.cautious`覆盖. 名称可在配置中自定义, 不代表权限的真实功能.
 和模型配置一样, 配置文件的第一项是进入对话时的默认权限. 上下文会保留退出前最后使用的权限, 如果此模型已经失效, 将回归至默认权限. 在对话中, 可以使用`.permission`进行模型切换.  
 
 ## 命令一览  
 
-直接运行`yaca`会在目录下直接进入TUI. `yaca`二进制本身可接受以下参数:  
+主入口是`yaca [目录]`. 裸`yaca`与`yaca .`完全等价: 都以当前目录作为初始工作区位置进入TUI. `yaca <目录>`则从指定目录启动. `yaca`二进制还可接受以下参数:
 
 - `--help` / `-h`(Unix) / `/h`(Windows): 获取帮助  
 - `--version` / `-v`(Unix) / `/v`(Windows): 输出版本  
@@ -66,7 +71,7 @@ Yet Another Coding Agent.
 - `--global-context` / `-gc`(Unix) / `/gc`(Windows): 输出全局上下文清单  
 - `--delete-context` / `-dc`(Unix) / `/dc`(Windows): 删除上下文  
 - `--rename-context` / `-rc`(Unix) / `/rc`(Windows): 重命名上下文  
-- `--manage-context` / `-mc`(Unix) / `/mc`(Windows): 上下文管理器  
+- `--manage-context` / `-mc`(Unix) / `/mc`(Windows): 目录树、搜索、选择、重命名和删除上下文
 - `--self-test` / `-st`(Unix) / `/st`(Windows): 运行自检. 当LLM可用时, 可使用LLM进入深度检查.  
 - `--continue` / `-c`(Unix) / `/c`(Windows): 以某上下文恢复会话  
 - `--set-default-permission` / `-sdp`(Unix) / `/sdp`(Windows): 设置默认权限  
@@ -76,12 +81,13 @@ Yet Another Coding Agent.
 在使用`TUI`是, 可以使用`.`命令形式唤起命令. 这些包括:  
 
 - `.quit`: 退出程序  
-- `.context`: 切换目录下可用的上下文. 直接`.context`进入选单, 或`.context 全局上下文哈希`/`.context 当前目录上下文名称`  
+- `.context`: 切换可用上下文. 直接`.context`进入浏览器, 或`.context <名称或16位哈希>`使用通用解析器
 - `.archive`: 归档当前上下文(随后进入一个新的干净会话). `.archive rename`同时触发自动重命名  
 - `.ping`: 检查模型的连通性. 默认测试当前模型, 或`.ping 模型名称`测试其他模型  
 - `.index`: 覆写当前上下文的名称(可选自动和手动). `.index 手动重命名名称`直接重命名  
 - `.compact`: 触发上下文压缩  
 - `.model`: 切换模型. 直接`.model`进入选单, 或`.model 模型名称`进行切换  
 - `.permission`: 切换权限. 直接`.permission`进入选单, 或`.permission 权限名称`进行切换  
-- `.status`: 当前情况说明, 如已用上下文等  
+- `.cautious`: 修改当前会话的`DoubleCheck`覆盖值; 覆盖值保存到上下文 XML
+- `.status`: 当前情况说明, 包括从当前逻辑路径实时计算的 16 位上下文哈希
 - `.delete`: 删除本对话上下文  

@@ -165,6 +165,9 @@ Windows/Linux 各维护一套 path、fs、text、process、network、terminal。
 - 平台后端必须返回相同形状的模块表与结构化错误。
 - 只有 `main.lua` 知道 `_windows` / `_linux` 文件名。
 - 高层源码与配置文件中禁止引用平台后缀模块。
+- `fs` 必须把“原子替换已有文件”和“仅当目标不存在时发布新文件”分成不同操作。后者可暂记为 `publish_new_no_replace(temp, target)`，只能返回成功或 `DestinationExists`，绝不能覆盖陌生目标。
+- `fs` 还需要为上下文 rename 提供 `move_no_replace(source, target)` 或等价恢复协议。禁止用“先检查目标不存在，再调用可能覆盖目标的普通 rename”模拟原子 no-replace；该检查存在 TOCTOU。
+- Windows/Linux 后端可以使用不同原语或带提交标记的恢复协议，但上层语义必须一致。某文件系统无法安全满足时应明确返回 capability/storage error，不能为了成功率降级为可能丢失用户文件的覆盖操作。
 
 ## 当前问题
 
