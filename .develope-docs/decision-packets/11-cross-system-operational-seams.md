@@ -1,14 +1,27 @@
 # 决策包 11：跨系统运行接缝与遗漏收口
 
-更新日期：2026-07-18
+更新日期：2026-07-22
 
-状态：F4-01 至 F4-12、F4-14 等待项目负责人回复；扩展关闭/重入门已由 D-038 确认
+状态：`F4-01` 已由负责人自然语言批注选择 custom turn-boundary automatic reload；F4-02 至 F4-12、F4-14 至 F4-17 等待回复；扩展关闭/重入门已由 D-038 确认
+
+## 已收到的跨包现行投影
+
+负责人在 packet 02 的后续批注中明确要求“模型和配置可以修改，yaca 每轮载入变更，实时”，归档为 `DISCUSSION-BATCH-04.md#as-004-09` 和 D-048。它关闭 `F4-01`，但不改写下面冻结的 A/B/C 题面：现行选择是 custom，而不是把旧候选 B 的确认步骤偷偷删除后仍记作 B。
+
+- 每个新顶层 main/side turn admission 前有界读取完整 INI bytes；private digest 未变时复用已验证 immutable generation。
+- bytes 变化时整份 parse/cross-validate，一次发布新 generation；有效变化自动在该 turn 生效，不再询问 reload。
+- 该 turn 派生的 Model/tool/review/retry/compaction 活动始终冻结同一个 generation；绝不在内部步骤间热换。
+- 已观察到删除、半写、不可读或无效候选时阻止新 turn，进入 bootstrap repair；不静默继续旧 generation，也不自动选择第一 Model/Permission。
+- 不增加 watcher、reload interval 或 reload-policy 配置字段。正确性基线是配置小文件每 turn 一次顺序读，digest 相同才跳过解析；高性能库和目标旧机时延进入 TP-019。
+- 本包冻结题面中的 `recorded workspace` 现统一解释为“由所选 Context XML 在 `__yaca__/CONTEXT/` 镜像树中的当前父目录经 `LogicalPathCodec` 解码出的唯一 root”。它不是 XML 内的 current-workdir/root 字段；F4-14 只决定 initial root/boundary 怎样从本次传入目录产生，不能重新引入第二份 workspace 真相。
+- `F4-02` 只决定同一 Model 的 scheduler、并发、间隔、公平性与 cooldown。其冻结题面中“仅 `PJ-12=B` 才有首 turn 后一次性 `context-name`”已由 D-041/D-046 取代；现行周期 `context-name` 在满足 interval/waterline/marker gate 时与其他 purpose 共用所选 scheduler，但不会恢复 one-shot lifecycle。
+- 下面正式问题、推荐回复模板、示例回复和完成标准一并作为冻结 inventory 证据保留；其中仍要求回复 `F4-01 A` 或称 F4-01 未关闭的字句均已被本节/D-048 supersede。负责人无需再次回答 F4-01，后续只处理仍为 `unanswered` 的组。
 
 ## 为什么还需要这一包
 
 前九个主包已经分别讨论产品旅程、Prompt、TUI、Model、AgentLoop、工具、安全、Context、错误、发布和测试。第四轮审阅不再按“一个子系统一个子系统”顺读，而是从用户输入开始，反向模拟外部编辑、休眠、断网、目录消失、进程卡住、配置备份、跨机恢复和升级，再检查每一条责任有没有唯一归属。
 
-第四轮敌对式审阅发现 31 个接缝：其中 21 个可以准确补入已有决策组或技术证明，10 个确实缺少主问题。责任归属审计又发现 raw 命令传输、活动 workspace 失效两个独立缺口；复审还发现“传入目录与上级 Git 根”的权限边界必须独立作答。因此本包集中 13 个正式决定。原 F4-13 的扩展运行时关闭已经由 D-038 确认，只在本包保留非回复式重入门；新发现的 Git 根轴使用 F4-14，避免复用已经归档的编号。若把另外 21 个重新包装成新题，只会让负责人对同一个意思回答两次。
+第四轮敌对式审阅发现 31 个接缝：其中 21 个可以准确补入已有决策组或技术证明，10 个确实缺少主问题。责任归属审计又发现 raw 命令传输、活动 workspace 失效两个独立缺口；复审还发现“传入目录与上级 Git 根”的权限边界必须独立作答。2026-07-19 的运行时完整性复核又确认，“同一进程能有几个 active Context”会改变 composition root、lease、调度与关闭拓扑；后续交互审计又发现 pending question 数量和普通输入绑定不能互相捆绑，也都不能与回答 turn 身份捆绑，因而新增 F4-15 至 F4-17。本包现集中 16 个正式决定。原 F4-13 的扩展运行时关闭已经由 D-038 确认，只在本包保留非回复式重入门；Git 根轴继续使用 F4-14，避免复用已经归档的编号。若把另外 21 个重新包装成新题，只会让负责人对同一个意思回答两次。
 
 - 一次 `ask-user` 跨过几小时后，究竟还是不是原 turn；
 - 外部改过 INI 后，正在运行的 Agent 何时换 Key、Endpoint 和 Permission；
@@ -19,6 +32,9 @@
 - Context 数据根与 workspace 位于 FAT、SMB、NFS 等文件系统时，产品究竟承诺什么；
 - 工作目录在 active turn 中消失后，旧审批和相对路径还能不能继续使用；
 - 传入仓库子目录时，工作区边界是否保持原目录、提示提升，还是自动提升到 Git 根。
+- 同一 yaca 进程是否只拥有一个 active Context，还是可以同时持有多个 lease 甚至多个 active turn。
+- 一个 Context 是否允许多个 pending question，以及普通 Enter 究竟回答哪一个。
+- pending question 与普通输入的绑定是否隐式、显式，或使用 durable focus。
 
 本包是补缝包，不替代 02--10。完整查漏证据见 [`FOURTH-ROUND-GAP-AUDIT.md`](../FOURTH-ROUND-GAP-AUDIT.md)，旧题到决策组和 readiness gate 的覆盖见 [`DECISION-TRACEABILITY.md`](../DECISION-TRACEABILITY.md)。
 
@@ -31,6 +47,9 @@ F4-01 A。
 F4-02 接受 B。
 F4-08 暂缓，先解释整 Context purge 会删除哪些已知副本。
 F4-14 A。
+F4-15 A。
+F4-16 A。
+F4-17 A。
 其余接受推荐。
 ```
 
@@ -48,7 +67,7 @@ F4-14 A。
 8. Context 没有永久 Context ID；名称、逻辑路径和 16 位运行时 hash 的 Resolver 规则已确认；分支对话不进入 v0.1。
 9. v0.1 是所选闭环的完整可用版本，但保持封闭和简单；不把 MCP、插件、hook、skill runtime、子 Agent 等种类数量当成“完整”的定义。
 
-## 本包十三项在系统里的位置
+## 本包十六项在系统里的位置
 
 | 决策 | 直接改变 | 最终权威归属 |
 | --- | --- | --- |
@@ -57,7 +76,7 @@ F4-14 A。
 | F4-03 | `ask-user` 后 turn、快照和预算 | 09 AgentLoop、10 Context |
 | F4-04 | 手动 retry 与副作用重放 | 03 Network、07 Tool、09 AgentLoop |
 | F4-05 | 未提交 draft 的隐私和恢复 | 10 Context、14 TUI |
-| F4-06 | `.history/.details` 的事实来源 | 10 Context、14 TUI |
+| F4-06 | history/details 语义动作的事实来源 | 10 Context、14 TUI |
 | F4-07 | raw `exec` stdin 与交互边界 | 02 Process、07 Tool、14 TUI |
 | F4-08 | Context 秘密删除与旧副本 | 08 Safety、10 Context、16 Release |
 | F4-09 | 非 Agent 管理型破坏动作 | 05 Config、10 Context、11 Index、22 Runtime |
@@ -65,10 +84,13 @@ F4-14 A。
 | F4-11 | raw 命令长度与编码失败 | 02 Process、07 Tool |
 | F4-12 | active workspace 中途失效 | 00 Product、09 AgentLoop、10 Context |
 | F4-14 | 传入目录与上级 Git 根边界 | 00 Product、01 Platform、07 Tool、10 Context |
+| F4-15 | 同一进程的 active Context 数量 | 00 Product、09 AgentLoop、10 Context、22 Runtime |
+| F4-16 | pending question 的 Context cardinality | 09 AgentLoop、10 Context |
+| F4-17 | pending question 与普通 Enter 的绑定 | 09 AgentLoop、10 Context、14 TUI |
 
 ## 建议的共同原则
 
-下面十三项的推荐遵循同一条简化原则：一个 turn 使用冻结的有效配置；用户新动作建立清楚的新因果边界；任何可能重复外部副作用的动作都不被模糊的 retry 重放；未提交内容不伪装成 durable 事实；数据保证和工作区边界按真实平台能力明确声明。D-038 已排除的扩展不进入这些选项。
+下面十六项的推荐遵循同一条简化原则：一个 turn 使用冻结的有效配置；用户新动作建立清楚的新因果边界；任何可能重复外部副作用的动作都不被模糊的 retry 重放；未提交内容不伪装成 durable 事实；数据保证和工作区边界按真实平台能力明确声明。D-038 已排除的扩展不进入这些选项。
 
 ```text
 external/user event
@@ -80,17 +102,17 @@ external/user event
   -> project the same fact to TUI/CLI/XML
 ```
 
-## 十三组正式决定
+## 十六组正式决定
 
 ### F4-01 运行中外部修改配置何时生效
 
 用户可能在 yaca 运行时用编辑器改变 `config.ini`。保存期间文件还可能短暂为空或只有一半。若 Runtime 每次读取字段，就可能让一次 turn 前半段使用旧 Permission、后半段使用新 Endpoint；若完全忽略外改，用户又可能以为保存已经生效。
 
-- A：外部修改永不自动载入；只有显式 reload 或重启才全量解析、校验并建立新 generation。busy 时 reload 形成一个可查看/取消的排队意图，到 durable idle 才读取当前完整文件、显示脱敏 digest/diff 并激活；不自动 cancel 当前活动。（推荐）
+- A：外部修改永不自动载入；只有显式 reload、显式磁盘检查或重启才全量解析、校验并建立新 generation。busy 时 reload 形成一个可查看/取消的排队意图，到 durable idle 才读取当前完整文件、显示脱敏 digest/diff 并激活；不自动 cancel 当前活动。未请求检查前继续使用已接受 generation 不是“静默 last-known-good fallback”，因为 Runtime 尚未宣称观察到新候选；一旦显式检查读到删除/半写/无效候选，就进入 repair-required 并阻止新 turn，不能退回旧 generation 假装磁盘仍健康。（推荐）
 - B：只在 idle/turn 边界比较 digest；发现变化后显示脱敏差异并询问是否载入。busy 期间只记录“磁盘候选已变化”，不解析或应用字段；回到 idle 后全量验证，无效候选保留旧 generation 但阻止新 turn，直到用户处理。
-- C：仍只允许显式 reload；busy 时返回 typed `ReloadBusy`，不排队也不自动 cancel。用户可以另行用 Esc 收口当前活动，进入 idle 后再执行 reload。
+- C：仍只允许显式 reload/检查；busy 时返回 typed `ReloadBusy`，不排队也不自动 cancel。用户可以另行用 Esc 收口当前活动，进入 idle 后再执行 reload。与 A 相同，未检查时已接受 generation 继续有效；一旦显式检查观察到无效候选，就阻止新 turn 直到磁盘配置修复并成功载入。
 
-推荐 A。三项都把每个已接受的 `ConfigGeneration` 视为不可变对象：reload 只会在完整 parse、schema/cross-field 校验和外部变化复核通过后建立新 generation；活动 turn 永远引用开始时冻结的旧 generation，绝不热改其中一个字段。A 不代表看不见外改：`.status`、reload 和下次管理入口仍显示磁盘候选与活动 generation 是否不同。
+推荐 A。三项都把每个已接受的 `ConfigGeneration` 视为不可变对象：reload 只会在完整 parse、schema/cross-field 校验和外部变化复核通过后建立新 generation；活动 turn 永远引用开始时冻结的旧 generation，绝不热改其中一个字段。这里明确区分“尚未观察磁盘候选”和“已经观察到无效候选”：只有后者触发 fail-closed repair state。A 不代表永远看不见外改；显式 `.status config`、reload、config-repl 或下次进程启动都是 observation point，必须显示磁盘候选与活动 generation 是否不同。普通 `.status` 若不读取磁盘，则必须明确显示 `disk candidate: not checked`，不能伪称一致。
 
 关联：AQ-361、`CFG-11`、`CFG-24`、`LOOP-15`、`ARCH-05`、TP-019、TP-020。
 
@@ -105,6 +127,8 @@ main、side、action review、termination review、compaction、self-test 可能
 推荐 B。它只增加两个容易理解的控制量，能表达单并发本地端点和常见限速；不在 v0.1 实现复杂 RPM/TPM 计费器。三项都明确公平性，也都把服务端 `Retry-After`/429 cooldown 只绑定到触发它的逻辑 `Model.<Name>`，不因 endpoint/remote model ID 相同而阻塞另一个 Model section；A/B 让该 Model 的所有 purpose 共享冷却，C 则在它冷却时调度其他可运行 Model。scheduler 只决定何时可以尝试，不能突破 Runtime hard cap，也不能把等待超时报告成 provider 已拒绝。
 
 调度范围和计费/预算范围在三项中都分开：main/side/review/compaction 按所属 Context/turn aggregate 归集；显式 self-test 没有 Context/turn 时进入独立 `self_test_run` aggregate，同时仍受相同 Model scheduler 和进程 hard cap。
+
+这里的 scheduler、`MaxConcurrentRequests`、`MinRequestIntervalMs` 和 `Retry-After` cooldown 作用域都只是当前 yaca 进程。两个进程即使读取同一配置、引用同名 Model、相同 endpoint 或 Key，也不共享 scheduler lease、计数器或 cooldown；进程重启也不伪造持久 cooldown。这些字段不承诺账户级或多进程总配额，UI/help/self-test 必须如实说明。跨进程双实例 fixture 负责证明没有隐藏共享状态，不新增另一个负责人选择。
 
 若且仅若 PJ-12=B，第一个 main turn 正常结束后还会产生一次 `context-name` purpose。它与其他 purpose 一样进入所选 Model 的同一 scheduler/cooldown，计入 Context/runtime aggregate，并拥有独立的“最多一次 request”lifecycle budget；它不属于已结束 main turn，不能重开该 turn 或消耗其剩余预算。等待/取消/失败只保留 provisional name，不阻断下一 main turn。PJ-12 选 A/C 时这个 purpose、队列项和预算不存在。
 
@@ -127,6 +151,31 @@ turn 13 -> reply_to question 12:4 -> freeze current configuration
 ```
 
 关联：AQ-363、`LOOP-01`、`LOOP-28`、`CTX-07`、AL06-02、TP-017。
+
+### F4-16 一个 Context 可积累几个 pending question
+
+F4-03 只决定一份答案属于旧 turn 还是新 turn；本组只决定 unresolved main question 的 cardinality。普通 Enter 怎样绑定由 F4-17 独立决定，因此“最多一个问题 + 必须显式 answer”与“多个问题 + durable focus”都能表达。
+
+- A：每个 Context 同时最多一个 unresolved main question。存在它时，queue 可以继续 durable 收集，但 scheduler 不得启动任何另一 main work item；用户必须先 answer、abandon 或 supersede 当前问题。（推荐）
+- B：允许多个 suspended work item 各自拥有一个 pending question，但使用发行版固定且不可为无限的 Context hard cap；用户显式 run-next 才能在仍有问题时启动另一 work item，自动 queue gate 仍停住。达到 cap 后不再启动可能产生新问题的 work item。
+
+推荐 A。它与单 active Context/单 active main 的简单心智模型一致，也避免离机后面对一叠互不相关的阻断问题；B 让用户暂时跳过一个问题继续其他排队工作，但需要 suspended-work-item 集合、cap、列表和关闭/恢复排序。
+
+共同不变量：每个问题都以 `question-id/work-item-id/source-turn/control-id/status` 进入 XML，状态至少有 `pending/answered/abandoned/superseded`，同一 question 最多绑定一个 accepted answer；超时、退出、压缩和恢复不会自动丢弃或当作 answered。恢复时先显示 `ACTION REQUIRED` 和完整问题集合。`abandon` 形成明确的用户停止/改向事实，不能伪装成模型 completed；F4-03 继续独占 accepted answer 的 turn identity，PP-18 继续独占答案中用户指令的生命周期。
+
+关联：`AQ-396`、`LOOP-01`、`LOOP-10`、`LOOP-24`、`LOOP-28`、`CTX-07`、AL06-04、F4-03、PP-18、TP-017。
+
+### F4-17 普通 Enter 怎样与 pending question 绑定
+
+本组不决定有几个 pending question；只决定用户在 chat composer 直接提交正文时，Runtime 能否把它绑定为 question answer。无论哪项，显式 `.question answer <question-id> <text>` 都可用，Runtime 不按正文语义猜“这句话像答案”。
+
+- A：恰好一个 pending question 时，普通 Enter 回答它；没有 pending 时按普通 main/queue 规则；多个 pending 时拒绝模糊提交并要求显式 ID，不保存 durable focus。（推荐）
+- B：普通 Enter 永远按普通 main/queue 规则；回答问题总要使用显式 `.question answer`，即使只有一个 pending question。
+- C：保存一个 durable reply focus；普通 Enter 回答 focused question。只有一个 pending 时自动聚焦；多个时必须先 `.question select <question-id>`，focus 缺失/stale 时拒绝而不猜。
+
+推荐 A。单问题的日常回答最自然，多问题时又不会误绑；B 最明确且没有 focus 状态，但高频输入更长；C 让多个问题也能直接回答，代价是 durable focus、stale、恢复和切换规则。三项都提供 `.question list|answer|abandon`，仅 C 注册 `select`；每次接受都回显 question ID、原问题摘要和新 turn/work-item link，空 Enter 没有隐式默认答案。
+
+关联：`AQ-397`、`TUI-04`、`TUI-05`、`TUI-22`、`CTX-07`、F4-03、F4-16、TU-32、TU-22、TP-024。
 
 ### F4-04 用户主动 retry 到底重试什么
 
@@ -155,32 +204,32 @@ turn 13 -> reply_to question 12:4 -> freeze current configuration
 - B：idle debounce 后将 draft 作为可删除 session state 写入 XML。
 - C：draft 默认只在内存；用户显式执行 `.draft save` 后才作为可删除 session state 写入当前 Context XML，发送或 `.draft discard` 后追加清除事件。
 
-推荐 A。它给“完整对话”一个清楚起点：用户明确提交之后。B 换取自动崩溃恢复，但会增加隐私、重写频率、导出与跨机含义；C 让用户显式决定何时持久化，代价是多一个命令和 XML session-state 生命周期。三项都不新增长期 draft 文件。正常 `.exit` 若仍有未保存 draft，应确认放弃，而不是静默丢失。
+推荐 A。它给“完整对话”一个清楚起点：用户明确提交之后。B 换取自动崩溃恢复，但会增加隐私、重写频率、导出与跨机含义；C 让用户显式决定何时持久化，代价是多一个命令和 XML session-state 生命周期。三项都不新增长期 draft 文件；typed registry 的 exact config-secret value 一旦命中，B 的 debounce 与 C 的 `.draft save` 都 typed reject，draft 只能留在本进程供用户删除命中 span，不能用“用户主动保存”绕过 XML secret boundary。正常 graceful-exit semantic action（chat root 服从 TU-32）若仍有未保存 draft，应确认放弃，而不是静默丢失。
 
-关联：AQ-365、`TUI-28`、`CTX-23`、TU-03、TP-022、TP-023。
+关联：AQ-365、`TUI-28`、`CTX-23`、`SAFE-09`、TU-03、TU-32、TS-15、TP-022、TP-023。
 
-### F4-06 `.history` 与 `.details` 能恢复到什么程度
+### F4-06 history 与 details 语义动作能恢复到什么程度
 
-如果 `.history` 只读当前终端缓存，恢复 Context 或换机后就看不到；若 `.details` 宣称总能显示原始全部工具输出，又会与 canonical result 的截断和配额事实冲突。
+如果 history 语义动作只读当前终端缓存，恢复 Context 或换机后就看不到；若 details 语义动作宣称总能显示原始全部工具输出，又会与 canonical result 的截断和配额事实冲突。本组只拥有两个动作的事实来源，不拥有 chat canonical root：TU-32 A 将其投影为 `.history/.details`，TU-32 B 将其投影进 `.show <target>`。
 
-- A：两个命令只查看当前进程 UI cache。
-- B：都从 canonical XML 和稳定局部 event ID 派生；`.history` 是事实 transcript 的分页投影，`.details` 只展示 XML 实际保存的完整、截断、摘要或引用状态，不声称找回从未持久化的字节。（推荐）
-- C：`.history` 从 canonical XML 派生；`.details` 优先显示当前进程的 expanded cache，恢复后只显示 XML 中的 canonical 摘要/截断/引用字段，并明确标记 `expanded detail unavailable`。
+- A：两个语义动作都只查看当前进程 UI cache。
+- B：都从 canonical XML 和稳定局部 event ID 派生；history 是事实 transcript 的分页投影，details 只展示 XML 实际保存的完整、截断、摘要或引用状态，不声称找回从未持久化的字节。（推荐）
+- C：history 从 canonical XML 派生；details 优先显示当前进程的 expanded cache，恢复后只显示 XML 中的 canonical 摘要/截断/引用字段，并明确标记 `expanded detail unavailable`。
 
 推荐 B。这样恢复、跨机接盘和终端 scrollback 不再是三份互相漂移的历史。A 最简单但恢复后的浏览能力弱，C 保留当次运行的更丰富详情却不承诺跨机等价。三项都不新增长期 history/detail 文件；若 canonical result 记录 `truncated=true, original_bytes=...`，details 必须诚实显示这一事实，而不是生成一个看似完整的新摘要。
 
-关联：AQ-366、`TUI-29`、`CTX-01`、`CTX-06`、TU-06、CX-03、TP-008、TP-010、TP-023。
+关联：AQ-366、`TUI-29`、`CTX-01`、`CTX-06`、TU-06、TU-32、CX-03、TP-008、TP-010、TP-023。
 
 ### F4-07 模型 raw `exec` 的 stdin 来源
 
 一个命令可能意外询问 `Are you sure?`，也可能故意从继承的 stdin 读取。若它继承 yaca 的终端，聊天、queue、审批和快捷键都可能被子进程偷走；若 Runtime 转发交互，则首版实际上需要 PTY/console bridge，而不再是简单的非交互 raw shell。
 
 - A：模型 `exec` 的 stdin 固定关闭/EOF；v0.1 只支持有界、非交互、前台命令。内部 curl/helper 必须显式声明自己的受控 stdin source。（推荐）
-- B：`exec` 允许模型在同一工具调用中提交一个有硬上限的 immutable `stdin_text` payload；Runtime 按明确编码完整写入后立即关闭 pipe，不从 yaca TUI 读取后续字节，不支持对话式应答。
+- B：`exec` 允许模型在同一工具调用中提交一个有硬上限的 immutable `stdin_text` payload；Runtime 按明确编码完整写入后立即关闭 pipe，不从 yaca TUI 读取后续字节，不支持对话式应答。该字段只能由 TS-23 A 的 typed envelope 承载；TS-23 B/C 与本路线静态不兼容。
 
-推荐 A。需要固定输入的命令可在已批准的 raw shell 中使用管道/重定向；B 在不引入 PTY、不让子进程偷走聊天/审批键盘的前提下支持较大固定输入。两项都可在 v0.1 的非交互进程契约内完整测试；继承 TUI stdin 和交互 PTY 不再伪装成本组的普通分支。输入 EOF、进程仍不退出时，继续按 timeout/cancel/kill tree 契约收口。
+推荐 A。需要固定输入的命令可在已批准的 raw shell 中使用管道/重定向；B 在不引入 PTY、不让子进程偷走聊天/审批键盘的前提下支持较大固定输入，但只有 TS-23 A 能把它作为独立字段绑定 schema、审批和 operation。两项都可在 v0.1 的非交互进程契约内完整测试；继承 TUI stdin 和交互 PTY 不再伪装成本组的普通分支。输入 EOF、进程仍不退出时，继续按 timeout/cancel/kill tree 契约收口。
 
-关联：AQ-367、`PROC-11`、`PROC-03`、`TOOL-03`、TS-09、TP-005。
+关联：AQ-367、`PROC-11`、`PROC-03`、`TOOL-03`、TS-09、TS-23、TP-005。
 
 ### F4-08 Context 误存秘密后提供哪种删除承诺
 
@@ -272,16 +321,28 @@ Windows CreateProcess、目标 shell 和平台编码都有真实边界。Runtime
 | 场景 | 第 1 步：D-026 | 第 2 步：F4-14 | 第 3 步：Resolver/选择 | 第 4 步：PJ-13 | 禁止的捷径 |
 | --- | --- | --- | --- | --- | --- |
 | 新 Context | 规范化传入目录，它仍是所有发现起点 | 按 A/B/C 先得到 initial boundary，它直接成为新 workspace | 不选旧 Context | 不运行；还没有 recorded workspace | 用 Git 自行向上猜另一个根 |
-| 显式 `--continue` 或用户选中 recent Context | 规范化传入目录，Resolver 起点不改 | 按 A/B/C 先产生 initial comparison boundary | Resolver 始终从传入目录镜像起步，选定精确 Context；选定动作不回写 initial boundary | 选定后才比较 recorded workspace；同 identity/boundary 按所选快捷策略，跨 boundary/不同 identity 显示精确 target 并确认 | 把 recorded Git root 当成 F4-14 B/C 已自动提升 |
+| 显式 `continue` semantic action 或用户选中 recent Context | 规范化传入目录，Resolver 起点不改 | 按 A/B/C 先产生 initial comparison boundary | Resolver 始终从传入目录镜像起步，选定精确 Context；选定动作不回写 initial boundary | 选定后才比较 recorded workspace；同 identity/boundary 按所选快捷策略，跨 boundary/不同 identity 显示精确 target 并确认 | 把 recorded Git root 当成 F4-14 B/C 已自动提升 |
 | Context 继续后 rebind | 不改变本次 invocation 起点 | F4-14 已结束，不重跑也不再授权变根 | 不重跑 Resolver 猜目标 | PJ-13/F4-12 管理动作显示 old/new identity，使旧 approval 失效，从新 turn 继续 | 把 rebind 伪装成 `chdir` 或 Git metadata 刷新 |
 
 因此 F4-14=A 也不禁止用户显式继续一个 recorded workspace 在上级目录的 Context；它只禁止“因为发现 Git 根就静默扩权”。反过来，F4-14=C 也不意味着可以无提示跳到任意 recorded workspace；跨 initial boundary/identity 仍必须经 PJ-13 确认。
 
 关联：AQ-212、`CLI-00`、`PROD-05`、`PROD-16`、`INSTR-01`、`INDEX-05`、`CTX-13`、`TOOL-11`、D-026、TP-012、TP-029。
 
+### F4-15 同一进程的 active Context 数量
+
+“每个 Context 最多一个 writer 和一个 active turn”并不能回答“一个 yaca 进程可以同时拥有几个 active Context”。后者会改变 ApplicationCoordinator 数量、write lease 生命周期、TUI 的当前 Context、进程级资源公平性、关闭排空和崩溃恢复顺序。
+
+- A：一个 yaca 进程同时最多只有一个 active Context：一个 writable ContextHandle、一个 session write lease 和一个 AgentLoop。Context 管理可读取其他 XML 的有界快照，但不使它们 active；同时运行另一 Context 需另一进程。（推荐）
+- B：一个进程可同时保持多个 active/writable Context 及各自 write lease、queue 和会话状态，但全进程同时最多一个 active main turn；side/maintenance/review lane 也必须明确归属某一 Context，并且只有当前获准 lane 能发 Model 请求、工具或审批。统一 scheduler 在 Context 之间无饥饿轮转，切换当前 Context 不迁移输入、approval、pending operation 或 lane identity。
+- C：一个进程可有多个 active Context，每个都可同时拥有自己的 active main turn；每 Context 仍只有一个 writer/active main turn，所有 side/maintenance/review lane、Model request、process、tool 和内存受进程级公平 scheduler、hard cap 和多 Context close barrier 统一约束。
+
+推荐 A。它与当前单 chat/current-Context 心智模型、单线程领域事件泵和旧平台资源目标一致，也不妨碍候选基线让用户通过多个进程分别运行不同 Context。B 保留多个热会话但需要跨 Context 公平性、多 lease 和更复杂的退出恢复；C 直接把首版变成多任务运行时。三项都不改变单 Context 只有一 writer/active main turn、第二 writer 不能按时间抢锁、Context 输入不得迁移到另一 Context 等不变量。
+
+关联：`LOOP-23`、`RUNTIME-01`、`RUNTIME-02`、`RUNTIME-07`、`CONC-03`、`CONC-04`、PJ-08、PJ-09、AL06-01、CX-13、F4-02、`AQ-381`、TP-021、TP-022。
+
 ## 推荐的整包组合
 
-若希望采用当前推荐基线，请明确回复本包 13 个正式组；F4-13 是已由 D-038 收口的非回复项，因此编号清单会跳过它：
+若希望采用当前推荐基线，请明确回复本包 16 个正式组；F4-13 是已由 D-038 收口的非回复项，因此编号清单会跳过它：
 
 ~~~text
 F4-01 A
@@ -297,6 +358,9 @@ F4-10 B
 F4-11 A
 F4-12 A
 F4-14 A
+F4-15 A
+F4-16 A
+F4-17 A
 ~~~
 
 也可以只回复差异，例如 `本包其余接受推荐；F4-02 B；F4-07 B。` 推荐不是决定，未明确回复的编号继续保持 unanswered。
@@ -305,7 +369,7 @@ F4-14 A
 
 D-038 已确认 v0.1 采用封闭单 Agent 核心：只运行随包内置工具和内部生命周期逻辑；MCP、自定义第三方工具协议、进程内插件、用户 hook、skill runtime 和子 Agent 全部排除。配置/help/schema 不保留无消费者字段、空 loader、假命令或公共 Lua plugin API，遇到相应输入返回稳定 `UnsupportedFeature`，不静默忽略。
 
-未来只有项目负责人明确提出具体 use case 才重入设计流。重新打开时必须同时给出信任边界、生命周期、配置、错误、Context 记录、权限矩阵、迁移和 Windows XP/CentOS 7 证据计划；不能仅以来源 ID/schema version 等已有窄字段推导“扩展已经预留”。这是一条现行规格门，不是 F4 选项，也不计入本包十三个待回复编号。
+未来只有项目负责人明确提出具体 use case 才重入设计流。重新打开时必须同时给出信任边界、生命周期、配置、错误、Context 记录、权限矩阵、迁移和 Windows XP/CentOS 7 证据计划；不能仅以来源 ID/schema version 等已有窄字段推导“扩展已经预留”。这是一条现行规格门，不是 F4 选项，也不计入本包十六个待回复编号。
 
 关联：AQ-373、`EXT-01`、`EXT-02`、`EXT-03`、`PROD-04`、`PROD-11`、`TOOL-14`、`LOOP-21`、D-038、TP-029。
 
@@ -319,7 +383,7 @@ D-038 已确认 v0.1 采用封闭单 Agent 核心：只运行随包内置工具�
 | suspend/resume | 已有专用 suspend/resume 组与恢复/事件泵证据，只缺长时间间隙真值 | AL06-17、ED-05、AQ-270/AQ-315、RUNTIME-06 |
 | plaintext HTTP Endpoint | Endpoint/TLS/Auth 已有主组 | M05-01/M05-02、AQ-137/AQ-146/AQ-220、NET-13 |
 | purpose local cap 与 aggregate budget | 已有预算主组 | AL06-06/AL06-09、AQ-028/AQ-097/AQ-153/AQ-359 |
-| `Tools=off` 主模型资格 | 已有 capability 主组 | M05-03、AQ-144 |
+| `Tools=off` 主模型资格 | 已有独立 eligibility 主组；字段存在性仍引用 capability owner | M05-26、AQ-374、MODEL-16；依赖 M05-03/AQ-144 |
 | 审批页编辑参数 | 已有审批主组；补“编辑使旧审批失效” | TU-07、TS-06、AQ-225/AQ-279 |
 | queue list/drop/edit/reorder | 已有 busy-input 主组 | TU-04、AL06-04、AQ-032/AQ-086 |
 | queue full 保留哪一边 | 是同一 queue policy 的 overflow 分支 | AL06-04、AQ-086、CONC-02 |
@@ -328,8 +392,8 @@ D-038 已确认 v0.1 采用封闭单 Agent 核心：只运行随包内置工具�
 | direct `search` dialect | 已有 tool registry 主组 | TS-02、AQ-114/AQ-184、TP-014 |
 | stdout/stderr 跨管道顺序 | 物理上只能记录 observed arrival；属端口证明 | AQ-122、PROC-04、TP-005 |
 | Git status/diff 外部 helper 风险 | 已有 Git/direct tool 主组 | TS-02/TS-11、AQ-129/AQ-249、TP-029 |
-| config backup 复制明文 Key | 已有 secret lifecycle/migration 主组 | M05-02/M05-08、RF-03、AQ-132、TP-025/027 |
-| `SensitiveRead` classifier | 不假定该能力必然存在；只在 M05-16 选中对应拆分后，再由 TS-04 定义各 preset 精确处理，classifier 只能提高限制 | M05-16、TS-04、AQ-149、SAFE-09、TP-014/027 |
+| config backup 复制任一 registered config-file secret | 已有 secret lifecycle/migration 主组 | M05-02/M05-42/M05-54、RF-03、AQ-132/AQ-417、TP-025/027 |
+| `SensitiveRead` classifier | 不假定该能力必然存在；只有 M05-56 B 生成字段，TS-04 定义各 preset 精确处理，TS-21 的 classifier 只能提高限制；M05-16 仅决定 outside 粗/细字段，与此正交 | M05-56、TS-04、TS-21、AQ-149、AQ-430、SAFE-09、TP-014/028 |
 | 单个 atomic group 已超窗口 | 已有压缩不可拆组主组 | AL06-11、AQ-062/AQ-310/AQ-352、TP-020 |
 | Context 自动命名 request purpose | 新 Context 名称策略已有唯一 owner；只在所选路线需要 Model purpose 时生成对应 contract | PJ-12、PP-05、AQ-216/AQ-259 |
 | release hash 与签名 | zip hash/manifest 与来源身份签名分属两个 owner | RF-06、RF-15、AQ-208、REL-10、TP-030 |
@@ -337,9 +401,9 @@ D-038 已确认 v0.1 采用封闭单 Agent 核心：只运行随包内置工具�
 | terminal resize/reflow | 已有 renderer 主组；推荐旧块不重画 | TU-01/TU-03、AQ-299/AQ-332、TP-023 |
 | ambient `.curlrc`/Git/cmd/sh 配置 | 是兑现既有安全承诺的硬不变量，不是风格选择 | PROC-13、TP-006/029 |
 
-这 21 行与 F4-01 至 F4-10 对应的十个第四轮新问题，合起来恰好覆盖 `FGA-001` 至 `FGA-031`。F4-11、F4-12 来自子系统责任审计；F4-14 把 AQ-212 与 D-026 尚未冻结的 Git 根边界提升成独立回复轴。原 F4-13 的扩展 namespace/关闭边界已经由 D-038 收口，只保留上面的非回复式重入门；完整来源和去重理由分别以相关审计文档为准。
+这 21 行与 F4-01 至 F4-10 对应的十个第四轮新问题，合起来恰好覆盖 `FGA-001` 至 `FGA-031`。F4-11、F4-12 来自子系统责任审计；F4-14 把 AQ-212 与 D-026 尚未冻结的 Git 根边界提升成独立回复轴；F4-15 来自 2026-07-19 的运行时完整性复核，不改写原 FGA 计数。原 F4-13 的扩展 namespace/关闭边界已经由 D-038 收口，只保留上面的非回复式重入门；完整来源和去重理由分别以相关审计文档为准。
 
-## 十三项确认后必须同步生成什么
+## 十六项确认后必须同步生成什么
 
 不能停在“选了 A/B”。本包至少要机械生成下列规格增量：
 
@@ -355,26 +419,30 @@ D-038 已确认 v0.1 采用封闭单 Agent 核心：只运行随包内置工具�
 10. workspace invalidation/rebind 状态机及旧 approval 失效规则。
 11. startup directory、有效 workspace、Git metadata scope 与指令/Resolver/tool 边界矩阵。
 12. 对应的 plain ASCII 页面、typed errors、fault fixtures 和真实平台证据。
-13. 依据 D-038 生成 extension unsupported/无空壳检查与未来 re-entry gate；它不依赖负责人再次选择。
+13. 进程内 Context owner/lease/AgentLoop 拓扑、跨 Context 资源公平性和 close/recovery 状态机。
+14. 依据 D-038 生成 extension unsupported/无空壳检查与未来 re-entry gate；它不依赖负责人再次选择。
+15. pending question 集合、durable focus、answer/abandon 一次性绑定、恢复页面和普通 Enter 的状态矩阵。
+16. 单问题/多问题 gate 与普通 Enter 显式/隐式/focus 路线的完整组合测试。
 
 ## 建议回答顺序
 
-若一次回答全部，按 `F4-01 -> F4-02 -> F4-03 -> F4-04 -> F4-07 -> F4-11 -> F4-12 -> F4-14 -> F4-09 -> F4-05 -> F4-06 -> F4-08 -> F4-10`。它先锁配置/Loop/进程事实，再锁 workspace、管理、存储和隐私边界。
+若一次回答全部，按 `F4-15 -> F4-01 -> F4-02 -> F4-03 -> F4-16 -> F4-17 -> F4-04 -> F4-07 -> F4-11 -> F4-12 -> F4-14 -> F4-09 -> F4-05 -> F4-06 -> F4-08 -> F4-10`。它先锁进程/Context 拓扑、配置与 Loop 事实，再锁 workspace、管理、存储和隐私边界。
 
-若只先回答最影响架构的六项，选：
+若只先回答最影响架构的七项，选：
 
-1. F4-02：一个 Model 的 request scheduler 与总账；
-2. F4-03：`ask-user` 后 turn 边界；
-3. F4-04：retry 不得重放副作用；
-4. F4-07：raw shell stdin；
-5. F4-09：管理型变更事务；
-6. F4-10：data root/workspace 文件系统承诺。
+1. F4-15：同一进程的 active Context 拓扑；
+2. F4-02：一个 Model 的 request scheduler 与总账；
+3. F4-03：`ask-user` 后 turn 边界；
+4. F4-04：retry 不得重放副作用；
+5. F4-07：raw shell stdin；
+6. F4-09：管理型变更事务；
+7. F4-10：data root/workspace 文件系统承诺。
 
 ## 本包完成标准
 
-- F4-01 至 F4-12 与 F4-14 每项有项目负责人明确回复，未答项仍标 open；原 F4-13 只按 D-038 生成规格，不等待再次选择；
+- F4-01 至 F4-12、F4-14 至 F4-17 每项有项目负责人明确回复，未答项仍标 open；原 F4-13 只按 D-038 生成规格，不等待再次选择；
 - 回复已消除与旧决定的冲突，而不是让两个候选同时存在；
-- AQ-361 至 AQ-372 加 AQ-212、十九个新增 checklist ID、旧组补充和技术证明可以双向追踪；
+- AQ-361 至 AQ-372 加 AQ-212、AQ-381、二十个新增 checklist ID、旧组补充和技术证明可以双向追踪；
 - D-038 排除的扩展从配置/help/schema 同时消失；非交互 stdin 契约与秘密 purge/redaction 范围则严格反映 F4-07/F4-08 的实际选择，不预先假装已经排除或已经支持；
 - 对 suspend、ambient config、filesystem、CPU ISA、进程 I/O 等事实有目标平台证明；
 - 在这些上游决定和 readiness P0 未收口前，仍不开始编码。

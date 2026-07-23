@@ -1,6 +1,6 @@
 # 决策日志
 
-更新日期：2026-07-18
+更新日期：2026-07-22
 
 ## D-001 文档与设计先行
 
@@ -176,7 +176,7 @@ Resolver 采用互不重叠的增量搜索环：距离是第一优先级，同�
 
 主交互入口为 `yaca [目录]`。省略目录时以 `.` 作为参数，因此裸 `yaca` 与 `yaca .` 在路径规范化后必须具有完全相同的初始工作目录、工作区发现起点、指令发现起点和上下文 Resolver 起点。`yaca <目录>` 使用给定目录作为这些流程的初始位置。该目标必须已经存在、确实是目录且能够成功进入；文件、缺失目录和不可进入目录都不能由 yaca 自动创建、猜测或替换。
 
-该规则不提前决定工作区根是否进一步提升到仓库根，也不改变 `--continue` 恢复上下文后由 `AutoJumpToDir` 控制的跳转语义。相对路径基准、符号链接/junction 的“真实目录”判定、规范路径与显示路径、参数/选项顺序和精确错误仍需确认。项目负责人提出使用双引号包裹含 `-` 的名称；双引号由宿主 shell 负责分词，不能阻止一个以 `-` 开头的 argv 被 CLI 当作选项，因此是否采用标准 `--` 结束选项仍是待决的精确 grammar，而不是把负责人的输入误记成已可实施规则。
+该规则不提前决定工作区根是否进一步提升到仓库根。恢复 Context 的目录语义由 D-041/D-045 固定：每个 Context 只有一个由其 XML 在 `__yaca__/CONTEXT/` 下的镜像父目录确定的 workspace root，续接只使用该目录；目录缺失、不可进入或不匹配时进入 `context-repl` 的 self-fix 路径，不提供 `AutoJumpToDir`、`ResumeDirectory` 或基于相似 Git 根的静默猜测。项目负责人原话曾用 `--continue` 表示该动作；这保留为需求证据，但精确 CLI 拼写仍只由 TU-18 决定。相对路径基准、符号链接/junction 的“真实目录”判定、规范路径与显示路径、参数/选项顺序和精确错误仍需确认。项目负责人提出使用双引号包裹含 `-` 的名称；双引号由宿主 shell 负责分词，不能阻止一个以 `-` 开头的 argv 被 CLI 当作选项，因此是否采用标准 `--` 结束选项仍是待决的精确 grammar，而不是把负责人的输入误记成已可实施规则。
 
 ## D-027 DoubleCheck 包含完成复核
 
@@ -184,19 +184,21 @@ Resolver 采用互不重叠的增量搜索环：距离是第一优先级，同�
 
 不再提供与 `DoubleCheck` 并列的 `UseTerminationEvaluator` 用户配置项。当前上下文的有效 `DoubleCheck` 开启时，谨慎流程至少包含主模型提出正常终止后的独立完成复核；关闭时不进行完成复核。`.cautious` 继续只覆盖当前上下文的 `DoubleCheck`，因此也会同时改变是否进行完成复核。
 
-完成复核仍使用独立 request purpose、用量和 verdict，不拥有工具执行权。复核拒绝后怎样继续、使用哪个 Model、输入范围、无效输出/失败/超时怎样收口，以及最大轮次、费用和墙钟上限仍待后续决策；不能因为总开关已经确认就暗定这些控制流。
+完成复核仍使用独立 `termination-review` request purpose、用量和 verdict，不拥有工具执行权。复核拒绝后怎样继续、输入范围、无效输出/失败/超时怎样收口，以及最大轮次、费用和墙钟上限仍待后续决策；termination-review 的 Model 来源只由 AL06-49 决定，不能与 AL06-08 的 action-review Model 来源合并或暗中跟随。不能因为总开关已经确认就暗定这些控制流。
 
 该模式的产品定位由项目负责人给出：花费更多时间、花费更多 Token、获得更多安全。English UI 的候选 slogan 是 `Spend more time and tokens for greater safety.`，精确文案随 TUI/Prompt 风格一起确认。
 
-## D-028 Model 是完整连接实例，Key 明文存 INI
+## D-028 Model 是完整连接实例，Key 明文存 INI，失败不静默换 Model
 
 状态：已确认结构；协议字段与传输实现待确认
 
 一个 `Model.<Name>` section 表示一个完整、可单独选择和测试的 LLM 连接实例。它自行拥有 endpoint、协议、远端 model ID、Key、能力、streaming 与 retry 等连接所需配置；v0.1 不把 Provider、Credential 和 Model 拆成需要跨 section 引用的三层对象。不同 Model 可以重复相同 endpoint 或 Key，换取简单、直接的读取和迁移语义。
 
-API Key 直接以明文写在主 INI，不改成环境变量引用或独立 secrets 文件。这个决定接受“能读取该 INI 的本地主体能读取 Key”的风险，但不授权把 Key 写入 Context XML、argv、普通日志、support/export、public digest 或 TUI 回显；Key 到网络 adapter 的具体 carrier 必须由泄漏测试和目标平台证据选择。
+API Key 直接以明文写在主 INI，不改成环境变量引用或独立 secrets 文件。这个决定接受“能读取该 INI 的本地主体能读取 Key”的风险，但不授权把 Key 写入 Context XML、argv、普通日志、support/export、public digest 或 TUI 回显；Key 到网络 adapter 的具体 carrier 必须由泄漏测试和目标平台证据选择。后续 schema 若把 proxy credential、SecretHeader、EnvironmentSet value 或 adapter 字段登记为 config secret，它们必须进入同一开放 registry 和同一禁止目的地规则，不能另写只保护 Key 的手工名单；这不改变“一个 Model 是完整连接、Key 明文 INI”的已确认保存形态。
 
-每个 Model 的 `Streaming` 使用 `force|try|off` 三态。`force` 不得静默降级，`off` 不请求流式；`try` 何时证明不支持、断流后怎样收口和是否缓存观察结果仍由 Model/Network 规格确认。本决定归档 `AQ-016`、`AQ-017`、`AQ-018` 的项目负责人原始选择，不替代 M05 包中的协议、AuthMode、HTTP、资源限制和 self-test 待决项。
+当当前 Model/provider 请求失败时，yaca 不得自动 fallback 到配置中的另一个 Model，也不得按 INI 顺序猜一个替代项。这种静默切换会改变 endpoint、费用、隐私域和行为。用户显式选择或映射新 Model 时，XML 必须记录旧实例、新实例、原因和生效边界；条件 `ActionReviewModel`、`TerminationReviewModel` 与 `CompactionModel` 若后续被明确选中，它们是三个独立 purpose 路由而不是失败 fallback。action 与 termination 即使显式指向同一个完整 Model，也不能共用一个隐式选择或让一方配置变化带动另一方。
+
+每个 Model 的 `Streaming` 使用 `force|try|off` 三态。`force` 不得静默降级，`off` 不请求流式；`try` 何时证明不支持、断流后怎样收口和是否缓存观察结果仍由 Model/Network 规格确认。本决定归档 `AQ-016`、`AQ-017`、`AQ-018` 与 `MODEL-10` 的项目负责人原始选择，不替代 M05 包中的协议、AuthMode、HTTP、资源限制和 self-test 待决项。
 
 ## D-029 程序界面固定 English/ASCII，并保持单一简单 TUI
 
@@ -218,17 +220,19 @@ yaca 自带的 UI 标签、机器字段、配置键、命令名和稳定 ID 只�
 
 ## D-031 首次配置与三阶段 self-test
 
-状态：已确认产品路线；bootstrap、联网预算与精确页面待确认
+状态：已确认产品路线与 bootstrap 边界；精确页面、预算和结果矩阵待确认
 
-yaca 不提供首次运行欢迎页或自动设置向导。用户第一次建立 Model 配置时显式进入 `yaca --model-repl`；完整配置浏览/编辑器是可选管理入口，不是正常启动的强制步骤。最终命令名称、唯一简称与兼容别名仍由 CLI 契约统一，不能因此保留多套同义 parser。
+yaca 不提供首次运行欢迎页或自动设置向导。用户第一次建立 Model 配置时显式进入 `model-repl` semantic action；完整配置浏览/编辑器是可选管理入口，不是正常启动的强制步骤。项目负责人原话使用 `yaca --model-repl`，它证明入口需求，不冻结 argv：只有 TU-18 A 才使用该 flag，B/C 由同一 action registry 投影各自拼写。最终命令名称、唯一简称与兼容别名仍由 CLI 契约统一，不能因此保留多套同义 parser。
 
-配置加载包含完整配置校验；正常 Agent 不能带着损坏配置启动。项目负责人原话中的“配置损坏就无法启动”不应被改写成自动进入恢复向导。`help/version`、首次建配置、静态 self-test 或显式配置修复能否使用只依赖内置 schema 的受限 bootstrap reader，仍需单独确认；无论选择哪条路线，都不能让未验证配置进入 AgentLoop。
+配置加载包含完整配置校验；正常 Agent 不能带着损坏配置或零个可用 Model 启动。项目负责人原话中的“配置损坏就无法启动”不应被改写成自动进入恢复向导。`help/version`、bootstrap `model-repl`、`config-repl`、self-test Stage 1 和不依赖 Model 的 `context-repl` 使用只依赖内置 schema 的受限入口；它们不得进入 AgentLoop、联网、调用 Model 或执行 Agent 工具。`context-repl` 可以浏览、导入/恢复、重命名、删除和修复已有 Context；“增加”不表示创建一个与 D-040 冲突的空 Context。
 
-self-test 采用三个有明确同意边界的阶段：第一阶段做不需要真实 LLM 请求的静态基础检查；完成后询问用户是否进入第二阶段，对需要测试的 LLM 配置做真实连接/协议检查；只有所选 LLM 都满足进入条件，才询问是否进入第三阶段，调用已经确认可用的 LLM 反向检查配置语义是否合理，例如名称、远端 model ID 与 Permission 意图明显不一致。第三阶段不能覆盖静态 schema 事实。每阶段的 Model 范围、最坏请求/attempt/token/费用、失败后是否继续收集其余结果和 reviewer 选择仍待 M05 决策组确认。
+self-test 采用三个有明确同意边界的阶段：第一阶段做不需要真实 LLM 请求的静态基础检查；除配置/schema 外，稳定检查清单还必须覆盖 Context XML 镜像父目录可解码、派生 workspace 存在且可进入、Catalog/Resolver/hash 扫描是否完整，以及大量 Context 在目标旧机上是否越过扫描 hard cap 或性能预算。完成后询问用户是否进入第二阶段，对需要测试的 LLM 配置做真实连接/协议检查；只有所选 LLM 都满足进入条件，才询问是否进入第三阶段，调用已经确认可用的 LLM 反向检查配置语义是否合理，例如名称、远端 model ID 与 Permission 意图明显不一致。第三阶段可提示 Permission 名称/Description/SystemPrompt 与真实 capability matrix 的错配和明显拼写错误，但不能由名称推导能力、自动改配置或覆盖 Stage 1/2 的确定性事实。每阶段的 Model 范围、最坏请求/attempt/token/费用、失败后是否继续收集其余结果和 reviewer 选择仍待 M05 决策组确认。
+
+配置可以用一个 typed 值 `StartupSelfTest=off|stage1|stage2|stage3` 显式要求普通 Agent 入口在进入 chat 前运行到指定最高阶段，默认 `off`。这不是旧式隐式连接检查：选到 Stage 2/3 仍必须显示本次实际联网范围、费用上限并取得阶段同意；拒绝、取消或 required failure 使本次 Agent 启动失败。阶段只能按 1→2→3 前进，不能跳过失败的前置阶段。显式 self-test CLI 必须能够表达最高阶段、列出检查以及按稳定 check ID/Model selector 做 inclusion/exclusion；最终 argv 拼写仍由 TU-18 决定。
 
 主配置与 Context 中保存的 Model、Permission 或其他会话依赖不一致时，Runtime 必须明确提示并要求按恢复契约处理，不能静默映射成另一个对象。
 
-本决定归档 `AQ-013` 的三阶段骨架和 `AQ-217` 的无首次页面方向；`AQ-012`、`AQ-085`、`AQ-289`、`AQ-317` 至 `AQ-320` 仍只询问受限入口、确认、失败、预算与输出细节。
+本决定归档 `AQ-013` 的三阶段骨架、`AQ-217` 的无首次页面方向及 `AS-004-03/04` 的完整静态/语义检查要求；`AQ-012`、`AQ-085`、`AQ-289`、`AQ-317` 至 `AQ-320` 仍只询问受限入口、确认、失败、预算与输出细节。
 
 ## D-032 SystemPrompt、ContextPrompt 与 `.prompt`
 
@@ -250,9 +254,11 @@ self-test 采用三个有明确同意边界的阶段：第一阶段做不需要�
 
 ## D-034 Permission 顺序、raw tools 与无 sandbox 边界
 
-状态：已确认产品边界；能力矩阵与审批流程待确认
+状态：已确认产品边界与命名 profile 语义；能力矩阵与审批流程待确认
 
 Permission section 的物理顺序决定新 Context 的默认项，不增加另一套 DefaultPermission ID；发行模板把 `Std` 放在第一项，因此默认是 `Std`。删除、禁用或重排第一项时怎样校验，Context 引用失效时怎样提示，继续由配置与恢复契约确认。
+
+发行模板同时包含名为 `Readonly` 的 profile，但名称只是人类可读名称。Permission 的名称、Description 和 `SystemPrompt` 都不能授予、拒绝或确认能力；Runtime 只消费 schema 登记的 typed capability 字段。用户若把名为 `Readonly` 的 profile 配成允许写入，或把只读矩阵命名成暗示宽授权的名称，实际行为仍以 capability map 为准；self-test Stage 3 可以根据名称、Description、SystemPrompt 与矩阵给出错配/拼写 advisory，但不能凭名称偷偷改写。`Permission.<Name>.SystemPrompt` 是有界用户指令组件，不是授权令牌；它在 Prompt 权威链的精确位置和 purpose 可见性仍由 PP-03/PP-05 确认。
 
 yaca 的工具面保持接近 Codex 的模型调用方式：模型直接调用清楚、原始而有界的工具能力，不在其上堆叠一套假装更安全的业务脚本语言。raw shell 是独立的宽能力工具，direct file/search 工具仍可以提供确定的参数、冲突和结果契约；“相信模型”不允许 Runtime 伪造工具结果、越过用户配置或重放未知副作用。
 
@@ -266,7 +272,7 @@ v0.1 不承诺或实现统一 OS sandbox。Permission、DoubleCheck、人工审�
 
 yaca 的长期用户数据面只使用 INI 与 XML：完整主配置在 INI，Context 的完整会话事实与允许的会话覆盖在单个 XML。不得新增长期 `.log`、SQLite、永久 WAL 目录、draft 文件或隐藏索引作为第二事实源。为原子替换、锁、崩溃恢复或有界网络/进程传输所需的短期 temp/lock/previous-valid 控制物是否允许、怎样命名和清理，必须由存储证明决定，且不能悄悄演化为长期事实源。
 
-Context XML 的可移交目标是：把该 XML 复制到另一台兼容机器后，接收方拥有理解历史、识别缺失依赖并继续工作的完整语义信息。它必须保存规范完整对话、控制事实、会话参数及来源、Prompt/Model/Permission 快照、Model 切换的旧值/新值/原因、工具与验证证据和压缩视图来源。这个保证不要求把 API Key、proxy credential 或本机绝对能力秘密写入 XML；目标机缺少对应 Model、Permission、workspace 或程序能力时，应只读说明并显式 mapping，而不是静默假装原环境仍存在。
+Context XML 的可移交目标是：把该 XML 复制到另一台兼容机器后，接收方拥有理解历史、识别缺失依赖并继续工作的完整语义信息。它必须保存规范完整对话、控制事实、会话参数及来源、Prompt/Model/Permission 快照、Model 切换的旧值/新值/原因、工具与验证证据和压缩视图来源。这个保证不要求把任何 registered config-secret exact value 或本机绝对能力秘密写入 XML；目标机缺少对应 Model、Permission、workspace 或程序能力时，应只读说明并显式 mapping，而不是静默假装原环境仍存在。普通用户/工具正文仍可能含 Runtime 不认识的秘密，因此“排除配置秘密”不能被宣传为 XML 已自动脱敏。
 
 “完整接盘”不等于无上限保存任意原始字节，也不授权第三方任意改写活动 XML。canonical result 的上限/引用、公开 schema、解析库、原子提交、恢复、迁移和 reference-reader 测试仍由 Context/格式/平台证明收口。
 
@@ -301,3 +307,115 @@ v0.1 必须是所选 Coding Agent 闭环的完整可用版本，不能把 README
 首版不得留下无消费者的配置、loader、假命令或公共 API 来伪装这些功能“已经预留”。未来若要加入任一种扩展，必须由项目负责人显式重新进入设计流，并重新审查权限、状态、Context schema、兼容、迁移和平台证据；当前只允许为既有事实保留必要的版本/来源字段。
 
 本决定归档 `AQ-373` 与 `EXT-01` 至 `EXT-03` 的当前关闭方向。后续只设计明确的 unsupported 行为、无空壳检查和未来显式 re-entry gate，不再提供“v0.1 开放一种扩展”的可选分支。
+
+## D-039 启动和本地管理不隐式联网
+
+状态：已确认网络触发边界；显式遥测与更新功能是否存在仍待确认
+
+默认正常启动、help/version、配置与 Context 浏览、静态 self-test 和其他只读取本机状态的管理动作不得自动发起网络请求。联网必须来自用户已经明确触发的 Model/tool 动作、self-test 在线阶段，或以后经单独确认进入产品的显式网络命令；每条入口仍要服从自己的 endpoint、Permission、预算、取消和记录契约。D-031 的 `StartupSelfTest=stage2|stage3` 是用户在 INI 中显式开启的启动门，但每次运行仍保留对应在线阶段的可见 consent，不能复活含糊的 `CheckModelOnStart`。
+
+因此，aggregate telemetry、诊断上传和更新检查/下载不能借“维护”名义在启动、定时器或本地浏览时静默运行。这个边界不预先决定 v0.1 是否提供 aggregate telemetry、一次性 diagnostic upload 或手动更新查询/下载；这些产品范围分别由 ED-13/AQ-246、ED-14/AQ-390 与 RF-16/AQ-387 决定。程序安装与数据迁移仍由 RF-01/RF-03 拥有，不能从网络触发边界反推。
+
+本决定归档 `DISCUSSION-BATCH-01.md` 中 B-07 对“启动和本地浏览不隐式联网”的明确接受，并约束 `PROD-07`、`DIAG-08` 与 `REL-11` 的所有下游方案。
+
+## D-040 简洁裸启动与第一条消息落盘
+
+状态：已确认；精确 renderer 与失败 ID 待下游冻结
+
+裸 `yaca [directory]` 永远开始一个新的未保存 chat，不扫描 Context Catalog、不提示 recent，也不根据“正常/异常结束”分类旧任务。旧 Context 只由 `.context`、continue 或 `context-repl` 等显式动作读取。启动头保持逐行 TUI 的简洁形式，没有总显示开关；Slogan、版本、work directory、data root、配置状态、Context/实时 hash、Model、Permission、DoubleCheck 和 `.status` 提示各自使用独立 bool，每个启用字段独占一行并从行首开始。全部关闭就不显示例行启动头；固定 Slogan 为 `yaca: Yet Another Coding Agent.`，chat 输入提示为 `>>`。这些 display-only 偏好永远不能隐藏错误、警告或要求动作。
+
+仅显示 chat、help/status、修改尚未保存的会话设置或直接退出都不建立 XML。第一条 main 用户消息被接受时，Runtime 必须先取得 D-041 的初始名称，以 no-replace 建立 Context XML，durable 保存该消息及此前内存会话设置，成功后才允许 Model 请求或任何副作用；创建失败就保留可见 draft 并失败关闭。
+
+本决定归档 `DISCUSSION-BATCH-02.md` 的 `AS-002-01`、`AS-002-04`、`AS-002-05` 以及 `DISCUSSION-BATCH-04.md` 的 `AS-004-01`；后者取代前者中的启动头 master，但不改变逐字段/逐行方向。本决定收口 `PJ-01`、`PJ-04` 和 `PJ-05` 的负责人方向。
+
+## D-041 Context 初始名称、固定目录与单 writer
+
+状态：已确认；workspace 绑定来源和手工名称优先级分别由 D-045/D-046 细化
+
+新 Context 的初始 basename 固定为 `Untitled Conversation [XXXX]`；`XXXX` 是四位大写十六进制随机短标签。它只是 ASCII 碰撞兜底，不是永久 ContextId，也不是由完整逻辑 XML 路径实时计算的 16 位 hash。创建使用平台安全随机源、bounded retry 和 no-replace，不能先检查再覆盖。用户路径、手工名称、Prompt 和对话仍按 UTF-8 保真；Windows XP 的 argv、console 和文件 API 使用宽字符边界，显示降级不得改变真实路径或 hash 输入。
+
+`AutoNameEveryMainTurns` 是唯一全局自动命名间隔：默认 `10`，`0` 表示关闭。每 N 个成功收口且已持久化的 main turn 最多触发一次低优先级、无工具后台命名请求；side、review、self-test、工具迭代和失败/取消 turn 不计数。新 main、退出、取消或超时都可终止它，失败不阻断 main、不在退出时等待，也不在下次启动自动补跑。D-046 已确认手工 rename 默认在 XML metadata 设置独立 `AutoRenameDisabled`，context-repl 可添加/取消该标记，取消不立即命名。
+
+每个 Context 绑定一个固定 work directory。D-045 进一步确认它就是由 XML 在 `__yaca__/CONTEXT/` 下的镜像父目录解码出的唯一 workspace root，而不是 XML 内的 current-workdir 字段。显式打开时总是验证并使用该目录；目录缺失、不可进入或 identity 不符就失败并交给 `context-repl` 的 self-fix，不提供普通 jump/keep。跨机显式 rebind 通过安全移动 XML 改变镜像父目录，成功后新目录成为固定目录且逻辑路径/hash 随之变化。
+
+同一 Context 只允许一个 writer。活动 writer 存在时第二进程完全拒绝打开正文，只可显示名称、路径、busy 与能够证明的 PID；无法证明时显示 unknown，绝不按锁龄强抢。其他进程的 context-repl/CLI 在锁释放前也不能 rename、rebind、删除、归档、恢复、修改 Prompt/metadata 或切换 `AutoRenameDisabled`。活动 chat 的 writer 仍可通过已登记会话 action 修改自己的 next-turn state；这不是第二 writer。陈旧锁只由 Context self-fix 在平台证据充分时处理。
+
+本决定归档 `AS-002-06`、`AS-002-08`、`AS-002-09` 和 `AS-004-08`，对应 `PJ-12`、`PJ-13` 与 `CX-13`。
+
+## D-042 独立管理 REPL、领域 self-fix 与直接退出
+
+状态：已确认产品表面；逐命令 grammar 与 deadline 待下游冻结
+
+正式交互表面只有 chat、model-repl、config-repl、context-repl、self-test 和 help，不建立独立 recovery surface。三个管理 REPL 都是顶层 CLI semantic action，不能从 chat 打开后再返回；每个 REPL 提供自己的 `self-fix-program` 菜单，只诊断/修复本领域。用户显式打开损坏、不兼容或 unknown 的目标时，程序先显示事实、已保存范围和对应修复入口，然后退出，不自动进入恢复交互或重放副作用。
+
+chat 中保留平坦 `.model` root，并且只切换已经存在、有效且 enabled 的 Model。无参数 `.model` 打开有界 Model picker，`.model <selector>` 直接选择；两者提交同一个 typed action、使用同一 resolver/校验并在 next-turn 生效。补全/候选提示只读取当前 enabled Model registry，窄屏或旧终端退化为逐行候选，不得改变选择结果。`.context`、`.prompt`、`.cautious`、`.status` 等仍是会话 action，而不是管理 REPL。普通对话不建立独立 plan state、PlanArtifact、`.plan` 或 `.execute`。
+
+每个 TUI 暴露的领域动作都必须来自同一 action registry，并存在可由 CLI 调用的等价投影；纯滚动、分页、焦点移动等 renderer 手势不是第二套领域 API。这个不变量不预先选择 TU-18 的 flag/subcommand 拼写，也不表示非 TTY 可以跳过缺失参数、秘密输入或人工确认。
+
+退出不额外确认，也不等待后台命名。统一 close 状态机立即取消/中断活动和未开始 queue、拒绝 pending approval，并在有界 deadline 内把事实诚实保存为 completed/interrupted/unknown；“直接退出”不等于跳过 XML 收口或伪造副作用已撤销。
+
+本决定归档 `AS-002-07`、`AS-002-10` 至 `AS-002-12`、`AS-004-02` 与 `AS-004-05`，收口 `PJ-06`、`PJ-08` 至 `PJ-11`；平坦 `.model` 同时选择 `TU-32=A`。
+
+## D-043 Permission 的 SystemPrompt 不参与授权
+
+状态：已确认字段与安全边界；精确 Prompt 排位和能力矩阵待 PP/TS 组确认
+
+`Permission.<Name>.SystemPrompt` 是 optional、有界、逐字保存的用户内容。配置浏览器必须把“Capabilities — Runtime enforced”和“SystemPrompt — model instruction”分开显示；Prompt 即使写着允许 shell 或跳过确认，也不能改变 capability map、工具 registry、DoubleCheck 或人工审批。每个请求/XML 保存实际采用的 Permission 名称、能力 snapshot/digest 和 Prompt component snapshot/digest，使另一台机器能够解释历史；外来 XML 只能提供历史证据，不能创建、覆盖或激活本机 Permission 定义。
+
+本决定细化 D-032/D-034，来源为 `AS-002-13`。它不预先回答 PP-03 的完整权威链或 TS-04 的具体 `Readonly` capability matrix。
+
+## D-044 v0.1 只发布 TUI，不保留 Web/媒体/远程空壳
+
+状态：已确认排除范围
+
+v0.1 完全不提供 Web、图像附件或 clipboard-media/screenshot、音频文件或麦克风、公共 headless/IPC/RPC/LAN/remote controller、独立 transcription、TTS 或自动朗读。用户仍可把普通文本粘贴进 TUI，或把资料放在工作目录后明确要求模型通过既有工具读取；这不会创建 clipboard、媒体或远程能力。
+
+这些排除项在配置、CLI/help/completion、Prompt/Model purpose、工具 registry、Context XML、Runtime listener/device/helper/self-test 和各平台 zip 中都必须是零表面。内部 application service、测试 fake 或设计文档中的 exclusion record 不构成公开 remote API。未来只有项目负责人针对具体 use case 显式重开设计流，才可新增相应 schema、依赖和测试；不得先留 disabled placeholder。
+
+`PJ-16=A` 使条件组 `PJ-19` 当前为 not-applicable，同时负责人也明确不要 transcription。本决定归档 `AS-002-14`，收口 `PJ-14` 至 `PJ-17`、`PJ-19` 和 `PJ-20`；`PJ-18` 的单 root 路线随后由 D-045 独立收口。
+
+## D-045 单 Context、单 workspace root，绑定由镜像位置决定
+
+状态：已确认拓扑与权威来源；初始 root 发现和跨平台路径编码待后续收口
+
+v0.1 每个 Context 恰好绑定一个 workspace root。一次获准访问 workspace 外路径不会把该路径升级为第二个 root；配置、Context XML、工具 schema、Prompt、Permission 和帮助中都不生成附加 root、root alias 或 root list。
+
+当前 workspace root 的权威来源不是 Context XML 内的 `current workdir` 字段。yaca 打开一个 Context 时，从该 XML 位于 `__yaca__/CONTEXT/` 下的规范镜像父目录解码唯一 root；XML basename 只表达当前 Context 名称。XML 仍可保存工具实际 cwd、历史路径和 Git/digest 等会话证据，但这些只能解释历史，不能覆盖由当前物理位置导出的绑定。
+
+显式 workspace rebind 是 context-repl 管理事务：在完整 XML 中追加 rebind 历史事件、原子推进 canonical `UpdatedAt`，并以 no-replace、可恢复的安全发布协议把该 generation 移动到新 root 对应的镜像目录；`CreatedAt` 不变。只有事件、metadata 与目标路径全部发布成功，新父目录才成为唯一绑定，完整逻辑 XML 路径与运行时 16 位 hash 一起变化，旧 hash 立即失效；失败或只读 inspect 不推进 `UpdatedAt`，也不得留下两个都可被 Resolver 当作 active 的候选。普通 basename rename 不改变 root，但仍因文件名变化而改变逻辑路径与 hash。
+
+本决定选择 `PJ-18=A`，并以 `AS-003-01` 细化 D-041/PJ-13 中“记录的固定 work directory”：固定的是由镜像位置确定的单 root，不是 XML 内另一份 current-workdir 真相。`F4-14` 仍独立决定新 Context 的初始唯一 root 是传入目录还是经过其所选 Git-root 流程得到的边界；Windows drive、UNC、Linux root、链接与非法名称的镜像编码也仍由路径规格和目标平台证明冻结。
+
+## D-046 手工名称默认设置每 Context 自动重命名禁用标记
+
+状态：已确认会话标记与管理语义；精确 XML 元素拼写和管理事务物理协议待 Context schema 收口
+
+Context XML metadata 保存布尔 `AutoRenameDisabled`。新 Context 默认没有禁用标记；用户手工 rename 成功时，canonical `Name`、`UpdatedAt` 与 `AutoRenameDisabled=true` 发布为同一个管理事务，`CreatedAt` 不变，默认保护用户明确给出的名称。自动命名请求自身成功改变名称时不设置该标记。
+
+context-repl 可以显式添加或取消该标记。取消等价于把有效值恢复为 `false`，只允许该 Context 从新的调度基线开始、以后继续按全局 `AutoNameEveryMainTurns` 间隔参与周期命名；它不立即发起命名、不追补禁用期间错过的请求。添加标记或手工 rename 把它置为 `true` 时，尚未完成的自动命名 request 必须被取消或逻辑失效；即使传输无法及时停止，迟到结果也只保存 request/usage/cancel 事实，绝不能采用名称覆盖用户刚确认的结果。
+
+`AutoNameEveryMainTurns` 继续是全局间隔：默认 `10`、`0` 全局关闭。修改一个 Context 的 `AutoRenameDisabled` 不修改这个全局值，修改全局值也不清除任何 Context 的标记；只有“全局间隔启用且当前 Context 未禁用”时，周期命名才有资格进入有界调度。
+
+本决定归档 `AS-003-02`，关闭 D-041/PJ-12 遗留的手工名称优先级补缝。
+
+## D-047 Context 列表排序是两个简单的全局显示偏好
+
+状态：已确认字段、默认与 canonical 时间角色；时间编码、名称 collation 和旧平台性能 fixture 待索引规格/技术证明冻结
+
+Context 列表、浏览器和相同 Catalog view 提供一个排序键与一个方向偏好。排序键只有 `created|updated|name`，方向只有 `ascending|descending`；默认是 `updated + descending`，即最近完整更新的 Context 在前。它们是用户 INI 的全局显示偏好，不进入 Context XML，不改变 Resolver 的距离/名称/hash 优先级，也不让裸 `yaca [directory]` 扫描 recent。
+
+`created`/`updated` 必须读取 Context canonical metadata，而不是文件系统 mtime/ctime：复制、原子 replace、恢复和跨机导入都会改变文件时间，不能借此重排会话事实。`CreatedAt` 在初次 durable 建立 XML 时固定；`UpdatedAt` 只在一次 durable XML mutation 成功发布时原子推进，失败尝试与只读 inspect 不推进。`name` 按规范逻辑名称排序；主键相同始终使用 canonical `LogicalPath` 升序 tie-break，绝不随 `ListSortDirection` 反转，目录枚举顺序不得影响结果。目标字段拼写为 `[Context] ListSortBy` 与 `ListSortDirection`，不保留多组同义字段。
+
+本决定归档 `AS-004-06`。`CX-19` 仍只决定 context-repl landing，不得把本排序偏好误当成选择 global-recent 首页。
+
+## D-048 配置和 Model 定义在每个新 turn 边界自动完整载入
+
+状态：已确认 `F4-01` custom 路线；文件观察、原子 generation 与目标平台性能证据待配置/Runtime 规格收口
+
+yaca 在每个新顶层 turn admission 前有界地读取完整 INI bytes 并计算仅留在进程内的 private source digest。bytes 未变化时直接复用已校验的 immutable `ConfigGeneration`；变化时必须对整份配置做 parse、schema/cross-field validation，并一次性发布新 generation。model-repl/config-repl 或外部编辑产生的有效 Model/配置变化由下一 turn 自动采用，不弹 reload 确认，也不要求重启。
+
+“每轮载入、实时”严格指顶层 turn 边界，不是逐字段热更新。一个 main/side turn 派生的 Model/tool/review/retry/compaction 活动继续使用该 turn 开始时的原快照；新 generation 不可反向改变它们。若本次观察到文件删除、半写、不可读或无效，新 turn 失败关闭并进入 bootstrap 修复路径，不能静默用旧 generation 继续。当前 Model/Permission 被删除、重命名或变得无效时明确要求 switch/mapping，不按物理第一项猜。
+
+配置文件是小型控制文件，简单且正确的基线是每 turn 一次有界顺序读；不能只依赖 mtime/size，因为旧文件系统和快速同尺寸改写会漏检。实现可以用经过实测的高性能 Lua/C parser、缓存已验证 generation，并在 digest 相同后跳过解析，但不能用 watcher、局部 table 重读或缓存借口改变上述观察语义。
+
+本决定选择 `F4-01` 的 custom `selected-with-exception` 路线并归档 `AS-004-09`。它与候选 B 都使用 turn boundary，但不包含“发现有效变化后询问是否载入”；用户已经要求自动生效。

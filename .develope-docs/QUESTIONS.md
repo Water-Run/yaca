@@ -1,6 +1,6 @@
 # 讨论问题队列
 
-更新日期：2026-07-18
+更新日期：2026-07-22
 
 问题通常按依赖逐个深入并逐项归档。项目负责人要求集中盘点时，可以一次收到多个高层问题并分批回答；任何未明确回复的条目仍保持“待决”，不会因推荐方案自动成为决定。
 
@@ -72,7 +72,7 @@ Windows/Linux 独立发行包是继续共用一个 `main.lua` 入口并在启动
 
 ## 当前工作
 
-全产品问题盘点和五个参考 AgentLoop 的固定提交源码核对已经形成讨论底稿。四轮完整性审阅现把问题扩展为 `AQ-001` 至 `AQ-373`，但本文件只承担原子追踪；项目负责人主要通过 [`DESIGN-DECISION-ROADMAP.md`](DESIGN-DECISION-ROADMAP.md) 和十个 `decision-packets/` 成套回复，后续仍逐项写入决定、子系统规格和 readiness gate。
+全产品问题盘点和五个参考 AgentLoop 的固定提交源码核对已经形成讨论底稿。多轮完整性、体验与交叉传播审阅现把问题扩展为 `AQ-001` 至 `AQ-437`，但本文件只承担原子追踪；项目负责人主要按 [`DECISION-BATCH-QUEUE.md`](DECISION-BATCH-QUEUE.md) 逐批回复，并从十个 `decision-packets/` 打开该批涉及的 owner 正文；[`DESIGN-DECISION-ROADMAP.md`](DESIGN-DECISION-ROADMAP.md) 只解释全局关系，明确回复后仍逐项写入决定、子系统规格和 readiness gate。
 
 ## 已确认 Q-012
 
@@ -98,7 +98,7 @@ AgentLoop 的“完成权”归谁：模型无工具调用即直接结束，Runt
 
 ## 已确认 Q-015
 
-当 `yaca --continue X` 等通用解析入口收到选择器时，怎样同时满足“由当前目录向外搜索”“名称/hash 语义可解释”和“尽量少遍历旧磁盘”？
+当 `continue(selector)` 等通用 semantic action 收到选择器时，怎样同时满足“由当前目录向外搜索”“名称/hash 语义可解释”和“尽量少遍历旧磁盘”？项目负责人原话使用 `yaca --continue X`；它是需求证据，精确 argv 只在 TU-18 A 中如此投影。
 
 三种方案是：严格先完整扫名称、未找到再完整扫 hash；对 16 位输入先按 hash 并允许提前返回；或使用互不重叠的增量搜索环，在每个环中单遍同时收集名称/hash 命中，完成本环后再按规定优先级裁决。
 
@@ -145,11 +145,11 @@ AgentLoop 的“完成权”归谁：模型无工具调用即直接结束，Runt
 4. **失败类型**：无效输入、部分响应、超时、取消、磁盘满、崩溃、并发外改、权限拒绝、旧版本/未知字段和目标平台能力缺失。
 5. **用户可见面**：chat、各 REPL、help、审批、错误、恢复、导入导出、self-test 和发行 zip；同一领域结果不能因入口不同而改变。
 
-每个高风险决定最终都必须能回答六句话：谁决定、依据什么、何时落盘、怎样取消、失败后是什么真实状态、用户和测试怎样看见证据。`DESIGN-CHECKLIST.md` 保留 354 个主题级检查点；下面的 AQ 是原子分支与技术证明点，其中真正改变产品边界的内容由决策包交给负责人，其余由规格/原型证明，两者不是用数字互相替代。
+每个高风险决定最终都必须能回答六句话：谁决定、依据什么、何时落盘、怎样取消、失败后是什么真实状态、用户和测试怎样看见证据。`DESIGN-CHECKLIST.md` 保留 384 个主题级检查点；下面的 AQ 是原子分支与技术证明点，其中真正改变产品边界的内容由决策包交给负责人，其余由规格/原型证明，两者不是用数字互相替代。
 
 ## 第一、二轮已经发现的十五个矛盾
 
-下面保留早期审计结果；第三轮新增的 typed finish、事件泵、raw shell 权限、外来 XML 信任、Key 生命周期、单 XML 性能和 undo 范围等高风险项见 `AQ-251` 至 `AQ-360`；第四轮新增的运行时外改、Model scheduler、ask-user/retry、draft/details、管理事务、文件系统与扩展关闭边界见 `AQ-361` 至 `AQ-373` 和 [`ARCHITECTURE-READINESS.md`](ARCHITECTURE-READINESS.md)。
+下面保留早期审计结果；第三轮新增的 typed finish、事件泵、raw shell 权限、外来 XML 信任、Key 生命周期、单 XML 性能和 undo 范围等高风险项见 `AQ-251` 至 `AQ-360`；第四轮新增的运行时外改、Model scheduler、ask-user/retry、draft/details、管理事务、文件系统与扩展关闭边界见 `AQ-361` 至 `AQ-373`；第五轮补出 `AQ-374` 的无工具 main 资格；第六轮先把 modal grammar、fd 拓扑、help 架构、Description 投影、手动压缩、import compatibility gate 和单进程 Context 拓扑提升为 `AQ-375` 至 `AQ-381`，再把旧 `PROD-11` 中仍未确认的 Web、图像、音频输入、remote/headless、多根和更新范围拆为 `AQ-382` 至 `AQ-387`。随后把独立转写、TTS 和一次性诊断上传另立为 `AQ-388` 至 `AQ-390`；owner 完整性审阅又把 Prompt/指令、人工复核、预算、pending question、旧终端关键事件、进程后代、direct 文件工具、Model/Permission 管理、金额门、self-test rerun、审批恢复、通知范围和文本/二进制文件契约拆为 `AQ-391` 至 `AQ-416`。第七轮补齐配置秘密文件权限、direct metadata、ignore 和 active XML 外改的 `AQ-417` 至 `AQ-420`；随后按真实长会话生命周期做的负责人体验、AgentLoop、Tool Calling 与安全红队复核，把 model-yield 续接、exec cwd、ambient environment、进程输出解码/binary、exec canonical retention 和 composer recall 拆为 `AQ-421` 至 `AQ-426`；体验/安全去捆绑又把 dot-command root、输入提示符、审批动作 grammar、SensitiveRead 配置面和 termination-review Model 来源拆为 `AQ-427` 至 `AQ-431`；第八轮从配置、AgentLoop、数据外发和 reserved tree 反查，把资源 selector、per-Model retry、stuck 阈值、特殊 purpose 外发同意、reserved direct-read 和短 secret 政策拆为 `AQ-432` 至 `AQ-437`。所有项目统一进入 [`ARCHITECTURE-READINESS.md`](ARCHITECTURE-READINESS.md)。
 
 1. `Alt+Enter` 在旧 Windows 控制台可能被系统占用；`Ctrl+Enter`、`Shift+Enter` 在 cooked line 输入中也不能可靠区分。必须决定 native/raw 输入还是点命令后备。
 2. “内部只使用 ASCII”不能等于“拒绝非 ASCII 用户数据”，否则已确认的中文上下文名和 CJK 路径失效。建议限定为代码标识、配置键、机器字段和 UI 固定文字使用 ASCII；用户路径、对话和 XML 内容仍为 UTF-8。
@@ -199,9 +199,9 @@ AgentLoop 的“完成权”归谁：模型无工具调用即直接结束，Runt
 
 状态：待决。依赖：AQ-001、AQ-002。
 
-方案：A. 固定简洁、直接、技术型人格；B. 完全由 `SystemPrompt` 决定；C. 提供多个人格预设。
+方案：A. 克制、平静、协作式；B. 温和、耐心、鼓励式；C. 干脆、事务式。三项只改变已经需要输出的同一份内容的语气，不改变消息时点、解释量、报告栏目、工具、验证或安全控制。
 
-推荐 A。它给 yaca 一个稳定基线，又不增加人格配置系统。
+推荐 A。它给 yaca 一个不夸张、不谄媚的稳定语气基线；持久/本轮 Prompt 仍可在指令权威链内要求不同语气。
 
 #### AQ-005 项目指令自动发现
 
@@ -265,7 +265,7 @@ AgentLoop 的“完成权”归谁：模型无工具调用即直接结束，Runt
 
 状态：部分；正常启动边界已答，诊断例外待决。依赖：B-02、AQ-013。
 
-方案：A. 所有 yaca 命令都因配置校验失败而拒绝；B. 正常 Agent/TUI 启动拒绝，但 `--self-test`、`--config-repl`、help/version 和显式 reset/repair 只加载最小内置 schema；C. 自动重置。
+方案：A. 所有 yaca actions 都因配置校验失败而拒绝；B. 正常 Agent/TUI 启动拒绝，但 self-test、config-repl、help/version 和显式 reset/repair semantic actions 只加载最小内置 schema；C. 自动重置。顶层 argv 拼写仍只由 TU-18 投影。
 
 用户明确的是“正常 yaca 启动包括配置加载和检查，配置损坏就无法启动”，同时又要求 self-test 很强大；这不足以推出所有管理命令也必须被封死。
 
@@ -455,11 +455,11 @@ AgentLoop 的“完成权”归谁：模型无工具调用即直接结束，Runt
 
 #### AQ-034 原始工具是否仍有 schema
 
-状态：待决。依赖：AQ-033、`MODEL-05`、`TOOL-06`。
+状态：待决。依赖：AQ-033、`MODEL-05`、`TOOL-06`、TS-23。
 
-方案：A. 所有工具强制 JSON schema；B. 全部自由文本；C. shell 参数是原始字符串，其他工具使用 schema。
+方案：A. 所有工具使用稳定 JSON object envelope；shell/exec 的 `command` 字段仍是 opaque 原始命令字符串，Runtime 不解析它来伪造细粒度安全；B. 其他工具使用 typed object，但 shell/exec 接受没有 object envelope 的 bare raw payload；C. 所有工具都接受自由文本，由模型和 Runtime 临时约定格式。
 
-推荐 C。相信模型不等于放弃参数边界和恢复语义。
+推荐 A。它既保留项目负责人要求的 raw shell 表达力，又让 tool call、Context 恢复、错误定位和版本迁移共享稳定载体；schema 是传输与验证契约，不是 sandbox。
 
 #### AQ-035 首版工具并发
 
@@ -581,17 +581,17 @@ AgentLoop 的“完成权”归谁：模型无工具调用即直接结束，Runt
 
 状态：待决。依赖：AQ-004、AQ-046。
 
-方案：A. 简洁、直接、主动、承认不确定性；B. 长篇教学型；C. 不提供任何人格文字。
+方案：A. 用中性、明确、克制的措辞，承认不确定性，不夸张、不谄媚；B. 对同一份内容使用更温和、耐心、鼓励的措辞，但不自动增加背景或消息；C. 对同一份内容使用更干脆的主动语态并减少寒暄，但不删除必需事实或改变报告上限。
 
-推荐 A。理由：它适合终端交互，也给自定义 `SystemPrompt` 留出足够空间；具体英文原文另在 AQ-183 冻结。
+推荐 A。理由：它适合终端交互，也给自定义 `SystemPrompt` 留出足够空间；具体英文原文另在 AQ-183 冻结。本题不拥有详略、进度频率或工具叙述。
 
 #### AQ-049 回复详略的控制权
 
-状态：待决。依赖：AQ-004、AQ-048。
+状态：待决。依赖：AQ-050、AQ-293、AQ-294。
 
-方案：A. 只由用户自然语言控制；B. 增加全局和会话级 verbosity 参数；C. 由模型永久固定。
+方案：A. 不增加独立 `Autonomy` 字段，人格和进度/报告契约按各自选项运行；B. 增加 `Autonomy=direct|explanatory`，只改变已允许文字块内的解释粒度，不新增消息、工具、验证、报告栏目或副作用；C. 不增加字段，只允许用户通过 SystemPrompt/ContextPrompt 描述偏好，但仍不能改变已选消息时点或 Runtime 控制。
 
-推荐 A。理由：首版少一个容易失真的抽象；若长期出现稳定需求，再把它提升为有明确枚举的配置。
+推荐 A。理由：安全、终止和自主推进已由 Permission、DoubleCheck、budget 和 typed control 组合表达；不应再用一个宽泛体验词偷偷改变行为。
 
 #### AQ-050 工具调用过程的叙述规则
 
@@ -1161,7 +1161,7 @@ AgentLoop 的“完成权”归谁：模型无工具调用即直接结束，Runt
 
 #### AQ-120 shell 的工作目录
 
-状态：待决。依赖：AQ-107、AQ-119、`PROC-02`。
+状态：待决输入轴；正式 owner 已归并到 AQ-422/TS-37，本条不再单独投票。依赖：AQ-107、AQ-119、`PROC-02`。
 
 方案：A. 继承 Runtime 当前进程且工具可永久 `cd`；B. 每次调用都有显式 cwd，默认使用 turn 快照的工作目录，结果不得暗中改变全局 cwd；C. 永远固定项目根。
 
@@ -1169,7 +1169,7 @@ AgentLoop 的“完成权”归谁：模型无工具调用即直接结束，Runt
 
 #### AQ-121 子进程环境变量继承
 
-状态：待决。依赖：AQ-119、AQ-120、AQ-148。
+状态：待决输入轴；正式 owner 已归并到 AQ-423/M05-55，本条不再单独投票。依赖：AQ-119、AQ-120、AQ-148。
 
 方案：A. 完整继承并允许任意覆盖；B. 继承基线环境，配置可添加/覆盖白名单字段，敏感值在 UI/XML 脱敏；C. 使用完全空环境。
 
@@ -1185,7 +1185,7 @@ AgentLoop 的“完成权”归谁：模型无工具调用即直接结束，Runt
 
 #### AQ-123 子进程输出编码
 
-状态：待决。依赖：AQ-045、AQ-122、`PROC-07`。
+状态：待决输入轴；正式 owner 已归并到 AQ-424/TS-38，本条不再单独投票。依赖：AQ-045、AQ-122、`PROC-07`。
 
 方案：A. 一律假定 UTF-8；B. 保留原始字节并按平台/显式 encoding 解码为 UTF-8，记录替换或失败；C. 一律使用系统 ANSI code page。
 
@@ -1193,7 +1193,7 @@ AgentLoop 的“完成权”归谁：模型无工具调用即直接结束，Runt
 
 #### AQ-124 二进制输出
 
-状态：待决。依赖：AQ-122、AQ-123、AQ-125。
+状态：待决输入轴；正式 owner 已归并到 AQ-424/TS-38，本条不再单独投票。依赖：AQ-122、AQ-123、AQ-125。
 
 方案：A. 原样塞进 Prompt/XML；B. 检测 NUL/解码失败后标为 binary，只保存长度、摘要和受限预览，必要时指向工作区文件；C. 静默丢弃。
 
@@ -1201,7 +1201,7 @@ AgentLoop 的“完成权”归谁：模型无工具调用即直接结束，Runt
 
 #### AQ-125 工具输出截断
 
-状态：待决。依赖：AQ-028、AQ-112、AQ-122、AQ-195。
+状态：已拆分；raw `exec` 的正式 owner 是 AQ-425/TS-39，direct tool 保留仍归 TS-16，TUI 投影仍归 TU-06/TU-29，本条不再单独投票。依赖：AQ-028、AQ-112、AQ-122、AQ-195。
 
 方案：A. 只保留开头；B. 设置字节/行硬上限，保留头尾、原始总量、摘要和明确截断标记；C. 无限保存。
 
@@ -1349,17 +1349,17 @@ AgentLoop 的“完成权”归谁：模型无工具调用即直接结束，Runt
 
 状态：待决。依赖：AQ-002、AQ-055、AQ-136。
 
-方案：A. Model Prompt 完全替换全局 Prompt；B. 作为第三层用户人格 Prompt；C. 删除用户可配的 `Model.CustomPrompt`，协议/工具适配提示由内置且版本化的协议模板负责。
+方案：A. 删除独立层；每个旧 Model 来源经管理事务逐项选择迁入全局 `SystemPrompt`、一个明确指定的 `ContextPrompt` 或 discard，多源同目标先预览可编辑 merge，先验证目标再清旧源；B. 保留为 Model-specific 用户默认，精确权威位置及冲突服从 PP-03 × PP-11 组合；C. 保留为低于其他持久用户 Prompt 的 Model-specific compatibility hint，不能改写 role/serializer/tool/control/purpose/权限或冒充内置 adapter。
 
-推荐 C。理由：用户目前只要求全局 `SystemPrompt` 和会话 `ContextPrompt`；模型协议需要的机器提示不应混入可自由编辑的人格层。
+推荐 A。现有 `SystemPrompt` 和 `ContextPrompt` 已能表达全局/会话偏好；删除不能静默丢内容、猜“当前 Context”或串接多个来源。B/C 都必须保存 typed component snapshot 和 Model transition，真正协议模板始终内置、版本化。
 
 #### AQ-144 Model 的工具能力字段
 
 状态：待决。依赖：AQ-033、AQ-081、AQ-136。
 
-方案：A. 首版声明 `none|native`，另记录 self-test 观察结果但不自动改写配置；B. 同时承诺 none/native/emulated；C. 总是假定支持原生 tools。
+方案：A. `Tools=native|off`，不做文本 emulation；B. 完全删除 `Tools` 字段，只有发行 manifest 中静态声明并实现 native tool/control schema 的 Protocol adapter 才能注册为 Model，在线 observation 只形成 support/warning；C. `Tools=native|off|required-native`，其中 required-native 与 adapter 静态不兼容时配置硬错误，普通运行请求或显式在线检查观察到缺失时该次结果硬失败，但从未联网不阻止保存/启用；`native` 继续按用户声明授权，不由 observation 静默改写。
 
-推荐 A。协议风格相同的端点也可能缺少 tool call，但 `emulated` 本身是另一整套 Prompt、解析和安全协议，不能在尚未设计时作为一个枚举值顺手加入。
+推荐 A。它让配置明确表达能否使用结构化 call，又不把联网探测变成启动 gate。文本 emulation 是被排除的另一套 Prompt/解析/安全协议；`Tools=off` 能否承担 main 由 AQ-374/M05-26 单独决定。
 
 #### AQ-145 全局代理配置字段
 
@@ -1839,11 +1839,11 @@ AgentLoop 的“完成权”归谁：模型无工具调用即直接结束，Runt
 
 #### AQ-204 Lua 测试框架
 
-状态：待决。依赖：B-20、`REL-06`、AQ-206。
+状态：技术证明，不进入负责人正式回复清单。依赖：`TEST-02`、`REL-06`、AQ-206、TP-002、TP-030。
 
 方案：A. 依赖系统安装的最新测试框架；B. 随仓库固定一个 Lua 5.5 可运行、无外部服务依赖的轻量 runner/库，统一单元、契约和 fixture 入口；C. 只写手工测试步骤。
 
-推荐 B。理由：XP 和旧 Linux 上必须可重复运行同一测试，依赖安装器或网络会破坏发布门槛。
+技术基线是 B：XP 和旧 Linux 上必须可重复运行同一测试，依赖系统安装或网络会破坏发布门槛。具体 runner/库只由 Lua 5.5 与最终 zip 证据选择；证明失败且必须改变可见测试承诺时才回开产品决策。
 
 #### AQ-205 性能 fixture 的规模
 
@@ -2019,13 +2019,15 @@ AgentLoop 的“完成权”归谁：模型无工具调用即直接结束，Runt
 
 推荐 B。理由：用户批准的是一个确定动作，不是模型稍后可以替换参数的空白支票；文件外改也必须让旧批准失效。
 
-#### AQ-226 审批过期、离机与非交互输入
+#### AQ-226 pending approval 是否随离机时间过期
 
-状态：待决。依赖：AQ-039、AQ-225、AQ-247。
+状态：待决。依赖：AQ-039、AQ-225、`AL06-44`。
 
-方案：A. 等待中的批准永不过期且脚本可默认同意；B. pending approval 可持久显示但绝不自行执行，取消/退出/动作快照变化即失效；非 TTY 默认拒绝，除非 CLI 有显式预授权契约；C. 超时自动允许。
+场景：一张已经 durable、但用户尚未批准的 action card 可能停留数分钟或一整夜。时间寿命与进程崩溃后怎样重新呈现、非 TTY 能否审批是三个独立问题；本题只决定一个仍在等待中的 approval 是否因时间本身失效。
 
-推荐 B。理由：离机时间本身不是批准，恢复后的环境也可能已经改变；任何自动允许都会把“等待用户”变成隐式越权。
+方案：A. 不因离机时间自动过期，只在用户 deny/cancel/close、动作或配置/工作区/文件 identity stale、或上游 turn 收口时失效；B. 使用发行 manifest 固定的 calendar expiry，到期自动生成与原 tool call 配对的 synthetic denied/expired result；C. INI 提供有界 `ApprovalExpiryMinutes`，到期行为同 B，不能配置为无限且不能突破 Runtime hard maximum。
+
+推荐 A。真正的安全门是执行前重新检查精确 action freshness，而不是猜用户离开多久；它也允许负责人第二天回来继续审阅。所有方案都禁止时间到达后自动允许，也不能只把过期卡片从页面删除而不为 accepted tool call 写入正式结果。崩溃恢复后的新 approval instance 由 AQ-412 独占，非 TTY 输入所有权继续由 TU-13 独占。
 
 #### AQ-227 持久化失败时是否 fail-stop
 
@@ -2043,11 +2045,11 @@ AgentLoop 的“完成权”归谁：模型无工具调用即直接结束，Runt
 
 推荐 B。单一 well-formed XML 的每次提交都可能整文件重写，周期性 checkpoint 正好放大最严重的 O(n²) 路径；流片段只作 UI transient，断流时一次收口为 `incomplete` 事实。
 
-#### AQ-229 `.exit`、EOF、窗口关闭与系统信号
+#### AQ-229 graceful-exit action、EOF、窗口关闭与系统信号
 
 状态：待决。依赖：AQ-027、AQ-098、`ARCH-02`、`PLAT-10`。
 
-方案：A. 所有入口立即杀进程；B. `.exit` 发起有状态的 graceful close，空闲 EOF 可退出，忙时 EOF/关闭/信号先取消最内层活动、收口子进程和 durable 状态；超过硬 deadline 后以明确 unknown 状态退出；C. 忙时一律忽略退出。
+方案：A. 所有入口立即杀进程；B. graceful-exit semantic action 发起有状态的 graceful close，实际 chat root 服从 TU-32；空闲 EOF 可退出，忙时 EOF/关闭/信号先取消最内层活动、收口子进程和 durable 状态；超过硬 deadline 后以明确 unknown 状态退出；C. 忙时一律忽略退出。
 
 推荐 B。理由：退出不是另一种完成；必须分别处理活动请求、审批、queue 和已经产生的外部副作用。
 
@@ -2127,9 +2129,11 @@ AgentLoop 的“完成权”归谁：模型无工具调用即直接结束，Runt
 
 状态：待决。依赖：AQ-070、AQ-122、AQ-125、AQ-127。
 
-方案：A. 工具结束前完全无输出；B. 经过控制字符清理和速率限制后实时显示有界增量，canonical result 在结束/取消时一次收口；取消保留 `incomplete`、截断和进程树状态；C. 原样高速刷屏并把每块写成正式消息。
+场景：长测试或构建仍在运行时，用户既需要判断它卡在哪里，也不能让旧终端被无界输出拖死。本题只决定运行期 preview 的默认入口；最终 canonical result、持久化截断和 stdout/stderr 顺序仍由工具 owner 决定。
 
-推荐 B。理由：用户能看到卡在哪里并及时取消，旧终端又不会因无界刷新失去响应；UI 增量不等于 XML canonical 事件。
+方案：A. 运行中只显示 lifecycle、elapsed、observed bytes 和 cancel hint，正文等最终结果收口后再显示；B. 默认追加经过控制字符可见化、chunk 合并、速率限制和总显示 hard cap 的 live preview，超过 cap 后只更新计数；C. 默认同 A，用户显式执行 `.operation follow <operation-id>` 后才显示与 B 相同的有界 preview，并可用 `.operation unfollow <operation-id>` 停止跟随而不取消工具。
+
+推荐 B。慢操作的真实进展默认可见，同时仍有明确的输出和刷新上限。任何 preview 都不是 canonical tool result，不得阻塞 pipe drain、写成完成 tool message 或在恢复时重放；取消必须保留 `incomplete`、截断、unknown 和进程树状态。
 
 #### AQ-240 压缩触发与更大窗口 Model 提示
 
@@ -2159,9 +2163,11 @@ AgentLoop 的“完成权”归谁：模型无工具调用即直接结束，Runt
 
 状态：待决。依赖：AQ-057、AQ-179、AQ-242、`COMP-09`。
 
-方案：A. 用户直接改写旧 compaction 事件；B. 提供查看和“追加纠正/重新压缩”动作，产生新的 superseding event 并保留旧摘要及覆盖关系；C. 摘要不可查看。
+场景：模型生成的 compaction 可能漏掉一项重要决定。旧摘要与它的 source range/digest 已经属于历史事实，不能原地修改；本题只决定用户通过什么入口查看并追加纠正。
 
-推荐 B。理由：模型可能漏掉关键决定；允许纠正但不改写历史，才能同时保持可用性和审计性。
+方案：A. 提供 `.summary show <compaction-id>` 与 `.summary correct <id> <text>`；correct 追加绑定旧 record/range/digest 的 canonical user correction，并作为后续 model view 的 must-preserve overlay；B. 提供 summary show，但没有 typed correct，用户只能用普通 main/steer 消息指出错误，作为新的 canonical user fact；C. 不增加 summary 专用命令，只允许通过通用 details/XML reader 查看，并用普通用户消息纠正。
+
+推荐 A。它让纠正精确指向哪份摘要，同时保持 append-only。三种方案都必须保留旧 summary/checkpoint、source range/digest、producer/version 和旧 view manifest；纠正或重建失败时保留旧 active view并告警，绝不删除原事实或暗中改写旧摘要。
 
 #### AQ-244 `__yaca__` 的物理位置
 
@@ -2179,13 +2185,13 @@ AgentLoop 的“完成权”归谁：模型无工具调用即直接结束，Runt
 
 推荐 B。理由：Win32 x86 和慢终端尤其不能让网络生产速度无限超过解析、XML 与 UI 消费速度。
 
-#### AQ-246 遥测与自动更新检查
+#### AQ-246 Aggregate telemetry 的发送策略
 
-状态：待决。依赖：B-19、`DIAG-08`、`REL-11`。
+状态：待决。依赖：`DIAG-08`、ED-13、`PROD-08`、D-039。
 
-方案：A. 启动时自动检查更新并发送使用统计；B. v0.1 完全无遥测、无隐式更新联网，版本信息和手动检查入口只在用户显式执行时工作；C. 由每个 Model 决定。
+方案：A. v0.1 不发送 aggregate telemetry；token/重试/耗时等只按现有规则留在本地；B. 向发行版声明的 project-owned 固定 HTTPS endpoint 提供显式 one-shot aggregate send，每次展示固定字段、counter range 与大小并重新确认，不保存以后也同意；C. 包含 B，并提供默认关闭的持久 opt-in，只在 opt-in generation 后用户显式 main turn/side question 到达一次 settled terminal boundary 时至多发送一次；内部请求、raw exec、telemetry/upload/update/self-test、启动、定时器、关闭和纯本地动作永不触发，也不建立 durable outbound queue 或回扫历史。v0.1 不接受第三方/自定义 endpoint 或 endpoint-side auth；只消费全局 proxy/CA/redirect，并把 proxy credential 限定在 proxy origin。
 
-推荐 B。理由：它符合离线、旧 TLS、隐私和“启动不隐式联网”的整体边界，也让 self-test 的每一次外部连接都可见。
+推荐 A。它最符合简单、离线和“启动/本地浏览不隐式联网”的已确认边界，也不制造第二条秘密生命周期；B/C 都必须有独立 endpoint/consent/budget、secret canary、失败与撤回契约，不能借 Model 请求权限取得上传权。完整 support/崩溃诊断的一次性上传已拆到 AQ-390/ED-14，更新发现与下载已拆到 AQ-387/RF-16。
 
 #### AQ-247 非 TTY 主 Agent 行为
 
@@ -2381,11 +2387,11 @@ AgentLoop 的“完成权”归谁：模型无工具调用即直接结束，Runt
 
 #### AQ-270 时间戳与 deadline 使用什么时钟
 
-状态：待决。依赖：AQ-092、AQ-196、`PLAT-07`。
+状态：技术规格/证明，不进入负责人正式回复清单。依赖：AQ-092、AQ-196、`PLAT-06`、TP-003、TP-005。
 
 方案：A. 持久化 UTC wall-clock 与可选时区证据，超时/耗时用 monotonic clock；不可用时显式降级；B. 所有逻辑只用本地字符串时间；C. 用 CPU time 计算网络 deadline。
 
-推荐 A。墙钟会跳变而单调钟不能跨重启；二者职责必须分开才能正确恢复和测试。
+技术不变量是 A。墙钟会跳变而单调钟不能跨重启；二者职责必须分开才能正确恢复和测试。使用哪个 Win32/POSIX API 及无单调钟时怎样降级由目标平台证据冻结。
 
 ### 安全、权限、导入信任与秘密生命周期
 
@@ -2487,13 +2493,15 @@ AgentLoop 的“完成权”归谁：模型无工具调用即直接结束，Runt
 
 推荐 A。少字段不等于把 provider 特性硬编码；任何高级项都需明确类型、默认“不发送”和协议支持检查，不能用虚假通用默认改变模型行为。
 
-#### AQ-283 费用预算与价格来源
+#### AQ-283 金额与价格来源
 
-状态：待决。依赖：AQ-028、AQ-153、AQ-282。
+状态：待决。依赖：AQ-028、AQ-153、AQ-282、`M05-50`。
 
-方案：A. v0.1 硬限制 request/token/time；费用仅在 provider 返回或用户配置版本化价格快照时估算显示；B. 无价格仍承诺精确 hard cost；C. 不显示任何使用量。
+场景：request/token/time 可以直接计数，金额却还需要币种、费率版本、缓存/推理类别或 provider 明确回报。本题只决定 yaca 从哪里取得金额事实或估算，不决定金额是否阻断下一次请求。
 
-推荐 A。币种、缓存 token 和价格变更都会让隐式费率失真；先保证可实施的硬边界。
+方案：A. v0.1 不计算金额，只显示 request、input/output token、active time，并区分 provider usage 是 reported 还是 estimated；B. 仅当 provider 响应明确返回 amount、currency 和 billing scope 时保存/显示 reported amount，缺失就显示 unavailable；C. 允许每个 Model 配置版本化 price snapshot，包括 currency、as-of/source label、input/output 单价，以及 adapter 明确支持的 cache/reasoning 类别，用冻结 snapshot 产生本地 estimate。
+
+推荐 A。它不根据 Model 名、endpoint 或品牌猜价格，也不会把经常变化的费率伪装成账单。B/C 必须把 amount、currency、source 和 generation 写入 Context usage event，estimated 与 reported 永远分栏。只有选择 C 时，AQ-410 的金额 warning/admission 门才适用；本题本身不拥有门禁。
 
 #### AQ-284 Endpoint 与 AuthMode 的精确语义
 
@@ -2563,7 +2571,7 @@ AgentLoop 的“完成权”归谁：模型无工具调用即直接结束，Runt
 
 #### AQ-292 Agent 默认回复语言
 
-状态：待决。依赖：AQ-004、AQ-049、`PROD-15`。
+状态：待决。依赖：AQ-045、`PROD-15`。
 
 方案：A. 程序标签/字段/error ID 固定英文 ASCII，Agent 默认跟随用户当前语言，SystemPrompt/ContextPrompt 可覆盖；B. Agent 永远英语；C. UI 标签跟随模型自由变化。
 
@@ -2815,11 +2823,11 @@ AgentLoop 的“完成权”归谁：模型无工具调用即直接结束，Runt
 
 #### AQ-323 tool arguments JSON 的安全解析规则
 
-状态：待决。依赖：AQ-112、AQ-254、`FMT-04`。
+状态：安全硬不变量/技术证明，不进入负责人正式回复清单。依赖：AQ-112、AQ-254、`FMT-03`、TP-015、TP-021。
 
 方案：A. 完整 UTF-8、深度/大小/数量上限、重复 key 拒绝、数值范围明确、schema 严格且未知字段按工具契约处理；B. Lua 宽松解析最后一个 key 赢；C. 交给 shell 解释 JSON。
 
-推荐 A。重复键和超深对象可让审批展示与实际执行参数不一致，必须在 durable 接受前拒绝。
+技术硬门是 A。重复键和超深对象可让审批展示与实际执行参数不一致，必须在 durable 接受前拒绝；选择具体 JSON parser 不会改变这个对外契约。
 
 #### AQ-324 同一 assistant response 同时有 text 与 tools 的顺序
 
@@ -2931,17 +2939,19 @@ AgentLoop 的“完成权”归谁：模型无工具调用即直接结束，Runt
 
 状态：待决。依赖：AQ-078、AQ-317 至 AQ-320。
 
-方案：A. 四段：静态摘要 → 在线知情确认 → 每 Model 进度/结果 → 可选 LLM advisory；支持只重跑失败项；B. 单个 spinner 到结束；C. 每次失败清屏重来。
+方案：A. 四段追加式页面：静态摘要 → 在线知情确认 → 每 Model 进度/结果 → 可选 LLM advisory；B. 运行中只显示一个紧凑 live status block，结束后追加最终总表；C. 每个阶段单独追加 transcript 和明确 next action，前一阶段结果仍保留在 scrollback。
 
-推荐 A。用户能看出哪一阶段确定、哪一阶段联网/付费、哪一条只是模型建议。
+推荐 A。用户能看出哪一阶段确定、哪一阶段联网/付费、哪一条只是模型建议，同时保持旧终端可读。所有方案都不得清屏、把 LLM advisory 冒充静态 pass/fail，或因页面选择改变联网 consent。测试结束后允许多细的 rerun 范围由 AQ-411 独占，不属于本题。
 
-#### AQ-338 完成/审批/错误是否发声或系统通知
+#### AQ-338 是否提供终端或系统通知渠道
 
-状态：待决。依赖：AQ-069、`TUI-24`。
+状态：待决。依赖：AQ-069、`TUI-24`、`TU-27`。
 
-方案：A. v0.1 不主动发声或调用桌面通知，只输出明确 ASCII 状态；B. 默认 bell；C. 调用各平台通知中心。
+场景：用户可能离开终端等待长任务，但 terminal bell 与 OS desktop notification 的兼容、权限和隐私成本不同。本题只决定渠道是否存在，不决定哪些领域事件触发通知。
 
-推荐 A。保持简单、避免旧终端蜂鸣和额外平台依赖；以后可作为明确 opt-in 功能讨论。
+方案：A. v0.1 不提供 bell、声音或 OS desktop notification，只使用规范 ASCII transcript；B. 提供默认关闭的 `NotificationChannel=off|bell`，只发送 terminal bell；C. 提供默认关闭的 `NotificationChannel=off|bell|desktop|both`，desktop 仅在平台 adapter 证明可用时启用。
+
+推荐 A。它最简单，也不会在 XP、SSH 或公共环境意外蜂鸣。任何通知都不能成为审批、错误或完成状态的唯一信号，不携带正文、路径、命令或 secret，失败只回退 transcript。若选择 B/C，哪些事件可通知再由 AQ-413 独立决定。
 
 #### AQ-339 终端能力降级怎样提示
 
@@ -3037,15 +3047,15 @@ AgentLoop 的“完成权”归谁：模型无工具调用即直接结束，Runt
 
 方案：A. 每项 requirement → confirmed decision → subsystem spec/state table/schema → test ID → target evidence 可双向追踪；P0 任一未闭环不得写实现计划；B. 回答问题后直接编码；C. 用 README 目标代替规格。
 
-推荐 A。题库只证明“想到了”，不证明“可实现”；追踪门保证明天的回复最终转成一致契约而非散落意见。
+推荐 A。题库只证明“想到了”，不证明“可实现”；追踪门保证后续回复最终转成一致契约而非散落意见。
 
 #### AQ-351 输入历史、终端 scrollback 与秘密排除
 
-状态：待决。依赖：AQ-076、AQ-232、`TUI-05`。
+状态：已拆分，不再单独投票。composer recall 归 AQ-426/TU-31，canonical `.history/.details` 归 AQ-366/F4-06，draft 持久性归 AQ-365/F4-05；终端 scrollback 是外部能力而不是 yaca 事实源。依赖：AQ-076、AQ-232、AQ-365、AQ-366、TU-31。
 
 方案：A. v0.1 输入历史仅进程内且有界；Key/审批答案/secret prompt 输入不入历史；旧 transcript 依赖终端 scrollback并提供 `.history` 按 XML 追加查询；B. 把全部输入写 shell history；C. 无法查看旧对话。
 
-推荐 A。XML 已是持久事实源，不需要再造第三类历史文件；`.history` 在窄终端也可工作。
+原 A/B/C 是把输入召回、事实浏览和外部终端历史捆在一起的早期候选，只保留为审计来源，不再作为负责人选票。
 
 #### AQ-352 单条输入的编码和大小边界
 
@@ -3079,7 +3089,7 @@ AgentLoop 的“完成权”归谁：模型无工具调用即直接结束，Runt
 
 推荐 A。实时文件树在浏览期间可被另一个进程修改，破坏动作不能落到旧编号现在指向的对象。
 
-#### AQ-356 recovery 在裸启动、`--continue` 与 context-repl 的入口优先级
+#### AQ-356 recovery 在裸启动、continue semantic action 与 context-repl 的入口优先级
 
 状态：待决。依赖：AQ-215、AQ-230、AQ-315。
 
@@ -3113,11 +3123,11 @@ AgentLoop 的“完成权”归谁：模型无工具调用即直接结束，Runt
 
 #### AQ-360 实施前是否需要逐页面 golden transcript 与逐状态 golden trace
 
-状态：待决。依赖：AQ-301、AQ-331、AQ-343、AQ-350。
+状态：发布硬门/技术证明，不进入负责人正式回复清单。依赖：AQ-301、AQ-331、AQ-343、AQ-350、TP-017、TP-023、TP-024。
 
 方案：A. 每个主要页面/失败/恢复状态有 plain ASCII golden transcript，每个 AgentLoop 转换有 durable event trace；平台增强只能在不改语义下另测；B. 实现后凭截图决定；C. 只测函数返回值。
 
-推荐 A。它把“页面风格”和“核心状态正确”一起变成可审阅证据，也是旧终端兼容最直接的回归保护。
+硬门是 A。它把“页面风格”和“核心状态正确”一起变成可审阅证据，也是旧终端兼容最直接的回归保护。具体 fixture/runner 形式不是负责人风格选择。
 
 ## 第四轮交叉缝隙追加问题
 
@@ -3251,26 +3261,655 @@ AgentLoop 的“完成权”归谁：模型无工具调用即直接结束，Runt
 
 推荐 A。完整 v0.1 指所选闭环质量完整，不是功能种类无限；排除后也不实现空 loader、公共 Lua API 或无消费者配置。
 
+#### AQ-374 无可执行工具 Model 的 main 资格
+
+状态：待决。适用条件：仅 M05-03 A/C 真实生成 `Tools=off` 时；M05-03 B 下为 `not-applicable`。依赖：AQ-144、AQ-251、AQ-252、`MODEL-16`、`AL06-02`。
+
+方案：A. `Tools=off` 不能成为 main，只能用于其 purpose 契约不需要 executable tool/control carrier 的 side/review/compaction，以及条件 `context-name`；B. 当 adapter 能原生承载 AL06-02 已选 control carrier并通过 fixture 时，可作为无可执行工具的受限 main chat，但任务需要 Coding 工具闭环时在请求前阻断。
+
+推荐 A。它不会把“模型可以输出普通文本”误当成“可以可靠完成 Coding Agent 的 typed finish/ask-user/tool 循环”；B 只放宽 main 资格，不得创造第二套 control 协议。
+
+#### AQ-375 modal prompt 中的本地命令与全局命令怎样区分
+
+状态：待决。依赖：`CLI-16`、TU-07、TU-11、TU-32、AL06-35。
+
+场景：approval、recovery 和各 REPL 都拥有当前焦点下的本地动作，但用户在这些 prompt 里仍可能需要 queue 一条 chat 消息、查看 status/help 或退出。如果两类命令都是 bare word，同一输入可能被不同 surface 解释成不同动作。
+
+方案：A. modal 本地动作使用 bare verb，跨 surface/全局动作始终保留点前缀，如 `allow 8 once`、`.queue ...`、`.status`、`.help`；B. modal 中全部使用 bare 保留字，未知文本 fail-closed；C. 使用 `action ...`/`chat ...`/`app ...` 显式 namespace。
+
+推荐 A。它保持 Lua 风格的简短本地 verb，又让跨界动作一眼可辨；解析出的 action/target 必须进入该动作原有的 confirmation 或 receipt，不能暗加第二套通用确认；焦点改变后的 stale 输入不得改投到新 prompt。
+
+#### AQ-376 stdin/stdout/stderr 的 TTY 拓扑与 human/machine 输出选择
+
+状态：待决。依赖：`CLI-17`、TU-13、TU-21、ED-05。
+
+场景：`yaca --help | less`、stdin 是 TTY 但 stdout 被管道接收、stdin 来自文件但 stdout 仍是终端，都不是一个简单的“TTY/非 TTY”布尔值。非 TTY 也不应自动等于 machine JSON。
+
+方案：A. 分别观测三个 fd；交互 surface 要求 stdin+stdout 均为 TTY，help/version 被管道时默认仍输出 human text，machine payload 只由显式 `--machine` 选择；B. stdout 不是 TTY 就自动进入 TU-21 的 machine mode，交互 action 拒绝；C. 只要 stdin 是 TTY 就允许交互，human transcript 可重定向，prompt/status 另行寻找终端或走 stderr。
+
+推荐 A。它不会让一条普通管道意外改变 schema，也不需要旧 Windows/Linux 实现额外 controlling-terminal 重连系统。任一输出通道 broken 仍按 ED-05 安全收口。
+
+#### AQ-377 help 的 topic grammar 与信息架构
+
+状态：待决。依赖：`CLI-18`、TU-05、TU-18、TU-32、TU-24。
+
+场景：顶层 help 要帮用户发现 model/config/context/self-test/chat，chat 内又需要查 queue、input、permission 或 recovery；旧终端还只应显示当前真能产生的快捷键。
+
+方案：A. 提供 `--help [surface|topic]` 与 `.help [topic]`，无参数显示当前 overview，内容从 command/config/capability registry 生成或机械校验；B. 只提供无参数 flat help，每个 surface 一次打印全部命令；C. 只提供层级 `help <surface> <topic>`，`--help` 不接受 topic。
+
+推荐 A。它既保留一个小型总览，又能对忙时输入、导入安全和自检这些复杂部分给出定向帮助；未知 topic 只能给确定性建议，不得猜一个命令执行。
+
+#### AQ-378 Model/Permission Description 进入 Context XML 的精度
+
+状态：待决。依赖：`CFG-25`、M05-20、M05-43、CX-16。
+
+场景：Description 是有界用户文本，只用于 UI 和 Stage 3 advisory，不能改变真实 Model/Permission 语义。但跨机接盘时，不保存它会让历史标签无法重建，保存全文则增加 XML 中的用户内容。
+
+方案：A. XML snapshot 保存有界完整 Description，标记 `user-content/advisory`并受明文 XML/export 警告约束；B. 只保存 presence、byte size 和 digest；C. 不保存内容或 digest，但显式写 `projection=omitted`。
+
+推荐 A。它最符合“拷贝 XML 可理解原会话”；reviewer/support/export 是否获得该全文仍由 M05-20 的独立最小化规则决定，不因它存在 XML 便自动外发。
+
+#### AQ-379 用户手动触发 compaction 时属于什么生命周期
+
+状态：待决。依赖：`COMP-11`、AL06-09、AL06-30、AL06-31、AL06-35、AL06-39。
+
+场景：现有候选文档已经引用“手动压缩”和 `.compact`，但它们尚未成为已确认承诺，也没有说明 main/tool/review 正忙时是拒绝、排队还是抢占，更没有独立身份可以记录费用、取消和崩溃恢复。
+
+方案：A. 只在 idle 接受，建立独立、可取消、不可 steer 的 maintenance/compaction turn；成功原子发布新 model-view，失败保留旧 view；B. 命令只建立可取消的 `compact-before-next-main` 意图，到下一安全边界执行，不建立独立 turn；C. v0.1 删除手动压缩与 `.compact`，只保留阈值触发。
+
+推荐 A。它使费用、进度、取消和恢复都有稳定身份，又不会让压缩混进一次普通 main turn 或收到 steer；达到阈值时的自动/consent 仍由 AL06-34 单独决定。
+
+#### AQ-380 跨机导入报告中的 gap 如何阻断续作
+
+状态：待决。依赖：`CTX-29`、CX-07、CX-14、CX-17、AL06-29。
+
+场景：拷贝来的 XML 可能缺 workspace、Model、Permission、ContextPrompt 映射，也可能只是少了一个过去的外部附件、原机工具能力或证据。把所有 gap 都当 warning 会虚假续作，全部阻断又可能让一个仅供历史查看的附件永久卡住任务。
+
+方案：A. 任何 unresolved portability gap 都阻断新 Model 请求和工具；B. 使用 typed gate：`required-now` 阻断全局续作，purpose/action-specific 只阻断依赖它的请求/动作，纯历史外部证据缺失只标记 `evidence-not-self-contained`，所有 mapping/acknowledgement 持久化；C. 只有 workspace/Model/Permission 缺失阻断，其余统一 warning。
+
+推荐 B。它让 importer、AgentLoop 和 tool admission 消费同一张 typed report，而不是各自猜 warning/error；任何缺失、未知、无法分类或 schema 不认识的 severity/type/required-extension 都必须先按 `required-now` fail-closed，只有经版本化分类规则确认后才能降到较窄范围。acknowledgement 只收口报告的不确定性，不能授予本机 Permission 或伪造丢失证据。
+
+#### AQ-381 同一 yaca 进程允许几个 active Context
+
+状态：待决。依赖：`RUNTIME-07`、AL06-01、CX-13、F4-02、F4-15。
+
+场景：“一个 Context 一个 writer/active turn”并没有回答“同一进程能否同时打开两个 Context”。这会改变 TUI 当前任务、多个 lease、资源公平性、关闭与恢复顺序。
+
+方案：A. v0.1 每进程只有一个 active/writable Context，并发任务使用多个进程；B. 一个进程可同时保持多个 active/writable Context 及各自 lease/queue，但全进程同时最多一个 active main turn；C. 每个 Context 可各自拥有 active turn，同进程并发推进。
+
+推荐 A。它与单 chat、单 Context 的简洁界面及 XP x86 资源边界一致，也不限制不同进程分别运行不同 Context；Context 管理界面可浏览其他 Context，但不把“浏览”偷换成第二个 active Agent。
+
+#### AQ-382 Web 是否进入 v0.1
+
+状态：待决。依赖：`PROD-11`、`WEB-01` 至 `WEB-04`、PJ-14。
+
+场景：仓库有 Web 占位，旧文档又把它写成“暂缓”，但项目负责人尚未明确它是 v0.1 非目标、只读附属面，还是完整交互面。占位目录和候选文字都不能代替范围决定。
+
+方案：A. v0.1 不发布或运行 Web UI；核心 terminal 版本 release-proven 后只有项目负责人显式重开才进入独立设计；B. v0.1 增加只读、loopback-only 的本地浏览页面，不发送消息、不审批、不改配置；C. v0.1 增加与 TUI 同等的本地交互 Web UI。
+
+推荐 A。它符合终端优先和旧平台目标，也避免首版同时承担浏览器、HTTP、认证、CSRF 和第二套交互测试。B/C 会激活 WEB-02 至 WEB-04 的浏览器/安全/复用规格，不能直接拿现有占位代码发布。
+
+#### AQ-383 是否支持图像输入
+
+状态：待决。依赖：`PROD-17`、`PROD-11`、M05-01、CX-02、PJ-15。
+
+场景：Coding Agent 可能受益于截图，但图像会改变 Model capability、请求 body、大小上限、Context XML 是否内嵌/引用、跨机接盘和旧终端预览。它与语音没有必然绑定。
+
+方案：A. v0.1 只接受文本/结构化工具事实，不提供图像附件或视觉 Model 输入；B. 允许用户从文件或 clipboard paste 显式建立一个 typed 静态图像附件，再发给声明支持 vision 的 Model，必须有来源/capability/大小/格式/持久化结果；C. 在 B 上增加用户显式发起的本地 screenshot capture action，采集后先形成未发送附件并预览；它不进入 Model tool registry，也不能由模型静默触发。
+
+推荐 A。它保持 XML、TUI 和 provider adapter 简单；B 能覆盖常见截图需求但新增二进制/隐私/可移植性契约，其中 file 是规范后备，GUI clipboard 只有平台 adapter 证明可用时出现，普通 terminal paste 不算图片；C 又增加本地采集、逐次同意与平台能力面。A 不妨碍模型通过文本或工具的规范结果理解项目。
+
+#### AQ-384 音频输入支持到哪一层
+
+状态：待决。依赖：`PROD-18`、`PROD-11`、M05-01、PJ-16。AQ-388 消费本题的 B/C；AQ-389 与本题独立。
+
+场景：提供已有音频文件和实时访问麦克风是两个递进的输入面；它们都不同于“单独转写成文字”和“把回复朗读出来”。本题只决定输入来源，后两者分别由 AQ-388/AQ-389 决定。
+
+方案：A. v0.1 不提供音频附件或麦克风采集；B. 只支持用户显式导入有界音频文件并先建立未发送 canonical object，再选择 main-send 或在 AQ-388 生效时 transcribe；不访问麦克风；C. 包含 B，并提供显式开始/停止的麦克风采集，停止后同样先形成未发送对象，必须有持续指示、硬上限、取消残片和设备丢失结果。
+
+推荐 A。Coding Agent 的核心闭环不依赖音频输入，排除可显著减少平台和隐私面；B/C 若进入首版，必须建立独立媒体数据、provider、XML 和测试契约，C 才额外承担旧 Windows/Linux 的设备/codec 证明。本题任何选择都不自动启用独立 transcription 或 TTS。
+
+#### AQ-385 是否提供 remote/headless 控制面
+
+状态：待决。依赖：`PROD-19`、`PROD-11`、TU-13、SAFE-01、PJ-17。
+
+场景：另一个本机进程、编辑器或远端客户端驱动 yaca，会改变输入所有权、审批可见性、事件订阅、认证和网络监听。内部模块边界不等于已经承诺一个公开 app-server 协议。
+
+方案：A. v0.1 不发布通用 headless IPC/RPC；若 PJ-14 C 被选中，只允许该 Web 前端自身的 origin-bound browser-private loopback transport，不能被第三方客户端当公共 API；B. 提供显式启动、默认关闭的本机 loopback/IPC headless API，仍要求可见的审批客户端和同一领域状态机；C. 提供 LAN/remote control，必须同时设计认证、TLS、channel binding、会话接管、重放与远程审批；只有使用浏览器 transport 时才另加 origin/CSRF。
+
+推荐 A。它最符合简单本地 Agent；B 适合编辑器集成但会新增版本化协议和无 TTY 审批模型；C 是独立网络产品。拒绝 B/C 不妨碍核心内部使用窄应用服务接口，也不与 PJ-14 C 的专用本机 Web transport 冲突。
+
+#### AQ-386 一个 Context 是否支持多个 workspace root
+
+状态：待决。依赖：`PROD-05`、`PROD-11`、F4-14、PJ-18。
+
+场景：F4-14 只决定传入目录与上级 Git 根怎样形成**初始单一边界**；它没有回答同一个 Context 能否同时把多个目录作为正式根。多根会改变相对路径、规则发现、Resolver、Permission、审批和 Context 迁移。
+
+方案：A. v0.1 一个 Context 恰好一个 workspace root；访问外部路径仍按单次 Permission 处理，但不会把它升级成第二根；B. 一个主 root 加多个显式绑定的 `direct-readonly` root，每个根有稳定别名和独立规则/identity snapshot；只约束 direct tools，不冒充 OS/shell 级只读；C. 多个根都可供 direct tools 读写，direct 路径必须带 root identity，跨根 direct rename/delete 另行授权。B/C 中 raw exec 仍是宽能力，批准后可能触及所有 OS 可访问路径，不能按 root 伪造隔离。
+
+推荐 A。它与 `yaca [directory]`、单 Context/单任务和旧平台路径模型最一致；B/C 适合大型组合仓库，却要求 root-aware tool schema、Prompt、审批和恢复。附加 root alias/mapping 永不进入 Context 的 16 字符 hash 或 Resolver 地址，也不形成永久 ContextId；选择 A 不禁止用户为另一个目录启动独立 Context/进程。
+
+#### AQ-387 更新发现与下载策略
+
+状态：待决。依赖：`REL-11`、RF-15、RF-16、D-039。
+
+场景：分平台 zip 可以完全由用户手工获取，也可以由 yaca 显式查询或下载；但任何更新网络都涉及旧 TLS、发布签名、平台/架构选择、隐私和失败恢复。已确认的启动/本地浏览不隐式联网必须保持，真正怎样安装/迁移仍只由 RF-01/RF-03 决定。
+
+方案：A. v0.1 不内置联网检查或下载；只显示当前版本和文档中的发布位置；B. 提供用户显式执行的只读 `check-update`，验证签名/版本/平台后报告可用 zip，但下载由用户完成；C. 包含 B，并增加用户显式触发、预览和确认的下载/验证，只把 exact zip 发布到用户选择或私有 staging 目标，绝不替换程序、安装或迁移数据。B/C 只有与 `RF-15 B` 的强制来源身份签名同时成立才可选；若 RF-15 选 A/C，就必须改选本组 A 或按冲突协议重开 RF-15，不能把 TLS 或发布方提供的 hash 当成来源身份证明。
+
+推荐 A。它最简单并与独立 zip 发行一致；B 改善发现体验但新增 update manifest/TLS/signing contract；C 再承担下载残留、磁盘满和目标发布，却有意不进入安装器。之后由用户按 RF-01/RF-03 已选 lifecycle 操作；downloader 不能把 RF-03 B 的“允许覆盖升级”解释成自己可以覆盖正在运行的程序。三项都禁止启动时、定时器或本地浏览暗中联网；B/C 与 RF-15 B 必须作为同一批相容选择归档。
+
+#### AQ-388 是否提供独立 transcription 动作
+
+状态：待决。依赖：`PROD-20`、PJ-16、PJ-19、M05-01。
+
+场景：把音频直接交给 main Model 回答任务，与“先把音频转成一份可编辑文字”不是同一目的。独立 transcription 会产生单独费用、进度、取消和 TranscriptArtifact，也要决定转写结果何时进入 composer/main turn。
+
+方案：A. v0.1 不提供独立 transcription；PJ-16 B/C 的音频只作为显式 main Model 输入；B. 当 PJ-16 B/C 生效时，允许用户显式把一个已接受音频对象转成有界 TranscriptArtifact，完成后只预览，由用户决定复制、插入 composer 或丢弃；C. 包含 B，并在 PJ-16 C 下允许 live incremental transcription，但 provisional 片段不成为用户消息，停止后才发布最终 artifact。
+
+推荐 A。它避免新增一个 Model purpose 和媒体工作流；B 适合会议/语音笔记但仍是明确的一次请求；C 还需要增量修订、设备与断线状态。B/C 都不能自动发送转写文字、改变当前 draft 或静默换 Model。
+
+#### AQ-389 是否提供 TTS/语音播报
+
+状态：待决。依赖：`PROD-21`、PJ-20、M05-01、TUI-15。
+
+场景：语音输出不依赖麦克风或音频输入，可能只是显式朗读一条 assistant 消息，也可能自动朗读所有回复。它涉及另一种 Model/本地引擎、扬声器设备、费用、停止键和公共场所隐私。
+
+方案：A. v0.1 不提供 TTS/语音播报；B. 用户可显式选择一条已完成的文本消息并请求朗读，预览语言/Model/费用后开始，可随时停止；C. 包含 B，并允许默认关闭的会话级 auto-speak，只对当前 opt-in generation 后新提交的完整 assistant 正文生效；generation 绑定 exact engine/Model、endpoint、output device 和 text policy，配置/设备/import/rebind 改变后必须重新确认；审批、错误、secret、streaming delta、启动/恢复/replay/redraw/reconnect 永不自动朗读，同一 event 至多一次。
+
+推荐 A。核心 Coding Agent 不依赖声音；B 是窄而可控的可访问性增强，C 更流畅但扩大隐私和设备状态。所有路线都必须保留完整文字等价路径，语音不能成为审批、安全警告或错误的唯一表达。
+
+#### AQ-390 是否提供一次性诊断上传
+
+状态：待决；仅在 ED-07 A/B 时适用。依赖：`DIAG-06`、`DIAG-14`、ED-07、ED-14、D-039。
+
+场景：ED-07 可以在本地生成经过预览的 support XML；项目也可以提供一个“本次上传”动作。它与只发送计数的 aggregate telemetry 不同，可能包含用户勾选的诊断/Context 字段，必须每次重新确认。
+
+方案：A. v0.1 不内建诊断上传；用户若要分享 ED-07 输出，在 yaca 之外自行传递；B. 提供显式 one-shot upload，每次先重新加载/验证目标 support XML，展示 endpoint、字段分类、大小和脱敏结果，再取得只对这份 digest 有效的确认；不保存以后也同意，不自动重试另一份内容。
+
+推荐 A。它最符合简单离线边界，也让本地 support 与网络完全解耦。B 改善支持体验，但必须有固定 project-owned HTTPS endpoint、secret canary、取消、retry、receipt 和失败后本地文件不变的契约；ED-13 telemetry opt-in 不能替代本次确认。ED-07 C 不生成 standalone XML，因此本题直接 not-applicable，不能让上传动作临时生成自己的 support；B 只消费共享 proxy/CA/redirect policy，不新增一套诊断网络配置，并要求健康 Context writer 先保存 exact operation intent，否则不上传。
+
+#### AQ-391 普通回答与设计讲解的默认详略
+
+状态：待决。依赖：AQ-004、AQ-049、PP-01、PP-15、PP-16。
+
+场景：普通事实确认、架构讲解和学习型问题需要的解释量差异很大。最终完成报告、进度播报和工具叙述已经各有 owner；本题只决定同一普通回答默认展开多少背景、原因和取舍。
+
+方案：A. 按任务自适应：简单事实直接回答，架构/风险/学习型问题先给结论，再用通俗分层说明关键原因和取舍；B. 默认解释型，即使简单问题也补背景、替代方案和下一步；C. 默认极简，除非用户明确要求详细，否则只给结论和必要动作。
+
+推荐 A。它兼顾日常简洁和复杂设计的可理解性。用户当次明确要求“简短”或“详细”始终优先；本题不能增加工具、联网、验证、进度消息或最终报告栏目，也不能用更长文字冒充更充分的证据。
+
+#### AQ-392 普通用户指令默认持续到什么时候
+
+状态：待决。依赖：AQ-031、AQ-047、AQ-059、PP-18、F4-03、F4-04。
+
+场景：用户说“之后不要上传”或“这个任务只改文档”，后续可能经历 steer、ask-user 回答、retry 或多个 causally-linked turn。若所有历史文字永久生效会污染无关任务；若每 turn 失效又会在连续工作中遗忘关键限制。
+
+方案：A. 普通用户消息默认绑定当前 durable work item，经其 steer、ask-user 回答和明确延续持续到真实 terminal outcome；无关的新 main/queue item 不继承，长期跨任务偏好必须显式写入 `.prompt`/ContextPrompt/SystemPrompt；B. 普通消息只对创建它的 turn 有效，后续 turn 必须重述；C. 普通消息中的指令默认持续整个 Context，直到用户明确撤销。
+
+推荐 A。它保留连续任务中的真实约束，又不会把临时要求永久化。Runtime 不从任意自然语言猜隐藏 scope；显式 add/supersede/revoke 必须引用稳定 user-event/turn/work-item，并以 append-only link 写入 XML。assistant、side、tool、review 或文件正文永远不能自行升级为用户指令。
+
+#### AQ-393 termination-review 后用户能否人工接受 finish
+
+状态：待决。适用条件：`DoubleCheck=true` 且 termination-review 已进入人工解算。依赖：AQ-021、AQ-109、AL06-26、AL06-40。
+
+场景：reviewer 可能明确要求继续、返回 uncertain，或因网络/schema 错误最终失败。用户是否能在看完证据后接受主模型原来的 finish candidate，与 Runtime 自动继续几轮是两个独立决定。
+
+方案：A. 对合法 continue、uncertain 或最终 request failure 都提供一次 `accept-finish`，但必须展示 reviewer 缺口/故障与 exact candidate；B. 只在 uncertain 或最终 failure 时允许，reviewer 明确 continue 时不能覆盖；C. 任何非-finish verdict 或失败都不能人工接受，只能继续或以未完成结果停止。
+
+推荐 A。用户保留最终决定权，但 override 只绑定 exact review-id、turn-id、finish-candidate digest、evidence snapshot 和配置 generation；任一事实变化立即 stale。接受时写 `human-finish-override`，不得伪装成 reviewer allow；停止必须记为 `user-stopped-not-finished`，不能叫 completed。
+
+#### AQ-394 人工解算时能否重试 termination-review
+
+状态：待决。适用条件：termination-review 已进入人工解算。依赖：AQ-021、AQ-023、AL06-27、AL06-41。
+
+场景：reviewer 的 uncertain、可重试 transport failure 或 schema failure 可能只是暂时问题。是否允许用户重试同一份仍新鲜的 finish candidate，不应与人工接受 finish 或 Runtime 自动 correction 混在一起。
+
+方案：A. 提供 `retry-review <review-id>`，仅在错误可重试、candidate 仍新鲜、局部 round cap 与 turn/runtime budget 都有余额时出现；每次建立新 request ID；B. 进入人工解算后不再重试同一 review，用户只能继续工作、按 AQ-393 允许的范围接受 finish，或停止为未完成。
+
+推荐 A。它能恢复暂时网络/格式故障，又不会靠重复抽样“刷通过”明确的 continue verdict。达到 cap、预算耗尽、candidate stale 或错误不可重试时 action 必须从 registry 消失；没有脱离对象的裸 `retry`，也不自动重发。
+
+#### AQ-395 turn hard guard 来自配置还是发行常量
+
+状态：待决。依赖：AQ-028、AQ-153、AQ-154、AL06-09、AL06-42。
+
+场景：每个 main turn 都必须有 model request、tool call、token 和 active-time 硬门；剩余问题是用户能否在 INI 中调整这些门，还是所有发行包使用只读常量。Context 累计 ledger 是否为 hard 由 AL06-09 另行决定。
+
+方案：A. INI 公开 `MaxModelRequests`、`MaxToolCalls`、`MaxTurnTokens`、`MaxTurnActiveTimeMs`，均受 Runtime 不可突破的上限；允许的 XML override 只能下调并从下一 turn 生效；B. turn guard 全部来自发行 manifest 的版本化只读常量，config-repl/status 只显示实际值、identity 和剩余量。
+
+推荐 A。不同 Model、机器和任务可以主动收紧或在硬上限内调整。两项都用单调时钟累计 Runtime 活动，不计 waiting-user、人工审批、idle 和 suspend；request/tool 自身 deadline 与 turn guard 取更早者。耗尽产生 typed outcome，不能截断事实或通过新 request 重置。
+
+#### AQ-396 一个 Context 可同时积累几个 pending question
+
+状态：待决。依赖：AQ-252、F4-03、F4-16、AL06-04。
+
+场景：模型向用户提问后，用户可能先处理另一条 queue。允许多个 suspended work item 各自留下问题会提高灵活性，也会增加恢复、排序和误答风险；普通 Enter 怎样绑定答案由 AQ-397 独立决定。
+
+方案：A. 每个 Context 同时最多一个 unresolved main question；存在它时 queue 仍可 durable 收集，但 scheduler 不启动另一个 main work item，用户先 answer、abandon 或 supersede；B. 允许多个 suspended work item 各有一个 pending question，但使用发行版固定且有限的 Context hard cap，只有用户显式 run-next 才可在仍有问题时启动另一 work item。
+
+推荐 A。它符合单 active Context/单 active main 的简单心智模型。无论选择哪项，每个问题都以 question-id/work-item-id/source-turn/control-id/status 写入 XML，同一问题最多绑定一个 accepted answer；退出、超时、压缩和恢复不会自动把问题当作 answered。
+
+#### AQ-397 普通 Enter 怎样绑定 pending question
+
+状态：待决。依赖：AQ-024、AQ-252、AQ-396、F4-03、F4-17。
+
+场景：chat 中恰好有一个待答问题时，用户自然会直接输入答案；若存在多个问题，Runtime 又不能根据正文语义猜回答的是哪一个。显式 `.question answer <id> <text>` 在所有方案中都存在。
+
+方案：A. 恰好一个 pending question 时普通 Enter 回答它；没有 pending 时走普通 main/queue；多个 pending 时拒绝模糊绑定并要求 exact ID；B. 普通 Enter 永远走普通 main/queue，回答问题即使只有一个也必须使用显式命令；C. 保存 durable reply focus，普通 Enter 回答 focused question；多个问题时先 `.question select <id>`。
+
+推荐 A。单问题日常输入自然，多问题时仍不误绑。接受答案必须回显 question ID、原问题摘要和新 turn/work-item link；空 Enter 没有默认答案，stale focus/ID 不得自动改投另一个问题。
+
+#### AQ-398 cooked-line 输入中关键事件怎样及时可见
+
+状态：待决。依赖：AQ-090、AQ-232、TU-03、TU-25、ED-05。
+
+场景：在 XP 或普通 cooked-line 终端中，系统可能正持有一行尚未提交的输入。`ACTION REQUIRED`、保存失败、fatal error、取消最终 unknown 或 close-blocked 不能无限等到用户按 Enter，但 Runtime 也未必能读取并重绘这份 draft。
+
+方案：A. 固定短延迟内追加一行包含 kind、stable ID、严重度和下一步的 urgent receipt；输入字节不丢，允许视觉行被打断，完整 block 在当前行提交/取消后追加；B. 固定短延迟内直接追加完整 semantic block，并在后面说明 `input still pending`；C. 只有平台 helper 能证明准确快照和重绘 draft 时才发布该 cooked backend，否则必须换用另一个已证明 backend。
+
+推荐 A。它在不假装 cooked API 能读取 draft 的前提下及时告警。关键事件集合和最大延迟是 Runtime 常量；任何方案都不得丢输入、把 draft 当命令、只靠颜色/bell表达，或把 receipt 显示等同于用户已经处理。
+
+#### AQ-399 foreground exec 的后代进程何时算收口
+
+状态：待决。依赖：AQ-127、AQ-128、AQ-367、TS-24、F4-07。
+
+场景：root shell 已退出时，继承 handle 或自行后台化的后代仍可能写文件、联网或占着 pipe。任意 `cmd.exe`/`sh` 文本无法可靠证明没有后代；本题只决定 foreground `exec` 的 completion criterion，不决定是否提供一等 background job。
+
+方案：A. join root shell；退出后只做发行常量限制的短 orphan-drain grace，随后关闭 capture 并报告 descendant_state、capture cutoff 与 `external_effects_unsettled`，不等待后代；B. 同时等待平台 adapter 能稳定追踪的 attached descendant tree，全部退出才 completed；deadline/cancel 后尽力终止，任何无法证明退出的节点都使结果 unknown。
+
+推荐 A。它诚实反映 XP/Linux 无法统一 containment 任意逃逸进程的现实。两项都必须有界 drain/close，不遗留无人拥有的 pipe reader；不提供 OS sandbox、不解析 shell 语法来假装阻止 detach，审批必须说明 Shell 可能留下外部进程。
+
+#### AQ-400 是否提供一等 tracked background jobs
+
+状态：待决。依赖：AQ-128、AQ-399、TS-24、TS-30。
+
+场景：获批 raw shell 自行 detach，只能得到 running/unknown 风险；真正的 background-job 产品还需要 durable job ID、list/wait/cancel/reconcile、输出背压、关闭和恢复。两者不能混为“都支持后台”。
+
+方案：A. v0.1 不注册 `exec-job`、job REPL、跨 turn reconnect 或后台成功状态；shell 留下的后代只按 AQ-399 记录风险；B. 增加仍属于宽 `Shell` Permission 的 `exec-job` tool/action，接收 opaque command、建立 durable job-id，并提供 `job list|show|wait|cancel|reconcile` 与有界输出。
+
+推荐 A。它符合首版简单、非交互前台和旧平台边界。若选择 B，Context switch/exit/writer close 遇到 active job 必须进入 close barrier；崩溃恢复只能从 interrupted/stale/unknown 做 identity reconciliation，绝不能因旧 PID 相同认领另一个进程或把 pipe EOF 当作 job success。
+
+#### AQ-401 direct write 的 create/replace 契约
+
+状态：待决。适用条件：TS-02 A/C 含 direct write。依赖：AQ-115、AQ-225、TS-25。
+
+场景：新建文件、基于已读版本替换和“不管当前内容直接覆盖”具有不同的并发丢失风险。本题只决定单个 ordinary file 的 create/replace admission；文本编码和 binary payload 分别由 AQ-414/AQ-416 决定。
+
+方案：A. 调用显式 `mode=create|replace`；create 使用 no-replace，replace 必须匹配 expected regular-file identity 与 raw content digest，全部校验后安全发布；B. 在 A 上增加 `force-replace`，digest 不匹配时先展示当前/候选 digest并取得新 action ID/approval；C. 只提供 upsert，不要求 expected digest，目标不存在就创建、存在就替换。
+
+推荐 A。它最能避免覆盖用户并发编辑。三项都只处理已复核的 ordinary file 和 parent，拒绝 symlink/reparse/special target；stage、flush、validate、publish 和恢复留下 typed operation/result，不能把单文件安全发布宣传成多文件 ACID。
+
+#### AQ-402 direct patch 采用哪种单文件格式
+
+状态：待决。适用条件：TS-02 A/C 含 direct patch。依赖：AQ-116、AQ-401、TS-26。
+
+场景：模型需要一种稳定、可完整解析且不经 shell 的 patch carrier。多文件事务、rename/mode 和 binary patch 不属于本题；三条路线都只处理一个 canonical ordinary-file target并要求 expected identity/digest。
+
+方案：A. 版本化 structured hunks，每个 hunk 带 old range、context、delete/insert lines 和 newline metadata；B. 严格、版本化的 single-file unified-diff subset，禁止多文件 header、rename/mode/binary 和未登记 extension；C. 结构化 exact-replacement 列表，每项含 old text、new text、expected occurrence count 和可选 range。
+
+推荐 A。它最容易稳定表达行号、上下文、CRLF 和 EOF newline。所有 hunk/replacement 必须先完整 parse、校验上下文和上限，再一次发布；任一失败零修改，并保存 canonical request、old/new digest、diff evidence 和失败位置。
+
+#### AQ-403 direct 文本读取采用什么范围单位
+
+状态：待决。依赖：AQ-112、AQ-125、AQ-414、AQ-415、TS-27。
+
+场景：大源码不能总是整份读入 Win32 x86 内存。读取范围可以面向行、面向原始字节窗口，或只允许小整文件；本题只处理已经由文本编码策略判定可读的 ordinary text，binary 内容由 AQ-415 独占。
+
+方案：A. `start_line/max_lines`，返回稳定行号、newline kind、next line/eof、raw byte span 与 digest；B. `offset/max_bytes`，Runtime 按已选 decoder 把边界调整到完整 code unit/character/newline，返回实际 raw span、decoded text 和 next offset/eof；C. 只允许整文件文本读取，超过 hard cap 或解码失败则整次失败。
+
+推荐 A。源码定位、search 和 patch 证据都更自然。任何路线都必须先复核 ordinary-file identity，报告 raw size/digest 和截断状态；不能切半字符、把 arbitrary binary 伪装成文本，或让 display decoder 改变真实 digest。
+
+#### AQ-404 direct rename 遇到已存在目标怎么办
+
+状态：待决。适用条件：TS-02 A 含 direct rename。依赖：AQ-118、AQ-225、TS-28。
+
+场景：rename 的目标已存在时，拒绝、显式替换或另选名称会产生三种不同结果。跨设备 fallback 由 AQ-405 独立决定，本题只处理目标冲突。
+
+方案：A. target 已存在即返回 typed conflict，永不覆盖也不自动改名；B. 只有显式 `replace=true` 才允许替换，审批前同时复核 source/target identity，并按 `Rename + Delete(target)` 的更严格 capability union 取得新 action ID；C. 按固定规则计算未占用的新 target，审批前绑定实际名称；若发布前再次冲突则旧 action stale，重新生成名称和 action。
+
+推荐 A。它最可预测，也不会让 rename 隐式删除目标内容。三项都要求 source/target expected identity、no-follow/open-then-verify 和 no-clobber primitive；模型理由或旧页面行号不能代替精确授权对象。
+
+#### AQ-405 direct rename 跨设备时怎么办
+
+状态：待决。适用条件：TS-02 A 含 direct rename。依赖：AQ-404、TS-25、TS-29。
+
+场景：平台返回 cross-device/not-atomic 时，copy+delete 已不再是普通 rename，并可能在目标成功、源删除失败后留下两份文件。本题不重新决定目标冲突。
+
+方案：A. 明确拒绝并返回 `CrossDeviceRenameUnsupported`；B. 只有调用显式设置 `non_atomic_fallback=true` 且审批展示完整风险时，才对 regular file 执行 copy → flush → digest/identity verify → delete source；C. 当已批准的 rename policy 允许 non-atomic fallback 时自动采用 B 的流程，但初始 action 必须预先展示可能发生 copy/delete。
+
+推荐 A。它保持 rename 的原子心智模型。B/C 必须按 `Read(source) + Write(target) + Delete(source)` 的更严格能力组合求值，每阶段先 durable intent 后 result；partial/unknown 不自动重试删除。目录树、symlink/reparse 和特殊文件的跨设备 fallback 一律拒绝。
+
+#### AQ-406 direct delete 是否允许递归目录树
+
+状态：待决。适用条件：TS-02 A 含 direct delete。依赖：AQ-117、AQ-225、TS-31。
+
+场景：删除一个 ordinary file/空目录与递归删除整棵树的扫描、竞态、内存和部分失败风险完全不同。raw shell 在宽 `Shell` 获批后仍可执行其自身删除语法，但不取得 direct guarantee。
+
+方案：A. direct delete 只接受一个精确 ordinary file 或空目录；复核 expected identity，不跟随 symlink/reparse，非空目录返回 conflict；B. 在 A 上增加显式 `recursive=true`，先用有界 no-follow walk 冻结完整 manifest/identity digest、entry/byte counts 和拒绝项，再按 `DeleteTree` 风险重新审批。
+
+推荐 A。它让 direct delete 保持单目标、可复核且适合旧平台。B 的 manifest 在执行前变化即 stale，逐项失败必须报告 partial/unknown；所有路线都不自动选择 trash、不跨 filesystem boundary、不承诺 preimage/undo，并显示 canonical root、类型、identity 和不可逆说明。
+
+#### AQ-407 Add Model 是否允许 clone existing
+
+状态：待决。依赖：AQ-078、AQ-079、M05-45、M05-47。
+
+场景：多个 Model 可能共享 endpoint/adapter 参数，但 clone 也容易误复制 Key、self-test 状态或当前 Context mapping。本题只决定 clone 入口是否存在；克隆后的编辑节奏仍由 Add Model owner 决定。
+
+方案：A. v0.1 不提供 clone，新增 Model 总从 blank typed draft 开始；B. 提供显式 `clone <source-row-id> <new-logical-name>`，只复制 non-secret、non-observation 配置字段，随后进入普通 draft/validate/preview/publish。
+
+推荐 A。向导足以承担首版字段数量，也避免维护第二套复制白名单。若选择 B，Key、secret header、proxy credential、self-test badge、current/default 和 Context mapping 永不复制；preview 逐项标明 copied/reset，source/target generation stale 或目标名存在就拒绝。
+
+#### AQ-408 config-repl 是否完整管理 Permission profile
+
+状态：待决。依赖：AQ-037、AQ-149、AQ-150、M05-16、M05-48、TS-04。
+
+场景：Permission section 的字段和内置矩阵已有各自 owner，但还需决定用户能否在 config-repl 完成自定义 profile 的整个生命周期，还是必须手工编辑高风险 INI。
+
+方案：A. config-repl 提供 list/show/add/edit/rename/delete/reorder，全部使用同一 typed draft、validate、脱敏 diff、stale check 和 atomic publish；B. 只允许 list/show/edit 已有 profile，add/rename/delete/reorder 由手工 INI 完成；C. 只管理发行内置模板的可编辑副本，自定义 section 在页面中只读。
+
+推荐 A。完整配置浏览器应安全管理 Permission，而不是把破坏动作赶到裸文本。任何路线都禁止发布零个合法 Permission 或无效第一项；第一项仍是新 Context 默认。rename/delete 显示全部已知引用，历史 snapshot 不改写；名称/Description 不授予能力。
+
+#### AQ-409 活动 Context 切换 `.permission` 怎样确认
+
+状态：待决。依赖：AQ-031、AQ-037、AQ-149、AQ-150、AQ-408、M05-49。
+
+场景：切到更严格的 profile 与从 deny/confirm 扩大到 allow 的风险不同。如果一律无确认，用户可能因相似名称扩权；如果每次都确认，切换 Readonly 也会多一步。
+
+方案：A. old/new effective capability matrix 相同或更严格时直接 stage 并回显；任一能力从 deny→confirm/allow 或 confirm→allow时显示 exact diff 并明确确认；B. 每次切换都显示完整 old/new matrix 并确认；C. 输入 exact profile name 后总是直接 stage，只追加 matrix-diff receipt。
+
+推荐 A。收紧权限顺滑，扩权仍显著可见。切换只从下一 turn 生效，不改变 active turn 或 pending approval；目标 profile/generation 必须合法且未 stale，生效时旧 review/approval/grant 全部失效。transition 与 old/new snapshot 写入 XML，不能越过 Runtime hard deny。
+
+#### AQ-410 本地金额 estimate 是否形成请求门
+
+状态：待决。适用条件：仅 `M05-50=C`，其他路线为 `not-applicable`。依赖：AQ-028、AQ-100、AQ-283、AL06-09、AL06-43。
+
+场景：有了冻结的 per-Model price snapshot 后，本地 estimate 可以只展示、跨阈值时询问，或成为 hard admission cap。provider 在响应后才报告金额的路线无法诚实承担请求前门禁。
+
+方案：A. amount estimate 只显示并写 usage audit，不阻断或额外询问；B. 每个 Model 可配置同币种 per-turn warning，下一请求的保守上界将跨阈值时先展示累计、增量和估算假设并 consent once；C. 每个 Model 可配置 `MaxEstimatedCost` hard cap，下一 request 上界会超过、price/usage generation stale 或无法保守估算时拒绝 admission。
+
+推荐 A。request/token/time 仍是最可靠的硬门，金额保持诚实的 estimate。B 的 consent 必须精确绑定 turn、Model/config/price generation、累计量和下一 logical request manifest，任一变化即 stale；C 没有模糊 override。所有路线都不做外汇换算；main、side、review、compaction、retry/fallback 记入实际 Model 的同一 turn ledger，estimated/reported 分开，进行中请求不会因后验金额被逆向取消，也不宣称等于账单。
+
+#### AQ-411 self-test 结束后允许多细的 rerun
+
+状态：待决。依赖：AQ-081、AQ-085、AQ-317 至 AQ-320、M05-46、M05-53。
+
+场景：一次 self-test 可能只有一个 Model 或一项检查失败。重跑整阶段最简单，failed-only 能节省费用，任意子集最灵活却会产生 partial 证据。本题不决定 self-test 页面布局。
+
+方案：A. 只允许 `rerun stage <1|2|3>`，阶段内当前适用 checks 全部重做；B. 允许整阶段或 `rerun failed`，后者只选择旧 run 中 failed/incomplete/stale 且当前仍适用的 checks；C. 在 B 上允许从 stable check/Model ID 列表显式选择任意合法子集，并把结果标为 partial。
+
+推荐 B。常见失败重试无需重复成功项费用，又不引入复杂多选。rerun 总是建立新 run-id，不原地修改旧结果或复用 request/attempt ID；所有联网范围重新展示当前 manifest 并 fresh consent。配置/adapter/endpoint binding 变化使旧 success stale，Stage 3 只能消费当前有效的 Stage 2 green evidence。
+
+#### AQ-412 崩溃恢复后的 pending approval 怎样重新进入流程
+
+状态：待决。依赖：AQ-104、AQ-225、AQ-226、AL06-44、AL06-45。
+
+场景：进程崩溃时可能正等待用户批准。旧 approval instance 和任何未提交输入只能作为审计，不能跨进程当成批准；恢复后仍需决定是自动呈现一张新卡、直接按拒绝收口，还是等待用户主动 reopen。
+
+方案：A. 恢复时自动做只读 freshness/re-evaluation；仍合法且未按 AQ-226 过期就创建新 approval ID、显示 exact card并等待重新决定；B. 所有 interrupted pending approval 都生成 synthetic denied-on-recovery result，不提供 reopen；C. 进入 recovery-required，只显示旧 action 与 `reopen approval|deny`，选择 reopen 后才 re-evaluate并创建新 ID。
+
+推荐 A。用户恢复后立即看见尚缺的决定，同时没有沿用旧批准。本题只把旧 pending approval 规范化为 fresh pending 或 synthetic denied；包含它的 unfinished main turn 是否 same-turn resume、形成终态或等待用户，仍完全由 AL06-32 决定，打开恢复页面绝不自动发下一次 main request。action/schema/Permission/DoubleCheck/workspace/target digest 任一变化都拒绝复用并要求新 action；非 TTY fail-closed。graceful exit 已按 close policy 取消/拒绝 pending，本题只处理无法正常收口的崩溃。
+
+#### AQ-413 启用通知渠道后覆盖哪些事件
+
+状态：待决。适用条件：仅 AQ-338 选择 B/C；A 下 `not-applicable`。依赖：AQ-069、AQ-338、TU-27、TU-30。
+
+场景：通知 transport 与事件范围是独立轴。只叫回用户处理阻断事项最安静；把正常完成也通知适合离机长任务；逐事件配置则增加 schema 和测试矩阵。
+
+方案：A. 只通知需要用户介入或结果不确定的 `approval/ask-user/fatal-error/unknown-effect/close-blocked`；普通 completed 不通知；B. A 加上 main turn 的 completed/partial/refused/cancelled terminal outcomes，高频 tool/stream/status 永不通知；C. 提供从 A/B 有限 registry 选择的 typed per-event allowlist，默认采用 A。
+
+推荐 A。真正阻断的问题能叫回用户，普通短任务不会持续响。每个 canonical event ID 最多通知一次，恢复、重绘和历史 replay 不补发；通知失败只写一次 warning，不形成 retry 风暴，也不改变 queue、approval 或 terminal outcome。自定义文本事件名不合法。
+
+#### AQ-414 direct 文件支持哪些文本编码
+
+状态：待决。依赖：AQ-045、AQ-112、AQ-352、TS-32。
+
+场景：终端代码页与工作区文件编码不是一回事。direct read/search/write/patch 必须明确哪些 raw bytes 能无损往返，尤其是旧 Windows 项目中的 BOM UTF-16 或 legacy codepage。
+
+方案：A. 只接受 ASCII/严格 UTF-8，可识别并保留 UTF-8 BOM；其他 encoding typed error；B. A 加上 BOM 明示的 UTF-16LE/UTF-16BE，保留原 encoding、BOM、newline kind 和 final-newline并无损写回；C. B 加上发行 manifest 的有限 legacy codepage allowlist，调用必须显式指定或使用已登记 metadata，绝不按 console/locale/字节频率猜测。
+
+推荐 B。UTF-8 覆盖现代源码，BOM UTF-16 覆盖常见旧 Windows 文件，而不引入猜编码。digest/expected digest 始终基于 raw bytes；invalid sequence/unpaired surrogate 返回明确 encoding error且不换 decoder，解码成功但含 NUL/XML 禁止 control 的内容分类为 binary 并交 AQ-415，而不是先被本题吞成 text error。不得使用 replacement character 后写回。read→no-op write 必须 byte-identical，mixed newline 的新增策略必须显式。
+
+#### AQ-415 direct read 是否返回二进制内容
+
+状态：待决。依赖：AQ-124、AQ-125、AQ-403、AQ-414、TS-33。
+
+场景：模型通常只需要知道二进制文件的类型、大小和 digest；把内容以 base64 放入 Prompt/XML 会快速膨胀。binary 修改由 AQ-416 独立决定，因此可以支持“可读但不可写”或相反组合。
+
+方案：A. 只返回 type、raw size、digest 和有界 metadata，direct read 拒绝内容；B. hard cap 内允许 whole-file base64，超过 cap 整次 content read 失败而不截断冒充完整；C. 允许 byte-range `offset/length`，返回 base64、actual bytes、next offset/eof 和 whole-file digest，并限制每段与总请求。
+
+推荐 A。Coding Agent 可通过获批 raw shell 调用专用二进制工具，没必要默认污染上下文。B/C 的有效 content cap 是 binary-read、turn/tool 与 canonical-retention 上限的最小值；B 放不下完整文件就整体失败，C 每段和整次请求都受限。两者绝不把 raw bytes 写到 terminal；base64 必须标明 encoding、byte count 和截断状态，不能由模型输出伪造 digest。binary search 首版不提供。
+
+#### AQ-416 direct tool 是否允许修改二进制文件
+
+状态：待决。适用条件：TS-02 A/C 含 direct write/patch。依赖：AQ-401、AQ-414、AQ-415、TS-34。
+
+场景：整文件 base64 create/replace 可以覆盖小图标或 fixture；byte-range patch 更灵活，却增加重叠、增长、审批可读性和 Win32 x86 流式复制成本。本题与 binary read 能力正交。
+
+方案：A. 不提供 direct binary mutation，write/patch 遇到 binary payload typed reject，用户使用获批 raw exec；B. hard cap 内允许 base64 whole-file create/replace，不支持 binary patch，解码后的 size/digest 必须与 envelope 一致；C. 在 B 上增加 byte-range replacement list，每项带 offset、old length、new base64，整文件 expected raw digest 必填。
+
+推荐 A。它避免把大型不可审阅 bytes 塞入 XML 和审批。B/C 仍服从 Permission、AQ-401 的 create/replace、expected raw digest、no-replace 和安全发布；审批显示 old/new size/digest 与 payload size，不打印 raw/base64 全文。任何 decode/size/range/digest 错误都必须零修改，多文件事务仍不承诺。
+
+#### AQ-417 明文秘密所在配置文件无法证明安全权限时怎样运行
+
+状态：待决。依赖：AQ-017、AQ-040、AQ-137、CFG-04、M05-02、M05-15、M05-23、M05-36、M05-54。
+
+场景：Key 已确认明文保存在主 INI，条件配置还可能含 proxy credential、SecretHeader 或 EnvironmentSet value；FAT、共享目录和部分旧 Windows 文件系统可能无法提供或证明“仅当前用户可读”。这不等于已经证实泄漏，却也不能把 TUI masking 说成磁盘保护；需要决定每个真正会消费这些配置秘密的 Model、网络 purpose 或 raw exec 在这种机器上能否运行。
+
+方案：A. 配置浏览、静态 self-test 和不消费配置秘密的路径仍可使用；每个进程第一次使用该配置 generation 的任一秘密前，显示规范配置路径、权限检查结论、秘密类别和受影响 consumer，并要求一次明确确认，非 TTY 失败关闭；B. 每个新配置 generation 只发出显著 warning，secret-bearing consumer 不额外阻断；C. 只禁用会消费 Key、SecretHeader、proxy credential 或 EnvironmentSet secret 的精确 Model/purpose/tool，直到权限修复、配置迁移或该秘密移除，其他路径仍可用。
+
+推荐 A。它保留 XP/FAT/便携场景的可用性，同时不把未知权限静默当成安全。确认只绑定当前进程、规范配置位置、文件身份、config generation 和权限 observation credential，不写入 Context XML，也不授权 endpoint、费用或本次请求；每次实际取用该文件中的 secret 前重查，任一可观察 binding 变化必须重新确认。typed secret registry 必须记录 source，本题只约束 `source=config-file`；ambient-environment/user-content/runtime secret 不能借 config.ini ACL 被放行或误禁。内容原子发布失败与 ACL/mode=`weak|unverifiable` 必须分开：前者不激活新 generation，后者成功发布后按 A/B/C 执行。Stage 1 如实报告结论，Stage 2/3 仍分别遵守自己的联网 consent 和最小数据视图。
+
+#### AQ-418 direct 文件修改怎样保留或改变文件属性
+
+状态：待决。适用条件：TS-02 A/C 含 direct write/patch，或 TS-02 A 含 direct rename/delete。依赖：AQ-401、AQ-402、AQ-404、AQ-414、CHANGE-04、TS-07、TS-25、TS-35。
+
+场景：用同目录临时文件替换内容可能悄悄改变 POSIX mode/可执行位、Windows readonly/ACL、owner、扩展属性、ADS 或 hardlink 拓扑。内容 digest 相同也不能证明行为和安全属性仍相同；另一方面，把所有平台属性都做成模型可调字段会扩大工具和审批面。
+
+方案：A. direct mutation 不提供属性修改参数；create 使用平台安全默认，replace/patch 必须保留已登记的行为与安全属性，遇到无法可靠读取、复制或复核的 ACL/xattr/ADS/owner/hardlink 等对象就 typed reject，改由获批 raw shell 或外部工具处理；B. 在 A 上增加窄 typed 属性变更：Linux `executable` 与 Windows `readonly`，必须在 action/diff/审批中单列，其他属性仍保留或拒绝；C. 只强制保留基础 mode/readonly，检测到其他属性或 hardlink 时允许在展示将丢失/断开的精确清单并重新批准后继续内容替换。
+
+推荐 A。它让 direct write/patch 的默认含义保持“只改内容”，不会因跨平台发布偷偷降权、提权或断开链接。任何路线都必须在 operation 前冻结 metadata snapshot/文件身份，在发布后重新读取并验证；失败时不得自动退回 content-only，无法证明最终状态就返回 partial/unknown 并阻止后续副作用。symlink/reparse/special file 仍完全服从 TS-07，raw shell 也不继承 direct metadata 保证。
+
+#### AQ-419 list/search 默认采用哪些 ignore 规则
+
+状态：待决。依赖：AQ-113、TOOL-11、TS-17、TS-36。
+
+场景：ignore 会决定模型递归时能否看见源码、生成目录、隐藏文件和潜在秘密。它是性能/候选集合政策，不是 Permission；项目中的 ignore 文件也属于不可信输入，不能因为被忽略就授权或禁止用户明确指定的路径。
+
+方案：A. 隐式递归读取沿途的 nested `.gitignore`，使用版本化、文档化的 Git-compatible grammar；dotfile/Windows hidden 不因“隐藏”自动忽略，用户或模型给出精确路径时可绕过 ignore，但仍走路径与 Permission；B. 在 A 上再读取 workspace 根的 `.yacaignore`，并默认排除 dotfile/Windows hidden，只有显式精确目标或 typed `include_hidden` 才纳入；C. 不读取任何项目 ignore 文件，也不按 hidden 属性排除，候选集合只受显式 roots、资源硬门、权限和 yaca 保留树限制。
+
+推荐 A。它符合常见仓库心智，又不会把隐藏文件悄悄当成不存在；非 Git 工作区仍可使用同一 `.gitignore` grammar，而不依赖宿主 Git。所有路线都固定：ignore 只影响隐式 list/search traversal，不授予读取权限，不覆盖用户精确目标，不得隐藏 yaca 自己必须报告的 partial/error；ignore 文件有大小、规则数、嵌套深度和解码硬门，变化会使 continuation/view generation stale，畸形或超限必须报告不完整范围，不能把部分扫描冒充完整。
+
+#### AQ-420 active Context XML 被外部移动、替换或改写后怎样恢复
+
+状态：待决。依赖：AQ-172、AQ-173、AQ-304、CTX-10、CTX-26、CX-05、CX-10、CX-20。
+
+场景：编辑器、同步程序或人工操作可能在 yaca 持有 writer 时移动、删除、原地改写或替换 active XML。旧逻辑路径/hash、打开句柄和磁盘上的新对象此时不再是一份可安全续写的事实；单靠 basename、mtime 或“内容看起来相似”不能认领新文件。
+
+方案：A. 一旦路径、文件身份、commit generation 或 digest 不匹配，active handle 立即进入 stale/fail-stop；不自动扫描或重绑，用户从 recovery/context-repl 显式选择检查磁盘候选、重新打开/绑定、恢复 previous-valid、切换或退出；B. 在 A 的 fail-stop 上，由 bounded Resolver 搜索与最后已提交 generation 精确 digest 相同的候选，只列出建议，用户明确选择后才重新绑定；有任何内容变化仍按 A 进入只读恢复；C. 若平台 adapter 能证明仍是同一打开文件身份且最后 commit digest 未变，自动更新逻辑路径/hash并回显 receipt；证明失败、替换或内容变化一律退回 A。
+
+推荐 A。它最符合“没有永久 ContextId、hash 随路径实时变化”的既有边界，也不会在外部改写后把两个历史猜成一个。每次发布前都必须复核规范路径、父目录、文件身份、generation 和 digest；无法 durable 保存时不得启动新的 Model 请求、工具或其他副作用，已经在途的动作必须取消并如实标成未持久化/unknown。绝不向外部改写文件追加事件、按 mtime 选候选、沿用旧 approval/grant，或在未通过 XML 安全解析与 compatibility mapping 前恢复写入。
+
+#### AQ-421 完整 canonical model-yield 之后怎样继续
+
+状态：待决。正式 owner：AL06-48。依赖：AQ-252、AQ-363、AQ-397、AL06-13、AL06-32、AL06-38、TU-32。
+
+场景：模型可能返回一段完整、有用的普通文字，却没有 tool、`finish` 或 `ask-user`，于是形成 `model-yield`。用户接下来可能想让这份响应继续，也可能只是开始一个普通新话题；Runtime 不能根据下一句话“像不像继续”来猜，更不能把旧 turn 的配置、权限、授权或剩余预算复活。
+
+方案：A. 只有 `.response continue <response-id>` 能继续 unresolved 的完整 canonical yield；使用当前有效 snapshot 和新 budget 建立带 `continues_response` 的 new continuation turn，普通 Enter 建立普通新 turn并显式 supersede 旧 yield；B. 保留显式入口，恰好一个 unresolved yield 时普通 Enter也可绑定并建立同样的新 continuation turn，多于一个必须 exact ID；C. model-yield 是 terminal yielded turn，不注册 continue target，下一条输入只能是普通新 turn。
+
+推荐 A。对象化继续最不容易把普通新任务误绑到旧响应。每个 eligible yield 的 canonical receipt 都必须显示稳定 `response-id` 与 unresolved 状态；A/B 条件注册只读 list/show 和 exact continue，使窄屏、恢复后或多候选时仍能找到对象。三项都只接受完整接收、校验并 durable 的 canonical model-yield；provider incomplete/断流、length、invalid response/control 和崩溃中的 unfinished request 仍分别服从 AL06-13、AL06-32 与 retry/protocol owner。任何 continue 都有新 turn ID、当前 snapshot、新预算和新 request ID，绝不沿用旧 approval/grant 或“剩余预算”。
+
+#### AQ-422 raw `exec` 的 cwd 是逐调用、固定还是跨调用状态
+
+状态：待决。正式 owner：TS-37。依赖：AQ-034、AQ-120、AQ-225、TS-23、TU-17、F4-12。
+
+场景：构建和测试常要从 workspace 子目录启动。若 cwd 没有正式契约，相同 command 在不同调用中可能指向不同文件，审批卡也无法说明真正执行位置；但 cwd 是否可表达必须与 raw tool carrier 分开，不顺带决定 stdin、deadline 或环境继承。
+
+方案：A. 仅 TS-23 A 的 typed envelope 可带 optional canonical cwd，缺失时使用 turn 冻结的 workspace root，执行前重新验证目录身份、可进入性、policy 和 generation；B. 每次 `exec` 永远使用冻结的 workspace root，没有逐 call 或跨 call cwd；C. 维护 process-local current shell cwd 并跨 call 保留，承担显式状态变化、恢复重置、审批 stale 和并发串行化成本。
+
+推荐 A。每个 operation 自足且可审计，同时能直接运行子目录任务。TS-23 B/C 没有无歧义字段承载 cwd，因此静态强制本题 B；Runtime 不解析 opaque command 内的 `cd` 来更新自身状态。三条路线都把实际 spawn cwd 写入 action、approval、operation 与 result，执行前身份变化必须重新求值而不是沿用旧授权。
+
+#### AQ-423 raw shell 的 inherit baseline 包含哪些宿主环境
+
+状态：待决。正式 owner：M05-55；仅 M05-15 A/B 适用，M05-15 C 为 `not-applicable`。依赖：AQ-121、AQ-145、AQ-148、AQ-276、M05-15、SAFE-09。
+
+场景：普通编译工具通常需要 PATH、系统目录、临时目录和 locale，但宿主环境也可能带云 token、proxy credential、SSH agent socket 或 CI secret。“受控继承”如果不定义政策类别，用户无法知道一次获批 raw Shell 获得了哪些 ambient credentials；是否允许 typed set/unset 仍是 M05-15 的另一条轴。
+
+方案：A. 使用随发行版本化的 compatibility allowlist，只继承普通 shell/toolchain 必需的有限类别；B. 继承完整宿主环境，只剔除 yaca 自己管理的 typed secrets，并显著警告未知宿主秘密可能暴露；C. 广泛继承，但以版本化高置信 denylist 剔除已知 credential、proxy、agent/socket 类变量，未知名称仍可能进入。
+
+推荐 A。它比全继承更可审计，又比完全 clean 更兼容旧工具。所有路线都在 spawn 前冻结 environment generation，使未执行审批在 binding 变化后 stale；结构化 `ExecEnvironmentSnapshot` 只保存 baseline/mode/source/公开变量名集合与 public digest，变量值和 private equality binding 不进入 XML。过滤环境也不是 sandbox：获准 raw Shell 仍能打印环境、读取当前用户有权访问的文件、运行凭据工具或发现 Runtime 不认识的秘密。registered config-secret 的 exact bytes 若出现在工具输出，统一在 canonical retention 前写 typed redaction marker；未知或变形 secret 仍可能进入完整 XML，不能承诺自动找全。内部 curl/Git/helper 始终使用独立最小环境，不消费本题 baseline。
+
+#### AQ-424 `exec` raw bytes 怎样成为 canonical text 或 binary
+
+状态：待决。正式 owner：TS-38。依赖：AQ-122、AQ-123、AQ-124、TS-22、TS-39、ED-08。
+
+场景：XP 的旧命令可能按 OEM codepage 输出，Linux 工具也可能输出非法 UTF-8、NUL 或真正的二进制。如果 Runtime 先用 replacement character 改写再冒充原文，模型、XML 和换机 reader 都会得到虚假证据；终端使用什么代码页显示又是另一件事。
+
+共同边界：三条路线都先把观察到的 raw bytes 交给统一跨 chunk secret scanner；registered exact value 命中后只保留 typed marker 与 `digest_scope=redacted-canonical`，不得持久化 raw-secret-derived digest。随后对 TS-39 实际 retained 的安全边界后 byte segment 使用 base64 或等价无损 carrier，记录 observed size、允许持久化的 canonical digest、retained span 和 decoder identity；解码文本只是派生 view，失败时保留 typed binary 与有界安全样本，绝不把 replacement 后文字当原输出。未知或变形秘密仍可能保留，不能把未命中宣传成安全。
+
+方案：A. spawn 时冻结目标平台 subprocess-output encoding snapshot，严格解码；非法序列、无可证明 decoder 或 NUL 形成 typed binary；B. 只接受严格 UTF-8，其他内容形成 typed binary；C. 默认同 A，仅 TS-23 A 允许逐 call 从发行 allowlist 选择 decoder，其他 carrier 只能使用平台 snapshot。
+
+推荐 A。它最贴合旧平台真实输出，又保持 raw bytes 才是事实。B 最可重复但会把更多 legacy 文本视为 binary；C 支持明确的特殊工具，却增加 schema 和平台 fixture。任何路线都不执行 ANSI/OSC、不让 UI decoder 改变 digest，也不因目标机器缺少相同 decoder 而改写历史。
+
+#### AQ-425 `exec` canonical output 在总上限内保留哪些 bytes
+
+状态：待决。正式 owner：TS-39。依赖：AQ-125、AQ-195、AQ-239、AQ-366、M05-51、TS-16、TS-22、TS-38、TU-29。
+
+场景：一次有副作用的构建可能输出数百 MiB，而 Win32 x86 必须设置 stdout+stderr combined cap。达到上限后 Runtime 仍要 drain pipe，但已经丢弃的中间或尾部不能靠重新运行命令安全找回；屏幕 live preview 也不能反过来决定 XML 最终保存什么。
+
+方案：A. 在 combined cap 内按固定、确定性通道配额分别保留 head+tail，并记录 observed/captured/discarded、retained spans、truncation reason 与允许持久化的 canonical digest；B. 每通道只保留 prefix，记录同样统计和 digest；C. 只保存每通道统计、digest 与极小安全诊断样本，不保存较长连续正文。这里的通道完全服从 TS-22：其 C 路线只有一个 merged stream；registered exact secret 命中时三项都只对 marker 后内容计算 `redacted-canonical` digest。
+
+推荐 A。命令背景常在开头、最终错误常在结尾，head+tail 对不可安全重跑的操作最有用。M05-51 只拥有 combined cap，TS-22 只拥有通道/观察顺序，TS-38 只拥有 raw decode/binary，TU-29 只拥有运行中 preview，TS-16 只拥有 direct tools。模型、TUI、`.details` 和跨机 reader 都只能消费本题真正 retained 的 canonical evidence，并明确不可恢复范围；绝不为补齐输出重新执行命令。
+
+#### AQ-426 composer 输入召回来自哪里并保留多久
+
+状态：待决。正式 owner：TU-31。依赖：AQ-351、AQ-365、AQ-366、F4-05、F4-06、TUI-23。
+
+场景：Up/Down 可以找回本次运行刚输入的消息，也可以从当前 XML 带回旧消息，或完全不提供。它会改变恢复后的键盘体验和秘密泄漏面，却不等于 `.history` 浏览 canonical transcript，也不等于无法由 yaca 控制的外部 terminal/shell history。
+
+方案：A. yaca-owned recall 使用绑定 `ContextHandle` 的有界进程内 ring，只接收已经提交的 canonical main 用户消息；切换 Context 时切换到该 Context 的独立 ring，新 handle 为空，关闭/退出即清除，不召回 queue/steer/side；B. 不提供 composer recall，旧事实只经 `.history` 浏览；C. 从当前 Context XML 中已经提交的 canonical main 用户消息有界重建，切换 Context 时清除并重建，其他 intent/表单内容不进入。
+
+推荐 A。它保留当前 Context 在本次运行内的便利，又不会把 A Context 的输入带进同进程打开的 B Context，也不会在恢复或换机时自动把旧消息放回可编辑输入。三项都禁止专用 secret-entry prompt 的 Key/秘密字段值、approval/recovery 答案和未提交管理表单值进入 yaca-owned recall/completion；但 ordinary canonical main 消息可能含 Runtime 无法识别的秘密，A 会在对应 Context 的本进程 ring 内召回它，C 还会从 XML 重建它，yaca 不能承诺自动找全或脱敏。`.history` 始终是事实浏览而不是 recall cache。外部 terminal emulator 或 console host 也可能自行保存输入，yaca 只能诚实提示，不能虚假承诺已经关闭或清理。
+
+#### AQ-427 chat dot-command 使用平坦 roots 还是紧凑 namespace
+
+状态：待决。正式 owner：TU-32。依赖：AQ-076、AQ-181、AQ-182、AQ-214、AQ-326、AQ-327、CLI-04、CLI-10 至 CLI-13、M05-51、AL06-48、TS-05、TU-18、TU-19、TU-24、TP-024。
+
+场景：chat 内需要 `.status/.prompt/.cautious`、queue/steer/side/cancel、details/history，以及 Model、Permission 和条件管理动作。是让每项都拥有可直接发现的 root，还是压缩成 `.show/.use` 的二级 target，会改变旧终端记忆成本、help 结构和关闭能力后的 zero-surface。
+
+方案：A. 使用平坦 roots：`.help/.status/.details/.error/.history/.queue/.steer/.side/.cancel/.retry/.response/.operation/.question/.instruction/.begin/.prompt/.cautious/.context/.model/.permission/.exit`，条件 ExecProfile、grant、job、summary 等各用清楚的 root；B. 保留 help/status/prompt/cautious 和高频控制 roots，把 details/error/history 合并为 `.show <target>`，把 Model/Permission 及条件 ExecProfile/grant 管理合并进 `.use <resource> ...`/`.show <resource>`，其余对象化 control root 仍独立。
+
+推荐 A。root 较多，但每个动作短且直接可发现，更适合逐行旧终端。两项都必须由一份版本化 registry 生成 parser/help/completion/command×state tests；unknown command 只建议、不自动执行，只有上游路线存在时才注册条件命令，关闭后 parser、help、machine schema 和 XML 都不能留下空壳。
+
+#### AQ-428 输入提示符采用短符号、全词状态还是统一名称
+
+状态：待决。正式 owner：TU-33。依赖：TUI-05、TUI-07、TUI-17、TUI-19、TU-14、TU-20、TU-22、TP-023、TP-024。
+
+场景：正文标签说明“刚才是谁说的”，输入提示符说明“现在输入会交给谁”。短符号省空间，全词状态更不容易在 approval/recovery 中输错，统一名称最简但必须依赖旁边的状态卡；它不应被 transcript 标签样式绑住。
+
+方案：A. 按焦点使用短而有区别的提示符：chat ready `>`、busy `!>`、multiline `...`，管理面使用 `action>`、`model>`、`config>`、`context>`、`self-test>`、`recovery>`；B. 全部使用完整 surface/state 名，例如 `idle>`、`busy>`、`approval>`、`model-repl>`、`context-repl>`、`recovery>`；C. 所有输入位置统一 `yaca>`，每次提示符前必须有不可省略的当前 focus/state 行。
+
+推荐 A。它兼顾旧终端宽度与危险焦点可辨性。三项都不得用颜色作为唯一含义；焦点变化必须追加 receipt，控制字符或模型正文不能伪造真实 prompt，TU-20 的 transcript 标签选择与本题独立。
+
+#### AQ-429 审批动作使用文字、编号还是短字母
+
+状态：待决。正式 owner：TU-34。依赖：SAFE-03、SAFE-07、TUI-05、TU-07、TU-17、TU-22、TP-024。
+
+场景：安全默认回答“什么都不输入会怎样”，页面 grammar 回答“用户明确选择时怎样输入”。两者正交：可以是 Enter 不作决定配编号菜单，也可以是 Enter 默认 deny 配完整 verb。
+
+方案：A. 使用完整 ASCII verb 和精确对象 ID：`allow <action-id> once`、`deny <action-id>`、`details <action-id>`，只有一个对象也不省略 ID；B. 当前 approval view 为每个动作生成稳定编号，显示 `1 allow once / 2 deny / 3 details`，编号只绑定当前 view generation；C. 在 `action>` 焦点内使用短字母加精确 ID：`a <id>`、`d <id>`、`i <id>`，help/header 每次展开含义，焦点外没有全局语义。
+
+推荐 A。它最容易复制到审计记录，恢复后仍能直接看懂，也不依赖瞬时行号。三项都必须在执行前回显 canonical 动作与目标，allow 只表示 once；编号、字母或省略 ID 都不能暗中扩大 grant，TU-07 的空 Enter 路线与本题任意组合。
+
+#### AQ-430 是否提供独立 `SensitiveRead` 能力
+
+状态：待决。正式 owner：M05-56。依赖/联动：SAFE-06、SAFE-09、TOOL-04、M05-16、TS-04、TS-21、TP-027。
+
+场景：`.env`、SSH key、credential 文件和用户额外标出的路径往往比普通源码更敏感。单独的 `SensitiveRead` 能让 Std 对源码直接读、对敏感文件再确认；代价是任何分类器都不可能发现所有秘密，错误命中也会增加打断。
+
+方案：A. 不增加 `SensitiveRead`；所有 direct file read 只服从 `Read` 与 M05-16 所选 workspace 外字段，UI 明说 yaca 不对“敏感”作额外安全判断；B. 增加独立 `SensitiveRead` 三态字段，只对 TS-21 定义的版本化敏感路径分类结果叠加求更严格值，未命中绝不等于文件安全。
+
+推荐 A。它最符合简单、相信模型、没有 OS sandbox 的产品方向，也避免把不完整的文件名启发式宣传成秘密防护。M05-56 只决定字段是否存在，分类来源与求值顺序仍由 TS-21 独占，内置 profile 默认矩阵仍由 TS-04 独占；它与 M05-16 的 workspace 外字段可任意组合。
+
+#### AQ-431 termination-review 使用哪个 Model
+
+状态：待决。正式 owner：AL06-49。依赖/联动：AQ-021、AQ-109、MODEL-12、LOOP-25、D-028、AL06-08、AL06-26、AL06-27。
+
+场景：action-review 关心“这个命令是否危险”，termination-review 关心“任务是否真的完成”。两者可能需要不同能力、费用和隐私边界；即使最终都用 main Model，也应独立确认，而不能被一个共用 reviewer selector 绑死。
+
+方案：A. 使用当前 turn 冻结的 main Model，但以独立 `purpose=termination-review` 请求执行；B. 主 INI 显式命名 `TerminationReviewModel`，缺失、无效或跨 endpoint 未确认时转 waiting-user，不 fallback；C. 每个 Context 首次需要 termination-review 时显式选择并持久化 `TerminationReviewModelMapping`，只保存非秘密逻辑 Model 引用与 mapping event，失效后重新选择。
+
+推荐 A。它最简单，也不会把完整历史额外发往另一个 endpoint。三项都只决定 termination-review 的 Model 来源，不改变 DoubleCheck 总开关、verdict、失败关闭、预算或 round cap；它与 AL06-08 的任一适用选项自由组合，同名配置也只是用户显式把两个 purpose 指向同一个完整实例。AL06-07 C 只使 action-review 路线 not-applicable，本题仍始终生效。
+
+#### AQ-432 Model/Permission 资源 selector 是否提供 `Abbreviation`
+
+状态：待决。正式 owner：M05-57。依赖/联动：AQ-135、AQ-136、AQ-199、CFG-27、M05-08、M05-34、M05-48。
+
+场景：Model/Permission 通常数量很少，section logical name 已经可以选择它；再加简称可以少输入，也会让重命名、大小写冲突和 Context mapping 多一套 token。这与 CLI 命令的短参数是两件事。
+
+方案：A. 删除 Model/Permission `Abbreviation`，只用完整 logical name；B. 允许可选简称，REPL 可建议但不自动保存；C. 所有 Permission 和 enabled Model 必填简称，disabled 草稿可到 enable transaction 再补。
+
+推荐 A。它最简洁，不让低数量资源为了少输入几个字符就多一套持久身份。三项都保留原拼写，匹配只做 ASCII case fold，同类命名空间内折叠后必须唯一；Context 只保存完整 logical name，简称不是永久 ID。
+
+#### AQ-433 per-Model retry 暴露哪种配置面
+
+状态：待决。正式 owner：M05-58。依赖/联动：D-036、AQ-140、AQ-197、AQ-221、CFG-28、M05-04、F4-02。
+
+场景：retry 已确认跟着每个完整 Model，但“属于 Model”还没回答用户会看见两个数字、三个数字还是策略名。它会影响配置简洁度、最坏等待和升级时的可预测性。
+
+方案：A. 每 Model 只公开 `RetryCount` + `RetryBaseDelayMs`，max/jitter 由版本化 Runtime manifest 冻结；B. 再公开 `RetryMaxDelayMs`；C. 只公开 `RetryPolicy=none|standard|patient`，并在每次 snapshot 中保存 preset 当时展开的完整数字与 manifest identity。
+
+推荐 A。它保留“重试几次、从多久开始等”两个最常用控制，同时不让用户配置放宽安全阶段、`Retry-After`、logical deadline、turn budget 或 Runtime hard cap。精确默认、范围和 jitter 要经真实 endpoint/旧平台 fixture 冻结，不在本题拍数字。
+
+#### AQ-434 stuck/no-progress 阈值从哪里来
+
+状态：待决。正式 owner：AL06-50。依赖/联动：AQ-029、AQ-101、AQ-154、AQ-196、LOOP-31、AL06-28、AL06-42。
+
+场景：AL06-28 只决定“命中阈值后怎么收口”，并没决定用户能否调节这个阈值。完全固定最容易复现，单一数字更能适应不同 Model，按 detector 拆分则会把内部分类变成长期配置 API。
+
+方案：A. 全部阈值由发行 manifest 固定，不生成 INI/XML 字段；B. INI 只提供一个有界 `MaxNoProgressRepeats`，XML 不覆盖；C. INI 按版本化 detector registry 提供少量独立的有界阈值。
+
+推荐 B。一个数字已能表达“更早停/再多试几次”，又不暴露 detector 细节。三项都不允许 0/off/infinite，不能关闭 stuck 检测或放宽其他 hard budget；算法、默认数字、上限和进展重置条件属于技术证明。
+
+#### AQ-435 特殊 purpose 跨 Endpoint 确认记多久
+
+状态：待决。正式 owner：AL06-51。依赖/联动：MODEL-17、SAFE-08、SAFE-09、AL06-08、AL06-49、AL06-30、CX-07。
+
+场景：action-review、termination-review 或 compaction 可能把不同范围的完整会话材料发往与 main Model 不同的 Endpoint。每次都问最保守但会频繁打断；记住一次则必须说清作用域、持久性和失效。
+
+方案：A. 每个跨 Endpoint 的特殊-purpose logical request 都显示 exact disclosure manifest 并确认；B. 每个 active Context handle/purpose/binding 在本进程第一次确认，close/reopen 即失效；C. 每 Context/purpose/binding 第一次确认，会话级 consent 写入 XML，本机恢复且 binding 未变时可复用。
+
+推荐 C。它避免长 Context 中 DoubleCheck/压缩重复弹问，同时每次真实发送仍保存 exact range/view/request receipt。三个 purpose 的 consent 永不共享；Endpoint、tenant/auth/proxy route、Model/config generation、data-class envelope 或 mapping 改变即 stale；外来 XML、跨机 mapping 和 workspace rebind 只能当历史审计，必须 fresh confirm。
+
+#### AQ-436 `__yaca__` reserved tree 是否允许 direct exact read
+
+状态：待决。正式 owner：TS-40。依赖/联动：SAFE-18、TOOL-04、SAFE-09、CTX-18、M05-16、TS-15、TS-16。
+
+场景：`__yaca__` 同时有明文 Key 的 INI、完整 Context XML 和正在提交/恢复的内部文件。list/search 不应把它当源码扫描，direct mutation 也不能改坏事实源；剩下的选择只是模型已经知道精确 XML 路径时，direct `read` 是否留窄出口。
+
+方案：A. 所有模型 direct exact read 都 hard-deny，只走 REPL/status/details/canonical view 或用户在 yaca 外复制的文件；B. 只允许当前 ContextHandle 最后已提交 XML，每次 exact-action 确认；C. 允许 Catalog 中任一已提交 Context XML，必须给出 exact physical path 并每次确认。
+
+推荐 A。当前模型已通过 canonical view 获得任务所需会话，全部拒绝最简单。三项都固定：reserved list/search 排除、direct mutation hard-deny、alias/句柄二次复核；INI、secret-bearing backup/temp、lock 与未完成对象永不 direct read。获准 raw shell 仍是无 OS sandbox 的宽能力，yaca 只能显著警告，不得宣称 direct gate 已包住 shell。
+
+#### AQ-437 过短 config-secret 的消费与 exact-scan 政策
+
+状态：待决。正式 owner：M05-59。依赖/联动：AQ-017、AQ-040、AQ-168、CFG-29、SAFE-09、M05-54、TS-15。
+
+场景：若 Key 是 `a` 或 `ok`，在所有正文中扫描 exact bytes 会大量误阻断；不扫又不能保证 registered config-secret exact value 不进 XML。长度必须按解码后原始 bytes 决定，不能按单词或实际出现频率猜。
+
+方案：A. 由 fixture 冻结版本化最小可安全扫描长度，过短值可管理但相关 consumer ineligible，直到更换/移除；B. 允许消费过短值，但只保护结构化私有 carrier，普通正文不再做全局 exact scan 并明确收缩 XML 保证；C. 允许任意长度且全局继续 exact scan，接受普通单词的高频误阻断/误标记。
+
+推荐 A。它保住一条统一可测的 config-secret 排除保证，并把不可靠的过短值在真正外发前显式化。重复 raw bytes 固定 collapse 成一个 matcher pattern，全部相交命中合并为 maximal byte-interval union 并使用稳定类别集合；这是技术不变量，不随 registry/平台遍历顺序改变。
+
 # 建议讨论批次
 
-题库不再直接承担主要问答界面。完整顺序、依赖和回复方法见 [设计决策路线图](DESIGN-DECISION-ROADMAP.md)，实际使用十个 `decision-packets/` 成套讨论：
+题库不再直接承担主要问答界面。十个 `decision-packets/` 只保存每组完整选项正文（通常 A/B/C，二元题为 A/B）；实际讨论顺序由 [实时登记表](DECISION-REGISTER.md) 指向 [分批队列](DECISION-BATCH-QUEUE.md) 的当前 `Bxx`。一批会按真实依赖同时打开一个或多个 packet 中的 3--6 个正式 sections，不要求先读完或答完整个 packet。
 
-1. 产品旅程与表面地图。
-2. Prompt、人格与工作区指令。
-3. TUI 视觉、输入与 CLI 体验。
-4. Model、配置、网络与 self-test。
-5. AgentLoop、忙时动作、DoubleCheck 与压缩。
-6. Tool Calling、安全、进程与运行时。
-7. Context XML、索引、恢复与可移植接盘。
-8. 错误、诊断、发布与兼容体验。
-9. 测试、性能、常量与实施冻结。
-10. 第四轮跨系统运行接缝与遗漏收口。
-
-每包只把真正改变产品/架构边界的成套选择交给项目负责人；包的大小按主题完整性决定，不再强行限制为 6--12 组。其余原子项作为技术推导、反例和验收追踪。未明确回复的任何推荐仍保持待决。
+每个正式组只承担一个会改变产品/架构边界的选择；其余原子项作为技术推导、反例和验收追踪。未明确回复的任何推荐仍保持待决，packet 中出现候选文字也不等于已经承诺功能。
 
 ## 下一步先读什么
 
-先读 `decision-packets/02-product-journey-and-surfaces.md`，确认启动、新建/继续、页面全集、空 Context、锁冲突、恢复和退出的总体旅程；九个主包读完后，用 `decision-packets/11-cross-system-operational-seams.md` 收口跨系统遗漏。随后按路线图逐包进行；如果先解最高风险，则优先回答：
+先读 `DECISION-REGISTER.md` 的“当前进度与下一批”；当前是队列 `B01`，因此只需打开 `decision-packets/02-product-journey-and-surfaces.md` 中 PJ-01 至 PJ-05 的正文。每批回复和传播完成后再由登记表指向下一批，不能凭 packet 文件名猜顺序。如果要了解为何这样排序，再读路线图和下列高风险说明：
 
 1. `AQ-251`、`AQ-252`：任务完成与向用户提问的 typed 信号。
 2. `AQ-271` 至 `AQ-275`：raw shell 宽权限与外来 XML 的授权边界。

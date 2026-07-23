@@ -89,7 +89,7 @@ owner 是最终规范的唯一修改责任，不等于只有该系统能引用�
 | `SUPPLY-01..04` | [16 发布](subsystems/16-packaging-and-release.md) | `RF-05/06` | `AR-P0-14/16`、`AR-P1-11` | component allowlist、SBOM、provenance/ABI audit | `T` |
 | `UPDATE-01..02` | [16 发布](subsystems/16-packaging-and-release.md) | `RF-02/03` | `AR-P0-01/09/10/16`、`AR-P1-10/12` | version compatibility and migration/rollback policy | `O/J/T` |
 | `DOC-01..05` | [16 发布](subsystems/16-packaging-and-release.md) | `RF-11` 只直接关联 `DOC-05` | `AR-P1-09/10/12` | documentation status/synchronization/conformance policy | `T/O` |
-| `WEB-01..04` | [17 Web](subsystems/17-web.md) | 无直接 group | `AR-P0-01` 的 v0.1 排除与重开条件 | `WebReentryCriteriaV1`；恢复讨论前不写运行规格 | `O/T`，暂缓 |
+| `WEB-01..04` | [17 Web](subsystems/17-web.md) | `PJ-14=A` / D-044 | `AR-P0-01` 的 v0.1 零表面与重开条件 | `WebReentryCriteriaV1` + negative surface scan；恢复讨论前不写运行规格 | `O/T`，已排除 |
 
 21 号 [扩展边界](subsystems/21-extension-boundary.md) 是唯一没有独立 ID namespace 的 owner 文档。当前建议保持 00 号拥有 `PROD-11` 的产品范围，21 号只拥有未来的 `ExtensionBoundaryV1` 规范；若后续确实需要逐项追踪扩展生命周期，应新增 `EXT-*`，不能让 `PROD-11` 同时承担 MCP、插件、hook、skill、自定义工具和子 Agent 的全部细节。
 

@@ -1,6 +1,6 @@
 # 当前状态分析
 
-更新日期：2026-07-18
+更新日期：2026-07-22
 
 ## yaca 仓库
 
@@ -24,7 +24,22 @@ yaca 当前是“产品说明、配置草案、模块骨架和本地运行工具
 - README 的模型预设清单与配置模板中的模型条目不一致。
 - `_CONFIG_.ini` 仍包含 `[Permission.Cautious]` 和 profile 内 `DoubleCheck`，尚未迁移到 D-021 的全局默认开关与 `.cautious` 会话覆盖设计。
 - `_CONTEXT_.xml` 仍只有头部注释，尚未表达 D-022 的镜像路径、完整对话、会话参数元数据和实时索引契约。
-- Web 目录只有占位内容，应与核心版本解耦。
+- Web、图像/音频、remote/headless、transcription 与 TTS 已被 D-044 明确排除；仓库中的 Web 占位不得进入 loader、help、配置或发行 zip，后续应作为实现前清理项而不是候选产品面。
+
+### 本轮已冻结的产品主链
+
+- 裸 `yaca [directory]` 不扫描历史，直接进入新的未保存 chat；旧 Context 只通过 `.context`、continue 或 context-repl 显式打开。
+- 配置损坏或无有效 Model 阻断 Agent，但 help/version、受限管理 REPL、self-test Stage 1 与不依赖 Model 的 Context 管理仍可使用。
+- `General.StartupSelfTest=off|stage1|stage2|stage3` 默认关闭；启用后严格按阶段顺序运行，在线阶段仍逐次确认。
+- 例行启动头没有总开关，Slogan、版本、work directory、data root、配置状态、Context/hash、Model、Permission、DoubleCheck 和 `.status` 提示只由各自 bool 控制；全部关闭也不能隐藏 ERROR/WARNING/ACTION。
+- 第一条 main 用户消息先用 ASCII provisional name 建立并 durable 写入 XML，之后才能请求 Model；周期后台命名的全局间隔默认 10、0 关闭且只计 durable completed main turn。手工 rename 默认在 Context XML metadata 设置 `AutoRenameDisabled`；context-repl 取消标记从当前水位建立新 baseline，不立即/追补，自动 rename 不设置标记，标记变为 true 后在途迟到结果也不得采用。退出不等待命名请求。
+- 每个 Context 恰好一个 workspace root，由 XML 在 `__yaca__/CONTEXT/` 下的镜像父目录决定，不在 XML 内另存 current workdir；显式 rebind 安全移动 XML 并改变逻辑路径/hash。活动 writer 存在时第二进程完全拒绝打开正文和一切外部 Context mutation。三个管理 REPL 各有本域 self-fix，不建立 recovery surface。
+- Context 列表以 INI 的 `created|updated|name` 和 `ascending|descending` 排序，默认 `updated+descending`；时间取 XML canonical metadata，不取文件 mtime/ctime；主键相同始终按 canonical `LogicalPath` 升序且不随主方向反转，也不改变 Resolver 或裸启动。
+- `.model` 无参数打开可降级 picker，`.model <selector>` 直接选择，两者与 CLI 投影提交同一个 typed Model 选择动作；补全是增强，不是命令可用前提。所有 TUI 领域动作必须由同一 registry 提供 CLI 等价入口，但这不开放 remote/headless controller。
+- 每个顶层 main/side turn admission 前完整读取并比较 INI bytes；变化时整份验证后原子激活 immutable generation，当前 turn 及其工具/复核/重试/压缩不热换。Stage 1 self-test 检查 Context 镜像、workspace 与 Catalog 扫描完整性/性能，Stage 3 只 advisory 检查 Model/Permission 名称、说明、Prompt 与实际配置的明显错配和拼写。
+- Permission 是命名 typed profile，`SystemPrompt` 不参与授权；普通对话没有独立 plan state。
+
+本轮 PJ 产品问题和手工名称补缝已经全部收到回复；后续增量批注又收口 `TU-32=A`、`F4-01=custom` 及上述跨系统不变量。下一批回到 `F4-15` 的每进程 active Context 数量和 `F4-14` 的初始唯一 root 选择；它们不改变已确认的单 Context 单 root 与镜像父目录权威来源。
 
 ### `bin/` 不是可直接发布的依赖集合
 

@@ -1,6 +1,6 @@
 # 决策包 08：Context XML、实时索引与恢复闭环
 
-更新日期：2026-07-18
+更新日期：2026-07-22
 
 状态：等待项目负责人回复；本文所有推荐、元素名、流程和选项都不是已确认决定
 
@@ -39,8 +39,10 @@
 10. v0.1 不提供 Context fork/分支机制。
 11. XML 保存完整对话、日志相关信息、会话级参数及元数据；`.cautious` 的 `DoubleCheck` 覆盖属于会话元数据。
 12. UI 固定程序文案使用 English/ASCII；颜色只是增强，不依赖鼠标或全屏。
+13. 每个 Context 恰好绑定一个 workspace root；root 不写入 XML，而是在打开时由该 XML 位于 `__yaca__/CONTEXT/` 镜像树中的父目录经 `LogicalPathCodec` 解码得到。basename 只是 Context 名称，完整逻辑 XML 路径仍决定实时 16 位 hash。
+14. `AutoRenameDisabled` 是 Context XML metadata 中的专用布尔字段：缺失/`false` 允许周期自动命名，`true` 禁止；它不是通用 flags bag，也不编码进目录名或 basename。
 
-关联决定：D-021 至 D-025。
+关联决定：D-021 至 D-025、D-045、D-046。
 
 ## 先统一几个通俗术语
 
@@ -135,7 +137,7 @@ yaca-context
   header
     schema version, writer version, creation facts
   metadata
-    current logical/workspace path, session parameters, lifecycle state
+    session parameters, lifecycle state, AutoRenameDisabled
   snapshot-pool
     model snapshots (non-secret projection)
     prompt snapshots
@@ -164,15 +166,17 @@ yaca-context
 - 完整或明确 `interrupted/failed/refused/partial` 的 assistant response；
 - request/attempt、Model error、usage 和 typed outcome；
 - tool call、approval request/decision、operation start、真实或合成 result；
-- Model、Prompt、Permission、DoubleCheck、预算，以及条件 ReviewModel mapping、compaction consent、workspace acknowledgement 的切换；
+- Model、Prompt、Permission、DoubleCheck、预算，以及条件 `ActionReviewModelMapping`、`TerminationReviewModelMapping`、compaction consent、workspace acknowledgement 和仅 M05-51 C 才存在的 CurrentExecProfile selector/profile-definition mapping 的切换；两个 review mapping 按 purpose 分别形成事件，不能用一条共用切换让其互相跟随；
 - adopted project-rule snapshot/transition 的 adopt、observe-changed/missing、keep、refresh、auto-replace、revoke；
 - compaction、用户对摘要的纠正、Model view 激活；
-- workspace/model/permission import mapping；
+- Model/Permission import mapping；workspace 的当前绑定只由 active XML 的父目录决定，不由 import event 覆盖；
 - turn start/end、cancel、stuck、recovery 与 unknown operation resolution；
 - PJ-11 B/C 条件 PlanArtifact 的 create/cancel/stale/execute-reference 及其 goal/model-view/workspace/config/Model/Permission/tool-schema bindings；它永远不是 approval/grant；
 - schema migration、rename/archive/restore 等生命周期事实。
 
 事实只追加或由新的 superseding/resolution event 解释。不能为了“保持当前状态干净”而修改旧 approval、旧摘要或旧 Model 名。
+
+“完整工具结果”是完整保存安全边界处理后的 canonical evidence，不是假装保存所有敏感原始字节。direct tool 进入 TS-16、`exec` 进入 TS-39 的 retention/digest 前，都由 TS-15 统一 secret boundary 对 M05-59 最终路线纳入 ordinary-content 扫描的 eligible patterns 做有界跨 chunk exact scan；命中部分替换为 typed redaction marker，只保存类别/occurrence 与 `digest_scope=redacted-canonical`，不保存原值或 raw-secret-derived digest。没有命中 eligible pattern 时才可保存所选 owner 路线的 raw canonical digest。M05-59 B 明确豁免的过短普通输出 coincidence 不扫描、不替换，作为 possibly-secret canonical content 保留并携带 `guarantee-contracted`；它不得被记成“扫描未命中”或“已脱敏”。这个检查也只能覆盖已登记且当前路线纳入的 exact pattern：raw shell、用户或工具正文中未识别、豁免、改写、编码或派生的秘密仍可能作为完整 user-content 进入 XML，复制/export/support 必须预览并警告，不能声称自动找全。Runtime 从 registry 结构化取得的实际 config-secret 不属于这类 ordinary result：它在任何路线下都只能进入登记的精确私有 consumer carrier，不得被 Runtime 复制成工具正文或 XML 字段。该边界也必须进入第三方 schema，使接盘者知道证据何处被有意脱敏、何处只是保证收缩。
 
 ### 2. snapshot pool 去重保存“当时有效的非秘密环境”
 
@@ -182,18 +186,18 @@ yaca-context
 - Prompt snapshot：内置 Prompt 版本、全局 SystemPrompt、ContextPrompt；实际采用的项目规则还保存完整有界 content/source/scope/digest/authority 与 PP-13 transition 引用；PP-11 B/C 时再保存 Model.CustomPrompt 完整 component、route/authority/digest 和 Model-switch transition，A 下不生成该 component；
 - Permission snapshot：当时 profile 与规则摘要，用于解释历史，不自动授予未来动作；
 - tool-schema snapshot：当时提供给 Model 的规范工具名、参数 schema 与版本；
-- session snapshot：DoubleCheck、AL06-09 路线与可配置/固定预算来源、工作目录，以及 TS-18 B 时 INI-only Autonomy 的有效值；M05-17 A/C 时保存 exact LogLevel enum/route（B 不生成），它只解释 optional diagnostic detail、绝不改变 canonical facts；M05-06 B/C 时保存实际存在的 turn/AL06-11 A/B threshold override effective value/source，C 再保存 queue/side/tool-preview/diagnostic 四项 preference。仅在对应路线启用时还包括 AL06-08 C 的 ReviewModel mapping、AL06-11 A + AL06-34 C 的 compaction consent 和 TS-14 C 的 identity-bound workspace acknowledgement。不存在的条件字段不生成空占位。
+- session snapshot：DoubleCheck、`AutoRenameDisabled`、AL06-09 的 Context audit/hard-ledger 路线、AL06-42 的 main-turn guard configurable/manifest-fixed 来源与实际身份，以及 TS-18 B 时 INI-only Autonomy 的有效值；当前 workspace root/workdir 不进入 snapshot。M05-17 A/C 时保存 exact LogLevel enum/route（B 不生成），它只解释 optional diagnostic detail、绝不改变 canonical facts；M05-06 B/C 时保存实际存在的 turn/AL06-11 A/B threshold override effective value/source，C 再保存 queue/side/tool-preview/diagnostic 四项 preference。仅在对应路线启用时还包括 AL06-07 A/B + AL06-08 C 的 `ActionReviewModelMapping`、AL06-49 C 的 `TerminationReviewModelMapping`、AL06-11 A + AL06-34 C 的 compaction consent、TS-14 C 的 identity-bound workspace acknowledgement，以及 M05-51 C 的 CurrentExecProfile selector、两个 effective resource 值、schema/profile-definition identity、public digest 和 mapping generation。两个 review mapping 分别保存 logical name、purpose、old/new/source/generation 与 non-secret Model snapshot 引用；AL06-07 C 时 action mapping 不生成，termination mapping 仍按 AL06-49 独立生效。raw shell 可用时另保存 `ExecEnvironmentSnapshot` 的公开部分：M05-15 mode、M05-55/clean baseline ID+version、source、canonical 变量名集合和 public digest；变量值及其 private equality binding 永不保存。不存在的条件字段不生成空占位。工具 operation/result 可以保存当次实际 cwd 作为历史证据，但它永远不参与以后打开 Context 时的 root 求值。
 
-Key、代理密码和 secret header 不进入 snapshot，也不进入 snapshot digest。相同 digest 可以复用同一 snapshot；未知或外部 snapshot 仍只是历史数据。
+Runtime 从 registry 结构化取得的任一 config-secret value（包括 Key、proxy credential、SecretHeader、EnvironmentSet value 和 adapter secret）都不得投影进 snapshot 或 snapshot digest；这个结构化排除集合必须由 typed registry 生成，不受 M05-59 B 收缩 ordinary-content 扫描的影响。Prompt、project-rule 或其他用户/工具正文 snapshot 是另一类 ordinary content：它们只对 M05-59 纳入的 eligible patterns 执行 exact gate；B 豁免的过短 coincidence 可保留，但 snapshot/view/export 都必须继承 `guarantee-contracted`，不得误报为 secret-free。相同 public digest 可以复用同一非秘密结构化 snapshot；未知或外部 snapshot 仍只是历史数据。
 
 ### 2a. 条件 attachment 与未发送 draft 不是聊天消息
 
-- 只有 TS-08 B 才允许 `PreimageAttachment`。每项绑定 operation/tool call、规范 path/file identity、before digest、encoding、original size、stored size 和 attachment digest，普通文本按 XML 安全转义、binary 使用规范 base64；写入并 flush 成功且 per-file/per-turn/per-Context quota 都有余量后，undo-protected mutation 才可执行。已登记 secret 或命中 Runtime 已知 secret value 时 capture/admission 一并拒绝；A/C 下 attachment 类型不存在。attachment 计入单 XML/总空间硬门、复制/export/support 预览与 purge 范围，undo 只引用其稳定局部 ID。
-- F4-05 B/C 才存在 `DraftSessionState`，它位于 `ephemeral-session-state` 而不是 canonical conversation/events/model view。B 由有界 idle debounce 原子替换当前 draft；C 只有 `.draft save` 才写 payload。发送/discard 时物理移除 payload，并追加只含 draft ID/digest/size/reason 的 clear fact；旧 payload 可能仍留在 previous-valid/backup，必须按隐私/清除承诺说明。A 下 section/command 不存在。恢复/复制可明确标记 `unsent draft` 并让用户 restore/discard，默认 export/support 不包含正文且必须预览；它永远不能被当作已发送用户消息。
+- 只有 TS-08 B 才允许 `PreimageAttachment`。每项绑定 operation/tool call、规范 path/file identity、before digest、encoding、original size、stored size 和 attachment digest，普通文本按 XML 安全转义、binary 使用规范 base64；写入并 flush 成功且 per-file/per-turn/per-Context quota 都有余量后，undo-protected mutation 才可执行。Runtime 不得把实际 config-secret carrier 复制成 attachment，这在任何 M05-59 路线下都直接拒绝。普通 preimage 只在命中 M05-59 纳入 ordinary-content 扫描的 eligible pattern 时拒绝 capture 和这次 undo-protected 执行；B 豁免的过短 coincidence 可作为 possibly-secret ordinary content 保留，attachment/export 必须标记 `guarantee-contracted`。A/C 下 attachment 类型不存在。attachment 计入单 XML/总空间硬门、复制/export/support 预览与 purge 范围，undo 只引用其稳定局部 ID。
+- F4-05 B/C 才存在 `DraftSessionState`，它位于 `ephemeral-session-state` 而不是 canonical conversation/events/model view。B 由有界 idle debounce 原子替换当前 draft；C 只有 `.draft save` 才写 payload。draft 是 ordinary user content：只在命中 M05-59 纳入的 eligible pattern 时才在写入前 typed reject并只保留进程内 draft；B 豁免的过短 coincidence 可写入，但 payload 及所有恢复/复制投影必须标记 `guarantee-contracted`，不得宣称已扫描或已脱敏。Runtime 结构化取得的实际 secret 永不得进入 draft carrier。发送/discard 时物理移除 payload，并追加只含 draft ID/digest/size/reason 的 clear fact；旧 payload 可能仍留在 previous-valid/backup，必须按隐私/清除承诺说明。A 下 section/command 不存在。恢复/复制可明确标记 `unsent draft` 并让用户 restore/discard，默认 export/support 不包含正文且必须预览；它永远不能被当作已发送用户消息。
 
 ### 3. model-view manifest 记录“模型当时真正看见什么”
 
-每个 main、side、action-review、termination-review、compaction 或 self-test 请求都保存一个有 purpose 的 manifest；PJ-11 B/C 下 main 还必须保存 `phase=plan|execute`，A 下不得伪造该字段；`self-test` 还必须保存 `phase=capability|semantic`，Stage 1 因没有 Model request 不伪造 manifest。若且仅若 PJ-12=B 实际发起一次 `context-name` 请求，该请求也保存自己的 purpose/manifest；它是条件性的单次请求记录，不是常驻“第七类”purpose，PJ-12=A/C 时 schema/projection 不伪造该请求。每个实际 manifest 至少引用：
+每个 main、side、action-review、termination-review、compaction 或 self-test 请求都保存一个有 purpose 的 manifest；PJ-11 B/C 下 main 还必须保存 `phase=plan|execute`，A 下不得伪造该字段；`self-test` 还必须保存 `phase=capability|semantic`，Stage 1 因没有 Model request 不伪造 manifest。`Context.AutoNameEveryMainTurns>0`、达到 durable main-turn 阈值且 `AutoRenameDisabled!=true` 时，才可能产生低优先级 `context-name` 请求并保存自己的 purpose/manifest；它不是常驻“第七类”purpose。每个实际 manifest 至少引用：
 
 - ordered Prompt/snapshot segments；
 - 哪些原始 event group 进入、哪些被排除；
@@ -245,7 +249,8 @@ manifest 不保存带 Key 的 HTTP body，也不要求无限保存 provider wire
 | 副作用开始 | operation-start 与幂等/未知风险元数据 | 调用工具/进程/网络副作用 |
 | 工具结束/取消 | 真实或 synthetic result、输出边界、known/unknown 状态 | 下一次 Model 采样 |
 | queue/steer/side | 类型、局部 ID、创建顺序和目标 Context/turn | 确认已接受并调度 |
-| Model/Prompt/Permission/DoubleCheck 切换 | 新 snapshot 和 transition/mapping event | 下一请求使用新值 |
+| Model/Prompt/Permission/DoubleCheck/条件 CurrentExecProfile 切换 | 新 snapshot 和 transition/mapping event；ExecProfile 还包括 old/new selector、effective resource、definition identity、public digest 与 mapping generation | 下一请求或下一 exec 使用新值 |
+| raw-shell environment generation 改变 | 新 `ExecEnvironmentSnapshot` 公开投影、旧/新 baseline/mode/name-set transition；exact value equality 只绑定进程内 private generation | 接受使用新环境的 exec action/review/approval |
 | compaction | summary、source digest、生成 snapshot、校验结果 | 激活新 model view |
 | turn 收口 | typed terminal outcome、未完成/unknown 列表 | 开始下一 turn 或正常关闭 |
 | rename/archive/delete | 操作意图、目标观察、收口状态（写入适当事实位置） | 改变 active 逻辑路径或生命周期 |
@@ -342,12 +347,12 @@ LuaExpat 没有 writer；自行实现窄 writer 不等于自行实现 parser。�
 | 完整 canonical 对话与控制事件 | API Key、代理密码和本机凭据 |
 | 非秘密 Model/Prompt/Permission/tool snapshots | 一个可用且经用户确认的本机 Model/Permission 映射 |
 | 每次请求的 model-view manifest | 实际 provider 服务仍然存在并兼容 |
-| 工作区原逻辑路径、Git/digest 摘要、已知改动事实 | 项目文件本身或用户指定的新 workspace root |
+| 工具调用实际 cwd、Git/digest 摘要、已知改动事实（均为历史证据） | 当前 workspace root；它由导入后 XML 所在的 `CONTEXT` 镜像父目录决定 |
 | 有界工具结果、truncation/reference/digest | 被明确标成 external 的大附件或机器外证据 |
 | compaction summary 与完整事实来源 | 目标模型的上下文窗口和工具能力 |
 | unknown operation 与恢复证据 | 用户检查外部世界后给出的 resolution |
 
-对已关闭或成功 snapshot/export 的 Context，复制该 XML 应能接盘。外部程序在 writer 活动时盲目复制不属于 atomic/latest snapshot 契约：它可能失败，也可能取得较旧 generation，不能据此声称包含最后一刻事件。受支持的热复制必须通过 context-repl 动作固定 generation，若有 WAL 则先 consolidation。
+对已关闭或成功 snapshot/export 的 Context，复制该 XML 应能接盘会话事实，但裸 XML 自身不携带当前 workspace 绑定。导入时，用户或 `context-repl` 必须把它 no-replace 发布到目标 workspace 对应的 `CONTEXT/.../` 镜像目录；发布后的父目录就是目标机唯一 root。外部程序在 writer 活动时盲目复制不属于 atomic/latest snapshot 契约：它可能失败，也可能取得较旧 generation，不能据此声称包含最后一刻事件。受支持的热复制必须通过 context-repl 动作固定 generation，若有 WAL 则先 consolidation。
 
 公开 schema 的 v0.1 承诺应是第三方可读、yaca 是唯一受支持 active writer。Codex、CodeWhale 或其他工具可以依据公开 schema/样例读取接盘信息，但不因为“XML 是文本”就自动获得 writer lease、迁移、unknown extension 往返和授权能力。
 
@@ -358,13 +363,13 @@ LuaExpat 没有 writer；自行实现窄 writer 不等于自行实现 parser。�
 无签名的 digest 链只能发现意外损坏，不能证明 XML 来自可信 yaca；路径位置或一个 `origin=local` 字段同样不能成为认证。安全规则不应依赖“是否成功识别外来文件”：恢复后的历史 approval 默认都不授权未来动作，任何会把当前本机安全基线调低的 XML 覆盖都需要显式确认。下面是 CX-07=A、CX-14=A 与 CX-17=A 组合后的推荐候选流程，不是额外的未编号选择：
 
 1. 以 LuaExpat 安全子集流式解析，先做 schema/size/digest/extension 检查。
-2. 只读显示来源声明、原逻辑路径、最后状态、Model/Permission/Prompt snapshots 和 portability gaps。
-3. 明确映射目标 workspace、Model 与 Permission；绝不按目录名全盘搜索后自动选择。
+2. 只读显示来源声明、导入文件当前位置、最后状态、Model/Permission/Prompt snapshots 和 portability gaps；XML 内历史 cwd 只作证据，不冒充当前绑定。
+3. 明确选择目标 workspace 镜像目录以及本机 Model/Permission；目标 workspace 通过最终发布位置建立，不按 XML 内容或同名目录猜测。
 4. imported Permission/DoubleCheck 覆盖按 CX-14 的实际选择激活；任何路线都不得静默降低本机安全基线，并且必须记录来源。
 5. imported ContextPrompt 按 CX-17 的实际选择 accept/edit/disable/受限自动激活；它不能改变不可变安全规则。
 6. 所有历史 approval 只作 audit-only。它们解释过去发生了什么，不能授权目标机的新 operation。
 7. 本机 permission engine 对每个未来动作重新求值；历史 Permission snapshot 只是历史证据。
-8. 兼容通过后，以新的 local mapping/import-accepted event 记录目标机选择，不改写原 snapshot。
+8. 兼容通过后，以 no-replace 方式把完整 XML 发布到目标镜像目录；Model/Permission 的 local mapping/import-accepted event 可以写入 XML，但 workspace 当前绑定仍只来自发布位置。
 
 同名/同路径导入必须 no-replace：digest 完全相同可以报告 already present；内容不同则让用户重命名、选择另一镜像路径或取消。不能覆盖本机 Context，也不能自动采用第一个候选。
 
@@ -386,7 +391,7 @@ CX-08=A 的用户可见方向是 16 个规范小写 hexadecimal 字符。逻辑�
 
 精确大小写、Unicode normalization、UNC/Linux root 编码与非法原生名字节处理需要平台 fixture 冻结，不让负责人凭感觉选择某个 Win32 API。
 
-当前地址的权威输入永远是 Scanner/Verifier 观察到的物理位置经 `LogicalPathCodec` 转换后的逻辑路径。XML 内保存的原路径、workspace path 和历史 hash 只是解释/mapping 事实；外来 XML 自报 `/C/Work/task.xml` 不能让位于另一物理路径的文件获得那个当前地址或 hash。二者不一致时显示 mismatch 并走 mapping/recovery，不能让内容覆盖目录事实。
+当前地址与唯一 workspace root 的权威输入永远是 Scanner/Verifier 观察到的物理位置经 `LogicalPathCodec` 转换后的逻辑路径：父目录解码为 root，basename 解码为 Context 名称，完整相对路径计算当前 hash。XML 不保存 `CurrentWorkspace`、`CurrentWorkDir` 或当前逻辑地址字段；工具历史中出现的 cwd/path/hash 只是过去事实，不能让位于另一物理路径的文件获得旧地址、旧 root 或旧 hash。
 
 ### Resolver 已确认的裁决流程
 
@@ -426,7 +431,7 @@ show exact logical path + current hash + intended action
 
 ### ASCII context-repl 候选 transcript
 
-下面用于确认信息和动作，不冻结最终空格、命令简称或 hash 示例：
+下面用于确认信息和动作，不冻结最终空格、命令简称或 hash 示例；方括号 chrome 与 `context>` 是 TU-20 A/TU-33 A 的组合投影，选择其他 TU 路线时只改变显示/提示符，不改变 Context controller 动作。
 
 ```text
 [YACA] context-repl
@@ -452,7 +457,7 @@ logical path: /C/Work/fix-parser.xml
 hash: 8a21f5c0d34071be
 state: ready
 last committed event: 418
-workspace: C:\Work
+workspace: C:\Work (derived from XML parent path)
 portable gaps: none known
 
 context> rename 2 parser-v2
@@ -468,18 +473,20 @@ No file was renamed. Refresh and select it again.
 
 ### rename
 
-首版推荐只允许同一镜像目录内修改 basename，不同时改变关联 workspace：
+首版推荐把手工 rename 限定为同一镜像目录内修改 basename，不同时改变关联 workspace。成功事务还必须把同一 XML metadata 的 `AutoRenameDisabled` 置为 `true`：
 
 ```text
 verify -> lock
-  -> durable rename-intent(old logical path, new logical path)
-  -> move_no_replace
+  -> build and verify a complete XML generation with
+     Name=<new basename>, UpdatedAt=<commit time>, AutoRenameDisabled=true
+  -> publish/move_no_replace to the new basename
   -> update active handle and compute new hash
-  -> durable rename-completed
   -> invalidate browser views
 ```
 
-成功后旧 hash 立即失效；失败时文件和句柄仍在旧路径。崩溃时，“旧路径 + pending intent”表示尚未移动，“新路径 + pending intent”表示移动已发生、需要恢复收口；若平台 fallback 可能留下双路径，必须有单独真值表，不能按 mtime 选一个。跨镜像目录移动、工作区 rebinding 和跨机器 mapping 是独立动作，不伪装成 rename。
+成功后旧 hash 立即失效，手工名称默认不会再被周期任务覆盖；自动命名自身成功时不设置该标记。`context-repl` 可以查看、添加或取消标记；取消只恢复下一正常阈值的命名资格，不立即发起请求。rename、canonical `Name`、`UpdatedAt` 和 marker 更新必须作为一个可恢复管理事务收口，`CreatedAt` 始终不变；任一步失败不得报告 rename 成功，也不得推进 `UpdatedAt`。若平台 fallback 可能留下双路径，必须有单独真值表，不能按 mtime 选一个。
+
+跨镜像目录的 workspace rebind 是独立动作：`context-repl` 在同一可恢复管理事务中写入 rebind 历史事件、原子推进 `UpdatedAt`，再把完整 XML no-replace 地发布到目标 workspace 对应的镜像目录；`CreatedAt` 不变，XML 中也没有需要同步改写的 current-workdir 字段。只有事件、metadata 与目标路径都成功发布，目标父目录才成为唯一 root，完整逻辑路径与 hash 同步变化；失败或只读 inspect 不推进 `UpdatedAt`。F4-14 仍决定新建 Context 时怎样选出最初的唯一 root；本决定不擅自提升到 Git 根。
 
 ### archive
 
@@ -531,6 +538,8 @@ recovery 是一套逐行 interaction，不是自动修复黑盒。这份 transcr
 
 恢复 previous-valid 时，原损坏 active 先以 Scanner 排除的只读隔离角色保留，再从已验证 previous-valid 生成新的 active generation 和 recovery event；“restore”不能原地抹掉唯一故障证据。
 
+下段的方括号/编号风格与 `recovery>` 只是 TU-20/TU-08/TU-33 的一种组合投影，CX 包只拥有恢复事实和领域动作。
+
 ```text
 [RECOVERY CTX-INCOMPLETE]
 context: fix-parser
@@ -558,11 +567,19 @@ Actions:
 recovery>
 ```
 
-若 XML 来自另一台机器，recovery/compatibility interaction 还要列出：原 workspace、建议 mapping、缺失 Model/Permission、ContextPrompt、DoubleCheck 降权、unknown required extensions 和外部 evidence gaps。没有明确选择前不发 Model 请求、不执行工具。
+若 XML 来自另一台机器，recovery/compatibility interaction 还要列出：由当前导入目标父目录推导的 workspace、历史 cwd/path evidence、缺失 Model/Permission、ContextPrompt、DoubleCheck 降权、unknown required extensions 和外部 evidence gaps。workspace 的选择通过把 XML 发布到目标镜像目录完成，不在 XML 内写 current-workdir mapping；其他 gap 的阻断范围与可接受动作只由 CX-18 决定。没有完成 CX-18 要求的选择前，不发相应 Model 请求、不执行相应工具。
 
-## 真正需要项目负责人回答的十三组问题
+## 已确认上游决定对冻结题面的解释
 
-可以回复：`CX-01 A；CX-02 A；CX-13 A；CX-14 A；CX-16 A；CX-17 A；CX-15 B；其余接受推荐`。没有明确回复的编号继续待决，不会因为本文写了推荐就自动进入 `DECISIONS.md`。每个编号只承担一个可独立回复的产品轴；并发 writer、导入安全覆盖、ContextPrompt 激活、明文隐私边界和 archive/trash/purge 范围分别由 CX-13、CX-14、CX-17、CX-16 和 CX-15 唯一定义。
+下面十六组问题继续逐字保留为 inventory 证据，但其中两组的候选文字必须服从已经归档的 D-045/D-047：
+
+- `CX-10` 现在只决定 basename rename 在 inactive/current-active Context 上的开放范围与 writer 生命周期。workspace rebind 已由 D-045 确认为独立 `context-repl` 管理动作，始终通过移动 XML 改变唯一 mirror-derived root；冻结选项 B 中把“是否存在 rebind”当作差异的部分已经被上游决定取代，未来选择任何 CX-10 路线都不能删除、重复创建或混入 rename 这项 rebind 动作。
+- `CX-19` 现在只决定 `context-repl` 的 landing。所有 recent、tree、search 和普通 Context row 都消费 D-047 的 `ListSortBy`/`ListSortDirection`；主键相同始终按 canonical `LogicalPath` 升序，绝不随主方向反转。冻结候选中写死 activity-descending 或 name 排序的字句不再拥有排序策略，也不能重新开启另一套顺序。
+- `CX-13` 已由负责人选择 B，并由 D-041 收口：第二进程拒绝打开正文，只显示不解析正文即可证明的 busy/PID 元数据；外部 Context mutation 在 writer 释放前全部返回 `LockConflict`。下面仍显示推荐 A 的选项和回复模板只是冻结证据，不是现行选择。
+
+## 真正需要项目负责人回答的十六组问题
+
+可以回复：`CX-01 A；CX-02 A；CX-18 B；CX-13 A；CX-14 A；CX-16 A；CX-17 A；CX-20 A；CX-15 B；其余接受推荐`。没有明确回复的编号继续待决，不会因为本文写了推荐就自动进入 `DECISIONS.md`。每个编号只承担一个可独立回复的产品轴；compatibility gap 继续门、并发 writer、导入安全覆盖、ContextPrompt 激活、明文隐私边界、active XML 外部变化和 archive/trash/purge 范围分别由 CX-18、CX-13、CX-14、CX-17、CX-16、CX-20 和 CX-15 唯一定义。
 
 ### CX-01 单 XML 的物理提交路线
 
@@ -579,12 +596,12 @@ recovery>
 
 ### CX-02 “复制 XML 接盘”与第三方写入边界
 
-通俗解释：XML 可以带走会话脑海和历史证据，但不能安全地带走 API Key、整个工作区和另一个 endpoint 的授权。
+通俗解释：XML 可以带走会话脑海和历史证据，但不能把 Runtime 结构化取得的 registered config-secret carrier、整个工作区或另一个 endpoint 的授权当作可迁移状态带走。ordinary conversation/tool content 中恰好等于 registry value 的 bytes 另按 M05-59 扫描集合处理；B 豁免的过短 coincidence 可随 XML 复制，但只能在 `guarantee-contracted` 承诺下接盘。
 
 - A：已关闭的完整 generation 或显式 snapshot/export 产生的 standalone XML 足以语义接盘；目标机显式映射 workspace/Model/Permission，v0.1 公开 reader/import contract，yaca 是唯一受支持 active writer。（推荐）
 - B：除 A 的 reader/import contract 外，再公开 offline producer conformance；第三方可以生成新的 foreign import candidate，但绝不原地修改正被 yaca 管理的 active XML。
 
-推荐 A。代价是热复制要经受支持动作，另一台机器第一次继续前会有 compatibility/mapping 步骤；优点是不需要隐藏 index/UUID/消息目录，也不把 secret 放进 XML。B 增加第三方 writer conformance 的长期成本。把 active schema 改成私有格式、要求另一份专有导出物才能接盘，会违反 D-035 的“复制 Context XML 可移交”保证，不是可回复选项。
+推荐 A。代价是热复制要经受支持动作，另一台机器第一次继续前会有 compatibility/mapping 步骤；优点是不需要隐藏 index/UUID/消息目录，也不把 Runtime 的实际 private secret carrier 放进 XML。B 增加第三方 writer conformance 的长期成本。两条路线的 ordinary content 都必须保留 M05-59 的 exact-scan 边界和保证收缩标记，不能把 B 的过短 coincidence 误报成不可复制的结构化 secret。把 active schema 改成私有格式、要求另一份专有导出物才能接盘，会违反 D-035 的“复制 Context XML 可移交”保证，不是可回复选项。
 
 技术侧必须交付公开 schema、字段语义、完整/中断/压缩/导入样例和 reference reader/conformance fixtures。
 
@@ -592,15 +609,15 @@ recovery>
 
 ### CX-16 Context XML 明文、OS 权限与第三方 reader 的隐私边界
 
-通俗解释：“XML 里不写 API Key”不等于 XML 没有秘密。用户消息、ContextPrompt、文件片段、shell 输出和错误详情都可能敏感。OS 目录/文件权限只能阻止未获得该账户访问权的主体，不能阻止同一账户的恶意软件、管理员、备份或用户主动复制。本组决定这一产品承诺，也决定通用第三方 XML reader 能看懂到哪一层。
+通俗解释：“XML 不写 Runtime 结构化取得的 config-secret carrier”不等于 XML 没有秘密，也不等于它在字节层面绝不会出现相同短值。用户消息、ContextPrompt、文件片段、shell 输出和错误详情都是 ordinary content：它们可能含 Runtime 不认识的敏感内容，也可能在 M05-59 B 下保留被豁免的过短 registered-value coincidence。OS 目录/文件权限只能阻止未获得该账户访问权的主体，不能阻止同一账户的恶意软件、管理员、备份或用户主动复制。本组决定这一产品承诺，也决定通用第三方 XML reader 能看懂到哪一层。
 
-- A：Context 是公开 schema 的明文 XML，yaca 只依赖已证明的 OS 目录/文件权限和安全创建模式；第三方 reader 可读取全部非 Key canonical 内容，UI/export 持续明示警告“能读该 XML 就能读会话”。（推荐）
+- A：Context 是公开 schema 的明文 XML，yaca 只依赖已证明的 OS 目录/文件权限和安全创建模式；第三方 reader 可读取除结构化 private secret carrier 与已被 eligible-pattern boundary 替换/拒绝的部分外的全部 canonical 内容，包含可能未被识别的用户/工具秘密，以及 M05-59 B 下可能保留的过短 coincidence；UI/export 持续明示警告“能读该 XML 就能读会话”，B 还要显示 `guarantee-contracted`。（推荐）
 - B：XML 结构、关系和必要元数据保持公开，允许用户为正文/Prompt/工具内容启用字段级口令加密；未解锁 reader 只能保真转运密文节点，不能声称已语义接盘。
 - C：只保留公开明文 envelope/最小路由元数据，canonical payload 整体口令加密；普通第三方 XML reader 不能继续任务。选 C 必须显式修订 D-035，把“复制 XML 可接盘”改为“复制 XML 与必需解密材料才可接盘”。
 
-推荐 A。它最符合简单、旧平台可移植和第三方接盘目标，但隐私代价必须直白告知，不能把“文件权限”宣传成加密。B/C 增加丢失口令、旧机密码库、流式解密、迁移和 reference-reader 成本。三项都不得把 API Key、proxy credential 或 secret header 写入 XML，也不承诺 secure erase。
+推荐 A。它最符合简单、旧平台可移植和第三方接盘目标，但隐私代价必须直白告知，不能把“文件权限”宣传成加密。B/C 增加丢失口令、旧机密码库、流式解密、迁移和 reference-reader 成本。三项都不得把 Runtime 结构化取得的实际 config-secret 写入 XML，也都必须对 ordinary content 执行 M05-59 最终路线的 eligible-pattern 规则；B 豁免的过短 coincidence 可按原数据类持久化或加密，同时必须继承 `guarantee-contracted`。普通 user/tool content 还可能包含其他未知秘密，也不承诺 secure erase。
 
-技术侧必须用 TP-010/TP-028 验证安全创建、权限降级失败、备份/导出警告、secret canary 和第三方 reader fixture；选 B/C 还要新增密码格式/密钥生命周期证据门。
+技术侧必须用 TP-010/TP-028 验证安全创建、权限降级失败、备份/导出警告、结构化 carrier 禁入 canary、eligible-pattern 跨 chunk/marker canary、M05-59 B 过短 coincidence 的保留与 `guarantee-contracted` fixture，以及第三方 reader fixture；选 B/C 还要新增密码格式/密钥生命周期证据门。
 
 关联：D-028、D-035、`CTX-06`、`CTX-15`、`SAFE-09`、`THREAT-01`、AQ-040、AQ-041、AQ-132、AQ-238、TP-010、TP-028。
 
@@ -608,7 +625,7 @@ recovery>
 
 通俗解释：D-035 已要求 XML 能回答“发生过什么、当时有效环境是什么、模型究竟看见什么”。在不改变公开 schema 语义和 reference-reader 结果的前提下，把不可变 snapshot 去重存在 pool，或把同一投影内联进 turn/request record，只是体积、流式内存和重建复杂度的实现取舍，不应让负责人凭偏好选。
 
-技术证明必须在 TP-008/TP-010/TP-020 中比较候选，并冻结 canonical event、非秘密有效快照、每请求精确 model-view manifest、局部 ID namespace、确定性 writer 与重建测试。无论物理组织如何，Key/secret header 都不得进入 XML，只保存当前投影也不得通过技术证明。
+技术证明必须在 TP-008/TP-010/TP-020 中比较候选，并冻结 canonical event、非秘密结构化有效快照、每请求精确 model-view manifest、局部 ID namespace、确定性 writer 与重建测试。无论物理组织如何，Runtime 实际 private secret carrier 都不得进入 XML；ordinary event/Prompt/tool content 只对 M05-59 纳入的 eligible patterns 执行 gate/marker，B 豁免的过短 coincidence 可保留但必须带 `guarantee-contracted`。只保存当前投影、或把 B 豁免内容误报为已扫描，都不得通过技术证明。
 
 关联：`CTX-02`、`CTX-07`、`CTX-16`、`CTX-23`、AQ-162 至 AQ-168、AQ-257 至 AQ-260。
 
@@ -648,14 +665,26 @@ recovery>
 
 通俗解释：别人给你的 XML 可以诚实记录“以前批准过删除”，也可以伪造这句话；无论哪种，都不应让新机器真的删除东西。
 
-- A：外来 XML 先只读 compatibility report；历史 approval 永远 audit-only，pending/unknown operation 不自动执行；完成 schema/完整性检查和 workspace/Model/Permission 映射后，发布一个带 import/mapping event 的本地管理 generation 再继续。（推荐）
-- B：外来 XML 始终保持只读；yaca 在新本地 Context 中完整转写已验证的 canonical history、非秘密 snapshot 和 view 关系，再建立映射和续作 turn；历史 approval/pending operation 同样只作审计。
+- A：外来 XML 先只读 compatibility report；历史 approval 永远 audit-only，pending/unknown operation 不自动执行；完成 schema/完整性检查和 workspace/Model/Permission/条件 ExecProfile 映射后，发布一个带 import/mapping event 的本地管理 generation 再继续。（推荐）
+- B：外来 XML 始终保持只读；yaca 在新本地 Context 中完整转写已验证的 canonical history、非秘密 snapshot 和 view 关系，再建立 workspace/Model/Permission/条件 ExecProfile 映射和续作 turn；历史 approval/pending operation 同样只作审计。
 
-推荐 A。A 保留原 XML 结构和局部 ID，B 以转写成本换取更清楚的外来/本地边界。两项都履行“数据不是能力”不变量，也都不拒绝 D-035 要求的跨机续作。imported Permission/DoubleCheck 的安全激活由 CX-14 独立回复，ContextPrompt 由 CX-17 独立回复。
+推荐 A。A 保留原 XML 结构和局部 ID，B 以转写成本换取更清楚的外来/本地边界。两项都履行“数据不是能力”不变量，也都不拒绝 D-035 要求的跨机续作。imported Permission/DoubleCheck 的安全激活由 CX-14 独立回复，ContextPrompt 由 CX-17 独立回复。foreign schema 若把结构化 config-secret carrier 放入普通 XML 字段，按 schema/data-class violation fail closed，不能利用 M05-59 B 豁免。对外来 ordinary content，目标机只使用 M05-59 最终路线纳入扫描的 eligible patterns 做 exact scan：命中时原文件必须保持只读且不被自动改写，compatibility report 记录 `registered-secret-content` gap，浏览投影只显示 typed marker；任何 writable continuation 都必须由用户显式生成 sanitized local generation/copy，把命中替换为 marker，或在该 registry value 已轮换/移除后重新评估。M05-59 B 豁免的过短 coincidence 不形成该 gap、不被 mask 或自动改写，但浏览/import/export 必须保留 `guarantee-contracted`；未命中也不证明 XML 没有豁免、编码、派生或其他未知秘密。若 M05-51 C 生效，imported `CurrentExecProfile` 只是待映射数据：同名不是相同定义，必须展示历史/本地 timeout、output cap 和 definition digest，由用户在该 import/mapping generation 中选择精确本地 profile 或 reset；在此之前不能发布一个已激活的 selector。
 
-技术侧必须实现 no-replace、schema/digest/extension 验证、秘密/gap 报告、mapping event 和 threat fixtures。
+技术侧必须实现 no-replace、schema/digest/extension 验证、eligible-pattern 跨 chunk canary、M05-59 B 过短 coincidence 的 no-gap/guarantee-contracted fixture、只读 mask/sanitized-copy、秘密/gap 报告、mapping event 和 threat fixtures。
 
-关联：`CTX-06`、`CTX-13`、`CTX-26`、`CTX-27`、`SAFE-12`、AQ-166、AQ-168 至 AQ-170、AQ-175、AQ-176、AQ-236 至 AQ-238、AQ-274、AQ-275。
+关联：`CTX-06`、`CTX-13`、`CTX-26`、`CTX-27`、`SAFE-09`、`SAFE-12`、AQ-166、AQ-168 至 AQ-170、AQ-175、AQ-176、AQ-236 至 AQ-238、AQ-274、AQ-275、M05-51、TS-15。
+
+### CX-18 compatibility gap 的继续门
+
+通俗解释：兼容报告可能同时发现缺失的 workspace/Model/Permission、当前请求必需的程序能力、只影响某个工具的能力，以及已经无法补回的历史外部证据。只列一张 gap 清单仍不足以决定用户能否继续安全工作。
+
+- A：任何 unresolved compatibility gap 都让 Context 保持全局只读；全部 gap 完成 mapping、恢复或明确消除后，才允许任何新 Model 请求或工具动作。
+- B：每项 gap 使用版本化 typed severity：`required-now` 阻断所有继续；`action-specific` 只阻断依赖它的 request purpose/tool/action；`history-only` 不阻断新工作，但必须醒目标记 `evidence-not-self-contained`。缺失、未知、无法分类或 schema 不认识的 severity/type/required-extension 一律先按 `required-now` fail-closed；只有版本化分类规则确认后才能缩小阻断范围。每次 mapping、用户 acknowledgement、能力恢复和阻断结果都写 durable event。（推荐）
+- C：只有缺失 workspace、Model 或 Permission 三类 mapping 全局阻断；程序/tool capability、target window、provider service 与 external evidence gap 一律只警告，后续请求或动作仍按当时本机校验尝试。M05-51 C 的未激活/定义不同 ExecProfile selector 不属于这些泛 capability warning；它仍只阻断新 exec，直到用户完成精确本地映射。
+
+推荐 B。它不会让一份永远缺少历史外部附件的 XML 永久无法续作，也不会把当前运行必需能力的缺失降成可忽略 warning。A 最保守但可能把 history-only gap 误当运行依赖；C 最省恢复交互，却可能在已知不兼容时先发请求或开始动作。三项都不允许历史 approval 授权新动作，不允许静默 fallback/mapping，也不改变 CX-07 的 foreign import 形态、CX-14 的安全覆盖激活或 CX-17 的 ContextPrompt 激活。M05-51 C 的 ExecProfile 是会话资源策略选择器，不是 XML 可以按名称自行授权的 capability；同名定义不同在 A 下跟随全局只读，B 下为 `action-specific:exec`，C 下也至少保持该 action-specific 阻断。
+
+关联：D-035、`CTX-15`、`CTX-27`、`CTX-29`、AQ-041、AQ-165、AQ-168 至 AQ-170、`AQ-380`、AL06-29、M05-51、CX-07、CX-14、CX-17。
 
 ### CX-08 16 字符 hash 使用哪个可见字母表
 
@@ -683,7 +712,19 @@ recovery>
 
 技术侧必须证明目录枚举顺序不影响结果、每候选最多探测一次、分页/取消有界、plain/快捷键动作等价和 stale race 安全。
 
-关联：`INDEX-04`、`INDEX-07` 至 `INDEX-11`、`INDEX-14`、`INDEX-16`、`TUI-11`、`TUI-26`。
+关联：`INDEX-04`、`INDEX-07` 至 `INDEX-11`、`INDEX-14`、`INDEX-16`、`TUI-11`、`TUI-26`、`AQ-354`、`AQ-355`。
+
+### CX-19 context-repl 的 landing
+
+CX-09 只决定搜索范围/全文能力和 stale selection；本组决定用户打开 context-repl 第一眼从哪里开始。它不改变通用 Resolver 的距离、名称优先、16 字符 hash 或歧义规则。
+
+- A：从当前工作位置对应的镜像目录进入；standalone `context-repl` semantic action 使用 invocation directory，chat 内的 context-repl action 使用 active workspace。TU-18/TU-32 只决定两种入口的拼写。当前/父目录面包屑在首行。（推荐）
+- B：先显示有界 global recent Context 列表，按最后 canonical activity 倒序；相同 activity 使用逻辑路径/名称的稳定 tie-break，绝不使用文件 mtime。用户再用 `tree/root/current` 进入目录镜像；全局扫描 partial 时必须显著标记，不能把已见列表冒充完整最近列表。
+- C：从 `__yaca__/CONTEXT/` 逻辑根的目录树开始，用户逐层进入盘符/路径；recent/current 只作为显式命令。
+
+推荐 A。它与 `continue` action 的当前目录搜索心智一致、通常扫描最少；B 恢复最近任务最快但先跨工作区展示元数据，C 结构最直观却每次导航较长。排序不是第二张票：所有 tree view 固定为子目录在前、Context 在后并各自按规范逻辑名称稳定排序；recent 只采用 B 已定义的 canonical activity 顺序。三项都显著标当前 Context/workspace、使用 view generation + stable row ID、扫描有界并把 partial/unreadable 明说；刷新/排序变化使旧 row stale，绝不因 recent/搜索中只有一个模糊候选就自动连接。
+
+关联：`AQ-083`、`INDEX-04`、`INDEX-07`、`INDEX-14`、`TUI-11`、CX-09、TU-15、TP-009、TP-024。
 
 ### CX-10 rename、路径/hash 与活动 writer
 
@@ -698,6 +739,18 @@ recovery>
 技术侧必须实现 move/publish no-replace、目标复核、句柄/hash 原子更新、reserved-tree Scanner 排除和每个崩溃点恢复。
 
 关联：`CTX-11`、`INDEX-03`、`INDEX-15`、AQ-117、AQ-173、AQ-178、AQ-237、AQ-308。
+
+### CX-20 active XML 外部移动、替换或改写后的恢复
+
+通俗场景：编辑器、同步软件或人工操作可能在 yaca 持有 writer 时移动、删除、原地改写或替换 active XML。旧路径/hash、打开句柄和磁盘上的新对象此时不再天然代表同一份会话；没有永久 ContextId 的前提下，不能靠 basename、mtime 或相似内容猜测“它只是被搬家了”。本组只决定检测后怎样恢复，受管理 rename 仍由 CX-10 独占。
+
+- A：路径、父目录、文件身份、commit generation 或 digest 任一不匹配就让 active handle 进入 stale/fail-stop；不自动扫描或重绑。用户从 recovery/context-repl 显式选择检查磁盘候选、重新打开/绑定、恢复 previous-valid、切换 Context 或退出。（推荐）
+- B：在 A 的 fail-stop 上，启动有界、可取消的 Resolver 搜索，只把与最后已提交 generation 精确 digest 相同的文件列为 rebind 建议；用户明确选择并重新取得 writer 后才更新路径/hash。候选内容有任何变化就不建议重绑，回到 A 的只读恢复。
+- C：只有平台 adapter 能证明仍是同一打开文件身份、最后 commit digest 未变且新逻辑路径唯一时，才自动更新 handle/path/hash并输出显著 receipt；删除、replace、内容变化、证明不完整或多个路径一律退回 A。
+
+推荐 A。它最符合实时路径/hash和无永久 ID 的既有承诺，恢复动作也最容易在 XP/Linux 上一致测试；B 减少纯移动后的人工导航但增加全树扫描和候选身份成本，C 最顺滑却使行为随平台文件句柄能力分叉。所有路线都固定：每次发布前复核规范路径、parent identity、文件 identity、generation 与 digest，失配后不得向外部文件追加、覆盖或用 temp 重建旧名称；无法 durable 保存时不得启动新的 Model 请求、工具或其他副作用，已经在途的动作要尽力取消并在页面保留未持久化/unknown 证据。外部候选必须先经过 XML 安全解析、schema/commit 验证和必要 compatibility mapping，旧 approval/grant/lock 不随路径猜测迁移；`.status` 显示 stale 和无有效当前 hash，绝不继续展示旧 hash 冒充可连接状态。
+
+关联：`AQ-420`、`CTX-08`、`CTX-10`、`CTX-16`、`CTX-17`、`CTX-21`、`CTX-26`、CX-05、CX-09、CX-10、F4-15、TP-008、TP-009。
 
 ### CX-11 quota、保留与单 XML 硬门
 
@@ -743,7 +796,7 @@ recovery>
 - B：任何 imported Permission/DoubleCheck 覆盖，即使与本地相同或更严，也都要在一张脱敏差异卡上确认后才激活；无法映射则不得发请求或执行工具。
 - C：不激活任何 imported Permission/DoubleCheck override；它们仅作历史可见，新机器以本地默认开始，用户必须以新的本地变更事件重新设置。
 
-推荐 A。它自动恢复相同/更严保护，又不让外来 XML 静默降低本机安全基线；B 最强调人工重新授权，C 的能力边界最简单。三项都不得把 XML 中的 Key/秘密值激活为本地 credential。
+推荐 A。它自动恢复相同/更严保护，又不让外来 XML 静默降低本机安全基线；B 最强调人工重新授权，C 的能力边界最简单。三项都不得把 XML 中的任何文本或历史 marker 激活为本地 config secret/credential。
 
 关联：`CTX-07`、`CTX-13`、`CTX-26`、`CTX-27`、`SAFE-12`、AQ-168 至 AQ-170、AQ-236 至 AQ-238、AQ-274、AQ-275。
 
@@ -773,7 +826,7 @@ recovery>
 
 ## 推荐的整包组合
 
-若希望采用当前推荐基线，请明确回复全部 13 个正式组；CX-03/CX-04/CX-06 是技术证明，CX-12 是 AL06 选择的存储投影，都不在回复清单：
+若希望采用当前推荐基线，请明确回复全部 16 个正式组；CX-03/CX-04/CX-06 是技术证明，CX-12 是 AL06 选择的存储投影，都不在回复清单：
 
 ~~~text
 CX-01 A
@@ -781,9 +834,12 @@ CX-02 A
 CX-16 A
 CX-05 A
 CX-07 A
+CX-18 B
 CX-08 A
 CX-09 A
+CX-19 A
 CX-10 A
+CX-20 A
 CX-11 A
 CX-13 A
 CX-14 A
@@ -802,17 +858,19 @@ CX-15 A
 3. `ContextCommitProtocol`：canonical 点、temp/previous/lock、完整重写或获准 WAL、fail-stop。
 4. `ContextCrashMatrix`：每个 process crash、power loss、disk full、replace fail 和副作用边界的唯一真值。
 5. `ContextImportTrust`：foreign XML、unknown extension、approval audit-only、mapping 与 secret/gap 报告。
-6. `LogicalPathCodecAndHash`：Windows/Linux 映射、16 字符 hash vectors、链接/非法名规则。
-7. `ContextResolver`：搜索环、裁决、结果 enum、损坏/不完整范围和复杂度门。
-8. `ContextBrowserController`：有界 view generation、search、details、stale 与单一 ASCII TUI 动作。
-9. `ContextWriterCoordination`：second-writer 拒绝/只读/交接、owner identity 与 takeover 证明。
-10. `ContextImportSafetyActivation`：foreign mapping、approval audit-only 与 Permission/DoubleCheck 安全激活。
-11. `ContextPromptActivation`：imported Prompt 的来源、preview/digest、accept/edit/disable 和实际 view 记录。
-12. `ContextPrivacyBoundary`：明文/加密路线、OS 权限承诺、第三方 reader 能力和用户警告。
-13. `ContextLifecycle`：rename/archive/delete/purge/restore/import/quota 状态机。
-14. `ModelViewAndCompaction`：summary schema、原子组、manifest、Model 切换和恢复。
-15. `ContextRecoveryUX`：ASCII transcript、只读默认、unknown resolution 与证据保留。
-16. `ContextConformanceSuite`：最小/完整/中断/损坏/迁移/压缩/导入 fixtures 和 reference reader。
+6. `ContextCompatibilityGate`：每类 gap 的 typed severity、阻断范围、mapping/acknowledgement event 与恢复条件。
+7. `LogicalPathCodecAndHash`：Windows/Linux 映射、16 字符 hash vectors、链接/非法名规则。
+8. `ContextResolver`：搜索环、裁决、结果 enum、损坏/不完整范围和复杂度门。
+9. `ContextBrowserController`：有界 view generation、search、details、stale 与单一 ASCII TUI 动作。
+10. `ContextWriterCoordination`：second-writer 拒绝/只读/交接、owner identity 与 takeover 证明。
+11. `ContextImportSafetyActivation`：foreign mapping、approval audit-only 与 Permission/DoubleCheck 安全激活。
+12. `ContextPromptActivation`：imported Prompt 的来源、preview/digest、accept/edit/disable 和实际 view 记录。
+13. `ContextPrivacyBoundary`：明文/加密路线、OS 权限承诺、第三方 reader 能力和用户警告。
+14. `ContextLifecycle`：rename/archive/delete/purge/restore/import/quota 状态机。
+15. `ModelViewAndCompaction`：summary schema、原子组、manifest、Model 切换和恢复。
+16. `ContextRecoveryUX`：ASCII transcript、只读默认、unknown resolution 与证据保留。
+17. `ContextConformanceSuite`：最小/完整/中断/损坏/迁移/压缩/导入 fixtures 和 reference reader。
+18. `ContextExternalChangeRecovery`：active path/identity/generation/digest 复核、stale fail-stop、rebind 候选与外部改写恢复真值表。
 
 候选元素名和伪代码不能直接充当权威 schema。最终规格必须删除被否决分支，精确给出正常、取消、失败、恢复、资源上限和目标平台证据。
 
@@ -829,12 +887,14 @@ CX-15 A
 7. 每个崩溃观察能由真值表确定 active、previous、temp、WAL 与 unknown operation 的处理。
 8. LuaExpat/Expat 候选只有在 DTD/entity/资源上限和两个目标 ABI 证明后才可进入发行。
 9. 外来 XML 的历史 approval 永远不会变成目标机授权，导入形态与本地 generation 边界唯一。
-10. imported Permission/DoubleCheck 与 ContextPrompt 的激活由两个独立决定收口，任何降权都不静默发生。
-11. 路径镜像、16 字符 hash、Resolver、浏览器与 stale selection 使用同一逻辑路径和目标复核。
-12. rename 和活动 writer 的收口不保留旧 hash、不继续写旧 handle。
-13. 第二 writer 的拒绝、只读或协作交接有唯一策略，不能仅按 lease 年龄抢锁。
-14. archive/trash/restore/purge、quota 和自动清理范围有唯一生命周期，不会覆盖、复活或误删 active。
-15. Context XML 的明文/加密承诺、OS 权限边界和第三方 reader 能力有唯一说法，不把可读文件宣传为保密容器。
-16. compaction 只改变派生 view，完整事实仍可让更大窗口 Model 或按 CX-16 具有读取能力的第三方 reader 恢复细节。
+10. 每类 compatibility gap 是全局阻断、action-specific 阻断还是 history-only 告警有唯一规则，mapping/acknowledgement 不只停在临时 UI。
+11. imported Permission/DoubleCheck 与 ContextPrompt 的激活由两个独立决定收口，任何降权都不静默发生。
+12. 路径镜像、16 字符 hash、Resolver、浏览器与 stale selection 使用同一逻辑路径和目标复核。
+13. rename 和活动 writer 的收口不保留旧 hash、不继续写旧 handle。
+14. active XML 外部移动、替换、删除或改写后，句柄何时 stale、怎样恢复以及何时可重新取得 writer 有唯一策略，不按名称/mtime/相似内容猜测。
+15. 第二 writer 的拒绝、只读或协作交接有唯一策略，不能仅按 lease 年龄抢锁。
+16. archive/trash/restore/purge、quota 和自动清理范围有唯一生命周期，不会覆盖、复活或误删 active。
+17. Context XML 的明文/加密承诺、OS 权限边界和第三方 reader 能力有唯一说法，不把可读文件宣传为保密容器。
+18. compaction 只改变派生 view，完整事实仍可让更大窗口 Model 或按 CX-16 具有读取能力的第三方 reader 恢复细节。
 
-任何未回复推荐仍然是候选。即使十三个正式组全部回复，如果完整重写尚未通过 XP/CentOS 7 基准、XML parser ABI 未证明、崩溃矩阵未执行或公开 schema/conformance fixtures 不存在，也只能说“产品边界已决定”，不能说 Context 子系统已经达到实施或发布就绪。
+任何未回复推荐仍然是候选。即使十六个正式组全部回复，如果完整重写尚未通过 XP/CentOS 7 基准、XML parser ABI 未证明、崩溃矩阵未执行或公开 schema/conformance fixtures 不存在，也只能说“产品边界已决定”，不能说 Context 子系统已经达到实施或发布就绪。

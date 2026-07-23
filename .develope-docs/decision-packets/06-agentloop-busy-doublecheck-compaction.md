@@ -1,6 +1,6 @@
 # 决策包 06：AgentLoop、忙时输入、DoubleCheck 与压缩视图
 
-更新日期：2026-07-18
+更新日期：2026-07-22
 
 状态：等待项目负责人回复；本文中的推荐、枚举、字段名、默认次数、状态名和页面行为都不是已确认决定
 
@@ -17,6 +17,8 @@
 7. request、attempt、turn、Context 多层预算怎样共同限制 retry 和 stuck loop。
 8. Model 切换怎样保持 turn 一致性、隐私和工具协议兼容。
 9. 压缩怎样只改变模型视图，不删除 XML 的完整事实，并让另一台机器能够解释摘要来源。
+10. 用户手动触发 compaction 时是独立 maintenance turn、下一 main turn 前的 pending intent，还是首版不提供。
+11. 一份完整 canonical model-yield 能否被继续，以及继续时为什么建立新 turn 而不复活旧快照和预算。
 
 逐字段预算候选参见 [配置 Schema 候选注册表](../CONFIG-SCHEMA-CANDIDATE.md)。Prompt purpose、输入白名单和工具权限参见 [Prompt 决策包](03-prompt-personality-and-instructions.md)。本包决定上游控制流，不复制完整配置表、工具 schema 或 XML XSD。
 
@@ -43,7 +45,7 @@
 8. 有副作用的动作执行前必须有 durable operation；结果未知时不能自动重放。
 9. Context XML 保存完整 canonical 对话和控制事实；流式 token delta 只是瞬态投影。
 10. 压缩只建立派生 model view，不能删除或覆盖 XML 中的事实历史。
-11. 一个 turn 冻结有效 main Model、Permission、DoubleCheck、Prompt、cwd、工具集合和预算；若后续选定专用 review Model，或在 AL06-11 A 下选定专用 compaction Model，也必须在对应 request 前按 AL06-08/30 冻结并留痕。
+11. 一个 turn 冻结有效 main Model、Permission、DoubleCheck、Prompt、cwd、工具集合和预算；若后续为 action-review、termination-review 选定专用 Model，或在 AL06-11 A 下选定专用 compaction Model，也必须在对应 request 前分别按 AL06-08/49/30 冻结并留痕。
 12. Model 是完整连接实例；失败时不静默切换另一个 Model 或 endpoint。
 13. 不提供 OS sandbox。Permission、LLM review 和人工批准都是策略与证据，不是隔离保证。
 14. 分支对话和 fork 首版不在范围内。
@@ -212,7 +214,7 @@ Runtime 验证它后补齐不可由模型伪造的身份与 digest，形成 Plan
 | --- | --- | --- |
 | completed | finish(completed)，或仅在 AL06-38 C 下由兼容 stop 归一化；需要的 termination review 已通过 | 主模型明确或兼容表达完成 |
 | partial | 若 AL06-36 允许，来自 finish(partial) 且需要的 review 通过 | 主模型明确收口为部分完成 |
-| waiting-user | ask-user、AL06-38 选择的普通 yield 路径、PJ-11 B/C 的 plan-ready、review 无法判断或需要用户选择 | 可以继续，但必须先有新用户决定 |
+| waiting-user | ask-user、AL06-38 选择的普通 yield 路径、PJ-11 B/C 的 plan-ready、review 无法判断或需要用户选择 | 可以继续，但必须先有新用户决定；完整 model-yield 的对象化继续只服从 AL06-48 |
 | refused | 主模型 refuse 或 provider refusal | 请求被拒绝，不是网络失败 |
 | cancelled | 用户取消当前 turn | 已发生动作按真实结果保留 |
 | budget-exhausted | Runtime 硬预算达到上限 | 不因已有进展改写为 completed |
@@ -440,7 +442,7 @@ PJ-11 是唯一产品 owner。本节只把其 B/C 的不可分割后果投影到
 
 `phase=plan` 使用独立 purpose/view manifest，只向模型注册 direct list/read/search：
 
-- 这三类仍通过正常 Permission，敏感读取仍通过 SensitiveRead 和 AL06-07 已选 action-review 范围；plan 不是绕过读取边界的通行证。
+- 这三类仍通过正常 Permission；只有 M05-56 B 才再通过 SensitiveRead，并继续服从 AL06-07 已选 action-review 范围。plan 不是绕过读取边界的通行证。
 - shell/Execute、direct Network、Write/Delete/Rename 及任何 mutating/unknown-effect tool 不出现在 plan tool schema。模型伪造这些 call 时整批零执行，按 AL06-18/19 处理，不暗中升级为 execute。
 - 合法只读 batch 仍服从 TS-10/TS-20、配对、取消、预算和 XML durable 不变量。
 - plan Prompt 明确要求：若现有只读证据已满足目标，可用普通 finish；若后续需要任何副作用，必须输出 plan-ready，不得声称已经执行。
@@ -471,7 +473,7 @@ PlanArtifactV1
 1. 在同一 event-loop 线性化边界重算 binding、追加 plan-execution-started，以 caused-by 引用 artifact，创建新 turn-id 和全新 turn snapshot/budget。`execution-started` 后同一 plan-id 不能再开第二个 execute turn；崩溃后只能按 AL06-32 处理原 turn，不重复消费 artifact。
 2. 把 artifact 作为可审计的计划事实放入 execute model view，但不把步骤文字转成 Runtime 命令。
 3. 模型必须在新 turn 里重新提议每个 tool call；Permission、DoubleCheck、人工 approval、operation durable、目标新鲜性和 TS-10/20 全部重新求值。
-4. PlanArtifact 不继承、不隐含、不能代替任何授权；即使 plan 阶段曾经获准 SensitiveRead，execute 也不复用旧 approval。
+4. PlanArtifact 不继承、不隐含、不能代替任何授权；若 M05-56 B 存在 SensitiveRead，即使 plan 阶段曾经获准，execute 也不复用旧 approval。
 
 线性化边界之后若外部进程再改变 workspace，execute turn 中的每个工具仍必须使用自己的 expected digest/stale 检查；PlanArtifact 的开始验证不是对未来状态的锁。
 
@@ -479,14 +481,16 @@ PlanArtifactV1
 
 - plan/execute 都使用同一 main lane，不并发、不分裂 Context writer。Esc/steer/queue/side 按本包已选语义处理；plan 取消时先配对已接受只读 calls，未 durable 的草稿不伪造成可 execute artifact。
 - 未完成 plan/execute turn 的崩溃恢复服从 AL06-32，不自动重发 request/tool。已 durable artifact 可查看，但恢复和 `.execute` 时都必须重算全部 binding；旧计划不能被当成 approval。
-- plan turn 是普通受限 turn，它的 request/read/review/active-time 消耗 AL06-09 预算。execute 是新 turn，可拥有新的 turn guard，但不重置 Context/runtime 累计或抹去 artifact 的 source usage/因果 trace；PlanArtifact 不是额外 Token/步骤兑换券。
+- plan turn 是普通受限 main turn，它的 request/read/review/active-time 消耗 AL06-42 所选 main-turn guard；对应 usage 还按 AL06-09 A 进入 Context audit、按 B 进入 Context hard ledger，并始终受 Runtime hard cap。execute 是新 turn，取得自己的 AL06-42 guard，但不重置 Context/runtime 累计或抹去 artifact 的 source usage/因果 trace；PlanArtifact 不是额外 Token/步骤兑换券。
 - plan-ready 成功 durable 后，该 plan turn 以 `waiting-user/reason=plan-ready` 收口，不做 termination-review、不自动启动 queue；用户可 `.execute`、重新 plan 或离开。
 - 纯只读目标在 plan phase 实际完成时可用 finish(completed)，或在 AL06-36 A 下用 finish(partial)，并按 DoubleCheck/AL06-36 正常做 termination-review/收口。ask-user、refuse、cancelled、budget-exhausted、stuck 和 error 均使用现有 terminal outcome，不为 plan 伪造第二套结局。
 - `.execute` 前 stale 是一个可操作的 session-command 错误：不建 execute turn、不发模型/工具，显示精确变化类别并要求重新 plan。
 
-关联：PJ-11、TU-18、LOOP-18、AQ-346、CTX-07、CTX-16、SAFE-01、SAFE-03。
+关联：PJ-11、TU-32、LOOP-18、AQ-346、CTX-07、CTX-16、SAFE-01、SAFE-03。
 
 ## 全局异步控制的线性化规则
+
+每个 queue、steer、side 和其他指向当前 Context/turn 的 semantic command 都必须携带用户提交时所观察到的 Context generation，以及目标 turn-id 或明确的 `no-active-turn` observation。Command normalizer 可以从当前 view 生成这些字段，但不得在 reducer 处理时换成更新的当前值。Reducer 在线性化点复核 observation；Context generation、active turn 或 target 已变时返回 typed stale conflict，保留可重新提交的输入，绝不把旧 command 重定向到新 Context/turn。这是避免延迟按键、renderer 旧 view 或 I/O 竞态改写另一个 turn 的身份不变量，不是一个可关闭的产品模式。
 
 状态机事件泵给每个已接受 command 分配 event-seq。谁先 durable，谁先发生：
 
@@ -502,8 +506,8 @@ PlanArtifactV1
 | 全局事件 | 当前条件 | 转换 |
 | --- | --- | --- |
 | storage-fault | 任意非 faulted 状态 | 取消尚未发出的 effect；已发生副作用在内存/UI 标 unknown，恢复器由无 result 的 operation 推导；进入 faulted |
-| AL06-09 选定的 hard turn guard | 尚未执行 operation | 不再 admission 新 call/request，收口 TS-10 已启动组，其余 accepted calls 写 synthetic budget-exhausted 结果，再进入 turn-finalizing/budget-exhausted |
-| AL06-09 选定的 hard turn guard | tool-executing | 请求取消并进入 cancelling；真实/unknown result 优先于预算文案 |
+| AL06-42 选定的 hard turn guard | 尚未执行 operation | 不再 admission 新 call/request，收口 TS-10 已启动组，其余 accepted calls 写 synthetic budget-exhausted 结果，再进入 turn-finalizing/budget-exhausted |
+| AL06-42 选定的 hard turn guard | tool-executing | 请求取消并进入 cancelling；真实/unknown result 优先于预算文案 |
 | stuck hard stop | warning 后再次命中且没有 operation 在执行 | 进入 turn-finalizing/stuck |
 | stuck hard stop | tool-executing | 不强杀未知副作用；等待本次结果后 turn-finalizing/stuck |
 | queue command | 任意 active main 状态 | durable pending item，main 状态不变 |
@@ -595,7 +599,7 @@ side：
 | approval-waiting | 明确 deny 当前动作，Agent 可收到 synthetic result 后继续 |
 | tool-executing | 请求终止进程树/动作，等待真实或 unknown 结果 |
 | retry-waiting | 取消 backoff，不再重试 |
-| ready | 不退出；退出使用 .exit/.quit |
+| ready | 不退出；退出使用 registry 选定的 graceful-exit action/root |
 
 点命令后备必须能精确表达 cancel-request、cancel-tool、cancel-side、cancel-turn 和退出意图这五种领域动作；正式命令拼写与别名由 CLI registry 冻结，本包不预占 `.cancel` 的具体 grammar。
 
@@ -707,7 +711,7 @@ termination-review 只看：
 - unknown effects、失败和未完成项；
 - 当前预算、stuck warning 和 Model/Prompt snapshot refs。
 
-它不看 Key、完整 XML、隐藏 reasoning，也没有工具。
+它不看任一 registered config-secret exact value、完整 XML、隐藏 reasoning，也没有工具；最小输入由 purpose/data registry 生成。
 
 ### verdict 与控制流
 
@@ -721,37 +725,37 @@ termination-review 只看：
 | 达到 MaxTerminationReviewRounds | waiting-user，显示主 finish 和未通过原因 |
 | cancel | cancelled，不把主 finish 当作已批准 |
 
-实际 review Model 只由 AL06-08 决定：A 使用当前 turn 冻结的 main Model，B/C 使用已显式配置或持久映射的完整 Model。review 的局部 round cap 与总预算归账则服从 AL06-27 对 AL06-09 预算层的映射，不在这里预选固定 turn 池。
+实际 termination-review Model 只由 AL06-49 决定：A 使用当前 turn 冻结的 main Model，B/C 使用已显式配置或持久映射的完整 Model。review 的局部 round cap 只由 AL06-27 决定，实际请求仍消耗 AL06-42 所选 main-turn guard，usage 再按 AL06-09 A/B 分别进入 Context audit/hard ledger；transport attempt 与 request 自身硬门继续服从 Network/Model request 契约，本节不重新选择这些 owner。
 
 review continue 后，旧 finish 变成 superseded intent。主模型必须看到 reviewer 列出的具体缺口和已使用 review round，不得只收到一句“继续”。
 
 ## 分层预算
 
-### 预算层级的唯一 owner（AL06-09）
+### 预算层级的独立 owner
 
-AL06-09 先决定哪些层是 hard ledger；AL06-22 只决定 side 怎样扣已存在的 ledger，AL06-27 只决定 review 在已存在的 turn guard 内怎样分额。后两组不得新建 AL06-09 没有选中的 Context/turn 硬池。
+Network/Model request 契约拥有 attempt/request 的 deadline、retry 和单次载荷硬门；AL06-42 只拥有每个 main turn 的 composite guard 来源；AL06-09 只拥有 Context 累计量是 audit-only 还是 hard ledger；process/runtime hard cap 始终存在且不可关闭。AL06-22 只决定 side 怎样扣这些既有层，AL06-27 只决定 review 怎样在既有 AL06-42 guard 内分额，两者都不得发明新的 turn 或 Context 容量。
 
-| 层级 | 典型限制 | AL06-09 A | AL06-09 B | AL06-09 C |
-| --- | --- | --- | --- | --- |
-| attempt | connect/first-event/idle/total timeout、response bytes | 独立 hard ledger | 由 request 内的 max-attempt/timeout 封顶 | 由 request 内的 max-attempt/timeout 封顶 |
-| request | max attempts、单 response/tool arguments、单 request tokens | hard | hard | hard |
-| turn | model/tool/review/compaction steps、active time、tokens/output | 可配置 hard ledger | 可配置 hard ledger | 发行版固定、不可配置为无限的 composite safety cap；至少封顶 step/request、token/output 与 active time |
-| Context | 累计 model requests/tokens/output 与 side usage | hard ledger | 只累计审计，不以这些 usage 停止请求 | hard ledger |
-| process/runtime | 活跃网络/进程、队列、内存和输出 | hard | hard | hard |
+| 层级 | 典型限制 | 固定语义 | 唯一 owner |
+| --- | --- | --- | --- |
+| attempt | connect/first-event/idle/total timeout、response bytes、retry attempt | 每个 attempt 有界并独立留痕；同一 logical request 的新 attempt 不能重置该 request 的 total deadline/hard maximum | Network/Model request 契约 |
+| request | max attempts、单 response/tool arguments、单 request tokens | 每个 logical request 始终有硬门；request 与 attempt 分开计数 | Network/Model request 契约 + Runtime hard maximum |
+| main turn | model/tool/review/compaction steps、active time、tokens/output | AL06-42 A 使用有 Runtime maximum 的 typed 配置，B 使用发行 manifest 固定 composite guard；两者都不可为无限 | AL06-42 |
+| Context | 累计 model requests/tool calls/input-output tokens/active time 与 side usage | AL06-09 A 只累计 audit、不据此阻断；B 才建立五项 Context hard ledger | AL06-09 |
+| process/runtime | 活跃网络/进程、队列、内存和输出 | 始终 hard，任何 AL06 选择都不能关闭或放宽 | Runtime/发行 manifest |
 
 共同计数不变量：
 
-- XML 文件安全上限、pending queue 容量和进程内存上限是存储/运行时正确性界限，不会因 AL06-09 B 的 Context model-usage “只审计”而失效；本组只拥有 AgentLoop 请求、Token、步骤和时间预算层。
-- 每个 logical request 计一次；每个网络 attempt 另记一笔，是否是独立 hard ledger 服从 AL06-09。
-- main、continuation、protocol correction 和 AL06-11 A 的 model compaction request 都消耗 AL06-09 选定的 turn guard；B 的 Runtime checkpoint 只消耗当前 turn/runtime 的计算时间与内存，不计 model request/Token；C 没有这个步骤。action/termination review 再按 AL06-27 在该 guard 内分额，side 按 AL06-22 映射。
-- `context-name` 只在 PJ-12 B 下存在。以下整套语义是 PJ-12 B 不可分割的后果，不是本包新增的开关或可单独投票项：每个 Context 终身只有一个 logical request 名额，使用独立且不可扩大的 lifecycle budget；它不回记已经结束的 first main turn，但计入 Context usage、同一 Model scheduler 和 process/runtime 总量。只允许 Model 配置本来就准许的有界 transport attempts，不做 protocol correction、semantic retry 或 Model fallback。
+- XML 文件安全上限、pending queue 容量和进程内存上限是始终存在的存储/Runtime 正确性界限，不会因 AL06-09 A 的 Context usage 只作 audit 而失效；AL06-09 B 只是在这些恒定硬门之外再增加 Context 累计 hard ledger。
+- 每个 logical request 计一次；每个网络 attempt 另记一笔。attempt/retry/deadline 的硬门服从 Network/Model request 契约，不能由 AL06-09 或 AL06-42 改写。
+- main、continuation、protocol correction 和 AL06-11 A 的 model compaction request 都消耗 AL06-42 所选 main-turn guard；B 的 Runtime checkpoint 只消耗当前 turn/runtime 的计算时间与内存，不计 model request/Token；C 没有这个步骤。action/termination review 再按 AL06-27 在该 guard 内分额，side 按 AL06-22 映射；所有 usage 同时按 AL06-09 A/B 写入 Context audit/hard ledger。
+- D-041/D-046 的周期 `context-name` 只在 interval、durable main-turn watermark 与 `AutoRenameDisabled` gate 同时满足时 admission；这不是本包新增的开关或可单独投票项。每次合格请求使用独立且不可扩大的 lifecycle budget，计入 Context usage、同一 Model scheduler 和 process/runtime 总量，但不回记已经结束的 main turn。只允许 Model 配置本来就准许的有界 transport attempts，不做 protocol correction、semantic retry 或 Model fallback；新 main、退出、取消、超时或 marker 变为 `true` 会取消/逻辑失效在途请求，迟到结果不可采用。
 - continuation 和 protocol correction 是新 request，不是新 attempt。
 - tool call 一旦 accepted 就计数，即使后来 denied/skipped。
 - backoff 和真实 I/O 消耗 active wall time。
 - 等待人工 approval 的离机时间不消耗 active wall time，但记录 calendar elapsed；恢复时重新做 action freshness。
 - 没有版本化价格快照时只能显示 token/费用估算，不能承诺精确硬费用上限。
 
-AL06-09 A/B 的可配置 hard turn ledger 或 C 的固定 turn safety cap 达到时，Runtime 都停止建立新 request/operation，先收口 TS-10 已启动组，对未开始 accepted calls 写明确 synthetic budget-exhausted result，再产生 turn outcome=budget-exhausted。已有进展写入 progress receipt，不改 outcome。只有收口过程真正观测到 failure 时才另记 TS-20 决策，不把“预算用尽”伪装成 batch failure。
+AL06-42 A 的 configurable guard 或 B 的 manifest-fixed guard 达到时，Runtime 都停止建立新 request/operation，先收口 TS-10 已启动组，对未开始 accepted calls 写明确 synthetic budget-exhausted result，再产生 turn outcome=budget-exhausted。AL06-09 B 的任一 Context hard ledger 达到时也阻止新的 Context-consuming request/operation；A 的 audit 永不触发该门。已有进展写入 progress receipt，不改 outcome；只有收口过程真正观测到 failure 时才另记 TS-20 决策，不把“预算用尽”伪装成 batch failure。Runtime/发行 manifest 的不可关闭 hard cap 仍可更早停止活动，并产生其契约规定的 typed outcome。
 
 ## retry 分类
 
@@ -797,11 +801,11 @@ stuck 阈值可以在安全范围配置，但不能关闭硬上限或设为无�
 
 ### turn 冻结
 
-每个 turn-start 保存有效 main Model 的非秘密 snapshot/digest，包括逻辑名、Protocol、Endpoint、RemoteModel、窗口、Streaming、Tools 和关键能力。main 始终使用这个 frozen Model；action/termination review 服从 AL06-08，只有 AL06-11 A 的 model compaction 服从 AL06-30。若它们选用不同完整 Model，必须另存非秘密 snapshot、request purpose、数据范围与跨 endpoint 确认，不能改写 main Model snapshot。B 的 Runtime checkpoint 只冻结 extractor-version，不伪造 Model snapshot/request。
+每个 turn-start 保存有效 main Model 的非秘密 snapshot/digest，包括逻辑名、Protocol、Endpoint、RemoteModel、窗口、Streaming、Tools 和关键能力。main 始终使用这个 frozen Model；action-review 服从 AL06-08，termination-review 服从 AL06-49，只有 AL06-11 A 的 model compaction 服从 AL06-30。若它们选用不同完整 Model，必须另存非秘密 snapshot、request purpose、数据范围与跨 endpoint 确认，不能改写 main Model snapshot。B 的 Runtime checkpoint 只冻结 extractor-version，不伪造 Model snapshot/request。
 
 ### 空闲切换
 
-.model 在 ready 时：
+model-switch semantic action（TU-32 A 投影为 `.model`，B 投影为 `.use model`）在 ready 时：
 
 1. 选择候选 Model。
 2. 做 context window、role、tool protocol、历史 call/result 配对和 endpoint 预检。
@@ -811,7 +815,7 @@ stuck 阈值可以在安全范围配置，但不能关闭硬上限或设为无�
 
 ### 忙时切换
 
-active turn 中的 .model 只记录 pending switch：
+active turn 中提交 model-switch semantic action（TU-32 A 投影为 `.model`，B 投影为 `.use model`）只记录 pending switch：
 
 - 不替换在途 request；
 - 不让一个 tool batch 的 call 与 result 跨 Model；
@@ -966,7 +970,7 @@ AL06-11 A 的 compaction 完整 Model 只由 AL06-30 决定，始终使用 purpo
 - 达到硬次数后 waiting-user；
 - 建议切换大 Model、缩短 Prompt、手动指定保留项或查看摘要。
 
-AL06-11 A 下用户纠正摘要时追加 correction/superseding compaction event，不原地改旧记录。B 的 extractive checkpoint 不接受自由文本编辑；用户只能追加新的 canonical 纠正/保留事实，Runtime 再以新 source digest 确定性生成 superseding checkpoint。下一 view 使用新记录，旧记录仍可审计。
+任何路线都不允许原地修改 CompactionRecord。用户是否拥有 summary-specific 查看/纠正动作、纠正怎样进入下一 view，只由 AL06-47 决定；若随后生成新 compaction/checkpoint，它必须以 supersedes link 和新 source digest 追加，旧记录仍可审计。
 
 ## 恢复与 fail-stop
 
@@ -993,7 +997,7 @@ AL06-11 A 下用户纠正摘要时追加 correction/superseding compaction event
 - turn-ended 未 durable：不得消费 queue 或释放为可写新 turn；
 - side 保存失败：整个 Context writer 进入 faulted，不让 main 继续制造无法记录的事实。
 
-## 需要项目负责人决定的 36 组问题
+## 需要项目负责人决定的 49 组问题
 
 下面每组只负责一个可独立回复的 owner 轴。只有明确回复后才会写入 DECISIONS.md；未回复、只阅读、没有反对推荐或只说“整体可以”都不算确认。
 
@@ -1003,6 +1007,7 @@ AL06-11 A 下用户纠正摘要时追加 correction/superseding compaction event
 - control 与 executable tool calls 不得同批；provider refusal 独立映射 refused，不走 transport retry，也不冒充主模型 finish。
 - 流式 delta、未闭合参数、含无效调用的 batch 都不能提前或部分执行；每个 accepted tool call 最终必须有真实或 synthetic result。
 - 本地关系 ID 一旦 durable 就稳定、不复用；queue edit、摘要纠正和恢复都追加事实，不原地改写既有 XML 事件。
+- queue、steer、side 和其他 Context/turn semantic command 携带 expected Context generation/turn observation；stale 只返回 typed conflict，不重定向到新目标。
 - retry、review、continuation、compaction、side、suspend/resume 都受可计算的硬上限；不得用新子循环、Model 切换、时钟跳变或重启重置已有预算。
 - compaction 和 model view 可以有损，但 Context XML 的 canonical facts 不得被截断、删除或覆盖。
 - 不静默切换 Model、endpoint、Permission 或缺失映射；任何跨 endpoint 历史发送都必须显式可见。
@@ -1143,13 +1148,12 @@ approval 不能另有一套和全局焦点/取消规则冲突的 Esc 选项。AL
 
 ### AL06-22：side 的请求/token 预算归账
 
-问题：side usage 从哪个预算池扣除？
+问题：side 自己已有有界 lifecycle budget 后，在 main 活动期间是否还同时消耗 main turn budget？
 
-- A：每个 side 有独立硬 cap，不消耗 active main turn guard；始终计 runtime，AL06-09 A/C 时再扣 Context hard ledger，B 时只写 Context audit。（推荐）
-- B：每个 side 仍有独立硬 cap；main 活期间还同时扣当前 turn guard（AL06-09 A/B 的可配置 ledger，或 C 的固定 safety cap），空闲 side 没有可借用的 turn；Context/runtime 仍按 AL06-09 扣除或审计。
-- C：side 不设独立 lifecycle 池；main 与 side 共用 AL06-09 最外层的累计 hard ledger——A/C 为 Context，B 为 runtime 内固定的累计 request/token safety quota——但每个 request 仍有 request hard cap，Context 在 B 下仍只审计。
+- A：每个 side 使用独立、不可为无限的一次请求/token/active-time cap，不消耗 active main turn guard；它始终计入 runtime，AL06-09 B 时再扣 Context hard ledger，A 时只写 Context audit。（推荐）
+- B：每个 side 仍有独立硬 cap；main 活动期间还同时扣当前 turn guard，guard 的 configurable/fixed 来源只服从 AL06-42；idle side 没有可借用的 main turn。Context/runtime 仍按 AL06-09 扣除或审计。
 
-推荐 A。它不会让一个旁问意外耗尽主任务步骤，同时总成本仍可见、有界。B 更严格地限制 main 活动期总花费；C 字段最少，但一次 side 可能挤压后续 main。三项都只映射 AL06-09 已存在的层，因此与 AL06-09 A/B/C 的九种组合全部有定义。
+推荐 A。它不会让一个旁问意外耗尽主任务步骤，同时总成本仍可见、有界。B 更严格地限制 main 活动期总花费。两项只决定“是否再扣 active main turn”这一条轴，不凭空发明另一套 runtime quota；与 AL06-09 × AL06-42 的全部组合都有定义。
 
 关联：AQ-028、AQ-096、AQ-100、AQ-153、LOOP-04、LOOP-23、CONC-01、PERF-01。
 
@@ -1203,19 +1207,73 @@ approval 不能另有一套和全局焦点/取消规则冲突的 Esc 选项。AL
 
 推荐 A。它既不把 DoubleCheck 故障当通过，也不会因临时网络问题永久卡死。B 自动收口最快；C 保留 reviewer 的强制地位。所有选择都遵守 Permission=deny 不可覆盖。
 
-关联：AQ-021 至 AQ-023、AQ-104、AQ-151、AQ-225、SAFE-11、SAFE-14、LOOP-10、MODEL-09。
+关联：AQ-021 至 AQ-023、AQ-104、AQ-151、AQ-225、`AQ-280`、SAFE-11、SAFE-14、LOOP-10、MODEL-09。
 
-### AL06-08：DoubleCheck reviewer 使用哪个 Model
+### AL06-44：pending approval 是否随时间过期
 
-问题：DoubleCheck 的 action-review（仅 AL06-07 A/B 存在）与 termination-review 共同由哪个完整 Model 实例执行？
+本组只决定已经 durable、仍未批准的人工 action approval 的时间寿命；grant 记忆由 TS-05、进程重启后的呈现方式由 AL06-45 独立决定。时间永远不会自动允许。
 
-- A：两类 review 都使用当前 turn 冻结的 main Model，但分别以 action-review/termination-review 独立 purpose/request 执行。（推荐）
-- B：配置显式命名同一个 ReviewModel，两类 review 共用；缺失、无效或跨 endpoint 未确认时转 waiting-user，不 fallback。
-- C：每个 Context 首次需要任一 review 时显式选择并持久化一个共用会话映射；它作为 `ReviewModelMapping` 的非秘密逻辑 Model 引用写入 XML session snapshot 并追加 mapping-selected 事件，action/termination 都用该映射，映射失效后重新选择。
+- A：不因离机时间自动过期；只在用户 deny/cancel/close、action/config/workspace/file identity stale 或上游 turn 收口时失效。（推荐）
+- B：使用发行 manifest 固定的 calendar expiry；到期自动写 synthetic denied/expired result，不允许配置关闭或延长。
+- C：INI 提供有界 `ApprovalExpiryMinutes`；到期行为同 B，`off/infinite` 非法，Runtime hard maximum 不可突破。
 
-推荐 A。它不增加配置和历史外发边界。B 可用不同能力做复核；C 更灵活但交互和恢复更复杂。三项都遵守“一个 Model section 是完整连接实例”，不使用配置第一项作为暗中默认。若 AL06-07 C，action 分支不存在，本组选择仍完整决定 termination reviewer，不会因此生成空 action request。
+推荐 A。用户可以离机到第二天再看，真正安全性由精确 action freshness 复核保证；B/C 能减少遗忘的危险窗口，但可能让长时间审批在用户阅读中自动消失。B/C 必须 durable 保存 created/expires UTC、配置 generation 与单调观测；活进程用单调 timer，恢复时若墙钟回退/可信度不足按 expired 处理而不是延长。若到期时用户正在 approval composer 中输入，输入不得绑定到别的卡片或被当作普通消息；提交时返回 typed stale receipt，并保留可安全复制的非秘密 draft 供用户自行决定。三项都无 Enter 默认 allow，过期 receipt 与 synthetic result 必须配对原 tool call，不能只从页面删除。
 
-关联：AQ-019、AQ-021、AQ-099、AQ-109、AQ-151、MODEL-12、LOOP-25、D-028。
+关联：`AQ-226`、`SAFE-03`、`SAFE-14`、`LOOP-10`、`CTX-07`、AL06-35、AL06-45、TS-05、TU-07、ED-05。
+
+### AL06-45：崩溃恢复后的 pending approval 怎样重新进入流程
+
+旧 approval instance/任何未提交输入都永远只是审计，不能跨进程当作批准。本组只选择 fresh Permission/config/action/workspace/file re-evaluation 后，新的 approval instance 是自动呈现、自动拒绝还是等待用户显式 reopen。
+
+- A：恢复时自动做只读 freshness/re-evaluation；仍合法且未按 AL06-44 过期就创建新 approval ID 并显示 exact card，等待用户重新决定。（推荐）
+- B：所有 crash/interrupted pending approval 都生成 synthetic denied-on-recovery result，让 main 按拒绝事实继续/收口；不提供 reopen。
+- C：Context 进入 recovery-required，只显示旧 action 与 `reopen approval|deny`；用户选择 reopen 后才 re-evaluate 并创建新 ID，选择 deny 生成 synthetic result。
+
+推荐 A。恢复后用户立即看见还缺什么，同时没有沿用旧批准；B 最简单且最保守，C 让是否重新建立 action 都由用户决定但多一个恢复步骤。这里的 A/B/C **只规范化旧 pending approval 本身**：先追加 recovery receipt、新 approval 或 synthetic result，再把 enclosing unfinished main turn 交回 AL06-32 所选恢复路线；本组绝不能顺带决定旧 main 是否 same-turn resume、自动发下一次 main request或直接形成最终终态。三项都在 action/schema/Permission/DoubleCheck/workspace/target digest 任一变化时拒绝复用并要求主模型生成新 action；非 TTY 一律 fail-closed，不从 stdin 猜 consent。graceful exit 已由 close policy 取消/拒绝 pending，本组只处理无法完成正常收口的恢复。
+
+关联：`AQ-412`、`SAFE-03`、`SAFE-14`、`CTX-07`、`CTX-26`、AL06-24、AL06-35、AL06-44、TU-07、TU-13、ED-05、TP-017。
+
+### AL06-08：action-review 使用哪个 Model
+
+适用条件：仅 AL06-07 A/B 存在 action-review；AL06-07 C 时本组为 `not-applicable`。本组不再替 termination-review 选择 Model，后者由 AL06-49 独立决定。
+
+- A：使用当前 turn 冻结的 main Model，但以独立 `purpose=action-review` 请求执行。（推荐）
+- B：主 INI 显式命名 `ActionReviewModel`；缺失、无效或跨 endpoint 未确认时转 waiting-user，不 fallback。
+- C：每个 Context 首次需要 action-review 时显式选择并持久化 `ActionReviewModelMapping`；只保存非秘密逻辑 Model 引用与 mapping event，失效后重新选择。
+
+推荐 A。它不增加配置、恢复步骤或新的历史外发边界；B 可长期用一个更擅长风险审查的完整 Model；C 可按会话选择，但 mapping、跨机接盘和失效交互更复杂。三项都遵守“一个 Model section 是完整连接实例”，不使用配置第一项作为暗中默认，也不因 termination-review 选了某个 Model 就暗中跟随。
+
+关联：AQ-019、AQ-099、AQ-151、MODEL-12、LOOP-25、D-028、AL06-07、AL06-49。
+
+### AL06-49：termination-review 使用哪个 Model
+
+通俗场景：动作复核关心“这个命令是否危险”，结束复核关心“任务是否真的完成”。两者可能需要不同能力、费用和隐私边界；即使最终都选 main Model，也应是两个可独立确认的 purpose，而不是被一个共用 reviewer selector 绑死。
+
+- A：使用当前 turn 冻结的 main Model，但以独立 `purpose=termination-review` 请求执行。（推荐）
+- B：主 INI 显式命名 `TerminationReviewModel`；缺失、无效或跨 endpoint 未确认时转 waiting-user，不 fallback。
+- C：每个 Context 首次需要 termination-review 时显式选择并持久化 `TerminationReviewModelMapping`；只保存非秘密逻辑 Model 引用与 mapping event，失效后重新选择。
+
+推荐 A。它最简单，也不会把完整历史额外发往另一个 endpoint；B 可以用更强或更便宜的 Model 专门判断完成度；C 最灵活，但首次复核、恢复和跨机导入都多一次显式 mapping。三项都只决定 Model 来源，不改变 DoubleCheck 总开关、termination verdict、失败关闭、预算或 round cap；它可以与 AL06-08 的任一适用选项自由组合，同名配置仍只是用户显式把两个 purpose 指向同一个完整实例。
+
+关联：`AQ-431`、AQ-021、AQ-109、MODEL-12、LOOP-25、D-028、AL06-08、AL06-26、AL06-27。
+
+### AL06-51：特殊 purpose 跨 endpoint 的确认 cadence
+
+通俗场景：action-review、termination-review 或 model compaction 可能使用与当前 main Model 不同 endpoint 的完整 Model。第一次发送时显示风险还不够回答：同一 Context 下一次复核是否再问、重启后是否仍记得、复制到另一台机器后旧确认是否还能生效。若不明确，某个实现会每次打断，另一个会把一次确认永久扩展到后来新增的对话和源码；两者的隐私与体验完全不同。
+
+适用条件：本组只在 AL06-08 B/C、AL06-49 B/C，或 AL06-11 A + AL06-30 B/C 实际选择的特殊-purpose Model 与当前 main Model 的有效 endpoint disclosure identity 不同时生效；同 endpoint 的独立 purpose request 不产生本组确认。它不选择 Model、不改变 AL06-34 的 compaction 费用/触发许可，也不替 M05-52 决定 main Model switch。
+
+- A：每一个跨 endpoint 的特殊-purpose logical request 都显示 exact disclosure manifest 并等待确认；不建立可复用 consent。每次确认与实际 request receipt 都 durable，取消只取消本次。（最保守）
+- B：每个 active Context handle、每个 purpose、每个精确 disclosure binding 在当前进程第一次发送前确认一次；可复用 consent 只在内存中存在，进程退出、Context close/reopen 或任一 binding 变化即失效。每次实际发送仍写 durable request/disclosure receipt并显示非阻断状态。
+- C：每个 Context、每个 purpose、每个精确 disclosure binding 第一次发送前确认一次，并把可复用 consent 作为会话级状态及选择事件写入 XML；本机恢复后 binding 未变可以继续复用。之后新增、但仍属于已确认 data-class envelope 的 canonical events 不因 event range 单独增长而重新询问，每次实际发送仍保存 exact range/view/request receipt并可取消。（推荐）
+
+推荐 C。长 Context 中 action-review 与 termination-review 可能多次发生，逐次确认会把 DoubleCheck 变成重复弹窗；把选择写入 XML又符合完整会话元数据与恢复目标。代价是必须严格区分“可复用 consent 状态”和“每次真实发送 receipt”，并在跨机或配置变化时可靠失效。B 的状态最简单且不会把许可带过重启；A 的隐私控制最细，但 DoubleCheck 与压缩频繁使用时打断最多。
+
+三项都固定以下失败边界：action-review、termination-review、compaction 三个 purpose 的确认状态永不共享，即使目标 Model/endpoint 相同；每次真正发送前都生成包含 purpose、当前 main/目标非秘密 endpoint identity、Model snapshot、event/view range、data classes、估算输入量与 registered-secret exclusions 的 exact manifest。endpoint origin/path、tenant/auth policy identity、proxy route、Model/config generation、purpose、data-class envelope、mapping/import generation 或所选 Model 任一变化都会使旧 consent stale。C 的 durable consent 在 foreign/imported XML、workspace rebind 或目标机重新 mapping 后只作为审计，必须 fresh confirm；不能凭同名 Model 或相同 hostname 激活。确认取消、输入无效、非 TTY 无法确认、receipt 无法 durable 或 freshness 复核失败时都不发送请求，转 waiting-user/fail-closed，不 fallback 到 main/第一 Model，也不把失败当作 action allow、termination finish 或 compaction success。
+
+本组只决定用户可观察的确认寿命；endpoint disclosure identity 的规范算法、manifest canonical encoding、字段 digest 与平台测试是技术规格/证明，不让负责人选择实现细节。
+
+关联：AQ-019、AQ-021、AQ-030、AQ-099、AQ-109、AQ-151、AQ-156、AQ-179、AQ-240 至 AQ-243、`AQ-435`、MODEL-07、MODEL-10、MODEL-12、`MODEL-17`、SAFE-08、SAFE-09、LOOP-25、COMP-04、COMP-08、CTX-07、AL06-08、AL06-49、AL06-30、AL06-34、M05-52、TP-020、TP-028。
 
 ### AL06-26：termination-review 非 finish verdict 的控制流
 
@@ -1227,31 +1285,78 @@ approval 不能另有一套和全局焦点/取消规则冲突的 Esc 选项。AL
 
 推荐 A。它最贴近“复核发现缺口就继续做”，同时所有失败都 fail-closed。B 最省 Token；C 给一次自动修正机会且更容易预测费用。三项都不把失败、超时或 malformed verdict 当作 finish。
 
-关联：AQ-021 至 AQ-023、AQ-099、AQ-109、LOOP-03、LOOP-25、LOOP-27、MODEL-12。
+关联：AQ-021 至 AQ-023、AQ-099、AQ-109、`AQ-280`、LOOP-03、LOOP-25、LOOP-27、MODEL-12。
+
+### AL06-40：termination-review 进入人工解算后能否接受 finish
+
+本组与 AL06-26 正交：AL06-26 只决定 reviewer verdict 后 Runtime 自动继续几次；本组只决定已经进入 `waiting_user` 后，用户能否把绑定的 finish candidate 人工接受。它在 `DoubleCheck=true` 且 termination-review 进入人工解算时才产生运行页面，但因为 DoubleCheck 是运行时配置，正式选择常驻而不是静态 `not-applicable`。
+
+- A：对合法 `continue`、`uncertain` 或最终 request failure 都提供 `accept-finish` once；用户必须看到 reviewer 缺口/故障并确认 exact candidate。（推荐）
+- B：只在 `uncertain` 或最终 request failure 时提供 `accept-finish` once；reviewer 明确 `continue` 时必须继续或停止，不能覆盖具体缺口。
+- C：任何非-finish/失败都不允许人工接受；只能继续工作或以未完成结果停止。
+
+推荐 A。用户仍是最终负责人，但 override 只绑定 exact review-id、turn-id、finish-candidate digest、evidence snapshot 和配置 generation；候选、证据或 Permission 变化立即 stale。`accept-finish` 追加 `human-finish-override`，绝不能伪装成 reviewer allow。所有路线都固定提供 `continue` 与 `stop-not-finished`，无 Enter 默认项；后者形成真实 `user-stopped-not-finished`，不能叫 completed，也不能自动启动 queue。
+
+关联：`AQ-393`、LOOP-03、LOOP-10、LOOP-25、AL06-26、AL06-36、F4-03、TU-32。
+
+### AL06-41：termination-review 人工解算后能否重试 review
+
+本组只决定是否允许显式重试同一个仍新鲜的 review，不决定 human finish override（AL06-40）或 reviewer 自动 continue（AL06-26）。
+
+- A：提供 `retry-review <review-id>`，但仅在结果为 uncertain 或可重试的 transport/schema failure、candidate 仍新鲜、局部 round cap/turn/runtime budget 都有剩余时出现；每次建立新 request ID 并继续同一 review lifecycle。（推荐）
+- B：进入人工解算后不再重试同一 review；用户只能继续工作、按 AL06-40 允许的范围接受 finish，或停止为未完成。
+
+推荐 A。临时网络/格式问题可以由用户显式再试，却不会突破 cap 或在 reviewer 已明确指出缺口时靠抽样“刷通过”。达到 cap、预算耗尽、candidate stale 或错误不可重试时 registry 必须删除该 action，而不是显示一个必失败按钮。两项都没有裸 `retry`，也不自动重发。
+
+关联：`AQ-394`、LOOP-25、LOOP-27、MODEL-09、AL06-26、AL06-27、AL06-40、F4-04、TU-32。
 
 ### AL06-27：action/termination review 的预算池关系
 
 问题：review 的局部上限怎样与 main turn 总预算相交？
 
-- A：termination 有局部 round cap；仅当 AL06-07 A/B 启用 action-review 时 action 才另有局部 cap。存在的 review 共同消耗 AL06-09 选定的 turn guard：A/B 扣可配置 request/token/active-time ledger，C 扣固定 composite safety cap。（推荐）
-- B：两类 review 共用一个 DoubleCheckRequests 局部 cap，同时也按 A/B 可配置或 C 固定的方式消耗同一 turn guard。
-- C：在 AL06-09 已选的 turn guard 内预留一个固定、有界 review reserve；main 不能耗用该份额，review 也不能超出它，但 reserve 不增大 turn 总 cap。A/B 仍扣同一可配置 token/time ledger，C 仍扣固定 safety cap。
+- A：termination 有局部 round cap；仅当 AL06-07 A/B 启用 action-review 时 action 才另有局部 cap。存在的 review 共同消耗 turn guard；其 configurable/fixed 来源只服从 AL06-42。（推荐）
+- B：两类 review 共用一个 DoubleCheckRequests 局部 cap，同时消耗同一 turn guard；该 guard 的 configurable/fixed 来源完全服从 AL06-42。
+- C：在既有 turn guard 内预留一个固定、有界 review reserve；main 不能耗用该份额，review 也不能超出它，但 reserve 不增大 turn 总 cap；guard 来源仍只服从 AL06-42。
 
-推荐 A。它能分别解释两种 review 的费用，又防止二者互相绕过总预算。B 配置更少；C 为完成复核保留请求名额，但不会创造额外容量。若 AL06-07 C 关闭 action-review，本组的 action 份额自然为零，termination 份额仍按同一规则归账。三项都与 AL06-09 A/B/C 完整可组合。
+推荐 A。它能分别解释两种 review 的费用，又防止二者互相绕过总预算。B 配置更少；C 为完成复核保留请求名额，但不会创造额外容量。若 AL06-07 C 关闭 action-review，本组的 action 份额自然为零，termination 份额仍按同一规则归账。三项都与 AL06-09/AL06-42 完整可组合。
 
 关联：AQ-028、AQ-099、AQ-100、AQ-151、MODEL-12、LOOP-04、LOOP-25、LOOP-27、PERF-01。
 
 ### AL06-09：通用预算层级
 
-问题：主 AgentLoop 使用哪种硬预算层级？
+问题：除了每个 request、turn 和整个 runtime 都有硬门之外，Context 累计量是否也成为会阻止后续工作的 hard ledger？turn guard 是配置字段还是发行常量由 AL06-42 独立决定。
 
-- A：attempt、request、turn、Context、runtime 五层，分别记录并由更外层封顶。（推荐）
-- B：request、turn、runtime 三层；Context 只累计审计，不承担额外 hard cap。
-- C：request、Context、runtime 三个 hard layer，另有一个由发行版固定、不暴露 INI 字段且不可变为无限的 per-turn composite safety cap，封顶 step/request、token/output 和 active time。
+- A：request、turn、runtime 是 hard layer；Context 只保存累计 audit，不因历史总量拒绝新 turn。（推荐）
+- B：在 A 上增加 Context hard ledger；条件生成 `MaxContextModelRequests`、`MaxContextToolCalls`、`MaxContextInputTokens`、`MaxContextOutputTokens`、`MaxContextActiveTimeMs`，waiting-user/idle 不计 active time，达到任一项后只允许本地管理/导出/显式提高或新建 Context。
 
-推荐 A。它能区分一次网络重试、一次模型意图和整轮成本。B 字段少但长 Context 总量不受硬界；C 用发行版安全 cap 阻止单 turn 失控，而把用户可配置总量放在 Context。三项都由本组唯一定义层级；AL06-22/27 只在已选层内归账，且 Model 切换、retry 或新子循环都不得重置任何 ledger/cap。
+推荐 A。它让每一轮和整个进程始终有界，又不让一个长期 Context 因历史累计突然永久不可运行；B 适合确实需要会话总量硬门的用户，但必须真正增加上述 schema、来源、默认、XML 快照、剩余量和恢复语义，不能只在 prose 引用不存在的 ledger。
+
+两项都由本组唯一定义 Context 层是否 hard；每一项 quota 必须能追到 schema/manifest、默认、来源、turn/request snapshot、单调 ledger 与 typed exhausted outcome。AL06-22/27 只在已选层内归账，Model 切换、retry、review、compaction 或新子循环都不得重置任何 ledger/cap；provider usage 缺失时使用版本化保守估算并分别记录 estimated/reported，不能把 token cap 宣传成精确费用 cap。
 
 关联：AQ-028、AQ-029、AQ-100、AQ-153、AQ-154、AQ-196、AQ-197、LOOP-04、LOOP-05、LOOP-27、PERF-01、PERF-02。
+
+### AL06-42：turn hard budget 是可配置还是发行版固定
+
+AL06-09 只决定 Context 是否有累计 hard ledger；本组只决定每个 main turn 始终存在的 composite hard guard 从哪里来。两组完全正交，因此“fixed turn + Context hard”与“configurable turn + Context audit-only”都能表达。
+
+- A：INI 公开 `MaxModelRequests`、`MaxToolCalls`、`MaxTurnTokens`、`MaxTurnActiveTimeMs`，均有 Runtime 不可突破的上限；只有 M05-06 允许时 XML 才可按白名单下调，next-turn 生效并进入 turn snapshot。（推荐）
+- B：turn guard 使用发行 manifest 中版本化、只读且不可关闭的 model-request/tool-call/input-output-token/active-time composite cap；INI/XML 不生成这些 turn 字段，config-repl/status 只显示实际常量、manifest identity 和剩余量。
+
+推荐 A。不同 Model、机器和任务可以用清楚的 typed 字段调整，同时 Runtime hard maximum 防止“无限”；B 的配置面最小且发行测试最容易冻结，但用户无法为昂贵 Model 主动收紧或为合理长任务放宽到 Runtime maximum。两项的 active time 都使用单调时钟，只累计 scheduler/network/model/tool/review/compaction 等 Runtime 活动；`waiting_user`、人工 approval、idle 和 OS suspend 不计入，恢复后从 durable ledger 继续。request/tool 的自身墙钟 deadline 另行存在，并与 turn guard 取更早者。预算耗尽产生 typed terminal/waiting outcome，而不是截断事实或重置新 request。
+
+关联：`AQ-395`、AQ-028、AQ-153、AQ-154、LOOP-04、LOOP-27、M05-06、AL06-09、AL06-22、AL06-27、PERF-01。
+
+### AL06-43：本地金额估算怎样形成门
+
+条件：只有 M05-50 C 提供 versioned per-Model price snapshot 时生效；M05-50 A/B 下本组 `not-applicable`。provider 只在响应后报告金额的 B 路线固定为 display/audit，不能据此伪造请求前 hard cap。
+
+- A：金额 estimate 只显示并写 usage audit，不阻断或额外询问；request/token/time hard budget 仍照常生效。（推荐）
+- B：每个 Model 可配置同币种的 per-turn `EstimatedCostWarning`；下一次请求的保守上界将跨过阈值时先显示累计/增量/剩余假设并 consent once。若该 Model 已配置 warning，但 price/usage generation stale、计价类别缺失或无法保守估算，则不能把“未知”当成未跨阈值：必须显示 `estimate unavailable`、原因和 exact next request，并取得同样一次性 fresh consent。该 consent 精确绑定 turn ID、Model/config/price generation、当前累计、下一 logical request manifest 与 worst-case estimate/unavailable reason；任一项变化即 stale，不能授权之后所有昂贵请求。
+- C：每个 Model 可配置同币种的 per-turn `MaxEstimatedCost` hard admission cap；下一次 request 上界会超过、price/usage generation stale 或无法保守估算时拒绝 admission，必须修改配置/Model/范围，不能用模糊 override 把 hard cap 变软。
+
+推荐 A。金额本质仍是估算，先把 request/token/time 做成可靠硬门最诚实；B 给昂贵或无法可靠估价的请求知情门，C 最严格但会因 MaxOutput、缓存/推理计价或 usage 缺失拒绝更多合法请求。B/C 的条件字段、默认、来源、生效点、XML snapshot、stale 和未选路线 orphan 规则必须进入 typed catalog，不能只存在于文案。每个逻辑 Model 单独按其 price currency/price generation 归账，不做外汇换算；main、side、review、compaction、retry/fallback 都记入实际使用 Model 的同一 turn ledger。estimated/reported 永远分开，进行中请求不因后验金额被逆向取消，也不声称等于最终账单。
+
+关联：`AQ-410`、`MODEL-09`、`LOOP-04`、`CTX-07`、M05-50、AL06-09、AL06-22、AL06-27、PERF-01。
 
 ### AL06-28：检测到无进展循环后的收口策略
 
@@ -1265,6 +1370,22 @@ approval 不能另有一套和全局焦点/取消规则冲突的 Esc 选项。AL
 
 关联：AQ-029、AQ-101、AQ-154、AQ-196、AQ-197、AQ-283、LOOP-05、LOOP-14、LOOP-27。
 
+### AL06-50：stuck/no-progress 阈值的配置来源
+
+通俗场景：AL06-28 决定命中 stuck 阈值后是给模型一次换策略机会、立即停止还是等待用户，但没有回答阈值本身由谁控制。固定阈值最容易跨机复现；一个简单数字方便用户调节耐心；按 detector 分开则能容忍长推理而更早阻止重复命令。这里不让负责人猜 exact-repeat、same-error、ABAB 或 progress fingerprint 的算法，也不让负责人现在拍脑袋填写具体数字。
+
+- A：所有 detector 使用发行 manifest 中版本化、只读的 threshold tuple；INI/XML 不生成 stuck/no-progress 阈值字段。turn snapshot 保存 manifest identity 和实际 tuple。
+- B：INI 公开一个有界 `MaxNoProgressRepeats`，作为所有已注册 detector 的统一用户耐心等级；缺失/default、最小值、最大值和 Runtime 绝对上限由技术证明冻结。XML 不覆盖，next-turn 生效并进入 turn snapshot。（推荐）
+- C：INI 按版本化 detector registry 公开少量彼此独立的 bounded threshold 字段，至少区分 exact-repeat/same-error、cycle 与 semantic no-progress；未注册 detector 不接受自由字段。每项缺失/default、范围和 Runtime hard maximum 由技术证明冻结，XML 不覆盖，next-turn 生效并整体进入 turn snapshot。
+
+推荐 B。用户通常只需要表达“更早停”或“再多试几次”，一个有界数字比多个检测器参数更容易理解，又比发行版固定值更能适应昂贵 Model、旧机器和长任务。A 最简单、最可重复，也最适合不希望暴露调参面的产品；C 对误报调优最细，但会把内部 detector 分类变成长期配置兼容面，并显著增加 config-repl、迁移和测试矩阵。
+
+三项都固定：阈值不能为 0、off、infinite 或超过 Runtime hard maximum，不能关闭 stuck 检测，也不能扩大 AL06-42/AL06-09 的请求、工具、Token、时间或 Context hard guard。算法、detector 集合、progress fingerprint、canonical progress/reset 条件、exact 数字与 Runtime 上限由技术规格和 fixtures 冻结；换措辞、换 Model、retry、review、compaction 或重启不得伪造进展或重置当前 turn 已 durable 的 detector state。配置 generation 在 active turn 中变化只影响下一 turn；恢复 unfinished turn 使用其原 frozen threshold snapshot。所选字段缺失、越界、组合不完整或来自外来 XML 时配置/导入校验失败，不能静默退回更宽阈值；threshold snapshot 无法 durable 时不得继续建立新的 Model request/tool effect。
+
+本组只拥有阈值来源和配置粒度；命中后的 warning/escape/terminal 行为仍只服从 AL06-28，首次 warning 后怎样给最后机会不能被阈值字段暗中改写。
+
+关联：AQ-029、AQ-101、AQ-154、AQ-196、AQ-197、AQ-283、`AQ-434`、CFG-13、CFG-15、LOOP-04、LOOP-05、LOOP-14、LOOP-27、`LOOP-31`、PERF-01、AL06-09、AL06-28、AL06-42、TP-017、TP-022。
+
 ### AL06-15：存在明确验证命令时的执行策略
 
 问题：任务有安全、可授权且可运行的明确验证命令时，Agent 默认怎样做？
@@ -1277,17 +1398,29 @@ approval 不能另有一套和全局焦点/取消规则冲突的 Esc 选项。AL
 
 关联：LOOP-09、TOOL-13、AQ-153、AQ-154。
 
-### AL06-10：active turn 中 Model switch 的生效方式
+### AL06-46：完成前默认承担多强的验证义务
 
-问题：main turn 活动时执行 .model，怎样避免同一 turn 混用能力不同的 Model？
+AL06-15 只回答“已经存在一条明确、安全、可运行的验证命令时怎么执行”；本组先回答 Agent 是否必须主动寻找相关验证、按风险形成证据。它不决定具体命令内容，也不能扩大 Permission。
+
+- A：模型自行判断是否寻找/执行验证；Runtime 只要求最终报告诚实引用实际证据。
+- B：对会改变代码、配置或可执行行为的任务，模型必须按风险寻找最相关的静态检查/测试/构建，再把明确候选命令交给 AL06-15 决定自动执行、先询问或只报告；纯分析、文档和普通问答不强跑测试。没有安全命令、权限或预算时明确 `unverified`。（推荐）
+- C：凡 workspace 存在可发现的完整测试套件，所有改动任务结束前都必须把全套候选交给 AL06-15；若 AL06-15 的路线、Permission 或 budget 使其未运行，不能 `finish(completed)`，只能 partial/waiting-user。
+
+推荐 B。它建立“改了就尽量找到合适验证”的产品习惯，又不会让 README 修改跑数小时全套；A 最信任模型判断，C 的完成门最严格。三项都不发明不存在的命令、不隐式联网、不越过 Permission/DoubleCheck/budget，也不把测试失败或未运行说成 passed；一旦得到明确候选命令，是否自动/先问/只报告始终只服从 AL06-15，因此本组不会偷偷把 AL06-15 B/C 改成自动执行。
+
+关联：`AQ-052`、`LOOP-09`、`LOOP-10`、`TOOL-13`、PP-15、AL06-15、AL06-36、PERF-01。
+
+### AL06-10：active turn 中 model-switch semantic action 的生效方式
+
+问题：main turn 活动时提交 model-switch semantic action，怎样避免同一 turn 混用能力不同的 Model？实际 chat root 只投影 TU-32：A 为 `.model`，B 为 `.use model`。
 
 - A：记录 pending switch，当前 turn 收口后预检并从下一 turn 生效。（推荐）
 - B：先要求确认取消当前 turn；真实/unknown effect 收口后切换，并等待用户显式继续，不自动重发旧目标。
-- C：忙时拒绝切换；用户必须先显式 cancel turn，回到 ready 后再执行 .model。
+- C：忙时拒绝切换；用户必须先显式 cancel turn，回到 ready 后再提交 model-switch semantic action。
 
 推荐 A。它保留当前工具配对和 turn snapshot。B 更快地改变策略但会结束当前轮；C 规则最简单。三项都禁止在同一 turn 的下一 sampling step 偷换 Model，并在切换前检查窗口、roles、tools、历史配对与 endpoint。
 
-关联：AQ-031、AQ-065、AQ-107、AQ-108、AQ-142、AQ-156、AQ-235、MODEL-07、MODEL-10、LOOP-15。
+关联：AQ-031、AQ-065、AQ-107、AQ-108、AQ-142、AQ-156、AQ-235、MODEL-07、MODEL-10、LOOP-15、TU-32。
 
 ### AL06-29：恢复时旧 Model 缺失的映射体验
 
@@ -1438,7 +1571,7 @@ approval 不能另有一套和全局焦点/取消规则冲突的 Esc 选项。AL
 | 7 | main 焦点 + 其他 active main 状态 | durable cancel-turn，在该状态的下一安全边界收口 | side 不变 |
 | 8 | 无上述有效焦点且 main active | 焦点归一为 main，再按 5–7 处理 | side 不变 |
 | 9 | main 不 active、side active，且无 local/draft/approval 可取消焦点 | 焦点归一为 side，再按 4 处理 | main 不变 |
-| 10 | ready、无 side active、无 draft/本地页 | 不退出，显示 `.exit/.quit` 提示 | 无变化 |
+| 10 | ready、无 side active、无 draft/本地页 | 不退出，显示 registry 选定的 graceful-exit action 提示 | 无变化 |
 
 #### B：“本地 back，否则整轮 main”的完整规则
 
@@ -1448,7 +1581,7 @@ approval 不能另有一套和全局焦点/取消规则冲突的 Esc 选项。AL
 | 2 | main active，且没有本地页面焦点；不问当前是 main、side、draft 还是 approval 焦点 | 取消整个 main turn；approval 中未执行 call 写 synthetic cancelled，tool 按真实/unknown 收口 | side 不变 |
 | 3 | main 不 active + 非空 draft | 清空 draft | side 不变 |
 | 4 | main 不 active + side active + 无 draft/本地页 | 不取消 side，显示唯一显式 side-cancel 命令的提示 | side 继续 |
-| 5 | main/side 都不 active、无 draft/本地页 | 不退出，显示 `.exit/.quit` 提示 | 无变化 |
+| 5 | main/side 都不 active、无 draft/本地页 | 不退出，显示 registry 选定的 graceful-exit action 提示 | 无变化 |
 
 #### C：候选集合与选择结果的完整规则
 
@@ -1457,7 +1590,7 @@ Esc 到达时从当前 focus×state 一次性生成候选：本地页面活动�
 | 当前 chooser/候选状态 | Esc 或选择的确定结果 |
 | --- | --- |
 | cancel chooser 已打开 | Esc 只关闭 chooser，不取消候选中任何目标 |
-| 0 个候选 | 不退出，显示 `.exit/.quit` 提示 |
+| 0 个候选 | 不退出，显示 registry 选定的 graceful-exit action 提示 |
 | 1 个候选 | 不开 chooser，直接执行下表对应动作 |
 | 2 个以上候选 | 打开 ASCII 单选；列表按 `local, draft, approval, main, side` 固定排序，不预选、不因当前 focus 自动提交 |
 
@@ -1471,7 +1604,7 @@ Esc 到达时从当前 focus×state 一次性生成候选：本地页面活动�
 
 推荐 A。它符合“Esc 终止当前正在处理的东西”，快捷且可用状态/焦点表完整测试。B 最容易记忆，但查看 side 时也可能误杀主任务；C 最明确，却让紧急取消多一步。三项都必须显示已经接受取消、正在收口还是最终 unknown，重复 Esc 不得重复执行副作用。
 
-关联：D-033、AQ-027、AQ-068、AQ-069、AQ-094、AQ-098、AQ-127、LOOP-07、TUI-04、PROC-03。
+关联：D-033、AQ-027、AQ-068、AQ-069、AQ-094、AQ-098、AQ-127、LOOP-07、TUI-04、PROC-03、TU-32。
 
 ### AL06-36：`finish(partial)` 是否构成真实终态
 
@@ -1488,13 +1621,13 @@ Esc 到达时从当前 focus×state 一次性生成候选：本地页面活动�
 
 问题：一份完整合法的 assistant response 同时包含说明文字和一个或多个 tool calls 时，文字怎样保存、显示并进入下一次采样？
 
-- A：保留 provider 的规范 block 顺序；TU-03 允许的 provisional delta 可实时显示，完整 response 验证成功后立即在原位置提升/标记为 canonical 调用说明，而非 terminal outcome。工具批次收口后，下一 request 同时看到原文字、calls 和逐项 results。（推荐）
+- A：保留 provider 的规范 block 顺序；TU-03 允许的 provisional delta 可实时显示，完整 response 验证成功后追加 `canonical-accepted` receipt 引用原 provisional block/event，不在 append-only transcript 中原地修改。该文字是调用说明而非 terminal outcome；工具批次收口后，下一 request 同时看到原文字、calls 和逐项 results。（推荐）
 - B：canonical/XML 仍保存原 block 顺序，TU-03 允许的 provisional delta 也可能已经在原位置显示；本项只延迟“已收口/canonical”的 TUI promotion，直到该批全部 calls/results 配对。收口时只输出指向原 block 的稳定标记/引用，不重排、重放或假装先前没有显示过；模型视图不改变。
 - C：首版拒绝 mixed response，按 AL06-19 请求模型改成“纯 tool batch”或“纯文字/control”；纠错失败就 waiting-user。
 
 推荐 A。它最忠实于模型实际输出，也符合常见“我先检查……”后调用工具的体验。B 避免在工具最终失败前就把说明标成已收口，又不与 TU-03 的 provisional streaming 冲突；C 协议最窄但会增加兼容失败和额外 Token。A/B 必须等完整 response 和整批参数校验后才接受工具；C 整份拒绝且零调用被接受。任何路线都不能把文字当作 completed，也不能无声丢弃它。
 
-关联：AQ-099、AQ-254、AQ-256、AQ-324、MODEL-02、MODEL-05、LOOP-13、LOOP-14、CTX-07、TUI-03。
+关联：`AQ-102`、AQ-099、AQ-254、AQ-256、AQ-324、MODEL-02、MODEL-05、LOOP-13、LOOP-14、CTX-07、TUI-03。
 
 ### AL06-38：普通无 control 回复怎样收口
 
@@ -1508,6 +1641,48 @@ Esc 到达时从当前 focus×state 一次性生成候选：本地页面活动�
 
 关联：AQ-024、AQ-101、AQ-110、AQ-251、AQ-252、MODEL-06、PROD-03、LOOP-03、LOOP-10、LOOP-24。
 
+### AL06-48：完整 model-yield 之后怎样继续
+
+适用对象只是一份已经完整接收、通过协议校验、durable 保存且由 AL06-38 A，或 AL06-38 B 纠错耗尽后，形成的 canonical `model-yield`。provider 断流或 incomplete、length 截断、无效 response/control、恢复中的未完成请求分别继续归 AL06-13、AL06-32 与相应 retry/protocol owner；它们绝不能伪装成可继续的 model-yield。
+
+通俗场景：模型可能给出一段有用说明后主动停下来，却没有 `finish` 或 `ask-user`。用户既可能想让它“接着做”，也可能只是提出下一件普通事情。Runtime 不能靠下一句话的内容猜，也不能复活旧 turn 的配置、授权或剩余预算。
+
+- A：只有显式 `.response continue <response-id>` 能继续仍 unresolved 的 eligible yield；它使用**当前**有效配置/权限/工具/工作区快照和新分配的 turn budget 建立一个 new continuation turn，并以 `continues_response=<response-id>` 记录因果。普通 Enter 始终建立普通新 turn，同时追加旧 yield 已被该新输入 supersede 的事实。（推荐）
+- B：保留 A 的显式入口；若当前 Context 恰好只有一个 unresolved eligible yield，普通 Enter 也把本次已提交正文绑定到它，使用当前快照和新预算建立带 `continues_response` 的 new continuation turn。零个时按普通新 turn，多于一个时拒绝模糊绑定并要求 exact response ID。
+- C：model-yield 是 terminal yielded turn，不登记 unresolved continue target，也不注册 `.response continue`；下一条输入只能建立普通新 turn。
+
+推荐 A。对象化命令让“继续这份响应”与“开始下一轮”永不靠语义猜测，同时换配置、权限、工作区或预算后也只使用当前事实；B 对自然连续聊天更省输入，却增加唯一候选绑定与多候选错误；C 状态最小，但用户不能精确要求同一响应继续。所有路线都不恢复旧 turn、不沿用旧 snapshot、剩余 budget、approval 或 grant；新 continuation turn 有自己的 turn ID、budget ledger、request IDs 和 durable start barrier。response 已 superseded、Context generation stale、目标不是完整 canonical yield，或存在未配对 tool/unknown effect 时，continue 必须 typed reject，不能偷偷改投最近响应。
+
+每份 canonical model-yield 的 TUI receipt 都必须显式显示稳定 `response-id` 和 `unresolved=yes|no`，不能只写“模型暂停”让用户猜对象。A/B 下 eligible yield 初始为 `unresolved=yes`，并条件注册 `.response list`、`.response show <response-id>` 与 `.response continue <response-id>`；list/show 只读并显示 eligibility、superseded/stale 原因及当前可用动作。continue、普通新输入、显式放弃或 Context 失效收口后，追加 receipt 把同一 ID 标成 `unresolved=no`。C 下初始 receipt 直接显示 `unresolved=no`，这些 unresolved-response subcommand 不注册。
+
+关联：`AQ-421`、`LOOP-01`、`LOOP-10`、AL06-13、AL06-32、AL06-38、TU-32。
+
+### AL06-39：手动 compaction 的生命周期
+
+适用性：只有 AL06-11 A/B 会生成 CompactionRecord，本组才生效。AL06-11 C 下本组标为 `not-applicable`，parser/help/completion 不注册 `.compact`，也不保留 pending manual-compaction 空状态。A/B 都复用 AL06-11 已选 producer：AL06-11 A 发起无工具 model-summary request，AL06-11 B 运行版本化 deterministic extractive checkpoint，本组不得暗中换 producer。
+
+问题：用户在尚未达到自动阈值时显式请求 compaction，Runtime 怎样建立可取消、可恢复的生命周期？
+
+- A：只在 durable idle 接受 `.compact`；建立独立 `manual-compaction` maintenance turn 和 compaction-id，并把 AL06-42 所选 composite guard（A 的有效 typed 值或 B 的 manifest 固定值）复用为隔离的 maintenance ledger，不借用或重置任一 main turn ledger；usage 还按 AL06-09 A 进入 Context audit、按 B 进入 Context hard ledger，并始终受 Runtime hard cap。不接受 steer。busy 时返回 typed `ManualCompactionBusy` 而不暗中排队。cancel/exit 走统一收口；成功时原子发布新派生 model view，失败/取消/崩溃保留旧 view 和全部 canonical facts。（推荐）
+- B：`.compact` 建立一个 durable、可取消的 `compact-before-next-main` intent；它在下一个 main turn 启动前的安全 idle 边界执行，不建立独立 maintenance turn，并消耗该 turn 的 AL06-42 guard；usage 按 AL06-09 A/B 进入 Context audit/hard ledger，Runtime hard cap 仍始终生效。执行前 Context generation/closed-prefix 已变则使旧 intent stale 并要求用户重新提交，不让 queue 或新 main 静默重绑。
+- C：v0.1 不提供手动 compaction；删除 `.compact` 及相关 help/schema/state，只保留 AL06-11 所选 producer 的自动阈值路径。AL06-11 A 的 model-summary consent 服从 AL06-34；AL06-11 B 直接运行 deterministic extractive checkpoint，AL06-34 为 `not-applicable`。
+
+推荐 A。它与已经出现在 Context/CLI 候选中的“手动压缩”引用一致，同时给费用、进度、取消、恢复和 view publication 一个不与普通 main turn 混淆的身份。B 少一种 turn kind，但会让用户命令与真实费用相隔一段时间；C 最简单，但必须同步删掉现有候选文档中的 `.compact` 引用。三项都不删除 XML 事实、不分拆 open atomic group：AL06-11 A 的 model-summary producer 服从 AL06-30/31 的 Model 与失败规则；AL06-11 B 的 deterministic checkpoint 不适用 AL06-30/31，只服从版本化 extractor、同输入同 digest 和完整性错误 fail-stop；AL06-39 C 只删除手动入口，不改变 A/B 已选自动 producer。
+
+关联：`COMP-09`、`COMP-11`、`CLI-11`、AL06-09、AL06-11、AL06-30、AL06-31、AL06-35、AL06-42、TU-32、CTX-07、RUNTIME-02、`AQ-379`。
+
+### AL06-47：压缩摘要的查看与纠正入口
+
+条件：只有 AL06-11 A/B 产生 CompactionRecord 时生效；C 下 `not-applicable`，不注册 summary surface。完整 canonical facts 仍可用普通 history/details 语义动作查看；chat 中的实际 root 只由 TU-32 A/B 投影，本组不重开“旧事件可否改写”。
+
+- A：提供 `.summary show <compaction-id>` 与 `.summary correct <id> <text>`；correct 追加绑定 source record/range/digest 的 canonical user correction，在当前 request/compaction 已收口后的**下一次 model-view publication** 才作为 must-preserve overlay 生效。若 AL06-39 允许手动 `.compact`，用户可另行重建；否则等下一次正常 compaction 生成 superseding record。（推荐）
+- B：提供 summary show，但没有 typed correct；用户只能用普通 main/steer 指令指出错误，作为后续 canonical user fact，Runtime 不自动建立结构化 correction link。
+- C：不提供 summary-specific root；用户只能通过通用 details 语义动作或 XML reader 看 CompactionRecord，也没有专用纠正动作。chat 中该语义动作的实际拼写只投影 TU-32：A 为 `.details <event-id>`，B 为 `.show <target>`。
+
+推荐 A。用户能准确指出“哪份摘要哪一点错了”，而不破坏 append-only 历史；B 命令面更小但纠正关系靠语义，C 最简单却最难发现压缩误差。`show` 可在 busy 时读取已经发布的稳定 record；`correct` 只在 durable idle 接受，busy 时 typed reject，不排队到含义已经变化的未来 view。三项都保存旧 summary/checkpoint、source range/digest、producer/model/extractor version 和 view manifest；correction/rebuild 失败保持旧 active view并明确 warning，不能删除原事实、暗中改旧摘要或把 correction 当成历史原文。新 compaction 真正吸收 correction 后，只在派生 view manifest 中把该 correction 标为 superseded/consumed，correction 事实本身永不删除；F4-06 选择了 snapshot isolation 时，`show/correct` 都绑定稳定 generation，过期提交返回 stale。若 correction 本身大到触发 AL06-16 的 oversized atomic-group 规则，就按该组失败/换 Model/缩短入口处理，不能截断后假装完整采用。
+
+关联：`AQ-243`、`COMP-09`、`CTX-07`、AL06-11、AL06-31、AL06-39、F4-06、TU-32、TP-020。
+
 ## 推荐的整包组合
 
 若负责人接受推荐基线，可以逐项回复下面的完整模板：
@@ -1520,13 +1695,18 @@ AL06-05 A
 AL06-06 A
 AL06-07 A
 AL06-08 A
+AL06-49 A
+AL06-51 C
 AL06-09 A
+AL06-42 A
+AL06-43 A
 AL06-10 A
 AL06-11 A
 AL06-12 A
 AL06-13 A
 AL06-14 A
 AL06-15 A
+AL06-46 B
 AL06-16 A
 AL06-17 A
 AL06-18 A
@@ -1536,9 +1716,14 @@ AL06-22 A
 AL06-23 A
 AL06-24 A
 AL06-25 A
+AL06-44 A
+AL06-45 A
 AL06-26 A
+AL06-40 A
+AL06-41 A
 AL06-27 A
 AL06-28 A
+AL06-50 B
 AL06-29 A
 AL06-30 A
 AL06-31 A
@@ -1549,6 +1734,9 @@ AL06-35 A
 AL06-36 A
 AL06-37 A
 AL06-38 A
+AL06-48 A
+AL06-39 A
+AL06-47 A
 ~~~
 
 也可以只回复差异，例如：
@@ -1561,10 +1749,12 @@ AL06-24 C，不允许人工覆盖 reviewer；
 AL06-32 C，只有没有外部 effect 的旧 turn 才允许 same-turn resume；
 AL06-34 B，每次压缩先确认；
 AL06-35 C，多目标时打开取消目标列表；
-AL06-38 B，缺 control 时先纠错一次。
+AL06-38 B，缺 control 时先纠错一次；
+AL06-48 B，只有一个 unresolved yield 时普通 Enter 也可显式绑定；
+AL06-39 C，首版不注册手动 `.compact`。
 ~~~
 
-没有明确回复的编号继续保持 unanswered。回复“按最合适方案”“看起来没问题”或只讨论其中一句，都不会自动把 36 组推荐、默认次数或 schema 拼写升级为决定。
+没有明确回复的编号继续保持 unanswered。回复“按最合适方案”“看起来没问题”或只讨论其中一句，都不会自动把 49 组推荐、默认次数或 schema 拼写升级为决定。
 
 ## 本包确认后的归档与实现前证据
 
@@ -1574,9 +1764,10 @@ AL06-38 B，缺 control 时先纠错一次。
 - subsystems/09-agent-session.md：唯一状态机、typed control、outcome、busy input 和预算。
 - subsystems/08-permission-and-safety.md：action review、人工 override 和 approval binding。
 - subsystems/10-context-storage.md：ID、canonical event、恢复收口和 model-view manifest。
-- subsystems/12-context-compaction.md：结构化 schema、触发、无收益与 correction。
+- subsystems/12-context-compaction.md：结构化 schema、自动/手动触发、maintenance turn、无收益与 correction。
 - subsystems/22-application-runtime-and-concurrency.md：main/side lane、事件泵、取消和背压。
 - CONFIG-SCHEMA-CANDIDATE.md：只把确认的预算/round/stuck 字段转为正式 schema。
+- TU-32/CLI registry：只在 AL06-39 A/B 下注册 `.compact`，只在 AL06-48 A/B 下注册 `.response list|show|continue ...`，并从同一份 command×state 契约生成 help、parser 与 typed busy/stale 结果。
 
 进入编码计划前至少需要以下可执行证据：
 
@@ -1602,3 +1793,6 @@ AL06-38 B，缺 control 时先纠错一次。
 20. 明确验证命令在 auto/ask/report-unverified 三种路线下的 receipt 和“没有证据不宣称通过”测试。
 21. suspend/resume 注入 monotonic/wall-clock 跳变、过期 socket/helper 和 workspace/config 变化，证明不重置预算、不复用未验证句柄。
 22. PJ-11 A 下证明 plan 字段/control/命令完全不注册；B/C 下用 plan-only tool schema、PlanArtifact 全 binding stale matrix、单次 `.execute`、不继承授权、cancel/crash/budget 和 plan-ready/read-only finish terminal golden trace 证明分阶段契约。
+23. 旧 view/turn 之后到达的 queue/steer/side/语义 command 以 expected Context generation/turn observation 返回 stale conflict，不会落到新 Context/turn。
+24. AL06-39 A 的 idle/busy、cancel、crash、success/failure view publication trace，B 的 pending/stale/cancel trace，以及 C 的 parser/help/schema 零 `.compact` 注册证据。
+25. AL06-48 A 的显式对象化 continue/supersede、B 的零/一/多候选绑定、C 的零 continue 注册，以及三条路线都只接收完整 canonical yield、建立新 turn/current snapshot/new budget 的恢复 trace。

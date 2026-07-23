@@ -6,7 +6,7 @@
 
 上下文 XML 的内容由 10 号存储系统负责，但“用户给出一个名称或 hash 后，到底连接哪个 XML”是另一类问题。它同时涉及路径映射、实时目录扫描、搜索范围、歧义、重命名后的身份变化、CLI/TUI 一致性和旧系统性能，不能散落在各条命令里分别实现。
 
-本系统建立一个统一的上下文目录与定位服务，供 `--continue`、`.context`、重命名、删除、列表、浏览器和后续带上下文选择器的功能共同使用。
+本系统建立一个统一的上下文目录与定位服务，供 `continue`、context-select、重命名、删除、列表、浏览器和后续带上下文选择器的 semantic actions 共同使用；CLI/dot-command 的精确拼写由 TU-18/TU-32 投影。
 
 ## 命名说明
 
@@ -21,15 +21,15 @@
 - 根据当前逻辑路径实时计算固定 16 位 hash。
 - 以统一规则解析名称/hash 选择器，并报告唯一命中、歧义、碰撞、不完整扫描或未找到。
 - 为上下文浏览器提供目录树、搜索、排序、选择和刷新语义。
-- 为重命名与删除提供经过重新校验的目标，但把 XML 内容更新交给 10 号系统。
-- 向 `.status` 提供当前绑定路径的实时 hash 计算，不通过全局搜索反查当前会话。
+- 为重命名、rebind 与删除提供经过重新校验的目标，但把 XML metadata/内容更新交给 10 号系统。
+- 向 current-context-status semantic action 提供当前绑定路径的实时 hash 计算，不通过全局搜索反查当前会话。
 
 ## 边界
 
 - 不保存或修改消息主体；XML schema、提交点和恢复由 10 号系统负责。
 - 不决定上下文压缩内容；由 12 号系统负责。
-- 不决定 CLI 参数拼写或终端绘制；13、14 号系统只能调用这里的语义动作。
-- 不因找到上下文就自行 `chdir`；工作目录跳转及 `AutoJumpToDir` 的最终语义由会话/CLI 契约确认。
+- 不决定 CLI 参数拼写或终端绘制；CLI、TUI、plain/enhanced renderer 都只能调用这里同一份 semantic action，不能复制一套目录、选择或 mutation 规则。这个内部 action parity 不构成公共 headless/IPC/RPC 控制面。
+- 不因名称/hash 搜索命中就自行 `chdir`。每个 Context 恰好一个 root；显式选中后只从当前 XML 在 `CONTEXT` 镜像树中的父目录解码该 root。XML 内历史 cwd/root 值不参与求值。解码失败、目录缺失/不可进入或身份不匹配时交给 `context-repl` self-fix，不提供 `AutoJumpToDir`、`ResumeDirectory` 或相似目录猜测。
 - 自动命名可以调用模型，但枚举、hash、定位、重命名和删除在无网络时必须可用。
 - 不建立永久数据库、集中索引文件或文件 watcher 作为正确性前提。
 
@@ -70,7 +70,7 @@ hash 输入：   /C/Program Files/我的任务.xml
 
 ### 动态地址的统一使用
 
-- `yaca --continue <selector>` 等所有接受上下文选择器的连接入口必须使用同一个解析器。
+- `continue(selector)` 等所有接受上下文选择器的 semantic actions 必须使用同一个解析器。
 - 重命名、删除等接受选择器的命令也使用相同搜索范围和消歧规则，不能各自实现一份近似逻辑。
 - `.status` 根据当前运行时绑定的逻辑路径直接计算当前 hash，不通过全树搜索寻找自己。
 - Resolver 已确认距离优先，同一搜索环内精确名称优先于 hash；计算层单遍同步匹配，语义层完成当前环的必要扫描后裁决。
@@ -82,7 +82,7 @@ hash 输入：   /C/Program Files/我的任务.xml
 | 物理路径 | 操作系统上实际 XML 文件路径 | 否 |
 | 逻辑路径 | 从 `CONTEXT` 根开始的规范 `/.../名称.xml` | 当前地址，不保证不变 |
 | 当前 hash | 由当前逻辑路径实时计算的 16 位短地址 | 否；路径变化即变化 |
-| 选择器 | 用户交给 `--continue`、`.context` 等入口的名称或 16 位 hash 文本 | 否 |
+| 选择器 | 用户交给 continue/context-select 等 semantic actions 的名称或 16 位 hash 文本 | 否 |
 | 起点 | 发起解析时的当前工作目录及其镜像目录 | 否 |
 | 搜索环 | 相对起点由近到远、互不重复的一组新增候选 | 否 |
 | 目录快照 | 一次操作内按范围/页惰性取得的可丢弃有界视图 | 否，不落盘 |
@@ -117,7 +117,7 @@ Resolver 结果/浏览器选中项 ------> ContextTargetVerifier
 
 ### `LogicalPathCodec`
 
-- 在关联工作路径、镜像物理路径和逻辑路径之间转换。
+- 在唯一 workspace root、镜像物理父目录和逻辑路径之间双向转换；当前 root 只由实际父目录反向解码。
 - 生成唯一且严格的 hash 输入。
 - 拒绝 `..`、绝对路径注入、非法分隔符和任何逃出 `CONTEXT` 根的映射。
 - 只处理路径语义，不扫描目录、不读取完整 XML、不计算业务状态。
@@ -156,7 +156,7 @@ Resolver 结果/浏览器选中项 ------> ContextTargetVerifier
 
 ### `CurrentContextHandle`
 
-- 保存运行中会话当前绑定的逻辑路径、物理路径和有效/失效状态。
+- 保存运行中会话当前绑定的逻辑路径、物理路径、由父目录解码的唯一 root 快照和有效/失效状态。
 - 它不是永久 ID，也不用于全局搜索。
 - yaca 重命名成功后更新句柄；失败时仍保留旧路径。
 - `.status` 每次从句柄的当前逻辑路径计算 hash；文件已丢失时还应同时显示失效状态。
@@ -171,20 +171,21 @@ Resolver 结果/浏览器选中项 ------> ContextTargetVerifier
 ### `ContextOpenService`
 
 - 消费已经验证的候选并调用 10 号 `ContextStore` 只读加载/恢复会话。
-- 负责格式不兼容、工作目录不可用、活动写锁等打开结果，不拥有 rename/delete 语义。
-- 浏览器“选择并连接”和 `--continue` 最终都进入这里。
+- 负责格式不兼容、镜像父目录不可解码为可用单一 root、活动写锁等打开结果，不拥有 rename/rebind/delete 语义。
+- 浏览器“选择并连接”和 `continue` action 最终都进入这里。
 
 ### `ContextMutationService`
 
 - 消费 Resolver 或浏览器快照给出的候选描述，不再凭字符串猜测目标。
-- 在重命名或删除前经 `ContextTargetVerifier` 复核，再取得修改锁/lease。
-- 调用 10 号 `ContextStore` 完成 XML 关闭、保存和路径更新。
-- 重命名、删除成功后废弃相关快照，并通知活动句柄更新或失效。
+- 在重命名、rebind 或删除前经 `ContextTargetVerifier` 复核，再取得修改锁/lease。
+- 目标已有活动 writer lease 时，任何外部管理入口的 rename、rebind、delete 或 `AutoRenameDisabled` 修改都返回 `LockConflict`；context-repl 只能显示无需解析正文即可证明的 busy/PID 元数据并等待用户稍后重试，不能用确认或锁龄强夺。
+- 调用 10 号 `ContextStore` 完成 XML metadata 提交与 no-replace、可恢复路径更新；rebind 的目标必须是另一个可解码的 workspace 镜像目录。
+- 重命名、rebind、删除成功后废弃相关快照，并通知活动句柄更新或失效。
 
 ### `ContextBrowserController`
 
 - 保存当前目录节点、展开状态、搜索条件、排序、分页/选择和待确认动作。
-- 接收 renderer 产生的 `OpenNode`、`SelectContext`、`RenameContext`、`DeleteContext`、`Refresh` 等语义动作。
+- 接收 renderer 产生的 `OpenNode`、`SelectContext`、`RenameContext`、`RebindContext`、`SetAutoRenameDisabled`、`DeleteContext`、`Refresh` 等语义动作。`SetAutoRenameDisabled` 只接受 typed boolean，不引入通用 flags bag。
 - 输出新的可渲染视图状态、确认请求或调用目录/打开/修改应用服务的意图。
 - 不知道 ANSI、颜色、方向键或鼠标，也不直接操作 XML。
 - plain 与 enhanced renderer 必须共享它，避免两个界面产生两套业务规则。
@@ -197,6 +198,9 @@ Resolver 结果/浏览器选中项 ------> ContextTargetVerifier
 physical_path       实际文件路径
 logical_path        规范逻辑路径
 display_name        去掉 .xml 的名称
+canonical_name      XML header 的 canonical Name
+created_at          XML header 的 canonical CreatedAt
+updated_at          XML header 的 canonical UpdatedAt
 scope_rank          第几个搜索环首次包含该条目
 hash16              按需计算，可暂时为空
 observed_stat       大小、修改时间及平台可提供的文件标识
@@ -207,11 +211,11 @@ header_state        valid / corrupt / unavailable / changed
 
 ## 哪些入口怎样使用目录服务
 
-| 入口类型 | 例子 | 行为 |
+| 入口类型 | Semantic action 例子（不是 CLI 拼写） | 行为 |
 | --- | --- | --- |
-| 精确选择器 | `--continue X`、`.context X`、`--rename-context X ...`、`--delete-context X` | 调用统一 Resolver |
-| 当前会话操作 | `.status`、`.archive`、`.index`、`.delete`、`.compact` | 使用 CurrentContextHandle，不搜索；若以后增加 selector 参数才调用 Resolver |
-| 列表枚举 | `--dir-context`、`--global-context`、裸 `.context`、`--manage-context` | 取得 Catalog 快照，不把列表每一项再解析一次 |
+| 精确选择器 | `continue(X)`、`context-select(X)`、`context-rename(X, ...)`、`context-delete(X)` | 调用统一 Resolver |
+| 当前会话操作 | `current-context-status`、`current-context-mutation`，以及仅在上游启用时存在的 `manual-compaction` | 使用 CurrentContextHandle，不搜索；chat root 只由 TU-32 投影；若以后增加 selector 参数才调用 Resolver |
+| 列表枚举 | `context-list(scope)`、`context-repl` | 取得 Catalog 快照，不把列表每一项再解析一次 |
 | 浏览器手工精确输入 | 输入完整名称或 16 位 hash | 调用统一 Resolver |
 | 浏览器选中一行 | `select 7` 或 enhanced 中确认 | 携带该快照条目的直接定位信息，TargetVerifier 复核后由 OpenService 连接，不按名称重新搜索 |
 | 浏览器普通搜索 | 名称/逻辑路径的前缀或包含搜索 | 过滤/排序快照，只展示结果，不自动连接 |
@@ -334,7 +338,7 @@ Resolver 结束后还有三组不同结果，不能继续塞回 `ResolveResult`�
 | --- | --- | --- |
 | `ContextTargetVerifier` | `Verified` / `TargetChanged` / `TargetUnavailable` | 扫描后目标是否仍是同一可用文件 |
 | `ContextOpenService` | `Opened` / `OpenConflict` / `Incompatible` / `StorageFailure` | 是否成功加载/恢复会话 |
-| `ContextMutationService` | `Applied` / `DestinationExists` / `LockConflict` / `StorageFailure` / `Cancelled` | rename/delete 是否执行及失败原因 |
+| `ContextMutationService` | `Applied` / `DestinationExists` / `LockConflict` / `StorageFailure` / `Cancelled` | rename/rebind/delete/metadata 修改是否执行及失败原因 |
 
 这样可以明确区分“搜索时没找到”“找到后被外部替换”“打开格式不兼容”和“修改时锁冲突”。最终错误 ID、重试属性和用户文字由 15 号统一错误模型确认。
 
@@ -355,7 +359,7 @@ Resolver 结束后还有三组不同结果，不能继续塞回 `ResolveResult`�
 - 展开节点时惰性扫描该节点；折叠、分页、排序和普通搜索可以复用未过期页，避免每次按键访问磁盘。
 - 全局搜索流式扫描，只保留有上限的结果页；后续页使用稳定排序游标重新扫描或继续受控扫描，不能把全部命中无限保存在内存。
 - `refresh` 显式重扫。
-- `select`、`rename` 和 `delete` 在确认前重新校验选中项。
+- `select`、`rename`、`rebind`、命名标记修改和 `delete` 在确认前重新校验选中项。
 - 修改成功后立即废弃旧快照并刷新受影响范围。
 - 浏览器长时间停留时可显示“目录可能已变化”；不依赖 inotify、USN Journal 或 watcher 才能正确工作。
 
@@ -372,18 +376,32 @@ Resolver 结束后还有三组不同结果，不能继续塞回 `ResolveResult`�
 - 按精确名称、名称前缀、名称包含或逻辑路径包含搜索。
 - 输入 16 位 hash 做精确定位。
 - 重命名上下文。
+- 查看当前 root 与专用 `AutoRenameDisabled` 状态，添加/取消该标记；取消不立即发起命名。
+- 通过 self-fix 把 Context rebind 到另一个明确 workspace 的镜像目录；这是移动 XML 的独立动作，不是增加第二 root。
 - 删除上下文；软删除还是永久删除尚未确认。
 - 手动刷新并查看扫描警告。
 - 取消操作并返回原会话，不产生副作用。
 
 ### 搜索与排序
 
-当前建议首版只做确定性的元数据搜索，不扫描完整消息和工具输出：
+首版只做确定性的元数据搜索，不扫描完整消息和工具输出。普通 Context 列表由两个 INI 字段控制：
+
+```ini
+[Context]
+ListSortBy=updated
+ListSortDirection=descending
+```
+
+`ListSortBy` 只接受 `created|updated|name`，分别读取 XML header 中 canonical `CreatedAt`、`UpdatedAt`、`Name`；`CreatedAt` 是初次 durable 创建时间，`UpdatedAt` 是最后一次成功发布的 durable XML mutation 时间，inspect/失败尝试不推进。`ListSortDirection` 只接受 `ascending|descending`，默认是 `updated + descending`，即最近更新在前。不得使用文件系统 ctime/mtime、目录枚举顺序或当前 locale/code page 代替这些规范值。主键相同时始终用 canonical `LogicalPath` 的稳定升序作为最终 tie-break；损坏/不可读、无法取得规范排序键的候选必须进入显式状态分组并按 `LogicalPath` 稳定展示，不能伪造时间。
+
+排序只改变列表、浏览器页和搜索同一相关性等级内的展示顺序，不改变 Resolver 的距离优先、同环名称优先于 hash、歧义和碰撞裁决。目录节点仍使用版本化的规范名称/路径稳定顺序；搜索先按匹配类型和范围形成相关性等级，再在同等级应用上述 Context 排序。
+
+完整展示规则为：
 
 1. 目录在前，上下文在后。
-2. 普通目录列表按规范名称/路径稳定排序，不依赖文件系统枚举顺序。
+2. 普通目录列表按规范名称/路径稳定排序，不依赖文件系统枚举顺序；Context 条目使用 `ListSortBy`/`ListSortDirection`。
 3. 搜索结果依次为精确名称、名称前缀、名称包含、逻辑路径包含。
-4. 同等级再按搜索范围距离和规范逻辑路径排序。
+4. 同等级先按搜索范围距离，再按配置的 Context 排序键，最后按规范逻辑路径稳定裁决。
 5. hash 搜索只接受精确 16 位 token，不做 hash 前缀。
 6. 首版不因模糊拼写结果自动连接；模糊搜索是否作为显示辅助以后决定。
 
@@ -434,19 +452,35 @@ quit
 -> 更新句柄/废弃快照/刷新
 ```
 
+### 初始名称与周期命名
+
+新 Context 第一次落盘时使用 ASCII basename `Untitled Conversation [XXXX]`，其中 `XXXX` 为四位大写十六进制随机短标签。它只负责产生简洁的碰撞候选：平台层取得安全随机 bytes，编码后直接尝试 `publish_new_no_replace`；碰撞就在固定 hard cap 内重新生成，不能用 `math.random`、时间/PID 或“先 exists 后普通 rename”作为正确性保证。随机源失败或重试耗尽时 Context 创建失败，绝不覆盖旧 XML。
+
+周期自动命名成功时复用下面的 rename transaction；因此逻辑路径、当前 16 位 hash、活动句柄和 Catalog 快照一起改变，旧 hash 立即失效。后台请求失败、取消、进程退出或迟到结果不改变名称。只有 `AutoNameEveryMainTurns>0`、已经 durable 收口的 main-turn 水位达到下一周期，且当前 XML metadata 的 `AutoRenameDisabled` 缺失/`false` 时才具备 admission 资格；`true` 直接跳过。把 marker 从 `true` 取消时，以取消时的 durable 水位建立新 baseline：不立即命名、不补发 marker 生效期间错过的请求，也不把旧累计 turn 带入新周期。添加 marker 或手工 rename 将其置为 `true` 时，已经在途的命名 request 取消/逻辑失效；迟到结果不得再进入 rename transaction。
+
+四位 tag 不单独作为 XML identity 或 Resolver key。Context 的唯一动态地址仍是完整逻辑 XML 路径及其实时 16 位 hash。
+
 ### 重命名
 
 首版候选是只改变同一镜像目录下的 basename，不同时移动关联工作目录：
 
 ```text
-重新校验 -> 取得修改锁 -> move_no_replace
--> 更新活动句柄 -> 从新逻辑路径计算新 hash -> 刷新
+重新校验 -> 取得修改锁
+-> 构建并验证完整 XML generation：Name=<new basename>,
+   UpdatedAt=<commit time>, CreatedAt=<unchanged>, marker=<manual/auto rule>
+-> publish/move_no_replace -> 更新活动句柄
+-> 从新逻辑路径计算新 hash -> 刷新
 ```
 
 - `move_no_replace` 必须在非协作程序竞态下也不覆盖已有目标；“检查后普通 rename”不满足契约。若平台只能用多步恢复协议，崩溃后必须能识别并收口双路径状态。
 - 成功后旧 hash 立即失效，新 hash 立即出现在 `.status` 和浏览器中。
 - 失败时文件仍在旧路径，运行时句柄和旧 hash 不提前变化。
 - 如果操作开始前目标已经被替换，返回冲突并要求刷新；不得用原名称重新解析后误改另一个文件。
+- 手工 rename 成功的默认事务把 canonical `Name`、`UpdatedAt` 与 `AutoRenameDisabled=true` 一起发布；自动 rename 同样原子发布 `Name`、`UpdatedAt` 与新路径，但保持 marker 缺失/`false`，绝不创建禁用标记。两者都保持 `CreatedAt` 不变；路径移动或任一 metadata 提交失败时全部保持旧值，不得对外声称完成。
+
+### Rebind
+
+rebind 不在 XML 内修改一个 root/workdir 字段，而是由 context-repl 在同一可恢复管理事务中追加 rebind 历史事件、原子推进 `UpdatedAt`，并把完整 XML generation 发布到目标 workspace 对应的镜像父目录；`CreatedAt` 不变。它复用 TargetVerifier、操作锁、no-replace 与可恢复发布协议；目标根必须可由同一 LogicalPathCodec 双向无损转换。只有事件、metadata 与目标路径全部成功发布，活动句柄、逻辑路径和 hash 才一起更新，旧 hash 失效；失败/崩溃/inspect 不推进 `UpdatedAt`，并按恢复协议收口为唯一可证明位置。XML 中的 rebind 记录和历史工具 cwd 只供审计，不反向覆盖当前父目录派生 root。
 
 ### 删除
 
@@ -458,9 +492,16 @@ quit
 
 无论最终选择哪种方式，都必须显示完整目标、明确确认、最终复核，并保证损坏或过期快照不会指向另一个文件。当前推荐软删除，永久清除作为另一项明确操作，但这不是已确认决定。
 
+## Self-Test Stage 1 的 Catalog 检查
+
+Stage 1 不调用 Model。它使用与正常 Resolver/Browser 相同的 `LogicalPathCodec`、scanner 与发行 hard cap，至少检查：镜像路径能否无损解码为唯一可进入的 workspace root；XML header 与 basename、canonical `Name/CreatedAt/UpdatedAt` 是否一致且可解析；临时/恢复文件是否被正确排除；目录不可读、损坏候选、失效 root 和扫描中变化是否形成 typed partial result。
+
+Stage 1 还必须报告 Catalog 数量、实际扫描范围、hash 计算数、耗时、是否触及页/扫描 hard cap，以及明显超过最低平台预算的目录或 Context。遇到 `ScanIncomplete`/`ScanLimit` 时只能报告“检查不完整”和未覆盖范围，不能声称整个 Catalog 健康；self-test 只诊断并给出 context-repl self-fix 入口，不在扫描时重命名、rebind、删除或修改 marker。
+
 ## 旧 Windows/Linux 约束
 
 - Windows 枚举与路径访问需要能正确处理 XP 上的 Unicode 路径，不能依赖当前 ANSI 代码页碰运气。
+- 程序生成的初始 basename、协议键和 UI chrome 使用 ASCII；用户手工名称、路径和内容仍是 UTF-8。XP launcher/console/filesystem 使用宽字符 API，控制台无法显示时只做 ASCII escape/编号展示，不能把展示串送回路径、Resolver、审批或 hash。
 - 不依赖 PowerShell、现代搜索 API、USN Journal、inotify、SQLite 或守护进程。
 - Win32 x86 中使用流式目录栈和小型命中集合，禁止无界加载全树或完整 XML。
 - 默认不跟随 symlink、junction 或 reparse point 是当前安全建议，以避免循环和逃出根目录；最终规则待路径问题确认。
@@ -492,6 +533,10 @@ quit
 - 扫描与确认之间替换、移动或删除文件时安全失败。
 - 不可读目录、损坏 XML、临时文件、回收区和链接循环。
 - 浏览器选择、目录导航、搜索、刷新、取消、重命名和删除确认。
+- `created|updated|name` 与正序/倒序的六种组合只读取 XML canonical metadata；相同主键始终以 `LogicalPath` 稳定收口，打乱目录枚举和文件系统时间不改变结果。
+- 活动 writer 存在时，TUI 与 CLI/context-repl 的 rename、rebind、delete、marker 修改都得到相同 `LockConflict`，释放后同一 semantic action 才可成功。
+- marker 取消以当前 durable 水位建立新 baseline；没有立即请求、历史追赶或重启补跑。
+- Stage 1 在缺失 root、大量 Context、慢目录、hash 预算和扫描 hard cap 下如实报告 partial/slow，不越界修复。
 - 有界页/全局搜索在巨大目录树下不保存全部候选，翻页结果仍按稳定游标确定。
 - 原生快捷键路径与逐行文本后备对同一动作脚本得到相同控制器结果。
 - Windows XP x86 与 CentOS 7 上验证 CJK、大小写、路径边界、no-replace 移动和崩溃恢复差异。

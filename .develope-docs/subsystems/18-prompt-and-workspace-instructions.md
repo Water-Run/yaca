@@ -16,6 +16,8 @@ Prompt 不是若干字符串的随意拼接。内置规则、当前用户输入�
 - 明确区分“可影响行为的指令”和“只能作为数据引用的不可信内容”。
 - 向上下文系统提供足以恢复、审计和解释本 turn 实际规则的快照信息。
 - 在指令缺失、变化、冲突、超限或无法读取时产生结构化诊断，而不是静默改变 Prompt。
+- 按 PP-03 × PP-11 的最终组合装配 `SystemPrompt`、`ContextPrompt`、adopted project rules 与条件 `Model.CustomPrompt`；Model 配置层不能自行发明另一套优先级。
+- 将当前 Permission 的候选 `SystemPrompt` 作为来源独立的有界组件投影给 `main`；其 PP-03 精确排位未正式决定，不能在本系统内暗定。
 
 ## 边界
 
@@ -56,6 +58,8 @@ Prompt 不是若干字符串的随意拼接。内置规则、当前用户输入�
 
 第 6 类即使包含“忽略上面的规则”等文字，也只能作为数据送入模型。正式指令源也不是完全可信：项目/目录指令可以描述项目工作流，却不能覆盖运行时安全边界或冒充用户授权。
 
+当前 Permission 还可以提供一个独立的 `permission-system-prompt` 候选组件。它来自完整 Permission logical name 与当前 config generation，是 `user-content`，不是 capability 描述本身；名称、`Description` 和该文本都不能改变真实能力。Runtime 生成的 effective capability/tool manifest 与这段文本分离，并始终由 08 号系统强制。
+
 ### Instruction bundle
 
 候选 bundle 中每个条目至少需要以下语义字段，具体编码以后再定：
@@ -70,6 +74,22 @@ Prompt 不是若干字符串的随意拼接。内置规则、当前用户输入�
 
 bundle 是 AgentLoop 的只读输入，不是全局可变单例。相同工作区身份、配置快照和文件内容应产生相同的顺序与摘要。
 
+### `Model.CustomPrompt` 的条件位置
+
+`Model.CustomPrompt` 是否存在只由 PP-11 决定，不能因为旧 INI 有该字段就默认把它加入 bundle：
+
+- PP-11 A 删除这一层。迁移到 SystemPrompt/指定 ContextPrompt 后，它只具有目标层权威，不保留隐藏 Model scope；迁移前后的历史 request 各自保存准确 component snapshot。
+- PP-11 B 保留 Model-specific 用户默认。PP-03 A/B 下它位于 adopted project rules 与 SystemPrompt 之间；PP-03 C 下它加入持久默认冲突集合，不允许 assembler 静默挑选。
+- PP-11 C 只形成低于 SystemPrompt 和其他持久用户层的 compatibility hint。它不能更改 role、serializer、tool/control schema、purpose 白名单或权限。
+
+Model 切换和旧字段迁移都必须先形成 transition，再从下一 turn 使用新 bundle。多个旧 Model Prompt 不得由本系统猜目标或简单串接；配置管理事务负责逐来源、逐目标确认、先发布目标再清旧源，本系统只消费已提交结果。
+
+### `Permission.SystemPrompt` 的候选位置
+
+当前最小路线只让它进入 `main` purpose，不让 side、action/termination review、compaction 或 self-test 因此取得另一份自由文本 policy。每个采用它的 request 保存完整 Permission logical name、config/profile generation、capability snapshot 引用、实际 Prompt component 原文/digest 与最终 bundle 顺序。
+
+它在当前用户指令、`ContextPrompt`、adopted project rules 和全局 `SystemPrompt` 之间的精确位置仍由 PP-03 正式决定。本文件只冻结两条安全边界：它永远低于不可覆盖 Runtime invariants；无论排位如何都不能授予工具、降低确认、扩大 workspace 或改变 purpose 白名单。外来 XML 中的 component 只解释历史 request，不能自动激活或写回本机 Permission 定义。
+
 ## 候选硬不变量
 
 1. 低优先级内容不能覆盖不可变运行规则、安全策略或用户的当前明确限制。
@@ -80,6 +100,8 @@ bundle 是 AgentLoop 的只读输入，不是全局可变单例。相同工作�
 6. 发现顺序与合并结果必须可解释、可测试，不依赖文件系统未定义的枚举顺序。
 7. 显式指定但无法读取的指令源不得静默跳过；自动发现源被跳过也必须留下用户可见诊断。
 8. 上下文中的快照承诺必须足以解释历史行为，但不能绕过 `CTX-06` 的秘密与敏感数据规则。
+9. `Autonomy` 若由 TS-18 B 生成，只能调整 PP-06 已允许消息块内的解释粒度；它不能改变本系统输出哪些组件、AgentLoop 何时发消息或是否执行额外验证。
+10. Permission 名称、`Description` 与 `SystemPrompt` 都不是授权输入；Prompt 与 capability snapshot 必须保持独立来源和独立 digest。
 
 ## 总体方案比较
 
@@ -134,10 +156,15 @@ v0.1 只读取一个用户级来源和一个项目根来源，不支持嵌套覆
 - 文本入口应有明确编码与换行规范。无法可靠解码时应诊断，不使用平台本地代码页默默改变语义。
 - 总字节、单来源字节、来源数量和装配后 token 都需要独立上限；超限策略不能删除高优先级安全规则。
 - 旧终端只需展示来源清单、警告和摘要，不要求依赖全屏树形浏览。
+- 程序生成的 component kind、source tag、role 和字段名固定为 ASCII；Prompt、路径与用户正文仍按严格 UTF-8 保存。Windows 控制台或字体无法显示字符时可以使用 ASCII escape 投影，但该投影不能回流成 Prompt 原文、digest、路径或身份。
+
+## 终端-only 零表面
+
+v0.1 不生成 Web、图像/截图、音频/麦克风、公共 headless/remote controller、transcription 或 TTS 的 Prompt component、Model purpose、工具说明或 XML component kind。外来 XML 若携带这类历史数据，只能按通用 unknown/history 规则保存或报告 compatibility gap，不能使当前 Runtime 出现对应 purpose。设计归档和负向测试可以写出被排除能力的名称，但活动 registry、help 和发行资源必须为零。
 
 ## 建议讨论顺序
 
-1. 指令信任层级：哪些来源可以影响行为，哪些安全边界永远不可覆盖。
+1. 指令信任层级：哪些来源可以影响行为，以及 `Permission.SystemPrompt` 在 PP-03 中的精确位置；安全边界永远不可覆盖。
 2. 工作区根身份与显式/自动发现的关系。
 3. 用户级、项目根和目录级来源是否都进入 v0.1，以及它们的作用域。
 4. 固定优先级、同级顺序与冲突显示。

@@ -1,8 +1,8 @@
 # 全产品设计决策清单
 
-更新日期：2026-07-18
+更新日期：2026-07-22
 
-状态：第四轮跨系统接缝审阅完成，共 354 个独立设计 ID，待按依赖确认
+状态：第八轮全系统反向闭环审阅完成，共 384 个独立设计 ID，待按依赖确认
 
 ## 用途
 
@@ -47,12 +47,17 @@
 - **PROD-07 离线承诺**：除模型调用外，哪些功能必须完全离线可用；启动时是否允许隐式联网检查？
 - **PROD-08 数据分类矩阵**：对秘密、用户输入、文件、工具输出、模型响应、权限记录和诊断分别决定“可发给模型、可持久化、可记录日志、可导出、可显示”的默认值与用户覆盖边界；各环节在 `NET-03`、`CFG-04`、`SAFE-09`、`CTX-06`、`DIAG-03` 落实。
 - **PROD-10 性能目标**：旧机器上的启动时间、空闲内存、单上下文大小和交互延迟需要什么上限？
-- **PROD-11 非目标清单**：Web、插件、MCP、语音、图像、远程控制、多 Agent、自动更新等能力在 v0.1 中明确支持、预留或排除哪些？Web 当前按暂缓处理，恢复条件由本项与 `WEB-01` 共同记录。
+- **PROD-11 产品范围总表**：把所有 optional surface 的最终状态汇总为 supported、confirmed-excluded、deferred 或 open，但不再用一项捆绑决定它们；Web/图像/音频输入/transcription/TTS/remote-headless/multi-root/aggregate telemetry/diagnostic upload/update discovery 分别由 PJ-14 至 PJ-20、ED-13、ED-14、RF-16 的对应组决定，插件/MCP/hook/skills/自定义工具/子 Agent 已由 D-038 收口。
 - **PROD-12 启动路由**：配置缺失/有效/损坏、TTY/非 TTY、当前目录有无上下文、模型离线时，裸 `yaca` 分别进入向导、新会话、选择器、恢复界面还是结构化错误；整个路由能否画成唯一状态表？
 - **PROD-13 首次设置事务**：最低必填项、连接测试能否跳过、非秘密草稿恢复、秘密重新输入和最终原子发布分别是什么契约？
 - **PROD-14 本地功能降级**：没有可用模型或网络时，配置、上下文浏览、诊断、导出和修复哪些仍必须可用？
 - **PROD-15 语言职责分离**：UI 语言、模型回复语言、配置键名/注释和机器输出字段是否独立；日期、数字和错误 ID 哪些允许本地化？
 - **PROD-16 活动工作区失效**：会话运行中工作目录被外部重命名、删除、卸载或变为不可访问时，在途模型、工具、审批和 Context 分别怎样 fail-stop、只读检查或显式重新绑定？
+- **PROD-17 图像输入范围**：v0.1 是纯文本 Coding Agent，还是允许把本地截图/图像作为显式用户输入发给支持视觉的 Model；格式、大小、XML 接盘和不支持 Model 的失败边界是什么？
+- **PROD-18 音频输入范围**：v0.1 是否接受用户提供的音频文件，是否再访问麦克风实时采集；Model capability、大小/时长、取消残片、XML 接盘和旧平台设备边界怎样收口？
+- **PROD-19 Remote/headless 控制面**：除本机 CLI/TUI 外，v0.1 是否暴露可被另一进程或远端客户端驱动的控制协议；监听、认证、审批、stdin、事件流和旧平台威胁边界怎样收口？
+- **PROD-20 独立语音转写**：除把音频作为 main Model 输入外，v0.1 是否提供单独的 file/live transcription 动作；它用哪个 Model/purpose、怎样计费、取消、持久化并回到 composer？
+- **PROD-21 语音输出/TTS**：v0.1 是否完全无语音播报、只允许用户显式朗读一条消息，还是可自动播报；输出 Model、设备、隐私、停止和文字等价路径是什么？
 
 ### P1
 
@@ -81,6 +86,7 @@
 - **RUNTIME-04 模块搜索安全**：发行包的 `package.path/cpath` 是否只指向受控路径，并在扩展未开放前拒绝从当前目录或环境注入 Lua/C 模块？
 - **RUNTIME-05 数字与内存**：字节数、event seq、时间、token 和外部 64 位值如何范围校验/持久化；GC 安全点、流式读取和大字符串限制是什么？
 - **RUNTIME-06 休眠与恢复**：系统 suspend/resume 或显著时钟间隙发生后，在途网络、进程、lease、deadline、waiting approval 和 active turn 怎样重新验证并收口，哪些动作绝不自动重放？
+- **RUNTIME-07 单进程 Context 拓扑**：一次 yaca invocation 只允许一个 active/writable Context，还是允许加载多个后串行切换或并发推进；这与进程级资源、writer lease、关闭顺序和当前 Context UI 怎样统一？
 - **CONC-03 所有权与提交锁**：会话生命周期 write lease 和短时文件 commit mutex 如何区分；各自的取得顺序、允许等待、进程死亡和陈旧接管证据是什么？
 - **CONC-04 全局资源上限**：进程级模型请求、子进程、打开文件、扫描前沿、待渲染事件和日志积压如何统一限额？
 - **PERF-02 代表性工作负载**：用什么固定的大 XML、大目录、大输出、慢磁盘、慢网络和慢终端夹具证明预算，而不是只在现代机器上凭感觉调参？
@@ -114,19 +120,19 @@
 ### P0
 
 - **PROC-01 执行基础**：纯 Lua + 受控 shell/临时文件，还是引入极小原生进程辅助层？
-- **PROC-02 参数契约**：是否只接受结构化 `program + argv`；何时允许用户显式请求 shell 语法？
+- **PROC-02 内部进程端口参数契约**：Runtime internal port 是否只接受结构化 `program + argv`，怎样拒绝 shell 注入；模型可见 raw `exec` 的 carrier 只由 `TS-23` 决定，cwd state 只由 `TS-37` 决定。
 - **PROC-03 进程树取消**：收到执行层取消后，只终止直接进程还是必须清理整个子进程树；清理失败如何报告？Agent 的业务状态转换由 `LOOP-07` 决定。
 
 ### P1
 
-- **PROC-04 输出模型**：stdout/stderr 分开还是合并；流式、顺序、二进制、编码错误和截断如何表示？
-- **PROC-05 限制**：默认超时、输出上限、无输出超时和资源上限是什么；用户能否逐工具覆盖？
-- **PROC-06 工作目录与环境**：环境继承、清理、覆盖和秘密变量传递的规则是什么？
+- **PROC-04 输出模型**：stdout/stderr 通道身份与 observed ordering 由 `TS-22` 独占；raw bytes 的 decoder/binary 契约由 `TS-38` 独占；`exec` canonical retention 由 `TS-39` 独占，不能再由一个“输出模型”选项捆绑决定。
+- **PROC-05 限制**：默认超时、combined output cap、无输出超时和资源硬上限是什么；用户可调值与逐调用收紧由 `M05-51` 决定，达到 cap 后保留哪些 bytes 由 `TS-39` 决定。
+- **PROC-06 工作目录与环境**：raw shell 的显式 `EnvironmentSet/Unset` 配置面由 `M05-15` 决定，inherit baseline 成员政策由 `M05-55` 决定，逐调用/固定/持久 cwd state 由 `TS-37` 决定；内部 helper 环境仍独立隔离。
 - **PROC-07 退出分类**：启动失败、非零退出、信号、超时、取消和输出截断如何形成统一结果？
 - **PROC-08 随包工具解析**：只使用受控随包工具，还是允许用户覆盖；搜索顺序、版本和支持边界是什么？
 - **PROC-09 完整性**：启动时、首次使用时还是自检时验证工具哈希与架构？
 - **PROC-10 临时文件**：请求体、响应体和大输出何时落盘，如何设置权限并在崩溃后清理？
-- **PROC-11 模型 shell stdin**：模型可见 raw `exec` 的 stdin 是固定 EOF、受控静态输入还是 TTY/PTY；怎样保证子进程不能偷取 yaca 的聊天、审批和 queue 输入？
+- **PROC-11 模型 shell stdin**：模型可见 raw `exec` 的 stdin 是固定 EOF 还是受控 immutable `stdin_text`；怎样保证子进程不能偷取 yaca 的聊天、审批和 queue 输入？来源语义归 `F4-07`，其中静态 payload 只与 `TS-23 A` carrier 兼容，TTY/PTY 不作为本项普通分支。
 - **PROC-12 命令物理传输上限**：raw 命令超过 Win32/shell 长度或无法按目标 shell 编码无损传递时，是 typed reject、生成受保护脚本还是自动拆分；脚本路线怎样保持审计和等价语义？
 - **PROC-13 宿主隐式配置隔离**：yaca 内部 curl/cmd/sh/Git/helper 是否必须禁用用户 rc、AutoRun、pager、external helper 等 ambient configuration；与模型获准 raw shell 的宿主环境怎样明确分离？
 
@@ -172,7 +178,7 @@
 - **CFG-01 配置层级**：内置默认、用户配置、项目配置、会话覆盖、命令行和环境变量中，v0.1 实际支持哪些层？
 - **CFG-02 项目配置的信任边界**：打开陌生仓库时，项目能否改变模型 endpoint、权限、工具、命令或网络行为？
 - **CFG-03 合并规则**：各层是整段替换、逐 key 合并还是按字段白名单覆盖；列表和命名组如何合并/删除？
-- **CFG-04 明文秘密边界（已确认方向）**：API Key 明文保存在主 INI，不拆 secrets 文件；仍需确认文件权限诊断、TUI 脱敏、复制/导出过滤，以及 Key 绝不进入 XML、argv 和普通日志的边界。
+- **CFG-04 明文秘密边界（已确认方向）**：API Key 明文保存在主 INI，不拆 secrets 文件；条件存在的 proxy credential、SecretHeader、EnvironmentSet value 与任何 adapter-secret 都属于同一开放 typed registry，并标明 config-file/ambient/user-content/runtime source。仍需确认文件权限诊断、TUI 脱敏、复制/导出过滤，以及所有 registered config-secret exact values 绝不进入 XML、argv 和普通日志的边界；工具输出命中 exact value 时在 canonical retention 前写 typed marker，未知正文秘密不能承诺自动找全。`M05-54` 只决定承载 `source=config-file` secret 的文件权限不足时哪些 consumer 能运行。
 - **CFG-05 单 Model 完整连接实例（已确认方向）**：不拆 Provider/Credential；每个 `Model.*` 自含 endpoint、协议、远端 Model ID、Key、能力和 retry。仍需确认重复连接信息的编辑体验、非秘密快照和同名配置迁移。
 - **CFG-06 顺序决定默认项（已确认方向）**：不增加显式 Default ID；第一个 Model/Permission 是默认项。仍需确认首项 Disabled/无效、重复 section、重排事务和恢复时引用已删除项的行为。
 - **CFG-16 独立终止评估开关迁移（已确认方向）**：B-08/D-027 已把结束复核并入 `DoubleCheck`，目标 schema 不再保留并列的 `UseTerminationEvaluator`；仍需清理旧模板/文档并确认迁移诊断。请求契约与控制流分别由 `MODEL-12`、`LOOP-25` 定义。
@@ -184,7 +190,7 @@
 - **CFG-08 校验策略**：未知、缺失、废弃、拼错和范围外字段分别警告、保留还是阻断？
 - **CFG-09 启动策略**：部分模型无效、秘密缺失或非关键 TUI 配置错误时，是整体拒绝启动还是降级运行？
 - **CFG-10 原子更新**：交互式修改如何锁定、写临时文件、保留备份并避免覆盖用户同时手工修改？
-- **CFG-11 热更新**：会话运行中配置变化是否生效；哪些字段必须到下一轮或新会话才生效？
+- **CFG-11 逐 turn 自动载入（已确认方向）**：D-048 已确认每个新顶层 main/side turn admission 前完整读取 INI bytes；digest 未变复用 immutable generation，变化则整份校验后原子激活，不弹 reload 确认。活动 turn 及其工具/复核/retry/compaction 继续冻结旧 generation；文件读取与原子发布的目标平台证明仍需完成。
 - **CFG-12 持久配置快照**：上下文保存配置引用、解析后的完整值还是两者；恢复时如何解释已删除模型/权限？turn 内冻结范围与生效时点由 `LOOP-15` 定义。
 - **CFG-13 完整配置面**：是否补充 General、Storage/Retention、Logging、Update、Locale、Theme、Streaming、Retry、Tool Limits 等 section？
 - **CFG-14 配置展示**：`show-config`、诊断包和交互编辑器如何脱敏，同时说明每个值来自哪一层？
@@ -195,7 +201,12 @@
 - **CFG-21 无效配置恢复**：主配置无法加载时，是否仍可进入只依赖内置 schema 的最小恢复界面，并提供诊断、备份、修复、重置和安全退出？
 - **CFG-22 条件/未知字段往返**：功能关闭时保留其子字段还是删除；未知与废弃字段怎样显示、保留、迁移和避免安全字段拼写错误被忽略？
 - **CFG-23 配置浏览器导航**：section、搜索、字段详情、来源层、立即/下一 turn/重启生效、返回原位置和脱敏 diff 如何在原生快捷键路径与逐行文本后备中共享控制器？
-- **CFG-24 外部修改与 reload**：运行中手工编辑 INI 时，是否只在显式 reload/重启加载，还是在 idle/turn 边界检测；新文件无效、Endpoint/Key/Permission 改变和旧内存快照分别怎样处理？
+- **CFG-24 外部修改与 reload（已确认方向）**：model/config REPL 或外部编辑在下一顶层 turn 自动观察；删除、半写、不可读或无效候选阻断新 turn，不能静默使用 last-known-good。当前 Model/Permission 失效时要求显式 switch/mapping，不按物理第一项 fallback；旧 generation 只服务已经 admission 的活动 turn。
+- **CFG-25 Description 的 XML 投影**：Model/Permission 的有界 `Description` 是否作为 `user-content/advisory` 全文进入 Context 快照，还是只保存 presence/size/digest 或明示省略；跨机历史 UI、reviewer/support/export 怎样消费同一分类？
+- **CFG-26 SensitiveRead 条件配置面**：是否完全不增加“敏感文件”能力，还是仅在 `M05-56 B` 生成 `SensitiveRead` 三态字段；该字段怎样只对 `TS-21` 的版本化分类结果叠加更严格值，并明确未命中不等于安全、分类器不是 sandbox？
+- **CFG-27 Model/Permission 资源选择器**：资源是只用 section logical name、提供可选 `Abbreviation`，还是必填简称；长名/简称的 ASCII 大小写、折叠唯一性、显示原拼写与历史 mapping 怎样一致？
+- **CFG-28 per-Model retry 配置面**：已确认 retry 属于完整 `Model.*`，但用户是调整 count/base delay、再调 max delay，还是只选 typed preset；安全阶段、jitter、`Retry-After` 和 Runtime hard cap 不能被配置放宽。
+- **CFG-29 过短 config-secret 的兼容政策**：明文 Key/条件 secret 过短时，是禁用相关 consumer、收缩普通正文 exact-scan 保证，还是接受高频误阻断；重复/重叠值的匹配与 marker 必须独立于实现遍历顺序。
 
 ## 06 模型协议与生成接口
 
@@ -217,7 +228,9 @@
 - **MODEL-11 自定义 headers/参数**：允许用户扩展到什么程度，如何防止覆盖安全关键 header？
 - **MODEL-12 终止评估请求**：启用评估器时使用当前模型还是专用模型；评估器看到哪些目标、消息、工具、改动和验证证据；Prompt、结构化 verdict、用量与 provider 错误如何归一化？控制流由 `LOOP-25` 定义。
 - **MODEL-14 可见推理边界**：只展示和保存 provider 明确返回的公开 reasoning summary，还是还支持其他推理字段；不得把隐藏思维承诺为可导出数据。
-- **MODEL-15 Model 级请求调度**：六个核心 purpose 与 PJ-12 B 条件 `context-name` 是否共享每个 Model 的并发、最小间隔、`Retry-After` 冷却和 aggregate 账本；配置需要暴露哪些最小字段？
+- **MODEL-15 Model 级请求调度**：六个核心 purpose 与 D-041/D-046 条件周期 `context-name` 进入同一有界 Model scheduler；仍需由 F4-02 决定每个 Model 的并发、最小间隔、`Retry-After` 冷却、aggregate 账本及最小配置字段。命名 request 只在 interval/watermark/marker gate 满足时 admission，不形成第二套 scheduler。
+- **MODEL-16 无可执行工具 Model 的 main 资格**：仅在 M05-03 A/C 真实允许 `Tools=off` 时，是否只能承担无工具 purpose，还是在 AL06-02 所选 control carrier 可被 adapter 原生承载且 fixture 证明后允许受限 main chat；M05-03 B 下必须 `not-applicable`，不能生成另一条资格分支。
+- **MODEL-17 特殊 purpose 跨 Endpoint 同意**：action-review、termination-review 或 compaction 把哪些会话材料发给与 main turn 不同的 Endpoint 时，是每次确认、按 Context+purpose durable 记忆，还是仅本进程记忆；三种 purpose 不得共享同意。Endpoint/Model/config/mapping、purpose 或已确认 data-class envelope 等 binding 变化必须使旧同意失效；同一 envelope 内 event/view range 自然增长是否重问由所选 cadence 明确定义，不能用模糊“数据范围变化”暗定。
 
 ## 07 工作区与 Agent 工具
 
@@ -225,7 +238,7 @@
 
 - **TOOL-01 最小工具集**：首版必须具备读取、列表、搜索、写入、补丁、命令执行中的哪些；哪些明确推迟？
 - **TOOL-02 改动不变量**：直接覆写、精确 patch 和临时替换各自允许在哪些场景使用；所有写操作必须满足什么原子性、冲突检测和失败保留要求？
-- **TOOL-03 Shell 边界**：任意命令是否作为正式工具；结构化专用工具与 shell 的职责如何划分？
+- **TOOL-03 Shell 边界**：任意命令是否作为正式工具；结构化专用工具与 shell 的职责如何划分？模型到 Runtime 的 carrier 归 `TS-23`，每次 `exec` 的 cwd state 归 `TS-37`，不能靠解析 opaque command 猜 capability 或 cwd。
 - **TOOL-04 工作区边界**：默认只能访问根目录内，还是可在确认后访问外部路径；符号链接和父目录如何处理？
 - **TOOL-05 改动审阅**：每次写入后、每轮结束或任务完成时展示 diff；是否提供撤销/检查点？
 - **TOOL-15 副作用重放**：执行结果未知、进程崩溃或恢复重放时，写入和命令能否自动重试；是否使用 operation ID 防止重复副作用？
@@ -233,11 +246,11 @@
 ### P1
 
 - **TOOL-06 结果 envelope**：成功、失败、拒绝、取消、超时、截断和部分成功如何统一封装给 AgentLoop、模型与 UI？调用必须配对的状态机不变量由 `LOOP-13` 定义。
-- **TOOL-07 输出上限**：按工具、单次调用、单轮和整会话如何限制；截断应保留头、尾还是摘要？
+- **TOOL-07 输出上限与保留分责**：按工具、单次调用、单轮和整会话如何限制；direct tool canonical result 归 `TS-16`，raw `exec` 在 cap 内保留 head/tail、prefix 或样本归 `TS-39`，屏幕默认投影/live preview 分别归 `TU-06`/`TU-29`。
 - **TOOL-08 调度元数据**：工具如何声明只读性、副作用、互斥资源键、可取消性和并发安全性，供 `LOOP-12` 决定实际调度？
 - **TOOL-09 冲突与新鲜度**：读后文件被外部修改时，写入如何检测并避免覆盖？
-- **TOOL-10 二进制与大文件**：读取、搜索、修改和展示的大小/类型限制是什么？
-- **TOOL-11 Ignore 规则**：是否遵守 `.gitignore`、隐藏文件、项目专用 ignore；显式路径是否可以覆盖？
+- **TOOL-10 二进制与大文件**：direct 文件读取/修改的大小、encoding 和 binary 契约归 `TS-32` 至 `TS-34`；raw `exec` 输出何时成为 typed binary 归 `TS-38`，不得用终端 replacement view 代替 raw evidence。
+- **TOOL-11 Ignore 规则**：是否遵守 `.gitignore`、隐藏文件、项目专用 ignore；显式路径是否可以覆盖？唯一产品 owner 为 `TS-36`，`TS-17` 只决定 list/search 方言与分页。
 - **TOOL-12 Git 工具**：status/diff/log/commit 是否有专用结构化接口，还是仅通过受控命令？
 - **TOOL-13 验证工具**：测试、lint、build 是普通命令，还是 Agent Loop 中有可识别的验证结果？
 - **TOOL-14 扩展工具**：自定义工具、MCP、插件和 hook 在 v0.1 中是支持、保留接口还是明确排除？
@@ -255,6 +268,11 @@
 
 - **INSTR-04 发现规则**：根目录发现、向上查找、嵌套覆盖、ignore、编码、大小限制和读取失败如何处理？
 - **INSTR-05 指令快照**：是否持久化本 turn 实际使用的指令来源、版本或摘要，以便恢复和审计？
+- **INSTR-06 工具叙述密度**：模型在工具调用前后默认解释哪些动作、原因和结果；怎样避免 Runtime lifecycle 与模型旁白对每次调用重复播报？
+- **INSTR-07 普通回答详略**：普通问答、设计讲解和实现交付分别采用多详细的默认回答；用户的显式长短要求怎样覆盖默认值？
+- **INSTR-08 澄清阈值**：目标、范围、安全、费用、副作用或不可逆选择不清楚时何时必须先问；低风险实现细节何时可以声明假设后继续？
+- **INSTR-09 用户指令生命周期**：普通消息中的要求默认只约束当前 work item、当前 turn 还是后续 Context；怎样用 typed add/supersede/revoke 表达持久要求而不从自然语言暗猜作用域？
+- **INSTR-10 内置 Prompt 冻结**：内置 Prompt 是只冻结语义组件，还是冻结逐字 ASCII-English 文本、变量位置、版本、digest 和 golden assembly；升级后怎样解释历史 request？
 
 ## 07B 改动事务、审阅与撤销
 
@@ -267,7 +285,7 @@
 
 ### P1
 
-- **CHANGE-04 文件属性保真**：换行、BOM、编码、权限位、可执行位和原子替换如何保留？
+- **CHANGE-04 文件属性保真**：换行、BOM、编码、权限位、可执行位和原子替换如何保留？内容编码由 `TS-32`、direct metadata 保真与修改面由 `TS-35` 独占。
 - **CHANGE-05 非 Git 工作区**：如何生成 diff、检查点、冲突证据和撤销记录？
 - **CHANGE-07 Preimage 与补偿数据面**：若承诺 undo，preimage 放在哪里、怎样限制体积和秘密复制、如何处理外部冲突/部分补偿，以及为什么 raw shell 明确不在同等保证内？
 
@@ -286,6 +304,7 @@
 - **SAFE-15 待批准状态**：审批的超时、取消、程序重启和多个并发询问如何收口？
 - **SAFE-16 拒绝语义**：拒绝是生成普通 tool error 后让 Agent 继续，还是立即结束 turn；不同危险级别是否采用不同规则？
 - **SAFE-17 Sandbox 承诺**：旧平台缺少 OS sandbox 时，产品明确只提供策略审批，还是另提供真实的进程、文件和网络隔离？permission 不得被描述成 sandbox。
+- **SAFE-18 `__yaca__` reserved tree 的 direct read**：隐式 list/search 排除、direct mutation hard-deny、alias/reparse 重查和 raw shell 无法强隔离是固定边界；但精确 direct read 是全部拒绝、只允许当前已打开 ContextHandle 的 committed canonical XML，还是允许 Catalog 中任一 current/other committed Context XML？主 INI、lock/temp/previous 和注册 secret 不得因此外发。
 - **THREAT-01 威胁模型**：明确防护哪些来源：恶意仓库、prompt injection、模型/工具输出、恶意 endpoint、本机其他进程、篡改发布包和误操作；哪些攻击者明确不在承诺内？
 - **THREAT-02 工作区首次信任**：陌生目录是否先显示规范路径、发现的指令/配置和可影响范围，得到用户确认前禁止执行命令、应用项目配置和扩大权限？
 - **THREAT-03 安装/搜索路径劫持**：随包 exe/DLL/Lua 模块、系统 PATH、当前目录和用户覆盖的搜索顺序怎样避免加载攻击者同名文件？
@@ -307,7 +326,7 @@
 
 ### P0
 
-- **LOOP-01 回合边界**：一次用户输入从哪个 durable 事件开始，到哪个终止事件成为一个 turn；排队输入与同轮 steer 是否开启新 turn？循环次数由 `LOOP-04` 决定。
+- **LOOP-01 回合边界**：一次用户输入从哪个 durable 事件开始，到哪个终止事件成为一个 turn；排队输入与同轮 steer 是否开启新 turn？typed `ask-user` 的回答归 `F4-03/F4-17`，完整 canonical model-yield 的对象化继续/new continuation turn 归 `AL06-48`，循环次数由 `LOOP-04` 决定。
 - **LOOP-02 状态机**：至少需要哪些显式状态，例如待输入、准备、请求模型、流式接收、终止评估、等待批准、执行工具、压缩、重试、取消、完成、失败？
 - **LOOP-03 完成与继续（已确认核心方向）**：正常完成由主模型主导；有效 `DoubleCheck` 关闭时接受主模型终止意图，开启时先单独请求完成复核。Runtime 仍如实收口取消、硬预算、未完成工具和基础设施错误；复核控制流由 `LOOP-25` 继续确认。
 - **LOOP-04 循环预算**：单轮模型请求次数、工具调用数、墙钟时间、token、输出字节和费用分别如何限制？
@@ -324,8 +343,10 @@
 - **LOOP-25 终止评估控制流（部分确认）**：已确认主模型终止后可触发独立评估请求；仍需决定允许/拒绝/无效输出/超时/请求失败分别如何转换，是否在同一 turn 继续，以及评估次数、费用和墙钟上限。
 - **LOOP-26 前端投影不变量**：单一自适应 TUI 的原生快捷键/逐行后备、CLI 和非交互只读入口是否只投影同一领域状态与 typed result，禁止前端另建 busy、approval、retry 或完成逻辑？
 - **LOOP-27 分层预算**：传输、整请求、工具、压缩和终止评估的局部重试怎样共同受步骤、墙钟、token、费用、输出和重复模式总预算约束？
-- **LOOP-28 `ask-user` 后续边界**：typed `ask-user` 是否结束当前 turn 为 waiting-user；用户回复怎样以新 turn 或旧 turn 继续，并重新冻结配置、预算及因果关系？
+- **LOOP-28 `ask-user` 后续边界**：typed `ask-user` 是否结束当前 turn 为 waiting-user；用户回复怎样建立后续 turn并重新冻结配置、预算及因果关系？本项不拥有普通 model-yield，后者只由 `AL06-48` 决定。
 - **LOOP-29 手动 retry 语义**：错误页或 recovery 中的用户主动重试是新 attempt、新 request 还是新 turn；哪些网络阶段可安全复用 logical request，哪些 accepted/unknown operation 永远不得泛化重放？
+- **LOOP-30 termination-review Model 路由**：完成复核是使用当前 turn 冻结的 main Model、INI 的专用 Model，还是 Context 独立 mapping；怎样与 action-review 的选择、跨 endpoint 确认、失败和快照完全分离，并保证 `AL06-07 C` 只移除 action 路线？
+- **LOOP-31 stuck 阈值的配置归属**：进展检测算法和不可关闭 hard cap 由技术证明冻结；达到阈值前允许的实质重复次数是随发行 manifest 固定、用一个全局 INI 数值统一调节，还是按版本化 detector registry 拆成 exact/error、cycle、semantic 等少量全局有界字段？
 
 ### P1
 
@@ -333,7 +354,7 @@
 - **LOOP-12 工具调度**：多个工具调用的顺序、并发资格、结果回送顺序和任一失败后的策略是什么？
 - **LOOP-13 工具配对不变量**：任何已接受的调用都必须产生 `TOOL-06` 定义的真实或合成结果，包括失败、拒绝、取消和崩溃恢复，是否作为不可破坏的硬不变量？
 - **LOOP-14 整请求重试**：依据 `NET-06` 的错误标记，流开始前、收到部分文本后、收到工具请求后断流时是否允许重启整次模型请求？
-- **LOOP-15 turn 冻结**：每个 turn 在何时冻结模型、权限、工具、工作目录和指令；中途配置变化从下一采样、下一 turn 还是新会话生效？持久内容由 `CFG-12` 定义。
+- **LOOP-15 turn 冻结（已确认主边界）**：每个顶层 main/side turn admission 使用 D-048 已完整验证的 immutable ConfigGeneration，并冻结 Model、Permission、DoubleCheck、Prompt、工具 registry、网络/retry 与镜像父目录派生的单一 workspace root；该 turn 的子请求/工具/复核/压缩都沿用同一快照。中途 INI 变化只影响下一个顶层 turn，持久内容和恢复引用仍由 `CFG-12` 定义。
 - **LOOP-16 流式提交**：文本增量是否立即进入规范历史，还是只在完成事件后提交；断流时部分文本是否保留给用户/模型？
 - **LOOP-17 错误归属**：传输、模型、协议、工具、权限、存储和 UI 错误如何决定重试、继续、等待或终止？
 - **LOOP-21 后台执行者兼容**：若 `PROD-04` 要求未来兼容后台执行者，当前哪些 ID、事件、锁和权限记录不得假设永远只有单执行者？若明确排除，则本项暂缓。
@@ -373,7 +394,7 @@
 
 - **CTX-07 会话数据模型**：session、turn、主模型/终止评估请求、message、verdict、tool call/result、approval、compaction、model/config snapshot 的 ID 和关系是什么；评估器解释是否进入主模型视图？
 - **CTX-08 物理记录修复**：尾部半记录、损坏分段、写入失败和磁盘满时如何截断、隔离或重建，并向用户说明丢失范围？恢复后的业务状态由 `LOOP-08`、`LOOP-24` 决定。
-- **CTX-10 动态目录身份（已确认核心）**：不另存永久 `ContextId`；当前逻辑 XML 路径是当前地址，固定 16 位 hash 运行时计算，重命名/移动后旧 hash 失效。仍需定义盘符/大小写变化、外部移动和失效句柄的恢复体验。
+- **CTX-10 动态目录身份（已确认核心）**：不另存永久 `ContextId`；当前逻辑 XML 路径是当前地址，固定 16 位 hash 运行时计算，重命名/移动后旧 hash 失效。盘符/大小写由路径 codec 冻结，受管理 rename 由 `CX-10`、外部移动和失效句柄恢复由 `CX-20` 决定。
 - **CTX-12 保留与配额**：单工具输出、单 turn、单会话、上下文总量、数量和年龄上限是什么？
 - **CTX-13 恢复已失效依赖**：保存的模型、权限组、工作目录或工具版本消失后如何打开与继续？
 - **CTX-14 版本迁移**：迁移前备份、失败回滚、只读打开新版格式和降级行为是什么？
@@ -381,9 +402,10 @@
 - **CTX-16 事件恢复不变量**：durable event 是否具有单调序号、幂等 replay、完整性校验和可重建投影；缺一项时如何证明一致性？
 - **CTX-17 不完整事件修复**：崩溃留下的孤立 tool call、半 assistant message 和未持久化 delta 如何被确定性地收口为真实或合成结果？
 - **CTX-25 XML 安全子集**：是否固定 UTF-8、禁止 DTD/外部实体、限制深度/大小/元素，并采用确定性 writer 与版本化完整性标记？
-- **CTX-26 外部修改契约**：允许人类只读查看但不承诺第三方写入；检测到外部改变时怎样使活动句柄失效、只读打开或要求重新连接？
+- **CTX-26 外部修改契约**：允许人类只读查看但不承诺第三方写入；检测到外部改变时怎样使活动句柄失效、只读打开或要求重新连接？唯一产品 owner 为 `CX-20`。
 - **CTX-27 失效依赖替换**：恢复时原模型、权限、工具或工作目录不存在，是否先只读展示历史，再由用户选择替代项并记录新快照？
 - **CTX-28 选择性秘密擦除**：用户误把 secret 放入消息/命令后，v0.1 是只支持整 Context purge/sanitized export，还是支持 redaction rewrite；已发送内容、previous-valid/backup/temp 和物理 secure erase 的免责声明是什么？
+- **CTX-29 跨机 compatibility gap 门**：导入报告中缺失的 workspace/Model/Permission/Prompt/工具能力、外部证据和未知扩展，哪些阻断全部续作，哪些只阻断依赖它的 purpose/action，哪些可以带 durable acknowledgement 继续？
 
 ## 11 上下文定位、实时索引与交互式浏览器
 
@@ -392,7 +414,7 @@
 - **INDEX-01 动态路径地址（已确认）**：不另存永久 `ContextId`；当前逻辑路径与固定 16 位 hash 共同表达当前地址，改名后重新计算且旧 hash 失效。用户名称、自动标题和路径关联的修改边界仍需定义。
 - **INDEX-02 名称/hash 解析（已确认核心）**：所有 selector 入口共用 Resolver；采用增量搜索环与单遍双判定，距离优先、同环名称优先于 hash，首个可裁决环获胜且不扫描外层，每个 XML 候选最多探测/匹配一次。完整环内的多个可用同名项或 hash 碰撞不得按枚举顺序任选一个；候选呈现、混合损坏状态、交互选择和显式前缀仍待确认。
 - **INDEX-03 项目移动**：自动识别、提示重新绑定还是保留旧路径并只读打开？
-- **INDEX-10 统一入口（已确认核心）**：`--continue`、`.context <selector>`、带 selector 的 rename/delete 和浏览器精确输入共用解析规则；列表项携带直接候选并最终复核，`.status` 从当前句柄直接计算 hash。
+- **INDEX-10 统一入口（已确认核心）**：`continue`、context-select、带 selector 的 rename/delete 和浏览器精确输入等 semantic actions 共用解析规则；列表项携带直接候选并最终复核，当前会话 status action 从句柄直接计算 hash。TU-18/TU-32 只投影 CLI/dot-command 拼写，不能改变这条领域规则。
 - **INDEX-11 交互式上下文浏览器**：目录树进入/返回/展开、名称/路径/hash 搜索、选择、详情、重命名、删除、刷新和取消的状态与确认流程是什么；原生快捷键路径与逐行文本后备怎样共享一个控制器？
 
 ### P1
@@ -425,6 +447,7 @@
 - **COMP-08 模型切换**：切到更小窗口时在切换前还是下一请求前压缩；切回大窗口能否恢复更多原文？
 - **COMP-09 手动压缩**：用户能否预览、取消、重做或指定保留内容？
 - **COMP-10 大工具输出**：先截断、单独存附件、摘要化还是不进入模型上下文？
+- **COMP-11 手动压缩生命周期**：用户显式运行 `.compact` 时，busy/idle 怎样 admission，它是独立 maintenance turn、下一轮前意图还是首版排除；如何记费用/预算、取消、恢复和新 model-view 发布？
 
 ## 13 CLI 契约
 
@@ -449,6 +472,10 @@
 - **CLI-13 交互提示门槛**：是否只有 TTY 且未要求机器输出时才能 prompt；非 TTY 缺参、审批、向导和浏览器是否一律失败关闭而不吞 stdin？
 - **CLI-14 stdin 单一用途**：一次调用中 stdin 是 prompt 正文、秘密、批处理事件还是不可用，怎样通过显式参数消除菜单答案与业务输入冲突？
 - **CLI-15 机器输出隔离**：版本化 JSON/JSONL 是否固定 UTF-8、ASCII 字段和稳定枚举，stdout 只含数据，进度/重试/本地化文案不混入？
+- **CLI-16 modal 焦点与全局命令 grammar**：approval/recovery/REPL 中的本地 bare verb 与 queue/status/help/graceful-exit 等跨 surface semantic actions 怎样区分，避免同一行在不同焦点被解释成授权、chat 消息或未知命令？实际 dot roots 只由 TU-32 投影。
+- **CLI-17 独立 fd 与输出选择**：stdin/stdout/stderr 的 TTY 能力是否分别判定；`help | less`、stdin 重定向、human transcript 管道和显式 machine format 如何决定 prompt 门槛与 payload？
+- **CLI-18 Help 信息架构**：`--help`/`.help` 是只打印一张全量表，还是提供 surface/topic grammar；无参数 overview、当前能力快捷键、前置条件、未知 topic 建议和 golden help 怎样从同一 registry 生成？
+- **CLI-19 chat dot-command root 架构**：`.details/.history/.model/.permission` 与条件管理动作是使用各自平坦 root，还是收进 `.show/.use` namespace；canonical registry 怎样同时生成 parser/help/completion/state tests，并在上游能力关闭时做到 zero-surface？
 
 ## 14 TUI 体验与样式
 
@@ -465,7 +492,7 @@
 - **TUI-02 视觉语言**：选择朴素开发控制台、复古 ASCII 面板或更密集的现代终端风格；无颜色时仍用哪些稳定文字标记？
 - **TUI-07 状态信息**：模型、权限、上下文当前 16 位 hash、token、工作目录、Git 状态和当前动作哪些常驻，哪些只由 `.status` 显示？`.status` 必须从当前句柄计算而不是全树搜索。
 - **TUI-08 流式呈现**：plain 模式逐块追加还是等待完整消息；basic ANSI 模式可更新到什么程度？
-- **TUI-09 工具输出**：默认显示摘要、完整输出还是按上限截断；如何在线性终端中表达“展开详情”？
+- **TUI-09 工具输出**：已经形成的 canonical evidence 默认显示摘要、正文片段还是只显示状态；运行中 preview 归 `TU-29`，direct/exec 的实际保留分别归 `TS-16`/`TS-39`，界面不能改变或找回未保存 bytes。
 - **TUI-10 点命令语法**：引用、补全、未知命令建议、多行输入，以及发送以 `.` 开头普通消息的转义规则是什么？已确认增加 `.cautious` 管理当前会话 `DoubleCheck` 覆盖，仍需确定无参数、on/off/toggle/reset 与状态回显语义。
 - **TUI-11 选择器与上下文浏览器**：模型、权限、上下文和配置菜单使用编号/字母；上下文浏览器的目录树、搜索、选择、重命名、删除、刷新、分页和取消如何在原生快捷键与逐行文本后备中共用语义？
 - **TUI-12 自动能力投影（方向已确认）**：不提供 `plain/basic/enhanced` 用户模式；原生按键、基本颜色、尺寸与 cooked 后备怎样探测，重定向/`TERM=dumb` 时怎样自动降级且保持语义一致？
@@ -478,13 +505,15 @@
 - **TUI-19 样式验证物**：先用完整 ASCII transcript 确认语义；只有决定全屏/固定分区后再制作 80×24 mockup。
 - **TUI-21 自动降级等价性（已确认方向）**：产品只提供一个自适应 renderer，不暴露显示模式开关；原生控制台、基本终端序列和逐行文本后备之间是否只改变表现，所有动作、默认选择、确认、安全失败和 typed result 完全一致？
 - **TUI-22 输入编辑契约**：plain 的 cooked line、增强光标编辑、IME、多行输入、bracketed paste、点命令转义、补全和秘密输入分别有哪些最低能力与降级？
-- **TUI-23 历史与隐私**：命令/输入历史是否只驻留当前进程；秘密、审批答案、API key 和敏感路径如何保证不进入历史与补全缓存？
+- **TUI-23 composer 输入召回与隐私**：是否提供 yaca-owned recall、只驻当前进程还是从当前 XML canonical main 用户消息重建，由 `TU-31` 唯一决定；专用 secret-entry 值、approval/recovery 答案和未提交管理表单值永不进入。普通 chat 可能含 Runtime 不认识的秘密，A 会在本进程召回、C 会从 XML 重建，不能承诺自动脱敏。`.history` 事实浏览归 `F4-06`，外部终端自身历史不作虚假控制承诺。
 - **TUI-24 流式真实性**：未完成 assistant 文本如何标记 provisional，断流残片如何展示/持久化，避免用户把半条消息误认成规范完成事实？
 - **TUI-25 有界长会话**：界面只保留有界窗口/页还是完整 transcript；慢终端时怎样合并状态、暂停读取或截断临时输出而不丢 durable 事实？
 - **TUI-26 浏览器导航规范**：配置/上下文/模型浏览器是否共享 help、面包屑、搜索模式、详情、back、discard 和返回原位置语义？
 - **TUI-27 线性可读验收**：不新增显示模式的前提下，屏幕阅读器按句/块而非 token 读取、所有状态有文字标签、无颜色/无动画后备和键盘可达怎样形成测试？
 - **TUI-28 未提交 draft 的持久性**：未按发送的单行/多行 draft 是否只驻内存并可在崩溃时丢失，还是进入 XML；保存会产生什么隐私、性能和“完整 Context”承诺？
-- **TUI-29 history/details 恢复契约**：`.history` 与 `.details` 从当前 UI cache 还是 canonical XML/稳定 event ID 派生；恢复后能查看到什么，已被 canonical truncation 丢弃的字节怎样明确不可恢复？
+- **TUI-29 history/details 恢复契约**：`.history` 与 `.details` 从当前 UI cache 还是 canonical XML/稳定 event ID 派生；恢复后能查看到什么，已被 canonical truncation 丢弃的字节怎样明确不可恢复？本项不拥有 composer 输入召回，后者只由 `TU-31` 决定。
+- **TUI-30 输入提示符 grammar**：chat ready/busy/multiline 和各管理/recovery 焦点是使用短而不同的 prompt、完整状态名还是统一 `yaca>`；无颜色、窄终端和不可信正文下怎样始终看清当前输入目标？
+- **TUI-31 approval 动作 grammar**：显式批准/拒绝/详情采用完整 verb + exact ID、绑定 view generation 的编号，还是焦点内短字母 + ID；它怎样与空 Enter 的安全默认正交，并在执行前回显 canonical 动作且永不扩大 once grant？
 
 ## 15 错误、诊断、自检与日志
 
@@ -506,6 +535,7 @@
 - **DIAG-11 去重与归因**：同一根因经过传输、模型、AgentLoop 和 UI 时谁显示主错误，其他层怎样只附 cause，避免错误风暴？
 - **DIAG-12 重试与部分成功**：自动重试是否显示原因、次数、倒计时和取消；部分成功是否列出成功项、失败项、未知副作用和恢复命令？
 - **DIAG-13 终端崩溃恢复**：renderer 或 Lua 未捕获错误时怎样先保存最小诊断，再 best-effort 恢复控制台模式、光标、颜色和代码页？
+- **DIAG-14 诊断上传**：本地 support 生成后，v0.1 是否提供每次预览并确认的一次性上传动作；endpoint、字段、取消/重试、receipt 与“没有持久同意”怎样独立于 aggregate telemetry？
 
 ## 16 测试、验收、打包与发布
 
@@ -578,12 +608,12 @@
 
 ## 17 Web 界面
 
-状态：暂缓；由 `PROD-11` 确认 v0.1 非目标后正式生效，恢复条件由 `WEB-01` 记录。
+状态：待 `PJ-14` 决定；当前既不能写成暂缓/排除，也不能把占位实现写成支持。
 
-- **WEB-01 恢复条件**：核心 CLI/TUI 达到什么稳定标准后才重新讨论 Web？
-- **WEB-02 浏览器基线**：恢复时重新确认 IE6/旧浏览器目标，不让当前占位实现反向限制核心架构。
-- **WEB-03 安全边界**：本地监听地址、认证、CSRF、远程访问和秘密显示需重新威胁建模。
-- **WEB-04 复用边界**：Web 只能消费 Agent/权限/上下文事件与应用服务，不复制核心循环。
+- **WEB-01 激活与重入条件**：PJ-14 选 B/C 时哪些安全、兼容与发布规格必须先完成；选 A 时核心达到什么证据且出现什么明确 use case 才能由负责人重开？
+- **WEB-02 浏览器基线**：若启用 Web，怎样重新确认实际浏览器目标而不让 IE6、现代浏览器假设或当前占位实现反向限制核心架构？
+- **WEB-03 安全边界**：若启用 Web，本地监听地址、认证、CSRF/origin、remote 分离、缓存和秘密显示怎样重新威胁建模？
+- **WEB-04 复用边界**：若启用 Web，它只能消费 Agent/权限/上下文事件与应用服务，不复制核心循环；若排除则发布物如何证明零 loader/route/asset？
 
 ## 补充子系统映射
 

@@ -1,6 +1,6 @@
 # 从负责人答复到可实施规格的收口协议
 
-更新日期：2026-07-18
+更新日期：2026-07-22
 
 状态：候选工作流；用于处理后续答复，不把尚未回复的推荐变成决定
 
@@ -16,6 +16,8 @@
 - 子系统实现时仍出现“任选一种”“以后再看”的空白。
 
 本文定义收到答复后的确定处理流程。它是设计阶段的变更控制，不要求项目负责人使用机器格式，也不开始编码。
+
+逐组现行状态统一登记在 [`DECISION-REGISTER.md`](DECISION-REGISTER.md)。决策包拥有选项正文，本协议拥有处理规则，登记表拥有 live state；三者不能互相替代。
 
 ## 一个问题进入负责人问卷前的质量门
 
@@ -51,6 +53,10 @@ CX-01 先采用 A；只有目标机 benchmark 不通过才回来讨论 B。
 
 收口时会把自然语言映射到最接近的方案，并把任何差异原样记录。若一句话可能映射到两个不兼容行为，只针对该歧义继续解释，不要求整包重答。
 
+默认按 `DECISION-BATCH-QUEUE.md` 的 49 个批次每批讨论 3--6 个紧密相关的正式 group，不把一个数十组的大包当作默认答题单位；当前批次只在实时登记表维护，之后以依赖和共同用户旅程组批。负责人仍可主动一次回复更多或整包。
+
+“本包其余全部接受推荐”必须绑定收到回复时的 inventory version/digest。先应用同批显式上游选择/例外并重算条件，再展开到此时 active 的其余组；跨包上游仍未决的条件组保持 `unanswered`，条件不成立的组记 `not-applicable`，后来新增的组仍是 `unanswered`。显式提前字母作为 pre-answer 保留，只有上游使其 active 时才成为有效选择。
+
 ## 每组决策的唯一状态
 
 | 状态 | 含义 | 能否进入正式规格 |
@@ -68,11 +74,17 @@ CX-01 先采用 A；只有目标机 benchmark 不通过才回来讨论 B。
 
 “推荐”“当前领先”“候选”“最合适”本身都不是 `selected`。只有负责人明确表达接受、选择或等价自然语言，才改变状态。`N/A`、`dormant` 等自由拼写不另建状态；条件分支统一归档为 `not-applicable`，以免被误读成 deferred 或仍会生成空壳字段。
 
-## 一次答复的六步归档
+## 一次答复的七步归档
+
+### 0. 锁定 inventory 与登记事务
+
+处理原话前先记录 [`DECISION-REGISTER.md`](DECISION-REGISTER.md) 的 inventory version、structural/semantic digest、当前 Git HEAD 和本批显式/隐式作用域。当前基线是 `decision-inventory-v9` 的 270 个正式 group；semantic digest 覆盖完整正式问题 section、推荐、条件和所属包。v9 在 v8 基础上又拆出六个不能由相邻主题代答的 owner：M05-57 资源 selector/简称、M05-58 per-Model retry 配置面、M05-59 过短配置秘密政策、AL06-50 stuck 阈值来源、AL06-51 特殊 purpose 跨 Endpoint 同意寿命和 TS-40 reserved tree 精确读取。若正文、正式组集合或推荐在答复期间发生变化，不能把新版本混进旧“其余接受推荐”。先按旧 inventory payload 展开，再另行说明新增或修订项。
+
+登记表的状态、原话证据、决定/规格/gate 引用必须作为一个文档事务更新。允许分阶段传播，但必须明确区分“回复已捕获”与“规格传播完成”，不能只改 `DECISIONS.md` 后依赖记忆补其余文档。
 
 ### 1. 保留原话
 
-把负责人原始回复保存在讨论证据中，记录日期、所答包和上下文。不得只保存技术侧的转述；转述可能漏掉“除外”“以后”“仅当”等限制词。
+把负责人原始回复按批次保存在 `DISCUSSION-BATCH-NN.md`，使用登记表定义的固定头，记录日期、所答包、inventory version/digest、回复前 Git HEAD 和上下文；同时保存显式 ID、blanket 实际展开 ID、inactive ID 与条件未决 ID。登记表逐组只引用稳定 reply/assertion ID，不引用行号。不得只保存技术侧的转述；转述可能漏掉“除外”“以后”“仅当”等限制词。
 
 ### 2. 原子化
 
@@ -89,6 +101,8 @@ CX-01 先采用 A；只有目标机 benchmark 不通过才回来讨论 B。
 
 每条断言分别标注：产品行为、体验文案、安全取舍、技术目标或精确常量。这样才能识别其中只有哪一部分需要技术证明。
 
+完成原子化后立即更新登记表的 `State`、`Selection` 和 `Reply`。自然语言例外进入稀疏 assertion 记录，不把长转述塞回 270 行主表。
+
 ### 3. 对照现行决定
 
 检查 `DECISIONS.md`：
@@ -99,6 +113,8 @@ CX-01 先采用 A；只有目标机 benchmark 不通过才回来讨论 B。
 - 可能冲突：不替负责人猜“新话一定覆盖旧话”，列出最小行为差异请其确认。
 
 优先级不是简单的“最新日期赢”。必须能证明新回复确实在修订同一主题，而不是回答另一个范围。
+
+每次新增、复用、取代或冲突都建立或更新 `PR`，并由登记表 `Projection` 引用；现有 D-001..D-048 不复制进登记表，只建立引用。
 
 ### 4. 传播影响
 
@@ -162,6 +178,12 @@ CX-01 先采用 A；只有目标机 benchmark 不通过才回来讨论 B。
 ```
 
 可以跳包回答，但下游只能标记“有负责人输入，等待上游一致性”，不能借机替未答上游做默认决定。
+
+### 能在决策阶段判定的静态约束
+
+有些组合不是“等运行时看看”的配置错误，而是所选 carrier 根本无法表达另一组选中的字段。收口器必须在传播 selection 时立即套用静态约束；不相容答复进入 `conflict`，不能同时标成 selected，也不能靠隐藏字段、配置降级或某个 Model 的特殊 parser 偷偷修正。
+
+当前必须机械执行的一条约束是：`TS-23 B` 或 `TS-23 C` 一旦生效，`exec` 没有 typed per-call field carrier，因此同时强制 `TS-37 B`、`F4-07 A`，并从 tool schema、parser、help、approval、Context 投影和测试中完全移除 per-call `cwd`、`stdin_text` 与 deadline override。M05-51 选择的全局/Exec-profile deadline 仍可在 call admission 前冻结为 effective limit，但不能伪装成模型逐调用 override。若负责人同时选择 TS-23 B/C 与 TS-37 A/C、F4-07 B 或任何逐调用 deadline 行为，必须报告这一最小冲突；只有重新选择 TS-23 A，或放弃对应逐调用行为，才能收口。
 
 ### 哪些情况必须重新打开已经回答的组
 
@@ -243,6 +265,8 @@ B. 所有入口都拒绝，只由外部文本错误说明修复。
 | Evidence target | 哪个最终平台/zip/模型组合必须提供证据 |
 | Status | 待答/已决/规格化/已验证/被取代 |
 
+登记表还必须保留 `group_id`、`inventory version`、`group_state`、`selection/assertion refs`、`reply_ref`、`active_when` 与 `supersedes/conflict/reopen refs`。这些是答复来源和条件生命周期，不应被上面的 requirement→evidence 记录吞并。
+
 双向规则：从 requirement 能找到证据，从失败的 evidence 也能反查是哪条保证和决定受影响。
 
 ## 一个答复批次完成的判定
@@ -250,13 +274,18 @@ B. 所有入口都拒绝，只由外部文本错误说明修复。
 只有同时满足以下条件，才把该批次标为已收口：
 
 - 每个明确回复都保留原话并原子化；
+- 登记表绑定正确 inventory，逐组状态、选择、条件和原话引用已更新；
+- reply batch 保存 blanket 实际展开的精确 ID 集合，不只保存“其余接受推荐”原句；
 - 未回复项仍明确是 `unanswered`，没有因“整包大体接受”被吞掉；
+- “其余接受推荐”只展开 active 组；条件假项为 `not-applicable` 且没有字段/页面/XML/test 空壳；
 - `DECISIONS.md` 没有两条同时现行的冲突结论；
 - 所有影响 owner/consumer 已登记；
+- 每个非 unanswered 组都有 typed PR；产生现行行为的组的 owner spec 恰好一个，讲解/暂缓/N/A/取代/冲突按登记表 state×PR 矩阵使用唯一 typed sentinel；consumer/gate/test 为真实引用或带原因的 pending/n/a/conflict sentinel；
 - 候选文档没有把旧推荐继续写成现行方向而不标状态；
 - 需要负责人决定与需要技术证明的部分已拆开；
 - 对应 P0/P1 gate 状态和原因已更新；
 - 文档链接、编号、枚举和术语校验通过；
+- 决策包正式组集合、推荐模板集合与登记表集合完全相等；
 - 没有开始实现代码。
 
 ## 全部答复后的最终输出

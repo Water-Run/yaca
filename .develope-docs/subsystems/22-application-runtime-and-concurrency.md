@@ -23,7 +23,7 @@
 - AgentLoop 决定 turn、工具、终止评估和业务结果；本系统只调度已经定义的状态转换。
 - 01 号系统提供平台身份和能力，02/03 号系统提供进程与网络端口。
 - 10 号系统拥有上下文 durable 事实和写锁语义，本系统只遵守其屏障。
-- 13/14 号前端只消费视图状态并发送语义动作，不能成为领域状态事实源。
+- 13/14 号前端只消费视图状态并发送同一 registry 中的语义动作，不能成为领域状态事实源。所有有领域效果的 TUI 动作必须有等价 CLI 投影并返回同一 typed result；方向键、焦点和分页等 renderer gesture 不是第二套领域动作。内部 action registry 不因此成为公共 headless/IPC/RPC API。
 - 20 号系统验证调度、背压、故障注入和长时间运行；本系统不拥有发布判定。
 
 ## 已确认前提
@@ -54,17 +54,36 @@ main.lua（唯一组合入口）
  1. 读取最小平台身份并拒绝错误 OS/架构的发行包。
  2. 选择并构造 path、fs、text、clock、process、network、terminal 等窄后端。
  3. 确定程序资源目录、用户数据目录和临时目录，检查最低文件能力。
- 4. 加载 schema，再加载并验证配置；无效配置进入最小恢复入口。
- 5. 根据命令选择新会话、Context Resolver、配置浏览器、自检或一次性操作。
- 6. 取得需要的上下文锁，完成恢复收口，再创建 AgentLoop。
- 7. 最后启动会联网、运行进程或接受用户输入的前端。
+ 4. 加载 schema，再完整读取 INI bytes、计算 digest、parse/schema-validate/cross-validate，并发布启动时第一份 immutable config generation。无效配置或零个可用 Model 阻断 Agent；help/version、三个 bootstrap 管理 REPL 和 self-test Stage 1 只进入各自受限路径。
+ 5. 根据顶层 semantic action 选择 chat、独立管理 REPL、self-test 或一次性操作。裸 chat 永远新建且不扫描 Context Catalog；只有 `.context`、continue/context-repl 等显式动作调用 Resolver。
+ 6. 若 `StartupSelfTest` 不是 `off`，调用同一 self-test domain action，从 Stage 1 顺序运行到指定最高阶段。Stage 1 包含 Context Catalog/header、父目录派生 root、目录存在/可进入和有界扫描/hash 性能诊断；Stage 2 才真实检查获准的 LLM；Stage 3 只使用 Stage 2 已确认 Model 做配置与 Permission 名称/说明/Prompt/矩阵/拼写 advisory。需要联网的阶段继续取得可见同意，required failure/cancel 阻止 chat，Stage 3 advisory 不改写 Stage 1/2。
+ 7. 显式打开旧 Context 时，从 XML 在 `CONTEXT` 镜像树中的父目录解码并验证其唯一 workspace root，再取得单 writer；XML 内不存在 root authority/list 字段，历史工具 cwd/root 也不参与当前 root 求值。活动 writer 存在就拒绝正文，不建立只读正文状态。
+ 8. 创建 AgentLoop 并显示可配置的简洁启动头。新 chat 直到第一条 main 消息被接受才先建立并提交 XML。
+ 9. 最后启动会联网、运行进程或接受用户输入的前端；启动头本身不触发这些动作。
 
 任何阶段失败都只清理已经成功构造的较早阶段。模块加载本身不得联网、写文件、修改终端或取得锁；副作用只能发生在显式 `start/open/run` 调用中。
 
+## Config generation 与逐 turn 载入
+
+配置不依赖 watcher、定时轮询或 reload interval。每个顶层 `main`/`side` turn admission 前，ApplicationCoordinator 都执行同一条确定流程：
+
+1. 以发行 hard cap 完整读取一次 INI bytes；读取失败或超过上限就拒绝这个新 turn。
+2. 对完整 bytes 计算 digest。若与当前 generation 的 source digest 相同，直接复用同一个 immutable generation，不重新 parse。
+3. 若 digest 变化，则对这份完整 bytes 做 parse、schema validation、引用解析和跨字段 validation；全部成功后才以单一原子状态转换发布新 immutable generation。
+4. 从该 generation 冻结本 turn 的 Model、Permission、Prompt、DoubleCheck、网络/重试、工具 registry 及其他有效配置 snapshot，再允许请求或副作用。
+
+解析或跨字段验证失败时，旧 generation 只继续服务已经 admission 的活动 turn；新的 main/side 必须显示错误并阻断，不能静默回退旧配置后继续。active turn 的工具、provider retry、action/termination review、compaction 和其他 child activity 始终沿用它 admission 时的 generation；文件在中途变化不能改写同一 turn。model-repl/config-repl 使用自己的原子 INI 提交协议，可以在某个 Context 活动时修改全局配置；变化由下一次顶层 main/side admission 观察，不向核心推送异步 mutation。
+
+## Semantic action registry 与前端等价
+
+ApplicationCoordinator 维护一份版本化 semantic-action registry：action identity、typed 参数、前置条件、锁/Permission 要求、结果/错误和 help metadata 只定义一次。TUI 菜单、dot-command、补全候选和顶层 CLI 都解析为这里的同一动作；不同入口不能给同一 rename、Model 选择、self-test 排除或 Context 列表建立不同默认值。Context 列表动作把已验证的 `ListSortBy`/`ListSortDirection` 交给 11 号系统，排序只消费 XML canonical metadata，不改变 Resolver。
+
+“所有 TUI 领域动作可由 CLI 调用”只保证本地调用表面的完整性。它不注册 daemon、不监听端口、不承诺第三方稳定协议，也不允许无 TTY 调用绕过交互确认、锁、Permission、联网 consent 或费用说明。
+
 ## 关闭顺序候选
 
- 1. 停止接受新的 turn、工具和破坏性动作。
- 2. 把当前取消请求送入 AgentLoop，并要求网络、进程/helper 等 I/O producer 在规定期限内停止或 join。
+ 1. 停止接受新的 turn、工具和破坏性动作；取消未开始 queue 和后台 Context 命名，不等待命名结果。
+ 2. 把当前取消请求送入 AgentLoop，并要求网络、进程/helper 等 I/O producer 在规定期限内停止或 join；pending approval 以拒绝/取消事实收口。
  3. 排空已经到达核心的完成事件；超时后仍无法确认的副作用记录为 unknown，不能伪造成功。
  4. 提交能够真实提交的最终结果，flush 上下文与必要审计，再释放会话 write lease。
  5. 清理临时资源，并恢复终端 raw mode、颜色、光标、QuickEdit 与代码页。
@@ -97,12 +116,14 @@ main.lua（唯一组合入口）
 
 首版推荐：
 
-- 同一上下文只有一个 writer 和一个 active turn。
+- 同一上下文只有一个 writer 和一个 active turn；活动 writer 存在时第二进程完全拒绝打开正文，只能读取不需要解析正文的 busy/PID 元数据。
+- write lease 存续期间，来自另一个 context-repl、CLI 或管理进程的 rename、rebind、delete、`AutoRenameDisabled` 修改及其他 Context mutation 一律返回 `LockConflict`；释放前不能靠 Permission、确认或锁龄强夺。全局 model/config INI 编辑使用独立锁与原子提交，可以进行，但只按上节边界影响新 turn。
 - 工具调用先全部串行；工具 schema 可以保留只读性、可取消性和互斥资源键，等正确性稳定后再开放并行。
-- 不同进程可以运行不同上下文；同一 XML 的第二个进程只读或拒绝写入。
+- 不同进程可以运行不同上下文；同一 XML 不提供第二进程只读正文路线。
 - 模型请求数、活跃进程数、待渲染事件、待写日志和扫描结果页都有进程级硬上限。
-- 会话生命周期 `write lease` 用来阻止第二个 writer，可以跨 TUI/网络等待持有，但不得阻止只读查看；短时 `commit mutex` 只保护实际文件提交，禁止跨 TUI 输入或长期网络请求持有。
+- 会话生命周期 `write lease` 用来阻止第二个 writer，可以跨 TUI/网络等待持有；第二进程只显示不解析正文的忙状态。短时 `commit mutex` 只保护实际文件提交，禁止跨 TUI 输入或长期网络请求持有。
 - 两类锁必须有固定取得顺序。陈旧 lease 不能只按时间抢占；必须结合进程存活、存储恢复和用户确认。
+- 周期 Context 命名只能在 `AutoNameEveryMainTurns>0`、durable main-turn 水位达到当前 baseline 的下一周期且 XML `AutoRenameDisabled` 缺失/`false` 时 admission。marker 为 `true` 时不排队；取消 marker 以当时 durable 水位建立新 baseline，不立即发请求、不追赶错过周期。新 main、退出、显式取消、purpose deadline，或 marker 被置为 `true`，都会取消/逻辑失效尚未完成的命名 request；无法停止的迟到 response 只保存 usage/result/cancel 事实，不采用名称。命名请求进入同一有界事件泵和 Model scheduler，不拥有第二份领域状态。
 
 ## 背压与有界内存
 
@@ -130,6 +151,9 @@ main.lua（唯一组合入口）
 - 任何队列、缓存、扫描结果和 UI 历史都有上限。
 - 一次副作用只有一个 operation 身份；取消或崩溃后不因重放自动再执行。
 - 启动未完成时不隐式联网或运行工作区命令。
+- 每个新 main/side turn 只使用一次完整 INI 观察所确定的 immutable generation；活动 turn/child 不受中途配置变化影响，也不存在 watcher 路径。
+- 每个 Context 的当前 root 只由 XML 镜像父目录派生；XML 字段、历史事件和 Permission 不能覆盖它。
+- TUI 与 CLI 的同一领域意图必须落到同一 semantic action、锁和 typed result；入口差异不能形成额外授权。
 - 关闭失败不把 unknown 副作用报告成成功，也不删除仍可能用于恢复的临时事实。
 - helper、线程或子进程崩溃形成端口错误，不成为第二个应用事实源。
 

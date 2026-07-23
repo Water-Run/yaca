@@ -1,6 +1,6 @@
 # 决策包 10：发布、完整测试与架构就绪冻结
 
-更新日期：2026-07-18
+更新日期：2026-07-22
 
 状态：等待项目负责人回复；本文所有推荐、路线、示例数字和问题选项都不是已确认决定
 
@@ -10,7 +10,7 @@
 
 - 每个平台的 zip 是解压即运行，还是必须安装后才能运行；
 - `__yaca__` 数据根放在哪里，多份 yaca 如何使用数据；
-- 升级、迁移、降级和卸载时，INI、Key 与 Context XML 怎样保留；
+- 升级、迁移、降级和卸载时，INI、registered config secrets 与 Context XML 怎样保留；
 - 当前 `luainstaller` 不支持 Windows x86/XP 时，Windows 发布如何取得可执行前置；
 - 现有 `bin/` 为什么不能直接复制进正式包，怎样建立最小依赖 allowlist；
 - 是否允许 UPX、怎样审计 ELF/PE/CRT/API/TLS/CA 和原生模块；
@@ -115,7 +115,7 @@ Windows XP SP3 x86
 - 每个平台 zip 解压后直接运行，不要求管理员安装、注册表或系统 Lua。
 - 每份解压实例拥有明确邻接的 `__yaca__` 数据根；程序不会因目录不可写而静默切换到另一个位置。
 - 安装脚本若以后提供，只做可预览的复制、快捷方式或 PATH 薄层；它不是首次运行前提。
-- 升级时把新版本解压到新位置，通过显式迁移/选择动作把旧数据备份、验证、转换到新实例；旧程序和旧数据在成功前保持不动。
+- 升级时把新版本解压到新位置，通过显式迁移/选择动作把旧数据验证、转换到新实例；Context 与 non-secret 配置可按 RF-03 备份，secret-bearing 配置是否复制及怎样保存只消费 M05-42；旧程序和旧数据在成功前保持不动。
 - 降级遇到更高 schema 只读打开或明确拒绝；不试图猜测并覆盖新版数据。
 - “卸载”首先是删除 application tree；默认保留或先导出数据，永久删除数据必须单独确认。
 
@@ -182,13 +182,13 @@ confirmed requirements and accepted subsystem specs
 | 首次运行 | application root 与 data root 怎样确定；缺失数据是建立草稿还是阻断 |
 | 多份副本 | 两个版本是否各用数据、显式共享时怎样锁和校验 schema |
 | 升级前 | 旧程序版本、配置 schema、Context schema、剩余空间和写者状态怎样预检 |
-| 迁移中 | 备份、临时目标、flush、验证、publish 和崩溃恢复怎样排序 |
+| 迁移中 | M05-42 允许的数据集合怎样备份，以及临时目标、flush、验证、publish 和崩溃恢复怎样排序 |
 | 升级后 | 哪个程序拥有写权限；旧程序怎样避免重新写坏新版数据 |
 | 降级 | 新 schema 是只读、明确拒绝还是有经过测试的逆迁移 |
 | 卸载 | application tree、数据、Key、备份和发布诊断分别保留还是删除 |
-| 搬到另一台机器 | XML 能否读取；缺失 Model/Permission/Key/路径映射怎样提示而不静默替换 |
+| 搬到另一台机器 | XML 能否读取；缺失 Model/Permission/config-secret/ExecProfile/路径映射怎样提示而不静默替换 |
 
-推荐的最低不变量是：程序永远显示自己实际使用的 data root；一个 invocation 内不自动切根；迁移失败保留可验证的旧数据；永久删除 Key/INI/XML 需要独立、明确、默认否定的动作。
+推荐的最低不变量是：程序永远显示自己实际使用的 data root；一个 invocation 内不自动切根；迁移失败保留可验证的旧数据；永久删除含 registered config secrets 的 INI/backup 或 Context XML 需要独立、明确、默认否定的动作。
 
 ## 依赖 allowlist、SBOM 与原生文件审计
 
@@ -205,7 +205,7 @@ confirmed requirements and accepted subsystem specs
 | target OS/arch/ABI | Windows PE32 x86 或 Linux ELF64 x86_64，不能靠文件名猜 |
 | compiler/CRT/libc baseline | 是否能在 XP SP3/CentOS 7 最低系统加载 |
 | imports/dependencies | 是否意外依赖新 API、系统 DLL、glibc symbol 或外部工具 |
-| security role | 是否处理 Key、网络、XML、命令或工作区数据 |
+| security role | 是否处理 registered config secrets、网络、XML、命令或工作区数据 |
 | final artifact hash | 实际进入 zip 的文件，而不是上游另一个文件 |
 | platform evidence IDs | 哪些真实测试证明它与完整包共同工作 |
 
@@ -286,7 +286,7 @@ confirmed requirements and accepted subsystem specs
 | Model/network | header/SSE/JSON 半截、断流、429、代理失败、取消 | request/attempt 身份不混淆；已收响应不悄悄整次重试 |
 | process/helper | stdout/stderr 背压、子进程树、helper crash、cancel race | 不死锁；结果为 completed/failed/unknown 之一 |
 | TUI | 异步输出时正在编辑、窄终端、无 ANSI、EOF/Esc | 输入不丢、不误发；文本后备等价 |
-| config/migration | 旧/新/未知 schema、损坏 INI/XML、外部修改 | 备份验证后发布；未知语义只读或拒绝 |
+| config/migration | 旧/新/未知 schema、损坏 INI/XML、外部修改 | 只对 M05-42 eligible data set 备份并验证后发布；未知语义只读或拒绝 |
 | release package | 文件缺失、错误 hash、混入未列文件、zip 损坏 | 启动或装配 fail-closed；错误指出实际缺项 |
 | long-session soak | 大 XML、大目录、大输出、反复压缩/恢复/模型切换 | 内存/队列有界，事实与 ID 关系保持一致 |
 
@@ -345,9 +345,9 @@ gate_status         open/specified/tested/platform-proven/release-proven
 8. 每个发布证据集至少记录源码 commit、luainstaller 版本、RF-06 所选 integrity artifact hash、zip hash、OS/架构、测试目录版本、配置非秘密摘要和逐项结果。
 9. 原始大日志和 VM 镜像不必污染源码仓库；仓库/Release 保留稳定摘要与内容 hash，受控证据存储保存原附件并有保留策略。
 
-## 真正需要项目负责人回答的十三组问题
+## 真正需要项目负责人回答的十四组问题
 
-以下十三个正式组各自只拥有一个 release 决策轴。Windows x86 与 Linux x86_64 独立 zip、Lua 5.5、luainstaller 打包、声明平台完整测试，以及“只有已证明组件才可入包”均为前提，不再作为可放弃的伪选项。RF-07 和 RF-13 只是证据/文档的内部组织门，不在回复清单。没有明确回复的正式编号继续待决，不会因为本文写了推荐就自动进入 `DECISIONS.md`。
+以下十四个正式组各自只拥有一个 release 决策轴。Windows x86 与 Linux x86_64 独立 zip、Lua 5.5、luainstaller 打包、声明平台完整测试，以及“只有已证明组件才可入包”均为前提，不再作为可放弃的伪选项。RF-07 和 RF-13 只是证据/文档的内部组织门，不在回复清单。D-039 已固定正常启动、本地管理和定时器不得为了更新隐式联网；RF-16 只决定是否再提供用户显式触发的更新能力。没有明确回复的正式编号继续待决，不会因为本文写了推荐就自动进入 `DECISIONS.md`。
 
 ### RF-01 zip 的正式程序入口
 
@@ -375,17 +375,19 @@ gate_status         open/specified/tested/platform-proven/release-proven
 
 ### RF-03 升级、降级、迁移与卸载
 
-- A：新版本 side-by-side 解压；显式选择旧数据，先备份、迁移到临时目标、验证后发布；失败保留旧版。降级对未知新 schema 只读或拒绝。卸载默认保留数据，永久删除单独确认。（推荐）
-- B：程序允许覆盖升级，但数据迁移仍先复制到临时目标、验证后原子发布；失败保留旧数据。卸载默认保留数据，永久删除单独确认。
-- C：始终 side-by-side；程序从不自动迁移，用户显式运行 migrate 并选择源/目标；旧 schema 只能只读或拒绝，卸载默认保留数据。
+RF-03 只消费 M05-42 的 secret-copy policy，并独立拥有程序版本、data root、迁移发布与卸载拓扑。“旧数据”“备份”和“复制”都先按 M05-42 生成 eligible data set：M05-42 A 时只有 Context 与 non-secret 配置投影，目标重新输入 secrets；B 时只有用户为本次动作显式 include-secrets 才可复制；C 时只能按其规则管理一份可见、可清除的 secret-bearing previous INI。RF-03 不得自行创造第四种 secret 副本、隐式复制 Key，或把迁移需要当成覆盖 M05-42 的理由。
 
-推荐 A。它会多一步显式动作和磁盘空间，但最容易证明崩溃、磁盘满或新版 bug 不会同时毁掉程序与工作历史。三项都禁止静默寻找/迁移/删除用户数据。
+- A：新版本 side-by-side 解压；显式选择旧数据，先备份 M05-42 允许的集合、迁移到临时目标、验证后发布；失败保留旧版。降级对未知新 schema 只读或拒绝。卸载默认保留数据，永久删除单独确认。（推荐）
+- B：程序允许覆盖升级，但数据迁移仍只复制 M05-42 允许的集合到临时目标，验证后原子发布；失败保留旧数据。卸载默认保留数据，永久删除单独确认。
+- C：始终 side-by-side；程序从不自动迁移，用户显式运行 migrate 并选择源/目标；migrate 仍只处理 M05-42 允许的集合，旧 schema 只能只读或拒绝，卸载默认保留数据。
+
+推荐 A。它会多一步显式动作和磁盘空间，但最容易证明崩溃、磁盘满或新版 bug 不会同时毁掉程序与工作历史。三项都禁止静默寻找/迁移/删除用户数据，也都只消费 M05-42 的 secret-copy policy，不能在 RF-03 内另创新的 secret 生命周期。
 
 一个无法由 yaca 兑现的边界必须写清：若 portable 数据根与 application tree 邻接，用户直接在 Explorer/shell 删掉整个解压目录会绕过 yaca 的卸载/永久删除确认；A/B/C 都不能保护或恢复这类外部手动删除。产品只能在 `.status`、迁移/卸载帮助和 README 中显著展示实际 data root，建议备份，并让 yaca 自己发起的删除保持默认取消。
 
-技术侧必须证明：三类版本（程序、配置 schema、Context schema）独立兼容；每个迁移崩溃点、外部修改、no-replace、磁盘满和旧程序重开都可恢复。精确命令名留给 CLI 包。
+技术侧必须证明：三类版本（程序、配置 schema、Context schema）独立兼容；每个迁移崩溃点、外部修改、no-replace、磁盘满和旧程序重开都可恢复；M05-42 A/B/C 生成的 eligible data set、重新输入 secret 或受管副本 inventory 与实际迁移结果一致。精确命令名留给 CLI 包。
 
-关联：`CFG-07`、`FMT-06`、`REL-02`、`REL-03`、`UPDATE-01`、`UPDATE-02`、AQ-330。
+关联：`CFG-07`、`FMT-06`、`REL-02`、`REL-03`、`UPDATE-01`、`UPDATE-02`、AQ-330、M05-42。
 
 ### RF-04 luainstaller Win32/x86/XP 前置
 
@@ -535,6 +537,28 @@ CLI help/schema/template 应从同一 typed registry 生成或做机械等价校
 
 确认后 owner artifact：`18-packaging-and-release.md` 的 PublicReleaseSet 验证契约；若选 B，追加 signing key lifecycle、offline verifier compatibility 和 revocation/rotation 证据门。
 
+### RF-16 更新发现与下载策略
+
+问题：各平台 zip 可以完全由用户手工获取，也可以由 yaca 显式查询或下载；v0.1 承诺到哪一层？本组只拥有网络发现与 verified acquisition，不拥有程序安装/替换/数据迁移，后者仍由 RF-01/RF-03 决定。D-039 已固定正常启动、help/version、本地配置/Context 管理、静态 self-test 和定时器不得检查或下载更新。
+
+相容性硬门：B/C 只有与 RF-15 B 的强制来源身份签名同时成立才可选。若 RF-15 选择 A 或 C，本组只能选 A，或按冲突协议重开 RF-15；TLS、同一服务器给出的 hash 和未认证 manifest 都不能独立证明更新来自项目发布者。
+
+- A：v0.1 不内建联网更新检查或下载；只显示当前程序/schema 版本，并在文档中给出正式发布位置，用户自行获取平台 zip。（推荐）
+- B：提供用户显式执行的只读 `check-update`；只获取有界、版本化且由 RF-15 B 认证的 update manifest，验证版本、目标 OS/架构、RF-06 完整性材料和签名后报告候选 zip，下载、替换和迁移仍由用户在 yaca 之外完成。
+- C：在 B 上增加用户显式触发、逐步预览并确认的下载与验证；下载物先进入私有临时目标，按 RF-06 与 RF-15 B 契约验证，再以 no-replace 发布到用户选择的 download path 或明确的 private staging。它绝不覆盖/切换当前程序、不启动 installer、不迁移数据；用户之后按 RF-01/RF-03 的既有 lifecycle 操作。
+
+推荐 A。它与独立 zip、离线旧系统和最小产品面最一致。B 增加 update manifest、TLS/CA/proxy、平台选择与失败状态；C 进一步承担下载截断、残留、磁盘满、目标冲突和 publish，却有意不进入 installer/rollback/migration。三项都禁止启动时、定时器、help/version、本地浏览或普通 `.status` 隐式联网，也不把“检查失败”当作当前版本不可用；B/C 的每次网络动作都必须来自清楚的用户命令，并显示 endpoint、目标平台、预算、取消和结果 receipt。
+
+配置与命令必须跟选择一致：A 下 INI/XML/help/command registry 没有 update endpoint、check/download 开关或后台调度字段；B 只注册显式只读检查动作，C 才增加显式 download 动作；三项都不注册 install/migrate shortcut。B/C 可以消费已经确认的全局 proxy/CA policy，但不得复用 Model Key、遥测 consent 或工具 Network approval；顶层/chat 命令、非 TTY 结果和每种 AgentState 可用性必须从 TU-18/TU-32/CLI-11 的同一 typed action registry 生成。
+
+RF-01/RF-03 组合不改变本组含义：RF-01 A/B/C 只决定用户拿到 verified zip 后使用 portable、installed 或两种入口；RF-03 A/C 的 side-by-side 与 RF-03 B 的“允许覆盖”都发生在下载完成之后。即使 RF-03 B 被选中，C 的 downloader 也不能覆盖正在运行的 application tree；即使 RF-03 C 被选中，C 也不能自动运行 migrate。所谓“内建下载但用户手工安装”正是 C 的有意中间路线，不是遗漏。
+
+关联：`AQ-387`、`REL-11`、`UPDATE-01`、`UPDATE-02`、`CFG-01`、`CFG-02`、`CLI-11`、TU-18、TU-32、D-039、RF-03、RF-06、RF-15。
+
+确认后 owner artifact：`18-packaging-and-release.md` 的 UpdateDiscovery/VerifiedDownload 契约与 D-039 触发矩阵；B 追加 manifest 获取、验证和只读报告，C 追加逐阶段 download/verify/no-replace publish、staging 清理，以及与 RF-01/RF-03 明确不越界的 handoff 表。
+
+发布门：A 路线必须证明发行包没有内建 update endpoint、后台检查或下载入口；B/C 必须在最终 exact zip 上证明启动/定时器/纯本地动作零更新网络，并覆盖旧 TLS、proxy/CA、redirect、manifest 篡改、错误 OS/架构、取消和断网；C 还必须覆盖下载截断、磁盘满、验证失败、崩溃、目标外部修改/no-replace、staging 清理，并证明绝不调用 install/migrate 或覆盖 application tree。任何一项缺证据都不得标记 `release-proven`。
+
 ### 完整推荐回复模板
 
 ```text
@@ -551,13 +575,14 @@ RF-11 A
 RF-12 A
 RF-14 A
 RF-15 A
+RF-16 A
 ```
 
 ## 本包确认后必须形成的权威工件
 
 负责人回复后，不是立刻开始写打包脚本，而是按决定形成以下规范：
 
-1. `ReleaseLifecycle`：zip、application tree、data root、安装/升级/降级/卸载状态表。
+1. `ReleaseLifecycle`：zip、application tree、data root、安装/升级/降级/卸载状态表，以及逐项消费 M05-42 的 secret-copy policy/eligible-data-set 投影。
 2. `PlatformPrerequisites`：luainstaller Win32/x86/XP 前置与 Linux x86_64 baseline。
 3. `ComponentManifest`：每平台 allowlist、来源、license、ABI、hash 和依赖闭合。
 4. `BuildAndAssembly`：固定输入、luainstaller 输出、外层装配、static audit 与 final zip。
@@ -567,10 +592,11 @@ RF-15 A
 8. `TraceMatrix`：requirement、decision、spec、test、artifact、platform、evidence 状态。
 9. `UpgradeCompatibility`：程序/INI schema/XML schema 的迁移、只读、拒绝和回滚矩阵。
 10. `PublicReleaseSet`：zip、RF-06 所选完整性材料、licenses、README 状态、证据摘要，以及 RF-15 所选签名材料。
+11. `UpdateDiscovery`：RF-16 所选发现/下载表面、D-039 零隐式联网触发矩阵，以及 B/C 条件下的 manifest、下载/验证/no-replace publish、RF-15 身份材料与 RF-01/RF-03 handoff 契约。
 
 候选文档不能直接充当这些权威工件。每份最终规格必须删除被否决分支、固定输入输出/失败结果，并能生成可执行验收。
 
-## 明天回复后的归档顺序
+## 负责人回复后的归档顺序
 
 1. 只把明确选择写入 `DECISIONS.md`；“接受大方向”不能自动展开成全部 RF 条目。
 2. 若 RF-04 选择 A，先建立 luainstaller 独立目标、范围、设计与测试授权，不在 yaca 仓库暗改。
@@ -578,7 +604,7 @@ RF-15 A
 4. 用 RF-05、RF-06 生成 component manifest/SBOM 契约，当前 `bin/` 一律保持未证明状态。
 5. 按 RF-07 技术门生成单一可校验追踪记录；用 RF-08 至 RF-10 冻结平台放行、性能测量和故障/soak 节奏。
 6. 用 RF-11 冻结证据保留期并填写 trace matrix；用 RF-12 建立正式 Model 支持/验证口径。
-7. 按 RF-13 技术门把公开文档同步纳入发布阻断；用 RF-14 固定 Win32 x86 CPU/ISA 公开契约；用 RF-15 固定签名承诺。
+7. 按 RF-13 技术门把公开文档同步纳入发布阻断；用 RF-14 固定 Win32 x86 CPU/ISA 公开契约；用 RF-15 固定签名承诺；用 RF-16 固定显式更新范围及其对 RF-03/RF-15 的消费。
 8. 重新评估 `AR-P0-16`、`AR-P1-08`、`AR-P1-11`、`AR-P1-12`。
 
 ## 本包的完成标准
@@ -587,7 +613,7 @@ RF-15 A
 
 1. 用户下载 zip 后是否可以直接运行，是否需要管理员或安装器。
 2. yaca 在任何一次启动中只使用哪个 data root，怎样向用户显示。
-3. 两个版本并存、升级失败、降级和卸载时，INI/Key/XML 哪些绝不会被静默删除或改写。
+3. 两个版本并存、升级失败、降级和卸载时，INI/registered-config-secret/XML 哪些绝不会被静默删除或改写，并且 RF-03 不会在 M05-42 之外制造任何 secret 副本。
 4. luainstaller Win32/x86/XP 阻塞由谁在什么授权下解除，未解除时 Windows release 怎样保持诚实阻断。
 5. 当前 ELF32/i386/x32 痕迹、PE32 与 UPX 文件为什么不能凭文件名放行。
 6. 每个进入 zip 的文件能否说明用途、来源、版本、hash、license、ABI 和测试证据。
@@ -600,5 +626,6 @@ RF-15 A
 13. README/help/schema/template 怎样避免把 proposed 写成 implemented。
 14. Windows x86 的 CPU/ISA 门怎样由最终 PE 与旧 CPU fixture 证明。
 15. RF-06 的完整性材料之外，v0.1 是否还承诺可离线验证的来源签名。
+16. v0.1 是否内建更新检查或 verified download；任何存在的入口怎样证明只由用户显式触发、与 RF-15 B 相容，并把安装/迁移明确交回 RF-01/RF-03 而不在启动/定时器中隐式联网。
 
-任何未回复推荐仍然是候选。即使负责人回答完十三个正式组，如果 RF-07/RF-13 技术门、luainstaller 前置、权威规格、真实平台基准或 exact-hash 证据尚不存在，项目也只能说“产品决策已收口”，不能说“已经通过发布门”或“可以凭当前资源直接打包”。
+任何未回复推荐仍然是候选。即使负责人回答完十四个正式组，如果 RF-07/RF-13 技术门、luainstaller 前置、权威规格、真实平台基准或 exact-hash 证据尚不存在，项目也只能说“产品决策已收口”，不能说“已经通过发布门”或“可以凭当前资源直接打包”。

@@ -10,7 +10,7 @@ AgentLoop 决定 yaca 何时继续工作、何时询问、何时落盘、怎样�
 
 ## 职责
 
-- 接受已经规范化的用户输入，创建 turn 并冻结本轮运行视图。
+- 接受已经规范化的用户输入和 Runtime 提供的已验证 immutable `ConfigGeneration`，创建 turn 并冻结本轮运行视图。
 - 通过上下文系统取得模型视图，通过模型层采样并解释规范化生成事件。
 - 把工具请求交给权限和工具调度系统，将每个结果送回模型。
 - 处理 busy input、取消、重试、压缩、验证、预算和防卡死。
@@ -18,8 +18,9 @@ AgentLoop 决定 yaca 何时继续工作、何时询问、何时落盘、怎样�
 
 ## 边界
 
-- 不直接绘制终端；TUI、CLI 和未来 headless 只是同一循环的输入/事件投影。
+- 不直接绘制终端；TUI、CLI 和内部测试 adapter 只是同一循环的输入/事件投影。v0.1 不存在 headless/remote 前端。
 - 不直接读写上下文文件；只请求 10 号系统提交、flush、查询或构建模型视图。
+- 不监视、读取或解析 INI；22 号 Runtime 在每个顶层 turn admission 前完成 D-048 的完整 bytes 观察与 generation 发布。AgentLoop 只接受一个已验证 generation，不能自行 fallback 到旧配置或物理第一项。
 - 不理解 curl、SSE 或 provider 私有消息；只消费 06 号系统的规范化事件与错误。
 - 不自行推断文件/命令是否安全；权限系统返回 allow、deny、ask 和授权范围。
 - 不把“已写入文件”和“任务已完成”视为同一事实；完成还受验证与结束契约约束。
@@ -31,13 +32,21 @@ AgentLoop 决定 yaca 何时继续工作、何时询问、何时落盘、怎样�
 ```text
 TUI ---------+
 CLI ---------+--> command/input --> AgentLoop --> durable domain events --> Context Store
-headless ----+                         |
+test adapter-+                         |
        ^                                +--> transient stream events
        |                                                |
        +------------------ event projection <-----------+
 ```
 
-这样同一任务不会因从 TUI 或 CLI 启动而拥有不同的取消、权限、完成或持久化语义。是否把 headless 纳入 v0.1 由 `PROD-11` 决定，但核心不应依赖终端存在。
+这样同一任务不会因从 TUI、CLI 或测试 fixture 注入而拥有不同的取消、权限、完成或持久化语义。PJ-17/D-044 已排除 v0.1 的 remote/headless 控制面；测试 adapter 不进入配置、help、发行包或公共协议，也不能被误写成未来前端预留。
+
+## 已确认的 turn 配置冻结边界
+
+D-048 已关闭“运行中配置何时生效”这一主轴。每个顶层 `main`/`side` turn admission 前，22 号 Runtime 完整读取 INI；source digest 未变就复用现有 immutable `ConfigGeneration`，变化则在整份 parse/schema/cross-field validation 全部通过后原子发布新 generation。AgentLoop 收到 generation 后，先冻结本 turn 的 Model、Permission、`DoubleCheck`、Prompt、工具 registry、网络/retry、预算以及由当前 Context XML 镜像父目录派生的唯一 workspace root，再允许建立 Model request 或工具副作用。
+
+同一 turn 派生的 provider retry、工具循环、action/termination review、compaction 和其他 child activity必须继续使用这份快照；活动期间 INI 再变化不能逐字段热换。新候选删除、半写、不可读或无效时，只阻断尚未 admission 的新 turn并进入配置/Model self-fix；已经活动的 turn 仍按旧快照如实收口。当前 Model/Permission 在新 generation 中失效时，AgentLoop 不自动选择配置第一项。
+
+Context Store 要保存能解释每个 turn 所用非秘密 generation、Model/Permission/Prompt/tool-schema/root snapshot 的事实或可验证引用；精确 XML schema 仍由 10 号系统和 `CFG-12` 决定。AgentLoop 不把 private INI source digest、Key 或其他 registered secret 写入 XML。
 
 ## 候选状态图
 

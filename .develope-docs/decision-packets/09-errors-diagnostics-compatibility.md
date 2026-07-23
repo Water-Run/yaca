@@ -1,6 +1,6 @@
 # 决策包 09：错误、诊断、关闭与兼容体验
 
-更新日期：2026-07-18
+更新日期：2026-07-22
 
 状态：等待项目负责人回复；推荐与示例均不是已确认决定
 
@@ -75,6 +75,8 @@ process、network、Model 各自都不能顺便打印一张红色错误。trace 
 
 ## 错误卡样例
 
+下列主卡的方括号 error label 与 `Next` verb 列表分别投影 TU-20 A 和 TU-08 A；紧随其后的技术详情样例再投影 TU-33 A 的 chat-ready prompt、TU-32 A 的 error-details root 与 TU-20 A 的 status label。ED 包只拥有 error/cause 事实、安全数据范围和可用 next action；其他 TU 选择必须生成对应 label/root/prompt/grammar。
+
 ```text
 [ERROR NET-TLS] The Model request could not establish a trusted TLS connection.
   model: DeepSeek
@@ -95,7 +97,7 @@ Next:
 
 ```text
 > .error NET-TLS
-[DETAILS NET-TLS]
+[STATUS] Error details: NET-TLS
   stage: tls-handshake
   curl-exit: 60
   ca-mode: bundled
@@ -118,6 +120,8 @@ Next:
 
 ## Retry 是可取消状态
 
+下列 `[WARNING]`/`[STATUS]`、`busy>` 和 cancel control root 分别投影 TU-20 A、TU-33 B 与 TU-32 两条路线都保留的高频 control action；`request` target 参数及取消结果仍由 AgentLoop owner 定义。ED 包只拥有 retry 事实、严重度和下一步，最终 label/prompt/root/grammar 必须从各自 owner 投影。
+
 ```text
 [WARNING NET-RETRY] Model request failed before the body was sent.
   attempt: 2 of 3
@@ -139,7 +143,7 @@ busy> .cancel request
 | Esc/`.cancel request` | 请求取消最内层 request；等真实完成事件 |
 | `.cancel tool` | 请求终止进程树；结果可为 cancelled/completed/unknown |
 | `.cancel turn` | 停止新动作，收口当前 operation 与 queue |
-| `.exit` | 进入 graceful close；不启动新 queue/副作用 |
+| graceful-exit semantic action | 进入 graceful close；不启动新 queue/副作用；chat root 服从 TU-32 |
 | EOF | idle 且无草稿时可 close；busy 时不直接假装完成 |
 | broken pipe | 停止 renderer，仍尝试安全收口；避免向已关闭 stdout 无限报错 |
 | OS terminate/window close | 有能力时请求 close；强杀依赖下次 recovery |
@@ -149,8 +153,11 @@ busy> .cancel request
 
 ## 磁盘满与持久化失败
 
+下列样例投影 TU-20 A 的 error/action label 和 TU-08 B 的稳定编号选择；`fatal` 是 ED severity 字段，不是另一套未经 TU-20 定义的 block label。
+
 ```text
-[FATAL CTX-COMMIT] yaca cannot record a safe operation state.
+[ERROR CTX-COMMIT] yaca cannot record a safe operation state.
+  severity: fatal
   context: C:\Tools\yaca\__yaca__\CONTEXT\C\Work\demo.xml
   saved through event: 418
   current operation: not started
@@ -178,7 +185,7 @@ XML 保存：canonical error/cause identity、状态转换、retry/cancel/approv
 
 ### Support 输出
 
-显式命令先预览包含内容：版本、平台、manifest hash、error IDs、资源/能力、脱敏配置投影、用户选择的 Context 事件范围。默认不含 Key、用户/模型正文、文件内容、原始 request/body。持久输出只能是用户明确生成的 standalone diagnostic XML；否则只写 stdout/当次 stderr。用户使用 shell 重定向保存的副本是 yaca 之外的用户 export，不成为 Context 事实源。不自动上传；v0.1 无遥测、无隐式更新联网。
+显式命令先预览包含内容：版本、平台、manifest hash、error IDs、资源/能力、脱敏配置投影、用户选择的 Context 事件范围。默认不含任一 registered config-secret exact value、用户/模型正文、文件内容、原始 request/body；排除集合由 typed registry 生成。持久输出只能是用户明确生成的 standalone diagnostic XML；否则只写 stdout/当次 stderr。用户使用 shell 重定向保存的副本是 yaca 之外的用户 export，不成为 Context 事实源。本地 support 生成本身从不授权网络发送；aggregate telemetry 只由 ED-13 决定，一次性诊断上传只由 ED-14 决定，更新发现与下载只由 RF-16 决定。
 
 ## 终端与文本安全
 
@@ -202,9 +209,9 @@ XML 保存：canonical error/cause identity、状态转换、retry/cancel/approv
 
 “视觉能力不足”可降级；“数据正确性或权限无法保证”必须 fail-stop/只读。两类不能共用“兼容模式”一词掩盖。
 
-## 负责人决策组（十二组）
+## 负责人决策组（十四组）
 
-D035/D036 已固定长期文件只有 INI/XML、没有 standalone log/crash.log，且恢复所需 canonical fact 不能受显示详细度或 LogLevel 影响。以下每组只决定错误体验或证据投影，不再把丢事实、自动上传、未知副作用重放列为选项。未回复项保持待决。
+D035/D036 已固定长期文件只有 INI/XML、没有 standalone log/crash.log，且恢复所需 canonical fact 不能受显示详细度或 LogLevel 影响。D-039 又固定启动、本地管理和定时器不能借维护功能隐式联网。以下每组只决定错误体验、证据投影或显式诊断传输范围；丢事实和未知副作用重放不再是选项。ED-07 只拥有本地 support，ED-13 只拥有 aggregate telemetry，ED-14 只拥有一次性诊断上传，三者的 consent 不能互相复用。未回复项保持待决。
 
 ### ED-01 稳定 error ID 的兼容粒度
 
@@ -246,15 +253,15 @@ D035/D036 已固定长期文件只有 INI/XML、没有 standalone log/crash.log�
 
 关联：`AQ-126`、`AQ-140`、`AQ-197`、`AQ-221`、`AQ-321`、`NET-07`。
 
-### ED-05 Ctrl+C、EOF、broken pipe 与 `.exit`
+### ED-05 Ctrl+C、EOF、broken pipe 与 graceful-exit action
 
-- A：Ctrl+C 取消最内层活动；`.exit` 请求全进程 graceful close；EOF 仅在 idle/无 draft 时关闭、busy 时进入 close action；broken pipe 停止 renderer 后请求安全收口。（推荐）
-- B：第一次 Ctrl+C 只取消最内层活动，第二次请求 process close；EOF/broken pipe/`.exit` 直接请求 graceful close，仍有界收口。
+- A：Ctrl+C 取消最内层活动；graceful-exit semantic action 请求全进程 graceful close，其实际 chat root 服从 TU-32；EOF 仅在 idle/无 draft 时关闭、busy 时进入 close action；broken pipe 停止 renderer 后请求安全收口。（推荐）
+- B：第一次 Ctrl+C 只取消最内层活动，第二次请求 process close；EOF/broken pipe/graceful-exit action 直接请求 graceful close，仍有界收口；chat root 仍只由 TU-32 投影。
 - C：所有退出来源都直接请求 process-wide graceful close；不再接受新动作，到达 deadline 后以 interrupted/unknown 收口。
 
 推荐 A。它让不同信号保持最符合用户预期的最小影响范围。三项最终都映射 typed cancel/close 状态并有界收口，不能立即 kill 后声称完成，也不能在 busy 时无限忽略退出。
 
-关联：`AQ-027`、`AQ-098`、`AQ-229`、`ARCH-02`、`PLAT-10`。
+关联：`AQ-027`、`AQ-098`、`AQ-229`、`ARCH-02`、`PLAT-10`、TU-32。
 
 ### ED-06 持久化失败
 
@@ -266,15 +273,15 @@ D035/D036 已固定长期文件只有 INI/XML、没有 standalone log/crash.log�
 
 关联：`AQ-092`、`AQ-172`、`AQ-227`、`CTX-03`。
 
-### ED-07 support 输出和遥测
+### ED-07 support 输出的本地内容与生成形态
 
 - A：先预览版本/平台/manifest/error ID/脱敏配置投影，用户选择“本次 stdout”或“standalone diagnostic XML”；默认不含会话正文，持久 XML 不是 active Context 事实源。（推荐）
-- B：在 A 之上，允许用户在预览中显式勾选 Context event range/正文字段，显示增加的隐私范围并二次确认后只生成 standalone diagnostic XML；Key/secret 仍永不进入。
+- B：在 A 之上，允许用户在预览中显式勾选 Context event range/正文字段，显示增加的隐私范围并二次确认后只生成 standalone diagnostic XML；registered config-secret exact values 仍由 registry 强制排除，普通正文里的未知 secret 则必须警告无法自动找全。
 - C：只向 stdout 输出最小 support summary，yaca 不生成任何持久 support 文件；用户自行重定向得到的副本明确属于外部 user export，不是 yaca 事实源。
 
-推荐 A。support 是用户动作，不是后台 channel。三项都无遥测、自动上传或隐式更新联网；都不创建 `.log`/`.txt`/`.json`/`.zip` 长期诊断物，也不把 diagnostic XML 伪装成可自动续作的 Context。
+推荐 A。support 是用户主动生成的本地诊断物，不是网络 channel。三项都不创建 `.log`/`.txt`/`.json`/`.zip` 长期诊断物，也不把 diagnostic XML 伪装成可自动续作的 Context；是否把这份诊断上传只由 ED-14 决定，aggregate telemetry 只由 ED-13 决定，更新发现/下载只由 RF-16 决定，不能复用本组的文件生成确认。
 
-关联：`AQ-238`、`AQ-246`、`DIAG-08`、`REL-11`、`SAFE-09`。
+关联：`AQ-238`、`DIAG-06`、`REL-11`、`SAFE-09`、D-039、ED-13、ED-14。
 
 ### ED-08 English UI 与 Unicode 数据
 
@@ -298,7 +305,7 @@ D035/D036 已固定长期文件只有 INI/XML、没有 standalone log/crash.log�
 
 ### ED-10 error 详情交互
 
-- A：主卡短且可行动，`.error <id>`/details 追加有界安全 cause。（推荐）
+- A：主卡短且可行动，用户显式调用 `error-details(id)` semantic action 追加有界安全 cause；chat 字面只由 TU-32 投影，A 的样例是 `.error <id>`，B 则纳入 `.show <target>`。（推荐）
 - B：fatal/unknown 默认在主卡后追加一段有界脱敏 details，其他错误仍显式请求 details。
 - C：每张主卡自动追加一行 safe cause summary；更深的 typed chain 仍通过 details 显式追加。
 
@@ -310,7 +317,7 @@ D035/D036 已固定长期文件只有 INI/XML、没有 standalone log/crash.log�
 
 问题：当 canonical XML 还不存在或已经不能安全写入时，怎样留下可行动但不泄密的当次诊断？
 
-- A：向 stderr 写最小 typed fatal card（error ID、阶段、程序/平台版本、last durable seq、side-effect state、exit class），不含 Prompt/Key/body；用户之后可显式运行 self-test/support。（推荐）
+- A：向 stderr 写最小 typed fatal card（error ID、阶段、程序/平台版本、last durable seq、side-effect state、exit class），不含 Prompt、registered config-secret value 或 body；用户之后可显式运行 self-test/support。（推荐）
 - B：向 stderr 只写一行稳定 error ID、safe stage 和 exit class；更完整的脱敏诊断只能由用户后续显式生成。
 - C：向 stderr 写多行有界安全卡，可含脱敏 Lua symbol/stack frame，但不含正文、Key、header、原始请求或文件内容；不自动另存。
 
@@ -334,6 +341,41 @@ D035/D036 已固定长期文件只有 INI/XML、没有 standalone log/crash.log�
 
 确认后 owner artifact：`15-diagnostics-and-logging.md` 的 aggregate/partial-result schema 与对应 TUI/XML/exit-class 投影表。
 
+### ED-13 Aggregate telemetry 的发送策略
+
+问题：token、重试、压缩、工具耗时和失败等 aggregate counters 是否发送到发行版声明的 project-owned 固定 endpoint？本组永远不发送 ED-07 support XML、Context 正文、Prompt、文件/路径、任一 registered secret value、原始 request/body 或可重建会话的事件；第三方/自定义 endpoint 需要未来显式重开，完整诊断的一次性上传只由 ED-14 决定。D-039 已固定正常启动、help/version、配置/Context 浏览、静态 self-test、定时器、退出和其他纯本地动作不得触发 telemetry。
+
+- A：v0.1 不发送 aggregate telemetry；允许的 counters 只按既有 Context/诊断规则留在本机，不注册 telemetry endpoint、consent 或发送动作。（推荐）
+- B：提供显式 one-shot aggregate send；每次显示固定版本化字段、endpoint、大小、预算和失败影响并重新确认，不保存“以后也同意”，取消/失败/retry 不复用旧确认。
+- C：包含 B，并提供默认关闭的持久 opt-in；启用后只在用户显式发起的 main turn 或 side question 到达一次 settled terminal boundary、且对应 Context writer 健康时发送固定 aggregate schema。一个 logical action 至多发送一次；内部 main retry、tool call、compaction、action/termination review、context-name、self-test、telemetry 自身、ED-14 upload、RF-16 update 和基础设施请求都不各自触发。raw exec 即使实际联网也不触发，因为 Runtime 不解析 command 推断网络行为。启动、定时器、关闭、离线 self-test 和纯本地管理永不触发；不建立 durable outbound queue，失败只记 receipt，不在下一次动作暗中补发。
+
+推荐 A。它最符合简单、离线和旧系统基线。B 是完全显式的单次 aggregate 动作；C 才增加持久 consent 和精确正向触发点。B/C 都必须拥有独立 endpoint、consent generation、预算、取消、retry、receipt 和 secret-canary 契约；不能借 Model 请求、tool Network 权限、ED-07 export 或 ED-14 diagnostic consent 自动取得 telemetry 权。发送失败不能改变原在线动作的 outcome。
+
+配置与命令不允许成为空壳：A 下 INI/XML/help/command registry 均没有 telemetry endpoint、consent 或发送动作；B 只注册显式 one-shot 动作且不持久化同意，C 才允许在 INI 保存默认关闭的 opt-in，Context XML 只记录当次 effective generation、counter range 和 receipt，不能反过来覆盖机器级 opt-in。每个 consent generation 绑定 exact aggregate schema version、字段/数据分类和 project endpoint identity；开启、关闭后再开、schema/分类/origin 改变都会创建新 generation 并要求重新预览确认。C 不扫描或发送该 generation 之前的历史 counters，只覆盖此后尚未 receipt 的当前 eligible logical-action range，失败不补发。B 若发送历史 counter range，必须在本次预览中明确选择起止并重新确认。
+
+B/C 的 endpoint 是发行 manifest 中版本化、project-owned 的固定 HTTPS origin，v0.1 不允许 INI/XML/CLI 自定义，也不使用 endpoint-side Auth/Key/secret header；需要自定义 endpoint 或认证时必须重新进入决策流。它消费 M05-36/M05-37/M05-38 的共享 proxy/CA 和 redirect 上限，但采用更严格的 purpose policy：只允许有界 same-origin HTTPS redirect，任何 cross-origin 或 HTTPS downgrade 都拒绝，不能借 M05-38 C 的人工跨源确认改写本次固定 endpoint consent。若全局代理使用 credential，只允许按 proxy 协议把该 generation 的 credential 发给精确 proxy origin/CONNECT，绝不转发到 upload endpoint。不得增加 telemetry 专属 proxy/CA/redirect 字段，也不得复用 Model Key、tool Permission 或其他 consent。每次 B send 或 C auto-send 都必须先在健康 Context writer 中 durable 保存 exact counter range、payload digest、endpoint/policy generation 和 operation intent，之后才允许联网；没有健康 writer 就 fail-closed，不用 stdout/stderr 代替副作用日志。长期仍只有 INI/XML，不增加 metrics database/spool。顶层/chat 命令、非 TTY 失败方式和每种 AgentState 结果必须从 TU-18/TU-32/CLI-11 的同一 typed action registry 生成。
+
+关联：`AQ-246`、`DIAG-08`、`PROD-08`、`REL-11`、`SAFE-09`、`CFG-01`、`CFG-02`、`CLI-11`、TU-18、TU-32、D-039、ED-07、ED-14。
+
+确认后 owner artifact：`15-diagnostics-and-logging.md` 的 AggregateTelemetry 数据分类、counter schema、正向触发、预览/consent、endpoint、预算、取消、receipt、失败与撤回矩阵；A 路线生成零 telemetry 命令/配置/schema/endpoint 的否定契约。
+
+### ED-14 是否提供一次性诊断上传
+
+适用性：只有 ED-07 A/B 允许 yaca 明确生成 standalone diagnostic XML 时本组才生效；ED-07 C 下记为 `not-applicable`，配置/help/schema/command registry 中没有 upload 空壳。ED-14 不得为了让自己生效而临时夺取 ED-07 的 artifact 生成职责。
+
+问题：ED-07 可以在本地生成 standalone diagnostic XML；yaca 是否再提供把用户选定的这一份 support artifact 发到明确 endpoint 的内建动作？这可能包含用户主动勾选的 Context 字段，风险和 consent 都比 ED-13 的 aggregate counters 更高。
+
+- A：v0.1 不提供内建 diagnostic upload；用户若要分享 ED-07 输出，在 yaca 之外自行传递。配置/help/schema/command registry 没有 upload endpoint 或 consent。（推荐）
+- B：提供显式 one-shot diagnostic upload；每次重新读取并验证 support XML，展示 endpoint、artifact digest、字段/data-class 分类、大小、脱敏结果和失败影响，再取得只对这份 digest/endpoint 有效的确认。取消、内容变化、endpoint 变化或 retry 都要求新的确认，不保存以后也同意。
+
+推荐 A。它最符合简单离线边界，让 support 生成与网络彻底解耦。B 改善远程支持体验，但必须有独立 endpoint、secret canary、上传预算、取消、retry、receipt 和失败后本地 artifact 不变的契约；ED-13 telemetry opt-in、Model/tool Network Permission 和 ED-07 的本地生成确认都不能替代本次确认。
+
+共同契约：B 不创建后台 uploader、spool 或 durable retry queue；上传请求本身可以流式读 standalone XML，但不能把它复制成第三份长期事实。endpoint 是发行 manifest 中版本化、project-owned 的固定 HTTPS origin，v0.1 不允许 INI/XML/CLI 自定义，也不使用 endpoint-side Auth/Key/secret header；需要自定义 endpoint 或认证时必须重新进入决策流。它消费 M05-36/M05-37/M05-38 的共享 proxy/CA 和 redirect 上限，但采用更严格的 purpose policy：只允许有界 same-origin HTTPS redirect，任何 cross-origin 或 HTTPS downgrade 都拒绝，不能借 M05-38 C 的人工跨源确认改写本次 artifact/endpoint consent。若全局代理使用 credential，只允许按 proxy 协议把该 generation 的 credential 发给精确 proxy origin/CONNECT，绝不转发到 upload endpoint。不得增加 diagnostic-upload 专属网络字段，也不得复用 Model Key、tool Permission 或 ED-13 consent。每次上传必须先在健康的当前 Context writer 中 durable 保存 source artifact identity、用户确认的 payload digest、endpoint/policy generation 和 operation intent，之后才允许联网；receipt/unknown 也回写同一 Context。没有健康 writer 就 fail-closed，并提示用户只能在 yaca 外自行传递文件，stdout/stderr 不能代替副作用日志。顶层/chat 命令、非 TTY 结果和 AgentState 可用性从 TU-18/TU-32/CLI-11 registry 生成；D-039 仍禁止启动、定时器、关闭或纯本地动作触发。
+
+关联：`AQ-390`、`DIAG-06`、`DIAG-14`、`PROD-08`、`SAFE-09`、`CFG-01`、`CFG-02`、`CLI-11`、TU-18、TU-32、D-039、ED-07、ED-13。
+
+确认后 owner artifact：`15-diagnostics-and-logging.md` 的 DiagnosticUpload source/digest/field preview、endpoint、单次 consent、stream/cancel/retry/receipt/failure 与 no-spool 矩阵；A 路线生成零上传表面证明。
+
 ### 完整推荐回复模板
 
 ```text
@@ -349,6 +391,8 @@ ED-09 A
 ED-10 A
 ED-11 A
 ED-12 A
+ED-13 A
+ED-14 A
 ```
 
 ## 本包确认后必须形成的工件
@@ -360,5 +404,7 @@ ED-12 A
 5. stderr/stdout/exit class 和 support output contract。
 6. terminal control sanitization、Unicode display 与 capability fallback tests。
 7. 持久化失败、磁盘满、网络阶段、helper 崩溃和关闭 deadline fault fixtures。
+8. ED-13 所选 aggregate telemetry 契约与 D-039 网络触发矩阵；A 路线证明零 telemetry，B/C 路线证明最小 counter schema、独立 consent、正向触发、取消、失败和 receipt。
+9. ED-14 所选 diagnostic upload 契约；A 路线或因 ED-07 C 而 not-applicable 时证明零上传表面，B 路线证明 artifact digest 绑定的单次预览/consent、secret canary、no-spool、取消、失败和 receipt。
 
-发布和平台 exact-hash 证据由包 10 收口。本包未明确回复的任何推荐都不会自动写入 `DECISIONS.md`。
+发布和平台 exact-hash 证据由包 10 收口。本包未明确回复的任何推荐都不会自动写入 `DECISIONS.md`。ED-13/ED-14 未收口时，对应 telemetry/diagnostic upload 配置或 endpoint 都保持 `open` 且不得进入实现；选择启用后，D-039 的启动/定时器/纯本地零联网 trace、secret canary 和真实 endpoint fault evidence 是 release hard gate，选择 A 则以发行包中零相关命令/配置/schema/后台请求的检查作为对应门槛。

@@ -18,6 +18,8 @@
 - Vista 至 11 可以在探测到能力后增强，但必须保留与 XP 一致的语义与逐行后备入口。
 - CentOS 7 终端不假设 256 色、true color、鼠标或大窗口。
 - 当前方向不承诺全屏、鼠标、true color、动画或用户自定义快捷键。
+- 程序生成的 slogan、标签、提示符、命令和机器字段只用 ASCII。路径、Context 名和用户/模型正文仍是 Unicode 用户数据，内部与 XML 使用严格 UTF-8。
+- Windows TTY 输入输出和 argv/path 边界必须使用 wide API，再与内部 UTF-8 转换；不能用当前 ANSI code page 改写用户数据。字体或终端无法显示时可输出 ASCII escape，但选择、hash、审批和文件操作继续使用未替换的真实身份。
 
 ## 已确认的固定输入意图与兼容边界
 
@@ -41,14 +43,58 @@
 - 状态是常驻区域、可更新的一行、每次变化追加一行，还是只由 `.status` 查询。
 - Ctrl+C、EOF、生成期间输入、排队/steer 和多行输入语义。
 - 长路径、长命令、工具输出、CJK、控制字符和 terminal injection 的处理。
-- 模型/权限/上下文选择器、配置编辑器和确认框的编号、分页、取消与默认项。
+- Model picker 的分页/挤占细节，以及 Permission/Context 选择器、配置编辑器和确认框的编号、分页、取消与默认项。
 - 自动能力降级、原生 Windows 颜色与基本终端颜色如何保持相同文字语义。
 
-`DotCommandCompletion=true` 与“不要求 raw mode、方向键或 ANSI”并不天然兼容。补全只能是增强能力，不能成为普通点命令可用性的前提。`CheckModelOnStart=true` 也可能让离线或慢网络启动阻塞，必须重新讨论其默认值和可取消性。
+旧草案的 `DotCommandCompletion=true` 与“不要求 raw mode、方向键或 ANSI”并不天然兼容；目标 schema 不保留这个用户开关，若平台以后证明可以提供 completion，它也只能是自动增强，不能成为普通点命令可用性的前提。旧 `CheckModelOnStart=true` 同样退出目标 schema：启动、help、配置管理和 Context 浏览不隐式联网，真实连接检查只从显式 self-test/用户动作进入并可取消。
+
+## 上游给出的简洁启动头常量
+
+负责人最新答复要求启动头保持短小，只由逐字段开关投影以下字段，不存在总开关；每个启用字段独占一行并从行首开始，顺序固定为：Slogan、version、work directory、data root、config status、Context、当前实时 hash、Model、Permission、DoubleCheck、`.status` 提示。固定 Slogan 是：
+
+```text
+yaca: Yet Another Coding Agent.
+```
+
+隐藏某个字段只改变本次启动 chrome，不删除状态事实，也不改变 `.status`、XML 或错误诊断。错误、warning 和 action-required 永远不能被逐字段开关隐藏；配置、help 和 renderer 都不得重新引入 `StartupHeader`、`ShowStartupHeader` 或等价 master。这里不增加 theme、vivid、mode 或第二套 renderer。
+
+上游同时给出 chat 输入提示符 `>>`。但正式 `TU-33` 在当前 inventory 中仍是 unanswered，且现有 A/B/C answer-set 没有 `>>`；因此本节只记录必须消费的上游字面常量，不能伪造 TU-33 已正式选择，也不能据此猜 approval、recovery 和各管理 REPL 的提示符。后续 inventory repair 必须修订 TU-33 的题面/投影并重新生成 parser、help 和 golden transcript；决策包在该修订前仍保持原样。
+
+最小启动投影示意为：
+
+```text
+yaca: Yet Another Coding Agent.
+work directory: C:\Work\demo
+config: valid
+context: new (not saved)
+model: Work
+permission: Std
+double check: on
+Run .status for details.
+>>
+```
+
+未启用的逐字段行直接不生成，不输出空占位；Unicode 路径不能显示时只转义该值，不改变字段名和真实路径。
 
 ## 已确认的 `.cautious` 语义边界
 
 `.cautious` 管理当前会话的 `DoubleCheck` 覆盖值，并由上下文系统保存到当前 XML。TUI 只解析命令、显示默认值/覆盖值/有效值和操作结果；它不能直接改写用户配置、切换 Permission profile 或自行决定 `DoubleCheck` 包含哪些复核行为。无参数、`on/off/toggle/reset` 的具体语法仍待 `TUI-10` 确认。
+
+## Model picker
+
+chat 内 `.model` 只有选择职责，不进入独立 `model-repl`：
+
+- `.model` 无参数时打开 enabled Model 的上/下选择器；能力足够的终端可以用方向键和高亮，Windows XP、窄窗口、cooked line 或能力不明时必须降级为编号列表或逐行文本选择。
+- `.model <selector>` 直接选择；它与选择器确认都提交同一个 `select-model(selector)` typed semantic action，所以验证、错误、Model 切换事件和下一 turn 生效语义必须一致。
+- 输入 selector 时可以按当前 Model registry 自动显示补全提示。补全没有配置开关，不自动提交，也不是可用前提；无法可靠重绘或窗口空间不足时安静退化，完整文本输入和无参数选择器仍可用。
+
+列表在窄终端怎样分页/截断、selector 的精确匹配与消歧，以及 Agent 忙时何时接纳切换，仍由对应 TUI/Model/AgentLoop 决定；本节不从“上/下选择器”推导全屏界面，也不提前冻结这些规则。
+
+## TUI 与 CLI 的动作一致性
+
+所有会改变或查询领域状态的 TUI action 都必须来自 CLI 共用的 typed action registry，并有 CLI 投影；同一输入快照下，两种投影调用相同 service、Permission/确认规则、typed outcome 和持久化路径。方向键、分页、颜色、补全、焦点移动和 renderer redraw 只是表现动作，不需要伪装成领域 CLI action。
+
+这条完整性要求不发布通用 headless/remote IPC/RPC，也不把交互动作自动变成可无人值守执行的命令。非 TTY 是否可用、如何表达 consent、stdout/stderr 与机器输出，仍由 CLI 契约决定；任何投影都不能自动批准 Permission 或跳过领域确认。
 
 ## 上下文浏览器的 TUI 边界
 
@@ -58,16 +104,26 @@
 - 能力足够时可以让固定方向键、颜色、高亮和临时状态行调用相同 controller action，但不增加鼠标、可重绑定按键或不同默认选择。
 - 任一内部 renderer 对同一快照和动作序列必须选中同一候选、触发相同确认并得到相同错误。
 - 普通搜索只过滤候选列表，不自动连接；精确名称/hash 输入调用统一 Resolver。
+- 列表排序从 XML canonical metadata 读取 `created`、`updated` 或名称，并按 `ascending|descending` 投影；默认 `updated` + `descending`。文件系统 ctime/mtime 不能作为这些字段的替代；主键相同时始终按 canonical `LogicalPath` 升序，绝不随主方向反转。改变排序不改变 Resolver，也不使裸启动扫描或提示 recent Context。
 - 重命名或删除确认必须显示完整逻辑路径与当前 16 位 hash，不能只显示可能重复的名称。
 - 快照过期、扫描不完整、XML 损坏和目标已变化都要有稳定文字提示，颜色不能承担唯一含义。
+- 活动 writer 已锁定的 Context 只能显示无需解析正文即可取得的 name、logical path、busy 和可证明 PID（否则 unknown）元数据；不进入 read-only Context view，也不把 `inspect` 映射为正文读取。外部 rename、delete、rebind 和 `AutoRenameDisabled` 等 metadata mutation 显示 typed `LockConflict`，不提供按锁龄 force unlock。释放锁后用户必须重新取得/复核 Catalog 快照再读取或修改。
 
 `.status` 显示的当前 hash 从活动 ContextHandle 的最新逻辑路径实时计算，不为显示状态扫描整棵 `CONTEXT`。如果活动 XML 已被外部移动或删除，候选体验是同时显示 `stale`/失效状态，不能只显示一个看似仍可恢复的旧 hash。
+
+## self-test 投影
+
+self-test 页面只投影诊断服务的 stable check registry 和 typed results，不在 renderer 内复制检查逻辑：
+
+- Stage 1 除配置/依赖的静态检查外，必须显示 Context XML codec/schema、镜像路径对应 workspace 是否存在且可进入、Catalog traversal、实时 hash derivation，以及扫描耗时、cap 与 `partial`。目录不存在、Context 过多或遍历超过预算都要给出具体 check ID、范围与 self-fix 入口，不能折叠成笼统的 `failed`。
+- Stage 3 显示 Permission 名称、Description、有限 Prompt 与实际能力矩阵的语义一致性建议，并可指出面向用户的自然语言拼写问题；例如名称暗示 readonly 而矩阵允许写入时必须明确列出实际配置。这些结果标为 advisory，不能覆盖 Stage 1/2 的确定性结论，也不能直接修改 Permission。
+- TUI 中的阶段选择、check list、合法排除和 self-fix 入口，与 CLI 使用同一 typed action/check IDs；TUI 不拥有额外的隐藏检查或默认排除。
 
 ## 主界面总体方向
 
 ### A. 追加式逐行对话 REPL（当前规范候选）
 
-每个语义事件以稳定文本块追加。当前领先视觉词汇是 `[YACA]`、`[USER]`、`[TOOL #12]`、`[STATUS]`、`[QUEUE #2]`、`[STEER #3]`、`[SIDE #1]`、`[WARNING]`、`[ERROR ID]`、`[ACTION]`；精确选择留给视觉决策包。输入始终在最后，选择和确认使用数字/字母；plain 模式完全不移动光标。
+每个语义事件以稳定文本块追加。当前领先视觉词汇是 `[YACA]`、`[USER]`、`[TOOL #12]`、`[STATUS]`、`[QUEUE #2]`、`[STEER #3]`、`[SIDE #1]`、`[WARNING]`、`[ERROR ID]`、`[ACTION]`；精确选择留给视觉决策包。输入始终在最后，chat 的上游目标字面量为 `>>`，选择和确认使用各自正式 grammar；plain 模式完全不移动光标。TU-33 inventory 修订前不得把 `>>` 外推为所有 focus 的已决提示符。
 
 它最适合 XP conhost、`TERM=dumb`、终端 scrollback、屏幕阅读器和纯文本快照测试。代价是状态不够紧凑，流式输出和长工具日志容易产生较多行。
 
@@ -107,9 +163,13 @@
 
 `Esc` 只是可用环境中的快捷键，规范后备是 `.cancel request|tool|side|turn|exit`。不采用“短时间按两次 Esc”的核心协议，因为 cooked 终端可能根本不交付该按键。
 
+## 终端-only 零表面
+
+v0.1 不提供 Web、图像/clipboard-media/screenshot、音频/麦克风、公共 headless/remote controller、transcription 或 TTS。TUI 和命令 registry 中不得出现相应页面、命令、help topic、completion、状态 badge、设备提示或 disabled 占位；旧终端也不需要为不存在的媒体设计 fallback。设计归档和负向测试可以点名这些排除项，活动 renderer 与发行资源必须为零。
+
 ## 需要逐项确认的体验
 
-1. 启动一行、输入提示符、角色标签、留白、时间戳和整体信息密度。
+1. 已给出的启动头字段/Slogan/`>>` 怎样在 inventory repair 后与 TU-33、角色标签、留白和整体信息密度形成唯一 projection；不再重新选择另一套欢迎页。
 2. 常驻最小状态、`.status` 详情，以及模型/权限/context hash/队列/当前动作的字段顺序。
 3. 模型流式文本、provisional 文本、工具调用、shell 输出、Git diff 与完成报告的块样式。
 4. queue、steer、旁问和取消的可见状态、序号、插入点与持久化提示。
@@ -126,4 +186,4 @@
 
 ## 当前讨论入口
 
-在产品负责人已要求简单、无鼠标、基本色彩后，当前推荐把追加式逐行 REPL 作为所有平台规范，basic ANSI/原生颜色只增强标签与 diff；不再把全屏作为同等首版候选。下一步通过 80×24、40 列、XP 无色、忙时 draft、审批、Git diff、error/recovery、三个 REPL 和 self-test 的完整 ASCII transcript 决定页面风格。
+在产品负责人已要求简单、无鼠标、基本色彩后，当前推荐把追加式逐行 REPL 作为所有平台规范，basic ANSI/原生颜色只增强标签与 diff；不再把全屏作为同等首版候选。下一步先修订 TU-33 inventory 以接纳上游 `>>` 常量，再通过 80×24、40 列、XP 无色、忙时 draft、审批、Git diff、error/recovery、三个 REPL 和 self-test 的完整 ASCII transcript 决定其余页面细节。

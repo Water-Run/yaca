@@ -2,92 +2,53 @@
 
 [English](./README.md)
 
-`yaca`是一个简单, 单Agent的基础Coding Agent, 以`GPL v3`协议开源于[GitHub](https://github.com/Water-Run/yaca).  
-`yaca`使用`lua`开发, 和琳然满目的其它强大的Coding Agent不同的是, 它可以很好的在Windows XP或者Cent OS 7等老旧系统上运行, 且开箱即用.  
+`yaca`是一款简单、单 Agent Coding Agent 的设计，以`GPL v3`协议开源于[GitHub](https://github.com/Water-Run/yaca)。目标为 Lua 5.5、Windows XP SP3 至 Windows 11 的 Win32 x86，以及包含 CentOS 7 的 Linux x86_64。
+
+> **项目状态（2026-07-22）：设计阶段。** 当前没有已经完成的 v0.1 二进制或通过验证的 Release。平台支持、安装、命令、预设和下面的示例都是设计目标，不是已实现行为。现行决定和待回复批次见 [`.develope-docs`](.develope-docs/README.md)。
 
 ## 安装  
 
-从[GitHub Release](https://github.com/Water-Run/yaca/releases)上下载对应系统的压缩包. 解压缩.  
-运行`INSTALL.bat`或`install.sh`, 根据向导继续.  
-安装完成后, 你可以运行`yaca --version`验证安装, 应该输出:  
+计划的发布单元是由上级目录`luainstaller`构建的各平台独立`.zip`。打包、安装入口和真实机器证据仍是设计/发布门；通过这些门之前，仓库不能宣称已有可下载发行包。
+
+语义上的`version`动作将用于识别构建后的发行版；它的顶层 CLI 确切拼写仍等待设计决策`TU-18`。目标输出形态为：
 
 ```cmd
 yaca v0.1.0
 Yet Another Coding Agent.
 ```
 
-使用`yaca --help`获取帮助.  
-作为一个Coding Agent, 配置模型是必须的. 使用`yaca --model-repl`进入模型管理, 选择`Add Model`添加你的模型, 已经预设如下快速配置:  
+产品具有语义上的`help`和`model-repl`入口。Agent chat 在采样 LLM 前必须有一个可用的完整 Model 连接。最终协议/预设清单和精确命令仍待决；旧 README 中出现过的 provider 名称不是兼容承诺。
 
-- `DeepSeek`  
-- `MiniMax`(`Token Plan China`, `Token Plan Global`, `API China`, `API Global`)  
-- `MiMo`(`Token Plan China`, `Token Plan Singapore`, `Token Plan Europe`, `API`)  
-- `Zhipu GLM`(`Coding Plan China`, `Coding Plan Global`, `API`)  
-- `Kimi`(`Code`, `API`)  
-- `Qwen`  
-- `OpenAI`  
-- `Anthropic`  
-- `Gemini`  
-- `Grok`  
-- `Poe`  
-- `Ollama`  
-
-> 除文档明确允许的配置入口外, 不要手动修改`__yaca__`中的内部文件. 它最终位于用户数据目录还是便携目录仍在设计中.
+> `__yaca__`是设计使用的逻辑数据根；它最终位于安装用户数据目录还是便携目录仍待决。不能从仓库中的旧资源反推已经实现的布局。
 
 ## 配置  
 
-`yaca`使用位于`__yaca__`下的`config.ini`作为配置文件.  
-配置文件中有详细的注释. 你可以依照修改, 然后运行`yaca --self-test`进行自检. 使用`yaca --show-config`输出配置; `yaca --reset-config`进行还原.  
-更推荐的配置修改方式是使用`yaca --interactive-config-changer`进行交互式修改. 对于模型管理, 使用`yaca --model-repl`.  
-配置文件的第一项是进入对话时的默认模型. 上下文会保留退出前最后使用的模型, 如果此模型已经失效, 将回归至默认模型. 在对话中, 可以使用`.model`进行模型切换.  
+目标设计使用逻辑`__yaca__`下的一份完整 INI，并允许每个 Context XML 保存明确的会话覆盖。配置查看、还原和交互式修改属于`config-repl`，Model 生命周期属于`model-repl`，三阶段`self-test`是显式验证路径。
+
+Model 的物理顺序决定新 Context 的默认项。Context 保存所选 Model 和历史连接快照；逻辑 Model 被改名、删除、禁用或发生不兼容变化时，yaca 必须在运行时提示映射/修复，不得静默 fallback 到另一个 Model 或 endpoint。会话内切换 Model 是语义动作，其最终 chat 拼写等待`TU-32`。
 
 ## 上下文机制  
 
-`yaca`把每个上下文保存为`__yaca__/CONTEXT/`镜像路径树中的`[命名名称].xml`. 例如 Windows 上的一个上下文可以保存为`CONTEXT/C/Program Files/我的任务.xml`.
+设计把每个 Context 保存为`__yaca__/CONTEXT/`镜像路径树中的`[命名名称].xml`。例如 Windows 上的一个 Context 可以保存为`CONTEXT/C/Program Files/我的任务.xml`。
 
 哈希输入是从`CONTEXT`根开始的逻辑路径: 带前导`/`, 统一使用`/`分隔, 并包含 XML 文件名. 上述示例严格使用`/C/Program Files/我的任务.xml`计算固定 16 位哈希. yaca 不为上下文另存永久 ID; 名称或路径变化后哈希实时重算, 旧哈希立即失效. 上下文清单与哈希查找从当前 XML 树实时派生.
 
-上下文 XML 保存完整对话、日志相关信息、会话级参数及其元数据. 使用`yaca --dir-context`输出目录下的上下文清单, `yaca --global-context`输出全局的上下文清单.
+上下文 XML 保存完整对话、日志相关信息、会话级参数及其元数据. 语义上的`context-list`动作按范围枚举上下文; `context-repl`提供交互式浏览和管理.
 
-`yaca --continue <选择器>`接受上下文精确名称或固定 16 位哈希. 所有连接、重命名和删除入口共用一套解析器: 从当前目录对应的镜像位置开始, 再由近到远扩展到祖先的递归范围和`CONTEXT`根. 距离优先; 在同一个搜索范围内名称优先于哈希. 解析器单遍同时检查两者, 当前范围得到可裁决结果后不再扫描更远范围. 解析完成后是否切换工作目录再由`AutoJumpToDir`控制.
+语义上的`continue(selector)`动作接受上下文精确名称或固定 16 位哈希. 所有连接、重命名和删除入口共用一套解析器: 从当前目录对应的镜像位置开始, 再由近到远扩展到祖先的递归范围和`CONTEXT`根. 距离优先; 在同一个搜索范围内名称优先于哈希. 解析器单遍同时检查两者, 当前范围得到可裁决结果后不再扫描更远范围. 解析后的工作目录策略仍等待决策`PJ-13`: A/B 保留布尔字段`AutoJumpToDir`, C 则以`ResumeDirectory=jump|ask|keep`取代它.
 
-更简易的上下文管理方式可以使用交互式`yaca --manage-context`: 访问目录树、搜索、选择并连接, 以及重命名、删除和刷新. 它与命令行共用同一套路径、哈希和安全复核规则.
+更简易的上下文管理方式可以使用交互式`context-repl`入口: 访问目录树、搜索、选择并连接, 以及重命名、删除和刷新. 它与命令行共用同一套路径、哈希和安全复核规则.
 
 ## 权限机制  
 
-`yaca`的权限组位于配置文件的`Permission`下, 预设三个权限: `Std`, `TrustMeBro`和`Readonly`. `Cautious`不再是独立权限模式; 谨慎复核由默认配置`DoubleCheck`控制, 当前会话可以使用`.cautious`覆盖. 名称可在配置中自定义, 不代表权限的真实功能.
-和模型配置一样, 配置文件的第一项是进入对话时的默认权限. 上下文会保留退出前最后使用的权限, 如果此模型已经失效, 将回归至默认权限. 在对话中, 可以使用`.permission`进行模型切换.  
+Permission profile 位于 INI。计划的发行模板把`Std`放在第一项，因此它是新 Context 默认项；内置 profile 的最终能力矩阵仍待安全决策。`Cautious`不是独立 Permission 模式：谨慎复核由`DoubleCheck`控制，当前 Context 可通过语义上的`.cautious`动作覆盖。名称和 Description 永远不授予能力。
+
+Context 保存所选 Permission 和历史 effective snapshot；本地 profile 被改名、删除或发生不兼容变化时，yaca 必须提示映射/修复，并在需要处 fail-closed，不得静默采用第一项。Permission 切换的 chat 拼写等待`TU-32`。
 
 ## 命令一览  
 
-主入口是`yaca [目录]`. 裸`yaca`与`yaca .`完全等价: 都以当前目录作为初始工作区位置进入TUI. `yaca <目录>`则从指定目录启动. `yaca`二进制还可接受以下参数:
+主入口是`yaca [目录]`. 裸`yaca`与`yaca .`完全等价: 都以当前目录作为初始工作区位置进入TUI. `yaca <目录>`则从指定目录启动.
 
-- `--help` / `-h`(Unix) / `/h`(Windows): 获取帮助  
-- `--version` / `-v`(Unix) / `/v`(Windows): 输出版本  
-- `--show-config` / `-sc`(Unix) / `/sc`(Windows): 输出配置  
-- `--reset-config` / `-rc`(Unix) / `/rc`(Windows): 重置配置  
-- `--interactive-config-changer` / `-icc`(Unix) / `/icc`(Windows): 交互式配置修改器  
-- `--dir-context` / `-dc`(Unix) / `/dc`(Windows): 输出目录下的上下文清单  
-- `--global-context` / `-gc`(Unix) / `/gc`(Windows): 输出全局上下文清单  
-- `--delete-context` / `-dc`(Unix) / `/dc`(Windows): 删除上下文  
-- `--rename-context` / `-rc`(Unix) / `/rc`(Windows): 重命名上下文  
-- `--manage-context` / `-mc`(Unix) / `/mc`(Windows): 目录树、搜索、选择、重命名和删除上下文
-- `--self-test` / `-st`(Unix) / `/st`(Windows): 运行自检. 当LLM可用时, 可使用LLM进入深度检查.  
-- `--continue` / `-c`(Unix) / `/c`(Windows): 以某上下文恢复会话  
-- `--set-default-permission` / `-sdp`(Unix) / `/sdp`(Windows): 设置默认权限  
-- `--set-default-model` / `-sdm`(Unix) / `/sdm`(Windows): 设置默认模型  
-- `--model-repl` / `-mr`(Unix) / `/mr`(Windows): 模型添加, 测试和删除REPL  
+产品设计还确认了`help`、`version`、`self-test`、`model-repl`、`config-repl`、`context-repl`、`context-list(scope)`和`continue(selector)`等语义动作. 决策`TU-18`仍需把它们投影为确切的顶层 grammar: flag、subcommand 或混合形式, 以及是否提供简称. 因此本 README 中的动作标签目前不是可直接执行的命令拼写. 旧草案的 flag 名称及其互相冲突的简称不属于已确认契约.
 
-在使用`TUI`是, 可以使用`.`命令形式唤起命令. 这些包括:  
-
-- `.quit`: 退出程序  
-- `.context`: 切换可用上下文. 直接`.context`进入浏览器, 或`.context <名称或16位哈希>`使用通用解析器
-- `.archive`: 归档当前上下文(随后进入一个新的干净会话). `.archive rename`同时触发自动重命名  
-- `.ping`: 检查模型的连通性. 默认测试当前模型, 或`.ping 模型名称`测试其他模型  
-- `.index`: 覆写当前上下文的名称(可选自动和手动). `.index 手动重命名名称`直接重命名  
-- `.compact`: 触发上下文压缩  
-- `.model`: 切换模型. 直接`.model`进入选单, 或`.model 模型名称`进行切换  
-- `.permission`: 切换权限. 直接`.permission`进入选单, 或`.permission 权限名称`进行切换  
-- `.cautious`: 修改当前会话的`DoubleCheck`覆盖值; 覆盖值保存到上下文 XML
-- `.status`: 当前情况说明, 包括从当前逻辑路径实时计算的 16 位上下文哈希
-- `.delete`: 删除本对话上下文  
+Chat 还具有 status/help、queue/steer/side/cancel、Prompt 与 DoubleCheck 覆盖、Model/Permission/Context 管理、typed retry/recovery 和优雅退出等语义动作。`TU-32`仍需决定 canonical dot-command namespace；手动压缩等条件动作只有在自己的上游决定启用时才存在。旧草案中的 dot-command 清单不是可执行契约或兼容承诺。

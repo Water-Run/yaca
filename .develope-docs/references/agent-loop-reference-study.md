@@ -1,6 +1,6 @@
 # AgentLoop 开源实现源码核对
 
-更新日期：2026-07-18
+更新日期：2026-07-22
 
 状态：参考资料，不是 yaca 决策
 
@@ -8,7 +8,7 @@
 
 本文件只回答“成熟 Coding Agent 的实际代码已经处理了哪些循环问题”。它不按功能数量评判项目，也不把任一实现直接移植为 yaca 的结论。
 
-核对方法：固定源码提交，阅读主循环、工具调度、取消/忙时输入、重试、防卡死、压缩和持久化相关实现；宣传页和 README 只用于确认项目身份，不作为机制证据。
+核对方法：固定源码提交，阅读主循环、工具调度、取消/忙时输入、重试、防卡死、压缩和持久化相关实现；宣传页只用于确认项目身份，不作为机制证据。官方协议 README/生成 schema 可用来证明客户端可见的 wire lifecycle，但实际循环、持久化和工具顺序仍以同提交源码复核。
 
 | 项目 | 固定提交 | 主要核对入口 |
 | --- | --- | --- |
@@ -19,6 +19,8 @@
 | OpenCode | [`901c9e73`](https://github.com/anomalyco/opencode/tree/901c9e732921891e1fd71eb735ef5e78013f582f) | [`prompt.ts`](https://github.com/anomalyco/opencode/blob/901c9e732921891e1fd71eb735ef5e78013f582f/packages/opencode/src/session/prompt.ts)、[`processor.ts`](https://github.com/anomalyco/opencode/blob/901c9e732921891e1fd71eb735ef5e78013f582f/packages/opencode/src/session/processor.ts)、[`run-state.ts`](https://github.com/anomalyco/opencode/blob/901c9e732921891e1fd71eb735ef5e78013f582f/packages/opencode/src/session/run-state.ts) |
 
 这里的 Grok 指 xAI 官方开源的 Grok Build，不是其他同名 `grok-cli` 仓库。
+
+2026-07-19 另对 OpenAI Codex 当日 `main` 的 [`b8b61bc6`](https://github.com/openai/codex/tree/b8b61bc692517adcd18622df260f2ddd80635122) 做了定向复核，只检查 `expectedTurnId`、manual compaction 与 mixed text+tool 三个新边界。它不替换上表对完整循环的固定提交样本。
 
 ## 共同的概念循环
 
@@ -76,6 +78,14 @@
 - [`replace_compacted_history`](https://github.com/openai/codex/blob/2895d82b5e449407712439ba4f89954f3fa0c7e3/codex-rs/core/src/session/mod.rs) 把 replacement history 作为 rollout item 持久化，[`rollout_reconstruction`](https://github.com/openai/codex/blob/2895d82b5e449407712439ba4f89954f3fa0c7e3/codex-rs/core/src/session/rollout_reconstruction.rs) 用它重建恢复/分支视图，而不是把屏幕增量当事实源。
 
 对 yaca 的启示：并发工具必须同时回答“谁能并发”和“结果按什么顺序回送”；压缩结果应是可重建模型视图，不应悄悄抹掉原始事实。
+
+#### 2026-07-19 当前 Codex 定向复核
+
+- [`turn/steer`](https://github.com/openai/codex/blob/b8b61bc692517adcd18622df260f2ddd80635122/codex-rs/app-server/README.md#L1064-L1074) 强制客户端携带 `expectedTurnId`。没有 active turn、ID 不匹配，或 active turn 是 review/manual-compaction 等不接受 same-turn steer 的 kind 时，服务端返回 invalid request，不把迟到输入投给更新的 turn。这验证了 yaca 需要 expected Context generation/turn observation 的 stale-target 技术绑定；“是否允许 stale command 重定向”不是合理的新产品开关。
+- [`thread/compact/start`](https://github.com/openai/codex/blob/b8b61bc692517adcd18622df260f2ddd80635122/codex-rs/app-server/README.md#example-trigger-thread-compaction) 立即返回接受结果，再用标准 `turn/*` 和 `item/*` 通知流报告一个 `contextCompaction` item；运行期间 thread 被视为正处于 turn，且同一协议明确 manual-compaction turn 拒绝 `turn/steer`。这不要求 yaca 复制 Codex 的协议，却暴露了 yaca 已出现 `.compact` 承诺而没有 admission、turn kind、cancel、budget、publication 和 recovery owner 的真缺口；三项中只有它需要新增 AL06-39 负责人问题。
+- 当模型在同一 response 中产生文本和 tool call 时，[`turn.rs`](https://github.com/openai/codex/blob/b8b61bc692517adcd18622df260f2ddd80635122/codex-rs/core/src/session/turn.rs#L2055-L2143) 对每个 `OutputItemDone` 分别完成消息或建立 tool future，累积 `needs_follow_up`；[`stream_events_utils.rs`](https://github.com/openai/codex/blob/b8b61bc692517adcd18622df260f2ddd80635122/codex-rs/core/src/stream_events_utils.rs#L319-L412) 分别持久非工具 item 与 tool call；响应流收口后，[`turn.rs`](https://github.com/openai/codex/blob/b8b61bc692517adcd18622df260f2ddd80635122/codex-rs/core/src/session/turn.rs#L2478-L2490) 再 drain ordered in-flight tool results。这证明 mixed response 需要 ordered-item/pairing 机制，但 yaca 已由 AL06-37 唯一决定展示、canonical promotion 与下一 model view；它只补协议 fixture 和工具配对证明，不新增 owner 问题。
+
+定向复核的投影结论因而是：`expectedTurnId` 类机制归不可关闭的命令身份与 stale-conflict 证明；mixed text+tool 继续由 AL06-37 拥有产品轴；只有 manual compaction 生命周期提升为 AL06-39。
 
 ### OpenClaude
 
