@@ -135,3 +135,9 @@ Win32 x86、Win64 x86_64 与 Linux x86_64 必须分别证明：
 - kill、磁盘满、只读文件、杀软/共享占用、输出超限、取消、进程后代与 XML result 提交失败不会自动重放或丢失配对；
 - 所有工具实际串行，首个失败后剩余调用稳定 `skipped`；
 - direct binary mutation、recursive delete、Git/HTTP/undo/backup tools 与 background job 表面确实不存在。
+
+## W2-B
+
+完整 **tool × Permission** 矩阵、求值函数、approval snapshot 与 Shell 诚实边界见
+[TOOL-PERMISSION-MATRIX.md](../TOOL-PERMISSION-MATRIX.md)（D-052，无新的产品分叉）。
+

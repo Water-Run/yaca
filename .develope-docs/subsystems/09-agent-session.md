@@ -1,6 +1,8 @@
 # 09 AgentLoop 与会话状态机
 
-状态：核心循环与交互语义已确认；数值上限、事件编码和旧平台取消待技术证明
+更新日期：2026-08-10
+
+状态：**W1-A 规格展开进行中** — 状态/outcome/转换表下文为现行契约草案（产品语义已由 D-051 等确认）；hard-cap **数值**、事件泵 ABI、平台取消时序仍待技术证明，不阻塞本表作为实现与 golden trace 的语义真源。
 
 ## 职责
 
@@ -105,7 +107,7 @@ Runtime 只强制工具配对、durability、Permission、硬上限和真实副�
 
 固定四条 lane 均有快捷键与点命令等价入口：
 
-- `queue`：Enter 或 `.queue`；只在上一 turn `completed` 且没有 pending/unknown 时自动启动。支持 list/delete/edit/move/clear，排序/编辑必须作用于稳定 queue item identity。
+- `queue`：Enter 或 `.queue`；只在上一 turn `completed` 且没有 pending/unknown 时自动启动。支持 list/delete/edit/move/clear。用户可见稳定 id 为 **`#1`…`#N`**（D-066）；INI 配置队列上限，**默认 9**；队满拒绝新增；clear/空队后序号从 1 重计；list 单行摘要。
 - `steer`：Ctrl+Enter 或 `.immediate`；取消可取消的 Model/review 与未开始工具，再把纠正注入同一 turn。已开始工具只能先请求取消并等待真实/unknown result。
 - `side`：Alt+Enter 或 `.side`；最多一个，无工具、只读、基于创建时 durable snapshot 的一次直接回复。side 已活动时拒绝新 side 并保留 draft。
 - `cancel`：Esc 或 `.cancel`；按当前焦点取消最内层 activity，而不是凭输入文字猜目标。
@@ -151,4 +153,196 @@ text/reasoning/tool-argument delta、spinner 和临时进度是 transient projec
 
 ## 仍需技术证明
 
-冻结状态/event 枚举、每层 hard-cap 数值、single-event-pump adapter 接口、Model/side 调度、旧平台取消/进程树时序和 fault-injection fixture。产品路线不再比较多 Context 并发、多线程领域状态、自然语言完成判断、并行工具或可关闭 finish review。
+每层 hard-cap **数值**、single-event-pump adapter 接口、Model/side 调度间隔、旧平台取消/进程树时序和 fault-injection fixture。产品路线不再比较多 Context 并发、多线程领域状态、自然语言完成判断、并行工具或可关闭 finish review。
+
+---
+
+## W1-A 规格展开：身份、状态、outcome 与转换（2026-08-10）
+
+本节把 D-051 / D-020 / D-033 / D-066 / D-067 收成 **实现不得任选** 的表。未标 “provisional” 的名字视为稳定语义 ID；wire/XML 元素拼写可在 06/10 号最终对齐，但 **不得改变下列因果**。
+
+### 1. 身份层级（因果表）
+
+| 身份 | 含义 | 生命周期 |
+| --- | --- | --- |
+| `Process` | 一个 yaca 进程 | 启动→close |
+| `ActiveContext` | 进程内唯一可写 Context | 打开→切换前收口→关闭 |
+| `Turn` | 顶层 `main` 或 `side` 工作单元 | admission→唯一 typed 收口 |
+| `LogicalRequest` | 一次有目的的 Model 调用（main/side/action-review/termination-review/compaction/context-name/self-test…） | 创建→attempt(s)→终态 |
+| `Attempt` | 同一 LogicalRequest 下的一次 transport/provider 尝试 | 受 retry 规则约束 |
+| `ToolCall` | 模型提出的一个工具信封 | accept→result（真或 synthetic） |
+| `Operation` | 已通过校验、可能有副作用的执行意图 | intent durable→执行→result durable |
+| `QueueItem` | 未开始的用户排队消息 | `#1`…`#N`（D-066） |
+| `ConfigGeneration` | turn admission 冻结的配置快照 | 整个 turn 及子活动只读 |
+
+规则：
+
+- 每个 `Turn` 恰好一个 **typed 收口**（见 §3）。  
+- 每个已 accept 的 `ToolCall` 恰好一个 `result`（真或 synthetic skipped/cancelled/unknown…）。  
+- `side` 最多一个 in-flight；与 `main` 共享事件泵与 Model scheduler，不共享第二套领域状态。  
+- provider 的 call id 只作审计映射，**本地** ToolCall/Operation id 不得依赖其唯一性。
+
+### 2. 主状态枚举（main turn）
+
+| 状态 ID | 用户可感知含义 | 可进入的主要后继 |
+| --- | --- | --- |
+| `Idle` | 无活动 main turn；可接受新 main / 管理 queue | `Preparing`；或保持 Idle（仅 queue 编辑） |
+| `Preparing` | 已 admission：固化 ConfigGeneration、装配 view、准备首个 request | `RequestingModel`；失败→`Finalizing` |
+| `RequestingModel` | 逻辑 main request 已发出或等待 scheduler | `Streaming`；错误/取消→`Finalizing` |
+| `Streaming` | 正在接收 main 流式/非流式 body | 解析完→工具/`WaitingUser`/`EvaluatingTermination`/`Finalizing`；取消→`Finalizing` |
+| `DispatchingTools` | 已有已接受工具批，串行调度中 | `AwaitingApproval` / `ExecutingTool` / 回 `RequestingModel`；取消/失败→合成 result 后继续或 `Finalizing` |
+| `AwaitingApproval` | 等人确认（Permission confirm 或等价） | 批准→`ExecutingTool`；拒绝/取消→synthetic result→… |
+| `ExecutingTool` | 前台工具/进程执行中 | result durable→下一项或 `RequestingModel` |
+| `EvaluatingAction` | 高风险动作的 action-review（DoubleCheck 路径） | 收紧/通过→审批或执行；失败/uncertain→`WaitingUser` 或拒绝执行 |
+| `EvaluatingTermination` | finish 后的 termination-review | pass→`Finalizing(completed)`；明确缺口→`RequestingModel`（**同一 turn**）；uncertain/错/帽→`WaitingUser` |
+| `WaitingUser` | 等待用户：ask-user / model-yield / review 不确定等 | 用户回答→同 turn 继续 `Preparing`/`RequestingModel`；cancel/exit 规则见下 |
+| `Finalizing` | 写入 turn 收口 outcome、做收尾 | →`Idle`（附带唯一 outcome） |
+| `Closing` | 进程/会话 close 状态机（可与 Finalizing 衔接） | 终端恢复；进程退出 |
+
+说明：
+
+- `WaitingUser` **不是** terminal outcome；outcome 仍是 `waiting_user` 直到用户回来或取消把 turn 收成 `cancelled` 等。  
+- 实现可用子状态，但对外 STATUS / 测试必须能映射到上表。  
+- `DispatchingTools` 与 `Streaming` 互斥于 “正在解释同一批模型输出” 的阶段划分；流结束后先进入工具阶段再请求模型。
+
+### 3. Turn 级 typed outcome（终态标签）
+
+每个 main turn 对外恰好一个（`WaitingUser` 期间对外报告 `waiting_user`，恢复后该 turn 仍只有一个最终 outcome）：
+
+| Outcome | 何时 | 可否 auto-start queue |
+| --- | --- | --- |
+| `completed` | typed `finish` 且（无 DoubleCheck 或 termination-review pass）并 Finalizing 成功 | **是**（且无 pending/unknown） |
+| `waiting_user` | ask-user / model-yield / review 需人 / 其它明确等人 | **否** |
+| `refused` | typed `refuse` 收口 | **否** |
+| `cancelled` | 用户/close 取消且 turn 按取消收口 | **否** |
+| `budget_exhausted` | 触 request/turn/process hard cap | **否** |
+| `stuck` | 无进展策略用尽 | **否** |
+| `partial` | 有界部分成功且不能称为 completed（规格化场景：如工具批中途存储失败已 durable 部分） | **否** |
+| `error` | 协议/存储/内部不可恢复错误（非 cancel） | **否** |
+| `unknown_side_effect` | 存在 accepted 副作用且结果不可证明，需人处理 | **否**（须先化解 unknown） |
+
+禁止：
+
+- 把 provider `stop` / 无工具 映射为 `completed`。  
+- 把自然语言 “done” 映射为 `finish`。  
+- queue 在非 `completed` 或存在 pending/unknown 时自动启动。
+
+### 4. 主路径转换（摘要表）
+
+| 从 | 事件 | 到 | 备注 |
+| --- | --- | --- | --- |
+| Idle | main 输入 accept + durable | Preparing | 首条消息还含建 XML（D-040） |
+| Preparing | view 就绪 | RequestingModel | |
+| RequestingModel | 首字节/事件 | Streaming | 非流式可瞬间穿过 |
+| Streaming | tools 批 | DispatchingTools | 串行 |
+| Streaming | control=finish | EvaluatingTermination 或 Finalizing | 视 DoubleCheck |
+| Streaming | control=ask-user | WaitingUser | 同 turn 可恢复 |
+| Streaming | control=refuse | Finalizing(refused) | |
+| Streaming | 无 control 完整回复 | WaitingUser(model-yield) | |
+| DispatchingTools | 需 confirm | AwaitingApproval | |
+| DispatchingTools | 需 action-review | EvaluatingAction | DoubleCheck 高风险 |
+| ExecutingTool | result durable | 下一项 / RequestingModel | |
+| EvaluatingTermination | gap | RequestingModel | **同一 turn** |
+| EvaluatingTermination | pass | Finalizing(completed) | |
+| EvaluatingTermination | uncertain/fail/cap | WaitingUser | |
+| WaitingUser | 用户回答（pending 槽） | RequestingModel/Preparing | 同一 turn 边界见 D-051 |
+| * | cancel 最内层 | 见 §6 | |
+| * | hard cap | Finalizing(budget_exhausted) | |
+| Finalizing | 已写 outcome | Idle | |
+
+### 5. Model control → 运行时（不得猜）
+
+| 模型产出 | Runtime 动作 |
+| --- | --- |
+| typed `finish` | 走 finish/review/completed 路线 |
+| typed `ask-user` | durable 问题 → WaitingUser |
+| typed `refuse` | durable 理由 → refused |
+| 完整回复且 **无** control | model-yield → WaitingUser |
+| tool calls | 串行 DispatchingTools |
+| 畸形 control / 未知 control | 不执行猜测；typed 错误；可 WaitingUser 或 error（实现选更安全的 fail-closed，默认不当 finish） |
+
+### 6. Cancel / Steer / Side / Queue
+
+| 意图 | 作用点 | 结果要点 |
+| --- | --- | --- |
+| **cancel** | 当前焦点最内层 activity | Model/review/tool 各有可取消性；不可证明终止 → unknown 路径 |
+| **steer** (`.immediate`) | 取消可取消的采样/复核与**未开始**工具；注入同 turn | 已开始工具：先 cancel 再等真/unknown result |
+| **side** | 最多一个只读无工具 request | 基于创建时 durable 快照；busy 时拒第二个 side |
+| **queue** | 仅当上一 main **completed** 且无 pending/unknown | `#N` 上限默认 9（D-066）；满则拒 |
+
+### 7. DoubleCheck 插入点
+
+```text
+tool path (DoubleCheck on + high-risk action review enabled):
+  validate → Permission → [EvaluatingAction] → [AwaitingApproval] → intent durable → execute → result durable
+
+finish path (DoubleCheck on):
+  control=finish → [EvaluatingTermination] → completed | same-turn continue | WaitingUser
+
+DoubleCheck off:
+  skip EvaluatingAction / EvaluatingTermination for those purposes
+```
+
+finish review **不可** 被 targets 关掉（D-051）。action review 可独立配置。
+
+### 8. Compaction 与 turn
+
+- 自动 compaction：D-067 STATUS；独立 LogicalRequest；失败保留旧 view。  
+- 可在 turn 边界或 Preparing 前由 Runtime 触发；**不得** 删除 XML 事实。  
+- 不解除存储 hard limit（D-063）。
+
+### 9. Golden trace 目录约定（测试）
+
+建议（实施阶段创建，现只定约定）：
+
+```text
+tests/golden/agentloop/
+  finish_no_dc_completed/
+  finish_dc_pass_completed/
+  finish_dc_gap_continues_same_turn/
+  ask_user_then_reply/
+  model_yield_waiting/
+  refuse/
+  tool_serial_permission_deny/
+  tool_approval_reject/
+  cancel_streaming/
+  steer_mid_tools/
+  queue_after_completed/
+  queue_blocked_when_waiting/
+  stuck_after_no_progress/
+  budget_exhausted/
+```
+
+每条 trace 最少记录：状态序列、outcome、各 LogicalRequest purpose、每个 ToolCall 的 result 种类、是否 durable 屏障通过。
+
+### 10. 本节开放点（不挡语义表）
+
+| 项 | 归属 |
+| --- | --- |
+| hard cap 具体数字 | TP / 发行 manifest |
+| `partial` 的完整枚举场景表 | 与 10/19 号联写时补全 |
+| XML 事件元素名 | W1-C |
+| ModelEvent wire | W2-C / 06 号 |
+| 事件泵 poll ABI | W3-A / 22 号 |
+
+### 11. W1-A 完成定义（规格侧）
+
+- [x] 状态枚举与 outcome 枚举（本节 §2–§3）  
+- [x] 主转换与 control 映射（§4–§5）  
+- [x] busy 四 lane 与 queue 规则锚点（§6，D-066）  
+- [x] DoubleCheck 插入点（§7）  
+- [x] golden trace 目录约定（§9）  
+- [ ] 与 06 号 control envelope 字段一一对表（W2-C 联调）  
+- [ ] hard-cap 数字证明（TP）  
+- [ ] AR-P0-02 在 ARCHITECTURE-READINESS 勾选“规格侧通过”
+
+---
+
+## 建议的下一批工作（路线）
+
+```text
+已完成：SQ D-059..D-069；W1-A/B/C 首版；_CONFIG_.ini non-normative
+下一步：
+  W2-A  action registry 草稿
+  并行：TP-003/008/006 proof plan 提纲
+```

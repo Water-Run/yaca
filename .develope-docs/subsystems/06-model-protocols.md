@@ -96,3 +96,9 @@ adapter 对 header、单 event、累计文本、reasoning summary、tool count�
 ## 仍需技术证明
 
 冻结两套 adapter 的精确 API 版本/header、role 映射、stream delta 状态机、reserved control wire schema、usage/error 映射和 fixture corpus；同时证明旧系统 curl 流、取消和大 tool arguments 不会越过内存上限。产品范围不再重开 `openai-chat` vs Anthropic、自然语言 tool calling、direct Web tool 或 provider stop 隐式完成。
+
+## W2-C
+
+Canonical **NormalizedRequest / ModelEvent / NormalizedResponse**、双协议映射与 fixture 清单见
+[MODEL-EVENT-SCHEMA.md](../MODEL-EVENT-SCHEMA.md)（openai-chat + anthropic-messages，不重开产品协议选择）。
+

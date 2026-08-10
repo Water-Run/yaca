@@ -1,10 +1,11 @@
 # 开发追踪
 
-更新日期：2026-07-22
+更新日期：2026-08-10
 
 ## 当前阶段
 
-整体分析与系统分解。只完善文档和设计，不开始编码。
+**设计恢复期（2026-08-10）**：产品负责人选择已于 2026-07-22 收口；当前继续 **规格硬化 + 技术证明计划**，不开始核心产品编码。  
+同步登记 D-058：本机 Web 双线（`yaca-web` / `yaca-ie6`）仅作设计预留，不进入 v0.1 实现。
 
 ## 已确认约束
 
@@ -26,9 +27,9 @@
 - AgentLoop 的正常完成由主模型主导；独立“使用终止评估器”用户开关已并入 `DoubleCheck`，有效值开启时在主模型提出终止后单独发起完成复核请求。
 - `Cautious` 不作为权限模式；`DoubleCheck` 是默认配置总开关并至少包含完成复核，`.cautious` 提供写入上下文 XML 的会话级覆盖。
 - 每个上下文是 `__yaca__/CONTEXT/` 镜像路径树中的一个 XML，并恰好绑定一个由 XML 镜像父目录解码的 workspace root；XML 不另存 current workdir。索引从当前 XML 树实时派生，hash 输入是包含文件名的逻辑路径，显式 rebind 安全移动 XML 后 hash 随之变化。
-- 上下文没有永久 `ContextId`；当前 hash 固定为 16 位并从当前逻辑路径运行时计算，重命名后旧 hash 失效。
+- 上下文没有永久 `ContextId`；当前 hash 固定为 16 位大写十六进制（`0-9A-F`，D-059），由当前逻辑路径运行时计算；重命名后旧 hash 失效。
 - 所有 selector 型连接、重命名和删除入口共用统一 Resolver；`.status` 直接从当前句柄计算 hash，不扫描全树。
-- Resolver 已确认采用“增量搜索环 + 单遍双判定”：距离优先、同环名称优先于 hash，当前环获胜后不扫描外层，每个 XML 候选最多探测和匹配一次。
+- Resolver（D-061）：短名按环距 + `LogicalPath` 升序 **首个可用** 命中即停；精准指定用 **hash**（整条逻辑路径摘要）；hash 同环须证明唯一，碰撞 fail-closed；无短名 `AmbiguousName`。
 - 交互式上下文浏览器与 CLI 共用目录扫描、路径/hash、目标复核及打开/修改服务；`recent` 是快速最近列表，`full` 是完整目录树/全部 Catalog，两者都支持详情、搜索、重命名、永久删除与刷新，不提供 trash/restore。
 - 当前产品范围不包含上下文/对话分支功能；不设计或预留 `.fork` 命令、分支元数据、lineage 索引及对应 TUI/CLI 流程。以后若重新提出，重新进入决策流。
 
@@ -43,19 +44,19 @@
 | 02 | 进程执行与随包资源 | 候选 | 00、01 |
 | 03 | 网络传输 | 候选 | 00--02 |
 | 04 | 数据格式 | 候选 | 00、01 |
-| 05 | 配置与模型注册表 | 候选 | 00、01、04 |
+| 05 | 配置与模型注册表 | **W1-B 展开中**（字段 catalog 已首版） | 00、01、04 |
 | 06 | 模型协议适配 | 候选 | 03--05 |
 | 07 | Agent 工具系统 | 候选 | 01、02、04 |
 | 08 | 权限与安全 | 候选 | 05、07、18 |
-| 09 | AgentLoop 与会话状态机 | 讨论中 | 05--08、18、19 |
-| 10 | 上下文存储 | 候选 | 04、05、09、19 |
+| 09 | AgentLoop 与会话状态机 | **W1-A 展开中**（状态/outcome 表已首版） | 05--08、18、19 |
+| 10 | 上下文存储 | **W1-C 展开中**（事件目录/提交表已首版） | 04、05、09、19 |
 | 11 | 上下文定位、实时索引与交互式浏览器 | 讨论中 | 10 |
 | 12 | 上下文压缩 | 候选 | 06、09、10 |
-| 13 | CLI | 候选 | 05、09--12 |
+| 13 | CLI | **W2-A 展开中**（ACTION-REGISTRY 首版） | 05、09--12 |
 | 14 | 兼容 TUI | 候选 | 01、13 |
 | 15 | 诊断、自检与日志 | 候选 | 01--14、18、19 |
 | 16 | 打包、安装与发布 | 候选 | 00--15、18--20 |
-| 17 | Web 排除记录 | 已排除（PJ-14 A） | v0.1 零 Web 配置/命令/listener/asset/依赖；未来只可显式重开设计 |
+| 17 | Web 排除 + 双线预留 | v0.1 已排除（PJ-14 A）；D-058 预留 | 核心零 Web；`yaca-web`=Java 8，`yaca-ie6`=PHP 5.4+IE6；实现未开题 |
 | 18 | Prompt、指令与工作区发现 | 候选 | 01、05、08、09 |
 | 19 | 改动事务、审阅与撤销 | 候选 | 01、02、07--10 |
 | 20 | 测试、Agent 评估与平台验收 | 候选 | 全部核心系统的已确认契约 |
@@ -71,3 +72,46 @@
 原子题库和十个 owner packet 继续承担完整性审计，但不再直接充当负责人问卷。`OWNER-QUESTIONS-01.md` 的 29 个集中问题已经全部答复；`DISCUSSION-BATCH-06.md` 保存原话与归一断言，`DECISION-PROJECTION-BATCH-06.md` 把它们回投到 248 个 atomic group。现行登记为 265 个 active 选择/排除、5 个 `not-applicable`、0 个 `unanswered`、0 个 conflict。库、内部状态、错误码、常量与性能数字继续下放到技术规格/证明，配置校验仍连续覆盖 `CV-001` 至 `CV-076`。答完问卷只关闭负责人输入门，不自动授权编码。
 
 `DISCUSSION-BATCH-02.md` 至 `04` 捕获产品旅程和早期补缝，`DISCUSSION-BATCH-05.md` 修正 luainstaller x86 证据外推，`DISCUSSION-BATCH-06.md` 完成集中产品决策。当前工作转为把 D-049 至 D-057 展开成唯一 owner 规格、完整 typed schema/状态表/action registry，以及给 XP x86、Win7+ x64、CentOS 7 和三个最终 zip 建立技术证明。全部 P0 规格与 proof plan 通过前继续只做设计，不开始实现；上下文分支功能保持移出当前范围。
+
+### 2026-08-10 进度快照
+
+| 层 | 状态 |
+| --- | --- |
+| 负责人产品选择 | 已关闭（register `unanswered=0` / `conflict=0`） |
+| 项目级决定 | D-001..D-058 已记录；D-049..D-057 为核心主链，D-058 为 Web 预留 |
+| Owner 规格 | 23 个子系统多为「候选/讨论中」，尚无「设计已确认」 |
+| 技术证明 | TP 多为 `unplanned`；少量仅 `proven-modern` |
+| 实施就绪门 | P0 **全部未通过**；不可写完整实施计划，更不可写产品代码 |
+| Web | v0.1 仍零表面；双线预留：`yaca-web`/Java 8、`yaca-ie6`/PHP 5.4+IE6 |
+
+**近期设计工作优先级（核心优先于 Web）：**
+
+1. 把 D-049..D-057 机械展开为可执行 owner 规格（schema / 状态表 / action registry）。
+2. 为 TP-001/003/006/008 等 P0 证明写可复现 proof plan。
+3. 推进 AR-P0-02/03/09/10 等阻塞全程序计划的门。
+4. Web 双线仅维护预留文档；不抢核心主线带宽，除非负责人指定开 Web 决策包。
+
+主线就绪差距与 Wave 工作包见 **[`READINESS-GAP.md`](READINESS-GAP.md)**。  
+规格冻结问答见 **[`SPEC-FREEZE-QUEUE.md`](SPEC-FREEZE-QUEUE.md)**：**主队列已完成**（至 D-069）。
+
+**当前工作路线（2026-08-10）：** Wave 1 **三条脊柱首版齐** — W1-A [`09`](subsystems/09-agent-session.md)、W1-B [`05` catalog](subsystems/05-configuration.md)、W1-C [`10` 内部 XML](subsystems/10-context-storage.md)。W2-A 见 [ACTION-REGISTRY.md](ACTION-REGISTRY.md)；TP-003/006/008 计划见 [PROOF-PLANS-P0.md](PROOF-PLANS-P0.md)（已 specified）。下一步 W2-B 工具矩阵 或 开始 modern 机 proof 原型。不写产品代码直至门 A/B。
+
+
+### 自动推进停止点 / 下一负责人问题集（2026-08-10）
+
+无负责人产品选择的 Wave-2 设计与 P0 证明**计划**已尽量推完：
+
+| 已自动完成 | 位置 |
+| --- | --- |
+| W1-A/B/C | 09 / 05 / 10 |
+| W2-A/B/C | ACTION-REGISTRY / TOOL-PERMISSION-MATRIX / MODEL-EVENT-SCHEMA |
+| TP specified | 003/004/005/006/008/010 → PROOF-PLANS-P0 |
+
+**下一负责人问题集主题**（自动路径不能继续编造用户保证）：
+
+1. **hard-cap / 预算发行数字** — turn/request/tool/token 的用户可见默认与 RuntimeMax 是否接受证明推导值，或需产品表态。  
+2. **路径编码边角** — UNC/盘符/symlink 显示与 hash 输入若与用户直觉冲突时的可感知规则。  
+3. **证明失败退路** — 若 TP-008/003/006 在旧机失败且退路改用户保证（如 WAL、弱 cancel），需最小 O 决策（D-069 只覆盖打包假设，不覆盖全部 TP）。  
+4. **Permission 扩展** — 仅当要改 Std/Readonly 矩阵或增加 capability 轴时（当前禁止静默改）。
+
+在上述批前回答前：**不** 新开 SQ 长卷；**不** 开始产品 `src/*.lua` 实现（D-001）。可继续的仅是 modern 机可丢弃 proof 原型或更多纯表格展开且不改保证的内容。

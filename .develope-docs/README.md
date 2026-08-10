@@ -31,6 +31,14 @@
 - `DESIGN-DECISION-ROADMAP.md`：解释原子题库、十个 owner packet、跨 packet 分批队列与实施就绪门的全局关系。
 - `DECISION-BATCH-QUEUE.md`：保留把全部正式问题按真实依赖重组后的 49 个旧原子审计批次；当前不再要求负责人逐批作答。
 - `ARCHITECTURE-READINESS.md`：区分题库、决定、规格与计划，列出进入实施计划前必须通过的 P0/P1 门和证据。
+- `TOOL-PERMISSION-MATRIX.md`：W2-B tool×Permission 矩阵。
+- `MODEL-EVENT-SCHEMA.md`：W2-C canonical Model 事件/请求。
+- `ACTION-REGISTRY.md`：W2-A semantic action 注册表。
+- `PROOF-PLANS-P0.md`：TP-003/006/008 证明提纲。
+- `READINESS-GAP.md`：主线就绪差距与 Wave 工作包（从“决定已收口”到“可开发”的运营清单）。
+- `SPEC-FREEZE-QUEUE.md`：规格冻结问答（主队列已完成 → D-059..D-069）；再有缺口另开题，不默认续 SQ。
+
+
 - `DECISION-RESOLUTION-PROTOCOL.md`：规定负责人回复怎样逐项归档、消解冲突并提升为可实施规格。
 - `DECISION-REGISTER.md`：`decision-inventory-v9` 的 270 组正式问题唯一实时状态、条件、回复证据和决定/规格/gate 传播登记；从这里恢复当前进度。
 - `LIVE-DESIGN-COVERAGE.md`：当前 checklist/AQ 到负责人决定、已确认结论、技术规格/证明或排除重入的覆盖审计；不另存回复状态。
@@ -52,6 +60,7 @@
 - `references/agent-loop-reference-study.md`：五个开源 AgentLoop 固定提交的源码核对与可借鉴问题。
 - `subsystems/00-*.md` 至 `22-*.md`：每个子系统各自的讨论与设计文档；编号用于稳定引用，不等于当前讨论顺序。
 - `subsystems/TEMPLATE.md`：单个子系统的统一设计模板。
+- `web-tracks/`：未来本机 Web 产品族空预留（`yaca-web` / `yaca-ie6`，D-058）；不进入 v0.1 实现。
 
 ## 状态定义
 
@@ -63,6 +72,8 @@
 
 ## 当前阅读入口
 
-当前先读 [`DECISION-REGISTER.md`](DECISION-REGISTER.md) 的状态汇总、[`DECISIONS.md`](DECISIONS.md) 的 D-049 至 D-057，以及 [`ARCHITECTURE-READINESS.md`](ARCHITECTURE-READINESS.md)。`OWNER-QUESTIONS-01.md` 的 29 题已经全部答复，现行 `decision-inventory-v9` 为 `unanswered=0`；270 组、384 个 checklist ID、`AQ-001..AQ-437`、`CV-001..CV-076` 和 49 个旧批次继续保留为审计证据。负责人选择完成不等于技术证明、owner 规格或实施计划完成；P0 门通过前仍不开始编码。
+当前先读 [`DECISION-REGISTER.md`](DECISION-REGISTER.md) 的状态汇总、[`DECISIONS.md`](DECISIONS.md) 的 D-049 至 D-058，以及 [`ARCHITECTURE-READINESS.md`](ARCHITECTURE-READINESS.md)。`OWNER-QUESTIONS-01.md` 的 29 题已经全部答复，现行 `decision-inventory-v9` 为 `unanswered=0`；270 组、384 个 checklist ID、`AQ-001..AQ-437`、`CV-001..CV-076` 和 49 个旧批次继续保留为审计证据。负责人选择完成不等于技术证明、owner 规格或实施计划完成；P0 门通过前仍不开始编码。
 
 本轮新增拆分把 composer 输入召回、配置秘密文件权限、raw shell 继承环境、完整 model-yield 后续接、direct 文件属性、ignore/隐藏项、`exec` cwd、输出解码与 canonical 保留、active XML 外改恢复等交给独立 owner。M05-57..59、AL06-50/51 与 TS-40 等原子组也已随 Batch 06 收口；旧 packet 中的推荐仍只是收到回复前的历史候选，现行选择只看登记表和 D-049 至 D-057。
+
+2026-08-10：D-058 登记本机 Web 双线预留（[`web-tracks/`](web-tracks/README.md)、[`subsystems/17-web.md`](subsystems/17-web.md)）：`yaca-web`=**Java 8**，`yaca-ie6`=**PHP 5.4** + IE6。这不改变 v0.1 零 Web 表面，也不授权 Web 实现。

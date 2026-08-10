@@ -1,6 +1,8 @@
 # 05 配置与模型注册表
 
-状态：产品配置面已确认；精确字段语法、默认数值与迁移 fixture 待技术证明
+更新日期：2026-08-10
+
+状态：**W1-B 规格展开进行中** — 下文「现行字段 catalog」为 v0.1 **唯一权威字段集合**（产品语义）；INI 多行 grammar、部分数值硬顶、原子写原语仍待技术证明。`src/_CONFIG_.ini` 与 `CONFIG-SCHEMA-CANDIDATE.md` **不是**现行契约（后者仅审计底稿）。
 
 ## 职责
 
@@ -41,22 +43,242 @@ Model/config INI 可以在 chat 持有 Context writer 时由独立 REPL 或外�
 
 正确性基线不依赖 mtime/size 或 watcher。实现可以在完整 bytes digest 相同后跳过重复 parse，但不增加 reload interval 或 watcher policy。REPL 保存使用 expected source digest、完整临时文件验证和可恢复原子替换，不能覆盖外部并发编辑。
 
-## typed catalog
+## typed catalog（区域职责）
 
-逐字段 schema 的正式实现必须从以下已确认表面生成；未列出的候选字段不能因旧模板曾出现就保留：
+实现必须 **只** 从下列区域与后文逐字段表生成 parser/REPL/help/self-test；未列出的旧候选不得保留：
 
 | 区域 | 正式职责 |
 | --- | --- |
-| `General` | schema/version、`SystemPrompt`、`StartupSelfTest=off|stage1|stage2|stage3` 和必要诊断开关 |
-| `TUI` | Slogan/Version/WorkDir/DataRoot/ConfigStatus/Context/Hash/Model/Permission/DoubleCheck/StatusHint 的逐字段启动显示；没有 master、theme/vivid/language/mouse/Web 配置 |
-| `Agent` | `DoubleCheck`、finish goal、独立 high-risk action-review 开关、各自 reviewer selector、stuck 阈值和允许用户收紧的 hard budgets |
-| `Network` | Model HTTP 共用的 Proxy/CA/no-proxy/资源策略；没有 direct HTTP transport、`UseStunnel` 或全局 Model retry |
-| `Exec` | raw shell 的允许用户收紧的 timeout/output/resource 与受控 environment baseline；没有 PTY/background job/direct HTTP profile |
-| `Context` | 自动命名周期、recent/full 列表/排序、压缩触发偏好；workspace root 是镜像路径派生事实，不是自由配置 |
-| `Permission.*` | `Description`、`SystemPrompt` 以及 `Read/Write/Delete/Shell/OutsideWorkspace` 五项 `allow|confirm|deny` |
-| `Model.*` | 一个完整 LLM 连接实例的 protocol/endpoint/model/key/capability/SystemPrompt/streaming/deadline/retry/output/typed adapter options |
+| `General` | schema 版本、`SystemPrompt`、`StartupSelfTest` |
+| `TUI` | 启动头逐字段 bool；无 master/theme/language/mouse/Web |
+| `Agent` | DoubleCheck 族、reviewer 选择、queue 上限、用户可收紧预算 |
+| `Network` | Model HTTP 的 proxy/CA/no-proxy；无 UseStunnel/全局 Model retry/DirectHttp |
+| `Exec` | raw shell 超时/输出/环境基线；无 PTY/background/direct HTTP |
+| `Context` | 自动命名周期、列表排序、压缩触发比；无 workspace root 配置项 |
+| `Permission.<Name>` | Description、SystemPrompt、五项 allow\|confirm\|deny |
+| `Model.<Name>` | 完整连接实例（见下表） |
 
-硬上限由发行版给出不可关闭基线。INI 只暴露确有消费者且允许收紧的预算，不允许把 request/turn/process hard cap 设为无限，也不提供 Context lifetime hard ledger 或默认金额预算。
+硬上限由发行 manifest 给出 **不可关闭** 基线。INI 只暴露允许用户 **收紧** 的预算；禁止把 request/turn/process hard cap 配成无限；无金额预算；无 Context lifetime hard ledger。
+
+---
+
+## W1-B 现行字段 catalog（权威）
+
+### 列说明
+
+| 列 | 含义 |
+| --- | --- |
+| Key | 规范拼写（PascalCase）；实现与 help 必须一致 |
+| Type | 类型 / 枚举 |
+| Default | 新模板与字段缺失时的行为（除非标 required） |
+| Secret | 是否 registered config secret（禁止 argv/XML/普通日志/export 明文） |
+| XML | 可否被 Context 白名单覆盖 |
+| Notes | 消费者与不变量 |
+
+**Sentinel：** 不用布尔 false 表示“无限”。可选上限用 **缺失 = 不额外收紧 / Runtime 默认**；关闭能力用枚举（如 `Streaming=off`）。
+
+**禁止出现（非穷尽）：** `Permission.Cautious` 内置语义、`Permission.*.DoubleCheck`、`UseStunnel`、`UseTerminationEvaluator`、可关 finish 的 `DoubleCheckTargets`、`DirectHttp`/`DirectNetwork`、`SensitiveRead`、`Autonomy`、Web/telemetry/upload/update、`Language`/`Theme`/`Vivid`、`AutoJumpToDir`/`AutoNameOnExit`/`ResumeDirectory`、`Model.CustomPrompt`（迁到 SystemPrompt）、`CompactionModel`、金额字段、backup/undo 配置、multi-root、MCP/plugin。
+
+### `[General]`
+
+| Key | Type | Default | Secret | XML | Notes |
+| --- | --- | --- | --- | --- | --- |
+| SchemaVersion | string | 发行写入 | no | no | 迁移与拒绝不兼容 |
+| SystemPrompt | UTF-8 text（有界） | 空 | no | no | Global Prompt；不能授权 |
+| StartupSelfTest | off\|stage1\|stage2\|stage3 | off | no | no | Agent 入口 gate；非 TTY≥2 须 D-062 |
+
+### `[TUI]` 启动头
+
+| Key | Type | Default | Secret | XML | Notes |
+| --- | --- | --- | --- | --- | --- |
+| StartupShowSlogan | bool | true | no | no | 固定 `yaca: Yet Another Coding Agent.` |
+| StartupShowVersion | bool | true | no | no | |
+| StartupShowWorkDir | bool | true | no | no | |
+| StartupShowDataRoot | bool | false | no | no | 默认隐藏 |
+| StartupShowConfigStatus | bool | true | no | no | |
+| StartupShowContext | bool | true | no | no | 无 XML 不伪造 |
+| StartupShowContextHash | bool | true | no | no | D-059 大写 hex |
+| StartupShowModel | bool | true | no | no | |
+| StartupShowPermission | bool | true | no | no | |
+| StartupShowDoubleCheck | bool | true | no | no | 有效值 |
+| StartupShowStatusHint | bool | true | no | no | 提示 .status |
+
+无 INI 主题/颜色系统；提示符色见 D-064。
+
+### `[Agent]`
+
+| Key | Type | Default | Secret | XML | Notes |
+| --- | --- | --- | --- | --- | --- |
+| DoubleCheck | bool | true | no | tri-state ov | true 时 finish review 不可关 |
+| DoubleCheckGoal | text（有界） | 空 | no | override | 空则 Runtime 构造；不授权 |
+| ActionReviewEnabled | bool | true | no | no | 仅 DoubleCheck 有效 true 时 |
+| ActionReviewModel | Model 名或空 | 空=turn Model | no | no | 跨 endpoint 首次 disclosure |
+| TerminationReviewModel | Model 名或空 | 空=turn Model | no | no | 与 Action 独立 |
+| QueueMaxItems | int 1..RuntimeMax | **9** | no | no | D-066 |
+| CompactThreshold | float (0,1) | 0.75 | no | 可选下调 | 只触发 model-view 压缩 |
+| MaxTurnModelRequests | int optional | unset | no | 可选下调 | 不可超 Runtime hard |
+| MaxTurnToolCalls | int optional | unset | no | 可选下调 | 同上 |
+| StuckNoProgressRounds | int optional | unset | no | no | 默认 TP |
+
+禁止 INI 关闭 hard cap；无金额字段。
+
+### `[Network]`
+
+| Key | Type | Default | Secret | XML | Notes |
+| --- | --- | --- | --- | --- | --- |
+| FollowProxy | bool | true | no | no | 不读任意 ambient curlrc |
+| ProxyUrl | string | 空 | 含凭证则 secret | no | |
+| NoProxy | string | 空 | no | no | |
+| CaBundlePath | path | 发行 CA | no | no | |
+| ConnectTimeoutMs | int optional | unset | no | no | |
+| MaxResponseBytes | int optional | unset | no | no | |
+
+无 UseStunnel；无全局 Model retry。
+
+### `[Exec]`
+
+| Key | Type | Default | Secret | XML | Notes |
+| --- | --- | --- | --- | --- | --- |
+| TimeoutMs | int optional | unset | no | no | |
+| MaxOutputKB | int optional | 1024 | no | no | |
+| EnvironmentMode | minimal\|inherit_filtered | minimal | no | no | 过滤表 TP |
+
+### `[Context]`
+
+| Key | Type | Default | Secret | XML | Notes |
+| --- | --- | --- | --- | --- | --- |
+| AutoNameEveryMainTurns | int ≥0 | 10（0=关） | no | no | durable completed main only |
+| ListSortBy | created\|updated\|name | updated | no | no | 非 mtime |
+| ListSortDirection | ascending\|descending | descending | no | no | LogicalPath tie-break 升序 |
+| RecentListLimit | int optional | unset | no | no | |
+
+无 AutoJumpToDir；无 root 配置项。
+
+### `[Permission.<Name>]`
+
+顺序第一 = 默认。发行模板：**Std** 然后 **Readonly**。
+
+| Key | Type | Std | Readonly | Notes |
+| --- | --- | --- | --- | --- |
+| Description | string | 发行文案 | 发行文案 | 非授权 |
+| SystemPrompt | text | 空 | 空 | 非授权 |
+| Read | allow\|confirm\|deny | allow | allow | |
+| Write | allow\|confirm\|deny | confirm | deny | |
+| Delete | allow\|confirm\|deny | confirm | deny | |
+| Shell | allow\|confirm\|deny | confirm | deny | |
+| OutsideWorkspace | allow\|confirm\|deny | confirm | deny | |
+
+### `[Model.<Name>]`
+
+| Key | Type | Default | Secret | Notes |
+| --- | --- | --- | --- | --- |
+| Enabled | bool | 模板 | no | |
+| Description | string | 空 | no | |
+| Protocol | openai-chat\|anthropic-messages | required | no | |
+| Endpoint | URL | required if enabled | no | HTTP 警告明文 |
+| RemoteModel | string | required if enabled | no | |
+| Key | string | 可空 | **yes** | 禁 XML/argv/export |
+| SystemPrompt | text | 空 | no | |
+| ContextLength | int or unset | 模板 | no | |
+| MaxOutputTokens | int optional | unset | no | |
+| Streaming | force\|try\|off | try | no | |
+| RequestTimeoutMs | int optional | unset | no | |
+| RetryCount | int ≥0 | 模板/Runtime | no | per Model |
+| RetryBaseDelayMs | int optional | unset | no | |
+| ToolsEnabled | bool | true | no | false 不可 main coding |
+| AdapterOptions | typed map | 空 | 视键 | 未知键 error |
+
+失败不自动换 Model。
+
+### Context XML 白名单
+
+`CurrentModel`, `CurrentPermission`, `DoubleCheckOverride` (inherit\|true\|false), `DoubleCheckGoalOverride`, `ContextPrompt`, `AutoRenameDisabled` (metadata)。
+
+### 跨字段校验（必须）
+
+1. Agent 需要 ≥1 可用 enabled Model（Endpoint/RemoteModel/Protocol 合法）。
+2. Reviewer Model 名若非空必须 enabled。
+3. CompactThreshold ∈ (0,1)；QueueMaxItems ∈ [1, RuntimeMax]。
+4. Streaming=force 与能力冲突 → error。
+5. 未知 section/key → generation 无效。
+6. HTTP+Key → 保存警告。
+7. 旧 CustomPrompt / Permission.DoubleCheck / Cautious 身份 → migration diagnostic。
+
+### 发行模板骨架（示意）
+
+```ini
+[General]
+SchemaVersion = 0.1.0
+SystemPrompt =
+StartupSelfTest = off
+
+[TUI]
+StartupShowSlogan = true
+StartupShowVersion = true
+StartupShowWorkDir = true
+StartupShowDataRoot = false
+StartupShowConfigStatus = true
+StartupShowContext = true
+StartupShowContextHash = true
+StartupShowModel = true
+StartupShowPermission = true
+StartupShowDoubleCheck = true
+StartupShowStatusHint = true
+
+[Agent]
+DoubleCheck = true
+DoubleCheckGoal =
+ActionReviewEnabled = true
+ActionReviewModel =
+TerminationReviewModel =
+QueueMaxItems = 9
+CompactThreshold = 0.75
+
+[Network]
+FollowProxy = true
+
+[Exec]
+MaxOutputKB = 1024
+EnvironmentMode = minimal
+
+[Context]
+AutoNameEveryMainTurns = 10
+ListSortBy = updated
+ListSortDirection = descending
+
+[Permission.Std]
+Description = Standard: confirm write/delete/shell/outside
+Read = allow
+Write = confirm
+Delete = confirm
+Shell = confirm
+OutsideWorkspace = confirm
+SystemPrompt =
+
+[Permission.Readonly]
+Description = Readonly: deny mutating capabilities
+Read = allow
+Write = deny
+Delete = deny
+Shell = deny
+OutsideWorkspace = deny
+SystemPrompt =
+```
+
+### W1-B 完成定义
+
+- [x] 唯一字段集合与禁止列表
+- [x] 默认值（QueueMaxItems=9、排序、Permission 矩阵等）
+- [x] XML 白名单与 secret 边界
+- [x] 跨字段校验要点
+- [ ] 多行 Prompt grammar + round-trip fixture
+- [ ] RuntimeMax / 预算发行数字表
+- [ ] 旧 ini migration 用例表
+- [ ] AR-P0-09 规格侧勾选
+
+### 下一步
+
+**W1-C**：Context 内部 XML 事件与提交状态机（D-068 下仍必需）。
 
 ## 四层 Prompt 配置
 
@@ -99,7 +321,7 @@ Key 直接明文保存在主 INI，这是已接受的简单性选择；它仍属
 
 ## DoubleCheck 配置
 
-`DoubleCheck` 是 Agent 默认总开关；`.cautious` 只写当前 Context 的 `DoubleCheckOverride`，不切换 Permission 或修改 INI。
+`DoubleCheck` 是 Agent 默认总开关；`.cautious` 只写当前 Context 的 `DoubleCheckOverride`，不切换 Permission 或修改 INI。命令语法见 **D-065**：无参 status；`on`/`off`/`toggle`/`reset`（`off`≠`reset`）。
 
 - `DoubleCheck=false`：action/finish review 都停用。
 - `DoubleCheck=true`：每个主模型 typed finish 必须完成独立 termination review；finish review 没有可关闭子开关。
@@ -155,4 +377,4 @@ Context XML 只允许保存当前会话真正需要的覆盖/元数据：
 
 typed schema 必须同时生成/校验默认值、INI parser/writer、REPL 表单/help、XML whitelist、secret registry/redaction、migration、self-test 和跨字段 fixture。任何字段只有 producer 没有 consumer，或只改文档没有改 redaction/lifecycle，都不构成完整配置项。
 
-仍需技术证明的是：字段精确拼写与多行/escaping 语法、默认数值、INI round-trip、Win32/Win64/Linux 原子提交、secret ACL observation、OpenAI/Anthropic adapter options 和长配置性能；不再把 Prompt 层级、协议数量、HTTP/stunnel、OutsideWorkspace、DoubleCheck finish review 或 backup 功能重新列为产品问题。
+仍需技术证明的是：多行 Prompt 唯一 grammar、RuntimeMax 与各 optional 预算发行数字、INI round-trip、Win32/Win64/Linux 原子提交、secret ACL observation、AdapterOptions 键表和长配置性能。字段 **集合与默认** 以本文 W1-B catalog 为准；不再把 Prompt 层级、协议数量、HTTP/stunnel、OutsideWorkspace、DoubleCheck finish review 或 backup 功能重新列为产品问题。

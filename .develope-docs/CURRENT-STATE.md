@@ -1,10 +1,10 @@
 # 当前状态分析
 
-更新日期：2026-07-22
+更新日期：2026-08-10
 
 ## yaca 仓库
 
-yaca 当前是“产品说明、配置草案、模块骨架和本地运行工具集合”，还不是可执行的 Coding Agent。
+yaca 当前是“产品说明、配置草案、模块骨架、设计文档体系和本地运行工具集合”，还不是可执行的 Coding Agent。
 
 已有内容：
 
@@ -24,7 +24,8 @@ yaca 当前是“产品说明、配置草案、模块骨架和本地运行工具
 - README 的模型预设清单与配置模板中的模型条目不一致。
 - `_CONFIG_.ini` 仍包含 `[Permission.Cautious]` 和 profile 内 `DoubleCheck`，尚未迁移到 D-021 的全局默认开关与 `.cautious` 会话覆盖设计。
 - `_CONTEXT_.xml` 仍只有头部注释，尚未表达 D-022 的镜像路径、完整对话、会话参数元数据和实时索引契约。
-- Web、图像/音频、remote/headless、transcription 与 TTS 已被 D-044 明确排除；仓库中的 Web 占位不得进入 loader、help、配置或发行 zip，后续应作为实现前清理项而不是候选产品面。
+- 图像/音频、remote/headless、transcription 与 TTS 仍被 D-044 明确排除。
+- Web：**v0.1 核心** 仍零表面（D-044）；2026-08-10 的 D-058 仅为未来 **本机本地 Web** 登记设计预留，产品线为 `yaca-web`（服务端 **Java 8**）与 `yaca-ie6`（服务端 **PHP 5.4**，浏览器有意兼容 IE6）。设计正文在 `.develope-docs/web-tracks/`；仓库根 `web/` 只作说明/空预留；JRE/PHP 与 Web 实现都不得进入 v0.1 loader、help、配置或核心 zip，也不得写成已实现能力。
 
 ### 本轮已冻结的产品主链
 

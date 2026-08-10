@@ -46,6 +46,8 @@ docs/
 - Permission 名称只用于选择和显示，实际能力由 typed 配置字段决定。发行模板包含 `Std` 和 `Readonly`；Permission 的 Prompt/说明不能代替 Runtime enforcement。
 - 不提供 Web、图像输入、音频输入、独立 transcription、TTS、公共 remote/headless IPC/RPC、MCP、插件、hook、skills runtime、第三方工具协议、子 Agent 或 Context 分支。
 - 被排除能力在配置、help、schema、Runtime、self-test、依赖和 zip 中都必须为零表面；未来只有项目负责人针对具体 use case 显式重开设计流后才能出现。
+- D-058 已为本机本地 Web 产品族登记 **设计预留**（`yaca-web` / **Java 8**；`yaca-ie6` / **PHP 5.4** + IE6），但 **不** 改变 v0.1 零 Web 表面，也 **不** 授权实现；JRE/PHP 不进入核心 zip。见 [17-web](17-web.md) 与 [web-tracks](../web-tracks/README.md)。
+- Context XML 为 **内部存储格式**（D-068）；跨工具/人类可读默认走 **export**，不承诺第三方 XML 公共 API。
 
 ## 正常启动契约
 
@@ -56,7 +58,7 @@ docs/
 1. 校验发行包、目录、数据根和主配置。
 2. 配置缺失/损坏或没有有效可用 Model 时阻断 Agent，给出对应管理入口；不进入空 chat。
 3. 缺失/损坏配置时，help/version、bootstrap model-repl、config-repl、self-test Stage 1 和不调用模型的 context-repl 仍可用。
-4. 若配置启用了启动前 self-test，则按所选最大阶段顺序运行；前阶段未满足不得进入后阶段，要求的阶段失败、取消或未完成时不进入 chat。Stage 1 包括 Context 镜像/workspace/Catalog/Resolver/hash 完整性与性能检查；Stage 2/3 仍具有独立联网、费用和数据范围 consent。Stage 3 可提示 Model/Permission 名称、说明和真实配置/能力的语义错配，但只作 advisory。
+4. 若配置启用了启动前 self-test，则按所选最大阶段顺序运行；前阶段未满足不得进入后阶段，要求的阶段失败、取消或未完成时不进入 chat。Stage 1 包括 Context 镜像/workspace/Catalog/Resolver/hash 完整性与性能检查；Stage 2/3 仍具有独立联网、费用和数据范围 consent。非 TTY 下 Stage≥2 必须有本次显式 online-consent，否则硬失败，不得静默联网（D-062）。Stage 3 可提示 Model/Permission 名称、说明和真实配置/能力的语义错配，但只作 advisory。
 5. 默认没有启动前 self-test，启动也不探测网络；暂时离线只在第一次显式模型请求时报告。
 6. 裸启动不扫描 Context Catalog、不提示 recent，也不按退出标记区分所谓正常/异常历史；它直接进入新的 `not saved` chat。旧 Context 只能通过 `.context`、continue action 或 context-repl 显式访问。
 
@@ -70,7 +72,7 @@ docs/
 2. 第一条 main 用户消息提交时，先生成 provisional 名称，以 no-replace 建立 XML，并 durable 保存有效会话设置和该用户消息。
 3. 只有保存成功后才允许发起 Model 请求、工具或其他副作用；失败时消息不能被报告为已接受。
 
-provisional 名称是 ASCII `Untitled Conversation [XXXX]`，`XXXX` 为四位大写十六进制随机后缀；碰撞时重新生成，不覆盖已有 XML。它不是永久 ID，也不代替从逻辑 XML 路径实时计算的十六位 Context hash。
+provisional 名称是 ASCII `Untitled Conversation [XXXX]`，`XXXX` 为四位大写十六进制随机后缀；碰撞时重新生成，不覆盖已有 XML。它不是永久 ID，也不代替从逻辑 XML 路径实时计算的十六位 Context hash（D-059：用户可见为 **大写** `0-9A-F`）。
 
 自动命名改为可关闭的后台 logical request，默认每十个已经完整收口的 main turn 触发一次。它必须有界、无工具、不阻断主任务；失败、超时、取消或退出保留当前名称。成功 rename 更新逻辑路径和实时 hash。“后台”只表示不阻塞用户体验，领域状态仍由单一事件泵串行裁决。
 

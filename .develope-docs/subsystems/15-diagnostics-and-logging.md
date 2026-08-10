@@ -23,7 +23,7 @@
 
 ## 三阶段 Self-Test
 
-三个阶段严格按 `Stage 1 -> Stage 2 -> Stage 3` 执行；用户选择的阶段上限、Model/check 范围和合法排除都必须进入同一 self-test semantic action。TUI 选单与 CLI 参数只是同一 typed request 的不同投影，检查 ID、依赖、结果和退出类别完全一致；这项 CLI parity 不开放公共 headless/remote controller，也不允许非交互调用默认批准联网或费用。
+三个阶段严格按 `Stage 1 -> Stage 2 -> Stage 3` 执行；用户选择的阶段上限、Model/check 范围和合法排除都必须进入同一 self-test semantic action。TUI 选单与 CLI 参数只是同一 typed request 的不同投影，检查 ID、依赖、结果和退出类别完全一致；这项 CLI parity 不开放公共 headless/remote controller。非 TTY 不得默认批准联网或费用：无本次显式 online-consent 时 Stage≥2 硬失败（D-062）。
 
 ### Stage 1：静态、离线、确定性
 
@@ -46,7 +46,7 @@ Stage 3 只能调用 Stage 2 已确认可用且由用户纳入范围的 Model。
 
 11 号上下文目录与应用服务的错误不能压成同一个“找不到上下文”。其中 Resolver 负责：
 
-- `AmbiguousName` 显示同一优先范围内全部候选的逻辑路径与当前 hash。
+- （已取代）`AmbiguousName`：D-061 下短名不再产生该结果；`HashCollision` 须显示冲突候选的逻辑路径与 hash。
 - `HashCollision` 明确说明发生碰撞，不能建议用户反复重试碰运气。
 - `MatchedUnavailable` 区分损坏 XML 和匹配文件不可读。
 - `ScanIncomplete` 列出未能读取的范围，不能在漏扫后声称全局不存在。

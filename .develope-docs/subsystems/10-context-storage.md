@@ -1,10 +1,12 @@
 # 10 上下文存储
 
-状态：已确认存储协议基线；精确 schema、旧平台原语与性能上限待技术证明
+更新日期：2026-08-10
+
+状态：**W1-C 规格展开进行中** — 内部事件目录与提交/崩溃表见文末；平台原语与 hard 数字待 TP。非公共 API（D-068）。
 
 ## 职责
 
-以单个活动 XML 持久化可以跨机接盘的规范事实：完整对话、实际 model view、工具与审批、日志相关信息、会话级参数、Model/Permission/Prompt 切换、压缩代次、专用命名 metadata、历史工具 cwd，以及无法证明副作用结果时的 `unknown` 事实；提供创建、加载、保存、永久删除和崩溃恢复。当前 workspace root 不在 XML 内重复保存，而由 XML 在 `__yaca__/CONTEXT/` 镜像树中的父目录解码。这里的“完整”仍受公开 schema 与经旧机实测冻结的资源上限约束，不等于无限保存每个 token delta 和任意二进制原始字节。
+以单个活动 XML 持久化可以跨机接盘的规范事实：完整对话、实际 model view、工具与审批、日志相关信息、会话级参数、Model/Permission/Prompt 切换、压缩代次、专用命名 metadata、历史工具 cwd，以及无法证明副作用结果时的 `unknown` 事实；提供创建、加载、保存、永久删除和崩溃恢复。当前 workspace root 不在 XML 内重复保存，而由 XML 在 `__yaca__/CONTEXT/` 镜像树中的父目录解码。这里的“完整”仍受 **yaca 内部** 版本化 schema 与经旧机实测冻结的资源上限约束，不等于无限保存每个 token delta 和任意二进制原始字节。对外不承诺第三方 XML API（D-068）；跨工具可读默认走 export。
 
 ## 边界
 
@@ -70,7 +72,7 @@ D-040/D-041 已冻结下面的产品语义：
 
 一个上下文对应镜像树中的一个 XML，文件本身承载完整对话与会话元数据。每个 canonical 提交边界必须从旧 generation 流式生成完整新 XML，经 flush 和从头验证后，再用目标平台已经证明的原子替换或两代可恢复替换发布。不能原地追加根后片段，也不能先把增量写进长期 WAL 再异步合并。对外可见的已提交版本始终必须可解析、可恢复，不能因半写入静默变成另一段有效历史。
 
-优点是路径直观、便于复制和直接查看。主要风险是长会话、大工具输出、XML 转义、保存峰值与崩溃恢复；XP x86 上尤其不能假设可以把整个大文件多份载入内存。公开 schema 也可能长期束缚迁移，因此“活动 XML”不自动等于“第三方可写的稳定公共格式”。
+优点是路径直观、便于 yaca 复制恢复。主要风险是长会话、大工具输出、XML 转义、保存峰值与崩溃恢复；XP x86 上尤其不能假设可以把整个大文件多份载入内存。D-068 已明确活动 XML **不是** 对外稳定公共格式；跨工具请用 export。
 
 ### B. 上下文目录 + 分段事件记录 + 派生快照（未采用为总体形态）
 
@@ -100,7 +102,7 @@ D-040/D-041 已冻结下面的产品语义：
 
 事件序列是唯一业务事实，current projection/摘要必须记录覆盖到的 event seq/digest，失配时只能丢弃重建。每个 XML 内必须有局部单调身份，例如 event/turn/input/request/attempt/message/tool-call/operation/approval/compaction；无永久 ContextId 不影响这些局部关系。provider 原始 ID 不能替代本地身份。
 
-这些角色只能是同一个正式 XML 内的不同 section/关系，使压缩改变模型看到的内容而不静默销毁用户历史。具体 schema 拼写尚待技术规格冻结，不再重新比较第二种持久化路线。
+这些角色只能是同一个正式 XML 内的不同 section/关系，使压缩改变模型看到的内容而不静默销毁用户历史。逻辑类型与提交语义见 **W1-C**；机器可读 schema 文件与字节上限仍待 TP。
 
 ## 已确认的持久化边界与待冻结细节
 
@@ -125,7 +127,15 @@ well-formed XML 在根结束标签后不能原地追加新子元素，因此每�
 
 根未闭合、根后追加和长期 WAL/sidecar 已排除。previous-valid 是一次替换窗口内的完整旧 generation，不是 undo、用户 backup 或另一条会话历史；Resolver/Catalog 在任何状态下都只把一个已证明的正式目标视为 Context。
 
-该协议让单次提交 I/O 随 XML 大小线性增长，长会话累计仍可能达到 O(n²)。最终 XML 大小、单次提交延迟、启动扫描延迟和内存 hard limits 必须由 Windows XP x86/CentOS 7 的大 XML、慢盘、磁盘满、进程终止和掉电等价故障测试证明后冻结；Windows x64 等发行目标再执行对应回归。超过 hard limit 时必须在新请求/副作用前 fail-stop 或只读修复，不能丢历史、偷偷启用 WAL，或宣传未经证明的规模。
+该协议让单次提交 I/O 随 XML 大小线性增长，长会话累计仍可能达到 O(n²)。最终 XML 大小、单次提交延迟、启动扫描延迟和内存 hard limits 必须由 Windows XP x86/CentOS 7 的大 XML、慢盘、磁盘满、进程终止和掉电等价故障测试证明后冻结；Windows x64 等发行目标再执行对应回归。
+
+**HardLimit 用户契约（D-063 / SQ-06）：**
+
+- 数值须 **足够大**，使触顶在声明工作负载下属于 **异常**，不是日常路径。  
+- 超过 hard limit 时：新 durable 写入/副作用前 **fail-stop**；不丢历史、不启用 WAL、不自动删史。  
+- 已有 XML 在安全范围内可只读查看/导出。  
+- **必须** 提示用户 **新开对话**，并提供可复制的 **接盘 Prompt 建议**（供下一会话的 Model 阅读关键材料/目标/未完成项）；不自动开新 Context、不自动注入历史。  
+- 不得把 compact 宣传为“一定能解除 XML 体积 hard limit”。
 
 如果某个 XML 库、flush/replace 原语或当前限额在目标机证明失败，技术退路依次是更换满足同一窄接口的流式库/平台 adapter、使用已验证的两代恢复替换、依据证据收紧 hard limits。若这些仍无法兑现固定协议，必须重新打开 D-053 的最小产品保证；实现不能自行切换到第二事实源。
 
@@ -135,7 +145,219 @@ well-formed XML 在根结束标签后不能原地追加新子元素，因此每�
 
 DTD/external entity 必须禁用，深度/元素/属性/文本/总大小受限。历史 Permission、`DoubleCheck`、ContextPrompt、approval/grant 和工具结果要忠实显示，但 approval/grant 永远 audit-only，不会在目标机创建授权；继续运行使用目标机当前有效 Permission 重新求值。Model `Key`、代理凭据、Authorization header 和环境变量秘密值不属于 XML schema，必须由目标机 INI 重新提供。缺凭据或映射不阻止只读检查历史，但阻止新的模型请求或副作用。
 
-外来 XML 还必须保留并验证完整接盘信息：实际 Prompt component、Model/Permission/tool snapshot、压缩/model-view provenance、请求与工具结果、取消/重试，以及所有 `unknown` 副作用事实。任何 unsupported schema、损坏、活动锁、unknown operation 或歧义映射都保持只读/fail-closed，并路由到 context-repl self-fix；不能自动重放工具或复制成一个看似健康的新 Context。公开 schema 的 v0.1 承诺优先是第三方可读、yaca 为受支持 writer；第三方原地写入若未来需要，必须另建 conformance contract。
+外来 XML 还必须保留并验证完整接盘信息：实际 Prompt component、Model/Permission/tool snapshot、压缩/model-view provenance、请求与工具结果、取消/重试，以及所有 `unknown` 副作用事实。任何 unsupported schema、损坏、活动锁、unknown operation 或歧义映射都保持只读/fail-closed，并路由到 context-repl self-fix；不能自动重放工具或复制成一个看似健康的新 Context。**D-068：** 上述接盘指 yaca 对用户放入镜像树的文件做产品内导入/校验/继续写，不是对外稳定公共 XML API。第三方工具不保证能解析；人类/跨工具默认使用 export。yaca 内部仍须版本化 schema 与 round-trip 正确性。
+
+## W1-C 内部 schema 展开（2026-08-10）
+
+状态：内部契约首版；**非** 公共 API（D-068）。元素本地名可在实现前微调，但 **角色、顺序关系、提交/恢复语义不得改弱**。
+
+### 1. 文件与旁路控制物命名
+
+| 角色 | 规范名模式（同目录） | Catalog/Resolver |
+| --- | --- | --- |
+| 正式 Context | `{Name}.xml` | 唯一事实候选 |
+| 提交 temp | `{Name}.xml.yaca-tmp-{nonce}` | **忽略** |
+| previous-valid | `{Name}.xml.yaca-prev`（最多一个） | **忽略**（恢复协议专用） |
+| writer lock | `{Name}.xml.yaca-lock` | **忽略**；持有证据见 §5 |
+
+`nonce` 足够避免碰撞；self-test 可回收陈旧 tmp。禁止把 tmp/prev/lock 当第二会话。
+
+### 2. 文档骨架（逻辑结构）
+
+```text
+YacaContext
+  @schemaVersion          -- 内部世代，如 0.1.0
+  @generation             -- 单调递增，每次成功 publish +1
+  Header                    -- 有界；Catalog 可只读 header
+    Name
+    CreatedAt               -- 首次 durable 固定
+    UpdatedAt               -- 每次成功 publish 推进
+    AutoRenameDisabled      -- bool；缺省=false
+    NamingWaterline         -- 已计 durable completed main 水位（可选显式）
+    AutoNameBaseline        -- 取消 marker 后的 baseline（可选）
+  Session                     -- 当前会话选择（非秘密）
+    CurrentModel            -- logical name + 非秘密 snapshot/digest
+    CurrentPermission
+    DoubleCheckOverride     -- inherit|true|false
+    DoubleCheckGoalOverride
+    ContextPrompt
+  Facts                       -- 唯一业务事件流
+    Event*                  -- 按 seq 严格递增
+  ModelView                   -- 可重建；记录覆盖到的 fact 范围
+    ActiveManifest
+    CompactionRecord*       -- 历史代次；不删 Facts
+  Audit                       -- 可选分区或并入 Event
+```
+
+说明：
+
+- **无** `<WorkspaceRoot>` 权威字段；root = 镜像父目录解码。  
+- **无** Key/secret。  
+- Header 必须够 Catalog 排序（Name/CreatedAt/UpdatedAt）而无需扫完 Facts。
+
+### 3. 局部身份
+
+| ID | 作用域 | 规则 |
+| --- | --- | --- |
+| `eventSeq` | 单 XML | 从 1 单调 +1；永不复用 |
+| `turnId` | 单 XML | 局部唯一；main/side 标记 |
+| `requestId` | 单 XML | LogicalRequest |
+| `attemptId` | 隶属 request | 1..n |
+| `messageId` | 单 XML | user/assistant/system 组件 |
+| `toolCallId` | 单 XML | 本地 id；可记 provider id 仅审计 |
+| `operationId` | 单 XML | 副作用意图 |
+| `approvalId` | 单 XML | 人批 |
+| `reviewId` | 单 XML | action/termination review |
+| `compactionId` | 单 XML | |
+
+崩溃恢复 **禁止** 复用已 durable 的 id。
+
+### 4. Event 类型目录（Facts 流）
+
+每条 Event：`seq`, `type`, `at` (canonical time), 可选 `turnId`, 载荷。
+
+| type | 载荷要点 | 与 W1-A 屏障 |
+| --- | --- | --- |
+| `turn_started` | kind=main\|side；configGeneration public digest；model/permission/prompt/tool-schema snapshots | admission 后 |
+| `user_message` | text；source=main\|queue\|steer\|ask_reply… | **Model 请求前** durable |
+| `model_request` | purpose；requestId；viewManifestRef | |
+| `model_message` | role；完整文本或 interrupted+partial；control? | 完整/interrupted 才进 Facts；**无** token delta 洪流 |
+| `model_control` | finish\|ask-user\|refuse；载荷 | |
+| `model_yield` | 无 control 的完整普通回复标记 | → waiting_user |
+| `tool_call` | toolCallId；name；args canonical | |
+| `permission_decision` | capability；allow\|confirm\|deny；profile snapshot | |
+| `approval` | decision；approvalId；绑定 operation/tool | 副作用前 |
+| `operation_intent` | operationId；kind；target identity/digest | **副作用前** |
+| `operation_result` | ok\|error\|cancelled\|unknown\|skipped；evidence | **下次采样前** |
+| `tool_result` | 配对 toolCallId；body 有界；truncated | 同上 |
+| `action_review` | verdict；reviewId；binding | |
+| `termination_review` | verdict；gap? | |
+| `turn_ended` | **唯一** outcome（completed\|waiting_user\|refused\|…） | Finalizing |
+| `cancel` | target activity；reason | |
+| `steer` | 注入摘要 | |
+| `compaction` | compactionId；source range/digest；result\|fail | 发布 view 前 |
+| `model_view_published` | manifest digest；covers eventSeq range | |
+| `session_override` | cautious/prompt/model/permission 变更 | |
+| `rename` | old/new name；AutoRenameDisabled 事务 | |
+| `rebind` | old/new logical path snapshot；root 变化事件 | |
+| `auto_name` | request/result/cancel；不采用迟到名 | |
+| `config_generation_ref` | public digest only | 可并入 turn_started |
+| `warning` | stuck 预警等 | |
+| `unknown_side_effect` | 需人处理的未知副作用 | |
+| `import_mapping` | 外来接盘 mapping 记录 | audit |
+
+**不入库（transient）：** 流式 delta、spinner、未提交 draft、未开始 queue 项（D-066）。
+
+**文本/二进制载体：** 优先 XML 安全 text；非法/二进制用 `representation=base64` + 原始长度 + digest（与 TP-010 方向一致）。
+
+### 5. Writer lock
+
+| 项 | 契约 |
+| --- | --- |
+| 互斥 | 一 Context 一 writer |
+| 锁内容 | pid、startedAt、可选 hostname；无法证 pid → unknown |
+| 第二进程 | 拒正文；可显示 name/path/busy/pid\|unknown |
+| 管理 mutation | 外进程 rename/rebind/delete/marker → LockConflict |
+| 陈旧锁 | **仅** context self-test + 平台证据；禁止按锁龄强抢 |
+
+### 6. 提交状态机
+
+```text
+Idle(have published generation G)
+  -> AcquireLock
+  -> WriteTemp (stream old -> new complete XML)
+  -> FlushCloseTemp
+  -> ValidateTemp (well-formed + schema + ids + header)
+  -> PublishReplace (atomic or two-generation)
+  -> ConfirmPublished
+  -> CleanupAux
+  -> ReleaseLock
+  -> Idle(G+1)
+```
+
+任一步失败 → **Abort**：保留最后已证明正式 generation；不拼接半文件；清理或隔离失败 temp（策略：删 temp 或留待 self-test，不得被当作正式 Context）。
+
+### 7. 崩溃真值表（产品级）
+
+| 崩溃/失败点 | 磁盘上可能留下 | 恢复后正式真相 |
+| --- | --- | --- |
+| 未获锁 | 无变 | 旧 G |
+| 写 temp 中 | 半 temp | 忽略/删 temp；旧 G |
+| temp 已写未验证 | 完整或半 temp | 验证失败则丢 temp；旧 G |
+| 验证通过未 publish | 好 temp | 可完成 publish **或** 丢 temp 保持旧 G（须确定性；推荐：仅当 lock 仍证明为己方且 temp digest 已知时续发，否则丢 temp） |
+| publish 换名中 | temp + target 模糊 | 两代协议：至多一个合法正式文件；歧义 → fail-closed + self-test |
+| publish 后未清理 | 正式 G' + 残余 prev/tmp | 正式 G'；清辅助 |
+| 持锁进程死 | lock 文件 | self-test 证陈旧后释放；不自动重放 operation |
+
+**禁止：** 自动重放 `operation_intent` 无 result；把 unknown 当成功。
+
+### 8. 与 W1-A durable 屏障对齐
+
+| 屏障（09） | 最少 Event |
+| --- | --- |
+| 用户输入后、Model 前 | user_message（+ turn_started 若新 turn） |
+| 助手/control 接受后 | model_message / model_control / model_yield |
+| 副作用前 | operation_intent + 所需 approval/permission |
+| 工具结果后、再采样前 | operation_result + tool_result |
+| compaction 发布前 | compaction + model_view_published |
+| review 生效前 | action_review / termination_review |
+| turn 收口 | turn_ended(outcome) |
+
+存储失败 → 停该 Context 新请求/副作用，报告最后 durable 水位。
+
+### 9. 打开 / 恢复算法（摘要）
+
+1. 解析路径 → 逻辑路径 → hash（D-059）。  
+2. 检查 lock → 若他方持有则拒正文。  
+3. 识别正式 generation（忽略 tmp/prev）。  
+4. 流式解析 Header + Facts；校验 schemaVersion、id 单调、tool 配对。  
+5. 重建 ModelView：manifest 与 fact range 不一致则 **丢弃 view 从 Facts 重建**。  
+6. 无 result 的 intent → 标记 unknown，阻断自动继续副作用。  
+7. Session 选择与本机 INI mapping；Key 仅来自 INI。
+
+### 10. 新建 Context（首条 main）
+
+1. 内存 draft（可含 model/prompt/cautious）。  
+2. 分配 `Untitled Conversation [XXXX]`，no-replace 目标路径。  
+3. WriteTemp 完整 XML：Header + Session + user_message + …  
+4. Publish 成功后才允许 Model request。  
+5. 失败：保留 draft 可见，无半个 Catalog 项。
+
+### 11. HardLimit（D-063）
+
+触顶：拒扩大 Facts 的 publish；可只读/export；提示新开对话 + 接盘 Prompt；不自动删史、不 WAL。
+
+### 12. Export（跨工具主路径）
+
+Markdown（或 registry 等价）从 Facts 投影；**不** 声称与 XML 元素稳定兼容。Export 可截断大 tool 输出并标注。
+
+### 13. 安全解析
+
+- 禁止 DTD / external entity / XInclude 外取。  
+- 深度、属性数、单文本节点、总字节 hard limit（数字 TP）。  
+- 未知 **可选** 扩展节点：yaca 可读时可保留 round-trip 或拒绝 — v0.1 推荐 **未知必选结构 → 拒绝打开写**；纯未知可选 audit 节点可忽略不写回（实现选更严：打开只读 + self-test）。
+
+### 14. W1-C 完成定义
+
+- [x] 控制物命名与忽略规则  
+- [x] 逻辑文档骨架与局部 id  
+- [x] Event 类型目录与屏障对齐  
+- [x] 提交状态机与崩溃真值表  
+- [x] 打开/新建/hardlimit/export 边界  
+- [ ] 精确 XSD/RNG 或等价机器 schema 文件  
+- [ ] 平台 replace/lock 原语证明（TP-008/011）  
+- [ ] 大小/延迟 hard 数字（TP-009）  
+- [ ] AR-P0-10 规格侧勾选  
+
+### 15. Wave 1 收束
+
+| 包 | 文档 |
+| --- | --- |
+| W1-A | `09-agent-session.md` |
+| W1-B | `05-configuration.md` catalog |
+| W1-C | 本节 |
+
+建议下一波：**W2-A action registry 草稿**（汇总 D-054/065/066 与 CLI 长名），并并行写 **TP-003/008/006** proof plan 提纲。
 
 ## 后续讨论顺序
 
@@ -148,4 +370,4 @@ DTD/external entity 必须禁用，深度/元素/属性/文本/总大小受限�
 
 ## 当前讨论入口
 
-D-023 已解决外部身份问题，D-024 已确认统一 Resolver，D-053 已解决持久化路线和原位移交方式。下一步只需把“完整接盘信息”的元素、局部事件关系、资源上限和目标平台证明写成可执行规格，不再向负责人重问 XML/WAL 路线。
+D-023 已解决外部身份问题，D-024 已确认统一 Resolver，D-053 已解决持久化路线和原位移交方式。W1-C 已给出内部事件目录与提交/崩溃表。下一步：机器 schema 文件、TP-008/009/011，以及 W2 action registry。

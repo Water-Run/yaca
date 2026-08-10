@@ -52,7 +52,7 @@
 
 ### TP-003 Windows XP/CentOS 统一事件泵
 
-- **当前状态**：`unplanned`。
+- **当前状态**：`specified`（计划见 [PROOF-PLANS-P0.md](PROOF-PLANS-P0.md)）；尚未 proven。
 - **要证明**：Lua 领域核心保持单线程状态所有者时，console input、curl stdout/stderr、工具进程、timer、cancel、XML commit completion 以及 D-041 周期 `context-name` 完成/取消可以进入同一有界事件泵，且没有任何一个阻塞源冻结全部应用；系统 suspend/resume 或显著时钟间隙也能成为显式事件并触发最终规格要求的重新验证。命名 admission 同时要求 `AutoNameEveryMainTurns>0`、durable main-turn waterline 到期且 Context XML 的 `AutoRenameDisabled!=true`；取消标记只建立新基线，不追补请求。PJ-18 已选单 root：每个 active Context 的唯一 root 由其 XML 在 `__yaca__/CONTEXT` 镜像树中的父目录经 `LogicalPathCodec` 解码，不建立 root list/alias/selector 或第二 root 资源域。D-044 意味着泵中不存在 Web/remote client、media device、capture/transcription/speech 流或它们的保留队列。
 - **最小证据**：只包含 `start/poll/cancel/join/close` 的最小 port；同时运行慢 SSE、慢命令输出、用户输入、周期持久化和低优先级 `context-name`；覆盖 marker missing/false/true、运行中设置/取消、到期水位、禁用期间跨过多个间隔与新基线，证明 true 时零排队/零费用，取消后不立即或追赶命名，新 main 消息或退出能取消已在途请求且不等待它收口；按 F4-15 A 只覆盖一个进程恰好一个 active Context、一个由镜像父目录解码的 root，并扫描零第二 Context/附加-root 队列或账本；对 D-044/D-055/D-056 做零 listener/device/client/codec/upload/update worker/queue 的 registry 与运行 trace 扫描；分别在 sampling、tool-running、approval、commit 和 idle 中 suspend/resume；记录事件顺序、墙钟/单调钟差、队列峰值、CPU、句柄与恢复后的 lease/workspace/root 状态。
 - **通过条件**：忙时输入和 Esc 在已确认延迟预算内可观察；慢消费者产生明确 backpressure；取消后必须得到真实 completed/cancelled/failed/unknown 之一；`context-name` 永不取得工具、不抢占 main/side/review 的已就绪请求、marker=true 时不进入 scheduler，取消 marker 后只从新基线计数且不在退出或恢复时幽灵继续；close barrier 后无遗留请求/helper，且从未创建 D-044 排除的 listener/device/client 状态；恢复后不自动重放不能证明连续性的模型请求或副作用，旧 approval/action snapshot 按最终规格重新验证；无共享 Lua table 的后台写入。
@@ -61,7 +61,7 @@
 
 ### TP-004 Windows XP console 与 QuickEdit
 
-- **当前状态**：`unplanned`。
+- **当前状态**：`specified`（计划见 [PROOF-PLANS-P0.md](PROOF-PLANS-P0.md)）；尚未 proven。
 - **要证明**：XP 传统 console 下能够识别普通 Enter、Ctrl+Enter、Shift+Enter、Alt+Enter、Esc；能力不足时能够可靠声明并使用点命令后备；QuickEdit、窗口关闭、Ctrl+C/Ctrl+Break 不会让程序永久挂死或破坏终端状态。
 - **最小证据**：真实 XP console 与重定向/管道矩阵；逐键事件 trace；raw→cooked→恢复；选择文本造成阻塞时的诊断；异常退出后的模式/代码页/光标复核。
 - **通过条件**：帮助只宣传实际可用动作；无法区分的组合键不误映射为另一动作；draft 不因异步输出静默丢失；终端恢复有 best-effort 证据。
@@ -70,7 +70,7 @@
 
 ### TP-005 子进程树、取消与 unknown
 
-- **当前状态**：`unplanned`。
+- **当前状态**：`specified`（计划见 [PROOF-PLANS-P0.md](PROOF-PLANS-P0.md)）；尚未 proven。
 - **要证明**：Windows `cmd.exe` 和 Linux `/bin/sh` 启动的前台命令，其 stdin、stdout/stderr、退出、超时、取消和子孙进程可以按最终确认契约收口；无法证明终止时准确返回 unknown；过长或无法无损编码的 raw command 不会被 Runtime 静默改写成另一动作；各平台 termination grace 和内建 `auto` decoder 可以作为发行契约冻结而不暴露用户字段。D-044 排除的录音、转写、codec 和播放 helper 不是 process port 的条件分支，而是必须证明不存在的路由。
 - **最小证据**：直接子进程、孙进程、继承句柄、主动读取 stdin/等待交互、忽略信号、快速退出与 cancel 竞态、创建到纳入 Job 的竞态、fork 后脱离进程组、不同 grace 值的收敛/延迟矩阵、平台命令长度边界、代码页/UTF-8/无效序列/二进制输出和不可表示字符等夹具；同时扫描 process/helper registry、发行 manifest 和实际子进程 trace，确认无媒体设备、codec、转写或播放进程入口。
 - **通过条件**：模型可见 `exec` 不会偷取 TUI/审批输入；已确认的前台非交互契约不能让子进程取得 TUI stdin，读取请求按进程规格得到稳定 EOF/typed non-interactive result；命令长度/编码超限得到稳定 typed error，不写临时脚本偷换调用；每个平台 manifest 固定有界 grace，result 记录实际 decoder/替换/失败/原始字节；不因发送 kill 就声称已停止；不复用仍可能回调的 operation/buffer；媒体/转写/TTS helper、process route 和孤立 reader 计数为零；unknown 可由恢复页解释。
@@ -79,7 +79,7 @@
 
 ### TP-006 curl 流式、取消、ambient config 与秘密传递
 
-- **当前状态**：`unplanned`。
+- **当前状态**：`specified`（计划见 [PROOF-PLANS-P0.md](PROOF-PLANS-P0.md)）；尚未 proven。
 - **要证明**：随包 curl 在 XP/CentOS 上支持目标 TLS/代理/SSE，能够被事件泵取消，并让明文 INI Key 不进入 argv、普通环境、日志和可恢复残留；yaca 的基础设施请求不受用户/工作区 curl 配置、home/proxy/CA 等未列 ambient input 偷偷改写。每个 logical request admission 把当前 Model 的 `RetryCount`、`RetryBaseDelayMs` 与发行 manifest 中的 exponent/max/deterministic-jitter 展开成不可变 retry snapshot；默认、单位、范围、饱和退避公式、jitter 输入/算法与 Runtime maximum 均由真实 endpoint 和旧机 fixture 冻结。M05-59 A 的 exact-byte scanner 以有界尾窗工作：发行版冻结跨目标平台一致、用户不可调低的 `MinimumScannableSecretBytes`，ConfigGeneration 和每次 consumer admission 都阻断过短 secret。D-055/D-056 要求 aggregate telemetry、diagnostic upload 与 update query/download 的 endpoint、purpose 和 worker 全部不存在。
 - **最小证据**：比较“secret config 走 stdin/body 走私有 temp”和“body 走 stdin/secret config 走私有 temp”；在用户目录、工作区与环境放入会改 header、proxy、CA、redirect 或输出的恶意/冲突配置；使用 canary key/正文/路径检查进程列表、环境、temp、stderr、XML、支持输出和崩溃残留。使用真实兼容 endpoint 与可编程故障 endpoint，在 XP x86 和 CentOS 上覆盖 count=`0|1|max|max+1`、base/manifest max 边界、manifest 升级、DNS/connect/TLS、body 未发送、body outcome unknown、429/503、`Retry-After` delta/date/畸形/过长、首个 canonical event、partial SSE、协议/auth/普通 4xx/内容拒绝、cancel、suspend/resume、wall-clock 跳变和 timer 粒度；用固定 logical-request identity/attempt/manifest 生成跨平台 jitter golden vector，记录计划/实际等待、attempt、deadline/turn 剩余量、CPU 与句柄。为 scanner 覆盖门槛前后长度、每一种 chunk split、零长度/空值 schema 拒绝、同值多个 secret class/source、前缀/后缀/嵌套与相交 occurrence、超长 pattern、慢消费者与输出上限；随机排列 registry、matcher 返回顺序、chunk 大小和 backend，证明短值 consumer ineligible 且错误不泄露值/实际长度。对 D-055/D-056 执行零 request-purpose、endpoint、worker、receipt 和启动/定时请求扫描；再评估是否需要窄 libcurl bridge。
 - **通过条件**：请求体与 Key 传递无歧义；实际请求 manifest 只由 schema、受控平台信息和显式用户选择决定，不读取未列宿主配置；所有 temp no-replace、最小权限、有界、启动可回收；redirect 只允许 same-origin，绝不向不同 origin 转发 Key。显式 HTTP endpoint 可以工作，但保存/变更时必须出现明文 Key/Prompt/reply 风险警告且 HTTPS 永不自动降级。`RetryCount` 机械表示首次 attempt 之后允许的自动 retry 数，Model 数字与 manifest 展开为公开、可快照的有效 tuple，整数运算饱和且 deterministic jitter golden vector 在两平台一致。local backoff、合法 `Retry-After`、logical-request deadline、turn 剩余预算与 Runtime hard cap 始终取更严格结果；等待超出剩余门即返回 typed deadline/budget outcome，不后台排队。body outcome unknown、收到任何 canonical event、畸形协议、auth/普通 4xx、内容拒绝或 cancel 都不 retry，active request 不热换配置，retry 不切换 Model。ConfigGeneration 激活与每次 consumer admission 都执行同一短 secret 资格门，升级后不静默放宽；完全相同 pattern 只保留一份并携带稳定排序的 class/source 集，scanner 检查全部 pattern、跨 chunk 保留有界必要尾窗，并将所有相交 hit 合并为 maximal byte-interval union。最终 Runtime 中 telemetry、diagnostic-upload、update endpoint/purpose/receipt 均为零；取消与断流给出确定 attempt 结果。
@@ -97,7 +97,7 @@
 
 ### TP-008 单 XML 完整重写的正确性
 
-- **当前状态**：`unplanned`。
+- **当前状态**：`specified`（计划见 [PROOF-PLANS-P0.md](PROOF-PLANS-P0.md)）；尚未 proven。
 - **要证明**：流式复制旧 XML、插入 canonical event/footer、完整验证、flush 与发布的协议，在每个崩溃点最多留下一个可识别的 current/previous-valid 状态，不产生半个正式 XML；手工 rename 的 canonical `Name`、`UpdatedAt` 与 `AutoRenameDisabled=true` 必须作为一个可恢复管理事务发布；workspace rebind 的历史事件、`UpdatedAt` 与目标镜像路径也必须作为一个可恢复管理事务收口。`CreatedAt` 始终不变，自动 rename 不置标记，显式增删标记也不能产生名称/metadata 半状态。
 - **最小证据**：对 open/read/copy/write/flush/close/verify/replace/directory flush 的每个边界故障注入；磁盘满、权限变化、杀进程、杀机器、杀毒软件占用和跨卷错误；再在手工/自动 rename、workspace rebind、marker add/remove、basename/path move、rebind event 与 XML metadata publication 每个切点杀进程，并覆盖 inspect/验证失败不得推进时间。
 - **通过条件**：恢复算法只依据可验证证据；正式路径始终是完整 well-formed XML；手工 rename 成功后 `Name`、`UpdatedAt`、marker 与新路径必然同时为新值，失败后必然同时保持旧值；自动 rename 同样要求 `Name`、`UpdatedAt` 与新路径全成或全不成，同时绝不创建禁用 marker；rebind 成功后事件、`UpdatedAt` 与目标路径全部生效，失败后全部不生效；`CreatedAt` 永不改变，任何 inspect/失败 mutation 不推进 `UpdatedAt`；marker 取消只建立新调度基线；副作用前 durable operation 屏障和副作用后 result 屏障可区分；不自动重放 unknown。D-053 的永久 delete 不建立 trash/restore 或 selective-redaction 历史；删除协议必须枚举 current/temp/previous-valid 等 yaca 已知 generation，逐项报告 best-effort 结果，绝不把 unlink 宣传成物理 secure erase或撤回已发送内容。
@@ -115,7 +115,7 @@
 
 ### TP-010 XML parser/writer 与 Lua 5.5
 
-- **当前状态**：`proven-modern`；LuaExpat 1.5.2 + Expat 2.8.2 只做过现代 Linux smoke。
+- **当前状态**：`specified` + 部分 `proven-modern` smoke；完整计划见 [PROOF-PLANS-P0.md](PROOF-PLANS-P0.md)；三目标尚未 proven-target。
 - **要证明**：目标构建可分块解析/验证项目 XML 安全子集，writer 能确定性转义，DTD/entity/外部读取被硬拒绝，资源上限在 C 与 Lua 两侧都生效。D-052/TS-23 A 已固定 direct tools 使用 typed envelope、`exec.command` 为 envelope 中的 opaque 原始字符串；canonical scalar 必须先成为“有效 Unicode scalar sequence 的精确 UTF-8 bytes + missing/present-empty 身份”，再由 `representation=text|base64` 进入 XML 1.0-safe carrier。M05-59 A 的 scanner 必须在公开 digest、approval、operation 和 XML persistence 前执行，以 TP-006 冻结的门槛、跨 chunk 与 maximal-union 语义工作。D-044/D-055/D-056 要求 schema 中不存在 media/remote、telemetry、diagnostic-upload 或 update 的 parser/element/namespace/receipt；D-045 要求 current-root/workdir/root-list/alias/selector 权威元素数为零，D-046 只加入 typed `AutoRenameDisabled` metadata。
 - **最小证据**：目标平台构建、合法 fixtures、畸形 UTF-8、重复/未知字段、深度/属性/文本/实体炸弹、分块边界、writer→parser round-trip 与 fuzz corpus。对 scalar/carrier 做逐 byte oracle：枚举 `0x00..0xFF` 经 typed binary/base64 的 round-trip；逐个枚举 U+0000..U+10FFFF（surrogate 区间除外）的单 scalar UTF-8，并以代表性多 scalar 序列覆盖 ASCII、非 BMP、组合序列、非字符、XML 1.0 禁止但仍是合法 UTF-8 的控制字符、BOM、`&<>`、单双引号、反斜杠、`]]>`、HT/LF/CR/CRLF、前后/连续空格；另枚举 surrogate 区间编码、超出 U+10FFFF、overlong/truncated UTF-8、孤立 continuation、NUL 和 maximum boundary。每个 corpus 逐一验证 missing/empty、text/base64 分类、original byte length、公开 digest、任意 parser/writer chunk split 和重新载入后的 byte equality；不合法 text 必须证明“拒绝且不替换/规范化”，同一原始 bytes 只有在 schema 明确为 binary 时才可 base64 无损承载。为 M05-59 A 再把门槛前后、重复 source、相同/前缀/嵌套/交叠 secret 放在 canonical 输入的 entity/base64-serializer 输入边界与所有 chunk split，排列 registry/匹配顺序并比较 consumer-ineligible 结果或 marker 后 XML 的 maximal-union golden bytes。D-044/D-055/D-056 执行 zero-element/namespace/parser/receipt scan；D-045 执行 zero-current-root/workdir/list/alias/selector scan；D-046 覆盖 marker missing/false/true、未知 enum/type、手工 rename 与 marker 同事务、自动 rename 不置位、rebind/copy/import 保留 marker。
 - **通过条件**：无 DOM 全量加载；禁用 DTD 不是只靠未注册回调；非法 XML 不触发文件/网络访问。每个 accepted canonical field 都满足 `protocol wire -> canonical bytes -> XML carrier -> canonical bytes` 逐 byte 等同，missing/empty 不合并，writer/parser 不做 Unicode normalization、replacement、NUL 截断、换行改写或尾空格处理；所有 256 个 byte 值可由 typed binary carrier 无损往返，所有允许的 scalar 要么经 text 往返相同、要么确定选择 base64，非法 text 只返回稳定 `carrier-not-lossless|invalid-scalar` 而不“修好后”接受。secret gate 在选择 representation/计算公开 digest 前运行；过短 registered secret 无法激活 consumer，重复/相交 hit 的 marker 与拒绝结果在 XML chunking、matcher 和平台间完全一致且不泄露原值、原长度或 equality fingerprint。media/remote/telemetry/upload/update namespace、element、parser、外部附件目录或 receipt 数为零；错误包含安全位置和类型但不回显秘密正文。

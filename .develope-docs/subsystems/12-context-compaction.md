@@ -2,6 +2,8 @@
 
 状态：产品算法已确认；token 估算、阈值和摘要 schema 编码待技术证明
 
+> D-063：XML **存储** hard limit 触顶时的解脱主路径是 **新开对话 + 接盘 Prompt**，不是依赖 compact 缩小事实 XML。compact 仍只服务 model view。
+
 ## 职责
 
 在下一次模型视图接近当前 Model 窗口时，生成可追踪的结构化摘要，保留关键目标、决定、文件状态、验证证据、未知副作用、未完成工作和最近完整事件组，并支持用户查看和纠正摘要。
@@ -51,6 +53,13 @@ summary 同时保存 source event range/digest、生成 Model、完整 Prompt/vi
 - 按 18 号 Prompt 契约继承 Global 与当前 Model SystemPrompt，并加入固定 summary schema；Permission/SystemPrompt、ContextPrompt、历史 Prompt 和对话内容只作为有界 quoted data，不继承其指令权威。
 - 只有 schema、source range、digest 和必填槽位全部验证通过，且新 view 确实低于安全阈值时，才能原子发布新 manifest。
 - 失败、取消、无效 schema、连续无收益或仍超限时保留旧 view，不破坏 XML，也不递归计费直到成功。
+
+### 自动压缩用户可见性（D-067 / SQ-10 = A）
+
+- 自动 compaction：**STATUS 可见**（开始/结束结果；必要时建议换更大 Model），**不** 默认弹确认框。  
+- **禁止** 成功完全静默。  
+- 可 cancel；失败保留旧 view 并诚实报告。  
+- 不解除 XML hard limit；不删事实史。
 
 ## 窗口推荐与 Model 切换
 

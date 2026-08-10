@@ -39,7 +39,7 @@
 | 用户意图 | 快捷键 | ASCII 点命令 |
 | --- | --- | --- |
 | 忙时排队 | 普通 `Enter` | `.queue <message>` |
-| 查看/删除/排序/编辑/清空待执行队列 | 无 | `.queue list\|delete\|move\|edit\|clear` |
+| 查看/删除/排序/编辑/清空待执行队列 | 无 | `.queue list\|delete\|move\|edit\|clear`（条目 `#N`，上限默认 9，见 D-066） |
 | 插队/steer 当前工作 | `Ctrl+Enter` | `.immediate <message>` |
 | 发起一次只读旁问 | `Alt+Enter` | `.side <message>` |
 | 输入多行消息 | `Shift+Enter` | `.multiline` |
@@ -71,7 +71,18 @@ yaca: Yet Another Coding Agent.
 
 隐藏某个字段只改变本次启动 chrome，不删除状态事实，也不改变 `.status`、XML 或错误诊断。错误、warning 和 action-required 永远不能被逐字段开关隐藏；配置、help 和 renderer 都不得重新引入 `StartupHeader`、`ShowStartupHeader` 或等价 master。这里不增加 theme、vivid、mode 或第二套 renderer。
 
-chat 输入提示符固定为负责人给出的 ASCII `>>`；`TU-33` 已按 Batch 06 归档为 A 并由 `AS-006-04` 细化这个精确字面量。approval、self-fix 和三个管理 REPL 的提示符仍需由同一 TUI grammar 技术规格冻结，但不能改变 chat 的 `>>` 或另建第二套输入语义。
+输入提示符已由 **D-064 / SQ-07** 冻结：
+
+| 焦点 | 提示符 | 可选基础色（增强） |
+| --- | --- | --- |
+| chat | `>>` | 浅色/暗淡 |
+| 审批/确认 | `??` | Yellow |
+| model-repl | `model>` | Green |
+| config-repl | `config>` | Cyan |
+| context-repl | `context>` | Blue |
+| self-test 交互 | `test>` | Magenta |
+
+无色与 `NO_COLOR` 时仅 ASCII 提示符。颜色不得作为唯一焦点/安全信号。Windows XP 不假设 ANSI；着色须平台可证明路径，失败则无色。不得改变上表字面量或另建用户自定义提示符主题。
 
 最小启动投影示意为：
 
@@ -91,7 +102,19 @@ Run .status for details.
 
 ## 已确认的 `.cautious` 语义边界
 
-`.cautious` 管理当前会话的 `DoubleCheck` 覆盖值，并由上下文系统保存到当前 XML。TUI 只解析命令、显示默认值/覆盖值/有效值和操作结果；它不能直接改写用户配置、切换 Permission profile 或自行决定 `DoubleCheck` 包含哪些复核行为。无参数、`on/off/toggle/reset` 的具体语法仍待 `TUI-10` 确认。
+`.cautious` 管理当前会话的 `DoubleCheck` 覆盖值，并由上下文系统保存到当前 XML。TUI 只解析命令、显示默认值/覆盖值/有效值和操作结果；它不能直接改写用户配置、切换 Permission profile 或自行决定 `DoubleCheck` 包含哪些复核行为。
+
+**语法（D-065 / SQ-08 = A）：**
+
+| 输入 | 行为 |
+| --- | --- |
+| `.cautious` | 只读 status（default / override / effective） |
+| `.cautious on` | 覆盖 true |
+| `.cautious off` | 覆盖 false（强制关，≠ reset） |
+| `.cautious toggle` | 按当前有效值翻转并写成 true/false 覆盖 |
+| `.cautious reset` | 清除覆盖，inherit INI 默认 |
+
+无参数不得 toggle。未知子参数报错并提示用法。
 
 ## Model picker
 
@@ -188,7 +211,8 @@ v0.1 不提供 Web、图像/clipboard-media/screenshot、音频/麦克风、公�
 1. 已确认的启动头字段、Slogan 和 chat `>>` 怎样与角色标签、留白和整体信息密度形成唯一 projection；不再重新选择另一套欢迎页。
 2. 常驻最小状态、`.status` 详情，以及模型/权限/context hash/队列/当前动作的字段顺序。
 3. 模型流式文本、provisional 文本、工具调用、shell 输出、Git diff 与完成报告的块样式。
-4. queue、steer、旁问和取消的可见状态、序号、插入点与持久化提示。
+4. queue、steer、旁问和取消的可见状态、序号、插入点与持久化提示。  
+4b. 自动 compaction 的 STATUS 可见性（D-067）：开始/结果，不强制确认，禁止成功静默。
 5. 确认页显示的命令/路径/host、默认选择、DoubleCheck 结果和拒绝后的下一步。
 6. chat、help、model-repl、config-repl、context-repl、self-test、model/permission picker 的完整页面集合与共同导航词根。
 7. 配置损坏、无 Model、配置/上下文不匹配、网络重试、压缩、磁盘满和恢复的错误/提示文案。

@@ -47,7 +47,17 @@
 hash 输入：   /C/Program Files/我的任务.xml
 ```
 
-逻辑路径带前导 `/`、统一使用 `/` 分隔，并包含当前上下文名称和 `.xml`。双引号不属于输入。hash 的具体算法、字节编码、输出字母表、大小写和碰撞概率仍待确认，但对用户显示和输入的结果固定为 16 位。
+逻辑路径带前导 `/`、统一使用 `/` 分隔，并包含当前上下文名称和 `.xml`。双引号不属于输入。
+
+**用户可见 hash（D-059 / SQ-01 = B）：**
+
+- 固定 **16** 位；
+- 字母表 **`0-9A-F`（大写十六进制）**；
+- 所有面向用户的显示输出大写；
+- 输入侧：长度 16 且字符属于 `0-9A-Fa-f` 时视为 hash token，先规范化为大写再匹配；否则整段按精确名称处理；
+- 不得截断、补齐或把非 16 位串强行当 hash。
+
+从逻辑路径到 16 位 hex 的摘要算法与字节编码仍待技术证明；碰撞概率分析随算法证据给出。碰撞呈现与损坏近处同名策略见 SQ-02/SQ-03。
 
 ### 没有永久 ContextId
 
@@ -73,7 +83,7 @@ hash 输入：   /C/Program Files/我的任务.xml
 - `continue(selector)` 等所有接受上下文选择器的 semantic actions 必须使用同一个解析器。
 - 重命名、删除等接受选择器的命令也使用相同搜索范围和消歧规则，不能各自实现一份近似逻辑。
 - `.status` 根据当前运行时绑定的逻辑路径直接计算当前 hash，不通过全树搜索寻找自己。
-- Resolver 已确认距离优先，同一搜索环内精确名称优先于 hash；计算层单遍同步匹配，语义层完成当前环的必要扫描后裁决。
+- Resolver 已确认距离优先；短名首个可用命中（D-061）；hash 精准且同环须唯一性证明（D-059/D-061）。
 
 ## 核心术语
 
@@ -244,65 +254,54 @@ R3 = D3 整棵子树，减去 D2 已经覆盖的整棵子树
 
 这比“每上一级递归扫描整棵子树”更省 I/O，也不会因为重复处理同一 XML 得到不同优先级。实现可以保存有界的子目录前沿来直接进入 `D0` 的深层分支；若前沿超过内存预算，也允许为发现这些子目录再次枚举 `D0` 这一层目录项，但不能重新探测其中已经处理过的直属 XML。这里承诺“不重复整棵已完成子树”，不虚假承诺每个目录项在所有情况下只由操作系统返回一次。
 
-## 名称/hash 算法比较
+## 名称与 hash 分流（D-061）
 
-选择器不是 16 位时，不可能是 hash，完全不需要计算任何候选 hash。选择器恰好 16 位时有三种主要做法：
+| 输入形态 | 用途 | 收口规则 |
+| --- | --- | --- |
+| **短名**（非 hash token） | 便捷；不承诺唯一 | 由近到远；环内按 `LogicalPath` 升序；**首个可用** 精确名称命中即返回；无 `AmbiguousName` |
+| **hash**（16 位，D-059） | **精准指定** | 当前环完成 hash 唯一性扫描；唯一可用则返回；多可用相同 hash → `HashCollision`；禁止裸枚举“第一个 hash 就返回” |
 
-| 方案 | 目录遍历 | 优点 | 代价/语义问题 |
-| --- | --- | --- | --- |
-| 严格两遍：先名称、后 hash（未采用） | 最坏每个范围两遍 | 规则最直观，名称命中时少算 hash | 老硬盘上目录 I/O 最坏近乎翻倍 |
-| 16 位 hash 先行并命中即返回（未采用） | 最好可能很快 | 明确按 hash 查询时延迟低 | 会改变“名称后 hash”的语义；16 位名称、碰撞和枚举顺序可能产生意外结果 |
-| 单遍双判定，范围结束后裁决（已确认） | 每个 XML 最多探测/匹配一次 | 同时保留语义优先级与最低目录遍历 | 名称最终命中时可能多做少量短路径 hash |
+- hash 输入 = **整条逻辑路径** 一次摘要（层级合并后的路径串），不是 basename alone。  
+- 跨目录可以有相同显示名；身份与精准选择靠 **路径 → hash**。  
+- 浏览器选中一行仍直接携带候选，不按短名重搜（既有规则）。
 
-路径 hash 只处理较短字符串；在 XP 时代机械硬盘或大型网络盘上，目录枚举通常比这点计算昂贵得多。因此已经确认第三种：**计算层同时判断，语义层再决定谁优先**。
-
-这也回答“16 位是否应优先判断 hash”：可以先用长度/字母表判断它“有可能是 hash”，并在扫描时同步计算；但不能遇到第一个 hash 就提前返回。计算顺序不等于结果优先级。
-
-## 已确认的解析流程
-
-正式语义为“距离优先，每个搜索环内名称优先于 hash”：
+## 已确认的解析流程（D-061）
 
 ```text
 resolve(selector, origin):
-    name_candidate = selector 是否可作为安全的精确上下文名称
-    hash_candidate = selector 是否恰好符合 16 位 hash token 规则
+    if selector 是 hash token (D-059):
+        for ring in 由近到远:
+            hash_hits = []
+            ring_complete = true
+            按 LogicalPath 升序流式遍历 ring 内候选:
+                计算逻辑路径 hash；收集相等命中及可用性
+                目录不可读 -> ring_complete = false
+            if not ring_complete: return ScanIncomplete
+            if 多个可用相同 hash: return HashCollision
+            if 恰好一个可用: return Unique
+            if 有命中但均不可用: return MatchedUnavailable  # 或与 15 号统一的不可用映射
+            # 无命中 -> 下一 ring
+        return NotFound
 
-    for ring in 由近到远的增量搜索环:
-        name_observations = []
-        hash_observations = []
-        ring_complete = true
-
-        if ring 是 R0 且 name_candidate:
-            只探测一次 D0/selector.xml，并把观察结果标记为已访问
-            若路径规则能证明它是唯一等价名称且文件有效，直接返回名称命中
-            否则缓存该观察，后续遍历不得再次探测同一候选
-
-        流式遍历 ring 中尚未访问的候选:
-            记录候选可用性，比较精确名称并收集名称观察
-            若 hash_candidate 且尚无可用名称命中:
-                从逻辑路径计算 hash，并收集 hash 观察
-            若应扫描目录不可读，记录范围错误并令 ring_complete = false
-
-        完成本 ring 后:
-            若 ring_complete = false，返回 ScanIncomplete，不宣称任何单个命中唯一
-            若有名称观察，按名称可用性/歧义策略裁决；产生终止结果就返回
-            若有 hash 观察，按 hash 可用性/碰撞策略裁决；产生终止结果就返回
-            若上述策略均未产生终止结果，进入下一个 ring
-
-    返回 NotFound 或 ScanIncomplete
+    else:  # 短名
+        for ring in 由近到远:
+            按 LogicalPath 升序流式遍历 ring 内候选:
+                if 精确名称匹配:
+                    if 可用: return Unique          # 首个可用命中，立即停止
+                    else: return MatchedUnavailable # D-060：不跳过损坏改连更远同名
+                目录不可读 -> 本环无法证明时 return ScanIncomplete
+        return NotFound
 ```
 
 重要约束：
 
-- 当前范围的 hash 命中仍早于更远范围的名称命中；“距离优先”是第一层规则。
-- 同一范围必须完成必要扫描后再裁决，不能把文件系统“先枚举到谁”当成优先级。
-- 当前范围不可完整扫描时，`ScanIncomplete` 是终止本次解析的结构化错误；不能把已观察到的单个名称/hash 当作唯一，也不能跳到外层继续找一个看似可用的结果。
-- R0 快路径的探测结果必须缓存并纳入本环裁决；即使文件损坏或不可读，也不能在流式遍历中再次探测同一路径。损坏匹配最终映射为 `MatchedUnavailable` 还是另一错误仍待 10、15 号系统确认，但不得因快路径丢失该观察。
-- 一旦发现可用名称命中，余下扫描只需排查其他同名项，不必继续计算 hash；只有损坏/不可读名称观察时仍保留 hash 观察，最终是否允许回退由待确认的损坏匹配策略决定。
-- 搜索环完整时，多个可用同名项不能任选第一个；Resolver 返回 `AmbiguousName`。若环不完整，前述 `ScanIncomplete` 优先；非交互候选输出和交互选择方式仍待确认。
-- 搜索环完整时，多个可用候选具有相同 hash 不能任选第一个；Resolver 返回 `HashCollision`。若环不完整，前述 `ScanIncomplete` 优先；碰撞的候选显示方式仍待确认。
-- 当前范围得到唯一 hash 后立即结束，不扫描更远范围排查全局碰撞；更远结果不能推翻近层结果。
-- 未来 hash 字母表确定后，应以“固定 16 位 + 合法字母表”判断 hash，而不只是接受任意 16 个用户字符。
+- **距离优先** 仍是第一层：近环先于远环。  
+- **短名首个可用命中即停**（D-061）；不要求同环名称唯一；**不** 产生短名歧义选择页。  
+- 环内顺序必须是稳定 **`LogicalPath` 升序**，禁止把 OS 目录枚举抖动当成产品语义。  
+- **D-060：** 按该顺序遇到的第一个精确名称候选若不可用 → `MatchedUnavailable`，禁止跳过改连更远同名可用项。  
+- **hash：** 当前环必须完成唯一性所需观察；唯一可用才返回；`HashCollision` fail-closed；更远环不能推翻近环已裁决的唯一 hash。  
+- hash 形态判定使用 D-059；非 hash 输入不计算候选 hash。  
+- 每个 XML 候选在一次解析中最多一次有效性探测与匹配。
 
 ### 复杂度
 
@@ -323,15 +322,19 @@ Resolver 额外内存：O(目录深度 + 有界前沿 + 当前命中项数)
 
 | 结果 | 含义 |
 | --- | --- |
-| `Unique` | 唯一有效候选，附路径、当前 hash 和观察凭据 |
-| `AmbiguousName` | 完整扫描的当前最高优先范围有多个可用同名候选 |
-| `HashCollision` | 完整扫描的当前最高优先范围有多个可用的相同 hash 候选 |
+| `Unique` | 已解析到一个可用候选（短名首个可用命中，或唯一可用 hash），附路径与当前 hash |
+| `HashCollision` | 当前完整环内多个可用候选具有相同 hash（精准路径的安全网） |
 | `InvalidSelector` | 既不是安全名称，也不是合法 hash token |
-| `MatchedUnavailable` | 高优先候选路径存在，但 XML 损坏或不可读 |
-| `ScanIncomplete` | 某个应搜索范围不可读，无法证明更高优先候选不存在 |
+| `MatchedUnavailable` | 按短名顺序将命中的第一个精确名称候选存在但不可用（D-060）；或 hash 命中均不可用 |
+| `ScanIncomplete` | 某个应搜索范围不可读，无法完成该形态所需证明 |
 | `NotFound` | 所有可读范围均无匹配 |
 
-候选建议是：高优先名称存在但 XML 损坏时返回 `MatchedUnavailable`，不能悄悄跳到远处同名会话。这个错误优先级，以及“一个可用候选 + 一个损坏同名候选”等混合状态，仍需和 10、15 号系统共同确认。
+**已确认：**
+
+- D-060：短名下第一个名称候选不可用 → `MatchedUnavailable`，不跳远处同名。  
+- D-061：短名 **无** `AmbiguousName`；精准靠 hash。  
+- `AmbiguousName` 不再作为 v0.1 短名解析的正式结果（历史文档若仍出现，视为已取代）。  
+- 15 号负责稳定 error ID 与用户文案映射。
 
 Resolver 结束后还有三组不同结果，不能继续塞回 `ResolveResult`：
 
@@ -405,7 +408,7 @@ ListSortDirection=descending
 
 `ListSortBy` 只接受 `created|updated|name`，分别读取 XML header 中 canonical `CreatedAt`、`UpdatedAt`、`Name`；`CreatedAt` 是初次 durable 创建时间，`UpdatedAt` 是最后一次成功发布的 durable XML mutation 时间，inspect/失败尝试不推进。`ListSortDirection` 只接受 `ascending|descending`，默认是 `updated + descending`，即最近更新在前。不得使用文件系统 ctime/mtime、目录枚举顺序或当前 locale/code page 代替这些规范值。主键相同时始终用 canonical `LogicalPath` 的稳定升序作为最终 tie-break；损坏/不可读、无法取得规范排序键的候选必须进入显式状态分组并按 `LogicalPath` 稳定展示，不能伪造时间。
 
-排序只改变列表、浏览器页和搜索同一相关性等级内的展示顺序，不改变 Resolver 的距离优先、同环名称优先于 hash、歧义和碰撞裁决。目录节点仍使用版本化的规范名称/路径稳定顺序；搜索先按匹配类型和范围形成相关性等级，再在同等级应用上述 Context 排序。
+排序只改变列表、浏览器页和搜索同一相关性等级内的展示顺序，不改变 Resolver 的距离优先、短名首个可用命中与 hash 唯一性裁决（D-061）。目录节点仍使用版本化的规范名称/路径稳定顺序；搜索先按匹配类型和范围形成相关性等级，再在同等级应用上述 Context 排序。
 
 完整展示规则为：
 
@@ -550,7 +553,7 @@ Stage 1 还必须报告 Catalog 数量、实际扫描范围、hash 计算数、�
 
 ## 待逐项确认的决策
 
-1. `AmbiguousName` 在非交互命令中的候选输出，以及交互浏览器是否允许用户从候选中选择。
+1. （已取代）短名 `AmbiguousName` 选择页——D-061 改为首个可用命中；精准用 hash。HashCollision 的非交互错误格式仍由 13/15 号冻结文案。
 2. hash 的算法、编码、16 位字母表、大小写和 `HashCollision` 的候选显示。
 3. 显式 `name:`、`hash:`、`path:` 前缀已由项目负责人排除；仍需冻结同名/hash 碰撞候选页和非交互错误格式。
 4. Windows/Linux 路径规范化、UNC、根目录、链接、Unicode 与非法名称。

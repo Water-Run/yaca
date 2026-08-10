@@ -1,12 +1,16 @@
 # 架构实施就绪门禁
 
-更新日期：2026-07-22
+更新日期：2026-08-10
 
 状态：负责人输入门已通过；当前仍未达到完整实施计划就绪，更未达到编码就绪
+
+> D-068：AR-P1-10 由“第三方公开 XML reader”改为“内部 schema + export + yaca 导入路径”。
 
 ## 当前判定
 
 `DISCUSSION-BATCH-06.md` 已使 `DECISION-REGISTER.md` 达到 `unanswered=0/conflict=0`，因此不再缺项目负责人产品选择。阻塞项已经转为两类：其一是若干 owner 文档仍需把决定机械展开为完整 schema/状态表/错误与恢复矩阵；其二是 XP x86、Win7+ x64、CentOS 7、单 XML durability、可取消进程/网络和 luainstaller 三目标包仍缺可执行 proof plan 或实际目标证据。当前可以继续完善设计和技术证明计划，不能开始产品实现。
+
+运营向差距清单、Wave 工作包与“可开发”两道门定义见 [`READINESS-GAP.md`](READINESS-GAP.md)。Web 产品族预留（D-058）不计入 v0.1 主线就绪。
 
 ## 目的
 
@@ -342,11 +346,13 @@ P1 gate 不一定改变全局架构，但会阻断对应子系统的可靠计划
 - **责任**：`O` 审阅用户可见命名；`T` 冻结机器字段和常量证据。
 - **主要来源**：`PROD-17` 至 `PROD-21`、`DIAG-14`、`CLI-01`、`CLI-10`、`TUI-10`、`TOOL-16`、`FMT-06`、`CFG-18`、`REL-11`、`AQ-014`、`AQ-076`、`AQ-111`、`AQ-135`、`AQ-181` 至 `AQ-185`、`AQ-190`、`AQ-193`、`AQ-203`、`AQ-209`、`AQ-246`、`AQ-259`、`AQ-326`、`AQ-327`、`AQ-333`、`AQ-382` 至 `AQ-390`、PJ-14 至 PJ-20、ED-13、ED-14、RF-16；技术证明 `TP-019`、`TP-024`。
 
-### AR-P1-10 第三方 reader 与公开 XML conformance
+### AR-P1-10 Context XML 内部 schema 与 export（D-068 修订）
 
-- **阻塞原因**：“信息足够接盘”不等于 Codex、CodeWhale 等天然理解自定义 XML；公开 reader 契约和第三方写入边界还需明确。当前 root 由 XML 放置位置表达，松散 XML 必须先放入用户选择的目标镜像目录；`AutoRenameDisabled` 和完整历史/Prompt/Model 切换必须可被独立 reader 理解。排除能力不得留下 receipt/namespace。
-- **权威工件**：公开 schema；字段语义；最小/完整/中断/压缩/迁移样例；zero namespace/current-root/list/alias/selector fixtures；`AutoRenameDisabled` fixture；松散 XML 原位导入契约；reader pseudocode；unknown extension 与 read-only/write-support 声明。
-- **通过证据**：独立 reference reader 在不知道 yaca 内部 Lua table 的情况下读取 fixtures 并重建相同会话视图；排除元素/namespace 数为零；reader 从 XML 位置解码唯一 root并校验标记；脱离镜像树的 XML 要求显式目标放置；不支持字段不会被静默丢弃或误授权。
+当前状态：产品承诺已由 D-068 收口为 **内部格式**；门禁改为 yaca 自身正确性与 export，而非第三方 public reader。
+
+- **阻塞原因（修订后）**：仍须冻结 **yaca 内部** 版本化 schema、迁移/拒绝不兼容文件、以及 Markdown（等）export 的稳定用户契约；不再以“独立第三方 reader 重建相同视图”为发布硬门。
+- **权威工件**：内部 schema/版本策略；yaca round-trip 与故障 fixture；export 格式说明；外来 XML 经 **yaca** 导入/mapping 的状态机；zero 排除能力元素；`AutoRenameDisabled` 等 metadata。
+- **通过证据**：yaca 对自产 XML 的打开/保存/恢复一致；不兼容世代明确失败；export 可用于人类/接盘 Prompt；文档不声称第三方 XML API；恶意/外来文件经 yaca 路径 fail-closed。
 - **责任**：`O` 确认公开承诺；`T` 提供 conformance suite。
 - **主要来源**：`CTX-05`、`CTX-15`、`CTX-25`、`PROD-17` 至 `PROD-21`、`DIAG-14`、`REL-11`、`AQ-041`、`AQ-042`、`AQ-161`、`AQ-180`、`AQ-185`、`AQ-186`、`AQ-210`、`AQ-237`、`AQ-246`、`AQ-306`、`AQ-349`、`AQ-383` 至 `AQ-390`、PJ-15 至 PJ-20、ED-13、ED-14、RF-16；技术证明 `TP-010`、`TP-020`、`TP-021`、`TP-028`。
 

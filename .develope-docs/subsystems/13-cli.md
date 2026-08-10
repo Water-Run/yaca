@@ -1,6 +1,6 @@
 # 13 CLI
 
-状态：核心 CLI、三套 argv 拼写与 semantic action registry 已确认；完整参数 grammar 和机器输出待技术规格冻结
+状态：**W2-A 展开中** — 见 [ACTION-REGISTRY.md](../ACTION-REGISTRY.md)；golden argv 待补
 
 ## 职责
 
@@ -62,7 +62,7 @@ yaca [目录]
 
 ## 已确认的会话命令
 
-TUI 点命令 `.cautious` 管理当前会话的 `DoubleCheck` 覆盖值。它不修改用户默认配置或切换 Permission profile；覆盖值由上下文系统写入当前 XML，恢复上下文时恢复。无参数行为、`on/off/toggle/reset` 语法、脚本化等价命令和状态输出仍待 TUI/CLI 契约确认。
+TUI 点命令 `.cautious` 管理当前会话的 `DoubleCheck` 覆盖值。它不修改用户默认配置或切换 Permission profile；覆盖值由上下文系统写入当前 XML，恢复上下文时恢复。语法见 **D-065**：无参 = status；`on`/`off`/`toggle`/`reset`。CLI 须提供同一 semantic action 投影。
 
 忙时输入、旁问、多行和取消的固定 ASCII 后备已经确认：
 
@@ -108,9 +108,9 @@ Model selector 的精确匹配、歧义规则、窄窗口挤占/分页细节，�
 | `current-context-status` | 从当前 ContextHandle 直接计算 16 位 hash，不调用 Resolver |
 | `current-context-mutation` | 操作当前句柄；若未来接受其他目标参数，才转为 selector 入口 |
 
-Resolver 的 `AmbiguousName`、`HashCollision`、`MatchedUnavailable`、`ScanIncomplete`、`NotFound` 等结构化结果必须映射为稳定的退出码和可行动错误。目标复核的 `TargetChanged`、打开服务的 `OpenConflict` 以及修改服务的 `DestinationExists`/`LockConflict` 属于后续阶段，不能伪装成 Resolver 的 `NotFound`。非交互模式不能遇到多个候选就取目录枚举中的第一个；应输出候选的逻辑路径和 hash，且不得在 stdout 机器数据中混入 TUI 提示。
+Resolver 的 `HashCollision`、`MatchedUnavailable`、`ScanIncomplete`、`NotFound` 等结构化结果必须映射为稳定的退出码和可行动错误（短名不再产生 `AmbiguousName`，见 D-061）。目标复核的 `TargetChanged`、打开服务的 `OpenConflict` 以及修改服务的 `DestinationExists`/`LockConflict` 属于后续阶段，不能伪装成 Resolver 的 `NotFound`。短名按规格顺序取首个可用命中；hash 精准路径在 `HashCollision` 时必须 fail-closed 并给出可行动说明，不得静默连第一个 hash。不得在 stdout 机器数据中混入 TUI 提示。
 
-`continue`、context rename/delete 和 context-select actions 的帮助文本必须一致说明已确认的“距离优先、同环名称优先于 hash、单遍双判定”规则，不能让不同入口看起来采用不同优先级。所有 help 拼写从同一 registry 生成；已冻结的 continue/context-repl 根使用上表规范名称，其他 context actions 不得私设别名。
+`continue`、context rename/delete 和 context-select actions 的帮助文本必须一致说明：**短名 = 便捷首个命中；精准指定用 hash（整条逻辑路径摘要）**（D-061），不能让不同入口看起来采用不同优先级。所有 help 拼写从同一 registry 生成；已冻结的 continue/context-repl 根使用上表规范名称，其他 context actions 不得私设别名。
 
 ## `context-repl` action 的适配边界
 
@@ -120,7 +120,7 @@ Resolver 的 `AmbiguousName`、`HashCollision`、`MatchedUnavailable`、`ScanInc
 
 若目标 Context 已由活动 writer 加锁，`context-repl` 只可显示无需解析正文即可取得的 name、logical path、busy 和可证明 PID（否则 unknown）元数据；不得进入 read-only Context view，也不得把普通 `inspect` 解释成读取正文。从另一个进程发起 rename、delete、rebind 或 `AutoRenameDisabled` 等 metadata mutation 必须返回 typed `LockConflict`，直到活动 writer 正常释放。不能因操作“只有一个 XML 字段”就绕过锁，也不能按锁龄强制解锁。
 
-plain 模式和能力有限的 TTY 仍应有编号/文本命令界面；在完全非 TTY、输入重定向的脚本环境中是拒绝启动、读取 stdin 命令流还是要求显式标志，留给 `CLI-02`。列表选中项携带快照中的明确候选，执行前复核，不应转回名称字符串再次搜索。裸 `yaca`/`yaca .` 不调用 recent/full Catalog action，也不扫描或提示历史 Context。
+plain 模式和能力有限的 TTY 仍应有编号/文本命令界面；分焦点 ASCII 提示符见 D-064（非 TTY 若投影同一 REPL 语义则用相同字面量且默认无色）。在完全非 TTY、输入重定向的脚本环境中是拒绝启动、读取 stdin 命令流还是要求显式标志，留给 `CLI-02`。列表选中项携带快照中的明确候选，执行前复核，不应转回名称字符串再次搜索。裸 `yaca`/`yaca .` 不调用 recent/full Catalog action，也不扫描或提示历史 Context。
 
 `model-repl`、`config-repl` 和 `context-repl` 均是独立顶层 management action，不从 chat 内点命令跳转。没有有效 Model 或 Agent ConfigGeneration 不可发布时，help/version、三个 REPL 和 self-test Stage 1 仍可用 bootstrap service；它们不启动 Agent/工具、不联网。context-repl 的管理面包括 list/inspect/rename/rebind/permanent-delete/import/repair 和专用命名标记修改；“add”只能是导入现有 XML，不创建空 Context。v0.1 不建立 trash、soft-delete 或 restore action。每个 REPL 都投影各自领域的 `self-fix-program` 选单，只提供扫描、typed plan 预览、确认与原子提交，不自动修改；活动锁目标只投影上一段列出的 busy metadata，不解析正文、不进入只读 Context view。
 
@@ -134,7 +134,15 @@ Stage 1 的 stable check registry 必须覆盖 Context XML codec/schema、由镜
 
 Stage 3 在仅使用 Stage 2 已确认 Model 的前提下，还要审阅 Permission 名称、Description、有限 Prompt、实际能力矩阵之间的语义偏差，以及面向用户的自然语言拼写问题。这些 Stage 3 结果都是 advisory warning，不能改写 Stage 1/2 的确定性通过/失败，也不能自动修复配置。
 
-self-test 的 TUI 菜单和 CLI 调用提交同一 typed request/check IDs；列表、排除、阶段依赖和结果分类不得出现两套语义。CLI parity 不意味着非 TTY 可以自动表示 Stage 2/3 consent：不能呈现所需确认时必须明确失败或要求合适的显式授权契约，其最终形式仍待 CLI 安全问题收口。
+self-test 的 TUI 菜单和 CLI 调用提交同一 typed request/check IDs；列表、排除、阶段依赖和结果分类不得出现两套语义。
+
+**非 TTY consent（D-062 / SQ-05 = A）：**
+
+- 仅 Stage 1 可在无额外授权时运行。
+- `through_stage≥2` 时必须带 **本次 invocation 的显式 online-consent**（registry 冻结拼写）；否则硬失败、零 Model 请求。
+- 不得因 `StartupSelfTest`、环境变量或默认值在非 TTY 自动同意联网。
+- 交互 TTY 仍走可见 consent；非 TTY 用显式授权投影同一语义。
+- 启动门要求 stage2/3 且非 TTY 无法 consent → Agent 启动失败，不静默跳过在线阶段进 chat。
 
 ## 待讨论
 
@@ -143,3 +151,8 @@ self-test 的 TUI 菜单和 CLI 调用提交同一 typed request/check IDs；列
 - `context-repl` action 在非 TTY 下的行为。
 - 完整 command registry 中尚未冻结动作的长名/唯一简称、参数位置/引号、互斥、TTY 要求、stdout/stderr、exit class 与每个 AgentState 的可用性。
 - README 中 `--interactive-config-changer` 等旧名是删除还是只作为兼容别名，以及 self-test 阶段/exclusion/list-checks 子参数的最终唯一拼写。
+
+
+## W2-A
+
+完整 registry：[ACTION-REGISTRY.md](../ACTION-REGISTRY.md)。

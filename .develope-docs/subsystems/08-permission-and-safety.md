@@ -101,3 +101,9 @@ v0.1 不宣称 OS sandbox，不提供 Web、媒体、remote/headless、direct ne
 ## 仍需技术证明
 
 冻结 direct path canonicalization、审批页面字段、五项矩阵 fixture、Shell 环境/进程树收口与 Win32 x86、Win64 x64、Linux x86_64 旧平台行为。不得重新引入 outside 细分、direct network、Prompt 驱动权限、backup 特权或持久 grant。
+
+## W2-B
+
+Std/Readonly 与八工具 fold 表、越界 OutsideWorkspace、action-review 范围见
+[TOOL-PERMISSION-MATRIX.md](../TOOL-PERMISSION-MATRIX.md)。
+
