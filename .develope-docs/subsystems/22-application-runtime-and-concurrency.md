@@ -1,6 +1,8 @@
 # 22 应用运行时、生命周期与并发
 
-状态：运行模型与并发基线已确认；旧平台 I/O、取消、替换和性能预算待技术证明
+更新日期：2026-08-10
+
+状态：**W3-A 规格首版** — 单线程事件泵、AsyncPort 组合与 hard-cap 维度表已冻结；平台数值待 TP 校准（D-070）
 
 ## 为什么需要独立子系统
 
@@ -170,3 +172,96 @@ ApplicationCoordinator 维护一份版本化 semantic-action registry：action i
  4. write lease、短时 commit mutex、第二写者拒绝、stale XML fail-stop 与恢复交互的 trace。
  5. 各 I/O 链路背压、硬上限、启动/关闭期限、Win32 x86 峰值内存和长会话稳定性。
  6. Lua 模块加载、协程重入、数字范围、GC 安全点，以及 runtime/domain/persistent/UI event 的映射测试。
+
+---
+
+## W3-A：单线程事件泵与 AsyncPort 组合（规范）
+
+对齐：D-051、D-014、AR-P0-04/05/15、TP-003；端口细节见 [01](01-platform-abstraction.md)、[02](02-process-and-resources.md)、[03](03-network-transport.md)。
+
+### 唯一泵
+
+```text
+                    +------------------+
+  semantic actions->|  Application     |
+  terminal input  ->|  Coordinator     |-> AgentLoop (09)
+  process events  ->|  single-thread   |-> Permission/tools
+  network events  ->|  event pump      |-> Context durable (10)
+  timers/xml      ->|                  |-> TUI projection
+                    +------------------+
+         AsyncPort.start/poll/cancel/join/close
+```
+
+| 不变量 | 规则 |
+| --- | --- |
+| 线程 | **一个** OS 线程拥有可变领域状态 |
+| 协程 | 仅同线程协作；**禁止** 后台线程写 Agent/Context 表 |
+| active Context | 进程内恰好 0 或 1 个 writer Context |
+| 工具 | 全局串行 |
+| 第二泵 | **禁止** TUI/network/storage 各自再维护 busy 状态机 |
+
+### 事件种类（有界入队）
+
+| 类 | 例子 | 背压 |
+| --- | --- | --- |
+| `user_action` | registry 动作、按键映射 | 队列满 → 拒绝新 queue 项 / 保留 draft |
+| `io_progress` | stdout chunk、SSE line | 暂停 poll 生产或合并 spinner |
+| `io_terminal` | exit、HTTP complete、cancel done | **不可丢** |
+| `timer` | deadline、context-name 调度 | 合并同 id |
+| `durable_barrier` | XML commit 完成/失败 | **不可丢** |
+
+事实类事件不得因 UI 慢而丢弃；仅瞬时 UI 可合并。
+
+### AsyncPort 统一契约（所有 I/O）
+
+| 方法 | 全局语义 |
+| --- | --- |
+| `start` | 注册到泵的 wait set；返回 handle |
+| `poll` | 泵每 tick 调用；返回 0..N 事件 |
+| `cancel` | 传播到底层；领域记 `cancel_requested` |
+| `join` | 在 deadline 内等到终态；超时 → 可再 join，最终可 `unknown` |
+| `close` | 从 wait set 移除；泄漏检测在 debug/self-test |
+
+### 泵主循环（伪代码契约）
+
+```text
+while not shutting_down:
+  wait(handles + console + timers, slice_ms)   -- 平台 wait；XP 无 CancelIoEx
+  for h in ready: enqueue(port.poll(h))
+  while event = dequeue_bounded():
+    dispatch_to_AgentLoop_or_Coordinator(event)
+  maybe_gc_safe_point()
+```
+
+`slice_ms` 与队列深度：**技术推导**，标入发行 manifest；用户不可抬高 process 级 cap（D-070）。
+
+### Hard-cap 维度表（发行 max = 推导；用户仅收紧）
+
+| 层 | 维度（至少） | 用户 INI |
+| --- | --- | --- |
+| process | 峰值 RSS 导向的缓冲总量、并发 AsyncPort 数（通常 1 model stream + 1 tool） | 不可抬高 max |
+| turn | Model requests、tool calls、reviews、wall clock、token/bytes 估算 | 可收紧 |
+| request | transport attempts、body/event bytes | 可收紧 |
+| tool | stdout/stderr bytes、exec wall | 可收紧 |
+
+**不** 冻结未经测量的“假精确”毫秒/token 偏好数；实现与 self-test 引用 manifest 常量。触顶 → `budget_exhausted` / typed `Limit`（见 09）。
+
+### 与 close 栈的衔接
+
+1. 停 accept → 2. cancel 所有 in-flight ports → 3. join 有界 → 4. durable close boundary → 5. 释 lease → 6. 恢复 terminal。  
+无法 join 的副作用 → `unknown`，不得报成功。
+
+### 备选否决
+
+| 方案 | 否决 |
+| --- | --- |
+| 多线程领域状态 | D-051 |
+| 每子系统独立 busy 机 | 状态分叉 |
+| 无限 Lua 事件表 | 内存硬门 |
+
+### 完成度（W3-A）
+
+- [x] 泵拓扑与事件类  
+- [x] AsyncPort 五方法全局语义  
+- [x] hard-cap 维度（无假精确偏好数）  
+- [ ] XP/CentOS wait 原语证据（TP-003）  

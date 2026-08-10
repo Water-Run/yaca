@@ -2,9 +2,9 @@
 
 更新日期：2026-07-22
 
-状态：Batch 06 前的候选审阅底稿；不是现行隐私规格，待按已选路线重建最终矩阵
+状态：Batch 06 前的候选审阅底稿；**不是**现行隐私规格
 
-> 所有产品分支已经回答。本文件中仍出现的 `pending`、A/B/C、B/C 条件发送面或“排位待决”仅保留当时的数据风险分析，不能覆盖 D-049 至 D-056。现行基线至少包括：M05-59=A、四层 Prompt 固定构造、特殊 purpose 只继承 Global/Model instruction、外来 XML 历史授权 audit-only、无 secret-bearing backup/export、无 telemetry/diagnostic upload/update/media/remote。进入编码前必须把这些结果生成一张无候选分支的权威数据矩阵；在此之前本文件本身就是 AR-P0-08 的明确规格债务。
+> **W3-C（2026-08-10）**：现行权威矩阵见 [`DATA-CLASSIFICATION.md`](DATA-CLASSIFICATION.md)。本文件仅保留历史风险分析；冲突时以 `DATA-CLASSIFICATION.md`、`DECISIONS.md`（D-049..D-070）为准。下文 `pending`/A/B/C 不得覆盖已选路线。
 
 ## 目的
 

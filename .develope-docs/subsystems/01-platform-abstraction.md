@@ -1,8 +1,8 @@
 # 01 平台兼容抽象
 
-更新日期：2026-07-22
+更新日期：2026-08-10
 
-状态：目标平台与发行架构已确认；端口实现细节讨论中
+状态：**W3-A 规格首版** — 窄端口 ABI 与能力结果表已冻结为设计契约；目标机数值与 XP 原语证明仍属 TP（不阻塞本表作实现真源）
 
 ## 职责
 
@@ -189,4 +189,71 @@ Windows/Linux 各维护一套 path、fs、text、process、network、terminal。
 
 ## 当前问题
 
-建议采用扁平后缀模块，并且只在行为真正不同处拆平台文件。这个布局是否需要调整？
+建议采用扁平后缀模块，并且只在行为真正不同处拆平台文件。这个布局是否需要调整？  
+**W3-A 答复（技术择优，D-070）**：保持扁平 `*_windows.lua` / `*_linux.lua` 后缀；仅 `main` 字面量 require。不改为大门面或生成入口。
+
+---
+
+## W3-A：窄端口 ABI（规范）
+
+对齐：D-013、D-014、D-017、D-070；门 AR-P0-04 / P0-14 / P0-15；事件泵组合见 [22](22-application-runtime-and-concurrency.md)。
+
+### 共同约定
+
+| 项 | 规则 |
+| --- | --- |
+| 错误形状 | 所有端口返回 `ok, result_or_err`；`err = { code, message, retryable?, detail? }`；`message` 永不含 secret |
+| 阻塞 | 端口 **不** 在业务线程上无限阻塞；长 I/O 必须经 22 号 `AsyncPort`（start→poll→cancel→join→close） |
+| 平台分支 | 业务模块 **禁止** `if os=="windows"`；只消费 capability 与统一错误码 |
+| 负向 | 无 Web listener、无 remote client、无 media device port |
+
+### `platform` 身份（只读事实）
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `os` | `"windows"\|"linux"` | 发行包身份 |
+| `arch` | `"x86"\|"x86_64"` | Win32=x86；Win64/Linux=x86_64 |
+| `package_id` | string | 与 manifest 一致；错误架构立即退出 |
+| `executable_dir` | path | 程序所在目录（绝对） |
+| `data_root` | path | 邻接 `__yaca__`（D-056） |
+
+### `path` 端口（纯计算，无 I/O）
+
+| 操作 | 语义 |
+| --- | --- |
+| `join(parts...)` | 平台分隔符合成；不解析 symlink |
+| `normalize_display(os_path)` | **显示用** 本机友好形（可保留盘符/UNC 外观） |
+| `to_logical_path(os_path, root_kind)` | 产出 Context/hash 用的 **LogicalPath 规范形**（见 11 号 W3-B；D-070：显示≠hash） |
+| `is_within_root(logical, root_logical)` | 规范前缀判定；禁止裸字符串前缀 |
+
+### `fs` 端口
+
+| 操作 | 语义 | 失败码（例） |
+| --- | --- | --- |
+| `open_read` / `open_write_temp` | 有界读写；写走 temp | `NotFound`, `AccessDenied`, `Limit` |
+| `publish_new_no_replace(temp, target)` | 仅目标不存在时发布；**禁止覆盖** | `DestinationExists` |
+| `replace_existing(temp, target)` | 原子替换已有文件（平台原语 + flush） | `TargetChanged`, `Storage` |
+| `move_no_replace(src, dst)` | 无覆盖移动 | `DestinationExists`, `CrossDevice` |
+| `identity(handle_or_path)` | 打开后复核（inode/file-id/size/mtime 或等价）；XP 无 `GetFinalPathNameByHandleW` 时用已证明 fallback | `Unverifiable` |
+| `flush` | 尽力 flush 到稳定存储 | — |
+
+### `text` / `clock`
+
+| 端口 | 操作摘要 |
+| --- | --- |
+| `text` | UTF-8 校验/替换；控制台 codec 探测；安全截断（保留计数） |
+| `clock` | wall UTC 与 monotonic；不可靠时显式 `degraded`，禁止静默用墙钟冒充 monotonic |
+
+### 备选否决
+
+| 方案 | 否决理由 |
+| --- | --- |
+| 统一 `platform.*` 大门面 | D-013 已否；循环依赖风险 |
+| 业务内散落 OS 判断 | 兼容规则分叉 |
+| 依赖系统 PATH 解析内部工具 | AR-P0-14；cwd 劫持 |
+
+### 完成度（W3-A）
+
+- [x] 窄端口清单与错误形状  
+- [x] no-replace / identity 语义  
+- [ ] 目标机数值与 XP identity fallback 实测（TP）  

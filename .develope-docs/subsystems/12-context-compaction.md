@@ -1,6 +1,8 @@
 # 12 上下文压缩
 
-状态：产品算法已确认；token 估算、阈值和摘要 schema 编码待技术证明
+更新日期：2026-08-10
+
+状态：**W3-D 规格首版** — model-view / summary schema 与 admission 表已冻结；token 估算误差待 TP
 
 > D-063：XML **存储** hard limit 触顶时的解脱主路径是 **新开对话 + 接盘 Prompt**，不是依赖 compact 缩小事实 XML。compact 仍只服务 model view。
 
@@ -86,3 +88,90 @@ summary 同时保存 source event range/digest、生成 Model、完整 Prompt/vi
 ## 仍需技术证明
 
 冻结各 adapter 的 token 估算误差与安全余量、触发阈值、summary 字段编码和字节上限，并用长对话、大工具结果、反复 Model/Prompt 切换、摘要失败和单 group 超窗 fixture 验证。产品路线不再比较 extractive-only、丢弃旧历史或摘要树。
+
+---
+
+## W3-D：Model-view 与 Compaction schema（规范）
+
+对齐：D-051、D-063、D-067、D-068；AR-P0-12；事实 XML 见 [10](10-context-storage.md)。
+
+### ModelViewManifest（派生，可重建）
+
+| 字段 | 说明 |
+| --- | --- |
+| `schema_version` | 整数；不兼容则丢弃派生、从 XML 重建 |
+| `context_generation` / `xml_digest` | 绑定事实代 |
+| `model_id` / `window_tokens` | 冻结 Model 快照 |
+| `prompt_bundle_digest` | 四层 Prompt + tool/control schema |
+| `summary_id` | 当前 active prefix summary，或 null |
+| `included_event_range` | 完整 atomic groups 的 event id 闭区间列表（有界编码） |
+| `excluded_prefix_reason` | `none` / `summarized` / `budget` |
+| `builder_algorithm` | 版本化算法 id |
+| `estimated_tokens` | 估算；标 `estimated` 非计费 |
+
+**不变量**：同一 XML digest + 同一 Model + 同一 algorithm → 确定性相同 manifest（允许 token 估算实现误差带，但 group 边界必须稳定）。
+
+### StructuredSummary 记录（XML 内事件，非删除事实）
+
+| 字段 | 必填 |
+| --- | --- |
+| `summary_id` | yes |
+| `source_range` + `source_digest` | yes |
+| `goals_decisions` | yes（结构化槽，非纯散文） |
+| `constraints_permissions` | yes |
+| `files_touched` | yes（path + op 类） |
+| `verification_evidence` | yes |
+| `unknown_side_effects` | yes |
+| `open_todos` | yes |
+| `prompt_model_transitions` | yes |
+| `generator_model` / `usage` | yes |
+| `schema_version` | yes |
+
+用户纠正 → **新** summary 事件 supersede；不回写旧 summary 字节。
+
+### Atomic group（不可拆）
+
+| 组类型 | 成员必须同进同出 |
+| --- | --- |
+| tool_pair | call + result（或 unknown） |
+| operation_pair | intent + approval? + result |
+| user_turn | user message + 直接 assistant 段 |
+| review_cycle | review request + verdict |
+| active_turn | 当前未完成 turn 全部 |
+
+单 group 超窗 → **停止**；提示更大窗口 Model / 缩小输入 / 新 Context（D-063 存储触顶另论）。
+
+### Admission：自动 vs 手动 `.compact`
+
+| | 自动 | 手动 |
+| --- | --- | --- |
+| 触发 | 下一次 view 估超安全阈值 | 用户 `.compact` |
+| 可见性 | STATUS 开始/结束（D-067）；禁完全静默 | STATUS + 结果 |
+| 确认框 | 默认无 | 默认无 |
+| cancel | 可 | 可 |
+| 失败 | 保留旧 view | 同左 |
+| 费用 | 独立 purpose 计数 | 同左 |
+| XML hard limit | **不** 解除（D-063） | **不** 解除 |
+
+### 发布事务
+
+```text
+1. durable compaction request
+2. model result validate (schema + slots + digest)
+3. build candidate manifest; verify under threshold
+4. atomic publish summary event + new manifest
+5. failure anywhere → old manifest remains sole active
+```
+
+### 备选否决
+
+| 方案 | 否决 |
+| --- | --- |
+| 删除旧 XML 事实 | D-051/068 |
+| 多层摘要树 | 复杂度 |
+| 静默自动换廉价 Model | 已否 |
+
+### 完成度（W3-D compact）
+
+- [x] Manifest / Summary / atomic group / admission 表  
+- [ ] token 估算与阈值数值（TP）  

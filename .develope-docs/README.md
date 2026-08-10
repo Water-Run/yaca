@@ -47,7 +47,8 @@
 - `TECHNICAL-PROOF-BACKLOG.md`：把不应由负责人凭偏好选择的兼容、性能和安全事实变成目标平台证明义务。
 - `FOURTH-ROUND-GAP-AUDIT.md`、`SUBSYSTEM-COVERAGE-AUDIT.md`、`CONFIG-COMPLETENESS-AUDIT.md`：第四轮敌对式查漏、23 子系统责任矩阵和完整配置面专项审计。
 - `CONFIG-SCHEMA-CANDIDATE.md`：完整配置逐字段候选、XML 覆盖、INI 往返、秘密生命周期与连续 `CV-001` 至 `CV-076` 跨字段校验底稿。
-- `DATA-CLASSIFICATION-CANDIDATE.md`：逐类说明数据能否进入不同 Model purpose、TUI、XML、stderr、support 和跨 endpoint 请求的审阅底稿。
+- `DATA-CLASSIFICATION.md`：**W3-C 现行**数据分类与 Key 生命周期矩阵。
+- `DATA-CLASSIFICATION-CANDIDATE.md`：历史审阅底稿；冲突以 `DATA-CLASSIFICATION.md` 为准。
 - `QUESTIONS.md`：`AQ-001` 至 `AQ-437` 原子设计决策题库；用于防遗漏和追踪，不再直接作为主要问答页面。
 - `DESIGN-CHECKLIST.md`：覆盖全产品的设计主题与历史讨论顺序；现行选择只看 register/decisions。
 - `DISCUSSION-BATCH-01.md`：首批 20 个高杠杆综合问题及项目负责人的原始回复；保留为决策证据，不把其中的推荐自动视为确认。

@@ -1,6 +1,8 @@
 # 19 改动归属、审阅与不可撤销边界
 
-状态：正式设计；`D-052` 已确认 v0.1 不提供 Runtime backup、undo 或 rollback
+更新日期：2026-08-10
+
+状态：**W3-D 规格首版** — 无 undo 故障/fault 全表与 batch 语义已规范；`D-052` 零 backup/undo/rollback 表面
 
 ## 结论
 
@@ -162,3 +164,83 @@ unknown 是正式结果，不是待后台重试状态。用户可以在 context 
 - unknown 不自动重放，用户解算只追加事实。
 - Runtime 不生成 preimage、checkpoint、reverse patch、trash、Git stash/commit 或 rollback。
 - `backup/` 只作为 Prompt 普通文字被处理；删除该文字不会留下任何 schema、tool、目录管理或恢复行为。
+
+---
+
+## W3-D：无 undo 操作故障全矩阵（扩展规范）
+
+对齐：D-052、D-057、D-070；AR-P0-07；工具边界见 [07](07-tool-system.md)、[TOOL-PERMISSION-MATRIX.md](../TOOL-PERMISSION-MATRIX.md)（**不改** Std/Readonly 格）。
+
+### Operation 状态机
+
+```text
+proposed -> admitted -> intent_durable -> executing -> { applied | failed | not_applied | skipped | unknown }
+                              \-> denied (Permission/user)
+```
+
+| 状态 | 可重放旧 ID？ | 下一步 |
+| --- | --- | --- |
+| applied | 否 | 新 op 需新 expected digest |
+| failed / not_applied / denied | 否 | 新 op |
+| skipped | 否 | batch 内后续项 |
+| unknown | 否 | self-fix 解算；仍新 ID 才执行 |
+
+### Direct 文件 op × 故障（补充细表）
+
+| Op | 故障窗口 | 规范结果 | 禁止 |
+| --- | --- | --- | --- |
+| create | 目标已存在 | `DestinationExists` / failed | 覆盖 |
+| write/patch | expected digest 不匹配 | `TargetChanged` | 盲写 |
+| write | temp 成功、replace 失败 | 目标保持 old；清理 temp | 把 temp 当事 |
+| rename | 目标存在 | conflict；source 不变 | 自动覆盖 |
+| rename | 跨卷 | typed CrossDevice 或受控 copy 协议失败→unknown | 静默半完成当成功 |
+| delete | 确认后消失 | applied（若 identity 匹配缺失） | 用同名新文件当旧文件 |
+| delete | 确认后仍在且 identity 变 | unknown/conflicted | 再删不确认 |
+| batch i 失败 | 见下 | 1..i-1 保留；i 失败；i+1..n `skipped` | 回滚 1..i-1 |
+
+### Batch 语义
+
+| 规则 | 说明 |
+| --- | --- |
+| 串行 | 工具全局串行（D-051） |
+| 配对 | 每项必有 result；禁止丢 pairing |
+| 部分成功 | **不** 事务回滚；Agent 据结果重计划 |
+| 中止 | cancel → 未开始项 skipped；执行中项 cancel/unknown 按 02 |
+
+### Raw shell / Git
+
+| 规则 | 说明 |
+| --- | --- |
+| 证据 | 仅 durable intent + observed exit/output + tree 终态 |
+| 只读 git | 仍走 Shell；ambient pager/difftool **隔离** |
+| 写 git | 仅用户明确要求；无自动 stash/commit/reset |
+| 未知副作用 | `external_effects_unsettled` / unknown；**无** 文件系统 diff 伪事务 |
+
+### 崩溃切点 × 存储（与 10 号衔接）
+
+| 切点 | 文件树 | XML |
+| --- | --- | --- |
+| intent 前 | 不变 | 无 op |
+| intent 后、mutation 前 | 不变 | intent 可恢复 → synthetic not_applied |
+| temp 写后、publish 前 | old + temp | 恢复协议清 temp |
+| publish 后、result 未记 | new 可能已在 | 恢复对照 identity → applied/unknown |
+| result 已记 | — | 正常 |
+
+### 零表面（发布扫描）
+
+| 禁止出现 | 位置 |
+| --- | --- |
+| undo / rollback / checkpoint tool | registry、help、INI |
+| preimage attachment element | XML schema |
+| trash/restore | Context mutation |
+| 自动 Git workflow controller | Runtime |
+
+### 备选否决（重申）
+
+完整 preimage XML、checkpoint commit、shadow workspace、shell 前后扫盘“事务”——均 **v0.1 否**；重开条件见上文「将来显式重开」。
+
+### 完成度（W3-D change）
+
+- [x] 状态机 + direct/batch/shell/崩溃表  
+- [x] 零 undo 表面  
+- [ ] 目标机 no-replace/kill 注入证据（TP）  

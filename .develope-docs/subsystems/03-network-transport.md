@@ -1,6 +1,8 @@
 # 03 网络传输
 
-状态：产品契约已确认；curl 接入、资源限额与旧平台行为待技术证明
+更新日期：2026-08-10
+
+状态：**W3-A 规格首版** — HTTP AsyncPort ABI、attempt 状态与 secret carrier 规则已冻结；curl 版本/数值待 TP（D-070）
 
 ## 职责
 
@@ -57,3 +59,82 @@ header、压缩体、解压后 body、单个流式 event、tool arguments、总�
 ## 仍需技术证明
 
 剩余工作不再是产品选择：冻结各平台 curl/CA 版本与最小功能集、Key/body 传递路线、proxy/CA 解析细节、deadline/重试数值和所有字节上限，并在目标旧系统上验证 HTTP、HTTPS、显式代理、外部 stunnel 路线、取消、断流和凭据脱敏。
+
+---
+
+## W3-A：HTTP / curl AsyncPort ABI（规范）
+
+对齐：D-039、D-050、D-055、AR-P0-03、P1-02、TP-006/007。事件经 22 号泵；wire JSON 由 06 解释。
+
+### 端口生命周期
+
+| 方法 | 语义 |
+| --- | --- |
+| `start(request_spec) → handle` | 启动一次 **attempt**；绑定 `request_id` + 新 `attempt_id` |
+| `poll(handle) → events[]` | `headers`, `body_chunk`, `sse_line`（原始行，未解析 JSON）, `complete`, `error`, `cancelled` |
+| `cancel(handle)` | 请求中止传输；已读 bytes 不回滚 |
+| `join(handle, deadline) → attempt_result` | 终态：`completed` / `failed` / `cancelled` / `unknown`（连接态不明） |
+| `close(handle)` | 释放；清理短寿命 secret carrier |
+
+### `request_spec`（调用方已冻结 snapshot）
+
+| 字段 | 规则 |
+| --- | --- |
+| `url` | 仅 Model 已授权 endpoint；无静默 scheme 改写 |
+| `method` | 通常 POST |
+| `headers` | 不含 Key 明文于可日志结构；Authorization 走 secret carrier |
+| `body_ref` | 有界 body；与 Key **不得** 无歧义同占一个 stdin 而不分界 |
+| `proxy` / `ca` | 全局 Network generation；ambient `.curlrc` **隔离** |
+| `deadlines` | connect / first_event / idle / total 四分（数值 TP 校准） |
+| `streaming` | 透传 Model 的 force/try/off；传输层不解释 finish reason |
+
+### Secret carrier（保守首选）
+
+| 规则 | 说明 |
+| --- | --- |
+| Key **永不** 进入 argv | canary 扫描 cmdline 必须为 0 |
+| 首选 | 私有短寿命 temp 文件（0600/ACL）或 stdin 分段协议；**bake-off 由 TP-006 定唯一胜者**，规格层固定“二选一后唯一路径” |
+| 清理 | cancel/close/崩溃路径必须 best-effort 删除 temp；残留进入 support 说明而非静默 |
+| 错误 | stderr/err.message 脱敏；禁止回显 Key |
+
+### Attempt 与重试（与上文表一致的状态机）
+
+```text
+start_attempt
+  -> connecting -> headers? -> streaming_body? -> complete
+                 \-> pre_body_fail (可按策略 retry)
+                 \-> post_body_uncertain (unknown, 不自动重放)
+                 \-> after_canonical_event (禁止整请求重放)
+                 \-> cancel
+```
+
+| 条件 | 自动 retry |
+| --- | --- |
+| DNS/connect/TLS 且体未发 | 是（在 Model/turn/process hard cap 内） |
+| 体可能已发、无 HTTP 响应 | **否** → unknown |
+| 429/503 + Retry-After，尚无 canonical event | 受限退避 |
+| 已有任何 canonical Model event | **否** |
+| 用户 cancel / 畸形流 / limit | **否** |
+
+### 硬上限维度（数值 = 技术推导 + 用户收紧，D-070）
+
+| 维度 | 发行 max 来源 | 用户 |
+| --- | --- | --- |
+| header 总 bytes | manifest / TP | 仅可收紧 |
+| 单 SSE 行 / 单 event | 同上 | 仅可收紧 |
+| 解压后 body 累计 | 同上 | 仅可收紧 |
+| 待消费缓冲 | 同上 | 不可抬高 |
+
+达 cap → typed `Limit`；**禁止** 先灌满 Lua 再截。
+
+### 负向清单
+
+- 无 telemetry/upload/update purpose  
+- 无 direct HTTP tool 复用本端口凭据  
+- 无 cross-origin auto-redirect 带凭据  
+
+### 完成度
+
+- [x] AsyncPort 与 attempt 状态  
+- [x] Key 不进 argv / ambient 隔离  
+- [ ] carrier bake-off 与旧机 TLS 证据（TP-006/007）  

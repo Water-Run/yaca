@@ -1,6 +1,8 @@
 # 11 上下文定位、实时索引与交互式浏览器
 
-状态：Resolver、recent/full、永久删除与 stale fail-stop 产品语义已确认；路径/碰撞/搜索细节待技术规格冻结
+更新日期：2026-08-10
+
+状态：**W3-B 规格首版** — LogicalPathCodec、hash 输入向量、Resolver 结果与 **显示≠hash（D-070）** 已冻结；部分平台边角数值待 TP
 
 ## 为什么这是一个独立子系统
 
@@ -563,4 +565,97 @@ Stage 1 还必须报告 Catalog 数量、实际扫描范围、hash 计算数、�
 
 ## 当前讨论入口
 
-Q-015 已确认统一 Resolver 的范围、裁决与最低遍历算法，D-053 已确认 recent/full、永久删除和活动 XML 外改后的 stale fail-stop。下一步只冻结同环歧义、路径规范化、recent 搜索投影和上下文 XML 技术细节，不重新开放这些产品语义。
+Q-015 已确认统一 Resolver 的范围、裁决与最低遍历算法，D-053 已确认 recent/full、永久删除和活动 XML 外改后的 stale fail-stop。**W3-B 已冻结** LogicalPathCodec、hash 与 display 规则；下列历史“待确认”项状态更新见文末完成度。
+
+---
+
+## W3-B：LogicalPathCodec、hash 与显示路径（规范）
+
+对齐：D-022、D-023、D-024、D-059、D-060、D-061、**D-070**；AR-P0-11。
+
+### 核心不变量（D-070）
+
+| 概念 | 定义 | 用于 |
+| --- | --- | --- |
+| **DisplayPath** | 面向用户的本机友好路径（可保留 `C:\...`、`\\server\share`、POSIX 原貌） | TUI/列表/错误展示、复制给用户 |
+| **LogicalPath** | 规范化、可跨平台比较的逻辑路径字符串 | **hash 输入**、Resolver 排序 tie-break、镜像树定位 |
+| 关系 | DisplayPath **不得** 单独充当 hash 输入；用户抄显示路径若需精确命中，应用 hash 或精确 Name | 文档/help 必须写明「显示 ≠ hash 输入」 |
+
+### LogicalPath 规范算法（Context XML 在 `CONTEXT` 树内）
+
+输入：XML 文件相对 `CONTEXT` 根的位置（已通过 fs 打开的真实项，非用户自由文本猜路径）。
+
+| 步骤 | 规则 |
+| --- | --- |
+| 1. 分隔 | 统一为 `/`；去掉多余连续 `/` |
+| 2. 前导 | **始终** 以 `/` 开头（例如 `/C/Program Files/task.xml`） |
+| 3. `.` / `..` | 解析时折叠；越出 `CONTEXT` 根 → 无效 |
+| 4. 段字符 | 保留 Unicode 段原文（NFC 规范化优先；无法 NFC 则按 UTF-8 原字节稳定） |
+| 5. Windows 盘符 | `C:\foo` 镜像 → 段 `C`（单字母盘）+ 其余段；**不** 保留冒号 |
+| 6. UNC | `\\server\share\a` → `/UNC/server/share/a` 形式（固定前缀 `UNC`） |
+| 7. 大小写 | LogicalPath **保留** 文件系统呈现的大小写用于显示映射；**比较** 在 Windows 上对路径段使用 case-insensitive 等价（实现：比较键另存），hash **输入字节** 固定为 UTF-8 LogicalPath 规范串（见下） |
+| 8. 尾 | 文件名含扩展名；目录段无尾 `/`（根除外概念上只有前导 `/`） |
+
+**hash 输入字节**：`UTF-8(LogicalPath 规范串)` 的完整字节序列（含文件名）。  
+**hash 输出**：固定 **16** 位大写十六进制 `0-9A-F`（D-059）；算法实现为可版本化 digest（发行锁定一种，如截断的 SHA-256 前 64 bit 的 hex 大写——**具体密码学原语 TP 冻结**，用户可见长度/字母表不变）。
+
+### 用户可见 vs 机器
+
+| 场景 | 展示 | 机器 |
+| --- | --- | --- |
+| `.status` | DisplayPath + 16 位 hash | hash 由 LogicalPath 重算 |
+| 列表排序 tie-break | 可显示 DisplayPath | 排序键 = LogicalPath 升序 |
+| 选择器 hash 形态 | 用户输入 16 hex（大小写不敏感输入→大写比较） | 与候选 LogicalPath 的 hash 比 |
+| 选择器名称 | 精确 basename/Name | **不** 用 DisplayPath 模糊匹配 |
+| symlink/junction | 显示可提示 link | LogicalPath 以 **打开后 identity** 解析的最终树位置为准；无法证明 → `Unverifiable` / 不可用 |
+
+### Hash 向量（验收形状，非完整 corpus）
+
+| # | LogicalPath | 说明 |
+| --- | --- | --- |
+| V1 | `/C/work/a.xml` | 基本盘符 |
+| V2 | `/C/work/A.xml` | 与 V1 不同字节 → **不同 hash**（即便 Windows 上可能同文件，规范串不同则 hash 不同；打开后 identity 另核） |
+| V3 | `/home/u/proj/t.xml` | Linux |
+| V4 | `/UNC/server/share/t.xml` | UNC |
+| V5 | 重命名 basename | hash **变**；旧 hash NotFound |
+| V6 | rebind 换父目录 | LogicalPath 与 hash **变**；旧 approval 快照 stale |
+
+### Resolver 结果 schema（机读字段）
+
+```text
+ResolveResult =
+  | { tag: Unique, logical_path, display_path, hash, physical_hint? }
+  | { tag: HashCollision, candidates: [{logical_path, hash}, ...] }  -- 有界
+  | { tag: InvalidSelector, reason }
+  | { tag: MatchedUnavailable, logical_path?, reason }   -- D-060
+  | { tag: ScanIncomplete, scope, reason }
+  | { tag: NotFound }
+```
+
+短名：**无** `AmbiguousName`（D-061）。  
+后续层：`TargetVerifier` / `OpenService` / `MutationService` 结果不得塞回本 schema。
+
+### 备选否决
+
+| 方案 | 否决 |
+| --- | --- |
+| 显示路径直接 hash | D-070；跨机/盘符漂移 |
+| 双 hash（显示+逻辑） | 复杂度与用户困惑 |
+| 永久 ContextId | D-023 排除 |
+
+### 历史“待确认”收口
+
+| 原项 | W3-B 状态 |
+| --- | --- |
+| hash 字母表/大小写 | D-059 + 上表 |
+| 损坏近处同名 | D-060 MatchedUnavailable |
+| 短名歧义页 | D-061 取消 |
+| 路径规范化 | LogicalPathCodec 上表 |
+| basename rename vs rebind | rename=basename；跨目录=rebind 独立动作（既有） |
+
+### 完成度（W3-B）
+
+- [x] DisplayPath vs LogicalPath  
+- [x] Codec 步骤与 hash 输入  
+- [x] Resolver 结果 schema  
+- [ ] 密码学原语最终选型与跨 OS golden 文件（TP）  

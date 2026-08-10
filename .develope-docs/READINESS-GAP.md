@@ -4,8 +4,7 @@
 
 状态：运营清单（设计阶段）；**当前判定：未达实施计划就绪，未达编码就绪**
 
-进度注记：SQ 完成。**W1-A/B/C 首版齐**；W2-A/B/C 与 TP 计划已落盘。原「下一负责人问题集」已由 **D-070** 收口；离线自动主线 = **Wave 3 规格硬化**（见 [`HANDOFF-AUTO-2026-08-10.md`](HANDOFF-AUTO-2026-08-10.md)）。仍 **未** 达门 A/B；不写产品代码。
-权威门禁仍以 [`ARCHITECTURE-READINESS.md`](ARCHITECTURE-READINESS.md) 为准。本文回答三个实操问题：
+进度注记：SQ 完成；D-070 收口。**W1–W2 首版 + Wave 3 四包首版齐**（见 HANDOFF）。Owner 规格粗估升至 ~35–40%；P0 门仍未 passed；**未** 达门 A/B；不写产品代码。权威门禁仍以 [`ARCHITECTURE-READINESS.md`](ARCHITECTURE-READINESS.md) 为准。本文回答三个实操问题：
 
 1. 现在站在哪一层？
 2. 离“可写实施计划 / 可开始编码”还缺什么？
@@ -55,8 +54,8 @@ Web 双线（D-058：`yaca-web`/Java 8、`yaca-ie6`/PHP 5.4）**不计入** v0.1
 | --- | ---: | --- |
 | 题库 / 审计覆盖 | ~95% | AQ-001..437、384 checklist、CV-001..076、10 决策包 |
 | 负责人产品选择 | **100%** | register `unanswered=0` / `conflict=0`；D-001..D-058 |
-| Owner **可编码规格** | **~15–25%** | 子系统多“产品语义已确认，精确 schema/矩阵待冻”；几乎无“设计已确认→计划已确认” |
-| 技术证明 | **~0–5%** | TP-001..030 多数 `unplanned`；XML/Lua 仅 modern smoke |
+| Owner **可编码规格** | **~35–40%** | W1–W3 首版合同表已落；多数子系统仍非「设计已确认→计划已确认」 |
+| 技术证明 | **~0–5%** | 关键 TP 仅 `specified`；无 proven-target |
 | 实施计划 / 源码 | **0%** | 无实施计划；`src/*.lua` 全空 |
 | 发布证据 | **0%** | 无三目标合格 zip |
 
@@ -76,18 +75,18 @@ Web 双线（D-058：`yaca-web`/Java 8、`yaca-ie6`/PHP 5.4）**不计入** v0.1
 | Gate | 主题 | 语义 | 规格 | 证明 | 阻塞度 | 缺失的权威工件（摘要） |
 | --- | --- | --- | --- | --- | --- | --- |
 | AR-P0-01 | 产品闭环 / 零表面 / 发行形态 | 有 | 缺 | 缺 | M | 旅程矩阵、zero-surface manifest、安装→升级→卸载状态表；README 与模板对齐 |
-| AR-P0-02 | AgentLoop typed outcome | 有 | **缺** | 缺 | **H** | 状态机、转换表、turn/request/attempt 因果、retry registry、golden trace |
-| AR-P0-03 | Model 协议 canonical | 有 | **缺** | 缺 | **H** | ModelRequest/Event/Result/Error schema、双 adapter fixture、scheduler/budget |
-| AR-P0-04 | 事件泵 / 可取消 I/O | 有 | 缺 | **缺** | **H** | `start/poll/cancel/join/close` ABI；XP/CentOS 多路复用证明 |
+| AR-P0-02 | AgentLoop typed outcome | 有 | **首版**（W1-A） | 缺 | **H** | golden trace / 完整因果仍待加深 |
+| AR-P0-03 | Model 协议 canonical | 有 | **首版**（W2-C） | 缺 | **H** | 双 adapter 录制 fixture 仍缺 |
+| AR-P0-04 | 事件泵 / 可取消 I/O | 有 | **首版**（W3-A 22/02/03） | **缺** | **H** | XP/CentOS 证明未做 |
 | AR-P0-05 | TUI full-duplex / draft | 有 | 缺 | **缺** | H | 输入状态机、fd 能力矩阵、快捷键→文本后备、ASCII golden transcript |
-| AR-P0-06 | 工具 × Permission 矩阵 | 有 | **缺** | 缺 | **H** | 逐工具 carrier/schema/capability；raw shell 宽边界；approval 快照 |
-| AR-P0-07 | 改动事务 / 无 undo | 有 | 缺 | 缺 | M | 文件 op 事务/fault 矩阵；部分成功；shell unknown |
-| AR-P0-08 | 数据分类 / 秘密 / 导入 | 有方向 | **缺** | 缺 | H | 跨 purpose/XML/TUI/stderr 矩阵；Key 生命周期；外来 XML 信任 |
-| AR-P0-09 | 配置 typed schema | 有 | **缺** | 缺 | **H** | 逐字段 catalog、INI grammar、CV 生效、generation 契约；**替换过时 `_CONFIG_.ini`** |
-| AR-P0-10 | Context XML durability | 有 | **缺** | **缺** | **H** | 公开 schema、提交状态机、崩溃真值表、大小/延迟 hard limit |
-| AR-P0-11 | 路径 / 索引 / 生命周期 | 有 | 缺 | 缺 | H | LogicalPathCodec、hash vectors、lock/rebind/delete/import 状态机 |
-| AR-P0-12 | 压缩 model view | 有 | 缺 | 缺 | M | 摘要 schema、view manifest、oversized-atom、手动 compact 生命周期 |
-| AR-P0-13 | CLI/点命令 × 状态 | 有 | **缺** | 缺 | **H** | action registry 完整表；command×AgentState；非 TTY schema |
+| AR-P0-06 | 工具 × Permission 矩阵 | 有 | **首版**（W2-B） | 缺 | **H** | 机读求值/fixture 仍待 |
+| AR-P0-07 | 改动事务 / 无 undo | 有 | **首版**（W3-D 19） | 缺 | M | 目标机 fault 注入证据 |
+| AR-P0-08 | 数据分类 / 秘密 / 导入 | 有 | **首版**（W3-C） | 缺 | H | canary/exact-scan TP |
+| AR-P0-09 | 配置 typed schema | 有 | **首版**（W1-B） | 缺 | **H** | INI grammar/原子写；替换过时 `_CONFIG_.ini` |
+| AR-P0-10 | Context XML durability | 有 | **首版**（W1-C） | **缺** | **H** | 崩溃真值表目标机证据 |
+| AR-P0-11 | 路径 / 索引 / 生命周期 | 有 | **首版**（W3-B） | 缺 | H | golden path vectors / 密码学原语锁定 |
+| AR-P0-12 | 压缩 model view | 有 | **首版**（W3-D 12） | 缺 | M | token 估算阈值 TP |
+| AR-P0-13 | CLI/点命令 × 状态 | 有 | **首版**（W2-A） | 缺 | **H** | golden argv / 机读 schema |
 | AR-P0-14 | 安全加载 / ambient | 方向 | 缺 | 缺 | H | module allowlist、DLL 搜索、curl/shell ambient isolation |
 | AR-P0-15 | 本地 ID / 锁 / 崩溃 | 有 | 缺 | 缺 | H | identity 表、lease、stale lock 协议 |
 | AR-P0-16 | 发布可行性 | 有 | 缺 | **阻塞** | **H*** | luainstaller x86/x64 qualification；三 zip 证据（*编码前可后置到发布阶段，但实施计划必须写清 qualification 任务与失败退路） |
@@ -202,10 +201,10 @@ P1 门（AR-P1-01..12）在写**全程序**计划前也应关闭；若只做**�
 
 | 工作包 | 产出 | 门 / TP |
 | --- | --- | --- |
-| **W3-A Runtime ports** | process/network/fs/terminal 窄 ABI；事件泵组合契约 | P0-04、P0-14、P0-15；TP-003/005/006 plan |
-| **W3-B Path/Index** | LogicalPathCodec + hash vectors + Resolver 结果 schema | P0-11；TP-012/013 plan |
-| **W3-C Data/secret matrix** | 数据分类收口 + Key 禁止目的地表 | P0-08；TP-028 plan |
-| **W3-D Change/compaction** | 无 undo 事务矩阵 + model-view schema | P0-07、P0-12 |
+| **W3-A Runtime ports** | **首版完成** → 01/02/03/22 | P0-04 规格侧；证明仍缺 |
+| **W3-B Path/Index** | **首版完成** → 11 + D-070 display≠hash | P0-11 规格侧 |
+| **W3-C Data/secret matrix** | **首版完成** → `DATA-CLASSIFICATION.md` | P0-08 规格侧 |
+| **W3-D Change/compaction** | **首版完成** → 19 + 12 | P0-07、P0-12 规格侧 |
 
 ### Wave 4 — 产品闭环与文档诚实
 

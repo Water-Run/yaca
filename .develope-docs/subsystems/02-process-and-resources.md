@@ -1,6 +1,8 @@
 # 02 进程执行与随包资源
 
-状态：产品契约已确认；目标平台进程、管道、取消与 kill-tree 原语待技术证明
+更新日期：2026-08-10
+
+状态：**W3-A 规格首版** — Process AsyncPort ABI 与 result 枚举已冻结；kill-tree/grace 数值待 TP 校准（D-070 技术推导）
 
 ## 职责
 
@@ -42,4 +44,69 @@ Lua 纯标准库无法可靠提供跨平台进程控制。已确认允许窄 C b
 
 Windows XP 可以使用 `ReadConsoleInput` 等旧控制台 API 接收输入，也支持 Job Object 与 `TerminateJobObject` 管理已成功纳入 job 的进程树；但跨线程 `CancelIoEx` 和取消同步 I/O 的 `CancelSynchronousIo` 最低是 Vista，XP 后端不能依赖它们。技术原型应验证可控的异步/overlapped I/O、短超时事件泵和关闭自有句柄/终止自有 job 的协议，不能先做阻塞同步读取再假设能从另一线程取消。参考：[ReadConsoleInput](https://learn.microsoft.com/en-us/windows/console/readconsoleinput)、[CancelIoEx](https://learn.microsoft.com/en-us/windows/win32/api/ioapiset/nf-ioapiset-cancelioex)、[CancelSynchronousIo](https://learn.microsoft.com/en-us/windows/win32/fileio/cancelsynchronousio-func)、[TerminateJobObject](https://learn.microsoft.com/en-us/windows/win32/api/jobapi2/nf-jobapi2-terminatejobobject)。
 
-以下全部是实施技术证明，不再是产品负责人候选：管道 handle 能否进入同一等待模型、创建后到纳入 job 之间的竞态、shell 子孙进程能否全部收口、取消后如何等待真实完成、helper 崩溃怎样形成 typed port error/`unknown`，以及 Windows x86/x64 与 Linux x86_64 的输出背压和超时上限。证明失败且退路会改变上述用户保证时，只重新打开对应的最小产品差异。
+以下全部是实施技术证明，不再是产品负责人候选：管道 handle 能否进入同一等待模型、创建后到纳入 job 之间的竞态、shell 子孙进程能否全部收口、取消后如何等待真实完成、helper 崩溃怎样形成 typed port error/`unknown`，以及 Windows x86/x64 与 Linux x86_64 的输出背压和超时上限。证明失败且退路会改变上述用户保证时，只重新打开对应的最小产品差异（D-070）。
+
+---
+
+## W3-A：Process AsyncPort ABI（规范）
+
+对齐：D-052、D-057、AR-P0-04/06、P1-03、TP-003/005。组合见 [22](22-application-runtime-and-concurrency.md)。
+
+### 端口生命周期
+
+| 方法 | 语义 |
+| --- | --- |
+| `start(spec) → handle` | 创建进程/管道；返回本地 `op_id`；失败不分配 durable 副作用 |
+| `poll(handle) → events[]` | 非阻塞；事件：`stdout_chunk`, `stderr_chunk`, `exit`, `error`, `cancelled` |
+| `cancel(handle)` | **请求** 终止；不保证立即结束 |
+| `join(handle, deadline) → result` | 等到终态或 deadline；超时后仍须可再次 join/close |
+| `close(handle)` | 释放句柄；未 join 时隐含 best-effort cancel+unknown |
+
+### `start` 规格字段
+
+| 字段 | 内部 exec | 模型 raw shell |
+| --- | --- | --- |
+| `mode` | `argv` | `shell` |
+| `executable` / `argv` | 绝对路径 allowlist | — |
+| `command` | — | opaque 字符串 |
+| `cwd` | 显式绝对路径 | 当前 Context root（冻结） |
+| `env` | clean + allowlist | inherit baseline 按 M05-15/55（无用户 ambient 偷带 Key） |
+| `stdin` | bytes 或 closed | 默认 closed；若工具要求则有界 bytes |
+| `limits` | stdout/stderr/total bytes、wall clock | 同左；受 turn/process hard cap |
+
+Windows shell：`cmd.exe /d /s /c`。Linux：`/bin/sh -c`。Runtime **不** 解析 command 正文。
+
+### 终态 result
+
+| `status` | 何时 | 用户/Agent 含义 |
+| --- | --- | --- |
+| `completed` | exit 已知且进程树已证明结束 | exit_code + 有界输出 |
+| `cancelled` | 取消且树已证明结束 | 无自动重放 |
+| `failed` | spawn/API 失败，无副作用或已记录 | typed error |
+| `unknown` | 无法证明树/外部效果 | **禁止** 伪造成功；需 self-fix 解算 |
+
+### 取消与 kill-tree（保守）
+
+| 平台 | 策略（待 TP 校准数值） |
+| --- | --- |
+| Windows | Job Object + `TerminateJobObject`；创建→入 job 竞态必须覆盖；**不** 依赖 XP 上的 `CancelIoEx` |
+| Linux | process group + SIGTERM→SIGKILL grace；grace **发行固定**，无 INI 字段 |
+
+### 输出解码
+
+- Runtime 内建 `auto` 解码；result 记录 decoder、replacement 计数、raw byte 计数。  
+- 达 cap → typed `Limit` + 截断标记；**禁止** 无限 Lua 缓冲。
+
+### 备选否决
+
+| 方案 | 否决 |
+| --- | --- |
+| PTY / 交互代理 | D-052 排除 |
+| tracked background job | D-052 排除 |
+| 弱 cancel（exit 即当树死） | 违反 unknown 诚实；失败走 O 包 |
+
+### 完成度
+
+- [x] start/poll/cancel/join/close 与 result 枚举  
+- [x] shell dialect 固定  
+- [ ] grace ms / 管道背压数值（TP-005）  
