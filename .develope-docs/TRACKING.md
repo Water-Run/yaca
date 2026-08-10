@@ -4,8 +4,11 @@
 
 ## 当前阶段
 
-**设计恢复期（2026-08-10）**：产品负责人选择已于 2026-07-22 收口；当前继续 **规格硬化 + 技术证明计划**，不开始核心产品编码。  
-同步登记 D-058：本机 Web 双线（`yaca-web` / `yaca-ie6`）仅作设计预留，不进入 v0.1 实现。
+**离线自动规格硬化（D-070，2026-08-10）**：产品负责人选择已于 2026-07-22 收口；SQ 与「下一负责人问题集」已由 D-070 收口。  
+当前 **只做** `.develope-docs` Wave 3 规格硬化（+ 可加深 W1–W2）；**不** 写产品 `src/*.lua`；**不** 做 proof 可执行原型。  
+主线顺序：W3-A Runtime → W3-B Path/Index → W3-C 数据/秘密 → W3-D 改动/压缩。  
+Git：main 批次 commit；**仅重大里程碑** 少数 push。交接笔记：[`HANDOFF-AUTO-2026-08-10.md`](HANDOFF-AUTO-2026-08-10.md)。  
+Web 双线（D-058）仍仅预留，不进入 v0.1。
 
 ## 已确认约束
 
@@ -107,11 +110,15 @@
 | W2-A/B/C | ACTION-REGISTRY / TOOL-PERMISSION-MATRIX / MODEL-EVENT-SCHEMA |
 | TP specified | 003/004/005/006/008/010 → PROOF-PLANS-P0 |
 
-**下一负责人问题集主题**（自动路径不能继续编造用户保证）：
+**下一负责人问题集**：**已由 D-070 收口**（2026-08-10 离线前问卷）。
 
-1. **hard-cap / 预算发行数字** — turn/request/tool/token 的用户可见默认与 RuntimeMax 是否接受证明推导值，或需产品表态。  
-2. **路径编码边角** — UNC/盘符/symlink 显示与 hash 输入若与用户直觉冲突时的可感知规则。  
-3. **证明失败退路** — 若 TP-008/003/006 在旧机失败且退路改用户保证（如 WAL、弱 cancel），需最小 O 决策（D-069 只覆盖打包假设，不覆盖全部 TP）。  
-4. **Permission 扩展** — 仅当要改 Std/Readonly 矩阵或增加 capability 轴时（当前禁止静默改）。
+| 原主题 | D-070 结论 |
+| --- | --- |
+| hard-cap / 预算数字 | 技术推导 + 用户可配置收紧；不写假精确偏好数字 |
+| 路径显示 vs hash | hash/Resolver = LogicalPath 规范形；显示可友好，显示≠hash |
+| TP 失败改用户保证 | 停 → 最小 O 包；不擅自 WAL/弱 cancel |
+| Permission 扩展 | Std/Readonly 冻结；禁止静默改 |
 
-在上述批前回答前：**不** 新开 SQ 长卷；**不** 开始产品 `src/*.lua` 实现（D-001）。可继续的仅是 modern 机可丢弃 proof 原型或更多纯表格展开且不改保证的内容。
+**仍有效禁令**：不新开 SQ 长卷；不开始产品 `src/*.lua`（D-001）；本轮不做 proof 可执行原型。  
+**可继续**：Wave 3 规格、W1–W2 加深、门禁文档、纯表格与保守技术择优。  
+离线会话细则见 [`HANDOFF-AUTO-2026-08-10.md`](HANDOFF-AUTO-2026-08-10.md)。
