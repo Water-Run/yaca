@@ -83,5 +83,25 @@ return {
                 A.equal(entry_count, 1)
             end,
         },
+        {
+            name = "native source owns a closed streaming SHA-256 handle",
+            run = function()
+                local source = read_all("native/yaca_native.c")
+                for _, symbol in ipairs({
+                    "sha256_start",
+                    "sha256_update",
+                    "sha256_finish",
+                    "sha256_close",
+                }) do
+                    A.contains(source, '{ "' .. symbol .. '", l_' .. symbol .. " }")
+                end
+                A.contains(source, "YACA_SHA256_METATABLE")
+                A.contains(source, "yaca_sha256_constants[64]")
+                A.contains(source, "secure_zero(context, sizeof(*context))")
+                A.contains(source, "lua_pushlstring")
+                A.falsy(source:find("openssl", 1, true))
+                A.falsy(source:find("CryptAcquireContext", 1, true))
+            end,
+        },
     },
 }

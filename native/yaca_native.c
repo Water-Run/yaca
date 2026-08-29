@@ -2,7 +2,7 @@
 ** File: yaca_native.c
 ** Date: 2026-08-29
 ** Author: WaterRun
-** Description: Portable narrow native ports for yaca filesystem, process, terminal, and clocks.
+** Description: Portable narrow native ports for filesystem, process, terminal, clocks, and SHA-256.
 */
 
 #if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
@@ -47,6 +47,7 @@
 #define YACA_FILE_METATABLE "yaca.native.file"
 #define YACA_PROCESS_METATABLE "yaca.native.process"
 #define YACA_TERMINAL_METATABLE "yaca.native.terminal"
+#define YACA_SHA256_METATABLE "yaca.native.sha256"
 
 #if defined(_WIN32)
 #define YACA_PATH_SEPARATOR L'\\'
@@ -123,6 +124,15 @@ typedef struct yaca_terminal
   int closed;
   char outcome[16];
 } yaca_terminal;
+
+typedef struct yaca_sha256
+{
+  uint32_t state[8];
+  uint64_t byte_count;
+  unsigned char buffer[64];
+  size_t buffer_length;
+  int closed;
+} yaca_sha256;
 
 /*
 ** Pushes the common false, structured-error return shape.
@@ -3232,6 +3242,293 @@ static int l_terminal_close(lua_State *L)
   return push_true_result(L);
 }
 
+static const uint32_t yaca_sha256_constants[64] = {
+  UINT32_C(0x428a2f98), UINT32_C(0x71374491), UINT32_C(0xb5c0fbcf),
+  UINT32_C(0xe9b5dba5), UINT32_C(0x3956c25b), UINT32_C(0x59f111f1),
+  UINT32_C(0x923f82a4), UINT32_C(0xab1c5ed5), UINT32_C(0xd807aa98),
+  UINT32_C(0x12835b01), UINT32_C(0x243185be), UINT32_C(0x550c7dc3),
+  UINT32_C(0x72be5d74), UINT32_C(0x80deb1fe), UINT32_C(0x9bdc06a7),
+  UINT32_C(0xc19bf174), UINT32_C(0xe49b69c1), UINT32_C(0xefbe4786),
+  UINT32_C(0x0fc19dc6), UINT32_C(0x240ca1cc), UINT32_C(0x2de92c6f),
+  UINT32_C(0x4a7484aa), UINT32_C(0x5cb0a9dc), UINT32_C(0x76f988da),
+  UINT32_C(0x983e5152), UINT32_C(0xa831c66d), UINT32_C(0xb00327c8),
+  UINT32_C(0xbf597fc7), UINT32_C(0xc6e00bf3), UINT32_C(0xd5a79147),
+  UINT32_C(0x06ca6351), UINT32_C(0x14292967), UINT32_C(0x27b70a85),
+  UINT32_C(0x2e1b2138), UINT32_C(0x4d2c6dfc), UINT32_C(0x53380d13),
+  UINT32_C(0x650a7354), UINT32_C(0x766a0abb), UINT32_C(0x81c2c92e),
+  UINT32_C(0x92722c85), UINT32_C(0xa2bfe8a1), UINT32_C(0xa81a664b),
+  UINT32_C(0xc24b8b70), UINT32_C(0xc76c51a3), UINT32_C(0xd192e819),
+  UINT32_C(0xd6990624), UINT32_C(0xf40e3585), UINT32_C(0x106aa070),
+  UINT32_C(0x19a4c116), UINT32_C(0x1e376c08), UINT32_C(0x2748774c),
+  UINT32_C(0x34b0bcb5), UINT32_C(0x391c0cb3), UINT32_C(0x4ed8aa4a),
+  UINT32_C(0x5b9cca4f), UINT32_C(0x682e6ff3), UINT32_C(0x748f82ee),
+  UINT32_C(0x78a5636f), UINT32_C(0x84c87814), UINT32_C(0x8cc70208),
+  UINT32_C(0x90befffa), UINT32_C(0xa4506ceb), UINT32_C(0xbef9a3f7),
+  UINT32_C(0xc67178f2),
+};
+
+static uint32_t sha256_rotate_right(uint32_t value, unsigned int count)
+{
+  return (value >> count) | (value << (32U - count));
+}
+
+static void secure_zero(void *memory, size_t length)
+{
+  volatile unsigned char *bytes;
+
+  bytes = (volatile unsigned char *)memory;
+  while (length > 0)
+  {
+    *bytes++ = 0;
+    --length;
+  }
+}
+
+static void sha256_transform(yaca_sha256 *context, const unsigned char block[64])
+{
+  uint32_t words[64];
+  uint32_t a;
+  uint32_t b;
+  uint32_t c;
+  uint32_t d;
+  uint32_t e;
+  uint32_t f;
+  uint32_t g;
+  uint32_t h;
+  uint32_t first;
+  uint32_t second;
+  size_t index;
+
+  for (index = 0; index < 16; ++index)
+  {
+    size_t offset;
+
+    offset = index * 4;
+    words[index] = ((uint32_t)block[offset] << 24)
+      | ((uint32_t)block[offset + 1] << 16)
+      | ((uint32_t)block[offset + 2] << 8)
+      | (uint32_t)block[offset + 3];
+  }
+  for (index = 16; index < 64; ++index)
+  {
+    uint32_t lower;
+    uint32_t upper;
+
+    lower = sha256_rotate_right(words[index - 15], 7)
+      ^ sha256_rotate_right(words[index - 15], 18)
+      ^ (words[index - 15] >> 3);
+    upper = sha256_rotate_right(words[index - 2], 17)
+      ^ sha256_rotate_right(words[index - 2], 19)
+      ^ (words[index - 2] >> 10);
+    words[index] = words[index - 16] + lower + words[index - 7] + upper;
+  }
+
+  a = context->state[0];
+  b = context->state[1];
+  c = context->state[2];
+  d = context->state[3];
+  e = context->state[4];
+  f = context->state[5];
+  g = context->state[6];
+  h = context->state[7];
+  for (index = 0; index < 64; ++index)
+  {
+    uint32_t choice;
+    uint32_t majority;
+    uint32_t sum_a;
+    uint32_t sum_e;
+
+    sum_e = sha256_rotate_right(e, 6)
+      ^ sha256_rotate_right(e, 11)
+      ^ sha256_rotate_right(e, 25);
+    choice = (e & f) ^ ((~e) & g);
+    first = h + sum_e + choice + yaca_sha256_constants[index] + words[index];
+    sum_a = sha256_rotate_right(a, 2)
+      ^ sha256_rotate_right(a, 13)
+      ^ sha256_rotate_right(a, 22);
+    majority = (a & b) ^ (a & c) ^ (b & c);
+    second = sum_a + majority;
+    h = g;
+    g = f;
+    f = e;
+    e = d + first;
+    d = c;
+    c = b;
+    b = a;
+    a = first + second;
+  }
+  context->state[0] += a;
+  context->state[1] += b;
+  context->state[2] += c;
+  context->state[3] += d;
+  context->state[4] += e;
+  context->state[5] += f;
+  context->state[6] += g;
+  context->state[7] += h;
+  secure_zero(words, sizeof(words));
+}
+
+static void sha256_initialize(yaca_sha256 *context)
+{
+  memset(context, 0, sizeof(*context));
+  context->state[0] = UINT32_C(0x6a09e667);
+  context->state[1] = UINT32_C(0xbb67ae85);
+  context->state[2] = UINT32_C(0x3c6ef372);
+  context->state[3] = UINT32_C(0xa54ff53a);
+  context->state[4] = UINT32_C(0x510e527f);
+  context->state[5] = UINT32_C(0x9b05688c);
+  context->state[6] = UINT32_C(0x1f83d9ab);
+  context->state[7] = UINT32_C(0x5be0cd19);
+}
+
+static int sha256_append(
+  yaca_sha256 *context,
+  const unsigned char *bytes,
+  size_t length)
+{
+  size_t available;
+  size_t copied;
+
+  if ((uint64_t)length > UINT64_MAX / 8U - context->byte_count)
+  {
+    return 0;
+  }
+  context->byte_count += (uint64_t)length;
+  while (length > 0)
+  {
+    if (context->buffer_length == 0 && length >= sizeof(context->buffer))
+    {
+      sha256_transform(context, bytes);
+      bytes += sizeof(context->buffer);
+      length -= sizeof(context->buffer);
+      continue;
+    }
+    available = sizeof(context->buffer) - context->buffer_length;
+    copied = length < available ? length : available;
+    memcpy(context->buffer + context->buffer_length, bytes, copied);
+    context->buffer_length += copied;
+    bytes += copied;
+    length -= copied;
+    if (context->buffer_length == sizeof(context->buffer))
+    {
+      sha256_transform(context, context->buffer);
+      context->buffer_length = 0;
+    }
+  }
+  return 1;
+}
+
+static void sha256_finalize(yaca_sha256 *context, unsigned char digest[32])
+{
+  uint64_t bit_count;
+  size_t index;
+
+  bit_count = context->byte_count * 8U;
+  context->buffer[context->buffer_length++] = 0x80;
+  if (context->buffer_length > 56)
+  {
+    memset(
+      context->buffer + context->buffer_length,
+      0,
+      sizeof(context->buffer) - context->buffer_length);
+    sha256_transform(context, context->buffer);
+    context->buffer_length = 0;
+  }
+  memset(context->buffer + context->buffer_length, 0, 56 - context->buffer_length);
+  for (index = 0; index < 8; ++index)
+  {
+    context->buffer[63 - index] = (unsigned char)(bit_count >> (index * 8));
+  }
+  sha256_transform(context, context->buffer);
+  for (index = 0; index < 8; ++index)
+  {
+    digest[index * 4] = (unsigned char)(context->state[index] >> 24);
+    digest[index * 4 + 1] = (unsigned char)(context->state[index] >> 16);
+    digest[index * 4 + 2] = (unsigned char)(context->state[index] >> 8);
+    digest[index * 4 + 3] = (unsigned char)context->state[index];
+  }
+}
+
+static yaca_sha256 *check_sha256(lua_State *L)
+{
+  return (yaca_sha256 *)luaL_checkudata(L, 1, YACA_SHA256_METATABLE);
+}
+
+static int l_sha256_gc(lua_State *L)
+{
+  yaca_sha256 *context;
+
+  context = (yaca_sha256 *)luaL_checkudata(L, 1, YACA_SHA256_METATABLE);
+  secure_zero(context, sizeof(*context));
+  context->closed = 1;
+  return 0;
+}
+
+static int l_sha256_start(lua_State *L)
+{
+  yaca_sha256 *context;
+
+  context = (yaca_sha256 *)lua_newuserdatauv(L, sizeof(*context), 0);
+  sha256_initialize(context);
+  luaL_setmetatable(L, YACA_SHA256_METATABLE);
+  return 1;
+}
+
+static int l_sha256_update(lua_State *L)
+{
+  yaca_sha256 *context;
+  const char *bytes;
+  size_t length;
+
+  context = check_sha256(L);
+  if (context->closed)
+  {
+    return luaL_error(L, "SHA-256 context is closed");
+  }
+  bytes = luaL_checklstring(L, 2, &length);
+  if (!sha256_append(context, (const unsigned char *)bytes, length))
+  {
+    return luaL_error(L, "SHA-256 input exceeds the algorithm limit");
+  }
+  lua_pushboolean(L, 1);
+  return 1;
+}
+
+static int l_sha256_finish(lua_State *L)
+{
+  yaca_sha256 *context;
+  yaca_sha256 copy;
+  unsigned char digest[32];
+
+  context = check_sha256(L);
+  if (context->closed)
+  {
+    return luaL_error(L, "SHA-256 context is closed");
+  }
+  copy = *context;
+  sha256_finalize(&copy, digest);
+  secure_zero(context, sizeof(*context));
+  context->closed = 1;
+  lua_pushlstring(L, (const char *)digest, sizeof(digest));
+  secure_zero(digest, sizeof(digest));
+  secure_zero(&copy, sizeof(copy));
+  return 1;
+}
+
+static int l_sha256_close(lua_State *L)
+{
+  yaca_sha256 *context;
+
+  context = check_sha256(L);
+  if (!context->closed)
+  {
+    secure_zero(context, sizeof(*context));
+    context->closed = 1;
+  }
+  lua_pushboolean(L, 1);
+  return 1;
+}
+
 static int l_abi_version(lua_State *L)
 {
   lua_pushliteral(L, YACA_ABI_VERSION);
@@ -3318,6 +3615,10 @@ static const luaL_Reg yaca_native_functions[] = {
   { "platform_identity", l_platform_identity },
   { "monotonic_now", l_monotonic_now },
   { "utc_now", l_utc_now },
+  { "sha256_start", l_sha256_start },
+  { "sha256_update", l_sha256_update },
+  { "sha256_finish", l_sha256_finish },
+  { "sha256_close", l_sha256_close },
   { "fs_open_read", l_fs_open_read },
   { "fs_create_new", l_fs_create_new },
   { "fs_stat_identity", l_fs_stat_identity },
@@ -3367,6 +3668,7 @@ LUAMOD_API int luaopen_yaca_native(lua_State *L)
   create_handle_metatable(L, YACA_FILE_METATABLE, l_file_gc);
   create_handle_metatable(L, YACA_PROCESS_METATABLE, l_process_gc);
   create_handle_metatable(L, YACA_TERMINAL_METATABLE, l_terminal_gc);
+  create_handle_metatable(L, YACA_SHA256_METATABLE, l_sha256_gc);
   luaL_newlib(L, yaca_native_functions);
   return 1;
 }
