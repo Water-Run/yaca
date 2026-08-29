@@ -2173,6 +2173,456 @@ function M.new_request_builder(ports, options)
     return readonly(service, "model request builder")
 end
 
+local REVIEW_BUILDER_OPTION_FIELDS = {
+    main_model_name = true,
+    permission_name = true,
+    context_prompt = true,
+    default_connect_timeout_ms = true,
+    default_request_timeout_ms = true,
+    default_retry_base_delay_ms = true,
+    default_max_output_tokens = true,
+    maximum_binding_bytes = true,
+}
+
+local REVIEW_START_FIELDS = {
+    request_id = true,
+    turn_id = true,
+    purpose = true,
+    binding = true,
+    model_snapshot = true,
+    config_generation = true,
+    view_manifest_ref = true,
+    no_tools = true,
+}
+
+local ACTION_REVIEW_BINDING_FIELDS = {
+    tool_call_id = true,
+    operation_id = true,
+    adapter_call_id = true,
+    provider_call_id = true,
+    name = true,
+    canonical_arguments = true,
+    side_effecting = true,
+}
+
+local TERMINATION_REVIEW_BINDING_FIELDS = {
+    request_id = true,
+    message_id = true,
+}
+
+local function review_model_name(generation, options, purpose)
+    local configured = purpose == "action-review"
+        and generation.agent.action_review_model
+        or generation.agent.termination_review_model
+    if configured == "" then return options.main_model_name end
+    return configured
+end
+
+local function json_data(value, visiting)
+    local value_type = type(value)
+    if value_type == "string" or value_type == "boolean" then return value end
+    if value_type == "number" and math.type(value) == "integer" then
+        return json.number(tostring(value))
+    end
+    if value_type ~= "table" then
+        return nil, failure("InvalidReviewBinding", "review binding contains non-data")
+    end
+    visiting = visiting or {}
+    if visiting[value] then
+        return nil, failure("InvalidReviewBinding", "review binding contains a cycle")
+    end
+    visiting[value] = true
+    local count = dense_count(value)
+    local result
+    if count ~= nil and count > 0 then
+        local values = {}
+        for index = 1, count do
+            local converted, convert_error = json_data(value[index], visiting)
+            if converted == nil then visiting[value] = nil return nil, convert_error end
+            values[index] = converted
+        end
+        result = json.array(values)
+    else
+        local values = {}
+        for key, item in pairs(value) do
+            if type(key) ~= "string" then
+                visiting[value] = nil
+                return nil, failure("InvalidReviewBinding", "review binding keys must be text")
+            end
+            local converted, convert_error = json_data(item, visiting)
+            if converted == nil then visiting[value] = nil return nil, convert_error end
+            values[key] = converted
+        end
+        result = json.object(values)
+    end
+    visiting[value] = nil
+    return result
+end
+
+local function validate_review_builder(ports, options)
+    local port_fields = {
+        adapter = true,
+        prompt = true,
+        views = true,
+        generation = true,
+        codec = true,
+        safety = true,
+    }
+    if not exact_activity_fields(ports, port_fields)
+        or type(ports.adapter) ~= "table"
+        or type(ports.adapter.normalize_request) ~= "function"
+        or type(ports.prompt) ~= "table"
+        or type(ports.prompt.assemble) ~= "function"
+        or type(ports.views) ~= "table"
+        or type(ports.views.resolve_view) ~= "function"
+        or type(ports.generation) ~= "table"
+        or type(ports.generation.reveal_secret) ~= "function"
+        or type(ports.codec) ~= "table"
+        or type(ports.codec.write) ~= "function"
+        or type(ports.safety) ~= "table"
+        or type(ports.safety.digest) ~= "function"
+        or type(ports.safety.binding_digest) ~= "function"
+        or not exact_activity_fields(options, REVIEW_BUILDER_OPTION_FIELDS)
+        or not valid_token(options.main_model_name, 128)
+        or not valid_token(options.permission_name, 128)
+        or type(options.context_prompt) ~= "string"
+        or not valid_integer(options.default_connect_timeout_ms, 1)
+        or not valid_integer(options.default_request_timeout_ms, 1)
+        or options.default_connect_timeout_ms > options.default_request_timeout_ms
+        or not valid_integer(options.default_retry_base_delay_ms, 0)
+        or not valid_integer(options.default_max_output_tokens, 1)
+        or not valid_integer(options.maximum_binding_bytes, 1)
+    then
+        return nil, failure(
+            "InvalidReviewRequestBuilder",
+            "review request builder is incomplete"
+        )
+    end
+    local generation = ports.generation
+    local permission_ref = generation.permissions
+        and generation.permissions[options.permission_name]
+    if not valid_token(generation.id, 256)
+        or type(generation.general) ~= "table"
+        or type(generation.agent) ~= "table"
+        or type(generation.network) ~= "table"
+        or type(generation.models) ~= "table"
+        or type(permission_ref) ~= "table"
+    then
+        return nil, failure(
+            "InvalidReviewRequestBuilder",
+            "review configuration or Permission snapshot is unavailable"
+        )
+    end
+    for _, purpose in ipairs({ "action-review", "termination-review" }) do
+        local name = review_model_name(generation, options, purpose)
+        local model_ref = generation.models[name]
+        if not valid_token(name, 128)
+            or type(model_ref) ~= "table"
+            or model_ref.enabled ~= true
+            or type(model_ref.endpoint) ~= "string"
+            or model_ref.endpoint == ""
+            or type(model_ref.remote_model) ~= "string"
+            or model_ref.remote_model == ""
+        then
+            return nil, failure(
+                "InvalidReviewRequestBuilder",
+                "selected review Model is unavailable"
+            )
+        end
+    end
+    return {
+        ports = ports,
+        options = options,
+        generation = generation,
+        permission = permission_ref,
+    }
+end
+
+local function validate_runtime_review(spec, admitted)
+    if not exact_activity_fields(spec, REVIEW_START_FIELDS)
+        or not valid_token(spec.request_id, 128)
+        or not valid_token(spec.turn_id, 128)
+        or (spec.purpose ~= "action-review" and spec.purpose ~= "termination-review")
+        or not valid_token(spec.model_snapshot, 256)
+        or spec.config_generation ~= admitted.generation.id
+        or not valid_token(spec.view_manifest_ref, 256)
+        or spec.no_tools ~= true
+    then
+        return nil, failure("InvalidReviewRequest", "Runtime review request is invalid")
+    end
+    local expected = spec.purpose == "action-review"
+        and ACTION_REVIEW_BINDING_FIELDS
+        or TERMINATION_REVIEW_BINDING_FIELDS
+    if not exact_activity_fields(spec.binding, expected) then
+        return nil, failure("InvalidReviewBinding", "Runtime review binding is invalid")
+    end
+    if spec.purpose == "action-review" then
+        if not valid_token(spec.binding.tool_call_id, 256)
+            or not valid_token(spec.binding.operation_id, 256)
+            or not valid_token(spec.binding.adapter_call_id, 256)
+            or not valid_token(spec.binding.provider_call_id, 256)
+            or not DIRECT_TOOL_NAMES[spec.binding.name]
+            or type(spec.binding.canonical_arguments) ~= "string"
+            or type(spec.binding.side_effecting) ~= "boolean"
+        then
+            return nil, failure("InvalidReviewBinding", "action-review binding is invalid")
+        end
+    elseif not valid_token(spec.binding.request_id, 256)
+        or not valid_token(spec.binding.message_id, 256)
+    then
+        return nil, failure("InvalidReviewBinding", "termination-review binding is invalid")
+    end
+    local tagged, tag_error = json_data(spec.binding)
+    if not tagged then return nil, tag_error end
+    local binding_json, encode_error = admitted.ports.codec.write(tagged)
+    if not binding_json then return nil, encode_error end
+    if #binding_json > admitted.options.maximum_binding_bytes then
+        return nil, failure("ReviewBindingLimit", "review binding exceeds its byte limit")
+    end
+    local binding_digest, digest_error = admitted.ports.safety.binding_digest(
+        "yaca-review-request-v1",
+        {
+            { name = "request_id", value = spec.request_id },
+            { name = "turn_id", value = spec.turn_id },
+            { name = "purpose", value = spec.purpose },
+            { name = "model_snapshot", value = spec.model_snapshot },
+            { name = "config_generation", value = spec.config_generation },
+            { name = "view_manifest_ref", value = spec.view_manifest_ref },
+            { name = "binding", value = binding_json },
+        }
+    )
+    if not binding_digest then return nil, digest_error end
+    return {
+        specification = freeze(spec, "Runtime review specification"),
+        binding_json = binding_json,
+        binding_digest = binding_digest,
+    }
+end
+
+---Builds exact no-tool action/termination review requests from Runtime bindings.
+-- Runtime-supplied reviewer IDs or verdict bindings are never accepted here;
+-- only the later local review adapter may mint them.
+function M.new_review_request_builder(ports, options)
+    local admitted, admission_error = validate_review_builder(ports, options)
+    if not admitted then return nil, admission_error end
+    local generation = admitted.generation
+    local bound = {}
+    local active_count = 0
+    local empty_digest, empty_error = admitted.ports.safety.digest(
+        "yaca-empty-tool-registry-v1\0[]"
+    )
+    if not empty_digest then return nil, empty_error end
+    local empty_registry = assert(freeze({
+        version = "yaca-empty-tool-registry-v1",
+        digest = empty_digest,
+        tools = {},
+    }, "empty review tool registry"))
+    local model_digests = {}
+    local service = {}
+
+    local function proxy_snapshot()
+        local configured = generation.network
+        if configured.follow_proxy ~= true then return { mode = "off" } end
+        if configured.proxy_url_configured == true then
+            return {
+                mode = "explicit",
+                secret_id = "Network.ProxyUrl",
+                destination = "network-proxy",
+                no_proxy = configured.no_proxy or "",
+            }
+        end
+        if type(configured.proxy_url) == "string" and configured.proxy_url ~= "" then
+            return {
+                mode = "explicit",
+                url = configured.proxy_url,
+                no_proxy = configured.no_proxy or "",
+            }
+        end
+        return { mode = "off" }
+    end
+
+    local function model_digest(name, model_ref)
+        if model_digests[name] then return model_digests[name] end
+        local encoded, encode_error = canonical_value({
+            generation = generation.id,
+            name = name,
+            values = model_ref,
+        })
+        if not encoded then return nil, encode_error end
+        local digest, digest_error = admitted.ports.safety.digest(
+            "yaca-review-model-snapshot-v1\0" .. encoded
+        )
+        if not digest then return nil, digest_error end
+        model_digests[name] = digest
+        return digest
+    end
+
+    function service.bind(spec)
+        if active_count ~= 0 then
+            return nil, failure("ReviewRequestBusy", "a review request is already bound")
+        end
+        local binding, binding_error = validate_runtime_review(spec, admitted)
+        if not binding then return nil, binding_error end
+        bound[spec.request_id] = binding
+        active_count = 1
+        return freeze({
+            request_id = spec.request_id,
+            turn_id = spec.turn_id,
+            purpose = spec.purpose,
+            continuation = false,
+            view_manifest_ref = spec.view_manifest_ref,
+            progress_identity = "review:" .. binding.binding_digest,
+        }, "review model activity specification")
+    end
+
+    function service.prepare(spec)
+        local start, start_error = validate_activity_start(spec)
+        if not start then return nil, start_error end
+        local binding = bound[start.request_id]
+        if not binding
+            or start.purpose ~= binding.specification.purpose
+            or start.turn_id ~= binding.specification.turn_id
+            or start.view_manifest_ref ~= binding.specification.view_manifest_ref
+        then
+            return nil, failure("StaleReviewBinding", "review request binding is unavailable")
+        end
+        local called, view, view_error = pcall(
+            admitted.ports.views.resolve_view,
+            start.view_manifest_ref
+        )
+        if not called or type(view) ~= "table"
+            or view.digest ~= start.view_manifest_ref
+            or not valid_integer(view.first_sequence, 0)
+            or not valid_integer(view.last_sequence, 0)
+            or view.first_sequence > view.last_sequence
+            or type(view.body) ~= "string"
+        then
+            return nil, called and view_error
+                or failure("ModelViewUnavailable", "durable review view could not be resolved")
+        end
+        local purpose = start.purpose
+        local name = review_model_name(generation, admitted.options, purpose)
+        local model_ref = generation.models[name]
+        local evidence = table.concat({
+            "Durable Model view digest=", view.digest,
+            " range=", tostring(view.first_sequence), "..", tostring(view.last_sequence),
+            " RuntimeBindingDigest=", binding.binding_digest,
+            ". Use the separately supplied durable Model view as canonical evidence.",
+        })
+        local input
+        if purpose == "action-review" then
+            input = {
+                proposed_action = binding.binding_json,
+                evidence = evidence,
+            }
+        else
+            input = {
+                double_check_goal = generation.effective_double_check_goal or "",
+                candidate_report = binding.binding_json,
+                evidence = evidence,
+            }
+        end
+        local bundle, bundle_error = admitted.ports.prompt:assemble({
+            purpose = purpose,
+            config_generation = generation.id,
+            layers = {
+                global = {
+                    source = "General.SystemPrompt",
+                    version = generation.id,
+                    text = generation.general.system_prompt,
+                },
+                model = {
+                    source = "Model." .. name .. ".SystemPrompt",
+                    version = generation.id,
+                    text = model_ref.system_prompt,
+                },
+                permission = {
+                    source = "Permission." .. admitted.options.permission_name
+                        .. ".SystemPrompt",
+                    version = generation.id,
+                    text = admitted.permission.system_prompt,
+                },
+                context = {
+                    source = "ContextPrompt",
+                    version = generation.id,
+                    text = admitted.options.context_prompt,
+                },
+            },
+            input = input,
+            tool_mode = "none",
+        })
+        if not bundle then return nil, bundle_error end
+        local capabilities_digest, model_error = model_digest(name, model_ref)
+        if not capabilities_digest then return nil, model_error end
+        local public_model_ref = {
+            name = name,
+            protocol = model_ref.protocol,
+            endpoint = model_ref.endpoint,
+            remote_model = model_ref.remote_model,
+            capabilities_digest = capabilities_digest,
+            adapter_options = model_ref.adapter_options or {},
+        }
+        if model_ref.key_configured == true then
+            public_model_ref.auth_secret_id = "Model." .. name .. ".Key"
+        end
+        local retry_count = model_ref.retry_count or 0
+        local retry_base_delay = model_ref.retry_base_delay_ms
+            or admitted.options.default_retry_base_delay_ms
+        local normalized, normalize_error = admitted.ports.adapter:normalize_request({
+            request_id = start.request_id,
+            purpose = purpose,
+            model_ref = public_model_ref,
+            config_generation = generation.id,
+            prompt_bundle = bundle,
+            model_view_manifest = {
+                digest = view.digest,
+                first_sequence = view.first_sequence,
+                last_sequence = view.last_sequence,
+                body = view.body,
+            },
+            tool_registry = empty_registry,
+            controls_schema = bundle.controls_schema,
+            streaming = model_ref.streaming,
+            limits = {
+                max_output_tokens = model_ref.max_output_tokens
+                    or admitted.options.default_max_output_tokens,
+            },
+            retry_policy = {
+                count = retry_count,
+                base_delay_ms = retry_base_delay,
+            },
+        })
+        if not normalized then return nil, normalize_error end
+        local connect_timeout = generation.network.connect_timeout_ms
+            or admitted.options.default_connect_timeout_ms
+        local total_timeout = model_ref.request_timeout_ms
+            or admitted.options.default_request_timeout_ms
+        if connect_timeout > total_timeout then connect_timeout = total_timeout end
+        return readonly({
+            request = normalized,
+            secret_source = generation,
+            proxy = freeze(proxy_snapshot(), "review proxy snapshot"),
+            ca_bundle_path = generation.network.ca_bundle_path,
+            connect_timeout_ms = connect_timeout,
+            total_timeout_ms = total_timeout,
+        }, "prepared review request")
+    end
+
+    function service.binding(request_id)
+        return bound[request_id] or false
+    end
+
+    function service.release(request_id)
+        if not bound[request_id] then return false end
+        bound[request_id] = nil
+        active_count = 0
+        return true
+    end
+
+    service.empty_tool_registry = empty_registry
+    return readonly(service, "review request builder")
+end
+
 local function transport_category(result)
     if type(result) ~= "table"
         or type(result.response_body) ~= "string"
@@ -2827,6 +3277,246 @@ function M.new_activity(ports, options)
         target_qualified = false,
     }, "model activity capabilities")
     return readonly(service, "model activity service")
+end
+
+local REVIEW_PORT_OPTION_FIELDS = {
+    maximum_poll_events = true,
+    maximum_reason_bytes = true,
+    maximum_gap_bytes = true,
+}
+
+local function validate_review_port(ports, options)
+    if not exact_activity_fields(ports, {
+        activity = true,
+        builder = true,
+        safety = true,
+        codec = true,
+    })
+        or type(ports.activity) ~= "table"
+        or type(ports.activity.start) ~= "function"
+        or type(ports.activity.cancel) ~= "function"
+        or type(ports.activity.poll) ~= "function"
+        or type(ports.builder) ~= "table"
+        or type(ports.builder.bind) ~= "function"
+        or type(ports.builder.binding) ~= "function"
+        or type(ports.builder.release) ~= "function"
+        or type(ports.safety) ~= "table"
+        or type(ports.safety.binding_digest) ~= "function"
+        or type(ports.codec) ~= "table"
+        or type(ports.codec.parse) ~= "function"
+        or not exact_activity_fields(options, REVIEW_PORT_OPTION_FIELDS)
+        or not valid_integer(options.maximum_poll_events, 1)
+        or not valid_integer(options.maximum_reason_bytes, 1)
+        or not valid_integer(options.maximum_gap_bytes, 1)
+    then
+        return nil, failure("InvalidReviewPort", "review port is incomplete")
+    end
+    return { ports = ports, options = options }
+end
+
+local function valid_review_text(value, maximum, allow_empty)
+    if type(value) ~= "string" or #value > maximum or value:find("\0", 1, true)
+        or (not allow_empty and value == "")
+    then
+        return false
+    end
+    return text.validate_utf8(value) == true
+end
+
+local function parsed_review(document, purpose, options)
+    if json.kind(document) ~= "object" then return nil end
+    if purpose == "action-review" then
+        if not exact_activity_fields(document, { verdict = true, reason = true })
+            or (document.verdict ~= "pass" and document.verdict ~= "tighten"
+                and document.verdict ~= "deny" and document.verdict ~= "uncertain")
+            or not valid_review_text(document.reason, options.maximum_reason_bytes, true)
+        then
+            return nil
+        end
+        return { verdict = document.verdict, gap = "", reason = document.reason }
+    end
+    if not exact_activity_fields(document, {
+        verdict = true,
+        gap = true,
+        reason = true,
+    })
+        or (document.verdict ~= "pass" and document.verdict ~= "gap"
+            and document.verdict ~= "uncertain")
+        or not valid_review_text(document.gap, options.maximum_gap_bytes, true)
+        or not valid_review_text(document.reason, options.maximum_reason_bytes, true)
+        or (document.verdict == "gap" and document.gap == "")
+        or (document.verdict ~= "gap" and document.gap ~= "")
+    then
+        return nil
+    end
+    return {
+        verdict = document.verdict,
+        gap = document.gap,
+        reason = document.reason,
+    }
+end
+
+---Adapts one canonical Model activity to Runtime's isolated review port.
+-- Model text may choose only the bounded verdict fields. Review identity and
+-- the exact request/response binding are always computed locally.
+function M.new_review_port(ports, options)
+    local admitted, admission_error = validate_review_port(ports, options)
+    if not admitted then return nil, admission_error end
+    local active
+    local service = {}
+
+    local function release()
+        if not active then return false end
+        admitted.ports.builder.release(active.specification.request_id)
+        active = nil
+        return true
+    end
+
+    local function verdict_from(wrapper)
+        local binding = admitted.ports.builder.binding(active.specification.request_id)
+        if type(binding) ~= "table"
+            or type(wrapper) ~= "table"
+            or wrapper.request_id ~= active.specification.request_id
+            or not valid_token(wrapper.canonical_digest, 256)
+            or type(wrapper.canonical_body) ~= "string"
+            or type(wrapper.normalized) ~= "table"
+        then
+            return nil, failure("InvalidReviewResponse", "review response is unbound")
+        end
+        local normalized = wrapper.normalized
+        local parsed
+        if normalized.incomplete ~= true
+            and normalized.finish_class == "stop"
+            and normalized.control == nil
+            and dense_count(normalized.tool_calls) == 0
+        then
+            local document = admitted.ports.codec.parse(wrapper.canonical_body)
+            if document then
+                parsed = parsed_review(
+                    document,
+                    active.specification.purpose,
+                    admitted.options
+                )
+            end
+        end
+        if not parsed then
+            parsed = {
+                verdict = "uncertain",
+                gap = "",
+                reason = "Review response was rejected by the exact JSON schema.",
+            }
+        end
+        local verdict_digest, digest_error = admitted.ports.safety.binding_digest(
+            "yaca-review-verdict-v1",
+            {
+                { name = "request_binding", value = binding.binding_digest },
+                { name = "response_digest", value = wrapper.canonical_digest },
+                { name = "purpose", value = active.specification.purpose },
+                { name = "verdict", value = parsed.verdict },
+                { name = "gap", value = parsed.gap },
+                { name = "reason", value = parsed.reason },
+            }
+        )
+        if not verdict_digest then return nil, digest_error end
+        local result = {
+            verdict = parsed.verdict,
+            review_id = "review-" .. verdict_digest:sub(1, 32),
+            binding_digest = verdict_digest,
+            reason = parsed.reason,
+        }
+        if active.specification.purpose == "termination-review" then
+            result.gap = parsed.gap
+        end
+        return freeze(result, "bound review verdict")
+    end
+
+    function service.start(specification)
+        if active then return nil, failure("ReviewPortBusy", "a review is already active") end
+        local activity_spec, binding_error = admitted.ports.builder.bind(specification)
+        if not activity_spec then return nil, binding_error end
+        local handle, start_error = admitted.ports.activity.start(activity_spec)
+        if not handle then
+            admitted.ports.builder.release(specification.request_id)
+            return nil, start_error
+        end
+        local binding = admitted.ports.builder.binding(specification.request_id)
+        if type(binding) ~= "table" or type(binding.specification) ~= "table" then
+            admitted.ports.builder.release(specification.request_id)
+            return nil, failure("StaleReviewBinding", "review binding vanished during start")
+        end
+        local public_handle = freeze({
+            request_id = binding.specification.request_id,
+            purpose = binding.specification.purpose,
+        }, "review activity handle")
+        active = {
+            handle = public_handle,
+            model_handle = handle,
+            specification = binding.specification,
+        }
+        return public_handle
+    end
+
+    function service.cancel(handle, reason)
+        if not active or handle ~= active.handle or not valid_token(reason, 128) then
+            return { outcome = "unknown" }
+        end
+        local called, result = pcall(
+            admitted.ports.activity.cancel,
+            active.model_handle,
+            reason
+        )
+        if not called or type(result) ~= "table"
+            or (result.outcome ~= "cancelled" and result.outcome ~= "pending"
+                and result.outcome ~= "unknown")
+        then
+            return { outcome = "unknown" }
+        end
+        if result.outcome == "cancelled" then release() end
+        return result
+    end
+
+    function service.poll(budget)
+        if not valid_integer(budget, 0) or budget > admitted.options.maximum_poll_events then
+            return nil, failure("InvalidReviewPoll", "review poll budget is invalid")
+        end
+        if not active or budget == 0 then return freeze({}, "review poll batch") end
+        local events, poll_error = admitted.ports.activity.poll(budget)
+        if not events then return nil, poll_error end
+        local output = {}
+        for _, event in ipairs(events) do
+            if event.kind == "response" then
+                local verdict, verdict_error = verdict_from(event.wrapper)
+                if not verdict then return nil, verdict_error end
+                output[#output + 1] = {
+                    kind = "verdict",
+                    request_id = active.specification.request_id,
+                    purpose = active.specification.purpose,
+                    verdict = verdict,
+                }
+                release()
+                break
+            end
+        end
+        return freeze(output, "review poll batch")
+    end
+
+    function service.status()
+        if not active then return freeze({ state = "idle" }, "review port status") end
+        return freeze({
+            state = "active",
+            request_id = active.specification.request_id,
+            purpose = active.specification.purpose,
+        }, "review port status")
+    end
+
+    service.capabilities = freeze({
+        purposes = { "action-review", "termination-review" },
+        tools = false,
+        runtime_bound_identity = true,
+        malformed_response = "uncertain",
+        concurrent_requests = 1,
+    }, "review port capabilities")
+    return readonly(service, "review model port")
 end
 
 return M

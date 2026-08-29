@@ -10,7 +10,7 @@ local text = require("text")
 local M = {}
 local ASSEMBLED_BUNDLES = setmetatable({}, { __mode = "k" })
 
-local PROMPT_VERSION = "yaca-prompt-v0.1.0-readiness.1"
+local PROMPT_VERSION = "yaca-prompt-v0.1.0-readiness.2"
 local CONTROL_VERSION = "yaca-controls-v0.1.0-readiness.1"
 
 local RUNTIME_CONTRACT = [[You are the model inside yaca, a terminal coding agent.
@@ -26,9 +26,9 @@ A normal provider stop without one of those controls means yield to the user; it
     side = RUNTIME_CONTRACT .. [[
 Answer the side question from the supplied committed facts. Do not call tools or change the main turn. Return advisory text only and state uncertainty explicitly.]],
     ["action-review"] = RUNTIME_CONTRACT .. [[
-Review only the bound proposed action and evidence. Return the exact review schema. You may add restrictions or uncertainty; you may never grant a capability or approval denied by Runtime.]],
+Review only the bound proposed action and evidence. Return only one UTF-8 JSON object with exactly two string fields named "verdict" and "reason", with no code fence or surrounding text. "verdict" must be exactly "pass", "tighten", "deny", or "uncertain". You may add restrictions or uncertainty; you may never grant a capability or approval denied by Runtime.]],
     ["termination-review"] = RUNTIME_CONTRACT .. [[
-Review whether the bound completion claim satisfies the supplied goal and evidence. Return the exact review schema. Do not perform work, call tools, or turn uncertainty into success.]],
+Review whether the bound completion claim satisfies the supplied goal and evidence. Return only one UTF-8 JSON object with exactly three string fields named "verdict", "gap", and "reason", with no code fence or surrounding text. "verdict" must be exactly "pass", "gap", or "uncertain"; "gap" must be non-empty only for a "gap" verdict. Do not perform work, call tools, or turn uncertainty into success.]],
     compaction = RUNTIME_CONTRACT .. [[
 Produce only the requested StructuredSummary. Preserve required identities, unresolved work, user decisions, approvals as historical facts, unknown effects, and atomic call/result groups. Never claim that omitted facts were deleted.]],
     ["self-test"] = RUNTIME_CONTRACT .. [[

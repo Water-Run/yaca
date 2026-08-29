@@ -5,7 +5,7 @@ Use only the schemas supplied in this request. Do not invent tools, capabilities
 
 return {
   contract_version = "0.1.0-readiness.1",
-  prompt_version = "yaca-prompt-v0.1.0-readiness.1",
+  prompt_version = "yaca-prompt-v0.1.0-readiness.2",
   decision_refs = { "D-020", "D-027", "D-044", "D-049", "D-051", "D-052" },
 
   segment_order = { "runtime-purpose", "global", "model", "permission", "context", "user-message" },
@@ -47,7 +47,7 @@ Answer the side question from the supplied committed facts. Do not call tools or
       user_instruction_layers = { "global", "model" },
       quoted_layers = { "permission", "context", "proposed-action", "evidence" },
       text = runtime_contract .. [[
-Review only the bound proposed action and evidence. Return the exact review schema. You may add restrictions or uncertainty; you may never grant a capability or approval denied by Runtime.]],
+Review only the bound proposed action and evidence. Return only one UTF-8 JSON object with exactly two string fields named "verdict" and "reason", with no code fence or surrounding text. "verdict" must be exactly "pass", "tighten", "deny", or "uncertain". You may add restrictions or uncertainty; you may never grant a capability or approval denied by Runtime.]],
     },
     ["termination-review"] = {
       tools = "none",
@@ -55,7 +55,7 @@ Review only the bound proposed action and evidence. Return the exact review sche
       user_instruction_layers = { "global", "model" },
       quoted_layers = { "double-check-goal", "context", "candidate-report", "evidence" },
       text = runtime_contract .. [[
-Review whether the bound completion claim satisfies the supplied goal and evidence. Return the exact review schema. Do not perform work, call tools, or turn uncertainty into success.]],
+Review whether the bound completion claim satisfies the supplied goal and evidence. Return only one UTF-8 JSON object with exactly three string fields named "verdict", "gap", and "reason", with no code fence or surrounding text. "verdict" must be exactly "pass", "gap", or "uncertain"; "gap" must be non-empty only for a "gap" verdict. Do not perform work, call tools, or turn uncertainty into success.]],
     },
     compaction = {
       tools = "none",

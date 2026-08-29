@@ -3740,4 +3740,305 @@ function M.new_agent_loop(ports, options)
     return readonly(loop, "AgentLoop")
 end
 
+local DRIVER_OPTION_FIELDS = {
+    model_poll_events = true,
+    tool_poll_events = true,
+    review_poll_events = true,
+    maximum_output_events = true,
+}
+
+local function validate_agent_driver(ports, options)
+    if type(ports) ~= "table" or not exact_fields(ports, {
+        loop = true,
+        model = true,
+        tools = true,
+        reviews = true,
+        clock = true,
+    })
+        or type(ports.loop) ~= "table"
+        or type(ports.loop.status) ~= "function"
+        or type(ports.loop.tick) ~= "function"
+        or type(ports.loop.accept_model_event) ~= "function"
+        or type(ports.loop.accept_model_response) ~= "function"
+        or type(ports.loop.accept_tool_result) ~= "function"
+        or type(ports.loop.resolve_action_review) ~= "function"
+        or type(ports.loop.resolve_termination_review) ~= "function"
+        or type(ports.model) ~= "table"
+        or type(ports.model.poll) ~= "function"
+        or type(ports.tools) ~= "table"
+        or type(ports.tools.poll) ~= "function"
+        or (ports.reviews ~= false and (
+            type(ports.reviews) ~= "table"
+            or type(ports.reviews.poll) ~= "function"
+        ))
+        or type(ports.clock) ~= "table"
+        or type(ports.clock.now) ~= "function"
+        or type(options) ~= "table"
+        or not exact_fields(options, DRIVER_OPTION_FIELDS)
+        or not integer_at_least(options.model_poll_events, 1)
+        or not integer_at_least(options.tool_poll_events, 1)
+        or not integer_at_least(options.review_poll_events, 1)
+        or not integer_at_least(options.maximum_output_events, 1)
+        or options.maximum_output_events
+            < math.max(
+                options.model_poll_events,
+                options.tool_poll_events,
+                options.review_poll_events
+            ) + 1
+    then
+        return nil, failure(
+            "InvalidAgentDriver",
+            "Agent activity driver ports or limits are incomplete"
+        )
+    end
+    return { ports = ports, options = options }
+end
+
+local function driver_call(target, method, ...)
+    local called, result, call_error = pcall(target[method], target, ...)
+    if not called then
+        return nil, failure(
+            "AgentDriverFailure",
+            "AgentLoop activity reduction raised an exception",
+            method
+        )
+    end
+    if result == nil or result == false then
+        return nil, call_error or failure(
+            "AgentDriverFailure",
+            "AgentLoop rejected an activity fact",
+            method
+        )
+    end
+    return result
+end
+
+---Drives canonical Model, Tool, and review activities into one AgentLoop owner.
+-- The driver never interprets Model text or operation effects; it only maps
+-- already-normalized activity facts to the corresponding typed Runtime method.
+function M.new_agent_activity_driver(ports, options)
+    local admitted, admission_error = validate_agent_driver(ports, options)
+    if not admitted then return nil, admission_error end
+    local last_now
+    local steps = 0
+    local service = {}
+
+    local function now()
+        local called, value = pcall(admitted.ports.clock.now)
+        if not called or not integer_at_least(value, 0)
+            or (last_now ~= nil and value < last_now)
+        then
+            return nil, failure(
+                "MonotonicClockFailure",
+                "Agent activity driver clock failed"
+            )
+        end
+        last_now = value
+        return value
+    end
+
+    local function append(output, event)
+        if #output >= admitted.options.maximum_output_events then
+            return nil, failure(
+                "AgentDriverOutputLimit",
+                "Agent activity driver output exceeded its bounded queue"
+            )
+        end
+        output[#output + 1] = event
+        return true
+    end
+
+    local function model_step(output)
+        local batch, poll_error = admitted.ports.model.poll(
+            admitted.options.model_poll_events
+        )
+        if dense_count(batch) == nil then
+            return nil, poll_error or failure(
+                "ModelActivityContract",
+                "Model activity returned an invalid batch"
+            )
+        end
+        for _, event in ipairs(batch) do
+            if type(event) ~= "table" or type(event.kind) ~= "string" then
+                return nil, failure(
+                    "ModelActivityContract",
+                    "Model activity event is invalid"
+                )
+            elseif event.kind == "canonical-event" then
+                local reduced, reduce_error = driver_call(
+                    admitted.ports.loop,
+                    "accept_model_event",
+                    event.request_id
+                )
+                if not reduced then return nil, reduce_error end
+            elseif event.kind == "adapter-event" then
+                local appended, append_error = append(output, {
+                    kind = "model-event",
+                    request_id = event.request_id,
+                    event = event.event,
+                })
+                if not appended then return nil, append_error end
+            elseif event.kind == "response" then
+                local reduced, reduce_error = driver_call(
+                    admitted.ports.loop,
+                    "accept_model_response",
+                    event.wrapper
+                )
+                if not reduced then return nil, reduce_error end
+                local appended, append_error = append(output, {
+                    kind = "runtime-transition",
+                    cause = "model-response",
+                    request_id = event.request_id,
+                    result = reduced,
+                })
+                if not appended then return nil, append_error end
+            else
+                return nil, failure(
+                    "ModelActivityContract",
+                    "Model activity returned an unknown event"
+                )
+            end
+        end
+        return #batch > 0
+    end
+
+    local function tool_step(output)
+        local observed_now, clock_error = now()
+        if not observed_now then return nil, clock_error end
+        local events, settlement = admitted.ports.tools.poll(
+            observed_now,
+            admitted.options.tool_poll_events
+        )
+        if dense_count(events) == nil or settlement == nil then
+            return nil, failure(
+                "ToolActivityContract",
+                "Tool activity returned an invalid poll result",
+                settlement or events
+            )
+        end
+        for _, event in ipairs(events) do
+            local appended, append_error = append(output, {
+                kind = "tool-event",
+                event = event,
+            })
+            if not appended then return nil, append_error end
+        end
+        if settlement ~= false then
+            if type(settlement) ~= "table" or type(settlement.result) ~= "table"
+                or (settlement.result_receipt ~= false
+                    and type(settlement.result_receipt) ~= "table")
+            then
+                return nil, failure(
+                    "ToolActivityContract",
+                    "Tool settlement is incomplete"
+                )
+            end
+            local reduced, reduce_error = driver_call(
+                admitted.ports.loop,
+                "accept_tool_result",
+                settlement.result,
+                settlement.result_receipt
+            )
+            if not reduced then return nil, reduce_error end
+            local appended, append_error = append(output, {
+                kind = "runtime-transition",
+                cause = "tool-result",
+                result = reduced,
+            })
+            if not appended then return nil, append_error end
+        end
+        return #events > 0 or settlement ~= false
+    end
+
+    local function review_step(output)
+        if admitted.ports.reviews == false then
+            return nil, failure(
+                "ReviewActivityUnavailable",
+                "AgentLoop is evaluating a review without a review activity port"
+            )
+        end
+        local batch, poll_error = admitted.ports.reviews.poll(
+            admitted.options.review_poll_events
+        )
+        if dense_count(batch) == nil then
+            return nil, poll_error or failure(
+                "ReviewActivityContract",
+                "review activity returned an invalid batch"
+            )
+        end
+        for _, event in ipairs(batch) do
+            if type(event) ~= "table" or event.kind ~= "verdict"
+                or (event.purpose ~= "action-review"
+                    and event.purpose ~= "termination-review")
+                or type(event.verdict) ~= "table"
+            then
+                return nil, failure(
+                    "ReviewActivityContract",
+                    "review activity returned an invalid verdict"
+                )
+            end
+            local method = event.purpose == "action-review"
+                and "resolve_action_review"
+                or "resolve_termination_review"
+            local reduced, reduce_error = driver_call(
+                admitted.ports.loop,
+                method,
+                event.verdict
+            )
+            if not reduced then return nil, reduce_error end
+            local appended, append_error = append(output, {
+                kind = "runtime-transition",
+                cause = event.purpose,
+                request_id = event.request_id,
+                result = reduced,
+            })
+            if not appended then return nil, append_error end
+        end
+        return #batch > 0
+    end
+
+    function service.step()
+        local ticked, tick_error = driver_call(admitted.ports.loop, "tick")
+        if not ticked then return nil, tick_error end
+        local before = admitted.ports.loop:status()
+        if type(before) ~= "table" or type(before.state) ~= "string" then
+            return nil, failure("AgentDriverFailure", "AgentLoop status is invalid")
+        end
+        local output = {}
+        local progressed = false
+        local lane_progress, lane_error
+        if before.state == "RequestingModel" or before.state == "Streaming" then
+            lane_progress, lane_error = model_step(output)
+        elseif before.state == "ExecutingTool" then
+            lane_progress, lane_error = tool_step(output)
+        elseif before.state == "EvaluatingAction"
+            or before.state == "EvaluatingTermination"
+        then
+            lane_progress, lane_error = review_step(output)
+        else
+            lane_progress = false
+        end
+        if lane_progress == nil then return nil, lane_error end
+        progressed = lane_progress
+        steps = steps + 1
+        local after = admitted.ports.loop:status()
+        return assert(freeze({
+            events = output,
+            status = after,
+            progressed = progressed or after.state ~= before.state,
+            step = steps,
+        }, nil, "Agent activity driver step"))
+    end
+
+    function service.status()
+        return assert(freeze({
+            steps = steps,
+            last_now = last_now or false,
+            loop = admitted.ports.loop:status(),
+        }, nil, "Agent activity driver status"))
+    end
+
+    return readonly(service, "Agent activity driver")
+end
+
 return M
