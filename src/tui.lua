@@ -6,6 +6,7 @@ Description: Renders bounded append-only semantic transcript blocks.
 ]]
 
 local cli = require("cli")
+local terminal = require("terminal")
 local text = require("text")
 
 local M = {}
@@ -645,6 +646,138 @@ function M.new(options)
         end
         last_sequence = sequence
         return rendered
+    end
+
+    ---Creates a draft-safe editor whose output always uses this renderer.
+    -- The returned facade does not expose the byte-level publish method, so an
+    -- asynchronous producer can append only validated semantic blocks.
+    function service.new_line_editor(display, editor_options)
+        if type(editor_options) ~= "table" then
+            return nil, failure("InvalidLineEditor", "TUI line-editor options are required")
+        end
+        local allowed_editor_options = {
+            mode = true,
+            focus = true,
+            maximum_draft_bytes = true,
+            maximum_pending_bytes = true,
+            maximum_pending_blocks = true,
+            initial_draft = true,
+            initial_cursor_byte = true,
+        }
+        for key in pairs(editor_options) do
+            if type(key) ~= "string" or not allowed_editor_options[key] then
+                return nil, failure(
+                    "InvalidLineEditor",
+                    "TUI line-editor options contain an unknown field"
+                )
+            end
+        end
+        local focus = editor_options.focus
+        if not PROMPTS[focus] then
+            return nil, failure("InvalidPrompt", "line-editor focus is unknown")
+        end
+        local backlog_notice, backlog_error = render_block({
+            kind = "status",
+            text = "output waiting",
+            inline = true,
+        }, capabilities, limits)
+        if not backlog_notice then return nil, backlog_error end
+        local line_editor, editor_error = terminal.new_line_editor(display, {
+            mode = editor_options.mode,
+            maximum_draft_bytes = editor_options.maximum_draft_bytes,
+            maximum_pending_bytes = editor_options.maximum_pending_bytes,
+            maximum_pending_blocks = editor_options.maximum_pending_blocks,
+            initial_draft = editor_options.initial_draft,
+            initial_cursor_byte = editor_options.initial_cursor_byte,
+            render_prompt = function(draft)
+                if draft == false or draft == "" then return service.render_prompt(focus) end
+                return service.render_prompt(focus, draft)
+            end,
+            backlog_notice = backlog_notice,
+        })
+        if not line_editor then return nil, editor_error end
+
+        local editor_sequence = 0
+        local facade = {}
+
+        function facade.show()
+            return line_editor.show()
+        end
+
+        function facade.set_draft(value, cursor_byte)
+            return line_editor.set_draft(value, cursor_byte)
+        end
+
+        function facade.insert(value)
+            return line_editor.insert(value)
+        end
+
+        function facade.backspace()
+            return line_editor.backspace()
+        end
+
+        function facade.delete_forward()
+            return line_editor.delete_forward()
+        end
+
+        function facade.move(direction)
+            return line_editor.move(direction)
+        end
+
+        function facade.consume(event)
+            return line_editor.consume(event)
+        end
+
+        function facade.prepare_submission(intent)
+            return line_editor.prepare_submission(intent)
+        end
+
+        function facade.resolve_submission(submission_generation, accepted)
+            return line_editor.resolve_submission(submission_generation, accepted)
+        end
+
+        ---Renders and publishes one increasing semantic block.
+        function facade.publish(block)
+            local rendered, render_error = render_block(block, capabilities, limits)
+            if not rendered then return nil, render_error end
+            local next_sequence = block.sequence or (editor_sequence + 1)
+            if next_sequence <= editor_sequence then
+                return nil, failure(
+                    "OutOfOrderViewBlock",
+                    "line-editor semantic sequence must increase"
+                )
+            end
+            local result, publish_error = line_editor.publish(rendered)
+            if not result then return nil, publish_error end
+            editor_sequence = next_sequence
+            return readonly({
+                sequence = next_sequence,
+                queued = result.queued,
+                bytes = result.bytes,
+                rendered = rendered,
+            }, "line-editor published block")
+        end
+
+        function facade.flush_cooked()
+            return line_editor.flush_cooked()
+        end
+
+        function facade.resume_cooked()
+            return line_editor.resume_cooked()
+        end
+
+        function facade.snapshot()
+            local snapshot = line_editor.snapshot()
+            local values = { last_sequence = editor_sequence }
+            for key, value in pairs(snapshot) do values[key] = value end
+            return readonly(values, "TUI line-editor snapshot")
+        end
+
+        function facade.close()
+            return line_editor.close()
+        end
+
+        return readonly(facade, "TUI line editor")
     end
 
     ---Renders independently visible startup fields in their fixed order.
