@@ -1,16 +1,18 @@
 --[[
 File: session.lua
-Date: 2026-08-29
+Date: 2026-08-30
 Author: WaterRun
-Description: Owns the bounded unsaved chat draft before Context publication.
+Description: Owns the bounded chat draft and first durable Context publication.
 ]]
 
 local text = require("text")
 
 local M = {}
 
-local function failure(code, message)
-    return { code = code, message = message }
+local function failure(code, message, reason)
+    local result = { code = code, message = message }
+    if reason ~= nil then result.reason = reason end
+    return result
 end
 
 local function readonly(values, label)
@@ -79,6 +81,613 @@ local function settings_bytes(settings)
         + #settings.context_prompt
 end
 
+local function valid_absolute_path(path)
+    if type(path) ~= "string" or path == "" or path:find("\0", 1, true) then
+        return false
+    end
+    local normalized = path:gsub("\\", "/")
+    return normalized:sub(1, 1) == "/"
+        or normalized:match("^[A-Za-z]:/") ~= nil
+        or normalized:match("^//[^/]+/[^/]+") ~= nil
+end
+
+local function directory_of(path, platform_kind)
+    if type(path) ~= "string" then return nil end
+    local separator
+    for index = #path, 1, -1 do
+        local byte = path:byte(index)
+        if byte == 0x2F or (platform_kind == "windows" and byte == 0x5C) then
+            separator = index
+            break
+        end
+    end
+    if not separator then return nil end
+    if separator == 1 then return path:sub(1, 1) end
+    if separator == 3 and path:sub(2, 2) == ":" then return path:sub(1, 3) end
+    return path:sub(1, separator - 1)
+end
+
+local function join_native(root, leaf, platform_kind)
+    local separator = platform_kind == "windows" and "\\" or "/"
+    if root:sub(-1) == separator then return root .. leaf end
+    return root .. separator .. leaf
+end
+
+local function hex(bytes)
+    return (bytes:gsub(".", function(byte)
+        return string.format("%02X", byte:byte())
+    end))
+end
+
+local function canonical_public(value, visiting)
+    local value_type = type(value)
+    if value_type == "string" then return "s" .. tostring(#value) .. ":" .. value end
+    if value_type == "boolean" then return value and "b1" or "b0" end
+    if value_type == "number" then
+        if value ~= value or value == math.huge or value == -math.huge then
+            return nil, failure("InvalidSnapshot", "public snapshot contains a non-finite number")
+        end
+        if math.type(value) == "integer" then return "i" .. tostring(value) end
+        return "f" .. string.format("%.17g", value)
+    end
+    if value_type ~= "table" then
+        return nil, failure("InvalidSnapshot", "public snapshot contains a non-data value")
+    end
+    visiting = visiting or {}
+    if visiting[value] then
+        return nil, failure("InvalidSnapshot", "public snapshot contains a cycle")
+    end
+    visiting[value] = true
+    local entries = {}
+    for key, item in pairs(value) do
+        local key_bytes, key_error = canonical_public(key, visiting)
+        if not key_bytes then visiting[value] = nil; return nil, key_error end
+        local item_bytes, item_error = canonical_public(item, visiting)
+        if not item_bytes then visiting[value] = nil; return nil, item_error end
+        entries[#entries + 1] = key_bytes .. "=" .. item_bytes
+    end
+    table.sort(entries)
+    visiting[value] = nil
+    return "t" .. tostring(#entries) .. ":" .. table.concat(entries, "|")
+end
+
+local function snapshot_digest(safety, domain, value)
+    local bytes, bytes_error = canonical_public(value)
+    if not bytes then return nil, bytes_error end
+    return safety.binding_digest(domain, { { name = "public", value = bytes } })
+end
+
+local function public_generation_snapshot(generation, settings)
+    return {
+        id = generation.id,
+        schema_version = generation.schema_version,
+        general = generation.general,
+        tui = generation.tui,
+        agent = generation.agent,
+        network = generation.network,
+        exec = generation.exec,
+        context = generation.context,
+        permissions = generation.permissions,
+        permission_order = generation.permission_order,
+        models = generation.models,
+        model_order = generation.model_order,
+        current_model = settings.model,
+        current_permission = settings.permission,
+        double_check = settings.double_check,
+        double_check_goal = settings.double_check_goal,
+        context_prompt = settings.context_prompt,
+        auto_rename_disabled = settings.auto_rename_disabled,
+    }
+end
+
+local function admit_directory_snapshot(path, snapshot)
+    if type(snapshot) ~= "table"
+        or snapshot.requested_path ~= path
+        or snapshot.canonical_path ~= path
+        or snapshot.ancestry_complete ~= true
+        or type(snapshot.ancestors) ~= "table"
+        or #snapshot.ancestors == 0
+        or type(snapshot.parent_identity) ~= "table"
+        or snapshot.parent_identity.kind ~= "directory"
+    then
+        return nil, failure(
+            "ContextDirectoryAlias",
+            "Context mirror ancestry is not an exact no-follow directory path"
+        )
+    end
+    for _, ancestor in ipairs(snapshot.ancestors) do
+        if type(ancestor) ~= "table"
+            or type(ancestor.identity) ~= "table"
+            or ancestor.identity.kind ~= "directory"
+        then
+            return nil, failure(
+                "ContextDirectoryAlias",
+                "Context mirror ancestry contains a non-directory"
+            )
+        end
+    end
+    if snapshot.exists then
+        if type(snapshot.identity) ~= "table"
+            or snapshot.identity.kind ~= "directory"
+            or type(snapshot.metadata) ~= "table"
+            or snapshot.metadata.link_target ~= false
+        then
+            return nil, failure(
+                "ContextDirectoryConflict",
+                "Context mirror path is not an ordinary directory"
+            )
+        end
+    end
+    return snapshot
+end
+
+local function inspect_directory(filesystem, path)
+    local inspected, snapshot_or_error = filesystem.direct_inspect(path)
+    if not inspected then return nil, snapshot_or_error end
+    return admit_directory_snapshot(path, snapshot_or_error)
+end
+
+local function ensure_directory(filesystem, path, platform_kind)
+    local snapshot, inspect_error = inspect_directory(filesystem, path)
+    if not snapshot then return nil, inspect_error end
+    if snapshot.exists then return snapshot end
+    local created, create_error = filesystem.make_directory(path, 448)
+    if not created
+        and (type(create_error) ~= "table" or create_error.code ~= "DestinationExists")
+    then
+        return nil, create_error
+    end
+    snapshot, inspect_error = inspect_directory(filesystem, path)
+    if not snapshot then return nil, inspect_error end
+    if not snapshot.exists then
+        return nil, failure(
+            "ContextDirectoryUnknown",
+            "Context mirror directory creation could not be confirmed"
+        )
+    end
+    if not created then return snapshot end
+    local parent = directory_of(path, platform_kind)
+    if not parent then
+        return nil, failure("InvalidContextPath", "Context mirror directory has no parent")
+    end
+    local flushed, flush_error = filesystem.flush_directory(parent)
+    if not flushed then
+        return nil, failure(
+            "ContextDirectoryUnknown",
+            "Context mirror directory durability is unknown",
+            flush_error and flush_error.code
+        )
+    end
+    return snapshot
+end
+
+local function validate_publication_ports(ports)
+    if type(ports) ~= "table" then
+        return nil, failure("InvalidContextPublication", "Context publication ports are required")
+    end
+    local required = {
+        filesystem = {
+            "direct_inspect", "direct_reverify", "make_directory", "flush_directory",
+        },
+        schema = { "build" },
+        store = { "create_writer", "publish", "close_writer" },
+        path = { "to_logical", "validate_context_name", "context_hash" },
+        safety = { "binding_digest" },
+        prompt = { "assemble" },
+        system = { "secure_random", "current_process_id", "utc_now" },
+    }
+    for name, methods in pairs(required) do
+        if type(ports[name]) ~= "table" then
+            return nil, failure(
+                "InvalidContextPublication",
+                "Context publication omits the " .. name .. " port"
+            )
+        end
+        for _, method in ipairs(methods) do
+            if type(ports[name][method]) ~= "function" then
+                return nil, failure(
+                    "InvalidContextPublication",
+                    "Context publication " .. name .. " port omits " .. method
+                )
+            end
+        end
+    end
+    if type(ports.tool_registry) ~= "table"
+        or type(ports.tool_registry.digest) ~= "string"
+        or ports.tool_registry.digest == ""
+    then
+        return nil, failure(
+            "InvalidContextPublication",
+            "Context publication requires the exact tool registry snapshot"
+        )
+    end
+    return ports
+end
+
+local function validate_publication_options(options)
+    if type(options) ~= "table" then
+        return nil, failure("InvalidContextPublication", "Context publication limits are required")
+    end
+    local allowed = {
+        data_root = true,
+        platform_kind = true,
+        maximum_create_attempts = true,
+    }
+    for key in pairs(options) do
+        if type(key) ~= "string" or not allowed[key] then
+            return nil, failure(
+                "InvalidContextPublication",
+                "Context publication options contain an unknown field"
+            )
+        end
+    end
+    if not valid_absolute_path(options.data_root)
+        or (options.platform_kind ~= "windows" and options.platform_kind ~= "posix")
+        or not valid_integer(options.maximum_create_attempts, 1)
+        or options.maximum_create_attempts > 256
+    then
+        return nil, failure(
+            "InvalidContextPublication",
+            "Context publication options are incomplete or unsafe"
+        )
+    end
+    return options
+end
+
+---Creates the single-owner service that turns a first main message into the
+-- initial durable Context generation. Candidate names come only from the
+-- injected secure random port and every attempt is published no-replace.
+function M.new_context_publication(ports, options)
+    local admitted_ports, ports_error = validate_publication_ports(ports)
+    if not admitted_ports then return nil, ports_error end
+    local admitted, options_error = validate_publication_options(options)
+    if not admitted then return nil, options_error end
+
+    local filesystem = admitted_ports.filesystem
+    local schema = admitted_ports.schema
+    local store = admitted_ports.store
+    local path = admitted_ports.path
+    local safety = admitted_ports.safety
+    local prompt = admitted_ports.prompt
+    local system = admitted_ports.system
+    local context_root = join_native(admitted.data_root, "CONTEXT", admitted.platform_kind)
+    local active
+    local closed = false
+    local service = {}
+
+    local function prepare_mirror(workspace_path)
+        local logical, logical_error = path.to_logical(workspace_path)
+        if not logical then return nil, logical_error end
+        local current = admitted.data_root
+        local prepared, prepare_error = ensure_directory(
+            filesystem,
+            current,
+            admitted.platform_kind
+        )
+        if prepared == nil then return nil, prepare_error end
+        current = context_root
+        prepared, prepare_error = ensure_directory(filesystem, current, admitted.platform_kind)
+        if prepared == nil then return nil, prepare_error end
+        if logical ~= "/" then
+            for segment in logical:sub(2):gmatch("[^/]+") do
+                current = join_native(current, segment, admitted.platform_kind)
+                prepared, prepare_error = ensure_directory(
+                    filesystem,
+                    current,
+                    admitted.platform_kind
+                )
+                if prepared == nil then return nil, prepare_error end
+            end
+        end
+        return current, logical, prepared
+    end
+
+    local function prompt_bundle(generation, settings, message)
+        local model = generation.models[settings.model]
+        local permission = generation.permissions[settings.permission]
+        if type(model) ~= "table" or type(permission) ~= "table" then
+            return nil, failure("SnapshotUnavailable", "selected Model or Permission vanished")
+        end
+        return prompt:assemble({
+            purpose = "main",
+            config_generation = generation.id,
+            layers = {
+                global = {
+                    source = "General.SystemPrompt",
+                    version = generation.id,
+                    text = generation.general.system_prompt,
+                },
+                model = {
+                    source = "Model." .. settings.model .. ".SystemPrompt",
+                    version = generation.id,
+                    text = model.system_prompt,
+                },
+                permission = {
+                    source = "Permission." .. settings.permission .. ".SystemPrompt",
+                    version = generation.id,
+                    text = permission.system_prompt,
+                },
+                context = {
+                    source = "ContextPrompt",
+                    version = generation.id,
+                    text = settings.context_prompt,
+                },
+            },
+            input = { user_message = message },
+            tool_mode = "registered",
+        })
+    end
+
+    local function snapshots(specification)
+        local generation = specification.generation
+        local settings = specification.settings
+        local model = generation.models[settings.model]
+        local permission = generation.permissions[settings.permission]
+        if type(model) ~= "table" or type(permission) ~= "table" then
+            return nil, failure("SnapshotUnavailable", "selected Model or Permission is missing")
+        end
+        local model_digest, digest_error = snapshot_digest(
+            safety,
+            "yaca-model-snapshot-v1",
+            { name = settings.model, generation = generation.id, values = model }
+        )
+        if not model_digest then return nil, digest_error end
+        local permission_digest
+        permission_digest, digest_error = snapshot_digest(
+            safety,
+            "yaca-permission-snapshot-v1",
+            { name = settings.permission, generation = generation.id, values = permission }
+        )
+        if not permission_digest then return nil, digest_error end
+        local config_digest
+        config_digest, digest_error = snapshot_digest(
+            safety,
+            "yaca-config-generation-public-v1",
+            public_generation_snapshot(generation, settings)
+        )
+        if not config_digest then return nil, digest_error end
+        local bundle, bundle_error = prompt_bundle(
+            generation,
+            settings,
+            specification.message
+        )
+        if not bundle then return nil, bundle_error end
+        local view_digest
+        view_digest, digest_error = snapshot_digest(
+            safety,
+            "yaca-initial-model-view-manifest-v1",
+            {
+                schema_version = 1,
+                context_generation = 1,
+                event_range = "1-2",
+                kind = "main",
+                config_snapshot = config_digest,
+                model_snapshot = model_digest,
+                permission_snapshot = permission_digest,
+                prompt_snapshot = bundle.digest,
+                tool_registry_snapshot = admitted_ports.tool_registry.digest,
+                message = specification.message,
+                source = specification.source,
+            }
+        )
+        if not view_digest then return nil, digest_error end
+        return {
+            model = model_digest,
+            permission = permission_digest,
+            config = config_digest,
+            prompt = bundle.digest,
+            view = view_digest,
+            tool_registry = admitted_ports.tool_registry.digest,
+        }
+    end
+
+    local function close_writer(writer, original_error)
+        local closed_writer, close_error = store.close_writer(writer)
+        if not closed_writer then
+            return nil, failure(
+                "ContextPublicationUnknown",
+                "Context publication failed and writer release is unknown",
+                close_error and close_error.code or (original_error and original_error.code)
+            )
+        end
+        return nil, original_error
+    end
+
+    function service.publish_first(specification)
+        if closed then
+            return nil, failure("ContextPublicationClosed", "Context publication service is closed")
+        end
+        if active then
+            return nil, failure("ContextAlreadyPublished", "this process already owns a Context")
+        end
+        if type(specification) ~= "table"
+            or type(specification.generation) ~= "table"
+            or type(specification.workspace) ~= "table"
+            or type(specification.workspace.path) ~= "string"
+            or type(specification.settings) ~= "table"
+            or type(specification.message) ~= "string"
+            or specification.message == ""
+            or type(specification.source) ~= "string"
+            or specification.source == ""
+        then
+            return nil, failure("InvalidFirstMain", "first main publication input is incomplete")
+        end
+        local generation = specification.generation
+        local settings = specification.settings
+        local snapshot, snapshot_error = snapshots(specification)
+        if not snapshot then return nil, snapshot_error end
+        local mirror, workspace_logical_or_error, mirror_snapshot = prepare_mirror(
+            specification.workspace.path
+        )
+        if not mirror then return nil, workspace_logical_or_error end
+        local workspace_logical = workspace_logical_or_error
+        local now, time_error = system.utc_now()
+        if type(now) ~= "string" or now == "" then
+            return nil, time_error or failure("UtcClockReadFailed", "UTC clock is unavailable")
+        end
+        local pid, pid_error = system.current_process_id()
+        if not valid_integer(pid, 1) then
+            return nil, pid_error or failure("ProcessIdentityUnavailable", "process ID is unavailable")
+        end
+
+        for _ = 1, admitted.maximum_create_attempts do
+            local current, current_or_error = filesystem.direct_reverify(mirror_snapshot)
+            if not current then return nil, current_or_error end
+            mirror_snapshot, current_or_error = admit_directory_snapshot(mirror, current_or_error)
+            if not mirror_snapshot then return nil, current_or_error end
+            local random, random_error = system.secure_random(10)
+            if type(random) ~= "string" or #random ~= 10 then
+                return nil, random_error or failure(
+                    "SecureRandomUnavailable",
+                    "secure random source returned an invalid result"
+                )
+            end
+            local display_name = "Untitled Conversation [" .. hex(random:sub(1, 2)) .. "]"
+            local valid_name, name_error = path.validate_context_name(display_name)
+            if not valid_name then return nil, name_error end
+            local filename = display_name .. ".xml"
+            local target_path = join_native(mirror, filename, admitted.platform_kind)
+            local logical_path = workspace_logical == "/" and "/" .. filename
+                or workspace_logical .. "/" .. filename
+            local context_hash, hash_error = path.context_hash(logical_path)
+            if not context_hash then return nil, hash_error end
+            local facts = {
+                {
+                    seq = 1,
+                    type = "turn_started",
+                    at = now,
+                    turn_id = "turn-1",
+                    fields = {
+                        kind = "main",
+                        configGeneration = snapshot.config,
+                        modelSnapshot = snapshot.model,
+                        permissionSnapshot = snapshot.permission,
+                        promptSnapshot = snapshot.prompt,
+                        toolRegistrySnapshot = snapshot.tool_registry,
+                    },
+                },
+                {
+                    seq = 2,
+                    type = "user_message",
+                    at = now,
+                    turn_id = "turn-1",
+                    fields = {
+                        messageId = "turn-1:message:1",
+                        text = specification.message,
+                        source = specification.source,
+                    },
+                },
+            }
+            local goal_override = settings.double_check_goal_override == "value"
+                and { mode = "value", value = settings.double_check_goal }
+                or { mode = "inherit" }
+            local header = {
+                name = display_name,
+                created_at = now,
+                updated_at = now,
+                naming_waterline = 0,
+                auto_name_baseline = 0,
+            }
+            if settings.auto_rename_disabled then header.auto_rename_disabled = true end
+            local document, document_error = schema.build({
+                schema_version = "0.1.0",
+                generation = 1,
+                header = header,
+                session = {
+                    current_model = {
+                        name = settings.model,
+                        snapshot_digest = snapshot.model,
+                    },
+                    current_permission = {
+                        name = settings.permission,
+                        snapshot_digest = snapshot.permission,
+                    },
+                    double_check_override = settings.double_check_override,
+                    double_check_goal_override = goal_override,
+                    context_prompt = settings.context_prompt,
+                },
+                facts = facts,
+                model_view = {
+                    active_manifest = {
+                        digest = snapshot.view,
+                        first_event_seq = 1,
+                        last_event_seq = 2,
+                    },
+                    compaction_records = {},
+                },
+            })
+            if not document then return nil, document_error end
+            local writer, writer_error = store.create_writer(target_path, {
+                pid = pid,
+                started_at = now,
+            })
+            if writer then
+                local temporary_path = target_path .. ".yaca-tmp-" .. hex(random:sub(3))
+                local published, publish_error = store.publish(
+                    writer,
+                    document,
+                    temporary_path
+                )
+                if published then
+                    local receipt = readonly({
+                        outcome = "published",
+                        durable = true,
+                        context_path = target_path,
+                        logical_path = logical_path,
+                        context_hash = context_hash,
+                        display_name = display_name,
+                        generation = document.generation,
+                        event_count = document.event_count,
+                        config_snapshot = snapshot.config,
+                        model_snapshot = snapshot.model,
+                        permission_snapshot = snapshot.permission,
+                        prompt_snapshot = snapshot.prompt,
+                        tool_registry_snapshot = snapshot.tool_registry,
+                        view_manifest_snapshot = snapshot.view,
+                    }, "first Context publication receipt")
+                    active = { writer = writer, document = document, receipt = receipt }
+                    return receipt
+                end
+                local collision = type(publish_error) == "table"
+                    and (publish_error.code == "DestinationExists"
+                        or publish_error.code == "LockConflict")
+                local _, close_error = close_writer(writer, publish_error)
+                if close_error and close_error.code == "ContextPublicationUnknown" then
+                    return nil, close_error
+                end
+                if not collision then return nil, publish_error end
+            elseif type(writer_error) ~= "table"
+                or (writer_error.code ~= "DestinationExists"
+                    and writer_error.code ~= "LockConflict")
+            then
+                return nil, writer_error
+            end
+        end
+        return nil, failure(
+            "ContextNameExhausted",
+            "secure random Context names collided through the bounded retry limit"
+        )
+    end
+
+    function service.status()
+        if active then return active.receipt end
+        return readonly({ durable = false, closed = closed }, "Context publication status")
+    end
+
+    function service.close()
+        if closed then return false end
+        closed = true
+        if not active then return true end
+        local writer = active.writer
+        active.writer = false
+        local released, release_error = store.close_writer(writer)
+        if not released then return nil, release_error end
+        return true
+    end
+
+    return readonly(service, "Context publication service")
+end
+
 ---Creates a bounded in-memory chat draft without scanning or writing Contexts.
 -- The draft owns only not-yet-durable session selectors. It cannot accept a
 -- first main message until the later Context publication service is attached.
@@ -87,7 +696,7 @@ end
 -- @param options table Contains maximum_draft_bytes.
 -- @return table|nil draft Immutable facade over the owned draft state.
 -- @return table|nil err Structured validation failure.
-function M.new_draft(generation, workspace, options)
+function M.new_draft(generation, workspace, options, publication)
     local admitted_generation, generation_error = validate_generation(generation)
     if not admitted_generation then return nil, generation_error end
     local admitted_workspace, workspace_error = validate_workspace(workspace)
@@ -103,6 +712,15 @@ function M.new_draft(generation, workspace, options)
     if not valid_integer(options.maximum_draft_bytes, 1) then
         return nil, failure("InvalidSessionOptions", "maximum_draft_bytes must be positive")
     end
+    if publication ~= nil and (type(publication) ~= "table"
+        or type(publication.publish_first) ~= "function"
+        or type(publication.close) ~= "function")
+    then
+        return nil, failure(
+            "InvalidSessionPublication",
+            "draft publication must expose publish_first and close"
+        )
+    end
     if not valid_text(generation.context_prompt or "", options.maximum_draft_bytes) then
         return nil, failure("DraftLimit", "initial Context Prompt exceeds the draft limit")
     end
@@ -112,7 +730,9 @@ function M.new_draft(generation, workspace, options)
         model = generation.current_model,
         permission = generation.current_permission,
         double_check = generation.effective_double_check,
+        double_check_override = "inherit",
         double_check_goal = generation.effective_double_check_goal or "",
+        double_check_goal_override = "inherit",
         context_prompt = generation.context_prompt or "",
         auto_rename_disabled = generation.auto_rename_disabled == true,
     }
@@ -120,6 +740,8 @@ function M.new_draft(generation, workspace, options)
         return nil, failure("DraftLimit", "initial session settings exceed the draft limit")
     end
     local draft = {}
+    local publication_receipt
+    local close_failure
 
     local function require_open()
         if lifecycle ~= "not-saved" then
@@ -131,10 +753,10 @@ function M.new_draft(generation, workspace, options)
     local function status()
         return readonly({
             lifecycle = lifecycle,
-            durable = false,
-            context_path = false,
-            context_hash = false,
-            display_name = "not saved",
+            durable = publication_receipt ~= nil,
+            context_path = publication_receipt and publication_receipt.context_path or false,
+            context_hash = publication_receipt and publication_receipt.context_hash or false,
+            display_name = publication_receipt and publication_receipt.display_name or "not saved",
             workspace = admitted_workspace.path,
             config_generation = generation.id,
             model = settings.model,
@@ -198,6 +820,7 @@ function M.new_draft(generation, workspace, options)
                 return nil, failure("InvalidDraftUpdate", "double_check must be boolean")
             end
             next_settings.double_check = changes.double_check
+            next_settings.double_check_override = changes.double_check
         end
         for _, key in ipairs({ "double_check_goal", "context_prompt" }) do
             if changes[key] ~= nil then
@@ -213,6 +836,9 @@ function M.new_draft(generation, workspace, options)
                     )
                 end
                 next_settings[key] = changes[key]
+                if key == "double_check_goal" then
+                    next_settings.double_check_goal_override = "value"
+                end
             end
         end
         if changes.auto_rename_disabled ~= nil then
@@ -231,22 +857,84 @@ function M.new_draft(generation, workspace, options)
         return status()
     end
 
-    ---Refuses a first main message until durable Context publication is wired.
-    -- @return nil
-    -- @return table err Typed non-acceptance; no Model or tool has been started.
-    function draft.begin_main()
+    ---Publishes the first main input before any Model or tool may be started.
+    function draft.begin_main(message, source)
         local open, open_error = require_open()
         if not open then return nil, open_error end
-        return nil, failure(
-            "ContextPublicationUnavailable",
-            "the first main message cannot be accepted before Context storage is attached"
-        )
+        if not publication then
+            return nil, failure(
+                "ContextPublicationUnavailable",
+                "the first main message cannot be accepted before Context storage is attached"
+            )
+        end
+        source = source or "main"
+        if not valid_text(message, options.maximum_draft_bytes) or message == ""
+            or not valid_text(source, 64) or source == ""
+        then
+            return nil, failure("InvalidDraft", "first main message or source is invalid")
+        end
+        local hits, scan_error = generation.scan_registered_secrets(message)
+        if not hits then return nil, scan_error end
+        if #hits > 0 then
+            return nil, failure(
+                "RegisteredSecret",
+                "first main message matches a registered configuration secret"
+            )
+        end
+        local called, receipt, publish_error = pcall(publication.publish_first, {
+            generation = generation,
+            workspace = admitted_workspace,
+            settings = {
+                model = settings.model,
+                permission = settings.permission,
+                double_check = settings.double_check,
+                double_check_override = settings.double_check_override,
+                double_check_goal = settings.double_check_goal,
+                double_check_goal_override = settings.double_check_goal_override,
+                context_prompt = settings.context_prompt,
+                auto_rename_disabled = settings.auto_rename_disabled,
+            },
+            message = message,
+            source = source,
+        })
+        if not called then
+            return nil, failure(
+                "ContextPublicationFailure",
+                "first Context publication raised an exception"
+            )
+        end
+        if type(receipt) ~= "table" or receipt.durable ~= true
+            or type(receipt.context_path) ~= "string"
+            or type(receipt.context_hash) ~= "string"
+            or type(receipt.display_name) ~= "string"
+        then
+            return nil, publish_error or failure(
+                "ContextPublicationFailure",
+                "first Context publication returned no exact durable receipt"
+            )
+        end
+        publication_receipt = receipt
+        lifecycle = "saved"
+        return receipt
     end
 
     ---Closes the in-memory draft without creating any filesystem object.
     function draft.close()
-        if lifecycle == "closed" then return false end
+        if lifecycle == "closed" then
+            if close_failure then return nil, close_failure end
+            return false
+        end
         lifecycle = "closed"
+        if publication_receipt then
+            local called, closed_publication, close_error = pcall(publication.close)
+            if not called or not closed_publication then
+                close_failure = close_error or failure(
+                    "ContextLeaseUnknown",
+                    "saved Context writer could not be released"
+                )
+                return nil, close_failure
+            end
+        end
         return true
     end
 

@@ -1,6 +1,6 @@
 --[[
 File: native_ports_test.lua
-Date: 2026-08-29
+Date: 2026-08-30
 Author: WaterRun
 Description: Verifies narrow filesystem, process, terminal, and backend ports.
 ]]
@@ -56,6 +56,14 @@ local function success_native()
 
     function native.utc_now()
         return "2026-08-29T00:00:00Z"
+    end
+
+    function native.secure_random(length)
+        return string.rep("r", length)
+    end
+
+    function native.current_process_id()
+        return 41
     end
 
     function native.fs_open_read(path)
@@ -419,6 +427,8 @@ return {
                 }, port_options()))
                 A.equal(linux_backend.target_id, "linux-x86_64")
                 A.equal(linux_backend.processes.capabilities.shell, "linux")
+                A.equal(#assert(linux_backend.system.secure_random(10)), 10)
+                A.equal(linux_backend.system.current_process_id(), 41)
                 A.equal(linux_backend.qualification, "pending-target-evidence")
                 A.raises(function() linux_backend.target_id = "win32-x86" end, "cannot be modified")
 
@@ -431,6 +441,8 @@ return {
                 }, port_options()))
                 A.equal(windows_backend.target_id, "win32-x86")
                 A.equal(windows_backend.processes.capabilities.shell, "windows")
+                A.equal(#assert(windows_backend.system.secure_random(10)), 10)
+                A.equal(windows_backend.system.current_process_id(), 41)
                 A.equal(windows_backend.qualification, "pending-target-evidence")
                 local rejected, mismatch = windows.new(windows_native, {
                     os = "windows",

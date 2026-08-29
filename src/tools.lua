@@ -1,6 +1,6 @@
 --[[
 File: tools.lua
-Date: 2026-08-29
+Date: 2026-08-30
 Author: WaterRun
 Description: Defines the closed tool registry and verified direct-file operations.
 ]]
@@ -375,6 +375,19 @@ local function build_registry(safety)
     }, "tool registry")
     if not registry then return nil, freeze_error end
     return registry
+end
+
+---Builds the exact immutable registry snapshot without constructing workspace
+-- mutation ports. Runtime uses this to bind the first durable Context before
+-- any tool service is allowed to start.
+function M.registry_snapshot(safety)
+    if type(safety) ~= "table"
+        or type(safety.digest) ~= "function"
+        or type(safety.freeze) ~= "function"
+    then
+        return nil, failure("InvalidToolDependencies", "tool registry requires safety ports")
+    end
+    return build_registry(safety)
 end
 
 local function valid_string(value, maximum, allow_empty)

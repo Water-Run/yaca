@@ -1,6 +1,6 @@
 --[[
 File: bootstrap_test.lua
-Date: 2026-08-29
+Date: 2026-08-30
 Author: WaterRun
 Description: Verifies offline bootstrap routing, Agent gates, and bare-draft behavior.
 ]]
@@ -185,6 +185,8 @@ local function production_native()
     end
     function native.monotonic_now() return 1 end
     function native.utc_now() return "2026-08-30T00:00:00Z" end
+    function native.secure_random(length) return string.rep("r", length) end
+    function native.current_process_id() return 41 end
     for _, name in ipairs({
         "sha256_start", "sha256_update", "sha256_finish", "sha256_close",
     }) do

@@ -1,8 +1,8 @@
 /*
 ** File: yaca_native.c
-** Date: 2026-08-29
+** Date: 2026-08-30
 ** Author: WaterRun
-** Description: Portable narrow native ports for filesystem, process, terminal, clocks, and SHA-256.
+** Description: Portable narrow native ports for filesystem, process, terminal, system identity, clocks, and SHA-256.
 */
 
 #if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
@@ -37,6 +37,11 @@
 
 #include <windows.h>
 #include <winioctl.h>
+
+/* SystemFunction036 is the XP-compatible Advapi32 export commonly exposed as
+** RtlGenRandom.  Keep the import explicit so random bytes never fall back to
+** process, clock, or C-library pseudo-random state. */
+extern BOOLEAN WINAPI SystemFunction036(PVOID buffer, ULONG length);
 
 #else
 
@@ -8834,6 +8839,70 @@ static void secure_zero(void *memory, size_t length)
   }
 }
 
+static int l_secure_random(lua_State *L)
+{
+  lua_Integer requested;
+  unsigned char bytes[64];
+  size_t length;
+
+  requested = luaL_checkinteger(L, 1);
+  if (requested < 1 || requested > (lua_Integer)sizeof(bytes))
+  {
+    return luaL_error(L, "secure random byte count must be from 1 through 64");
+  }
+  length = (size_t)requested;
+#if defined(_WIN32)
+  if (!SystemFunction036(bytes, (ULONG)length))
+  {
+    secure_zero(bytes, sizeof(bytes));
+    return luaL_error(L, "native secure random source is unavailable");
+  }
+#else
+  {
+    int descriptor;
+    size_t offset;
+
+    descriptor = open("/dev/urandom", O_RDONLY
+#if defined(O_CLOEXEC)
+      | O_CLOEXEC
+#endif
+    );
+    if (descriptor < 0)
+    {
+      secure_zero(bytes, sizeof(bytes));
+      return luaL_error(L, "native secure random source is unavailable");
+    }
+    offset = 0;
+    while (offset < length)
+    {
+      ssize_t count;
+
+      count = read(descriptor, bytes + offset, length - offset);
+      if (count < 0 && errno == EINTR) continue;
+      if (count <= 0)
+      {
+        int error_value;
+
+        error_value = count < 0 ? errno : EIO;
+        close(descriptor);
+        secure_zero(bytes, sizeof(bytes));
+        errno = error_value;
+        return luaL_error(L, "native secure random source is unavailable");
+      }
+      offset += (size_t)count;
+    }
+    if (close(descriptor) != 0)
+    {
+      secure_zero(bytes, sizeof(bytes));
+      return luaL_error(L, "native secure random source could not be closed");
+    }
+  }
+#endif
+  lua_pushlstring(L, (const char *)bytes, length);
+  secure_zero(bytes, sizeof(bytes));
+  return 1;
+}
+
 static void sha256_transform(yaca_sha256 *context, const unsigned char block[64])
 {
   uint32_t words[64];
@@ -9123,6 +9192,30 @@ static int l_monotonic_now(lua_State *L)
   return 1;
 }
 
+static int l_current_process_id(lua_State *L)
+{
+#if defined(_WIN32)
+  DWORD process_id;
+
+  process_id = GetCurrentProcessId();
+  if (process_id == 0)
+  {
+    return luaL_error(L, "native process identity is unavailable");
+  }
+  lua_pushinteger(L, (lua_Integer)process_id);
+#else
+  pid_t process_id;
+
+  process_id = getpid();
+  if (process_id <= 0)
+  {
+    return luaL_error(L, "native process identity is unavailable");
+  }
+  lua_pushinteger(L, (lua_Integer)process_id);
+#endif
+  return 1;
+}
+
 static int l_utc_now(lua_State *L)
 {
   char value[64];
@@ -9134,14 +9227,13 @@ static int l_utc_now(lua_State *L)
   snprintf(
     value,
     sizeof(value),
-    "%04u-%02u-%02uT%02u:%02u:%02u.%03uZ",
+    "%04u-%02u-%02uT%02u:%02u:%02uZ",
     (unsigned int)current.wYear,
     (unsigned int)current.wMonth,
     (unsigned int)current.wDay,
     (unsigned int)current.wHour,
     (unsigned int)current.wMinute,
-    (unsigned int)current.wSecond,
-    (unsigned int)current.wMilliseconds);
+    (unsigned int)current.wSecond);
 #else
   time_t raw;
   struct tm current;
@@ -9169,6 +9261,8 @@ static const luaL_Reg yaca_native_functions[] = {
   { "fs_make_directory", l_fs_make_directory },
   { "monotonic_now", l_monotonic_now },
   { "utc_now", l_utc_now },
+  { "secure_random", l_secure_random },
+  { "current_process_id", l_current_process_id },
   { "sha256_start", l_sha256_start },
   { "sha256_update", l_sha256_update },
   { "sha256_finish", l_sha256_finish },

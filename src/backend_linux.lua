@@ -1,6 +1,6 @@
 --[[
 File: backend_linux.lua
-Date: 2026-08-29
+Date: 2026-08-30
 Author: WaterRun
 Description: Composes Linux x86_64 narrow native services.
 ]]
@@ -46,8 +46,15 @@ local function validate_native(native)
     if not ok or version ~= ABI_VERSION then
         return nil, failure("NativeAbiMismatch", "native ABI does not match this release")
     end
-    if type(native.monotonic_now) ~= "function" or type(native.utc_now) ~= "function" then
-        return nil, failure("InvalidNativeModule", "native clock functions are required")
+    if type(native.monotonic_now) ~= "function"
+        or type(native.utc_now) ~= "function"
+        or type(native.secure_random) ~= "function"
+        or type(native.current_process_id) ~= "function"
+    then
+        return nil, failure(
+            "InvalidNativeModule",
+            "native clock, random, and process identity functions are required"
+        )
     end
     return true
 end
@@ -86,6 +93,38 @@ function M.new(native, identity, options)
         monotonic_now = native.monotonic_now,
         utc_now = native.utc_now,
     }, "Linux clock port")
+    local system_port = readonly({
+        utc_now = function()
+            local called, value = pcall(native.utc_now)
+            if not called or type(value) ~= "string" or value == "" then
+                return nil, failure("UtcClockReadFailed", "native UTC clock failed")
+            end
+            return value
+        end,
+        current_process_id = function()
+            local called, value = pcall(native.current_process_id)
+            if not called or math.type(value) ~= "integer" or value < 1 then
+                return nil, failure(
+                    "ProcessIdentityUnavailable",
+                    "native process identity failed"
+                )
+            end
+            return value
+        end,
+        secure_random = function(length)
+            if math.type(length) ~= "integer" or length < 1 or length > 64 then
+                return nil, failure("InvalidRandomLength", "secure random length is invalid")
+            end
+            local called, value = pcall(native.secure_random, length)
+            if not called or type(value) ~= "string" or #value ~= length then
+                return nil, failure(
+                    "SecureRandomUnavailable",
+                    "native secure random source failed"
+                )
+            end
+            return value
+        end,
+    }, "Linux system port")
 
     ---Creates a terminal port with the backend's fixed release input cap.
     -- @param mode string|nil Requested auto, raw, or cooked mode.
@@ -103,6 +142,7 @@ function M.new(native, identity, options)
         filesystem = filesystem,
         processes = processes,
         clock_port = clock_port,
+        system = system_port,
         new_terminal = new_terminal,
         qualification = "pending-target-evidence",
     }, "Linux backend")

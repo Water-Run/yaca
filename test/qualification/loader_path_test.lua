@@ -1,6 +1,6 @@
 --[[
 File: loader_path_test.lua
-Date: 2026-08-29
+Date: 2026-08-30
 Author: WaterRun
 Description: Qualifies absolute native loading against ambient path injection.
 ]]
@@ -92,6 +92,8 @@ return {
                     "stdio_facts",
                     "workspace_inspect",
                     "fs_make_directory",
+                    "secure_random",
+                    "current_process_id",
                     "sha256_start",
                     "sha256_update",
                     "sha256_finish",
@@ -109,6 +111,9 @@ return {
                 A.contains(source, "YACA_SHA256_METATABLE")
                 A.contains(source, "yaca_sha256_constants[64]")
                 A.contains(source, "secure_zero(context, sizeof(*context))")
+                A.contains(source, "SystemFunction036")
+                A.contains(source, "GetCurrentProcessId")
+                A.contains(source, 'open("/dev/urandom"')
                 A.contains(source, "lua_pushlstring")
                 A.falsy(source:find("openssl", 1, true))
                 A.falsy(source:find("CryptAcquireContext", 1, true))

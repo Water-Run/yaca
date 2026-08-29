@@ -1,6 +1,6 @@
 --[[
 File: main.lua
-Date: 2026-08-29
+Date: 2026-08-30
 Author: WaterRun
 Description: Routes the offline bootstrap lifecycle from the unique composition root.
 ]]
@@ -561,6 +561,7 @@ local function validate_components(components)
         network = true,
         context_catalog = true,
         agent = true,
+        publication = true,
     }
     for key in pairs(components) do
         if type(key) ~= "string" or not allowed[key] then
@@ -599,6 +600,16 @@ local function validate_components(components)
         return nil, failure(
             "InvalidBootstrapComponents",
             "management must declare an offline run method"
+        )
+    end
+    if components.publication ~= nil
+        and (type(components.publication) ~= "table"
+            or type(components.publication.publish_first) ~= "function"
+            or type(components.publication.close) ~= "function")
+    then
+        return nil, failure(
+            "InvalidBootstrapComponents",
+            "Context publication must expose publish_first and close"
         )
     end
     return components
@@ -1058,7 +1069,7 @@ function M.new(components, options)
         if not self_test_ok then return nil, self_test_error end
         local draft, draft_error = session.new_draft(generation, workspace, {
             maximum_draft_bytes = admitted.maximum_draft_bytes,
-        })
+        }, admitted_components.publication)
         if not draft then return nil, draft_error end
         active_draft = draft
         lifecycle = "draft-ready"
@@ -1116,9 +1127,13 @@ function M.new(components, options)
     ---Closes the current in-memory draft and prevents further dispatch.
     function application.close()
         if lifecycle == "closed" then return false end
-        if active_draft then active_draft.close() end
+        local closed_draft, close_error = true, nil
+        if active_draft then
+            closed_draft, close_error = active_draft.close()
+        end
         active_draft = nil
         lifecycle = "closed"
+        if not closed_draft then return nil, close_error end
         return true
     end
 
@@ -1296,6 +1311,9 @@ local function build_context_services(native, filesystem)
     local safety = require("safety")
     local xml = require("xml")
     local context = require("context")
+    local path = require("path")
+    local prompt = require("prompt")
+    local tools = require("tools")
     local safety_service, safety_error = safety.new(native, {
         maximum_hash_chunk_bytes = 65536,
         minimum_scannable_secret_bytes = 8,
@@ -1339,11 +1357,35 @@ local function build_context_services(native, filesystem)
         lock_permissions = 384,
     })
     if not store then return nil, store_error end
+    local path_service, path_error = path.new(native, {
+        maximum_path_bytes = 32768,
+        maximum_segments = 256,
+        maximum_segment_bytes = 255,
+        maximum_hash_chunk_bytes = 32768,
+    })
+    if not path_service then return nil, path_error end
+    local prompt_service, prompt_error = prompt.new({
+        digest = safety_service.digest,
+    }, {
+        maximum_component_bytes = 32768,
+        maximum_quoted_bytes = 16384,
+        maximum_total_bytes = 262144,
+        maximum_estimated_tokens = 262144,
+        maximum_components = 16,
+        maximum_source_bytes = 256,
+        maximum_version_bytes = 256,
+    })
+    if not prompt_service then return nil, prompt_error end
+    local registry, registry_error = tools.registry_snapshot(safety_service)
+    if not registry then return nil, registry_error end
     return readonly({
         safety = safety_service,
         xml = codec,
         schema = schema,
         store = store,
+        path = path_service,
+        prompt = prompt_service,
+        tool_registry = registry,
     }, "Context runtime services")
 end
 
@@ -1805,6 +1847,24 @@ function M.compose_runtime(runtime)
         runtime.native,
         backend.filesystem
     )
+    local publication
+    if contexts then
+        publication, contexts_error = session.new_context_publication({
+            filesystem = backend.filesystem,
+            schema = contexts.schema,
+            store = contexts.store,
+            path = contexts.path,
+            safety = contexts.safety,
+            prompt = contexts.prompt,
+            system = backend.system,
+            tool_registry = contexts.tool_registry,
+        }, {
+            data_root = layout.data_root,
+            platform_kind = runtime.identity.os == "windows" and "windows" or "posix",
+            maximum_create_attempts = 16,
+        })
+        if not publication then contexts = nil end
+    end
     local composed = {
         native = runtime.native,
         native_path = runtime.native_path,
@@ -1843,13 +1903,15 @@ function M.compose_runtime(runtime)
         },
     }, SELF_TEST_OPTIONS)
     if not self_test then return nil, self_test_error end
-    local application, application_error = M.new({
+    local application_components = {
         platform = { identity = function() return runtime.identity end },
         config = config_service,
         workspace = workspace_port(runtime.native),
         self_test = self_test,
         management = management_service(backend.filesystem, layout),
-    }, {
+    }
+    if publication then application_components.publication = publication end
+    local application, application_error = M.new(application_components, {
         product_name = "yaca",
         product_version = "0.1.0",
         release_target = runtime.identity.target,
@@ -1864,6 +1926,7 @@ function M.compose_runtime(runtime)
         config = config_service,
         contexts = contexts or false,
         context_error = contexts_error or false,
+        publication = publication or false,
     }, "production runtime composition")
 end
 
