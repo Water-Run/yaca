@@ -60,10 +60,10 @@ local function validate_observation(observation)
 end
 
 ---Creates a lazy platform service for one declared release target.
----@param native table Native port exposing platform_identity().
----@param release_target string One of the release manifest target names.
----@return table|nil service Immutable service exposing identity().
----@return table|nil err Structured validation or probe failure.
+-- @param native table Native port exposing platform_identity().
+-- @param release_target string One of the release manifest target names.
+-- @return table|nil service Immutable service exposing identity().
+-- @return table|nil err Structured validation or probe failure.
 function M.new(native, release_target)
     if type(native) ~= "table" or type(native.platform_identity) ~= "function" then
         return nil, failure("InvalidPlatformPort", "platform_identity function is required")

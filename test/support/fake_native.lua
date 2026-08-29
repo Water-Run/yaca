@@ -15,9 +15,9 @@ local function copy_table(value)
 end
 
 ---Creates a deterministic platform native-port fake and call counter.
----@param response table|function|nil Fixed identity or per-call response producer.
----@param probe_error any Optional error returned when response is nil.
----@return table port Fake port exposing platform_identity() and call_count().
+-- @param response table|function|nil Fixed identity or per-call response producer.
+-- @param probe_error any Optional error returned when response is nil.
+-- @return table port Fake port exposing platform_identity() and call_count().
 function M.platform(response, probe_error)
     local calls = 0
     local port = {}

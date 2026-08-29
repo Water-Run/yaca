@@ -120,9 +120,9 @@ local function queue_pop(queue)
 end
 
 ---Creates a bounded, single-threaded AsyncPort event pump.
----@param options table Queue capacity, poll budget, and reducer callback.
----@return table|nil pump Event-pump instance when options are valid.
----@return string|nil err Configuration error when construction fails.
+-- @param options table Queue capacity, poll budget, and reducer callback.
+-- @return table|nil pump Event-pump instance when options are valid.
+-- @return string|nil err Configuration error when construction fails.
 function M.new_event_pump(options)
     options = options or {}
     local capacity = options.capacity
@@ -189,9 +189,9 @@ function M.new_event_pump(options)
     end
 
     ---Registers one five-method AsyncPort before the pump starts.
-    ---@param port_id string Stable event source identifier.
-    ---@param port table AsyncPort implementation.
-    ---@return boolean registered True when registration succeeds.
+    -- @param port_id string Stable event source identifier.
+    -- @param port table AsyncPort implementation.
+    -- @return boolean registered True when registration succeeds.
     function pump:register(port_id, port)
         require_lifecycle("created")
         if type(port_id) ~= "string" or port_id == "" or port_id:find("\0", 1, true) then error("AsyncPort id must be a nonempty NUL-free string", 2) end
@@ -207,8 +207,8 @@ function M.new_event_pump(options)
     end
 
     ---Starts all registered ports in registration order.
-    ---@param now integer Current monotonic tick.
-    ---@return boolean started True after every port starts.
+    -- @param now integer Current monotonic tick.
+    -- @return boolean started True after every port starts.
     function pump:start(now)
         require_lifecycle("created")
         if not integer_at_least(now, 0) then error("event pump time must be a nonnegative integer", 2) end
@@ -228,9 +228,9 @@ function M.new_event_pump(options)
     end
 
     ---Polls each live port once and dispatches a bounded number of events.
-    ---@param now integer Current monotonic tick.
-    ---@param dispatch_budget integer|nil Maximum normal dispatches this tick.
-    ---@return integer consumed Number of normally dispatched events.
+    -- @param now integer Current monotonic tick.
+    -- @param dispatch_budget integer|nil Maximum normal dispatches this tick.
+    -- @return integer consumed Number of normally dispatched events.
     function pump:tick(now, dispatch_budget)
         require_lifecycle("started")
         if inside_tick then error("event pump tick is not reentrant", 2) end
@@ -279,8 +279,8 @@ function M.new_event_pump(options)
     end
 
     ---Dispatches already queued events without polling ports.
-    ---@param limit integer|nil Maximum events, or nil to empty the queue.
-    ---@return integer consumed Number of dispatched events.
+    -- @param limit integer|nil Maximum events, or nil to empty the queue.
+    -- @return integer consumed Number of dispatched events.
     function pump:drain(limit)
         require_lifecycle("started")
         if inside_tick then error("event pump drain is not reentrant", 2) end
@@ -291,8 +291,8 @@ function M.new_event_pump(options)
     end
 
     ---Joins every port and validates its terminal outcome.
-    ---@param deadline integer|nil Native-port deadline representation.
-    ---@return table outcomes Terminal outcome keyed by port identifier.
+    -- @param deadline integer|nil Native-port deadline representation.
+    -- @return table outcomes Terminal outcome keyed by port identifier.
     function pump:join(deadline)
         require_lifecycle("started")
         local outcomes = {}
@@ -311,7 +311,7 @@ function M.new_event_pump(options)
     end
 
     ---Closes all ports in reverse registration order.
-    ---@return boolean closed True after all close calls succeed.
+    -- @return boolean closed True after all close calls succeed.
     function pump:close()
         if lifecycle ~= "started" and lifecycle ~= "joined" then error("event pump lifecycle is " .. lifecycle .. ", expected started or joined", 2) end
         local first_error
@@ -326,7 +326,7 @@ function M.new_event_pump(options)
     end
 
     ---Returns a snapshot of queue, lifecycle, and admission counters.
-    ---@return table stats Mutable snapshot detached from pump state.
+    -- @return table stats Mutable snapshot detached from pump state.
     function pump:stats()
         return {
             lifecycle = lifecycle,
