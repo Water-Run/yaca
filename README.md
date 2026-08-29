@@ -4,7 +4,7 @@
 
 yaca is the design for a simple, single-agent terminal Coding Agent, licensed under GPL v3.
 
-> **Project status (2026-08-29): coding-ready; implementation not started.** No working v0.1 Agent or qualified release exists yet; the Lua product modules are still empty. Everything below describes the frozen v0.1 target, not currently executable behavior. Product choices, machine-readable contracts, Gate A/B audit, and the whole-program implementation plan are complete. Target qualification remains incomplete, so Release Gate R is closed.
+> **Project status (2026-08-29): implementation in progress.** M0 test/manifest infrastructure is complete and the first product module is being implemented; there is still no working v0.1 Agent or qualified release. Everything below describes the frozen v0.1 target unless a capability is explicitly marked implemented and tested. Gate A/B remain passed; target qualification is incomplete, so Release Gate R is closed.
 
 ## Supported release targets
 

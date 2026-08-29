@@ -1,7 +1,7 @@
 # yaca v0.1 全程序实施计划
 
 版本：2026-08-29.1
-状态：**计划已确认 / Gate B passed / 尚未开始产品实现**
+状态：**计划已确认 / Gate B passed / 产品实现进行中**
 首个编码任务：**C01 — 建立测试 harness 与 release manifest**
 
 ## 1. 计划边界
@@ -89,7 +89,7 @@ M0 完成后推送一个核心节点；若 loader 负向测试未过，不进入
 
 | Task | Files | Tests 与唯一退出条件 | Commit |
 | --- | --- | --- | --- |
-| C02 | `src/platform.lua`, `test/support/fake_native.lua`, `.develope-docs/contracts/readiness.lua`, `.develope-docs/IMPLEMENTATION-PLAN.md`, `README.md`, `README-zh.md` | `platform_test.lua`；只产生一次 immutable `os/arch/target/supported`，拒绝未知字段/target；业务层不读取 OS version 分支；首次写产品源码时把 phase 切为 `implementing` 并同步计划/公开状态 | `feat: add validated platform identity port` |
+| C02 | `src/platform.lua`, `test/support/fake_native.lua`, `.develope-docs/contracts/readiness.lua`, `.develope-docs/IMPLEMENTATION-PLAN.md`, `.develope-docs/subsystems/01-platform-abstraction.md`, `README.md`, `README-zh.md` | `platform_test.lua`；只产生一次 immutable `os/arch/target/supported`，拒绝未知字段/target；业务层不读取 OS version 分支；首次写产品源码时把 phase 切为 `implementing` 并同步计划/公开状态 | `feat: add validated platform identity port` |
 | C03 | `src/runtime.lua`, `src/clock.lua` | `event_pump_test.lua` 复用 TP-003 oracle；单 mutable thread、bounded queue、progress 可合并、terminal 不丢、cancel 下一 tick 可见 | `feat: add deterministic runtime event pump` |
 | C04 | `src/backend_linux.lua`, `src/backend_windows.lua`, `src/fs.lua`, `src/process.lua`, `src/terminal.lua`, `native/yaca_native.c` | `native_ports_test.lua`, `loader_path_test.lua`；五方法 AsyncPort、独立 stdout/stderr、typed terminal outcome、absolute safe load；目标 adapter 必须完成 TP-004/005/029 后才算 M1 complete | `feat: add narrow native platform adapters` |
 

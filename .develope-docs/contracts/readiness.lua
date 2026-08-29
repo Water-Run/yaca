@@ -51,9 +51,9 @@ return {
 
   source_start = {
     authorized_after_this_contract_and_validators_commit = true,
-    implementation_phase = "pre-coding",
+    implementation_phase = "implementing",
     allowed_implementation_phases = { "pre-coding", "implementing", "implemented-unqualified" },
-    source_is_currently_skeleton_only = true,
+    source_is_currently_skeleton_only = false,
     release_is_not_authorized = true,
     first_task = "C01",
     transitions = {
@@ -115,7 +115,7 @@ return {
 
   tasks = {
     task("C01", "M0", {}, { "test/run.lua", "test/support/assert.lua", "release/manifest.lua", ".tools/check_loader.lua" }, { "test/self/harness_test.lua", "test/self/manifest_test.lua" }, "test: establish harness and release manifest"),
-    task("C02", "M1", { "C01" }, { "src/platform.lua", "test/support/fake_native.lua", ".develope-docs/contracts/readiness.lua", ".develope-docs/IMPLEMENTATION-PLAN.md", "README.md", "README-zh.md" }, { "test/unit/platform_test.lua" }, "feat: add validated platform identity port"),
+    task("C02", "M1", { "C01" }, { "src/platform.lua", "test/support/fake_native.lua", ".develope-docs/contracts/readiness.lua", ".develope-docs/IMPLEMENTATION-PLAN.md", ".develope-docs/subsystems/01-platform-abstraction.md", "README.md", "README-zh.md" }, { "test/unit/platform_test.lua" }, "feat: add validated platform identity port"),
     task("C03", "M1", { "C02" }, { "src/runtime.lua", "src/clock.lua" }, { "test/unit/event_pump_test.lua" }, "feat: add deterministic runtime event pump"),
     task("C04", "M1", { "C03" }, { "src/backend_linux.lua", "src/backend_windows.lua", "src/fs.lua", "src/process.lua", "src/terminal.lua", "native/yaca_native.c" }, { "test/integration/native_ports_test.lua", "test/qualification/loader_path_test.lua" }, "feat: add narrow native platform adapters"),
     task("C05", "M2", { "C01" }, { "src/text.lua" }, { "test/unit/text_test.lua" }, "feat: add strict utf8 and byte carriers"),

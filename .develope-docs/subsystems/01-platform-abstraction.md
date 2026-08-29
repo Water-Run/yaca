@@ -2,7 +2,7 @@
 
 更新日期：2026-08-29
 
-状态：**计划已确认（C02--C04）** — 窄端口、safe-load、target identity、lock 与 planned module boundary 已冻结；目标机数值/XP 原语仍是 adapter hard gate
+状态：**实现中（C02 identity core 已写入，C03/C04 待推进）** — 窄端口、safe-load、target identity、lock 与 planned module boundary 已冻结；目标机数值/XP 原语仍是 adapter hard gate
 
 ## 职责
 
@@ -119,7 +119,7 @@ Windows x86、Windows x86_64 与 Linux x86_64 分别在目标平台由 luainstal
 
 - `os`：`windows` 或 `linux`。
 - `arch`：`x86` 或 `x86_64`。
-- `target`：规范化组合，只允许当前三个发行目标：`windows-x86`、`windows-x86_64`、`linux-x86_64`。
+- `target`：规范化组合，只允许与 package/qualification 共用的三个发行目标 ID：`win32-x86`、`win64-x86_64`、`linux-x86_64`。
 - `supported`：该 OS/架构组合是否属于本发行版允许的目标。
 
 平台描述创建后不可修改。操作系统具体版本可以由诊断系统读取并记录，但不能作为业务模块的平台分支依据。
