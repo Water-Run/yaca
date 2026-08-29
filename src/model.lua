@@ -7,6 +7,7 @@ Description: Maps bounded OpenAI Chat and Anthropic Messages wire data to canoni
 
 local json = require("json")
 local network = require("network")
+local prompt = require("prompt")
 local text = require("text")
 
 local M = {}
@@ -234,7 +235,7 @@ local function to_json_value(value, hint)
         local items = {}
         for index = 1, count do
             local converted, convert_error = to_json_value(value[index])
-            if not converted then return nil, convert_error end
+            if converted == nil then return nil, convert_error end
             items[index] = converted
         end
         return json.array(items)
@@ -245,7 +246,7 @@ local function to_json_value(value, hint)
             return nil, failure("InvalidWireValue", "wire object keys must be strings")
         end
         local converted, convert_error = to_json_value(item, ARRAY_KEYS[key] and "array" or nil)
-        if not converted then return nil, convert_error end
+        if converted == nil then return nil, convert_error end
         items[key] = converted
     end
     return json.object(items)
@@ -253,7 +254,7 @@ end
 
 local function encode_value(codec, value, hint)
     local converted, convert_error = to_json_value(value, hint)
-    if not converted then return nil, convert_error end
+    if converted == nil then return nil, convert_error end
     local kind = json.kind(converted)
     if kind == "object" or kind == "array" then return codec.write(converted) end
     local wrapper = assert(json.object({ v = converted }))
@@ -262,7 +263,7 @@ local function encode_value(codec, value, hint)
     return encoded:sub(6, -2)
 end
 
-local function encode_messages(codec, messages)
+local function encode_message_array(codec, messages)
     if dense_count(messages) == nil then
         return nil, failure("InvalidPromptBundle", "prompt messages must be a dense array")
     end
@@ -278,16 +279,20 @@ local function encode_messages(codec, messages)
     for index, message in ipairs(messages) do
         if type(message) ~= "table"
             or type(message.role) ~= "string"
-            or type(message.content) ~= "string"
+            or (type(message.content) ~= "string" and type(message.content) ~= "table")
         then
-            return nil, failure("InvalidPromptBundle", "C21 messages require string role and content")
+            return nil, failure("InvalidPromptBundle", "prompt messages require string role and content")
         end
         if index > 1 and not add(",") then
             return nil, failure("WireRequestLimit", "provider messages exceed their byte limit")
         end
         local role, role_error = encode_value(codec, message.role)
         if not role then return nil, role_error end
-        local content, content_error = encode_value(codec, message.content)
+        local content, content_error = encode_value(
+            codec,
+            message.content,
+            type(message.content) == "table" and "array" or nil
+        )
         if not content then return nil, content_error end
         local item = "{\"role\":" .. role .. ",\"content\":" .. content .. "}"
         local admitted, limit_error = add(item)
@@ -296,6 +301,75 @@ local function encode_messages(codec, messages)
     local admitted, limit_error = add("]")
     if not admitted then return nil, limit_error end
     return table.concat(result)
+end
+
+local function encode_messages(codec, bundle, protocol)
+    local messages = bundle.messages
+    if dense_count(messages) == nil then
+        return nil, nil, failure("InvalidPromptBundle", "prompt messages must be a dense array")
+    end
+    local projected = {}
+    if bundle.system ~= nil and bundle.system ~= "" then
+        if type(bundle.system) ~= "string" then
+            return nil, nil, failure("InvalidPromptBundle", "legacy system Prompt must be text")
+        end
+        projected[#projected + 1] = { role = "system", content = bundle.system }
+    end
+    for _, message in ipairs(messages) do projected[#projected + 1] = message end
+    if protocol == "openai-chat" then
+        for _, message in ipairs(projected) do
+            if message.role ~= "system" and message.role ~= "user" and message.role ~= "assistant" then
+                return nil, nil, failure("InvalidPromptBundle", "OpenAI Prompt role is invalid")
+            end
+        end
+        local encoded, encode_error = encode_message_array(codec, projected)
+        return encoded, nil, encode_error
+    end
+
+    local system_blocks, provider_messages = {}, {}
+    local saw_provider_message = false
+    for _, message in ipairs(projected) do
+        if type(message) ~= "table" or type(message.content) ~= "string" then
+            return nil, nil, failure("InvalidPromptBundle", "Anthropic Prompt message is invalid")
+        end
+        if message.role == "system" then
+            if saw_provider_message then
+                return nil, nil, failure("InvalidPromptBundle", "Anthropic system components must precede messages")
+            end
+            system_blocks[#system_blocks + 1] = { type = "text", text = message.content }
+        elseif message.role == "user" or message.role == "assistant" then
+            saw_provider_message = true
+            if bundle.version ~= nil then
+                local previous = provider_messages[#provider_messages]
+                if not previous or previous.role ~= message.role then
+                    previous = { role = message.role, content = {} }
+                    provider_messages[#provider_messages + 1] = previous
+                end
+                previous.content[#previous.content + 1] = {
+                    type = "text",
+                    text = message.content,
+                }
+            else
+                provider_messages[#provider_messages + 1] = {
+                    role = message.role,
+                    content = message.content,
+                }
+            end
+        else
+            return nil, nil, failure("InvalidPromptBundle", "Anthropic Prompt role is invalid")
+        end
+    end
+    if #provider_messages == 0 then
+        return nil, nil, failure("InvalidPromptBundle", "Anthropic requires one non-system message")
+    end
+    local encoded_messages, messages_error = encode_message_array(codec, provider_messages)
+    if not encoded_messages then return nil, nil, messages_error end
+    local encoded_system
+    if #system_blocks > 0 then
+        encoded_system, messages_error = encode_value(codec, system_blocks, "array")
+        if not encoded_system then return nil, nil, messages_error end
+    end
+    return encoded_messages, encoded_system
 end
 
 local function validate_options(options)
@@ -353,21 +427,15 @@ local function normalize_registry(registry, options)
     return { public = registry, lookup = lookup, names = names }
 end
 
-local function normalize_controls(controls)
-    if type(controls) ~= "table" or not valid_token(controls.version, 128)
-        or dense_count(controls.controls) == nil
-    then
-        return nil, failure("InvalidControlSchema", "versioned controls schema is required")
-    end
+local function normalize_controls(controls, purpose)
+    local valid, validation_error = prompt.validate_controls_schema(controls, purpose)
+    if not valid then return nil, validation_error end
     local lookup = {}
     for _, control in ipairs(controls.controls) do
-        local wire_name = type(control) == "table" and control.wire_name or nil
+        local wire_name = control.wire_name
         local canonical = CONTROL_NAMES[wire_name]
-        if not canonical or lookup[wire_name]
-            or (control.id ~= nil and control.id ~= canonical)
-            or (control.schema ~= nil and type(control.schema) ~= "table")
-        then
-            return nil, failure("InvalidControlSchema", "control schema entry is invalid or duplicated")
+        if not canonical or control.canonical_id ~= canonical or lookup[wire_name] then
+            return nil, failure("InvalidControlSchema", "control schema entry is invalid")
         end
         lookup[wire_name] = canonical
     end
@@ -432,16 +500,36 @@ local function validate_request_shape(spec, options)
     if not valid_token(spec.model_view_manifest.digest, 256) then
         return nil, failure("InvalidModelViewManifest", "model view manifest digest is required")
     end
+    if spec.prompt_bundle.version ~= nil then
+        local bound, bundle_error = prompt.validate_bundle(
+            spec.prompt_bundle,
+            spec.purpose,
+            spec.config_generation
+        )
+        if not bound then return nil, bundle_error end
+        if type(spec.prompt_bundle.controls_schema) ~= "table"
+            or spec.prompt_bundle.controls_schema.digest ~= spec.controls_schema.digest
+        then
+            return nil, failure("InvalidPromptBundle", "Prompt and request control snapshots differ")
+        end
+        local tool_count = dense_count(spec.tool_registry.tools)
+        if spec.prompt_bundle.tool_mode == "none" and tool_count ~= 0 then
+            return nil, failure("InvalidPromptBundle", "no-tool purpose received a tool registry")
+        end
+        if spec.prompt_bundle.tool_mode == "registered" and tool_count == 0 then
+            return nil, failure("InvalidPromptBundle", "registered-tool purpose has an empty registry")
+        end
+    end
     local registry, registry_error = normalize_registry(spec.tool_registry, options)
     if not registry then return nil, registry_error end
-    local controls, controls_error = normalize_controls(spec.controls_schema)
+    local controls, controls_error = normalize_controls(spec.controls_schema, spec.purpose)
     if not controls then return nil, controls_error end
     local copy, copy_error = copy_bounded(spec, options)
     if not copy then return nil, copy_error end
     -- Rebuild every lookup from the admitted copy. The caller-owned schema tables
     -- must never remain an authority after the immutable request snapshot exists.
     registry = assert(normalize_registry(copy.tool_registry, options))
-    controls = assert(normalize_controls(copy.controls_schema))
+    controls = assert(normalize_controls(copy.controls_schema, copy.purpose))
     return { public = copy, registry = registry, controls = controls }
 end
 
@@ -612,7 +700,11 @@ end
 local function encode_request(codec, request_data, streaming)
     local model_ref = request_data.model_ref
     local protocol = model_ref.protocol
-    local messages, messages_error = encode_messages(codec, request_data.prompt_bundle.messages)
+    local messages, system, messages_error = encode_messages(
+        codec,
+        request_data.prompt_bundle,
+        protocol
+    )
     if not messages then return nil, messages_error end
     local remote_model, model_error = encode_value(codec, model_ref.remote_model)
     if not remote_model then return nil, model_error end
@@ -641,14 +733,10 @@ local function encode_request(codec, request_data, streaming)
         local fields = {
             "\"model\":" .. remote_model,
             "\"max_tokens\":" .. tostring(request_data.limits.max_output_tokens),
-            "\"messages\":" .. messages,
-            "\"stream\":" .. stream,
         }
-        if request_data.prompt_bundle.system ~= nil and request_data.prompt_bundle.system ~= "" then
-            local system, system_error = encode_value(codec, request_data.prompt_bundle.system)
-            if not system then return nil, system_error end
-            fields[#fields + 1] = "\"system\":" .. system
-        end
+        if system then fields[#fields + 1] = "\"system\":" .. system end
+        fields[#fields + 1] = "\"messages\":" .. messages
+        fields[#fields + 1] = "\"stream\":" .. stream
         if tools then fields[#fields + 1] = "\"tools\":" .. tools end
         body = "{" .. table.concat(fields, ",") .. "}"
     end
@@ -1475,10 +1563,18 @@ function M.new(options)
         ) }, "model event batch")
     end
 
+    function service:controls_schema(purpose)
+        return prompt.control_schema(purpose)
+    end
+
     service.capabilities = freeze({
         schema_version = "0.1.0",
+        prompt_version = prompt.prompt_version(),
+        control_schema_digest = prompt.control_schema_digest(),
         protocols = { "openai-chat", "anthropic-messages" },
         canonical_only = true,
+        prompt_component_order_preserved = true,
+        native_controls = true,
         streaming_arguments_executable = false,
         synthetic_wire_inventory = true,
         recorded_provider_wire = false,

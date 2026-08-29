@@ -46,48 +46,20 @@ local function limits(overrides)
     return result
 end
 
-local function controls()
-    return {
-        {
-            id = "finish",
-            wire_name = "yaca_finish",
-            description = "finish",
-            schema = { type = "object", additionalProperties = false, properties = {} },
-        },
-        {
-            id = "ask-user",
-            wire_name = "yaca_ask_user",
-            description = "ask",
-            schema = { type = "object", additionalProperties = false, properties = {
-                question = { type = "string" },
-            }, required = { "question" } },
-        },
-        {
-            id = "refuse",
-            wire_name = "yaca_refuse",
-            description = "refuse",
-            schema = { type = "object", additionalProperties = false, properties = {
-                reason = { type = "string" },
-            }, required = { "reason" } },
-        },
-    }
-end
-
 local function request(service, protocol, streaming, suffix, surface, schema)
     local remote_model = protocol == "openai-chat" and "gpt-test" or "claude-test"
     local tools = {}
-    local control_list = {}
     if surface then
         tools[1] = {
             name = "read",
             description = "read",
             schema = schema or { type = "object", additionalProperties = true },
         }
-        control_list = controls()
     end
+    local purpose = surface and "main" or "side"
     return assert(service:normalize_request({
         request_id = "request-" .. suffix,
-        purpose = "main",
+        purpose = purpose,
         model_ref = {
             name = "test",
             protocol = protocol,
@@ -101,7 +73,7 @@ local function request(service, protocol, streaming, suffix, surface, schema)
         prompt_bundle = { messages = { { role = "user", content = "hi" } } },
         model_view_manifest = { digest = "view-1", first_sequence = 1, last_sequence = 1 },
         tool_registry = { version = "tools-1", digest = "registry-1", tools = tools },
-        controls_schema = { version = "controls-1", controls = control_list },
+        controls_schema = assert(service:controls_schema(purpose)),
         streaming = streaming and "force" or "off",
         limits = protocol == "anthropic-messages" and { max_output_tokens = 64 } or {},
         retry_policy = { count = 0, base_delay_ms = 1 },
@@ -375,7 +347,7 @@ return {
                     prompt_bundle = { messages = {} },
                     model_view_manifest = { digest = "v" },
                     tool_registry = { version = "tools-1", digest = "r", tools = {} },
-                    controls_schema = { version = "c", controls = {} },
+                    controls_schema = assert(service:controls_schema("main")),
                     streaming = "force",
                     limits = {},
                     retry_policy = {},
@@ -438,7 +410,7 @@ return {
                     prompt_bundle = { messages = { { role = "user", content = "hi" } } },
                     model_view_manifest = { digest = "v" },
                     tool_registry = { version = "tools-1", digest = "r", tools = {} },
-                    controls_schema = { version = "c", controls = {} },
+                    controls_schema = assert(service:controls_schema("main")),
                     streaming = "force",
                     limits = {},
                     retry_policy = {},
