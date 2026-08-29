@@ -2557,6 +2557,462 @@ function M.new(options)
     return exposed
 end
 
+---Creates the next canonical generation for one durable operation barrier.
+-- `begin` appends an operation_intent. `finish` appends the matching
+-- operation_result and tool_result in the same generation, so a result cannot
+-- become visible to the next model request without closing both relations.
+-- The caller still publishes the returned full document through new_store.
+local function build_operation_document(document, mutation, admitted)
+    if type(mutation) ~= "table" or type(mutation.kind) ~= "string" then
+        return nil, failure("InvalidOperationMutation", "typed operation mutation is required")
+    end
+    local common = {
+        kind = true,
+        updated_at = true,
+        view_manifest_digest = true,
+    }
+    local begin_fields = {
+        operation_id = true,
+        tool_call_id = true,
+        operation_kind = true,
+        target_identity = true,
+        expected_digest = true,
+    }
+    local finish_fields = {
+        operation_id = true,
+        tool_call_id = true,
+        status = true,
+        evidence = true,
+        error_id = true,
+        tool_status = true,
+        tool_body = true,
+        tool_truncated = true,
+        tool_raw_bytes = true,
+        tool_digest = true,
+        tool_error_id = true,
+    }
+    local fields = mutation.kind == "begin" and begin_fields
+        or mutation.kind == "finish" and finish_fields
+        or nil
+    if not fields then
+        return nil, failure("InvalidOperationMutation", "operation mutation kind is unknown")
+    end
+    local allowed = {}
+    for key in pairs(common) do allowed[key] = true end
+    for key in pairs(fields) do allowed[key] = true end
+    for key in pairs(mutation) do
+        if type(key) ~= "string" or not allowed[key] then
+            return nil, failure(
+                "InvalidOperationMutation",
+                "operation mutation contains an unknown field"
+            )
+        end
+    end
+    local updated_at, time_error = canonical_time(
+        mutation.updated_at,
+        "/Operation/UpdatedAt"
+    )
+    if not updated_at then return nil, time_error end
+    local manifest_digest, digest_error = attribute_text(
+        mutation.view_manifest_digest,
+        admitted.maximum_field_bytes,
+        "/Operation/ViewManifestDigest",
+        false
+    )
+    if not manifest_digest then return nil, digest_error end
+
+    local candidate, canonical_or_error = lifecycle_candidate(document)
+    if not candidate then return nil, canonical_or_error end
+    local canonical = canonical_or_error
+    if updated_at <= canonical.header.updated_at then
+        return nil, failure(
+            "ContextGeneration",
+            "operation mutation must advance UpdatedAt"
+        )
+    end
+    local events = {}
+    if mutation.kind == "begin" then
+        events[1] = {
+            type = "operation_intent",
+            fields = {
+                operationId = mutation.operation_id,
+                toolCallId = mutation.tool_call_id,
+                kind = mutation.operation_kind,
+                targetIdentity = mutation.target_identity,
+                expectedDigest = mutation.expected_digest,
+            },
+        }
+    else
+        if not RESULT_STATUSES[mutation.status]
+            or not RESULT_STATUSES[mutation.tool_status]
+            or mutation.status ~= mutation.tool_status
+            or type(mutation.tool_truncated) ~= "boolean"
+            or not valid_integer(mutation.tool_raw_bytes, 0)
+            or type(mutation.tool_body) ~= "string"
+            or mutation.tool_raw_bytes ~= #mutation.tool_body
+        then
+            return nil, failure(
+                "InvalidOperationMutation",
+                "operation result status or tool metadata is invalid"
+            )
+        end
+        local operation_fields = {
+            operationId = mutation.operation_id,
+            status = mutation.status,
+            evidence = mutation.evidence,
+        }
+        if mutation.error_id ~= nil then operation_fields.errorId = mutation.error_id end
+        local tool_fields = {
+            toolCallId = mutation.tool_call_id,
+            status = mutation.tool_status,
+            body = mutation.tool_body,
+            truncated = tostring(mutation.tool_truncated),
+            rawBytes = tostring(mutation.tool_raw_bytes),
+        }
+        if mutation.tool_digest ~= nil then tool_fields.digest = mutation.tool_digest end
+        if mutation.tool_error_id ~= nil then tool_fields.errorId = mutation.tool_error_id end
+        events[1] = { type = "operation_result", fields = operation_fields }
+        events[2] = { type = "tool_result", fields = tool_fields }
+
+        local bound_tool_call
+        for _, item in ipairs(canonical.events) do
+            if item.type == "operation_intent"
+                and item.fields.operationId == mutation.operation_id
+            then
+                bound_tool_call = item.fields.toolCallId
+                break
+            end
+        end
+        if bound_tool_call ~= mutation.tool_call_id then
+            return nil, failure(
+                "ContextRelation",
+                "operation result does not bind its original tool call"
+            )
+        end
+    end
+
+    candidate.generation = canonical.generation + 1
+    candidate.header.updated_at = updated_at
+    for _, item in ipairs(events) do
+        candidate.facts[#candidate.facts + 1] = {
+            seq = #candidate.facts + 1,
+            type = item.type,
+            at = updated_at,
+            fields = item.fields,
+        }
+    end
+    candidate.facts[#candidate.facts + 1] = {
+        seq = #candidate.facts + 1,
+        type = "model_view_published",
+        at = updated_at,
+        fields = {
+            manifestDigest = manifest_digest,
+            firstEventSeq = #candidate.facts == 0 and "0" or "1",
+            lastEventSeq = tostring(#candidate.facts + 1),
+            replacesManifestDigest = canonical.model_view.active_manifest.digest,
+        },
+    }
+    candidate.model_view.active_manifest = {
+        digest = manifest_digest,
+        first_event_seq = #candidate.facts == 0 and 0 or 1,
+        last_event_seq = #candidate.facts,
+    }
+    return normalize_document(candidate, admitted)
+end
+
+---Builds a full canonical operation generation for a schema service.
+function M.operation_document(schema, document, mutation)
+    local admitted = schema_service_states[schema]
+    if not admitted then
+        return nil, failure(
+            "InvalidContextDocument",
+            "operation mutation requires a schema service from this module"
+        )
+    end
+    return build_operation_document(document, mutation, admitted)
+end
+
+---Creates a current-process operation barrier over a durable Context journal.
+-- The journal must acknowledge the exact binding digest supplied with each
+-- commit.  A result-commit ambiguity permanently blocks new effects in this
+-- service instance; recovery data is audit-only and is never replayed.
+function M.new_operation_service(ports, options)
+    if type(ports) ~= "table"
+        or type(ports.safety) ~= "table"
+        or type(ports.safety.binding_digest) ~= "function"
+        or type(ports.safety.freeze) ~= "function"
+        or type(ports.journal) ~= "table"
+        or type(ports.journal.commit_intent) ~= "function"
+        or type(ports.journal.commit_result) ~= "function"
+    then
+        return nil, failure(
+            "InvalidOperationPorts",
+            "safety and durable Context journal ports are required"
+        )
+    end
+    for key in pairs(ports) do
+        if key ~= "safety" and key ~= "journal" then
+            return nil, failure("InvalidOperationPorts", "operation ports are ambiguous")
+        end
+    end
+    if type(options) ~= "table" then
+        return nil, failure("InvalidOperationOptions", "operation limits are required")
+    end
+    local option_fields = {
+        maximum_identifier_bytes = true,
+        maximum_evidence_bytes = true,
+        unresolved_operation_ids = true,
+    }
+    for key in pairs(options) do
+        if type(key) ~= "string" or not option_fields[key] then
+            return nil, failure("InvalidOperationOptions", "operation options are ambiguous")
+        end
+    end
+    if not valid_integer(options.maximum_identifier_bytes, 1)
+        or not valid_integer(options.maximum_evidence_bytes, 1)
+    then
+        return nil, failure("InvalidOperationOptions", "operation limits must be positive")
+    end
+
+    local function valid_string(value, maximum, empty)
+        return type(value) == "string"
+            and (empty or value ~= "")
+            and #value <= maximum
+            and not value:find("\0", 1, true)
+            and text.validate_utf8(value) == true
+    end
+    local function valid_id(value)
+        return valid_string(value, options.maximum_identifier_bytes, false)
+            and value:match("^[A-Za-z0-9][A-Za-z0-9._:-]*$") ~= nil
+    end
+    local unresolved = options.unresolved_operation_ids or {}
+    local unresolved_count = dense_count(unresolved)
+    if unresolved_count == nil then
+        return nil, failure("InvalidOperationOptions", "unresolved operations must be an array")
+    end
+    local seen = {}
+    local recovery_ids = {}
+    for index, operation_id in ipairs(unresolved) do
+        if not valid_id(operation_id) or seen[operation_id] then
+            return nil, failure("InvalidOperationOptions", "unresolved operation identity is invalid")
+        end
+        seen[operation_id] = true
+        recovery_ids[index] = operation_id
+    end
+
+    local operation_states = setmetatable({}, { __mode = "k" })
+    local active
+    local blocked = unresolved_count > 0
+    local service = {}
+
+    local function journal_commit(method, record, digest_value)
+        local called, ok, receipt = pcall(
+            ports.journal[method],
+            record,
+            digest_value
+        )
+        if not called then
+            return nil, failure(
+                "OperationJournalFailure",
+                "durable Context journal raised an exception"
+            )
+        end
+        if ok ~= true or receipt ~= digest_value then
+            return nil, type(receipt) == "table" and receipt or failure(
+                "OperationJournalContract",
+                "durable Context journal did not acknowledge the exact binding"
+            )
+        end
+        return true
+    end
+
+    function service.begin(intent)
+        if blocked then
+            return nil, failure(
+                "OperationBarrierBlocked",
+                "an unresolved durable operation blocks new side effects"
+            )
+        end
+        if active then
+            return nil, failure("OperationBusy", "one durable operation is already active")
+        end
+        local allowed = {
+            operation_id = true,
+            tool_call_id = true,
+            kind = true,
+            target_identity = true,
+            expected_digest = true,
+            call_digest = true,
+        }
+        if type(intent) ~= "table" then
+            return nil, failure("InvalidOperationIntent", "operation intent is required")
+        end
+        for key in pairs(intent) do
+            if type(key) ~= "string" or not allowed[key] then
+                return nil, failure("InvalidOperationIntent", "operation intent is ambiguous")
+            end
+        end
+        if not valid_id(intent.operation_id)
+            or not valid_id(intent.tool_call_id)
+            or not valid_string(intent.kind, options.maximum_identifier_bytes, false)
+            or not valid_string(intent.target_identity, options.maximum_evidence_bytes, false)
+            or not valid_string(intent.expected_digest, options.maximum_evidence_bytes, false)
+            or not valid_string(intent.call_digest, options.maximum_evidence_bytes, false)
+            or seen[intent.operation_id]
+        then
+            return nil, failure("InvalidOperationIntent", "operation intent fields are invalid")
+        end
+        local digest_value, digest_error = ports.safety.binding_digest(
+            "yaca-operation-intent-v1",
+            {
+                { name = "operation_id", value = intent.operation_id },
+                { name = "tool_call_id", value = intent.tool_call_id },
+                { name = "kind", value = intent.kind },
+                { name = "target_identity", value = intent.target_identity },
+                { name = "expected_digest", value = intent.expected_digest },
+                { name = "call_digest", value = intent.call_digest },
+            }
+        )
+        if not digest_value then return nil, digest_error end
+        local record, freeze_error = ports.safety.freeze({
+            operation_id = intent.operation_id,
+            tool_call_id = intent.tool_call_id,
+            kind = intent.kind,
+            target_identity = intent.target_identity,
+            expected_digest = intent.expected_digest,
+            call_digest = intent.call_digest,
+            intent_digest = digest_value,
+        }, "durable operation intent")
+        if not record then return nil, freeze_error end
+        seen[intent.operation_id] = true
+        local committed, commit_error = journal_commit("commit_intent", record, digest_value)
+        if not committed then
+            if type(commit_error) ~= "table"
+                or type(commit_error.code) ~= "string"
+                or commit_error.code:find("Unknown", 1, true)
+                or commit_error.code == "OperationJournalContract"
+            then
+                blocked = true
+            end
+            return nil, commit_error
+        end
+        local handle = readonly({}, "operation handle")
+        local state = {
+            handle = handle,
+            record = record,
+            digest = digest_value,
+            finished = false,
+        }
+        operation_states[handle] = state
+        active = state
+        return handle, digest_value
+    end
+
+    function service.finish(handle, result)
+        local state = operation_states[handle]
+        if not state or state ~= active or state.finished then
+            return nil, failure("InvalidOperationHandle", "operation handle is stale or foreign")
+        end
+        local allowed = {
+            status = true,
+            evidence = true,
+            error_id = true,
+            tool_status = true,
+            tool_body = true,
+            tool_truncated = true,
+            tool_raw_bytes = true,
+            tool_digest = true,
+            tool_error_id = true,
+        }
+        if type(result) ~= "table" then
+            return nil, failure("InvalidOperationResult", "operation result is required")
+        end
+        for key in pairs(result) do
+            if type(key) ~= "string" or not allowed[key] then
+                return nil, failure("InvalidOperationResult", "operation result is ambiguous")
+            end
+        end
+        if not RESULT_STATUSES[result.status]
+            or not RESULT_STATUSES[result.tool_status]
+            or not valid_string(result.evidence, options.maximum_evidence_bytes, false)
+            or not valid_string(result.tool_body, options.maximum_evidence_bytes, true)
+            or type(result.tool_truncated) ~= "boolean"
+            or not valid_integer(result.tool_raw_bytes, 0)
+            or result.tool_raw_bytes ~= #result.tool_body
+            or (result.error_id ~= nil and not valid_id(result.error_id))
+            or (result.tool_error_id ~= nil and not valid_id(result.tool_error_id))
+            or (result.tool_digest ~= nil
+                and not valid_string(result.tool_digest, options.maximum_evidence_bytes, false))
+        then
+            return nil, failure("InvalidOperationResult", "operation result fields are invalid")
+        end
+        local digest_value, digest_error = ports.safety.binding_digest(
+            "yaca-operation-result-v1",
+            {
+                { name = "intent_digest", value = state.digest },
+                { name = "status", value = result.status },
+                { name = "evidence", value = result.evidence },
+                { name = "error_id", value = result.error_id or "" },
+                { name = "tool_status", value = result.tool_status },
+                { name = "tool_body", value = result.tool_body },
+                { name = "tool_truncated", value = tostring(result.tool_truncated) },
+                { name = "tool_raw_bytes", value = tostring(result.tool_raw_bytes) },
+                { name = "tool_digest", value = result.tool_digest or "" },
+                { name = "tool_error_id", value = result.tool_error_id or "" },
+            }
+        )
+        if not digest_value then return nil, digest_error end
+        local record, freeze_error = ports.safety.freeze({
+            operation_id = state.record.operation_id,
+            tool_call_id = state.record.tool_call_id,
+            status = result.status,
+            evidence = result.evidence,
+            error_id = result.error_id or false,
+            tool_status = result.tool_status,
+            tool_body = result.tool_body,
+            tool_truncated = result.tool_truncated,
+            tool_raw_bytes = result.tool_raw_bytes,
+            tool_digest = result.tool_digest or false,
+            tool_error_id = result.tool_error_id or false,
+            intent_digest = state.digest,
+            result_digest = digest_value,
+        }, "durable operation result")
+        if not record then return nil, freeze_error end
+        state.finished = true
+        local committed, commit_error = journal_commit("commit_result", record, digest_value)
+        if not committed then
+            blocked = true
+            return nil, failure(
+                "OperationResultDurabilityUnknown",
+                "operation result did not cross the durable Context barrier",
+                type(commit_error) == "table" and commit_error.code or nil
+            )
+        end
+        active = nil
+        return digest_value
+    end
+
+    function service.status()
+        return assert(ports.safety.freeze({
+            blocked = blocked,
+            active_operation_id = active and active.record.operation_id or false,
+            unresolved_operation_ids = recovery_ids,
+            auto_replay = false,
+        }, "operation barrier status"))
+    end
+
+    service.capabilities = assert(ports.safety.freeze({
+        durable_intent_before_effect = true,
+        durable_result_before_next_effect = true,
+        serial = true,
+        auto_replay = false,
+        backup = false,
+        undo = false,
+        rollback = false,
+    }, "operation barrier capabilities"))
+    return readonly(service, "operation service")
+end
+
 local STORE_FILESYSTEM_METHODS = {
     "open_read",
     "create_new",

@@ -30,6 +30,13 @@ local MUTATING_TOOLS = {
     rename = true,
     delete = true,
 }
+local OPERATION_TOOLS = {
+    write = true,
+    patch = true,
+    rename = true,
+    delete = true,
+    exec = true,
+}
 
 local arrays = setmetatable({}, { __mode = "k" })
 
@@ -482,7 +489,8 @@ local function validate_options(options)
         "maximum_search_matches", "maximum_patch_hunks", "maximum_patch_lines",
         "maximum_line_bytes", "maximum_continuations", "maximum_identifier_bytes",
         "filesystem_chunk_bytes", "create_permissions", "maximum_json_depth",
-        "maximum_json_nodes", "maximum_number_bytes",
+        "maximum_json_nodes", "maximum_number_bytes", "maximum_exec_output_bytes",
+        "maximum_exec_deadline_ms",
     }
     local allowed = {
         platform_kind = true,
@@ -509,6 +517,7 @@ local function validate_options(options)
         or result.filesystem_chunk_bytes > result.maximum_file_bytes
         or result.maximum_line_bytes > result.maximum_content_bytes
         or result.maximum_content_bytes > result.maximum_argument_bytes
+        or result.maximum_exec_output_bytes > result.maximum_result_bytes
     then
         return nil, failure("InvalidToolOptions", "tool sub-limits are inconsistent")
     end
@@ -543,6 +552,8 @@ local function validate_dependencies(dependencies)
         safety = true,
         secret_registry = true,
         authorization = true,
+        processes = true,
+        operations = true,
     }) then
         return nil, failure("InvalidToolDependencies", "tool dependencies are ambiguous")
     end
@@ -588,12 +599,36 @@ local function validate_dependencies(dependencies)
     then
         return nil, failure("InvalidToolDependencies", "authorization port is incomplete")
     end
+    local processes = dependencies.processes
+    if processes ~= false
+        and (type(processes) ~= "table" or type(processes.new_port) ~= "function")
+    then
+        return nil, failure("InvalidToolDependencies", "process service is invalid")
+    end
+    if processes ~= false and secrets ~= false
+        and type(secrets.new_stream_scanner) ~= "function"
+    then
+        return nil, failure(
+            "InvalidToolDependencies",
+            "raw exec requires a cross-chunk registered-secret scanner"
+        )
+    end
+    local operations = dependencies.operations
+    if type(operations) ~= "table"
+        or type(operations.begin) ~= "function"
+        or type(operations.finish) ~= "function"
+        or type(operations.status) ~= "function"
+    then
+        return nil, failure("InvalidToolDependencies", "durable operation service is incomplete")
+    end
     return {
         filesystem = filesystem,
         path = paths,
         safety = safety,
         secret_registry = secrets,
         authorization = authorization,
+        processes = processes,
+        operations = operations,
     }
 end
 
@@ -687,6 +722,7 @@ function M.new(dependencies, options)
     local continuation_count = 0
     local continuation_serial = 0
     local executing = false
+    local halted = false
 
     local function inspect_path(path)
         local ok, snapshot = ports.filesystem.direct_inspect(path)
@@ -1285,7 +1321,6 @@ function M.new(dependencies, options)
                 identity_bytes(target.snapshot.parent_identity),
             }, "\0")
         end
-        if envelope.tool == "exec" then outside = false end
         local call_digest, digest_error = ports.safety.binding_digest("yaca-tool-call-v1", {
             { name = "registry_version", value = REGISTRY_VERSION },
             { name = "registry_digest", value = registry.digest },
@@ -1323,6 +1358,8 @@ function M.new(dependencies, options)
             targets = targets,
             continuation = continuation,
             call_digest = call_digest,
+            operation_handle = nil,
+            operation_digest = nil,
             result = nil,
         }
         return public
@@ -1357,6 +1394,78 @@ function M.new(dependencies, options)
         return projection
     end
 
+    ---Publishes the unique operation intent for a mutating or raw-shell call.
+    -- Permission and any approval are expected to have completed before this
+    -- method is invoked.  The returned digest is evidence only; callers cannot
+    -- inject it back into authorization because the marked operation handle is
+    -- retained inside this service.
+    function service:begin_operation(call)
+        local state = calls[call]
+        if not state or state.result ~= nil or not OPERATION_TOOLS[state.tool] then
+            return nil, failure(
+                "InvalidToolCall",
+                "durable intent requires a pending side-effecting call"
+            )
+        end
+        if state.operation_handle ~= nil then
+            return nil, failure("OperationExists", "tool call already has a durable intent")
+        end
+        if halted then
+            return nil, failure(
+                "OperationBarrierBlocked",
+                "a prior result durability failure blocks new operations"
+            )
+        end
+        local target_rows = {}
+        for index, target in ipairs(state.targets) do
+            target_rows[index] = table.concat({
+                target.snapshot.canonical_path,
+                target.snapshot.exists and identity_bytes(target.snapshot.identity) or "missing",
+                identity_bytes(target.snapshot.parent_identity),
+            }, "\1")
+        end
+        local target_identity, target_error = ports.safety.binding_digest(
+            "yaca-operation-target-v1",
+            {
+                { name = "call_digest", value = state.call_digest },
+                { name = "targets", value = table.concat(target_rows, "\2") },
+            }
+        )
+        if not target_identity then return nil, target_error end
+        local expected_digest = state.arguments.expected_raw_digest
+        if type(expected_digest) ~= "string" or expected_digest == "" then
+            expected_digest = state.tool == "write" and state.arguments.mode == "create"
+                and "target-absent:" .. state.call_digest
+                or "opaque-call:" .. state.call_digest
+        end
+        local called, handle, intent_digest = pcall(ports.operations.begin, {
+            operation_id = state.public.operation_id,
+            tool_call_id = state.public.tool_call_id,
+            kind = state.tool,
+            target_identity = target_identity,
+            expected_digest = expected_digest,
+            call_digest = state.call_digest,
+        })
+        if not called then
+            halted = true
+            return nil, failure(
+                "OperationJournalFailure",
+                "durable operation service raised an exception"
+            )
+        end
+        if not handle then return nil, intent_digest end
+        if not valid_string(intent_digest, 256, false) then
+            halted = true
+            return nil, failure(
+                "OperationJournalContract",
+                "durable operation service returned an invalid intent digest"
+            )
+        end
+        state.operation_handle = handle
+        state.operation_digest = intent_digest
+        return intent_digest
+    end
+
     ---Mints a one-shot execution token after the external safety pipeline.
     -- The injected port is responsible for verifying deterministic Permission,
     -- exact approval when required, current config/workspace generations, and
@@ -1369,7 +1478,6 @@ function M.new(dependencies, options)
         if not exact_fields(facts, {
             permission_snapshot_digest = true,
             approval_digest = true,
-            durable_intent_digest = true,
             config_generation = true,
             workspace_identity = true,
             double_check = true,
@@ -1377,7 +1485,6 @@ function M.new(dependencies, options)
         })
             or not valid_string(facts.permission_snapshot_digest, 256, false)
             or not valid_string(facts.approval_digest, 256, true)
-            or not valid_string(facts.durable_intent_digest, 256, false)
             or not valid_string(facts.config_generation, limits.maximum_identifier_bytes, false)
             or facts.workspace_identity ~= identity_key(workspace.identity)
             or type(facts.double_check) ~= "boolean"
@@ -1387,17 +1494,35 @@ function M.new(dependencies, options)
         then
             return nil, failure("InvalidAuthorization", "authorization facts are invalid or stale")
         end
+        if OPERATION_TOOLS[state.tool] and state.operation_handle == nil then
+            return nil, failure(
+                "OperationIntentRequired",
+                "side effects require a durable operation intent before authorization"
+            )
+        end
+        local authority_input = {
+            permission_snapshot_digest = facts.permission_snapshot_digest,
+            approval_digest = facts.approval_digest,
+            durable_intent_digest = state.operation_digest or "not-required:" .. state.call_digest,
+            config_generation = facts.config_generation,
+            workspace_identity = facts.workspace_identity,
+            double_check = facts.double_check,
+            action_review = facts.action_review,
+        }
         local called, admitted, authority_digest = pcall(
             ports.authorization.admit,
             call,
-            facts
+            authority_input
         )
         if not called or admitted ~= true
             or not valid_string(authority_digest, 256, false)
         then
             return nil, failure("AuthorizationDenied", "external authorization did not admit the call")
         end
-        local frozen_facts, freeze_error = ports.safety.freeze(facts, "tool authorization facts")
+        local frozen_facts, freeze_error = ports.safety.freeze(
+            authority_input,
+            "tool authorization facts"
+        )
         if not frozen_facts then return nil, freeze_error end
         local token = readonly({}, "tool authorization token")
         authorizations[token] = {
@@ -2464,7 +2589,7 @@ function M.new(dependencies, options)
         return targets
     end
 
-    local function make_result(state, outcome, payload, error_value)
+    local function build_result(state, outcome, payload, error_value)
         local error_projection = false
         if error_value then
             error_projection = {
@@ -2493,12 +2618,9 @@ function M.new(dependencies, options)
         local bytes, encode_error = canonical_json(record)
         if not bytes then return nil, encode_error end
         if #bytes > limits.maximum_result_bytes then
-            record.outcome = "failed"
-            record.payload = false
-            record.error = {
-                code = "ResultLimit",
-                message = "canonical direct result exceeds maximum_result_bytes",
-                detail = false,
+            record.payload = {
+                classification = "result-evidence-omitted",
+                original_bytes = #bytes,
             }
             bytes = assert(canonical_json(record))
         end
@@ -2514,8 +2636,67 @@ function M.new(dependencies, options)
         local digest, digest_error = ports.safety.digest(bytes)
         if not digest then return nil, digest_error end
         record.result_digest = digest
+        local body, body_error = canonical_json(record)
+        if not body then return nil, body_error end
+        if #body > limits.maximum_result_bytes then
+            record.payload = {
+                classification = "result-evidence-omitted",
+                original_bytes = #body,
+            }
+            record.result_digest = nil
+            bytes = assert(canonical_json(record))
+            digest, digest_error = ports.safety.digest(bytes)
+            if not digest then return nil, digest_error end
+            record.result_digest = digest
+            body = assert(canonical_json(record))
+            if #body > limits.maximum_result_bytes then
+                return nil, failure("ResultLimit", "canonical result envelope exceeds its limit")
+            end
+        end
         local frozen, freeze_error = ports.safety.freeze(record, "canonical tool result")
         if not frozen then return nil, freeze_error end
+        return frozen, body
+    end
+
+    local function result_status(outcome)
+        if outcome == "success" then return "ok" end
+        if outcome == "cancelled" or outcome == "timeout" then return "cancelled" end
+        if outcome == "unknown" or outcome == "partial" then return "unknown" end
+        if outcome == "skipped" then return "skipped" end
+        return "error"
+    end
+
+    local function make_result(state, outcome, payload, error_value)
+        local frozen, body_or_error = build_result(state, outcome, payload, error_value)
+        if not frozen then
+            if state.operation_handle ~= nil then halted = true end
+            return nil, body_or_error
+        end
+        local body = body_or_error
+        if state.operation_handle ~= nil then
+            local body_digest, digest_error = ports.safety.digest(body)
+            if not body_digest then halted = true; return nil, digest_error end
+            local called, committed, commit_error = pcall(
+                ports.operations.finish,
+                state.operation_handle,
+                {
+                    status = result_status(frozen.outcome),
+                    evidence = "canonical-result:" .. frozen.result_digest,
+                    tool_status = result_status(frozen.outcome),
+                    tool_body = body,
+                    tool_truncated = false,
+                    tool_raw_bytes = #body,
+                    tool_digest = body_digest,
+                }
+            )
+            if not called or not valid_string(committed, 256, false) then
+                halted = true
+                return nil, (called and commit_error) or failure(
+                    "OperationResultDurabilityUnknown",
+                    "tool result did not cross the durable Context barrier"
+                )
+            end
+        end
         state.result = frozen
         return frozen
     end
@@ -2530,25 +2711,7 @@ function M.new(dependencies, options)
         delete = execute_delete,
     }
 
-    ---Executes one authorized call exactly once and returns one terminal result.
-    -- Direct tools remain serialized.  C25 attaches raw exec to the same
-    -- envelope; at this node exec is admitted/authorized but fails before spawn.
-    function service:execute(token)
-        local authorization = authorizations[token]
-        if not authorization then
-            return nil, failure("InvalidAuthorization", "execution token is forged or foreign")
-        end
-        if authorization.consumed then
-            return nil, failure("AuthorizationConsumed", "execution token is one-shot")
-        end
-        if executing then
-            return nil, failure("ToolBusy", "all v0.1 tools execute serially")
-        end
-        authorization.consumed = true
-        local state = authorization.state
-        if state.result ~= nil then
-            return nil, failure("ToolResultExists", "accepted call already has a terminal result")
-        end
+    local function authorization_current(authorization)
         local called, current, reverify_error = pcall(
             ports.authorization.reverify,
             authorization.call,
@@ -2556,21 +2719,72 @@ function M.new(dependencies, options)
             authorization.authority_digest
         )
         if not called or current ~= true then
-            return make_result(
-                state,
-                "failed",
-                nil,
-                reverify_error or failure(
-                    "AuthorizationStale",
-                    "external authorization is no longer current"
-                )
+            return nil, reverify_error or failure(
+                "AuthorizationStale",
+                "external authorization is no longer current"
             )
         end
+        return true
+    end
+
+    local function consume_authorization(token, expected_tool)
+        local authorization = authorizations[token]
+        if not authorization then
+            return nil, failure("InvalidAuthorization", "execution token is forged or foreign")
+        end
+        if authorization.consumed then
+            return nil, failure("AuthorizationConsumed", "execution token is one-shot")
+        end
+        if halted then
+            return nil, failure(
+                "OperationBarrierBlocked",
+                "a prior result durability failure blocks new effects"
+            )
+        end
+        if executing then return nil, failure("ToolBusy", "all v0.1 tools execute serially") end
+        local state = authorization.state
+        if state.result ~= nil then
+            return nil, failure("ToolResultExists", "accepted call already has a terminal result")
+        end
+        if expected_tool and state.tool ~= expected_tool then
+            return nil, failure("InvalidToolCall", "execution surface does not match the tool")
+        end
+        authorization.consumed = true
+        return authorization, state
+    end
+
+    ---Executes one authorized direct call exactly once and returns one result.
+    -- Raw exec is driven through execution_port so the single event pump can
+    -- continue draining output and admit cancellation without a blocking wait.
+    function service:execute(token)
+        local pending = authorizations[token]
+        if pending and not pending.consumed and pending.state.tool == "exec"
+            and ports.processes ~= false
+        then
+            return nil, failure(
+                "AsyncExecutionRequired",
+                "raw exec must be driven through its foreground AsyncPort"
+            )
+        end
+        local authorization, state_or_error = consume_authorization(token)
+        if not authorization then return nil, state_or_error end
+        local state = state_or_error
+        executing = true
+        local current, current_error = authorization_current(authorization)
+        if not current then
+            local result, result_error = make_result(state, "failed", nil, current_error)
+            executing = false
+            return result, result_error
+        end
         local boundaries, boundary_error = reverify_boundaries(state)
-        if not boundaries then return make_result(state, "failed", nil, boundary_error) end
+        if not boundaries then
+            local result, result_error = make_result(state, "failed", nil, boundary_error)
+            executing = false
+            return result, result_error
+        end
         local executor = EXECUTORS[state.tool]
         if not executor then
-            return make_result(
+            local result, result_error = make_result(
                 state,
                 "failed",
                 nil,
@@ -2579,10 +2793,10 @@ function M.new(dependencies, options)
                     "raw exec is attached by the C25 durable operation node"
                 )
             )
+            executing = false
+            return result, result_error
         end
-        executing = true
         local executed, payload, operation_error = pcall(executor, state)
-        executing = false
         if not executed then
             operation_error = failure("ToolInternalFailure", "tool execution raised an exception")
             payload = nil
@@ -2590,9 +2804,481 @@ function M.new(dependencies, options)
         if not payload then
             local outcome = unknown_error(operation_error) and "unknown" or "failed"
             if not executed and MUTATING_TOOLS[state.tool] then outcome = "unknown" end
-            return make_result(state, outcome, nil, operation_error)
+            local result, result_error = make_result(state, outcome, nil, operation_error)
+            executing = false
+            return result, result_error
         end
-        return make_result(state, "success", payload)
+        local result, result_error = make_result(state, "success", payload)
+        executing = false
+        return result, result_error
+    end
+
+    local BASE64_ALPHABET =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+    local function base64_encode(bytes)
+        local output = {}
+        for index = 1, #bytes, 3 do
+            local first = bytes:byte(index)
+            local second = bytes:byte(index + 1)
+            local third = bytes:byte(index + 2)
+            local value = first * 65536 + (second or 0) * 256 + (third or 0)
+            output[#output + 1] = BASE64_ALPHABET:sub((value >> 18 & 63) + 1, (value >> 18 & 63) + 1)
+            output[#output + 1] = BASE64_ALPHABET:sub((value >> 12 & 63) + 1, (value >> 12 & 63) + 1)
+            output[#output + 1] = second
+                and BASE64_ALPHABET:sub((value >> 6 & 63) + 1, (value >> 6 & 63) + 1)
+                or "="
+            output[#output + 1] = third
+                and BASE64_ALPHABET:sub((value & 63) + 1, (value & 63) + 1)
+                or "="
+        end
+        return table.concat(output)
+    end
+
+    local function strict_output_text(bytes)
+        local codepoints = text.decode_utf8(bytes)
+        if not codepoints then return nil end
+        for _, codepoint in ipairs(codepoints) do
+            local safe = codepoint == 0x09 or codepoint == 0x0A or codepoint == 0x0D
+                or (codepoint >= 0x20 and codepoint <= 0xD7FF)
+                or (codepoint >= 0xE000 and codepoint <= 0xFFFD)
+                or (codepoint >= 0x10000 and codepoint <= 0x10FFFF)
+            if not safe then return nil end
+        end
+        return bytes
+    end
+
+    local function validate_exec_policy(policy, authorization)
+        if not exact_fields(policy, {
+            config_generation = true,
+            environment_mode = true,
+            environment = true,
+            output_limit_bytes = true,
+            deadline_ms = true,
+            decoder = true,
+        })
+            or policy.config_generation ~= authorization.facts.config_generation
+            or (policy.environment_mode ~= "minimal"
+                and policy.environment_mode ~= "inherit_filtered")
+            or type(policy.environment) ~= "table"
+            or not valid_integer(policy.output_limit_bytes, 1)
+            or policy.output_limit_bytes > limits.maximum_exec_output_bytes
+            or not valid_integer(policy.deadline_ms, 1)
+            or policy.deadline_ms > limits.maximum_exec_deadline_ms
+            or not valid_string(policy.decoder, 128, false)
+        then
+            return nil, failure("InvalidExecPolicy", "raw exec policy is invalid or stale")
+        end
+        return policy
+    end
+
+    local function channel_projection(name, process_result, scanner_receipt, decoder)
+        local prefix = name .. "_"
+        local bytes = process_result[name]
+        local observed = process_result[prefix .. "observed_bytes"]
+        local retained = process_result[prefix .. "retained_bytes"]
+        local discarded = process_result[prefix .. "discarded_bytes"]
+        local quota = process_result[prefix .. "quota_bytes"]
+        if type(bytes) ~= "string"
+            or not valid_integer(observed, 0)
+            or not valid_integer(retained, 0)
+            or not valid_integer(discarded, 0)
+            or not valid_integer(quota, 0)
+            or retained ~= #bytes
+            or observed ~= retained + discarded
+            or type(process_result[prefix .. "truncated"]) ~= "boolean"
+            or (scanner_receipt and scanner_receipt.observed_bytes ~= observed)
+        then
+            return nil, failure("ProcessContract", "raw exec output accounting is invalid")
+        end
+        if scanner_receipt and scanner_receipt.redacted then
+            return {
+                stream = name,
+                representation = "registered-secret-redacted",
+                text = false,
+                base64 = false,
+                observed_bytes = observed,
+                retained_bytes = 0,
+                discarded_bytes = observed,
+                quota_bytes = quota,
+                truncated = true,
+                truncation_reason = "registered-secret",
+                decoder = decoder,
+                replacement_count = 0,
+                digest = false,
+                digest_scope = "redacted-canonical",
+                registered_secret_hits = scanner_receipt.hit_count,
+            }
+        end
+        local digest, digest_error = ports.safety.digest(bytes)
+        if not digest then return nil, digest_error end
+        local decoded = strict_output_text(bytes)
+        return {
+            stream = name,
+            representation = decoded and "text" or "base64",
+            text = decoded or false,
+            base64 = decoded and false or base64_encode(bytes),
+            observed_bytes = observed,
+            retained_bytes = retained,
+            discarded_bytes = discarded,
+            quota_bytes = quota,
+            truncated = process_result[prefix .. "truncated"],
+            truncation_reason = process_result[prefix .. "truncated"]
+                and "combined-fixed-channel-quota" or false,
+            decoder = decoded and decoder or "binary",
+            replacement_count = 0,
+            digest = digest,
+            digest_scope = "retained-raw-bytes",
+            registered_secret_hits = 0,
+        }
+    end
+
+    ---Returns the five-method foreground AsyncPort for one authorized exec.
+    -- Progress events expose byte counts only. Raw bytes stay behind the
+    -- cross-chunk secret boundary until the terminal canonical result exists.
+    function service:execution_port(token, policy)
+        if ports.processes == false then
+            return nil, failure("ExecUnavailable", "raw exec process capability is unavailable")
+        end
+        local authorization, state_or_error = consume_authorization(token, "exec")
+        if not authorization then return nil, state_or_error end
+        local state = state_or_error
+        local admitted_policy, policy_error = validate_exec_policy(policy, authorization)
+        if not admitted_policy then
+            -- The token has not produced a side effect, but its durable intent
+            -- must still be closed before another operation may begin.
+            executing = true
+            local result, result_error = make_result(state, "failed", nil, policy_error)
+            executing = false
+            return nil, result_error or failure(
+                "InvalidExecPolicy",
+                "raw exec policy was rejected",
+                result and result.result_digest
+            )
+        end
+        executing = true
+
+        local lifecycle = "created"
+        local inner
+        local terminal
+        local deadline_at
+        local timed_out = false
+        local user_cancelled = false
+        local scan_fault
+        local scanners = {}
+        local port = {}
+
+        local function settle_without_process(outcome, error_value)
+            local result, result_error = make_result(state, outcome, nil, error_value)
+            terminal = {
+                outcome = outcome == "unknown" and "unknown" or "failed",
+                tool_result = result or false,
+                error = result_error or false,
+            }
+            if result_error then halted = true; terminal.outcome = "unknown" end
+        end
+
+        local function finish_scanner(name)
+            if not scanners[name] then return false end
+            local called, receipt, scanner_error = pcall(scanners[name].finish)
+            if not called or not receipt then
+                scan_fault = called and scanner_error or failure(
+                    "SecretScanFailure",
+                    "registered-secret scanner raised an exception"
+                )
+                return false
+            end
+            return receipt
+        end
+
+        local function settle_process(process_result)
+            if type(process_result) ~= "table"
+                or (process_result.outcome ~= "completed"
+                    and process_result.outcome ~= "cancelled"
+                    and process_result.outcome ~= "failed"
+                    and process_result.outcome ~= "unknown")
+                or type(process_result.exit_kind) ~= "string"
+                or not valid_integer(process_result.duration_ms, 0)
+                or type(process_result.descendants_proven_stopped) ~= "boolean"
+                or not valid_integer(process_result.observed_sequences, 0)
+            then
+                settle_without_process(
+                    "unknown",
+                    failure("ProcessContract", "raw exec terminal result is invalid")
+                )
+                return
+            end
+            local stdout_scan = finish_scanner("stdout")
+            local stderr_scan = finish_scanner("stderr")
+            local stdout, stdout_error = channel_projection(
+                "stdout",
+                process_result,
+                stdout_scan,
+                admitted_policy.decoder
+            )
+            local stderr, stderr_error = channel_projection(
+                "stderr",
+                process_result,
+                stderr_scan,
+                admitted_policy.decoder
+            )
+            local descendants = process_result.descendants_proven_stopped == true
+            local tool_outcome, error_value
+            if scan_fault or not stdout or not stderr then
+                tool_outcome = "unknown"
+                error_value = scan_fault or stdout_error or stderr_error
+            elseif process_result.outcome == "unknown" or not descendants then
+                tool_outcome = "unknown"
+                error_value = failure(
+                    "ProcessOutcomeUnknown",
+                    "raw exec process-tree outcome is not proven"
+                )
+            elseif timed_out then
+                tool_outcome = "timeout"
+                error_value = failure("ExecTimeout", "raw exec reached its frozen deadline")
+            elseif process_result.outcome == "cancelled" or user_cancelled then
+                tool_outcome = "cancelled"
+                error_value = failure("ExecCancelled", "raw exec was cancelled")
+            elseif process_result.outcome == "failed" then
+                tool_outcome = "failed"
+                error_value = failure("ProcessFailed", "raw exec process adapter reported failure")
+            else
+                tool_outcome = "success"
+            end
+            local payload = stdout and stderr and {
+                cwd = state.arguments.cwd,
+                stdin = "closed",
+                shell = ports.processes.capabilities
+                    and ports.processes.capabilities.shell or "fixed-platform-shell",
+                environment_mode = admitted_policy.environment_mode,
+                process_outcome = process_result.outcome,
+                exit_kind = process_result.exit_kind,
+                exit_code = process_result.exit_code or false,
+                signal_or_exception = process_result.signal_or_exception or false,
+                duration_ms = process_result.duration_ms,
+                observed_sequences = process_result.observed_sequences,
+                stdout = stdout,
+                stderr = stderr,
+                descendants_proven_stopped = descendants,
+                descendant_state = descendants and "proven-stopped" or "unknown",
+                external_effects_unsettled = not descendants
+                    or process_result.outcome == "unknown",
+                deadline_ms = math.min(
+                    admitted_policy.deadline_ms,
+                    state.arguments.deadline_ms or admitted_policy.deadline_ms
+                ),
+            } or nil
+            local result, result_error = make_result(
+                state,
+                tool_outcome,
+                payload,
+                error_value
+            )
+            local port_outcome = tool_outcome == "success" and "completed"
+                or (tool_outcome == "cancelled" or tool_outcome == "timeout") and "cancelled"
+                or tool_outcome == "failed" and "failed"
+                or "unknown"
+            if result_error then halted = true; port_outcome = "unknown" end
+            terminal = {
+                outcome = port_outcome,
+                tool_result = result or false,
+                error = result_error or false,
+            }
+        end
+
+        function port:start(now)
+            if lifecycle ~= "created" then error("exec port is " .. lifecycle, 2) end
+            if not valid_integer(now, 0) then error("exec start time is invalid", 2) end
+            lifecycle = "started"
+            local effective_deadline = math.min(
+                admitted_policy.deadline_ms,
+                state.arguments.deadline_ms or admitted_policy.deadline_ms
+            )
+            if effective_deadline > math.maxinteger - now then
+                settle_without_process(
+                    "failed",
+                    failure("InvalidDeadline", "raw exec deadline overflows monotonic time")
+                )
+                return true
+            end
+            deadline_at = now + effective_deadline
+            if ports.secret_registry ~= false then
+                for _, name in ipairs({ "stdout", "stderr" }) do
+                    local constructed, scanner = pcall(
+                        ports.secret_registry.new_stream_scanner
+                    )
+                    if not constructed or type(scanner) ~= "table"
+                        or type(scanner.push) ~= "function"
+                        or type(scanner.finish) ~= "function"
+                    then
+                        settle_without_process(
+                            "failed",
+                            failure(
+                                "SecretScanFailure",
+                                "registered-secret scanner could not start"
+                            )
+                        )
+                        return true
+                    end
+                    scanners[name] = scanner
+                end
+            end
+            local current, current_error = authorization_current(authorization)
+            if not current then settle_without_process("failed", current_error); return true end
+            local boundaries, boundary_error = reverify_boundaries(state)
+            if not boundaries then settle_without_process("failed", boundary_error); return true end
+            local constructed, process_port, process_error = pcall(ports.processes.new_port, {
+                command = state.arguments.command,
+                cwd = state.arguments.cwd,
+                environment_mode = admitted_policy.environment_mode,
+                environment = admitted_policy.environment,
+                output_limit_bytes = admitted_policy.output_limit_bytes,
+            })
+            if not constructed then
+                settle_without_process(
+                    "failed",
+                    failure("ProcessContract", "raw exec process factory raised an exception")
+                )
+                return true
+            end
+            if not process_port then settle_without_process("failed", process_error); return true end
+            inner = process_port
+            local started, start_error = pcall(inner.start, inner, now)
+            if not started then
+                settle_without_process(
+                    "unknown",
+                    failure("ProcessStartUnknown", "raw exec start outcome is unknown")
+                )
+                return true
+            end
+            if start_error ~= true then
+                settle_without_process(
+                    "unknown",
+                    failure("ProcessStartUnknown", "raw exec start was not acknowledged")
+                )
+            end
+            return true
+        end
+
+        function port:poll(now, budget)
+            if lifecycle ~= "started" then error("exec port is " .. lifecycle, 2) end
+            if not valid_integer(now, 0) or not valid_integer(budget, 0) then
+                error("exec poll arguments are invalid", 2)
+            end
+            if terminal then
+                if terminal.emitted then return {} end
+                if budget == 0 then return {} end
+                terminal.emitted = true
+                return { { kind = "io_terminal", outcome = terminal.outcome } }
+            end
+            if now >= deadline_at and not timed_out then
+                timed_out = true
+                local cancelled, cancel_result = pcall(inner.cancel, inner, now)
+                if not cancelled then
+                    scan_fault = failure(
+                        "ProcessCancelUnknown",
+                        "raw exec deadline cancellation raised an exception"
+                    )
+                elseif type(cancel_result) ~= "boolean" then
+                    scan_fault = failure(
+                        "ProcessCancelUnknown",
+                        "raw exec deadline cancellation was not acknowledged"
+                    )
+                end
+            end
+            local called, events = pcall(inner.poll, inner, now, budget)
+            if not called then
+                error("raw exec process poll failed", 2)
+            end
+            local public_events = {}
+            for _, event in ipairs(events) do
+                if event.kind == "io_progress" then
+                    local scanner = scanners[event.stream]
+                    if scanner then
+                        local scanned, hits, scanner_error = pcall(scanner.push, event.bytes)
+                        if not scanned or not hits then
+                            scan_fault = scanned and scanner_error or failure(
+                                "SecretScanFailure",
+                                "registered-secret scanner raised an exception"
+                            )
+                        end
+                    end
+                    public_events[#public_events + 1] = {
+                        kind = "io_progress",
+                        key = event.stream,
+                        stream = event.stream,
+                        observed_sequence = event.observed_sequence,
+                        observed_bytes = #event.bytes,
+                        content = "withheld-until-terminal-secret-scan",
+                    }
+                elseif event.kind == "io_terminal" then
+                    local joined, process_result = pcall(inner.join, inner, now)
+                    if not joined then
+                        settle_without_process(
+                            "unknown",
+                            failure("ProcessJoinUnknown", "raw exec terminal join failed")
+                        )
+                    else
+                        settle_process(process_result)
+                    end
+                    terminal.emitted = true
+                    public_events[#public_events + 1] = {
+                        kind = "io_terminal",
+                        outcome = terminal.outcome,
+                    }
+                else
+                    error("raw exec process emitted an unknown event", 2)
+                end
+            end
+            return public_events
+        end
+
+        function port:cancel(now)
+            if lifecycle ~= "started" then error("exec port is " .. lifecycle, 2) end
+            if terminal then return false end
+            if not valid_integer(now, 0) then error("exec cancel time is invalid", 2) end
+            user_cancelled = true
+            local called, accepted = pcall(inner.cancel, inner, now)
+            if not called then
+                scan_fault = failure(
+                    "ProcessCancelUnknown",
+                    "raw exec cancellation raised an exception"
+                )
+                return false
+            end
+            return accepted
+        end
+
+        function port:join(deadline)
+            if lifecycle ~= "started" then error("exec port is " .. lifecycle, 2) end
+            if deadline ~= nil and not valid_integer(deadline, 0) then
+                error("exec join deadline is invalid", 2)
+            end
+            if not terminal then error("exec port has not reached terminal truth", 2) end
+            lifecycle = "joined"
+            return {
+                outcome = terminal.outcome,
+                tool_result = terminal.tool_result,
+                error = terminal.error,
+            }
+        end
+
+        function port:close()
+            if lifecycle ~= "started" and lifecycle ~= "joined" then
+                error("exec port is " .. lifecycle, 2)
+            end
+            local close_error
+            if inner then
+                local closed, value = pcall(inner.close, inner)
+                if not closed or value ~= true then close_error = value end
+            end
+            lifecycle = "closed"
+            executing = false
+            if close_error then error("raw exec process close failed", 2) end
+            return true
+        end
+
+        return port
     end
 
     ---Returns the terminal result already paired with an admitted call.
@@ -2616,6 +3302,10 @@ function M.new(dependencies, options)
         git_workflow = false,
         backup_or_undo = false,
         serial_execution = true,
+        raw_exec = ports.processes ~= false,
+        raw_exec_async = ports.processes ~= false,
+        durable_operation_barrier = true,
+        unknown_auto_replay = false,
         target_qualified = false,
     }, "tool capabilities"))
 

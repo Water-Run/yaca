@@ -294,6 +294,12 @@ function M.new(hash_port, options)
         local by_id, ordered_or_error = validate_secret_entries(entries)
         if not by_id then return nil, ordered_or_error end
         local ordered = ordered_or_error
+        local maximum_scannable_bytes = 0
+        for _, entry in ipairs(ordered) do
+            if #entry.value >= options.minimum_scannable_secret_bytes then
+                maximum_scannable_bytes = math.max(maximum_scannable_bytes, #entry.value)
+            end
+        end
         local registry = {}
 
         ---Lists non-secret registry metadata in deterministic source order.
@@ -353,6 +359,76 @@ function M.new(hash_port, options)
                 end
             end
             return assert(freeze_value(hits, {}, "secret scan results"))
+        end
+
+        ---Creates a cross-chunk exact scanner for an unbounded byte stream.
+        -- Only the longest-pattern overlap is retained.  Match values and the
+        -- overlap length stay closure-private so public diagnostics cannot use
+        -- the scanner as a secret-length oracle.
+        function registry.new_stream_scanner()
+            local tail = ""
+            local observed = 0
+            local hit_count = 0
+            local finished = false
+            local scanner = {}
+
+            function scanner.push(bytes)
+                if finished then
+                    return nil, failure("SecretScannerClosed", "secret stream scanner is closed")
+                end
+                if type(bytes) ~= "string" then
+                    return nil, failure("InvalidSecretScan", "secret stream chunk must be bytes")
+                end
+                local combined = tail .. bytes
+                local combined_start = observed - #tail
+                local hits = {}
+                for _, entry in ipairs(ordered) do
+                    if #entry.value >= options.minimum_scannable_secret_bytes then
+                        local from = 1
+                        while true do
+                            local first = combined:find(entry.value, from, true)
+                            if not first then break end
+                            local absolute = combined_start + first
+                            local last = absolute + #entry.value - 1
+                            -- A match whose final byte was already observed was
+                            -- reported by an earlier push. This boundary rule
+                            -- avoids an unbounded de-duplication set while the
+                            -- overlap still catches every cross-chunk match.
+                            if last > observed then
+                                if hit_count < math.maxinteger then
+                                    hit_count = hit_count + 1
+                                end
+                                hits[#hits + 1] = {
+                                    id = entry.id,
+                                    class = entry.class,
+                                    offset = absolute,
+                                    length = #entry.value,
+                                }
+                            end
+                            from = first + 1
+                        end
+                    end
+                end
+                observed = observed + #bytes
+                local overlap = math.max(maximum_scannable_bytes - 1, 0)
+                tail = overlap == 0 and "" or combined:sub(-overlap)
+                return assert(freeze_value(hits, {}, "secret stream scan results"))
+            end
+
+            function scanner.finish()
+                if finished then
+                    return nil, failure("SecretScannerClosed", "secret stream scanner is closed")
+                end
+                finished = true
+                tail = ""
+                return readonly({
+                    observed_bytes = observed,
+                    hit_count = hit_count,
+                    redacted = hit_count > 0,
+                }, "secret stream scan receipt")
+            end
+
+            return readonly(scanner, "secret stream scanner")
         end
 
         registry.minimum_scannable_secret_bytes = options.minimum_scannable_secret_bytes

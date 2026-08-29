@@ -97,6 +97,8 @@ local function options(overrides)
         maximum_json_depth = 24,
         maximum_json_nodes = 4096,
         maximum_number_bytes = 32,
+        maximum_exec_output_bytes = 8192,
+        maximum_exec_deadline_ms = 60000,
         platform_kind = "posix",
         workspace_path = "/work",
         reserved_paths = { "/reserved" },
@@ -157,14 +159,39 @@ local function fixture(settings)
                 and digest == "authority-" .. call.call_digest
         end,
     }
+    local operation_controls = { intents = {}, results = {}, active = false }
+    local operations = {
+        begin = function(intent)
+            A.falsy(operation_controls.active)
+            local handle = {}
+            operation_controls.active = handle
+            operation_controls.intents[#operation_controls.intents + 1] = intent
+            return handle, "intent-" .. intent.operation_id
+        end,
+        finish = function(handle, result)
+            A.equal(handle, operation_controls.active)
+            operation_controls.results[#operation_controls.results + 1] = result
+            operation_controls.active = false
+            return "result-" .. tostring(#operation_controls.results)
+        end,
+        status = function()
+            return { blocked = false, active_operation_id = false, auto_replay = false }
+        end,
+    }
     local tools = assert(load_module("tools", modules).new({
         filesystem = filesystem,
         path = paths,
         safety = safety,
         secret_registry = secrets,
         authorization = authorization,
+        processes = false,
+        operations = operations,
     }, options(settings.options)))
-    return tools, controls, authorization_controls, { modules = modules, safety = safety }
+    return tools, controls, authorization_controls, {
+        modules = modules,
+        safety = safety,
+        operations = operation_controls,
+    }
 end
 
 local function call(service, tool, arguments, suffix)
@@ -182,10 +209,12 @@ end
 
 local function authorize(service, admitted)
     local action = assert(service:permission_action(admitted))
+    if admitted.mutates or admitted.tool == "exec" then
+        assert(service:begin_operation(admitted))
+    end
     return assert(service:authorize(admitted, {
         permission_snapshot_digest = "permission-v1",
         approval_digest = "",
-        durable_intent_digest = "intent-" .. admitted.operation_id,
         config_generation = "generation-1",
         workspace_identity = action.workspace_root_identity,
         double_check = false,

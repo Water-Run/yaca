@@ -94,12 +94,27 @@ local function setup()
         admit = function(call) return true, "authority-" .. call.call_digest end,
         reverify = function(call, _, digest) return digest == "authority-" .. call.call_digest end,
     }
+    local active_operation
+    local operations = {
+        begin = function(intent)
+            active_operation = {}
+            return active_operation, "intent-" .. intent.operation_id
+        end,
+        finish = function(handle)
+            A.equal(handle, active_operation)
+            active_operation = false
+            return "result-durable"
+        end,
+        status = function() return { blocked = false, auto_replay = false } end,
+    }
     local service = assert(load_module("tools", modules).new({
         filesystem = filesystem,
         path = paths,
         safety = safety,
         secret_registry = false,
         authorization = authority,
+        processes = false,
+        operations = operations,
     }, {
         maximum_argument_bytes = 32768,
         maximum_path_bytes = 1024,
@@ -121,6 +136,8 @@ local function setup()
         maximum_json_depth = 20,
         maximum_json_nodes = 2048,
         maximum_number_bytes = 32,
+        maximum_exec_output_bytes = 4096,
+        maximum_exec_deadline_ms = 60000,
         platform_kind = "posix",
         workspace_path = "/work",
         reserved_paths = { "/reserved" },
@@ -139,10 +156,10 @@ local function admit(service, tool, arguments, id)
         canonical_arguments = encode(arguments),
     }))
     local action = assert(service:permission_action(call))
+    if call.mutates or call.tool == "exec" then assert(service:begin_operation(call)) end
     local token = assert(service:authorize(call, {
         permission_snapshot_digest = "permission-v1",
         approval_digest = "approval-v1",
-        durable_intent_digest = "intent-" .. id,
         config_generation = "generation-1",
         workspace_identity = action.workspace_root_identity,
         double_check = true,

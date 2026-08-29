@@ -347,8 +347,14 @@ local function new_async_port(native, request_factory, output_limit_bytes, maxim
     local state = "created"
     local handle
     local terminal_outcome
-    local stdout = new_accumulator(output_limit_bytes)
-    local stderr = new_accumulator(output_limit_bytes)
+    -- The release cap is combined across both canonical channels.  Fixed
+    -- quotas keep retention deterministic even when the OS happens to make one
+    -- pipe readable before the other one.
+    local stdout_quota = (output_limit_bytes + 1) // 2
+    local stderr_quota = output_limit_bytes // 2
+    local stdout = new_accumulator(stdout_quota)
+    local stderr = new_accumulator(stderr_quota)
+    local observed_sequence = 0
     local port = {}
 
     function port:start(now)
@@ -413,11 +419,13 @@ local function new_async_port(native, request_factory, output_limit_bytes, maxim
             if observation.kind == "stdout" or observation.kind == "stderr" then
                 local accumulator = observation.kind == "stdout" and stdout or stderr
                 append_bytes(accumulator, observation.bytes)
+                observed_sequence = observed_sequence + 1
                 events[#events + 1] = {
                     kind = "io_progress",
                     key = observation.kind,
                     stream = observation.kind,
                     bytes = observation.bytes,
+                    observed_sequence = observed_sequence,
                 }
             else
                 terminal_outcome = observation.outcome
@@ -473,6 +481,15 @@ local function new_async_port(native, request_factory, output_limit_bytes, maxim
             stderr = stderr_bytes,
             stdout_truncated = stdout_truncated,
             stderr_truncated = stderr_truncated,
+            stdout_observed_bytes = stdout.total,
+            stderr_observed_bytes = stderr.total,
+            stdout_retained_bytes = #stdout_bytes,
+            stderr_retained_bytes = #stderr_bytes,
+            stdout_discarded_bytes = stdout.total - #stdout_bytes,
+            stderr_discarded_bytes = stderr.total - #stderr_bytes,
+            stdout_quota_bytes = stdout_quota,
+            stderr_quota_bytes = stderr_quota,
+            observed_sequences = observed_sequence,
             decoder = "bytes",
             duration_ms = result.duration_ms,
             descendants_proven_stopped = result.descendants_proven_stopped,
@@ -637,6 +654,7 @@ function M.new(native, options)
         stdout_stderr_separate = true,
         shell = shell_snapshot.kind,
         maximum_output_bytes = maximum_output_bytes,
+        output_limit_scope = "combined-fixed-channel-quotas",
         maximum_poll_bytes = maximum_poll_bytes,
         internal_argv = true,
         internal_stdin = "bounded-anonymous-pipe-bytes",
