@@ -75,7 +75,7 @@ return {
             downstream_patches = {
                 {
                     path = "release/patches/luainstaller-1.3.0-resources.patch",
-                    sha256 = "df011b4a5f54e96a098a2dd235e6a7dc300f7ed7ff7e2a2c269b9b01ff203210",
+                    sha256 = "974cf25b51ab644c8af60a7f2524a5670b1fea38e35ad733267ac4775c5d9dff",
                     purpose = "explicit-hash-verified-resource-overlay",
                     applies_to_revision = "97192d100077b31b61dc8f94427e14df1c68a9eb",
                     base_file_sha256 = {

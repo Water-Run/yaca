@@ -14,7 +14,7 @@ trap cleanup EXIT
 LUAINSTALLER_REVISION=97192d100077b31b61dc8f94427e14df1c68a9eb
 LUAINSTALLER_URL=https://github.com/Water-Run/luainstaller.git
 PATCH_PATH="$REPO_ROOT/release/patches/luainstaller-1.3.0-resources.patch"
-PATCH_SHA256=df011b4a5f54e96a098a2dd235e6a7dc300f7ed7ff7e2a2c269b9b01ff203210
+PATCH_SHA256=974cf25b51ab644c8af60a7f2524a5670b1fea38e35ad733267ac4775c5d9dff
 LUA_VERSION=5.5.1
 LUA_SHA256=1c4b4068d67061f2a2231ad2b5422e77acea1487ea9890f6320af614f4373dce
 LUA_URL=https://www.lua.org/ftp/lua-5.5.1.tar.gz

@@ -44,7 +44,7 @@ return {
                 A.equal(patch_record.applies_to_revision, lock.components.luainstaller.revision)
                 A.equal(
                     SHA256.hex(patch_bytes),
-                    "df011b4a5f54e96a098a2dd235e6a7dc300f7ed7ff7e2a2c269b9b01ff203210"
+                    "974cf25b51ab644c8af60a7f2524a5670b1fea38e35ad733267ac4775c5d9dff"
                 )
                 A.deep_equal(
                     manifest.dependencies.luainstaller.downstream_patches,
@@ -69,7 +69,7 @@ return {
                     if new_file then new_files[#new_files + 1] = new_file end
                 end
                 local expected = {
-                    "src/init.lua", "src/manifest.lua", "src/bundler.lua", "src/onefile.lua",
+                    "src/bundler.lua", "src/init.lua", "src/manifest.lua", "src/onefile.lua",
                 }
                 A.deep_equal(old_files, expected)
                 A.deep_equal(new_files, expected)
@@ -84,6 +84,7 @@ return {
                     "local RESOURCE_FIELDS = {",
                     "content_hash = true",
                     "local function validateBundleResources(",
+                    '{ path = ".luai/native", subtree = false }',
                     "resource_destinations[path.targetKey(",
                     "resources = normalized.resources",
                     "resources = opts.resources",

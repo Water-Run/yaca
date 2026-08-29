@@ -182,7 +182,7 @@ return {
                 )
                 A.equal(
                     lock.components.luainstaller.downstream_patches[1].sha256,
-                    "df011b4a5f54e96a098a2dd235e6a7dc300f7ed7ff7e2a2c269b9b01ff203210"
+                    "974cf25b51ab644c8af60a7f2524a5670b1fea38e35ad733267ac4775c5d9dff"
                 )
                 A.equal(lock.components.curl.version, "8.21.0")
                 A.equal(

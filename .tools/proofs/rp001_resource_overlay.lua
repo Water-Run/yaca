@@ -21,10 +21,13 @@ local root = assert(fs.makePrivateDirectory("resource-overlay"))
 local entry = path.join(root, "main.lua")
 local curl_source = path.join(root, "curl-resource")
 local ca_source = path.join(root, "cacert-resource.pem")
+local native_source = path.join(root, "native-resource.so")
 local curl_bytes = "locked curl bytes\n"
 local ca_bytes = "locked CA bytes\n"
+local native_bytes = "locked native bytes\n"
 assert(fs.writeFile(curl_source, curl_bytes))
 assert(fs.writeFile(ca_source, ca_bytes))
+assert(fs.writeFile(native_source, native_bytes))
 assert(fs.writeFile(entry, [=[
 local native_template = assert(package.cpath:match("^([^;]+)"))
 local root = assert(native_template:match("^(.*)/%.luai/native/"))
@@ -36,6 +39,7 @@ local function read(relative)
 end
 assert(read(".luai/components/curl") == "locked curl bytes\n")
 assert(read(".luai/components/cacert.pem") == "locked CA bytes\n")
+assert(read(".luai/native/yaca_native.so") == "locked native bytes\n")
 print("resource-overlay-runtime=PASS")
 ]=]))
 
@@ -50,6 +54,11 @@ local resources = {
         destination_path = ".luai/components/cacert.pem",
         content_hash = hash.sha256(ca_bytes),
     },
+    {
+        source_path = native_source,
+        destination_path = ".luai/native/yaca_native.so",
+        content_hash = hash.sha256(native_bytes),
+    },
 }
 
 local snapshot = manifest.build({
@@ -62,10 +71,10 @@ local snapshot = manifest.build({
     lua_prefix = lua_prefix,
 })
 assert(snapshot.ok, snapshot.error and snapshot.error.message)
-assert(#snapshot.manifest.resources == 2)
+assert(#snapshot.manifest.resources == 3)
 assert(snapshot.manifest.resources[1].content_hash == resources[1].content_hash)
 local projected = manifest.distribution(snapshot.manifest)
-assert(#projected.resources == 2)
+assert(#projected.resources == 3)
 assert(projected.resources[1].source_path == nil)
 
 local onedir = luainstaller.bundle({
@@ -85,6 +94,10 @@ assert(assert(fs.readRegularFile(path.join(
     onedir.out,
     ".luai/components/cacert.pem"
 ))) == ca_bytes)
+assert(assert(fs.readRegularFile(path.join(
+    onedir.out,
+    ".luai/native/yaca_native.so"
+))) == native_bytes)
 local onedir_ok, onedir_output = process.outputCommand(onedir.executable, {})
 assert(onedir_ok, onedir_output)
 assert(onedir_output:find("resource%-overlay%-runtime=PASS"))
@@ -126,7 +139,7 @@ rejected(luainstaller.bundle({
     out = path.join(root, "reserved"),
     resources = { {
         source_path = curl_source,
-        destination_path = ".luai/native/injected.so",
+        destination_path = ".luai/native",
         content_hash = hash.sha256(curl_bytes),
     } },
     target_os = "linux",
