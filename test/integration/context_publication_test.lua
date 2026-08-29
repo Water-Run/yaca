@@ -239,7 +239,11 @@ local function fixture(settings)
             temporary_path = temporary_path,
         }
         if settings.publish_error then return nil, settings.publish_error end
-        return { outcome = "published" }
+        return {
+            outcome = "published",
+            generation = document.generation,
+            event_count = document.event_count,
+        }
     end
 
     function store.close_writer(writer)
@@ -254,8 +258,8 @@ local function fixture(settings)
     local system = {}
     function system.secure_random(length)
         observations.random_calls = observations.random_calls + 1
-        local value = random_values[observations.random_calls]
-        A.equal(length, 10)
+        local value = random_values[observations.random_calls] or string.rep("z", length)
+        A.equal(#value, length)
         return value
     end
     function system.current_process_id() return 1234 end
@@ -344,6 +348,32 @@ return {
                 A.equal(document.facts[2].fields.source, "terminal")
                 A.equal(draft.status().lifecycle, "saved")
                 A.truthy(draft.status().durable)
+                local batch = {
+                    barrier_id = "turn-1:barrier:1",
+                    first_sequence = 3,
+                    last_sequence = 3,
+                    event_count = 1,
+                    expected_context_generation = 1,
+                    events = { {
+                        seq = 3,
+                        type = "model_request",
+                        turn_id = "turn-1",
+                        fields = {
+                            requestId = "turn-1:request:1",
+                            purpose = "main",
+                            viewManifestRef = receipt.view_manifest_snapshot,
+                        },
+                    } },
+                }
+                local committed, journal_receipt = publication.commit(batch)
+                A.truthy(committed)
+                A.equal(journal_receipt.binding, batch)
+                A.equal(journal_receipt.previous_context_generation, 1)
+                A.equal(journal_receipt.context_generation, 2)
+                A.equal(publication.status().generation, 2)
+                A.equal(publication.status().event_count, 3)
+                A.equal(observed.published.document.header.updated_at, "2026-08-30T12:34:57Z")
+                A.equal(observed.published.document.facts[3].type, "model_request")
                 A.truthy(draft.close())
                 A.equal(observed.closes, 1)
                 A.equal(draft.status().lifecycle, "closed")

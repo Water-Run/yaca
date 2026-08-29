@@ -1,6 +1,6 @@
 --[[
 File: runtime.lua
-Date: 2026-08-29
+Date: 2026-08-30
 Author: WaterRun
 Description: Owns the bounded single-threaded event pump and runtime primitives.
 ]]
@@ -1792,24 +1792,8 @@ function M.new_agent_loop(ports, options)
         return finalize("refused", control.payload.reason)
     end
 
-    start_main = function(input, cause)
-        if halted then return nil, halt_error end
-        if state ~= "Idle" then return nil, failure("AgentBusy", "a main turn is already active") end
-        local snapshot, input_error = validate_turn_input(input, limits)
-        if not snapshot then return nil, input_error end
-        if snapshot.context_generation ~= context_generation then
-            return nil, failure(
-                "StaleContextObservation",
-                "main input observed a different Context generation"
-            )
-        end
-        local now, clock_error = clock_now()
-        if not now then return nil, clock_error end
-        turn_serial = turn_serial + 1
-        message_serial = message_serial + 1
-        local turn_id = "turn-" .. tostring(turn_serial)
-        local message_id = turn_id .. ":message:" .. tostring(message_serial)
-        turn = {
+    local function initialize_main_turn(snapshot, turn_id)
+        return {
             id = turn_id,
             snapshot = snapshot,
             counters = {
@@ -1848,6 +1832,26 @@ function M.new_agent_loop(ports, options)
             outcome_durable = false,
             reported_outcome = false,
         }
+    end
+
+    start_main = function(input, cause)
+        if halted then return nil, halt_error end
+        if state ~= "Idle" then return nil, failure("AgentBusy", "a main turn is already active") end
+        local snapshot, input_error = validate_turn_input(input, limits)
+        if not snapshot then return nil, input_error end
+        if snapshot.context_generation ~= context_generation then
+            return nil, failure(
+                "StaleContextObservation",
+                "main input observed a different Context generation"
+            )
+        end
+        local now, clock_error = clock_now()
+        if not now then return nil, clock_error end
+        turn_serial = turn_serial + 1
+        message_serial = message_serial + 1
+        local turn_id = "turn-" .. tostring(turn_serial)
+        local message_id = turn_id .. ":message:" .. tostring(message_serial)
+        turn = initialize_main_turn(snapshot, turn_id)
         local turn_fields = {
             kind = "main",
             configGeneration = snapshot.config_generation,
@@ -1909,6 +1913,81 @@ function M.new_agent_loop(ports, options)
     ---Accepts a new main message only after its complete turn snapshot validates.
     function loop:begin_main(input)
         return start_main(input, nil)
+    end
+
+    ---Adopts the first turn already committed by session publication. This
+    -- starts with the next model_request barrier and never duplicates the
+    -- durable turn_started or user_message Facts.
+    function loop:resume_published_main(handoff)
+        if halted then return nil, halt_error end
+        if state ~= "Idle" or turn ~= nil or last_turn ~= nil
+            or turn_serial ~= 0 or message_serial ~= 0
+        then
+            return nil, failure(
+                "AgentBusy",
+                "published first-turn handoff requires a fresh idle AgentLoop"
+            )
+        end
+        if not exact_fields(handoff, { input = true, binding = true }) then
+            return nil, failure(
+                "InvalidPublishedTurn",
+                "published first-turn handoff is ambiguous"
+            )
+        end
+        local snapshot, input_error = validate_turn_input(handoff.input, limits)
+        if not snapshot then return nil, input_error end
+        local binding = handoff.binding
+        if not exact_fields(binding, {
+            first_sequence = true,
+            last_sequence = true,
+            context_generation = true,
+            turn_id = true,
+            message_id = true,
+            text = true,
+            source = true,
+            config_snapshot = true,
+            model_snapshot = true,
+            permission_snapshot = true,
+            prompt_snapshot = true,
+            tool_registry_snapshot = true,
+            view_manifest_snapshot = true,
+        })
+            or binding.first_sequence ~= 1
+            or binding.last_sequence ~= sequence
+            or sequence ~= 2
+            or binding.context_generation ~= context_generation
+            or binding.turn_id ~= "turn-1"
+            or binding.message_id ~= "turn-1:message:1"
+            or binding.text ~= snapshot.text
+            or binding.source ~= snapshot.source
+            or binding.config_snapshot ~= snapshot.config_generation
+            or binding.model_snapshot ~= snapshot.model_snapshot
+            or binding.permission_snapshot ~= snapshot.permission_snapshot
+            or binding.prompt_snapshot ~= snapshot.prompt_snapshot
+            or binding.tool_registry_snapshot ~= snapshot.tool_registry_snapshot
+            or binding.view_manifest_snapshot ~= snapshot.view_manifest_ref
+            or snapshot.context_generation ~= context_generation
+        then
+            return nil, failure(
+                "PublishedTurnMismatch",
+                "published first-turn handoff does not bind the current AgentLoop"
+            )
+        end
+        local now, clock_error = clock_now()
+        if not now then return nil, clock_error end
+        turn_serial = 1
+        message_serial = 1
+        turn = initialize_main_turn(snapshot, binding.turn_id)
+        turn.trace.durable_barriers[1] = "turn-1:initial-publication"
+        transition("Preparing")
+        local admitted, request_error = request_model("main")
+        if not admitted then return nil, request_error end
+        return assert(freeze({
+            state = admitted.state,
+            request_id = admitted.request_id or false,
+            turn_id = binding.turn_id,
+            queue_item_id = false,
+        }, nil, "published main turn admission"))
     end
 
     ---Captures and admits a fresh main snapshot from an exact idle observation.
@@ -3443,6 +3522,7 @@ function M.new_agent_loop(ports, options)
         provider_stop_means_completed = false,
         natural_language_done_means_finish = false,
         durable_before_effect = true,
+        precommitted_first_turn = true,
         no_auto_replay = true,
         queue_actions = {
             enqueue = true, list = true, drop = true,

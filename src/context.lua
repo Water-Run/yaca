@@ -1,6 +1,6 @@
 --[[
 File: context.lua
-Date: 2026-08-29
+Date: 2026-08-30
 Author: WaterRun
 Description: Models, reads, writes, and exports canonical internal Context documents.
 ]]
@@ -2298,6 +2298,79 @@ local function lifecycle_candidate(document)
     return candidate, canonical
 end
 
+local function build_event_document(document, mutation, admitted)
+    if type(mutation) ~= "table" then
+        return nil, failure("InvalidEventMutation", "Context event mutation is required")
+    end
+    local allowed = { updated_at = true, events = true }
+    for key in pairs(mutation) do
+        if type(key) ~= "string" or not allowed[key] then
+            return nil, failure(
+                "InvalidEventMutation",
+                "Context event mutation contains an unknown field"
+            )
+        end
+    end
+    local updated_at, time_error = canonical_time(
+        mutation.updated_at,
+        "/EventMutation/UpdatedAt"
+    )
+    if not updated_at then return nil, time_error end
+    local event_count = dense_count(mutation.events)
+    if event_count == nil or event_count < 1 then
+        return nil, failure(
+            "InvalidEventMutation",
+            "Context event mutation requires a non-empty dense batch"
+        )
+    end
+    local candidate, canonical_or_error = lifecycle_candidate(document)
+    if not candidate then return nil, canonical_or_error end
+    local canonical = canonical_or_error
+    if updated_at <= canonical.header.updated_at then
+        return nil, failure(
+            "ContextGeneration",
+            "Context event mutation must advance UpdatedAt"
+        )
+    end
+    if #candidate.facts + event_count > admitted.maximum_events then
+        return nil, failure("ContextLimit", "Context event batch exceeds the event limit")
+    end
+    candidate.generation = canonical.generation + 1
+    candidate.header.updated_at = updated_at
+    for index, event_candidate in ipairs(mutation.events) do
+        if type(event_candidate) ~= "table" then
+            return nil, failure("InvalidEventMutation", "Context event must be a table")
+        end
+        local event_allowed = { seq = true, type = true, turn_id = true, fields = true }
+        for key in pairs(event_candidate) do
+            if type(key) ~= "string" or not event_allowed[key] then
+                return nil, failure(
+                    "InvalidEventMutation",
+                    "Context event contains an unknown mutation field"
+                )
+            end
+        end
+        local expected_sequence = #candidate.facts + 1
+        if event_candidate.seq ~= expected_sequence
+            or type(event_candidate.type) ~= "string"
+            or type(event_candidate.fields) ~= "table"
+        then
+            return nil, failure(
+                "ContextSequence",
+                "Context event mutation sequence or shape is invalid"
+            )
+        end
+        candidate.facts[expected_sequence] = {
+            seq = expected_sequence,
+            type = event_candidate.type,
+            at = updated_at,
+            turn_id = event_candidate.turn_id ~= false and event_candidate.turn_id or nil,
+            fields = event_candidate.fields,
+        }
+    end
+    return normalize_document(candidate, admitted)
+end
+
 local LIFECYCLE_FIELDS = {
     rename = {
         new_name = true,
@@ -2517,6 +2590,12 @@ function M.new(options)
     ---Validates and freezes one semantic Context candidate.
     function service.build(candidate)
         return normalize_document(candidate, admitted)
+    end
+
+    ---Appends one already-sequenced durable Agent batch as a new full XML
+    -- generation without rewriting prior Facts or changing the active view.
+    function service.append_events(document, mutation)
+        return build_event_document(document, mutation, admitted)
     end
 
     ---Builds one full lifecycle generation without rewriting durable Facts.

@@ -202,6 +202,28 @@ local function input(double_check, context_generation)
     }
 end
 
+local function published_handoff()
+    local first = input(false, 1)
+    return {
+        input = first,
+        binding = {
+            first_sequence = 1,
+            last_sequence = 2,
+            context_generation = 1,
+            turn_id = "turn-1",
+            message_id = "turn-1:message:1",
+            text = first.text,
+            source = first.source,
+            config_snapshot = first.config_generation,
+            model_snapshot = first.model_snapshot,
+            permission_snapshot = first.permission_snapshot,
+            prompt_snapshot = first.prompt_snapshot,
+            tool_registry_snapshot = first.tool_registry_snapshot,
+            view_manifest_snapshot = first.view_manifest_ref,
+        },
+    }
+end
+
 local function call(name, serial, arguments)
     return {
         local_tool_call_id = "adapter-call-" .. tostring(serial),
@@ -301,6 +323,32 @@ end
 return {
     name = "fault/agentloop",
     cases = {
+        {
+            name = "precommitted first turn starts at model request without duplicate Facts",
+            run = function()
+                local f = fixture({}, { initial_sequence = 2 })
+                local admitted = assert(f.loop:resume_published_main(published_handoff()))
+                A.equal(admitted.turn_id, "turn-1")
+                A.equal(f.events[1].seq, 3)
+                A.equal(f.events[1].type, "model_request")
+                A.equal(f.log[1], "durable:model_request")
+                A.equal(f.log[2], "effect:model:turn-1:request:1")
+                A.equal(f.loop:status().last_durable_sequence, 3)
+                A.equal(f.loop:status().context_generation, 2)
+                A.equal(
+                    f.loop:status().trace.durable_barriers[1],
+                    "turn-1:initial-publication"
+                )
+
+                local rejected = fixture({}, { initial_sequence = 2 })
+                local forged = published_handoff()
+                forged.binding.text = "different"
+                local result, handoff_error = rejected.loop:resume_published_main(forged)
+                A.falsy(result)
+                A.equal(handoff_error.code, "PublishedTurnMismatch")
+                A.equal(#rejected.log, 0)
+            end,
+        },
         {
             name = "typed finish is the only no-review completion path",
             run = function()

@@ -32,6 +32,17 @@ local function valid_integer(value, minimum)
     return math.type(value) == "integer" and value >= minimum
 end
 
+local function dense_count(values)
+    if type(values) ~= "table" then return nil end
+    local count = 0
+    for key in pairs(values) do
+        if math.type(key) ~= "integer" or key < 1 then return nil end
+        count = count + 1
+    end
+    for index = 1, count do if values[index] == nil then return nil end end
+    return count
+end
+
 local function valid_text(value, maximum_bytes)
     if type(value) ~= "string" or #value > maximum_bytes then return false end
     local valid, metadata = text.validate_utf8(value)
@@ -117,6 +128,60 @@ local function hex(bytes)
     return (bytes:gsub(".", function(byte)
         return string.format("%02X", byte:byte())
     end))
+end
+
+local function utc_parts(value)
+    if type(value) ~= "string" then return nil end
+    local year, month, day, hour, minute, second = value:match(
+        "^(%d%d%d%d)%-(%d%d)%-(%d%d)T(%d%d):(%d%d):(%d%d)Z$"
+    )
+    year, month, day = tonumber(year), tonumber(month), tonumber(day)
+    hour, minute, second = tonumber(hour), tonumber(minute), tonumber(second)
+    if not year or year < 1 or month < 1 or month > 12
+        or hour > 23 or minute > 59 or second > 59
+    then
+        return nil
+    end
+    local leap = year % 4 == 0 and (year % 100 ~= 0 or year % 400 == 0)
+    local days = {
+        31, leap and 29 or 28, 31, 30, 31, 30,
+        31, 31, 30, 31, 30, 31,
+    }
+    if day < 1 or day > days[month] then return nil end
+    return { year, month, day, hour, minute, second }
+end
+
+local function next_utc_time(observed, previous)
+    local current = utc_parts(observed)
+    local prior = utc_parts(previous)
+    if not current or not prior then
+        return nil, failure("UtcClockReadFailed", "UTC clock returned a non-canonical value")
+    end
+    if observed > previous then return observed end
+    local year, month, day, hour, minute, second = table.unpack(prior)
+    second = second + 1
+    if second >= 60 then second, minute = 0, minute + 1 end
+    if minute >= 60 then minute, hour = 0, hour + 1 end
+    if hour >= 24 then hour, day = 0, day + 1 end
+    local leap = year % 4 == 0 and (year % 100 ~= 0 or year % 400 == 0)
+    local days = {
+        31, leap and 29 or 28, 31, 30, 31, 30,
+        31, 31, 30, 31, 30, 31,
+    }
+    if day > days[month] then day, month = 1, month + 1 end
+    if month > 12 then month, year = 1, year + 1 end
+    if year > 9999 then
+        return nil, failure("UtcClockReadFailed", "UTC generation timestamp overflowed")
+    end
+    return string.format(
+        "%04d-%02d-%02dT%02d:%02d:%02dZ",
+        year,
+        month,
+        day,
+        hour,
+        minute,
+        second
+    )
 end
 
 local function canonical_public(value, visiting)
@@ -269,7 +334,7 @@ local function validate_publication_ports(ports)
         filesystem = {
             "direct_inspect", "direct_reverify", "make_directory", "flush_directory",
         },
-        schema = { "build" },
+        schema = { "build", "append_events" },
         store = { "create_writer", "publish", "close_writer" },
         path = { "to_logical", "validate_context_name", "context_hash" },
         safety = { "binding_digest" },
@@ -353,6 +418,7 @@ function M.new_context_publication(ports, options)
     local context_root = join_native(admitted.data_root, "CONTEXT", admitted.platform_kind)
     local active
     local closed = false
+    local journal_failure
     local service = {}
 
     local function prepare_mirror(workspace_path)
@@ -638,6 +704,10 @@ function M.new_context_publication(ports, options)
                         display_name = display_name,
                         generation = document.generation,
                         event_count = document.event_count,
+                        first_sequence = 1,
+                        last_sequence = 2,
+                        turn_id = "turn-1",
+                        message_id = "turn-1:message:1",
                         config_snapshot = snapshot.config,
                         model_snapshot = snapshot.model,
                         permission_snapshot = snapshot.permission,
@@ -667,6 +737,119 @@ function M.new_context_publication(ports, options)
             "ContextNameExhausted",
             "secure random Context names collided through the bounded retry limit"
         )
+    end
+
+    ---Commits one AgentLoop batch through the already-owned writer lease. Each
+    -- acknowledged batch is a fully validated replacement generation.
+    function service.commit(batch)
+        if closed then
+            return nil, failure("ContextPublicationClosed", "Context journal is closed")
+        end
+        if journal_failure then return nil, journal_failure end
+        if not active or not active.writer then
+            return nil, failure("ContextNotPublished", "Context journal has no durable owner")
+        end
+        local allowed = {
+            barrier_id = true,
+            first_sequence = true,
+            last_sequence = true,
+            event_count = true,
+            expected_context_generation = true,
+            events = true,
+        }
+        if type(batch) ~= "table" then
+            return nil, failure("InvalidContextBatch", "Context journal batch is required")
+        end
+        for key in pairs(batch) do
+            if type(key) ~= "string" or not allowed[key] then
+                return nil, failure("InvalidContextBatch", "Context journal batch is ambiguous")
+            end
+        end
+        local count = dense_count(batch.events)
+        local previous_generation = active.document.generation
+        local first_sequence = active.document.event_count + 1
+        if not valid_text(batch.barrier_id, 256) or batch.barrier_id == ""
+            or count == nil or count < 1
+            or batch.event_count ~= count
+            or batch.first_sequence ~= first_sequence
+            or batch.last_sequence ~= first_sequence + count - 1
+            or batch.expected_context_generation ~= previous_generation
+        then
+            return nil, failure(
+                "InvalidContextBatch",
+                "Context journal batch does not bind the current generation"
+            )
+        end
+        local observed, time_error = system.utc_now()
+        if not observed then return nil, time_error end
+        local updated_at, next_error = next_utc_time(
+            observed,
+            active.document.header.updated_at
+        )
+        if not updated_at then return nil, next_error end
+        local document, document_error = schema.append_events(active.document, {
+            updated_at = updated_at,
+            events = batch.events,
+        })
+        if not document then return nil, document_error end
+
+        local published, publish_error
+        for _ = 1, admitted.maximum_create_attempts do
+            local random, random_error = system.secure_random(8)
+            if type(random) ~= "string" or #random ~= 8 then
+                return nil, random_error or failure(
+                    "SecureRandomUnavailable",
+                    "Context journal temporary name requires secure random bytes"
+                )
+            end
+            published, publish_error = store.publish(
+                active.writer,
+                document,
+                active.receipt.context_path .. ".yaca-tmp-" .. hex(random)
+            )
+            if published then break end
+            if type(publish_error) ~= "table"
+                or publish_error.code ~= "DestinationExists"
+            then
+                journal_failure = publish_error or failure(
+                    "ContextPublicationUnknown",
+                    "Context journal publication returned no outcome"
+                )
+                return nil, journal_failure
+            end
+        end
+        if not published then
+            return nil, failure(
+                "ContextTemporaryNameExhausted",
+                "Context journal temporary names collided through the retry limit"
+            )
+        end
+        if type(published) ~= "table"
+            or published.generation ~= previous_generation + 1
+            or published.event_count ~= batch.last_sequence
+        then
+            journal_failure = failure(
+                "ContextPublicationUnknown",
+                "Context journal returned an inexact durable receipt"
+            )
+            return nil, journal_failure
+        end
+        active.document = document
+        local status_values = {}
+        for key, value in pairs(active.receipt) do status_values[key] = value end
+        status_values.generation = document.generation
+        status_values.event_count = document.event_count
+        status_values.last_sequence = document.event_count
+        active.receipt = readonly(status_values, "Context publication receipt")
+        return true, readonly({
+            barrier_id = batch.barrier_id,
+            first_sequence = batch.first_sequence,
+            last_sequence = batch.last_sequence,
+            event_count = batch.event_count,
+            binding = batch,
+            previous_context_generation = previous_generation,
+            context_generation = document.generation,
+        }, "Context journal receipt")
     end
 
     function service.status()
@@ -741,6 +924,8 @@ function M.new_draft(generation, workspace, options, publication)
     end
     local draft = {}
     local publication_receipt
+    local published_message
+    local published_source
     local close_failure
 
     local function require_open()
@@ -870,6 +1055,7 @@ function M.new_draft(generation, workspace, options, publication)
         source = source or "main"
         if not valid_text(message, options.maximum_draft_bytes) or message == ""
             or not valid_text(source, 64) or source == ""
+            or source:match("^[A-Za-z0-9][A-Za-z0-9._:-]*$") == nil
         then
             return nil, failure("InvalidDraft", "first main message or source is invalid")
         end
@@ -914,8 +1100,50 @@ function M.new_draft(generation, workspace, options, publication)
             )
         end
         publication_receipt = receipt
+        published_message = message
+        published_source = source
         lifecycle = "saved"
         return receipt
+    end
+
+    ---Returns the exact precommitted first-turn handoff for AgentLoop. The
+    -- handoff exists only after begin_main received a durable receipt.
+    function draft.agent_handoff()
+        if not publication_receipt then
+            return nil, failure(
+                "ContextNotPublished",
+                "Agent handoff requires a durable first Context generation"
+            )
+        end
+        return readonly({
+            input = readonly({
+                text = published_message,
+                source = published_source,
+                config_generation = publication_receipt.config_snapshot,
+                model_snapshot = publication_receipt.model_snapshot,
+                permission_snapshot = publication_receipt.permission_snapshot,
+                prompt_snapshot = publication_receipt.prompt_snapshot,
+                tool_registry_snapshot = publication_receipt.tool_registry_snapshot,
+                view_manifest_ref = publication_receipt.view_manifest_snapshot,
+                double_check = settings.double_check,
+                context_generation = publication_receipt.generation,
+            }, "published first-turn input"),
+            binding = readonly({
+                first_sequence = publication_receipt.first_sequence,
+                last_sequence = publication_receipt.last_sequence,
+                context_generation = publication_receipt.generation,
+                turn_id = publication_receipt.turn_id,
+                message_id = publication_receipt.message_id,
+                text = published_message,
+                source = published_source,
+                config_snapshot = publication_receipt.config_snapshot,
+                model_snapshot = publication_receipt.model_snapshot,
+                permission_snapshot = publication_receipt.permission_snapshot,
+                prompt_snapshot = publication_receipt.prompt_snapshot,
+                tool_registry_snapshot = publication_receipt.tool_registry_snapshot,
+                view_manifest_snapshot = publication_receipt.view_manifest_snapshot,
+            }, "published first-turn binding"),
+        }, "published first-turn handoff")
     end
 
     ---Closes the in-memory draft without creating any filesystem object.
