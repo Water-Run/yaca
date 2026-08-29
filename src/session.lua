@@ -529,6 +529,9 @@ function M.new_context_publication(ports, options)
     local journal_failure
     local service = {}
     local model_views = {}
+    local operation_journal
+    local operation_intent_receipts = {}
+    local operation_result_receipts = {}
 
     local function cache_model_view(facts, context_generation)
         local candidate, view_error = render_model_view(
@@ -1058,6 +1061,130 @@ function M.new_context_publication(ports, options)
             previous_context_generation = previous_generation,
             context_generation = document.generation,
         }, "Context journal receipt")
+    end
+
+    ---Returns the durable journal used by context.new_operation_service. Each
+    -- commit is translated into the same sequenced Context stream owned by
+    -- this publication lease. Receipts are retained until the Runtime tool
+    -- adapter adopts the external barrier into its local sequence waterline.
+    function service.operation_journal()
+        if operation_journal then return operation_journal end
+        local journal = {}
+
+        local function turn_id(tool_call_id)
+            if type(tool_call_id) ~= "string" then return false end
+            return tool_call_id:match("^(.-):tool:[1-9][0-9]*$") or false
+        end
+
+        local function commit_record(record, digest, kind)
+            if not active or not active.document then
+                return false, failure(
+                    "ContextNotPublished",
+                    "durable operation journal has no active Context"
+                )
+            end
+            local status = active.receipt
+            local first_sequence = status.event_count + 1
+            local events
+            if kind == "intent" then
+                events = { {
+                    seq = first_sequence,
+                    type = "operation_intent",
+                    turn_id = turn_id(record.tool_call_id),
+                    fields = {
+                        operationId = record.operation_id,
+                        toolCallId = record.tool_call_id,
+                        kind = record.kind,
+                        targetIdentity = record.target_identity,
+                        expectedDigest = record.expected_digest,
+                    },
+                } }
+            else
+                local operation_fields = {
+                    operationId = record.operation_id,
+                    status = record.status,
+                    evidence = record.evidence,
+                }
+                if record.error_id ~= false then
+                    operation_fields.errorId = record.error_id
+                end
+                local tool_fields = {
+                    toolCallId = record.tool_call_id,
+                    status = record.tool_status,
+                    body = record.tool_body,
+                    truncated = tostring(record.tool_truncated),
+                    rawBytes = tostring(record.tool_raw_bytes),
+                }
+                if record.tool_digest ~= false then
+                    tool_fields.digest = record.tool_digest
+                end
+                if record.tool_error_id ~= false then
+                    tool_fields.errorId = record.tool_error_id
+                end
+                events = {
+                    {
+                        seq = first_sequence,
+                        type = "operation_result",
+                        turn_id = turn_id(record.tool_call_id),
+                        fields = operation_fields,
+                    },
+                    {
+                        seq = first_sequence + 1,
+                        type = "tool_result",
+                        turn_id = turn_id(record.tool_call_id),
+                        fields = tool_fields,
+                    },
+                }
+            end
+            local batch = {
+                barrier_id = "operation-" .. kind .. ":" .. digest,
+                first_sequence = first_sequence,
+                last_sequence = first_sequence + #events - 1,
+                event_count = #events,
+                expected_context_generation = status.generation,
+                events = events,
+            }
+            local committed, receipt = service.commit(batch)
+            if committed ~= true then return false, receipt end
+            local slot = { digest = digest, receipt = receipt }
+            if kind == "intent" then
+                operation_intent_receipts[record.operation_id] = slot
+            else
+                operation_result_receipts[record.operation_id] = slot
+            end
+            return true, digest
+        end
+
+        function journal.commit_intent(record, digest)
+            return commit_record(record, digest, "intent")
+        end
+
+        function journal.commit_result(record, digest)
+            return commit_record(record, digest, "result")
+        end
+
+        local function take(receipts, operation_id, digest)
+            local slot = receipts[operation_id]
+            if not slot or (digest ~= nil and slot.digest ~= digest) then
+                return nil, failure(
+                    "OperationJournalContract",
+                    "Runtime requested an unbound durable operation receipt"
+                )
+            end
+            receipts[operation_id] = nil
+            return slot.receipt
+        end
+
+        function journal.take_intent_receipt(operation_id, digest)
+            return take(operation_intent_receipts, operation_id, digest)
+        end
+
+        function journal.take_result_receipt(operation_id, digest)
+            return take(operation_result_receipts, operation_id, digest)
+        end
+
+        operation_journal = readonly(journal, "Context operation journal")
+        return operation_journal
     end
 
     function service.status()

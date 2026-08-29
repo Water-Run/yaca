@@ -1144,6 +1144,13 @@ function M.new(ports, options)
             return registry.scan(bytes)
         end
 
+        ---Creates the cross-chunk scanner used by bounded process output. Raw
+        -- bytes remain private to the scanner until it proves the terminal
+        -- ToolResult contains no registered configuration secret.
+        function facade.new_stream_scanner()
+            return registry.new_stream_scanner()
+        end
+
         return readonly(facade, "configuration generation"), document, overrides
     end
 

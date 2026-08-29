@@ -2702,11 +2702,13 @@ function M.new(dependencies, options)
                 {
                     status = result_status(frozen.outcome),
                     evidence = "canonical-result:" .. frozen.result_digest,
+                    error_id = frozen.error ~= false and frozen.error.code or nil,
                     tool_status = result_status(frozen.outcome),
                     tool_body = body,
                     tool_truncated = false,
                     tool_raw_bytes = #body,
                     tool_digest = body_digest,
+                    tool_error_id = frozen.error ~= false and frozen.error.code or nil,
                 }
             )
             if not called or not valid_string(committed, 256, false) then
@@ -2718,7 +2720,27 @@ function M.new(dependencies, options)
             end
         end
         state.result = frozen
+        state.result_body = body
         return frozen
+    end
+
+    ---Closes an already-durable operation when the external authorization
+    -- binding fails before any filesystem/process effect can start. This is a
+    -- real failed result, not unknown: begin_operation only journals intent,
+    -- and this method is unavailable once execution has begun or settled.
+    function service:fail_before_effect(call, error_value)
+        local state = calls[call]
+        if not state or state.result ~= nil or state.operation_handle == nil
+            or executing
+            or type(error_value) ~= "table"
+            or not valid_identifier(error_value.code, limits.maximum_identifier_bytes)
+        then
+            return nil, failure(
+                "InvalidToolCall",
+                "pre-effect failure requires one pending durable operation"
+            )
+        end
+        return make_result(state, "failed", nil, error_value)
     end
 
     local EXECUTORS = {
@@ -3308,6 +3330,51 @@ function M.new(dependencies, options)
         return state.result or false
     end
 
+    ---Projects one already-settled canonical ToolResult into the narrow shape
+    -- consumed by Runtime. The exact canonical body is retained by this
+    -- service so callers never have to re-encode a readonly result and risk a
+    -- different byte representation from the durable operation_result pair.
+    function service:runtime_result(call)
+        local state = calls[call]
+        if not state then
+            return nil, failure(
+                "InvalidToolCall",
+                "Runtime result lookup requires an admitted call"
+            )
+        end
+        local result = state.result
+        local body = state.result_body
+        if not result or type(body) ~= "string" then return false end
+        local kind
+        if result.outcome == "success" then
+            kind = "real-success"
+        elseif result.outcome == "cancelled" or result.outcome == "timeout" then
+            kind = "real-cancelled"
+        elseif result.outcome == "unknown" or result.outcome == "partial" then
+            kind = "unknown"
+        else
+            kind = "real-failed"
+        end
+        local digest, digest_error = ports.safety.digest(body)
+        if not digest then return nil, digest_error end
+        local error_id = result.error ~= false
+            and type(result.error) == "table"
+            and result.error.code
+            or false
+        local projection, projection_error = ports.safety.freeze({
+            kind = kind,
+            body = body,
+            truncated = false,
+            raw_bytes = #body,
+            digest = digest,
+            error_id = error_id or false,
+            external_effects_unsettled = kind == "unknown",
+            progress_identity = result.result_digest,
+        }, "Runtime tool result")
+        if not projection then return nil, projection_error end
+        return projection
+    end
+
     service.registry_version = REGISTRY_VERSION
     service.schema_version = SCHEMA_VERSION
     service.registry_digest = registry.digest
@@ -3330,6 +3397,456 @@ function M.new(dependencies, options)
     }, "tool capabilities"))
 
     return readonly(service, "tool service")
+end
+
+---Adapts the closed Tool and Permission services to Runtime's serialized
+-- foreground port. The adapter retains every current-process object behind an
+-- opaque string token because AgentLoop freezes/copies its public admission.
+-- Operation receipts come from the one active Context publication lease.
+function M.new_agent_port(ports, options)
+    if type(ports) ~= "table"
+        or not exact_fields(ports, {
+            service = true, permission = true, profile = true,
+            operation_journal = true, clock = true,
+        })
+        or type(ports.service) ~= "table"
+        or type(ports.service.admit_call) ~= "function"
+        or type(ports.service.permission_action) ~= "function"
+        or type(ports.service.begin_operation) ~= "function"
+        or type(ports.service.authorize) ~= "function"
+        or type(ports.service.fail_before_effect) ~= "function"
+        or type(ports.service.execute) ~= "function"
+        or type(ports.service.execution_port) ~= "function"
+        or type(ports.service.runtime_result) ~= "function"
+        or type(ports.permission) ~= "table"
+        or type(ports.permission.evaluate) ~= "function"
+        or type(ports.permission.tighten) ~= "function"
+        or type(ports.permission.approval_snapshot) ~= "function"
+        or type(ports.permission.record_approval) ~= "function"
+        or type(ports.permission.consume_approval) ~= "function"
+        or type(ports.permission.admit_without_approval) ~= "function"
+        or type(ports.operation_journal) ~= "table"
+        or type(ports.operation_journal.take_intent_receipt) ~= "function"
+        or type(ports.operation_journal.take_result_receipt) ~= "function"
+        or type(ports.clock) ~= "table"
+        or type(ports.clock.now) ~= "function"
+    then
+        return nil, failure(
+            "InvalidAgentToolPorts",
+            "Tool, Permission, operation journal, and clock ports are required"
+        )
+    end
+    if type(options) ~= "table"
+        or not exact_fields(options, {
+            config_generation = true, double_check = true,
+            action_review_enabled = true, exec_policy = true,
+        })
+        or not valid_identifier(options.config_generation, 256)
+        or type(options.double_check) ~= "boolean"
+        or type(options.action_review_enabled) ~= "boolean"
+        or type(options.exec_policy) ~= "table"
+    then
+        return nil, failure(
+            "InvalidAgentToolOptions",
+            "Runtime Tool snapshot options are incomplete"
+        )
+    end
+
+    local service = ports.service
+    local permission = ports.permission
+    local entries = {}
+    local active
+    local adapter = {}
+
+    local function adapter_failure(error_value)
+        local code = type(error_value) == "table"
+            and type(error_value.code) == "string"
+            and error_value.code
+            or "ToolAdapterFailure"
+        local body = "tool-adapter-error:" .. code
+        return {
+            kind = "real-failed",
+            body = body,
+            truncated = false,
+            raw_bytes = #body,
+            digest = false,
+            error_id = code,
+            external_effects_unsettled = false,
+            progress_identity = false,
+        }
+    end
+
+    local function entry_for_token(token)
+        return type(token) == "string" and entries[token] or nil
+    end
+
+    local function effective_decision(entry, review_verdict)
+        if not entry.permission.review_required then
+            if review_verdict ~= nil then
+                return nil, failure(
+                    "InvalidReviewVerdict",
+                    "an unreviewed Tool admission received review evidence"
+                )
+            end
+            return entry.permission
+        end
+        if review_verdict ~= "pass" and review_verdict ~= "tighten" then
+            return nil, failure(
+                "ReviewRequired",
+                "high-risk Tool admission requires its exact action review"
+            )
+        end
+        if entry.reviewed and entry.reviewed.verdict == review_verdict then
+            return entry.reviewed.decision
+        end
+        if entry.reviewed then
+            return nil, failure(
+                "ReviewStale",
+                "Tool admission already binds a different action review"
+            )
+        end
+        local reviewer_decision = review_verdict == "pass" and "allow" or "confirm"
+        local decision, decision_error = permission:tighten(
+            entry.permission,
+            reviewer_decision
+        )
+        if not decision then return nil, decision_error end
+        entry.reviewed = { verdict = review_verdict, decision = decision }
+        return decision
+    end
+
+    function adapter.admit(runtime_call)
+        if type(runtime_call) ~= "table" then
+            return nil, failure("InvalidToolCall", "Runtime Tool call is missing")
+        end
+        local provider_call_id = runtime_call.provider_call_id
+        if type(provider_call_id) ~= "string" or provider_call_id == "" then
+            provider_call_id = runtime_call.adapter_call_id
+        end
+        local call, call_error = service:admit_call({
+            tool = runtime_call.name,
+            schema_version = service.schema_version,
+            registry_digest = service.registry_digest,
+            provider_call_id = provider_call_id,
+            tool_call_id = runtime_call.tool_call_id,
+            operation_id = runtime_call.operation_id,
+            canonical_arguments = runtime_call.canonical_arguments,
+        })
+        if not call then return nil, call_error end
+        local action, action_error = service:permission_action(call)
+        if not action then return nil, action_error end
+        local decision, decision_error = permission:evaluate(ports.profile, {
+            tool = action.tool,
+            outside_workspace = action.outside_workspace,
+            reserved_tree = action.reserved_tree,
+            double_check = options.double_check,
+            action_review_enabled = options.action_review_enabled,
+        })
+        if not decision then return nil, decision_error end
+        local token = runtime_call.tool_call_id
+        if entries[token] ~= nil then
+            return nil, failure("DuplicateToolCall", "Runtime Tool identity was already admitted")
+        end
+        local runtime_decision = decision.review_required and "review" or decision.decision
+        local after_review = decision.review_required and decision.decision or false
+        entries[token] = {
+            runtime = runtime_call,
+            call = call,
+            action = action,
+            permission = decision,
+            token = token,
+            started = false,
+        }
+        return readonly({
+            decision = runtime_decision,
+            capabilities = table.concat(decision.required_capabilities, ","),
+            permission_snapshot_digest = decision.profile_snapshot_digest,
+            reason = decision.hard_denial or (decision.review_required
+                and "action-review-required"
+                or "permission-" .. decision.decision),
+            token = token,
+            after_review = after_review,
+        }, "Runtime Tool admission")
+    end
+
+    local function approval_binding(entry)
+        local action = entry.action
+        return {
+            schema_version = action.schema_version,
+            registry_digest = action.registry_digest,
+            canonical_arguments = action.canonical_arguments,
+            canonical_target = action.canonical_target,
+            expected_raw_digest = action.expected_raw_digest,
+            cwd = action.cwd,
+            workspace_root_identity = action.workspace_root_identity,
+            operation_id = action.operation_id,
+            tool_call_id = action.tool_call_id,
+        }
+    end
+
+    ---Prepares the exact one-action snapshot displayed before a typed approval.
+    function adapter.prepare_approval(tool_call_id, review_verdict)
+        local entry = entries[tool_call_id]
+        if not entry or entry.started then
+            return nil, failure("NoPendingApproval", "Tool approval is stale or unavailable")
+        end
+        local decision, decision_error = effective_decision(entry, review_verdict)
+        if not decision then return nil, decision_error end
+        if decision.decision ~= "confirm" then
+            return nil, failure("ApprovalNotRequired", "Tool action does not require approval")
+        end
+        if entry.approval_snapshot then return entry.approval_snapshot end
+        local snapshot, snapshot_error = permission:approval_snapshot(
+            decision,
+            approval_binding(entry)
+        )
+        if not snapshot then return nil, snapshot_error end
+        entry.approval_snapshot = snapshot
+        return snapshot
+    end
+
+    ---Records a local answer and returns Runtime's exact approval envelope.
+    function adapter.record_approval(tool_call_id, review_verdict, approval_id, answer)
+        if answer ~= "approve" and answer ~= "reject" and answer ~= "defer" then
+            return nil, failure("InvalidApproval", "approval answer is invalid")
+        end
+        local snapshot, snapshot_error = adapter.prepare_approval(
+            tool_call_id,
+            review_verdict
+        )
+        if not snapshot then return nil, snapshot_error end
+        if answer == "defer" then
+            return readonly({
+                decision = "defer",
+                approval_id = approval_id,
+                snapshot_digest = snapshot.snapshot_digest,
+                approval_digest = "",
+            }, "deferred Runtime approval")
+        end
+        local entry = entries[tool_call_id]
+        local evidence, evidence_error = permission:record_approval(
+            snapshot,
+            approval_id,
+            answer == "approve" and "approved" or "rejected"
+        )
+        if not evidence then return nil, evidence_error end
+        entry.approval = evidence
+        entry.approval_digest = answer == "approve" and snapshot.snapshot_digest or ""
+        return readonly({
+            decision = answer,
+            approval_id = approval_id,
+            snapshot_digest = snapshot.snapshot_digest,
+            approval_digest = entry.approval_digest,
+        }, "Runtime approval")
+    end
+
+    local result_receipt
+
+    local function authorize(entry, admission)
+        local decision, decision_error = effective_decision(
+            entry,
+            admission.review_verdict
+        )
+        if not decision then return nil, { error = decision_error } end
+        local approval_digest = ""
+        if decision.decision == "confirm" then
+            if not entry.approval
+                or admission.approval_digest ~= entry.approval_digest
+            then
+                return nil, { error = failure(
+                    "ApprovalRequired",
+                    "exact Tool approval is unavailable"
+                ) }
+            end
+            local consumed, consume_error = permission:consume_approval(
+                entry.approval,
+                entry.approval_snapshot
+            )
+            if not consumed then return nil, { error = consume_error } end
+            approval_digest = entry.approval_digest
+        else
+            local admitted, permission_error = permission:admit_without_approval(decision)
+            if not admitted then return nil, { error = permission_error } end
+        end
+
+        local intent_receipt = false
+        if entry.call.mutates or entry.call.tool == "exec" then
+            local intent_digest, intent_error = service:begin_operation(entry.call)
+            if not intent_digest then return nil, { error = intent_error } end
+            intent_receipt, intent_error = ports.operation_journal.take_intent_receipt(
+                entry.call.operation_id,
+                intent_digest
+            )
+            if not intent_receipt then return nil, { error = intent_error } end
+        end
+        local action_review = decision.review_status == "not-required"
+            and "not-required"
+            or (entry.reviewed and entry.reviewed.verdict == "tighten")
+                and "tightened" or "approved"
+        local token, token_error = service:authorize(entry.call, {
+            permission_snapshot_digest = decision.profile_snapshot_digest,
+            approval_digest = approval_digest,
+            config_generation = options.config_generation,
+            workspace_identity = entry.action.workspace_root_identity,
+            double_check = options.double_check,
+            action_review = action_review,
+        })
+        if not token then
+            if intent_receipt ~= false then
+                local closed, close_error = service:fail_before_effect(
+                    entry.call,
+                    token_error or failure(
+                        "AuthorizationDenied",
+                        "external Tool authorization failed"
+                    )
+                )
+                local runtime_result, result_error = service:runtime_result(entry.call)
+                local receipt, receipt_error = result_receipt(entry)
+                if not closed or not runtime_result or receipt == nil then
+                    return nil, {
+                        error = close_error or result_error or receipt_error or token_error,
+                        intent_receipt = intent_receipt,
+                    }
+                end
+                return nil, {
+                    error = token_error,
+                    intent_receipt = intent_receipt,
+                    result = runtime_result,
+                    result_receipt = receipt,
+                }
+            end
+            return nil, { error = token_error }
+        end
+        return token, { intent_receipt = intent_receipt }
+    end
+
+    result_receipt = function(entry)
+        if not (entry.call.mutates or entry.call.tool == "exec") then return false end
+        return ports.operation_journal.take_result_receipt(entry.call.operation_id)
+    end
+
+    function adapter.start(spec)
+        if active then return nil, failure("ToolBusy", "one foreground Tool is active") end
+        if type(spec) ~= "table" or type(spec.admission) ~= "table"
+            or type(spec.call) ~= "table"
+        then
+            return nil, failure("InvalidToolStart", "Runtime Tool start is incomplete")
+        end
+        local entry = entry_for_token(spec.admission.token)
+        if not entry or entry.started
+            or spec.call.tool_call_id ~= entry.runtime.tool_call_id
+            or spec.call.operation_id ~= entry.runtime.operation_id
+        then
+            return nil, failure("InvalidToolStart", "Runtime Tool admission is stale")
+        end
+        entry.started = true
+        local token, authorization = authorize(entry, spec.admission)
+        if not token then
+            if authorization.result then
+                return {
+                    kind = "complete",
+                    result = authorization.result,
+                    intent_receipt = authorization.intent_receipt,
+                    result_receipt = authorization.result_receipt,
+                }
+            end
+            entry.started = false
+            return {
+                kind = "complete",
+                result = adapter_failure(authorization.error),
+            }
+        end
+        local intent_receipt = authorization.intent_receipt
+        if entry.call.tool ~= "exec" then
+            local executed, execute_error = service:execute(token)
+            local runtime_result, projection_error = service:runtime_result(entry.call)
+            if not runtime_result then
+                return nil, projection_error or execute_error or failure(
+                    "ToolResultUnknown",
+                    "direct Tool did not produce a canonical result"
+                )
+            end
+            local receipt, receipt_error = result_receipt(entry)
+            if receipt == nil then return nil, receipt_error end
+            return {
+                kind = "complete",
+                result = runtime_result,
+                intent_receipt = intent_receipt,
+                result_receipt = receipt,
+            }
+        end
+
+        local port, port_error = service:execution_port(token, options.exec_policy)
+        if not port then
+            local runtime_result, projection_error = service:runtime_result(entry.call)
+            if not runtime_result then return nil, projection_error or port_error end
+            local receipt, receipt_error = result_receipt(entry)
+            if receipt == nil then return nil, receipt_error end
+            return {
+                kind = "complete",
+                result = runtime_result,
+                intent_receipt = intent_receipt,
+                result_receipt = receipt,
+            }
+        end
+        local now = ports.clock.now()
+        local started, start_error = pcall(port.start, port, now)
+        if not started or start_error ~= true then
+            return nil, failure("ExecStartUnknown", "raw exec start was not acknowledged")
+        end
+        local handle = readonly({}, "Runtime exec handle")
+        active = { handle = handle, port = port, entry = entry }
+        return {
+            kind = "async",
+            handle = handle,
+            intent_receipt = intent_receipt,
+        }
+    end
+
+    ---Polls the single active exec and returns a settlement only at terminal truth.
+    function adapter.poll(now, budget)
+        if not active then return {}, false end
+        local events = active.port:poll(now, budget)
+        local terminal = false
+        for _, event in ipairs(events) do
+            if event.kind == "io_terminal" then terminal = true end
+        end
+        if not terminal then return events, false end
+        local joined = active.port:join(now)
+        active.port:close()
+        local entry = active.entry
+        active = nil
+        local runtime_result, result_error = service:runtime_result(entry.call)
+        if not runtime_result then
+            return nil, result_error or joined.error or failure(
+                "ToolResultUnknown",
+                "raw exec did not produce a canonical result"
+            )
+        end
+        local receipt, receipt_error = result_receipt(entry)
+        if receipt == nil then return nil, receipt_error end
+        return events, readonly({
+            result = runtime_result,
+            result_receipt = receipt,
+            outcome = joined.outcome,
+        }, "Runtime exec settlement")
+    end
+
+    function adapter.cancel(handle)
+        if not active or active.handle ~= handle then
+            return { outcome = "unknown" }
+        end
+        local now = ports.clock.now()
+        local called, accepted = pcall(active.port.cancel, active.port, now)
+        if not called then return { outcome = "unknown" } end
+        return { outcome = accepted and "pending" or "pending" }
+    end
+
+    function adapter.active_handle()
+        return active and active.handle or false
+    end
+
+    return readonly(adapter, "Runtime Tool port")
 end
 
 return M

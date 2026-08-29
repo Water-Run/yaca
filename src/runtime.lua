@@ -1006,6 +1006,80 @@ function M.new_agent_loop(ports, options)
         return receipt
     end
 
+    -- A production Tool adapter may cross the operation intent/result barrier
+    -- inside tools.start so it can prove intent durability before the actual
+    -- side effect. Adopt that exact publication receipt into AgentLoop's local
+    -- waterline; no event is replayed and no second Context writer exists.
+    local function adopt_external_receipt(receipt, expected_count, validator)
+        if halted then return nil, halt_error end
+        local batch = type(receipt) == "table" and receipt.binding or nil
+        local event_count = type(batch) == "table" and dense_count(batch.events) or nil
+        if type(receipt) ~= "table"
+            or type(batch) ~= "table"
+            or event_count ~= expected_count
+            or receipt.event_count ~= expected_count
+            or receipt.barrier_id ~= batch.barrier_id
+            or receipt.first_sequence ~= sequence + 1
+            or receipt.first_sequence ~= batch.first_sequence
+            or receipt.last_sequence ~= sequence + expected_count
+            or receipt.last_sequence ~= batch.last_sequence
+            or batch.event_count ~= expected_count
+            or batch.expected_context_generation ~= context_generation
+            or receipt.previous_context_generation ~= context_generation
+            or receipt.context_generation ~= context_generation + 1
+        then
+            return durability_failure("external-operation-receipt")
+        end
+        for index, event in ipairs(batch.events) do
+            if not exact_fields(event, {
+                seq = true, type = true, turn_id = true, fields = true,
+            })
+                or event.seq ~= sequence + index
+                or type(event.type) ~= "string"
+                or type(event.fields) ~= "table"
+                or not validator(event, index)
+            then
+                return durability_failure("external-operation-event")
+            end
+        end
+        sequence = receipt.last_sequence
+        context_generation = receipt.context_generation
+        if turn then
+            turn.trace.durable_barriers[#turn.trace.durable_barriers + 1]
+                = receipt.barrier_id
+        end
+        return true
+    end
+
+    local function adopt_operation_intent(call, receipt)
+        if receipt == nil or receipt == false then return true end
+        if not call.side_effecting then
+            return durability_failure("unexpected-operation-intent")
+        end
+        return adopt_external_receipt(receipt, 1, function(event)
+            local fields = event.fields
+            return event.type == "operation_intent"
+                and event.turn_id == turn.id
+                and exact_fields(fields, {
+                    operationId = true, toolCallId = true, kind = true,
+                    targetIdentity = true, expectedDigest = true,
+                })
+                and fields.operationId == call.public.operation_id
+                and fields.toolCallId == call.id
+                and fields.kind == call.public.name
+                and valid_runtime_text(
+                    fields.targetIdentity,
+                    limits.hard_caps.result_bytes,
+                    false
+                )
+                and valid_runtime_text(
+                    fields.expectedDigest,
+                    limits.hard_caps.result_bytes,
+                    false
+                )
+        end)
+    end
+
     local function observed_turn_id()
         return turn and turn.id or false
     end
@@ -1442,7 +1516,7 @@ function M.new_agent_loop(ports, options)
         return true
     end
 
-    local function pair_result(call, result)
+    local function pair_result(call, result, external_receipt)
         if call.result ~= nil then
             return nil, failure("DuplicateToolResult", "accepted tool call already has a result")
         end
@@ -1459,8 +1533,55 @@ function M.new_agent_loop(ports, options)
         fields.truncated = tostring(result.truncated)
         if result.digest ~= false then fields.digest = result.digest end
         if result.error_id ~= false then fields.errorId = result.error_id end
-        local receipt, commit_error = commit_events({ { type = "tool_result", fields = fields } })
-        if not receipt then return nil, commit_error end
+        if external_receipt ~= nil and external_receipt ~= false then
+            if not call.side_effecting then
+                return durability_failure("unexpected-operation-result")
+            end
+            local adopted, adopt_error = adopt_external_receipt(
+                external_receipt,
+                2,
+                function(event, index)
+                    local durable = event.fields
+                    if event.turn_id ~= turn.id then return false end
+                    if index == 1 then
+                        return event.type == "operation_result"
+                            and exact_fields(durable, {
+                                operationId = true, status = true,
+                                evidence = true, errorId = true,
+                            })
+                            and durable.operationId == call.public.operation_id
+                            and durable.status == status
+                            and valid_runtime_text(
+                                durable.evidence,
+                                limits.hard_caps.result_bytes,
+                                false
+                            )
+                    end
+                    return event.type == "tool_result"
+                        and exact_fields(durable, {
+                            toolCallId = true, status = true, body = true,
+                            truncated = true, rawBytes = true,
+                            digest = true, errorId = true,
+                        })
+                        and durable.toolCallId == call.id
+                        and durable.status == status
+                        and durable.body == result.body
+                        and durable.truncated == tostring(result.truncated)
+                        and durable.rawBytes == tostring(result.raw_bytes)
+                        and durable.digest == (result.digest ~= false
+                            and result.digest or nil)
+                        and durable.errorId == (result.error_id ~= false
+                            and result.error_id or nil)
+                end
+            )
+            if not adopted then return nil, adopt_error end
+        else
+            local receipt, commit_error = commit_events({ {
+                type = "tool_result",
+                fields = fields,
+            } })
+            if not receipt then return nil, commit_error end
+        end
         call.result = result
         turn.trace.tool_results[#turn.trace.tool_results + 1] = {
             tool_call_id = call.id,
@@ -1516,12 +1637,12 @@ function M.new_agent_loop(ports, options)
         })
     end
 
-    accept_result = function(result)
+    accept_result = function(result, external_receipt)
         if state ~= "ExecutingTool" or not active_tool then
             return nil, failure("NoExecutingTool", "no foreground tool awaits a result")
         end
         local call = active_tool.call
-        local paired, pair_error = pair_result(call, result)
+        local paired, pair_error = pair_result(call, result, external_receipt)
         if not paired then return nil, pair_error end
         active_tool = nil
         turn.call_cursor = turn.call_cursor + 1
@@ -1646,6 +1767,11 @@ function M.new_agent_loop(ports, options)
             active_tool = { call = call, handle = false }
             return accept_result(result)
         end
+        local adopted, adoption_error = adopt_operation_intent(
+            call,
+            started.intent_receipt
+        )
+        if not adopted then return nil, adoption_error end
         active_tool = { call = call, handle = started.handle or false }
         if started.kind == "complete" then
             if started.result == nil then
@@ -1658,7 +1784,7 @@ function M.new_agent_loop(ports, options)
                 invalid.external_effects_unsettled = call.side_effecting
                 return accept_result(invalid)
             end
-            return accept_result(started.result)
+            return accept_result(started.result, started.result_receipt)
         end
         if started.handle == nil or started.handle == false then
             local invalid = synthetic_result(
@@ -3088,11 +3214,11 @@ function M.new_agent_loop(ports, options)
     end
 
     ---Accepts the terminal result of an asynchronous foreground tool.
-    function loop:accept_tool_result(result)
+    function loop:accept_tool_result(result, external_receipt)
         if halted then return nil, halt_error end
         local now, clock_error = clock_now()
         if not now then return nil, clock_error end
-        return accept_result(result)
+        return accept_result(result, external_receipt)
     end
 
     ---Resolves the exact pending approval without granting a broader action.

@@ -112,6 +112,34 @@ local function fixture(settings, option_overrides)
         }
     end
 
+    local function external_commit(events, barrier_id)
+        local first_sequence = #durable_events + 1
+        local batch = {
+            barrier_id = barrier_id,
+            first_sequence = first_sequence,
+            last_sequence = first_sequence + #events - 1,
+            event_count = #events,
+            expected_context_generation = context_generation,
+            events = events,
+        }
+        for index, event in ipairs(events) do
+            event.seq = first_sequence + index - 1
+            log[#log + 1] = "durable:" .. event.type
+            durable_events[#durable_events + 1] = event
+        end
+        local previous_context_generation = context_generation
+        context_generation = context_generation + 1
+        return {
+            barrier_id = barrier_id,
+            first_sequence = batch.first_sequence,
+            last_sequence = batch.last_sequence,
+            event_count = batch.event_count,
+            binding = batch,
+            previous_context_generation = previous_context_generation,
+            context_generation = context_generation,
+        }
+    end
+
     local model = {}
     function model.start(spec)
         log[#log + 1] = "effect:model:" .. spec.request_id
@@ -141,6 +169,9 @@ local function fixture(settings, option_overrides)
     function tools.start(spec)
         log[#log + 1] = "effect:tool:" .. spec.call.tool_call_id
         tool_starts[#tool_starts + 1] = spec
+        if settings.tool_start then
+            return settings.tool_start(spec, external_commit)
+        end
         local candidate = settings.tool_starts and settings.tool_starts[start_cursor] or nil
         start_cursor = start_cursor + 1
         if candidate then return candidate end
@@ -588,6 +619,80 @@ return {
                 A.truthy(permission_at < tool_at)
                 A.truthy(tool_at < result_at)
                 A.truthy(result_at < second_model_at)
+            end,
+        },
+        {
+            name = "externally durable operation receipts advance the AgentLoop waterline once",
+            run = function()
+                local f = fixture({
+                    tool_start = function(spec, commit_external)
+                        local call_value = spec.call
+                        local intent_receipt = commit_external({ {
+                            type = "operation_intent",
+                            turn_id = spec.turn_id,
+                            fields = {
+                                operationId = call_value.operation_id,
+                                toolCallId = call_value.tool_call_id,
+                                kind = call_value.name,
+                                targetIdentity = "target-digest",
+                                expectedDigest = "opaque-call-digest",
+                            },
+                        } }, call_value.operation_id .. ":intent")
+                        local result_value = tool_result("real-success", {
+                            body = "canonical exec result",
+                            digest = "tool-body-digest",
+                            progress_identity = "tool-result-digest",
+                        })
+                        local result_receipt = commit_external({
+                            {
+                                type = "operation_result",
+                                turn_id = spec.turn_id,
+                                fields = {
+                                    operationId = call_value.operation_id,
+                                    status = "ok",
+                                    evidence = "canonical-result:tool-result-digest",
+                                },
+                            },
+                            {
+                                type = "tool_result",
+                                turn_id = spec.turn_id,
+                                fields = {
+                                    toolCallId = call_value.tool_call_id,
+                                    status = "ok",
+                                    body = result_value.body,
+                                    truncated = "false",
+                                    rawBytes = tostring(result_value.raw_bytes),
+                                    digest = result_value.digest,
+                                },
+                            },
+                        }, call_value.operation_id .. ":result")
+                        return {
+                            kind = "complete",
+                            result = result_value,
+                            intent_receipt = intent_receipt,
+                            result_receipt = result_receipt,
+                        }
+                    end,
+                })
+                assert(f.loop:begin_main(input(false)))
+                assert(f.loop:accept_model_response(response(f.loop, {
+                    tag = "durable-operation",
+                    calls = { call("exec", 1, '{"command":"true"}') },
+                })))
+                A.equal(f.loop:status().state, "RequestingModel")
+                A.equal(f.loop:status().last_durable_sequence, 10)
+                A.equal(f.loop:status().context_generation, 8)
+                local types = {}
+                for _, event in ipairs(f.events) do types[#types + 1] = event.type end
+                A.deep_equal(types, {
+                    "turn_started", "user_message", "model_request",
+                    "model_message", "tool_call", "permission_decision",
+                    "operation_intent", "operation_result", "tool_result",
+                    "model_request",
+                })
+                A.equal(trace(f.loop).tool_results[1].kind, "real-success")
+                assert(f.loop:accept_model_response(finish(f.loop)))
+                A.equal(f.loop:status().last_outcome, "completed")
             end,
         },
         {

@@ -354,12 +354,17 @@ return {
                 A.truthy(walked)
                 A.equal(#raw_walk.entries, 4)
                 A.raises(function() raw_walk.entries[1] = false end, "cannot be modified")
-                local first = run(service, "list", {
+                local first, first_call = run(service, "list", {
                     path = "/work", depth = 2, page_size = 2,
                 }, "list-1")
                 A.equal(first.outcome, "success", first.error and (
                     first.error.code .. ":" .. first.error.message .. ":" .. tostring(first.error.detail)
                 ))
+                local runtime_result = assert(service:runtime_result(first_call))
+                A.equal(runtime_result.kind, "real-success")
+                A.equal(runtime_result.raw_bytes, #runtime_result.body)
+                A.equal(runtime_result.progress_identity, first.result_digest)
+                A.contains(runtime_result.body, '"result_digest":"' .. first.result_digest .. '"')
                 A.equal(#first.payload.entries, 2)
                 A.truthy(first.payload.continuation)
                 A.equal(controls.last_ignore_policy, "git-compatible-v1")

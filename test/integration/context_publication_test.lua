@@ -280,7 +280,7 @@ local function fixture(settings)
         maximum_create_attempts = 4,
         maximum_model_view_bytes = 262144,
     }))
-    return publication, observations, path_service, registry
+    return publication, observations, path_service, registry, safety_service
 end
 
 return {
@@ -428,6 +428,132 @@ return {
                 A.truthy(draft.close())
                 A.equal(observed.closes, 1)
                 A.equal(draft.status().lifecycle, "closed")
+            end,
+        },
+        {
+            name = "operation journal publishes intent and paired result into one waterline",
+            run = function()
+                local publication, observed, _, _, safety_service = fixture()
+                local first = assert(publication.publish_first({
+                    generation = generation(),
+                    workspace = { path = "/work", enterable = true },
+                    settings = {
+                        model = "Primary",
+                        permission = "Std",
+                        double_check = true,
+                        double_check_override = "inherit",
+                        double_check_goal = "verify the durable result",
+                        double_check_goal_override = "inherit",
+                        context_prompt = "workspace context",
+                        auto_rename_disabled = false,
+                    },
+                    message = "run a tool",
+                    source = "main",
+                }))
+                local accepted = {
+                    barrier_id = "turn-1:barrier:accepted-tool",
+                    first_sequence = 3,
+                    last_sequence = 6,
+                    event_count = 4,
+                    expected_context_generation = first.generation,
+                    events = {
+                        {
+                            seq = 3,
+                            type = "model_request",
+                            turn_id = "turn-1",
+                            fields = {
+                                requestId = "turn-1:request:1",
+                                purpose = "main",
+                                viewManifestRef = first.view_manifest_snapshot,
+                            },
+                        },
+                        {
+                            seq = 4,
+                            type = "model_message",
+                            turn_id = "turn-1",
+                            fields = {
+                                messageId = "turn-1:message:2",
+                                requestId = "turn-1:request:1",
+                                role = "assistant",
+                                status = "complete",
+                                body = "tool call",
+                                rawBytes = "9",
+                                digest = "model-message-digest",
+                            },
+                        },
+                        {
+                            seq = 5,
+                            type = "tool_call",
+                            turn_id = "turn-1",
+                            fields = {
+                                toolCallId = "turn-1:tool:1",
+                                requestId = "turn-1:request:1",
+                                name = "exec",
+                                canonicalArguments = '{"command":"true"}',
+                                providerCallId = "provider-1",
+                            },
+                        },
+                        {
+                            seq = 6,
+                            type = "permission_decision",
+                            turn_id = "turn-1",
+                            fields = {
+                                toolCallId = "turn-1:tool:1",
+                                capabilities = "Shell",
+                                decision = "allow",
+                                profileSnapshot = "permission-snapshot",
+                            },
+                        },
+                    },
+                }
+                A.truthy(publication.commit(accepted))
+                local journal = publication.operation_journal()
+                local operations = assert(context.new_operation_service({
+                    safety = safety_service,
+                    journal = journal,
+                }, {
+                    maximum_identifier_bytes = 256,
+                    maximum_evidence_bytes = 65536,
+                    unresolved_operation_ids = {},
+                }))
+                local handle, intent_digest = assert(operations.begin({
+                    operation_id = "turn-1:operation:1",
+                    tool_call_id = "turn-1:tool:1",
+                    kind = "exec",
+                    target_identity = "target-digest",
+                    expected_digest = "opaque-call-digest",
+                    call_digest = "call-digest",
+                }))
+                local intent_receipt = assert(journal.take_intent_receipt(
+                    "turn-1:operation:1",
+                    intent_digest
+                ))
+                A.equal(intent_receipt.first_sequence, 7)
+                A.equal(intent_receipt.last_sequence, 7)
+                A.equal(intent_receipt.context_generation, 3)
+                local body = '{"outcome":"success"}'
+                local result_digest = assert(operations.finish(handle, {
+                    status = "ok",
+                    evidence = "canonical-result:result-digest",
+                    tool_status = "ok",
+                    tool_body = body,
+                    tool_truncated = false,
+                    tool_raw_bytes = #body,
+                    tool_digest = "tool-body-digest",
+                }))
+                local result_receipt = assert(journal.take_result_receipt(
+                    "turn-1:operation:1",
+                    result_digest
+                ))
+                A.equal(result_receipt.first_sequence, 8)
+                A.equal(result_receipt.last_sequence, 9)
+                A.equal(result_receipt.context_generation, 4)
+                A.equal(publication.status().event_count, 9)
+                A.equal(observed.published.document.facts[7].type, "operation_intent")
+                A.equal(observed.published.document.facts[8].type, "operation_result")
+                A.equal(observed.published.document.facts[9].type, "tool_result")
+                A.equal(observed.published.document.facts[9].fields.body, body)
+                A.truthy(publication.close())
             end,
         },
         {

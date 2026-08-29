@@ -328,6 +328,10 @@ return {
                 A.equal(joined.outcome, "completed")
                 local result = joined.tool_result
                 A.equal(result.outcome, "success")
+                local runtime_result = assert(f.tools:runtime_result(call))
+                A.equal(runtime_result.kind, "real-success")
+                A.equal(runtime_result.raw_bytes, #runtime_result.body)
+                A.equal(runtime_result.progress_identity, result.result_digest)
                 A.equal(result.payload.cwd, "/work/sub")
                 A.equal(result.payload.stdin, "closed")
                 A.equal(result.payload.stdout.text, "abGH")
