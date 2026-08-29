@@ -179,7 +179,7 @@ local function runtime_spec(purpose, serial)
         purpose = purpose,
         binding = binding,
         model_snapshot = "main-model-snapshot",
-        config_generation = "config-generation-1",
+        config_generation = "durable-config-snapshot-1",
         view_manifest_ref = "view-" .. tostring(serial),
         no_tools = true,
     }
@@ -210,6 +210,7 @@ local function fixture()
     }, {
         main_model_name = "Primary",
         permission_name = "Std",
+        config_snapshot = "durable-config-snapshot-1",
         context_prompt = "context",
         default_connect_timeout_ms = 100,
         default_request_timeout_ms = 5000,

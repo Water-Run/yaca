@@ -2370,6 +2370,7 @@ function M.start_published_agent(composed, chat, message, source)
     }, {
         main_model_name = status.model,
         permission_name = status.permission,
+        config_snapshot = handoff.input.config_generation,
         context_prompt = status.context_prompt,
         default_connect_timeout_ms = 120000,
         default_request_timeout_ms = 3600000,

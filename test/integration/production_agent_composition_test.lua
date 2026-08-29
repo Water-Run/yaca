@@ -207,6 +207,7 @@ local function fixture(settings)
         end,
         new_review_request_builder = function(_, options)
             A.equal(options.main_model_name, "Primary")
+            A.equal(options.config_snapshot, "config-snapshot-1")
             A.equal(options.default_max_output_tokens, 1024)
             log[#log + 1] = "review-builder"
             return {}

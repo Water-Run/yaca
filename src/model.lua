@@ -2178,6 +2178,7 @@ end
 local REVIEW_BUILDER_OPTION_FIELDS = {
     main_model_name = true,
     permission_name = true,
+    config_snapshot = true,
     context_prompt = true,
     default_connect_timeout_ms = true,
     default_request_timeout_ms = true,
@@ -2287,6 +2288,7 @@ local function validate_review_builder(ports, options)
         or not exact_activity_fields(options, REVIEW_BUILDER_OPTION_FIELDS)
         or not valid_token(options.main_model_name, 128)
         or not valid_token(options.permission_name, 128)
+        or not valid_token(options.config_snapshot, 256)
         or type(options.context_prompt) ~= "string"
         or not valid_integer(options.default_connect_timeout_ms, 1)
         or not valid_integer(options.default_request_timeout_ms, 1)
@@ -2346,7 +2348,7 @@ local function validate_runtime_review(spec, admitted)
         or not valid_token(spec.turn_id, 128)
         or (spec.purpose ~= "action-review" and spec.purpose ~= "termination-review")
         or not valid_token(spec.model_snapshot, 256)
-        or spec.config_generation ~= admitted.generation.id
+        or spec.config_generation ~= admitted.options.config_snapshot
         or not valid_token(spec.view_manifest_ref, 256)
         or spec.no_tools ~= true
     then
