@@ -2,7 +2,7 @@
 
 更新日期：2026-08-10
 
-状态：**W3-D 规格首版** — model-view / summary schema 与 admission 表已冻结；token 估算误差待 TP
+状态：**计划已确认（C28）** — model-view/summary/atomic-group/admission 已冻结；token 估算与长会话阈值由实现 benchmark 校准
 
 > D-063：XML **存储** hard limit 触顶时的解脱主路径是 **新开对话 + 接盘 Prompt**，不是依赖 compact 缩小事实 XML。compact 仍只服务 model view。
 

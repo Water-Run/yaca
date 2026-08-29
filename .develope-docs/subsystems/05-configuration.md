@@ -2,7 +2,7 @@
 
 更新日期：2026-08-29
 
-状态：**W1-B 规格侧已冻结** — 下文「现行字段 catalog」与 [`contracts/config.lua`](../contracts/config.lua) 共同构成 v0.1 权威字段集合；机器契约拥有稳定 ID、INI grammar、XML 白名单与 migration fixture。Runtime 数值硬顶、原子写原语仍待技术证明。`src/_CONFIG_.ini` 与 `CONFIG-SCHEMA-CANDIDATE.md` **不是**现行契约（后者仅审计底稿）。
+状态：**计划已确认（C10/C11）** — 下文 catalog 与 [`contracts/config.lua`](../contracts/config.lua) 是权威字段集合；Runtime 数值从 release manifest 注入，原子写仍是 M3 target hard gate。`src/_CONFIG_.ini` 与候选文档不是现行契约。
 
 ## 职责
 

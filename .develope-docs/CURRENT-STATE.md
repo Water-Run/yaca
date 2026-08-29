@@ -13,7 +13,7 @@ yaca 当前是“产品说明、配置草案、模块骨架、设计文档体系
 - `_CONTEXT_.xml` 仍只是历史头部草案；现行内部结构/事件真源在 `contracts/context.rng` 与 `contracts/context.lua`。
 - `bin/` 本地放置 Lua 5.5.0、curl、BusyBox、jq、diff、patch、iconv、file、sqlite3 等 32 位工具。
 - `coding-style.txt` 规定了 Lua 5.5、旧终端、旧浏览器和保守工具链要求。
-- 核心 Lua 文件已经按职责命名，但当前均为空。
+- 现有 14 个 Lua skeleton 当前仍全为空；`contracts/release.lua` 与实施计划已把最终 28 个模块、native 边界和 C01--C34 归属冻结，尚未开始填入产品实现。
 
 缺失内容：
 
@@ -39,7 +39,7 @@ yaca 当前是“产品说明、配置草案、模块骨架、设计文档体系
 - 每个顶层 main/side turn admission 前完整读取并比较 INI bytes；变化时整份验证后原子激活 immutable generation，当前 turn 及其工具/复核/重试/压缩不热换。Stage 1 self-test 检查 Context 镜像、workspace 与 Catalog 扫描完整性/性能，Stage 3 只 advisory 检查 Model/Permission 名称、说明、Prompt 与实际配置的明显错配和拼写。
 - Permission 是命名 typed profile，`SystemPrompt` 不参与授权；普通对话没有独立 plan state。
 
-`OWNER-QUESTIONS-01.md` 的 29 个集中问题已经全部答复并由 `DISCUSSION-BATCH-06.md` 归档。现行 register 为 `unanswered=0/conflict=0`；D-049 至 D-057 已冻结四层 Prompt、双 Model 协议、typed AgentLoop、完整 Tool/Permission、单 XML 提交基线、统一 CLI/TUI action registry，以及 Win32 x86、Win64 x86_64、Linux x86_64 三个独立 zip。负责人输入门已经关闭，但 owner 规格、技术证明和完整实施计划尚未全部通过，因此仍不进入编码。
+`OWNER-QUESTIONS-01.md` 的 29 个集中问题已经全部答复并由 `DISCUSSION-BATCH-06.md` 归档。现行 register 为 `unanswered=0/conflict=0`；D-049 至 D-057 已冻结四层 Prompt、双 Model 协议、typed AgentLoop、完整 Tool/Permission、单 XML 提交基线、统一 CLI/TUI action registry，以及 Win32 x86、Win64 x86_64、Linux x86_64 三个独立 zip。16 contracts、12 fixture sets、Gate Audit 与全程序实施计划现已使 Gate A/B 通过，可以从 C01 开始编码。三目标 proof 尚未通过，Release Gate R 保持关闭。
 
 ### `bin/` 不是可直接发布的依赖集合
 
@@ -66,11 +66,11 @@ yaca 当前是“产品说明、配置草案、模块骨架、设计文档体系
 - native profile 已覆盖 x86/x86_64，Windows 生成代码对 x86/x86_64 固定 `_WIN32_WINNT=0x0501`，PE subsystem 分别为 5.01/5.02。
 - 1.3.0 已加入 i686/x86_64 MinGW 生成源码与 XP import/subsystem 静态检查、Windows XP onefile watchdog 后备及 Linux native x86 CI。
 
-此前记录的“Windows profile guard 拒绝 x86 / recipe 仅 x64”已被 1.3.0 的实现与测试取代，不能继续作为当前阻塞原因。现存缺口是 **yaca-specific qualification**：尚未用 yaca 的 Lua 5.5 入口、XML 模块、curl/CA 与最终最小依赖闭包生成 Win32/Win64 候选，也没有 XP--11、Win7--11 的完整目标机证据。luainstaller 自身把真实 XP 列为 supplemental evidence，而 yaca 的 D-007/D-056 仍把 XP 完整测试设为硬门，因此 P0-16 只从“工具链能力未知”降为“候选与目标证据未完成”，没有通过。
+此前记录的“Windows profile guard 拒绝 x86 / recipe 仅 x64”已被 1.3.0 的实现与测试取代，不能继续作为当前阻塞原因。现存缺口是 **yaca-specific qualification**：尚未用 yaca 的 Lua 5.5 入口、XML 模块、curl/CA 与最终最小依赖闭包生成 Win32/Win64 候选，也没有 XP--11、Win7--11 的完整目标机证据。luainstaller 自身把真实 XP 列为 supplemental evidence，而 yaca 的 D-007/D-056 仍把 XP 完整测试设为硬门；因此 AR-P0-16 已达到 `qualification-bound` 计划状态，但 Gate R 未通过。
 
 ## XML 库候选现状
 
-上下文 XML 的当前领先技术候选是 LuaExpat 1.5.2 + Expat 2.8.2，写入端使用 yaca 自有的受限流式 writer；具体库由 CX-06 下游的 `TP-010` 兼容性、实体安全、流式内存和目标机证据决定，不再要求项目负责人替技术侧投库名。本轮临时 Linux x86_64 smoke test 证明 LuaExpat 1.5.2 源码可以针对 Lua 5.5.0 构建并完成分块解析，但还没有归档为可复现测试证据，更不是 CentOS 7 或 Windows XP 验收。上游公开支持目前止于 Lua 5.4，Windows XP x86 也没有现成上游保证。因此 Windows `lxp.dll` 与 Linux `lxp.so` 都必须针对 Lua 5.5 和目标架构原生构建；库选型不能替代单 XML 的原子提交、锁和崩溃恢复设计。
+上下文 XML 路线已锁为 LuaExpat 1.5.2 + Expat 2.8.2，写入端使用 yaca 自有的受限流式 writer。TP-010 已用固定 SHA-256 在现代 Linux x86_64 可复现构建 Lua 5.5.1/LuaExpat/Expat，并通过 5,564,743 条分块、Unicode、binary、invalid UTF-8、实体安全和 roundtrip 断言；证据为 `proven-modern`。Windows `lxp.dll` 与 Linux `lxp.so` 仍须针对三个目标原生构建/加载并校准资源上限；modern 结果不替代 CentOS 7 或 Windows XP 验收，也不替代单 XML 的目标 replace/lock/崩溃恢复证明。
 
 ## 与 yaca 的接入结论
 

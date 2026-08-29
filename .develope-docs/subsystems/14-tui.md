@@ -2,7 +2,7 @@
 
 更新日期：2026-08-29
 
-状态：规范逐行界面、输入后备与 Context 浏览器语义已确认；[`contracts/tui.lua`](../contracts/tui.lua) 已冻结提示符、输入状态与 action fallback；完整 ASCII transcript 和真实旧终端渲染仍待 proof
+状态：**计划已确认（C13/C14）**；[`contracts/tui.lua`](../contracts/tui.lua)、fd/machine contract 与 40-column transcripts 已冻结 renderer/draft/fallback；真实 XP/TTY/dumb/SSH transcript 仍是 M4 hard gate
 
 ## 职责
 

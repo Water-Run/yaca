@@ -30,6 +30,8 @@ return {
     linux_slash_is_path = true,
     long_name_is_documented_name = true,
     legacy_aliases = {},
+    global_modifiers = { "--machine" },
+    machine_modifier_consumes_primary_action = false,
   },
   exit_classes = {
     success = 0,
@@ -42,6 +44,41 @@ return {
     cancelled = 7,
   },
 
+  machine_output = {
+    decision_refs = { "TU-13=A", "TU-21=A", "TU-23=A" },
+    supported_actions = { "help", "version", "self-test" },
+    self_test_constraint = "through-stage-1-offline-only",
+    stdin = "never-read-in-v0.1",
+    stdout = "utf8-machine-payload-only",
+    stderr = "bounded-safe-diagnostics-only",
+    selection = "explicit-double-dash-machine-only-never-by-redirection",
+    single_result = {
+      framing = "one-RFC8259-object",
+      required_fields = { "schema_version", "kind", "outcome" },
+    },
+    stream = {
+      framing = "JSONL-one-RFC8259-object-per-line",
+      required_fields = { "schema_version", "kind", "sequence", "final" },
+      final_record_requires = { "outcome" },
+      sequence_starts_at = 1,
+      sequence_is_contiguous = true,
+    },
+    ansi = false,
+    broken_stdout = "typed-close-never-success",
+  },
+
+  fd_mode_matrix = {
+    facts = { "stdin_is_tty", "stdout_is_tty", "stderr_is_tty", "machine_requested" },
+    cases = {
+      { id = "interactive", stdin_is_tty = true, stdout_is_tty = true, stderr_is_tty = "any", machine_requested = false, result = "human-interactive" },
+      { id = "interactive-stdout-redirected", stdin_is_tty = true, stdout_is_tty = false, stderr_is_tty = "any", machine_requested = false, result = "TtyRequired" },
+      { id = "interactive-stdin-redirected", stdin_is_tty = false, stdout_is_tty = true, stderr_is_tty = "any", machine_requested = false, result = "TtyRequired" },
+      { id = "human-noninteractive", stdin_is_tty = "any", stdout_is_tty = "any", stderr_is_tty = "any", machine_requested = false, action_set = { "help", "version", "self-test-stage1" }, result = "human-text" },
+      { id = "machine-supported", stdin_is_tty = "any", stdout_is_tty = "any", stderr_is_tty = "any", machine_requested = true, action_set = { "help", "version", "self-test-stage1" }, result = "machine-json-or-jsonl" },
+      { id = "machine-unsupported", stdin_is_tty = "any", stdout_is_tty = "any", stderr_is_tty = "any", machine_requested = true, result = "UsageError" },
+    },
+  },
+
   actions = {
     {
       id = "run-chat", surface = "top", args = { arg("directory", "existing-directory", false, { default = "." }) },
@@ -50,11 +87,11 @@ return {
     },
     {
       id = "help", surface = "top", args = { arg("topic", "string", false) },
-      projections = { argv("--help", "-h", "/h") }, tty = "any", confirm = "none", allowed_states = { "pre-runtime" }, results = { "success", "usage" },
+      projections = { argv("--help", "-h", "/h") }, tty = "any", non_tty = "allowed", confirm = "none", allowed_states = { "pre-runtime" }, results = { "success", "usage" },
     },
     {
       id = "version", surface = "top", args = {}, projections = { argv("--version", "-v", "/v") },
-      tty = "any", confirm = "none", allowed_states = { "pre-runtime" }, results = { "success" },
+      tty = "any", non_tty = "allowed", confirm = "none", allowed_states = { "pre-runtime" }, results = { "success" },
     },
     {
       id = "self-test", surface = "top", args = {
@@ -65,7 +102,7 @@ return {
         arg("selected_checks", "check-id-list", false),
         arg("online_consent", "bool", false, { spelling = "--i-accept-online-self-test" }),
       },
-      projections = { argv("--self-test", "-st", "/st") }, tty = "any", confirm = "online-consent-stage2-plus",
+      projections = { argv("--self-test", "-st", "/st") }, tty = "any", non_tty = "through-stage-1-offline-only", confirm = "online-consent-stage2-plus",
       allowed_states = { "pre-runtime" }, results = { "passed", "partial", "cancelled", "error" },
     },
     {
@@ -88,12 +125,12 @@ return {
     },
     {
       id = "export-context", surface = "both", args = { arg("selector", "context-selector", false) },
-      projections = { argv("--export", "-ex", "/ex"), context_repl("export <selector?>") }, tty = "any", confirm = "none",
+      projections = { argv("--export", "-ex", "/ex"), context_repl("export <selector?>") }, tty = "tty-required", confirm = "none",
       allowed_states = { "pre-runtime", "Idle", "WaitingUser" }, results = { "success", "not-found", "error" },
     },
     {
       id = "status", surface = "top", args = {}, projections = { argv("--status", "-stt", "/stt") },
-      tty = "any", confirm = "none", allowed_states = { "pre-runtime" }, results = { "success", "error" },
+      tty = "tty-required", confirm = "none", allowed_states = { "pre-runtime" }, results = { "success", "error" },
     },
 
     {
@@ -197,7 +234,7 @@ return {
     },
     {
       id = "context-delete", surface = "context-repl", args = { arg("selector", "context-selector", true), arg("yes", "bool", false, { spelling = "--yes" }) }, projections = { context_repl("delete <selector> [--yes]") },
-      tty = "any-with-complete-args", confirm = "human-or-explicit-yes", allowed_states = { "repl", "pre-runtime" }, results = { "success", "lock-conflict", "target-changed", "cancelled", "error" },
+      tty = "tty-required", confirm = "human-or-explicit-yes", allowed_states = { "repl", "pre-runtime" }, results = { "success", "lock-conflict", "target-changed", "cancelled", "error" },
     },
     {
       id = "context-set-auto-rename-disabled", surface = "context-repl", args = { arg("selector", "context-selector", true), arg("value", "bool", true) }, projections = { context_repl("set-auto-rename-disabled <selector> <true|false>") },

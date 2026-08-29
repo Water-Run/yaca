@@ -45,6 +45,7 @@ return {
   controls = {
     {
       id = "finish",
+      wire_name = "yaca_finish",
       required_payload = {},
       optional_payload = { "summary" },
       state_when_doublecheck = "EvaluatingTermination",
@@ -53,6 +54,7 @@ return {
     },
     {
       id = "ask-user",
+      wire_name = "yaca_ask_user",
       required_payload = { "question" },
       optional_payload = {},
       next_state = "WaitingUser",
@@ -60,6 +62,7 @@ return {
     },
     {
       id = "refuse",
+      wire_name = "yaca_refuse",
       required_payload = { "reason" },
       optional_payload = {},
       next_state = "Finalizing",

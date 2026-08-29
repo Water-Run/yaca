@@ -1,6 +1,8 @@
 # 04 数据格式
 
-状态：已确认持久化格式与提交能力边界；具体 XML 库和目标平台原语待技术证明
+更新日期：2026-08-29
+
+状态：**计划已确认（C05--C09）** — [`formats.lua`](../contracts/formats.lua) 与 fixtures 已冻结 strict UTF-8/SHA-256/JSON/SSE/XML/INI；TP-010 modern 通过，三目标 ABI/资源上限仍待 qualification
 
 ## 职责
 

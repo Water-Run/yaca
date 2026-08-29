@@ -2,13 +2,23 @@
 
 更新日期：2026-08-29
 
-状态：负责人输入门已通过；当前仍未达到完整实施计划就绪，更未达到编码就绪
+状态：**Gate A / Gate B 已通过，可开始编码；Release Gate R 关闭，三目标资格证据仍是发布硬门**
 
 > D-068：AR-P1-10 由“第三方公开 XML reader”改为“内部 schema + export + yaca 导入路径”。
 
 ## 当前判定
 
-`DISCUSSION-BATCH-06.md` 已使 `DECISION-REGISTER.md` 达到 `unanswered=0/conflict=0`，因此不再缺项目负责人产品选择。W1--W3 已产生首版 owner 合同，但 gate 明细尚未全部回写为“规格首版 / 证明缺失”。阻塞项已经转为三类：机器 schema/registry/fixture 收口，关键 modern/target proof，以及最终实施计划。`../luainstaller` 1.3.0 已消除旧 x86 guard 并提供 upstream modern 证据；yaca-specific 三包与真实 XP/Win7/CentOS 证据仍缺。D-071 已授权完成这些 readiness 工作与 proof；Gate A/B 前仍不开始产品实现。
+`DISCUSSION-BATCH-06.md` 已使 `DECISION-REGISTER.md` 达到 `unanswered=0/conflict=0`。2026-08-29 收尾已形成 16 份 machine contract、12 组 fixtures、TP-003/006/008/010 `proven-modern` evidence、28 项 phase-aware gate audit 和 `M0..M10` / `C01..C34` 全程序实施计划。详见 [`GATE-AUDIT-2026-08-29.md`](GATE-AUDIT-2026-08-29.md) 与 [`IMPLEMENTATION-PLAN.md`](IMPLEMENTATION-PLAN.md)。因此 Gate A/B 已通过，产品实现可以从 C01 开始。`../luainstaller` 1.3.0 已消除旧 x86 guard，但 yaca-specific 三包与真实 XP/Win7/CentOS 证据仍缺；它们关闭的是 Release Gate R，不得被 modern proof 替代。
+
+## 三阶段门禁
+
+为避免“必须先有最终包证据才能允许写最终包”的循环，本文件统一使用：
+
+- **Gate A — 实施计划就绪**：产品语义唯一；machine contract/fixture 齐；只能实现后或目标机验证的事实已绑定任务、通过条件、失败退路和 hard gate。
+- **Gate B — 编码就绪**：全程序文件、依赖、测试、退出条件、提交边界与首任务已冻结。
+- **Release Gate R — 资格与发布**：实现完成，三目标 `proven-target`、最终 zip、干净机旅程及供应链证据全部通过。
+
+Gate A/B 通过不代表任何 target passed；Gate R 关闭也不再循环阻塞纯核心、fake adapter 和目标 adapter 的实现。若目标证明失败且退路会改变用户保证，仍按 D-057/D-070 停止并重开最小 O 差异。
 
 运营向差距清单、Wave 工作包与“可开发”两道门定义见 [`READINESS-GAP.md`](READINESS-GAP.md)。Web 产品族预留（D-058）不计入 v0.1 主线就绪。
 
@@ -104,11 +114,11 @@ question/checklist
 
 ## P0 readiness gates
 
-P0 gate 会同时改变多个子系统或决定能否安全恢复。编写全程序实施计划前，所有 P0 gate 都必须通过。
+P0 gate 会同时改变多个子系统或决定能否安全恢复。下方“计划门”判断能否无猜测地进入实施；“资格门”保留实现/目标机/最终包证据。28 项逐条状态与 task/hard-gate 绑定以 Gate Audit 为准。
 
 ### AR-P0-01 产品闭环、非目标和发行形态
 
-当前状态：未通过；规格侧已由 `contracts/product.lua` 与 `contracts/zero_surface.lua` 冻结六条旅程、三目标和零表面，公开中英文 README 已同步并通过本地 contract scan；仍缺最终 zip 的物理零表面/旅程证据。
+计划门：通过（qualification-bound）；`product.lua`、`zero_surface.lua`、`release.lua` 已冻结旅程/三目标/零表面，C33 负责最终 zip 物理扫描与旅程证据，完成前 Gate R 关闭。
 
 - **阻塞原因**：D-056 已确认三个解压后原地运行的便携 zip、邻接 `__yaca__` 和简单 Install 脚本；当前缺口不是产品形态或公开文档，而是最终包证据。D-044 已排除 Web、图像、音频、remote/headless、transcription 和 TTS，D-045 已排除 multi-root，D-055/D-056 又排除 telemetry、诊断上传和内建更新；必须证明这些能力真正从发行 bytes 消失。
 - **权威工件**：产品闭环说明；v0.1 支持/排除矩阵；Web/媒体/remote/multi-root/telemetry/upload/update 的 zero-surface manifest 与重开条件；portable 邻接数据的安装→首次配置→新建/恢复→退出→手工升级→卸载状态表。
@@ -118,7 +128,7 @@ P0 gate 会同时改变多个子系统或决定能否安全恢复。编写全程
 
 ### AR-P0-02 AgentLoop 的 terminal intent 和 typed outcome
 
-当前状态：未通过；W1-A 的 identity/state/outcome、W2-C control envelope 已由 `contracts/runtime.lua`/`model.lua` 机器对表，12 条 synthetic trace 已通过；仍缺实现后的 fault trace、hard-cap 数字和目标平台证明。
+计划门：通过（plan-ready）；identity/state/outcome/control 与 synthetic trace 已机器对表，C26 负责实现后的 fault trace、hard-cap 校准和 M8 hard gate。
 
 - **阻塞原因**：provider 响应结束只证明一次生成结束；“没有工具调用”无法区分完成、澄清问题、拒答和部分结果。Runtime 又不能靠搜索自然语言猜测 typed outcome。typed `ask-user` 后的用户回复尚未冻结 turn/快照/预算边界，错误页上的“retry”也尚未区分安全 transport attempt、新 request/new turn 和绝不可重放的 accepted/unknown operation。
 - **权威工件**：AgentLoop 状态机；主模型控制信号/envelope；`completed|waiting_user|partial|refused|cancelled|budget_exhausted|stuck|error` 枚举和转换表；turn/request/attempt/reply-to 因果表；manual action/retry registry；最终报告合成规则。
@@ -128,7 +138,7 @@ P0 gate 会同时改变多个子系统或决定能否安全恢复。编写全程
 
 ### AR-P0-03 Model/Provider canonical protocol
 
-当前状态：未通过；W2-C canonical schema、control/finish crosswalk 与 synthetic fixtures 已机读冻结；仍缺精确 wire/header 版本、金标录制字节 fixture 和 adapter conformance 证明。
+计划门：通过（qualification-bound）；canonical schema、native control crosswalk 与两协议 exact synthetic wire fixtures 已冻结，C21/TP-015 负责 recorded provider bytes 和 adapter conformance，M6 完成前必须通过。
 
 - **阻塞原因**：`OpenAI-compatible` 不是足够精确的协议规格。角色、工具调用 delta、同一响应中的文本和工具、重复/缺失 call ID、refusal/content filter、usage、HTTP error 与断流都可能不同；TS-23 选中的 carrier 还必须被所选 Protocol 无损承载，不能靠把 bare payload 偷包成另一语义。每 Model retry 的用户配置面、Runtime hard cap、`Retry-After` 和 request snapshot 也要闭合。D-044 已排除图像、音频、独立转写与语音输出，因此 provider profile、宽 passthrough 和 capability 探测都不得偷留可触发的 media content-part 或 purpose。
 - **权威工件**：内部 `ModelRequest`、`ModelEvent`、`ModelResult`、`ModelError` schema；v0.1 provider/content-part profile；capability/self-test 契约；六个核心 purpose与 D-041 周期 `context-name` 的权限/数据表；每 Model 调度/冷却与 aggregate budget 账本；D-044 的零 image/audio/transcription/speech purpose manifest。
@@ -138,7 +148,7 @@ P0 gate 会同时改变多个子系统或决定能否安全恢复。编写全程
 
 ### AR-P0-04 XP/CentOS 事件泵与可取消 I/O
 
-当前状态：未通过；W3-A 已冻结单线程事件泵、AsyncPort 五方法、process/network 端口和 hard-cap 维度；实际 XP/CentOS wait、console/network/process multiplex 与取消原语仍须 TP-003/005/006 证明。
+计划门：通过（qualification-bound）；单线程事件泵/AsyncPort/transport contract 已冻结，TP-003 已 modern-proven；C04 保留 XP/CentOS wait/console/process target proof，目标 adapter 完成前必须通过。
 
 - **阻塞原因**：Lua 协程不会把阻塞的 console、curl pipe、stdout/stderr 或进程等待自动变成可取消事件。没有共同端口就无法同时兑现流式响应、忙时输入、Esc、中断、工具输出和关闭期限；系统 suspend/resume 后旧连接、lease、deadline 与 workspace 也不能被当作仍连续有效。D-051 已固定单进程只有一个 active Context 和一个单线程领域状态源，当前责任是证明这套拓扑在旧平台可工作，而不是再选择 Context 数量。
 - **权威工件**：`start/poll/cancel/join/close` 异步端口 ABI；Windows/Linux adapter 能力矩阵；单 active Context 的资源、事件归属与关闭投影；single-root derivation 与 zero-root-list 资源清单；Web/remote 零 listener/client 端口清单；suspend/resume 检测与重新验证表；事件排序、背压、关闭和 helper 崩溃协议；最小技术验证计划。
@@ -148,7 +158,7 @@ P0 gate 会同时改变多个子系统或决定能否安全恢复。编写全程
 
 ### AR-P0-05 TUI full-duplex 输入与确定性交互
 
-当前状态：未通过；`contracts/tui.lua` 已冻结提示符、输入状态、runtime projection 与完整文本 action fallback；ASCII chrome transcript、旧 console/TTY 按键、draft 保护和 full-duplex 证据尚未完成。
+计划门：通过（qualification-bound）；fd/machine 矩阵、ASCII chrome、draft redraw/cooked backlog transcripts 已冻结并校验，C14 保留 XP/TTY/dumb/SSH target transcript hard gate。
 
 - **阻塞原因**：在 cooked/canonical 输入中，模型或工具异步输出可能穿过用户未提交的输入行；renderer 看不到 OS 正在编辑的缓冲。快捷键不可识别时还必须保持 queue/steer/side/cancel 的领域语义。stdin/stdout/stderr 的 TTY 能力不能合成一个布尔值；D-051 已固定单 active Context，仍须冻结唯一焦点下的异步事件与 draft 保护。
 - **权威工件**：输入状态机；三条标准 fd 的独立能力与 prompt gate 矩阵；async output 与 line editing 协议；快捷键→文本后备映射；单 active Context 的焦点规则；Web/remote/media 零输入表面清单；每个 Agent 状态下 Esc/EOF/Ctrl+C/普通输入的动作表；ASCII golden transcripts。
@@ -158,7 +168,7 @@ P0 gate 会同时改变多个子系统或决定能否安全恢复。编写全程
 
 ### AR-P0-06 工具集、raw shell 与 Permission 能力矩阵
 
-当前状态：未通过；W2-B 的八工具、五能力、Std/Readonly、OutsideWorkspace fold、approval snapshot 与 raw shell 宽边界已机读冻结，10 条 fold fixture 已通过；仍缺 path identity 和目标平台证明。
+计划门：通过（qualification-bound）；八工具、五能力、Permission fold、raw shell/transport 边界已冻结，C24/C25 保留 path identity、process tree 与 target proof。
 
 - **阻塞原因**：若 shell 只映射 `Execute`，其他细粒度权限无法约束 shell。若仍宣称能从任意 shell 文本精确识别副作用，又会制造不存在的 sandbox 保证。模型 raw `exec` 与 direct tool 的 input carrier/schema、stdin、命令物理传输上限，以及自动 Git 只读 adapter 是否会启动外部 helper，都尚未形成正式工具边界；`__yaca__` reserved tree 的 list/search、mutation 与 exact-read 必须分别闭合，且不得把 direct deny 冒充 shell containment；非 Agent 管理动作不能靠复用历史 tool approval 获得授权。D-044 同时禁止 screenshot/media capture tool 与 headless/remote approval source。
 - **权威工件**：首版 tool registry；TS-23 所选 ToolInputRegistry；每个工具的 carrier、参数/result schema、版本、capability、副作用、stdin、可取消性、unknown-field 规则和输出上限；raw command length/encoding contract；`tool × capability × Permission state` 矩阵，其中 M05-16 A/B 机械生成 coarse/split outside，M05-56 A 生成零 SensitiveRead surface、B 才接入 TS-21；provider 网络与工具网络分界；Git adapter/系统 Git 使用范围；Agent approval 与 `ManagementMutation` 的独立快照 schema；零 media-capture/remote-client tool 与 approval-source manifest。
@@ -168,7 +178,7 @@ P0 gate 会同时改变多个子系统或决定能否安全恢复。编写全程
 
 ### AR-P0-07 改动归属、审阅和 undo 范围
 
-当前状态：未通过；W3-D 已给出 operation、direct/batch/raw-shell/Git、崩溃切点与零 undo fault 全矩阵；仍缺机器 fixture 和目标机 no-replace/kill/fault 注入证据。
+计划门：通过（qualification-bound）；operation 与零 undo 语义唯一，C25 的 durable operation/fault tests 和目标 no-replace/kill 证据是 M7 hard gate。
 
 - **阻塞原因**：完整 preimage 会显著改变 XML 体积、秘密复制、配额、导出和崩溃提交协议；外部 checkpoint 又改变“长期只有 INI/XML”和单 XML 接盘承诺。raw shell 的副作用也无法获得同等撤销保证。
 - **权威工件**：v0.1 change guarantee；结构化写入新鲜度/原子替换协议；Agent 改动与用户既有改动的归属规则；若支持 undo，则还需 preimage 存储、配额、秘密、补偿与冲突规格。
@@ -178,7 +188,7 @@ P0 gate 会同时改变多个子系统或决定能否安全恢复。编写全程
 
 ### AR-P0-08 数据分类、秘密和导入信任
 
-当前状态：未通过；W3-C `DATA-CLASSIFICATION.md` 已成为 purpose×类别、Key 生命周期与负向清单的唯一矩阵；仍缺 canary/exact-scan fixture、阈值和目标平台证明。
+计划门：通过（qualification-bound）；data matrix 与 secret carrier/scanner contract 唯一，TP-006 已 modern-proven；C19 保留 target carrier/permission/canary qualification。
 
 - **阻塞原因**：外部或导入 XML 可以携带 ContextPrompt、Permission 名、`DoubleCheck=false`、跨 Endpoint 同意和历史 approval；digest 只能检测意外损坏，不能认证来源。已确认的明文 Key、显式 HTTP、过短 secret A 路线、无 secret-bearing backup/export、外来 XML 原位接盘和历史 approval audit-only 仍需合成一张可机械验证的数据矩阵；不能把多个 owner 的决定留给实现者重新解释。D-044/D-055/D-056 已消除媒体、remote、telemetry、诊断上传和更新网络面。
 - **权威工件**：[数据分类候选](DATA-CLASSIFICATION-CANDIDATE.md) 收口后的现行矩阵；secret lifecycle；HTTP/HTTPS + AuthMode/Key policy；curl/header/临时文件传递协议；Context 永久删除与已知副本说明；XML 导入信任规则；历史事实与当前授权的分离规则；零 media/remote/telemetry/upload/update 类别清单。
@@ -188,7 +198,7 @@ P0 gate 会同时改变多个子系统或决定能否安全恢复。编写全程
 
 ### AR-P0-09 完整 typed 配置 schema 与 bootstrap
 
-当前状态：未通过；W1-B 的唯一字段 catalog、默认、严格六项 XML 白名单、secret、M05-07=A 字符串 grammar、migration/负向 fixtures 已由 `contracts/config.lua` 冻结并校验；仍缺 RuntimeMax 实测数字表与目标平台原子写证明。
+计划门：通过（qualification-bound）；完整 catalog/grammar/migration/secret 已冻结，C10 负责实现与 target atomic-write，RuntimeMax 由 release manifest 注入而非编码时猜测。
 
 - **阻塞原因**：正常启动要求完整校验，但配置缺失/损坏时 model/config REPL 和 self-test 又需要最小 bootstrap。字段、默认、INI/XML 合并、顺序语义、未知字段、手工编辑、并发外改和秘密输入尚未全部成为一个生成式契约；不过 Model/Permission selector、per-Model retry、stuck 阈值、过短 secret、reset/delete/migration 路线和排除字段都已有选择，不能再写成实现时任选。D-048 已固定每个顶层 main/side turn 的 immutable generation 边界；剩余责任是完成 catalog/校验表并证明半写、删除、无效引用和旧机延迟。
 - **权威工件**：唯一 typed schema；逐字段 catalog；INI grammar；XML 覆盖白名单；跨字段约束；可选能力的 choice→schema 投影和 zero-field manifest；bootstrap command allowlist；完整 INI bytes/digest→parse/validate→atomic `ConfigGeneration` contract；`ManagementMutation`；配置编辑事务和迁移协议。
@@ -198,7 +208,7 @@ P0 gate 会同时改变多个子系统或决定能否安全恢复。编写全程
 
 ### AR-P0-10 Context XML schema、durability 与恢复
 
-当前状态：未通过；W1-C 的内部 event/payload catalog、局部 ID、提交状态机、崩溃真值表和恢复算法已由 Lua semantic schema + Relax NG + fixtures 冻结；仍缺 replace/lock 证明及大小/延迟 hard-limit 证据。
+计划门：通过（qualification-bound）；Lua semantic schema + RNG + format contract + TP-008/010 modern evidence 已齐，C17/C32 保留 target replace/lock/size/latency hard gates。
 
 - **阻塞原因**：每个 canonical/durable 事件都整文件重写会形成 O(n²) I/O；在闭合 XML 根后原地追加元素又不是合法 well-formed XML。D-053 已选完整流式重写、短寿命 temp/lock/previous-valid 和无长期 WAL；当前只需证明该路线满足旧机 hard limit，不能暗中切换事实源。XML 还必须对全部排除能力保持零 element/namespace。
 - **权威工件**：内部 versioned XML 结构与 semantic schema（D-068，不是公共 API）；event/relationship/ID schema；zero-element manifest；`AutoRenameDisabled` 元数据；确定性 writer；完整重写、flush、lock、temp、replace、恢复和外部读取状态机；文件大小/延迟门槛；损坏和迁移协议。
@@ -208,7 +218,7 @@ P0 gate 会同时改变多个子系统或决定能否安全恢复。编写全程
 
 ### AR-P0-11 Context 路径、索引、导入和生命周期
 
-当前状态：未通过；W3-B 已冻结 LogicalPathCodec 步骤、display≠hash、Resolver result schema 与 hash 输入向量形状；仍缺摘要原语最终选择、跨 OS golden corpus、filesystem edge 与生命周期证明。
+计划门：通过（qualification-bound）；SHA-256、LogicalPath exact bytes、first-8 network order、16 uppercase hex 与 drive/UNC/POSIX vectors 已冻结，C16 保留 target identity/filesystem edge proof。
 
 - **阻塞原因**：盘符、UNC、POSIX 根、Unicode/case、8.3、symlink/junction、非法名称和跨机映射会同时改变文件地址、hash、安全边界与浏览器结果。active Context 的 switch/rename/rebind/permanent-delete 还需完整状态表；FAT/SMB/NFS/可移动盘也不能共用一个模糊“可写”承诺。运行中 workspace 被删除、卸载或断线会使当前 root、审批和 Prompt 快照同时失效。外来 XML 已选择原位验证/mapping/确认与历史授权 audit-only，不能再从三条导入策略任选。
 - **权威工件**：`LogicalPathCodec` 规范；路径 hash 规范和 vectors；Context lifecycle；镜像父目录→唯一 root 契约；canonical time/name 排序键；文件系统支持矩阵；Resolver/browser result schema；switch/rename/rebind/permanent-delete/import 状态机；compatibility-gap 分类；special file/link policy。
@@ -218,7 +228,7 @@ P0 gate 会同时改变多个子系统或决定能否安全恢复。编写全程
 
 ### AR-P0-12 压缩后的模型视图
 
-当前状态：未通过；W3-D 已冻结 ModelViewManifest、StructuredSummary、atomic group、自动/手动 admission 与发布事务；仍缺 token 估算/阈值和可重建 golden fixture。
+计划门：通过（plan-ready）；ModelView/StructuredSummary/atomic group 语义唯一，C28 负责可重建 golden、长会话和 manifest threshold 校准。
 
 - **阻塞原因**：只说“事实历史+摘要+最近窗口”不足以决定每个工具对、Prompt、用户决定、未知副作用和模型切换怎样保留，也无法处理恢复后历史已超过当前 Model 窗口，或单个不可拆原子组自身已经大于窗口的情况。用户显式 `.compact` 还需要确定 admission、turn/intent 身份、费用/预算、取消、恢复和 view 发布，不能借用普通 main turn 的含糊生命周期。
 - **权威工件**：model-view builder；结构化 compaction schema；必保槽位；来源 event range/digest；自动与手动触发的 admission/身份/费用/预算/取消/恢复/publication 规则；失败、无收益、oversized-atom 和用户纠正规则；模型切换预检。
@@ -228,7 +238,7 @@ P0 gate 会同时改变多个子系统或决定能否安全恢复。编写全程
 
 ### AR-P0-13 CLI、点命令和会话命令状态表
 
-当前状态：未通过；W2-A 已由 `contracts/actions.lua` 冻结 39 个顶层/chat/context action、唯一别名、完整 state/admission/confirm/result 与 synthetic argv/chat/REPL fixtures；仍缺真实 parser/help 生成、machine output 和目标平台 non-TTY 证明。
+计划门：通过（qualification-bound）；39 action、aliases、state/admission、显式 `--machine`、JSON/JSONL 与 fd matrix 已冻结，C12/C14 负责生成 parser/help 和 target argv/TTY proof。
 
 - **阻塞原因**：Context 切换、Model/Permission/Prompt 修改、压缩、永久 delete 和 exit 在 busy/approval/tool/side/recovery/queued 状态中的行为会影响 AgentLoop 和 durable 事实，不能由各前端分别猜测。D-054 已冻结长式、跨平台短式、Windows `/` 式、点命令与快捷键共享 action registry；剩余责任是逐状态 admission/result 与 machine output，而不是再选择命名空间。排除能力、archive/trash、multi-root、telemetry/upload/update 动作都必须为零。
 - **权威工件**：CLI grammar；focus-scoped local/global command registry；长名/唯一简称/兼容别名；help topic/overview registry；可选范围选择到 action/help 成员的机械投影；`command × AgentState` 表；`ManagementMutation` 投影规则；stdin×stdout×stderr×显式 machine mode 矩阵；stdout/stderr/exit-class/machine-output schema；点命令与快捷键领域动作映射。
@@ -238,7 +248,7 @@ P0 gate 会同时改变多个子系统或决定能否安全恢复。编写全程
 
 ### AR-P0-14 安全模块/工具加载与文件目标复核
 
-当前状态：未通过；`contracts/platform.lua` 已冻结 embedded-manifest-only Lua allowlist、零 cwd/LUA_PATH/LUA_CPATH、target identity、复核与 lock 顺序；仍缺恶意 CWD/PATH/DLL/ambient config 和链接替换的目标平台 proof。
+计划门：通过（qualification-bound）；current/planned/native allowlist 与零 ambient load 已冻结，C04/C31 保留 TP-029、恶意 cwd/PATH/DLL 与 target loader proof。
 
 - **阻塞原因**：yaca 以陌生工作区为 cwd；若 `package.path/cpath`、DLL 搜索或内部工具解析使用 CWD/PATH，仓库中的同名 Lua/C 模块、DLL 或 curl 可以在权限系统之前执行。即使 executable 路径固定，`.curlrc`、shell AutoRun/rc、Git pager/external diff/textconv 等 ambient config 仍可能改变内部动作或启动外部 helper。文件工具也不能只做字符串前缀检查或审批前检查一次。所有已排除的 helper/listener/update/telemetry/upload 资源必须从 allowlist 消失。
 - **权威工件**：内部资源绝对路径解析规则；Lua/C module allowlist；DLL 搜索约束；内部进程 allowlisted environment/ambient-config disable contract；tool/component/listener negative manifest；普通文件/目录/symlink/junction/hardlink/device/FIFO/socket policy；open-then-verify 和 no-replace 契约。
@@ -248,7 +258,7 @@ P0 gate 会同时改变多个子系统或决定能否安全恢复。编写全程
 
 ### AR-P0-15 本地 ID、锁和崩溃收口
 
-当前状态：未通过；`contracts/runtime.lua`/`context.lua`/`platform.lua` 已把无永久 ContextId、10 类局部 ID、writer lease/commit mutex、target identity 和 unknown recovery 收成一个协议；仍缺 kill-point、双进程和 stale self-fix 的目标平台 proof。
+计划门：通过（qualification-bound）；局部 ID、lease/mutex、identity 与 unknown recovery 已闭合，C17 保留 target kill-point、双进程和 stale self-fix hard gate。
 
 - **阻塞原因**：turn、request、attempt、side、tool call、operation、approval 和 compaction 都依赖稳定关联。若崩溃后复用 ID 或信任 provider ID，会错误配对结果或重放副作用。仅按时间删除 stale lock 也会产生双写者；若所选单进程拓扑允许加载多个 Context，还必须证明每个 lease、commit mutex 和关闭动作都绑定正确 Context。D-045 不建立永久 root ID 或 root list；operation/approval/request snapshot 必须绑定当时由 XML 镜像位置解码出的规范 root 与 Context generation，rebind 后旧快照不得被重定向到新 root。
 - **权威工件**：identity/namespace table；局部序号分配与持久化规则；provider ID 保存/映射；request-attempt 关系；所选单进程 Context 与 workspace-root 拓扑；write lease/commit mutex 取得顺序；stale lock 复核和恢复协议。
@@ -258,7 +268,7 @@ P0 gate 会同时改变多个子系统或决定能否安全恢复。编写全程
 
 ### AR-P0-16 发布可行性与真实平台证据
 
-当前状态：未通过；luainstaller 路线已由 1.3.0 从“架构能力未知”降为“yaca 候选与目标证据缺失”，三包仍受发布硬门约束。
+计划门：通过（qualification-bound）；luainstaller 1.3.0、三目标、依赖 pins、组件/module allowlist 与 C31--C34 路线已冻结；三包仍受 Gate R 发布硬门约束。
 
 - **阻塞原因一：yaca-specific Windows 发布证据**。相邻 `../luainstaller` 1.3.0 已支持 native x86/x86_64 profile、XP API/subsystem 与对应静态检查；旧 x86 guard 结论已失效。缺口变为：尚无固定 luainstaller commit + Lua 5.5 + yaca native/资源闭包的 Win32/Win64 候选，也没有 XP--11、Win7--11 的完整运行证据。参考 [`platform.lua`](../../luainstaller/src/platform.lua)、`CHANGELOG.adoc`、`AS-005-01` 和 `AQ-211`。
 - **阻塞原因二：现有 Linux bin ABI**。当前 `bin/` 中 Linux executables 经 `file/readelf` 检查为 ELF32/i386，而正式 Linux 目标是 x86_64；它们只能作为来源线索，不能进入最终包。Windows PE32 资源也仍需 XP import/CRT/TLS 与来源验证，架构正确不等于兼容已证明。
@@ -270,7 +280,7 @@ P0 gate 会同时改变多个子系统或决定能否安全恢复。编写全程
 
 ## P1 readiness gates
 
-P1 gate 不一定改变全局架构，但会阻断对应子系统的可靠计划。由于项目负责人要求先完整规划再逐系统开发，编写全程序实施计划前也应全部关闭；若只为一个已隔离子系统写局部计划，至少关闭该系统及其上游 P1。
+P1 gate 不一定改变全局架构，但会阻断对应子系统的可靠计划。现 12 项均已成为 `plan-ready` 或 `qualification-bound` 并绑定 C task/hard gate；逐项判定见 Gate Audit。目标校准项继续阻止相应 milestone/发布，不再循环阻止 C01 开始。
 
 ### AR-P1-01 精确格式语义与库边界
 
@@ -322,7 +332,7 @@ P1 gate 不一定改变全局架构，但会阻断对应子系统的可靠计划
 
 ### AR-P1-07 错误目录、诊断和 self-test
 
-当前状态：未通过；三阶段顺序与可选启动门已确认，精确 check registry、partial/failure、输出和诊断边界仍待收口。
+计划门：通过（plan-ready）；`diagnostics.lua` 已冻结 error/exit/check registry，C29/C30 负责实现、golden 与 fault tests。
 
 - **阻塞原因**：typed error/check registry 尚未冻结；D-055 已确认长期只持久化 INI/XML、fatal bootstrap error 走 stderr、无独立日志/support file/telemetry/upload/update。三阶段顺序和深度已确定，剩余是 check ID、局部历史损坏 severity、CLI 排除 grammar 与 Stage 3 输入 manifest。
 - **权威工件**：error ID/category registry；错误归属和去重表；stderr/Context XML/self-test-support stdout 分工；self-test stage/check schema、Catalog scan budget 与 release-gate 规则；Stage 3 Permission/Model advisory 输入 manifest；零 telemetry/upload/update error/receipt/endpoint 清单。
@@ -418,13 +428,13 @@ status               open / specified / tested / release-proven
 6. 推荐、草案、未回复问题和未归档回复的 `status` 一律保持 `open`。
 7. 若决定被修订，追踪记录必须指向新决定；旧测试只有在新契约下仍有效才可复用。
 
-### 示例（只展示追踪形状，不宣告通过）
+### 示例（展示 phase-aware 追踪形状）
 
 | Requirement | Decision | Normative spec | Tests | Evidence status |
 | --- | --- | --- | --- | --- |
-| `INDEX-02` | D-024 | 待生成 Context Resolver 规范 | ring priority、collision、unreadable ring、enumeration shuffle | 设计方向已确认，规格/测试证据缺失 |
-| `CFG-17` | D-021、D-027 | 待生成会话覆盖 schema | inherit/on/off/reset、恢复、导入不降权 | 部分决定，未通过 |
-| `REL-04` | D-056 | 待生成 luainstaller Win32/Win64 qualification 与必要适配规格 | x86/x64 产物、PE imports、XP/Win7 launch、完整闭环 | 产品范围已定，发布证据阻塞 |
+| `INDEX-02` | D-024 | `contracts/context.lua` + `formats.lua` + path fixtures | ring priority、collision、unreadable ring、enumeration shuffle | plan-ready；C16 target identity pending |
+| `CFG-17` | D-021、D-027 | `contracts/config.lua` + config fixtures | inherit/on/off/reset、恢复、导入不降权 | plan-ready；C10 atomic-write pending |
+| `REL-04` | D-056 | `contracts/release.lua` + C31/C32 | x86/x64 产物、PE imports、XP/Win7 launch、完整闭环 | qualification-bound；Gate R closed |
 
 ## 当前已知发布证据阻塞
 
@@ -438,7 +448,7 @@ status               open / specified / tested / release-proven
 4. 保存 x86/x64 静态审计，并在 XP 至 11 的 yaca 目标矩阵运行实际候选；
 5. yaca 只消费带版本、hash、manifest 和证据引用的产物。
 
-在这项前置未解决前，可以继续完成设计、验证计划和经单独授权的可丢弃技术证明；仍不能开始产品实现，也不能把 Windows 发布计划标为可执行完成路径。任何技术证明进入正式实现前，仍需通过本文件的 readiness 与逐子系统实施计划。
+在这项资格证据未解决前，可以按 C01--C31 实现并生成候选，但不能通过 C32、不能打开 Gate R，也不能发布 Windows 包。产品实现现已由 Gate A/B 与逐任务计划授权；target proof 仍按对应 hard gate 执行。
 
 ### 当前 `bin/` ABI 与来源
 
@@ -456,18 +466,18 @@ status               open / specified / tested / release-proven
 6. 将已决定部分写入对应权威子系统规格，删除被否决分支和过期“待讨论”。
 7. 填写 requirement→spec→test matrix，并据此重新评估本文件每个 gate。
 
-## 进入 writing plan 的最终判定
+## Gate A / writing plan 的最终判定
 
-只有同时满足下列条件，才可以声明“架构可进入完整实施计划”：
+只有同时满足下列条件，才可以声明“架构可进入完整实施计划”；本轮核验结果为 **PASS**：
 
-- 所有 P0 gate 为 `passed`，而不是“推荐完成”或“没有发现新问题”。
-- 所有进入 v0.1 的 P1 gate 已关闭；明确排除的能力具有非目标决定，并由最终配置/help/schema/registry/zip 的 zero-surface 证据证明没有半实现边界；选入的 optional surface 具有对应旧平台、安全、隐私、恢复和发布证据。
+- 所有 P0 gate 都是 `plan-ready` 或 `qualification-bound`；后者必须有唯一实现任务、proof plan、失败退路和不可绕过的 integration/release hard gate。
+- 所有进入 v0.1 的 P1 gate同样完成上述路由；明确排除能力已有 zero-surface contract，最终 zip 的物理扫描保留为 Gate R，而不是伪称已经通过。
 - 所有项目负责人必须决定的分支已有明确回复并归档；任何未回复推荐仍保持候选。
 - 每个子系统拥有单一权威规格，正常、取消、失败、恢复、资源上限和目标平台差异均无实现者猜测空间。
 - AgentLoop、Model、Tool、Permission、Context XML、CLI/TUI 使用同一套 ID、事件、错误和状态语义。
 - 配置 schema、XML schema、命令/工具 registry、错误目录和测试 fixture 之间可以机械校验关键字段与枚举。
-- requirement→spec→test matrix 对全部 P0/P1 没有缺失链接。
-- luainstaller Win32/x86 qualification 已完成，或已获授权并作为实施计划中的硬前置证明/必要适配任务；现有错误 ABI 资源没有被当作可发布依赖。
+- requirement→spec→test/task matrix 对全部 P0/P1 没有缺失链接。
+- luainstaller Win32/x86 qualification 已完成，或像本轮一样绑定 C31/C32 和 Gate R 硬门；现有错误 ABI 资源没有被当作可发布依赖。
 - 实施计划能够只拆任务、测试和提交顺序，不再承担未决产品设计。
 
-若任一证据缺失、只间接支持结论或仍依赖“实现时再决定”，readiness 状态必须保持未通过。
+若实现输入仍依赖“实现时再决定”，Gate A 必须保持未通过。若实现/目标/最终包证据缺失，Gate R 必须保持关闭；不得反向把它写成 Gate A 已失败，也不得把 Gate A/B 通过写成发布就绪。

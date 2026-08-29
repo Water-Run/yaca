@@ -1,6 +1,6 @@
 # 07 Agent 工具系统
 
-状态：正式设计；产品能力由 `D-052` 确认，平台文件/进程原语仍须通过对应技术证明
+状态：**计划已确认（C24/C25）**；八工具/能力/operation contract 已冻结，平台文件/进程原语仍须通过 M7 target proof
 
 ## 职责与边界
 
@@ -140,4 +140,3 @@ Win32 x86、Win64 x86_64 与 Linux x86_64 必须分别证明：
 
 完整 **tool × Permission** 矩阵、求值函数、approval snapshot 与 Shell 诚实边界见
 [TOOL-PERMISSION-MATRIX.md](../TOOL-PERMISSION-MATRIX.md)（D-052，无新的产品分叉）。
-

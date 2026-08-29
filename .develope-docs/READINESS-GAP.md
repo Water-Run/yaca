@@ -2,9 +2,9 @@
 
 更新日期：2026-08-29
 
-状态：运营清单（设计阶段）；**当前判定：未达实施计划就绪，未达编码就绪**
+状态：运营清单（编码启动断点）；**当前判定：Gate A/B 已通过，可从 C01 开始编码；Release Gate R 关闭**
 
-进度注记：SQ 完成；D-070 收口；D-071 已授权 readiness 收尾、modern proof 与核心节点推送 main。**W1–W4 规格脊柱已机器化**：11 份 contract、6 组 synthetic fixtures 与跨规格 validator 已落盘，配置漂移已消解。TP-003/006/008/010 已在 2026-08-29 取得范围明确的 `proven-modern` 证据，公开 README 已同步；目标 proof 与 Gate A/B 审计仍未完成，暂不写产品代码。`../luainstaller` 已从文档基线 1.0 升至 1.3.0，旧 x86 guard 阻塞已消失，但 yaca-specific 三包与目标机证据仍缺。权威门禁仍以 [`ARCHITECTURE-READINESS.md`](ARCHITECTURE-READINESS.md) 为准。本文回答三个实操问题：
+进度注记：SQ/D-070/D-071 收口。**编码就绪边界已机器化**：16 份 contract、12 组 synthetic fixtures、7,000+ 跨规格断言、28 项 gate audit 与 `M0..M10`/`C01..C34` 实施图已落盘。TP-003/006/008/010 在 2026-08-29 取得范围明确的 `proven-modern` 证据；Gate A/B 已通过。`../luainstaller` 为 1.3.0，旧 x86 guard 阻塞已消失；yaca-specific 三包与真实 XP/Win7/CentOS 证据仍缺，因此 Release Gate R 保持关闭。权威判定见 [`ARCHITECTURE-READINESS.md`](ARCHITECTURE-READINESS.md) 和 [`GATE-AUDIT-2026-08-29.md`](GATE-AUDIT-2026-08-29.md)。本文回答三个实操问题：
 
 1. 现在站在哪一层？
 2. 离“可写实施计划 / 可开始编码”还缺什么？
@@ -20,8 +20,9 @@ Web 双线（D-058：`yaca-web`/Java 8、`yaca-ie6`/PHP 5.4）**不计入** v0.1
 
 | 门 | 含义 | 当前 |
 | --- | --- | --- |
-| **A. 实施计划就绪** | 每个相关子系统已有**唯一权威规格**（无 A/B 任选）；P0 规格工件齐全；P0 技术证明至少有 **可执行 proof plan**（关键路径最好已有目标机或可复现原型结果） | **未通过** |
-| **B. 编码就绪** | A 已通过；已有**全程序实施计划**（文件、顺序、测试、提交边界）；计划项不再写“视情况选择” | **未通过** |
+| **A. 实施计划就绪** | 每个相关子系统已有唯一权威规格；只能实现后/目标机验证的事实已绑定 task、proof plan、失败退路和 hard gate | **通过** |
+| **B. 编码就绪** | A 已通过；已有全程序实施计划（文件、依赖、测试、退出、提交边界）；首任务唯一 | **通过** |
+| **R. 资格与发布** | 实现完成；Win32/Win64/Linux 独立 target proof、最终 zip 与供应链/旅程证据全部通过 | **关闭** |
 
 流水线（不可跳步）：
 
@@ -29,19 +30,19 @@ Web 双线（D-058：`yaca-web`/Java 8、`yaca-ie6`/PHP 5.4）**不计入** v0.1
 负责人选择 ──已完成──► DECISIONS / REGISTER
         │
         ▼
- owner 规格硬化（schema / 状态表 / 矩阵） ──主脊柱完成──► P1/页面/路径细节待收口
+ owner 规格硬化（schema / 状态表 / 矩阵） ──已完成──► 16 contracts / 12 fixtures
         │
         ▼
- 技术证明 plan + 关键路径证据 ──缺口──► 大多 unplanned
+ 技术证明 plan + 关键路径证据 ──已路由──► modern-proven 或 qualification-bound
         │
         ▼
- 实施计划就绪 (A)
+ 实施计划就绪 (A) ──PASS──►
         │
         ▼
- 全程序实施计划 ──不存在──►
+ 全程序实施计划 M0..M10 / C01..C34 ──PASS──►
         │
         ▼
- 编码就绪 (B) → 按子系统串行实现
+ 编码就绪 (B) → C01 串行实现 → target qualification → Release Gate R
 ```
 
 **D-001 / D-057 明确：问卷答完 ≠ 可编码。**
@@ -54,44 +55,44 @@ Web 双线（D-058：`yaca-web`/Java 8、`yaca-ie6`/PHP 5.4）**不计入** v0.1
 | --- | ---: | --- |
 | 题库 / 审计覆盖 | ~95% | AQ-001..437、384 checklist、CV-001..076、10 决策包 |
 | 负责人产品选择 | **100%** | register `unanswered=0` / `conflict=0`；D-001..D-058 |
-| Owner **可编码规格** | **~70–75%** | W1–W4 机读 contracts/fixtures 已落；P1、ASCII chrome、路径 corpus 与 wire bytes 仍缺 |
-| 技术证明 | **~15–20%** | luainstaller 1.3.0 upstream modern；TP-003/006/008/010 proven-modern；无 proven-target |
-| 实施计划 / 源码 | **0%** | 无实施计划；`src/*.lua` 全空 |
+| Owner **可编码规格** | **100%（当前计划输入）** | 16 contracts / 12 fixtures；formats/path/wire/Prompt/transport/TUI 边角已闭合 |
+| 技术证明 | **关键 modern 候选已过；target 0%** | luainstaller 1.3.0 upstream modern；TP-003/006/008/010 proven-modern；无 proven-target |
+| 实施计划 / 源码 | **计划 100% / 源码 0%** | M0..M10、C01..C34 已冻结；`src/*.lua` 仍全空 |
 | 发布证据 | **0%** | 无三目标合格 zip |
 
-一句话：**主结构施工图已机器化；现在集中补试桩、边角规格和全程序排程。**
+一句话：**施工图和排程已闭环；下一步从 C01 建测试地基，目标机与发布证据沿 hard gate 补齐。**
 
 ---
 
-## 3. P0 门禁差距表（进入实施计划前必须处理）
+## 3. P0 计划状态与 qualification hard gate
 
 图例：
 
 - **语义**：产品选择是否够用（大多已够）
 - **规格**：是否已有唯一、可执行的权威工件
-- **证明**：是否有 proof plan / 目标证据
-- **阻塞度**：H = 不做则几乎无法安全开写任何主路径；M = 阻塞完整计划；L = 可与邻近项并行收口
+- **证明**：`proven-modern` 只支持实现候选；`target pending` 仍绑定 milestone/Release hard gate
+- **计划状态**：`plan-ready` 可直接实现；`qualification-bound` 可开始实现，但对应目标证据通过前不能完成指定 milestone/发布
 
-| Gate | 主题 | 语义 | 规格 | 证明 | 阻塞度 | 缺失的权威工件（摘要） |
-| --- | --- | --- | --- | --- | --- | --- |
-| AR-P0-01 | 产品闭环 / 零表面 / 发行形态 | 有 | **机读冻结** | 本地 scan；目标缺 | M | README 与最终 zip/旅程证据 |
-| AR-P0-02 | AgentLoop typed outcome | 有 | **机读冻结** | synthetic trace | **H** | fault trace / hard-cap / 目标证明 |
-| AR-P0-03 | Model 协议 canonical | 有 | **机读冻结** | synthetic；recorded 缺 | **H** | 双 adapter 录制 fixture |
-| AR-P0-04 | 事件泵 / 可取消 I/O | 有 | **机读冻结** | fake core modern；目标缺 | **H** | XP/CentOS adapter 证明未做 |
-| AR-P0-05 | TUI full-duplex / draft | 有 | **机读首版** | **缺** | H | fd 矩阵、ASCII transcript、旧终端 proof |
-| AR-P0-06 | 工具 × Permission 矩阵 | 有 | **机读冻结** | fold fixture；目标缺 | **H** | path identity / 目标平台 proof |
-| AR-P0-07 | 改动事务 / 无 undo | 有 | **首版**（W3-D 19） | 缺 | M | 目标机 fault 注入证据 |
-| AR-P0-08 | 数据分类 / 秘密 / 导入 | 有 | **首版**（W3-C） | canary/scanner modern；目标缺 | H | 目标 carrier/secret qualification |
-| AR-P0-09 | 配置 typed schema | 有 | **机读冻结** | grammar fixture；目标缺 | **H** | RuntimeMax 表 / 原子写 proof；替换历史模板 |
-| AR-P0-10 | Context XML durability | 有 | **机读冻结** | POSIX commit/parser modern；目标缺 | **H** | Windows/目标 FS replace/lock/性能证据 |
-| AR-P0-11 | 路径 / 索引 / 生命周期 | 有 | **首版**（W3-B） | 缺 | H | golden path vectors / 密码学原语锁定 |
-| AR-P0-12 | 压缩 model view | 有 | **首版**（W3-D 12） | 缺 | M | token 估算阈值 TP |
-| AR-P0-13 | CLI/点命令 × 状态 | 有 | **机读冻结** | synthetic argv | **H** | parser/help/machine output 与目标 proof |
-| AR-P0-14 | 安全加载 / ambient | 有 | **机读冻结** | 缺 | H | 恶意 CWD/PATH/DLL/ambient proof |
-| AR-P0-15 | 本地 ID / 锁 / 崩溃 | 有 | **机读冻结** | 缺 | H | kill-point、双进程、stale self-fix proof |
-| AR-P0-16 | 发布可行性 | 有 | 路线首版 | upstream modern；目标缺 | **H*** | 固定 luainstaller 1.3.x；yaca x86/x64 qualification 与三 zip 证据（*完整发布证据可后置，但实施计划必须保留硬门） |
+| Gate | 主题 | 规格/fixture | 证据阶段 | 计划状态 | Task / hard gate |
+| --- | --- | --- | --- | --- | --- |
+| AR-P0-01 | 产品闭环 / 零表面 / 发行形态 | machine frozen | 本地 scan；target pending | qualification-bound | C33 / release |
+| AR-P0-02 | AgentLoop typed outcome | machine frozen | synthetic pass | plan-ready | C26 / M8 |
+| AR-P0-03 | Model 协议 canonical | exact synthetic wire | TP-015 recorded pending | qualification-bound | C21 / M6 |
+| AR-P0-04 | 事件泵 / 可取消 I/O | machine frozen | TP-003 modern；target pending | qualification-bound | C04 / target adapters |
+| AR-P0-05 | TUI full-duplex / draft | fd+40-column transcripts | target terminal pending | qualification-bound | C14 / M4 |
+| AR-P0-06 | 工具 × Permission | machine frozen | fold pass；target pending | qualification-bound | C25 / M7 |
+| AR-P0-07 | 改动事务 / 无 undo | unique fault semantics | TP-008 modern；target pending | qualification-bound | C25 / M7 |
+| AR-P0-08 | 数据 / secret / import | matrix+carrier frozen | TP-006 modern；target pending | qualification-bound | C19 / M6 |
+| AR-P0-09 | typed config | catalog+grammar frozen | synthetic pass；target pending | qualification-bound | C10 / M3 |
+| AR-P0-10 | Context durability | RNG+semantic+format frozen | TP-008/010 modern；target pending | qualification-bound | C17 / M5 |
+| AR-P0-11 | path/index/lifecycle | SHA-256/path vectors frozen | local oracle pass；target pending | qualification-bound | C16 / M5 |
+| AR-P0-12 | compact model view | unique design | implementation benchmark scheduled | plan-ready | C28 / M8 |
+| AR-P0-13 | CLI/action state | parser+machine+fd frozen | synthetic pass；target pending | qualification-bound | C12/C14 / M4 |
+| AR-P0-14 | safe load / ambient | current/planned/native allowlists | TP-029 target pending | qualification-bound | C04/C31 / M10 |
+| AR-P0-15 | local ID / locks / crash | machine frozen | TP-008 modern；target pending | qualification-bound | C17 / M5 |
+| AR-P0-16 | release feasibility | pins+package plan frozen | upstream modern；three targets pending | qualification-bound | C32 / release |
 
-P1 门（AR-P1-01..12）在写**全程序**计划前也应关闭；若只做**局部子系统**垂直切片，至少关闭该子系统及其上游 P1。
+P1 门（AR-P1-01..12）也已逐项路由为 `plan-ready` / `qualification-bound`；完整表见 Gate Audit，machine truth 在 `contracts/readiness.lua`。
 
 ---
 
@@ -127,29 +128,29 @@ P1 门（AR-P1-01..12）在写**全程序**计划前也应关闭；若只做**�
 | ---: | --- | --- | --- |
 | 00 | 产品契约 | 高 | 机读旅程/零表面已齐；公开文档与最终包同步 |
 | 01 | 平台抽象 | 高 | 机读窄端口/加载/identity 已齐；能力探测 proof |
-| 02 | 进程资源 | 中 | 取消/管道/unknown 契约数值 |
-| 03 | 网络 | 中 | curl carrier、retry 展开、ambient isolation |
-| 04 | 数据格式 | 中 | 选定 parser 版本证据、安全子集 |
+| 02 | 进程资源 | 高 | transport contract 已齐；C04/C25 target cancel/pipe hard gate |
+| 03 | 网络 | 高 | carrier/retry/redirect/ambient 已机读；C19 target qualification |
+| 04 | 数据格式 | 高 | strict UTF-8/JSON/SSE/XML/INI 与 pins/fixtures 已齐 |
 | 05 | 配置 | 高 | 机读正式 catalog/grammar/migration 已齐；数字/原子写 proof |
-| 06 | 模型协议 | 中高 | canonical schema 已齐；recorded wire fixture |
+| 06 | 模型协议 | 高 | canonical + exact synthetic wire 已齐；C21/TP-015 recorded fixture |
 | 07 | 工具 | 中 | tool registry 全表 |
 | 08 | 权限 | 中 | 矩阵机械求值表 |
 | 09 | AgentLoop | 高 | 机读状态/outcome/trace 已齐；fault/hard-cap proof |
 | 10 | Context 存储 | 高 | RNG + semantic schema 已齐；提交原语/性能 proof |
-| 11 | 索引 | 中高 | path codec、碰撞展示、性能 cap |
+| 11 | 索引 | 高 | path/hash/selector vectors 已齐；target filesystem/cap 待校准 |
 | 12 | 压缩 | 中 | view schema |
 | 13 | CLI | 高 | 39 action 机读 registry 已齐；parser/help/output 实现 |
-| 14 | TUI | 中高 | 输入/prompt contract 已齐；页面 chrome/transcript |
+| 14 | TUI | 高 | fd、draft、ASCII chrome/transcript 已齐；target terminal proof 待做 |
 | 15 | 诊断 | 高 | error/exit/check registry 已齐；脱敏/output fixture |
-| 16 | 发布 | 中 | 装配 recipe、qualification |
+| 16 | 发布 | 高（计划） | pins/allowlist/M10 已齐；三目标 qualification 未执行 |
 | 17 | Web | 排除+预留 | **不阻塞主线** |
-| 18 | Prompt | 中 | 内置英文 Prompt 原文、大小上限 |
+| 18 | Prompt | 高 | 七 purpose 原文/层序/native control schemas 已齐 |
 | 19 | 改动事务 | 中 | fault 矩阵 |
-| 20 | 测试 | 方向 | 测试金字塔与 golden 目录约定 |
+| 20 | 测试 | 高（计划） | test tree、C01 harness、每 task test boundary 已冻结 |
 | 21 | 扩展 | 关闭 | 零表面扫描清单 |
 | 22 | 运行时 | 中 | 与 01/02/03/09 的组合契约 |
 
-**仍没有子系统处于「计划已确认」；但 W1–W4 主脊柱已达到规格侧设计冻结，可作为 proof 和实施计划输入。**
+**全程序已处于「计划已确认」，产品实现仍为 0%；每个子系统只有完成对应 C task 和 hard gate 后才进入「已验证」。**
 
 ---
 
@@ -169,7 +170,7 @@ P1 门（AR-P1-01..12）在写**全程序**计划前也应关闭；若只做**�
 
 ## 7. 建议补齐顺序（主线工作包）
 
-目标：用最少路径达到 **门 A（实施计划就绪）**，再写实施计划进入门 B。
+目标已完成：Wave 0–5 已使 **Gate A/B 通过**；后续按实施计划推进 C01--C34，并在 milestone hard gate 收集 target evidence。
 
 ### Wave 0 — 基线对齐（1 个短迭代）
 
@@ -212,15 +213,15 @@ P1 门（AR-P1-01..12）在写**全程序**计划前也应关闭；若只做**�
 | **W4-B Error/self-test registry** | 稳定 error ID、self-test check ID | P1-07 — **机读冻结** |
 | **W4-C README sync** | 中英文 README 仅声明设计/未实现边界并与 registry 对齐 | P1-12 — **2026-08-29 完成** |
 
-### Wave 5 — 实施计划就绪判定
+### Wave 5 — 实施计划就绪判定（2026-08-29 完成）
 
-当 Wave 1–4 的规格工件齐备，且 **TP-003/006/008/010（及 P0-05 相关的 TP-004）至少 `specified`** 时：
+Wave 1–4 规格工件已齐；TP-003/006/008/010 已 `proven-modern`，P0-05 的 exact synthetic transcript 与 TP-004 target plan 已绑定 C14：
 
-1. 更新 `ARCHITECTURE-READINESS.md` 各门状态（规格侧 / 证明侧分开勾）。
-2. 写 **全程序实施计划**（文件树、子系统顺序、测试目录、提交边界、发布 qualification 并行轨）。
-3. 通过门 A → 门 B → 才允许按 D-002 串行编码。
+1. `ARCHITECTURE-READINESS.md` 已把计划门与 qualification/release 门分开。
+2. `IMPLEMENTATION-PLAN.md` 已冻结文件树、C01--C34、测试、退出和提交边界。
+3. Gate A/B 已通过；按 D-002 从 C01 串行编码。Gate R 仍需三目标证据。
 
-### 编码启动后的推荐实现顺序（仅供计划引用，现在不执行）
+### 已确认实现顺序（由 C01--C34 展开）
 
 ```text
 平台窄端口 + 事件泵骨架
@@ -268,15 +269,15 @@ P1 门（AR-P1-01..12）在写**全程序**计划前也应关闭；若只做**�
 
 | 问题 | 答案 |
 | --- | --- |
-| 现在能不能写产品代码？ | **不能**（门 A/B 均未过） |
+| 现在能不能写产品代码？ | **能**；Gate A/B 已过，从 C01 开始 |
 | 缺的是负责人选择题吗？ | **不是** |
-| 缺的是什么？ | **(1) P1/页面/路径等边角规格 (2) 关键 modern/target proof (3) 全程序实施计划** |
-| 最短路径？ | **执行 TP-003/006/008/010 modern proof → README sync → Gate A 审计 → 实施计划** |
+| 接下来缺什么？ | **产品实现 C01--C34；各 milestone target proof；最终三包 qualification** |
+| 最短路径？ | **C01 harness/manifest → C02 platform identity → C03 event pump → 按 M0..M10 串行推进** |
 
-**当前已授权并正在执行的下一批：**
+**下一批编码执行单：**
 
-1. 运行并归档可丢弃的 Linux modern proof pack：event-pump、process/curl cancel、XML rewrite/lock、LuaExpat/Lua 5.5。
-2. 把 proof 结果回写 TP 与 P0/P1 状态，失败只提交最小反例。
-3. 同步中英文 README 的“目标/未实现”边界，完成 Gate A/B 审计与全程序实施计划。
+1. C01：测试 harness、release manifest、loader negative tests；独立提交并推送 M0。
+2. C02：pure platform identity + fake-native dependency；不提前做真实 I/O。
+3. C03：先把 TP-003 oracle 转为产品单测，再实现 deterministic event pump。
 
-核心里程碑按 D-071 提交并推送 `main`；目标平台 release qualification 仍作为计划中的不可绕过硬门。
+核心里程碑按 D-071 提交并推送 `main`；目标平台 release qualification 仍作为不可绕过的 Gate R。

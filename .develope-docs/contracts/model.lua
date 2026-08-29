@@ -1,20 +1,22 @@
 return {
   contract_version = "0.1.0-readiness.1",
   schema_version = "0.1.0",
-  decision_refs = { "D-050", "D-051" },
+  decision_refs = { "D-050", "D-051", "AL06-02=A" },
 
   protocols = {
     {
       id = "openai-chat",
       canonical_endpoint_shape = "/v1/chat/completions",
-      exact_wire_profile = "TP-004-recorded-provider-profile",
-      proof_required = true,
+      exact_wire_profile = "contracts/fixtures/wire.lua#openai-chat-synthetic",
+      synthetic_fixture = true,
+      recorded_target_proof = "TP-015",
     },
     {
       id = "anthropic-messages",
       canonical_endpoint_shape = "/v1/messages",
-      exact_wire_profile = "TP-004-recorded-provider-profile",
-      proof_required = true,
+      exact_wire_profile = "contracts/fixtures/wire.lua#anthropic-messages-synthetic",
+      synthetic_fixture = true,
+      recorded_target_proof = "TP-015",
     },
   },
 
@@ -71,9 +73,9 @@ return {
   },
 
   controls = {
-    { id = "finish", required_payload = {}, optional_payload = { "summary" }, runtime_state = "EvaluatingTermination-or-Finalizing", runtime_outcome = "completed-proposed" },
-    { id = "ask-user", required_payload = { "question" }, optional_payload = {}, runtime_state = "WaitingUser", runtime_outcome = "waiting_user" },
-    { id = "refuse", required_payload = { "reason" }, optional_payload = {}, runtime_state = "Finalizing", runtime_outcome = "refused" },
+    { id = "finish", wire_name = "yaca_finish", carrier = "native-provider-tool-or-function", required_payload = {}, optional_payload = { "summary" }, runtime_state = "EvaluatingTermination-or-Finalizing", runtime_outcome = "completed-proposed" },
+    { id = "ask-user", wire_name = "yaca_ask_user", carrier = "native-provider-tool-or-function", required_payload = { "question" }, optional_payload = {}, runtime_state = "WaitingUser", runtime_outcome = "waiting_user" },
+    { id = "refuse", wire_name = "yaca_refuse", carrier = "native-provider-tool-or-function", required_payload = { "reason" }, optional_payload = {}, runtime_state = "Finalizing", runtime_outcome = "refused" },
   },
 
   normalized_response = {

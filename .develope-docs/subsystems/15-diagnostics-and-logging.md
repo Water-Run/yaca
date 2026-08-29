@@ -2,7 +2,7 @@
 
 更新日期：2026-08-29
 
-状态：产品契约与规格侧已冻结；[`contracts/diagnostics.lua`](../contracts/diagnostics.lua) 已提供稳定 error/exit/check registry 与依赖图，目标平台输出、脱敏和真实 Model 证据待测试
+状态：**计划已确认（C29/C30）**；stable error/exit/check registry 已冻结，目标输出、脱敏和真实 Model 证据按 M9/M10 测试
 
 ## 职责
 

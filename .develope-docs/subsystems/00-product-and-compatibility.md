@@ -2,7 +2,7 @@
 
 更新日期：2026-08-29
 
-状态：兼容性与主要产品闭环已确认；十九个 PJ 组已全部收到回复；[`contracts/product.lua`](../contracts/product.lua) 已冻结三目标、包形态与六条端到端旅程，目标机验收证据仍待执行
+状态：**计划已确认（C33/C34）**；[`contracts/product.lua`](../contracts/product.lua) 已冻结三目标、包形态与六条旅程，target/final-zip evidence 仍受 Gate R 约束
 
 ## 职责
 

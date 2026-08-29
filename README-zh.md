@@ -4,7 +4,7 @@
 
 yaca 是一款简单、单 Agent、terminal-only Coding Agent 的设计，以 GPL v3 许可开源。
 
-> **项目状态（2026-08-29）：编码就绪收尾。** 当前没有可工作的 v0.1 Agent 或通过验收的发行包，Lua 产品模块仍为空。下文描述的是已经冻结的 v0.1 目标，不是当前可执行行为。产品选择已关闭，机读设计契约已建立，正在完成技术证明与全程序实施计划。
+> **项目状态（2026-08-29）：已具备编码条件，尚未开始实现。** 当前没有可工作的 v0.1 Agent 或通过验收的发行包，Lua 产品模块仍为空。下文描述的是已经冻结的 v0.1 目标，不是当前可执行行为。产品选择、机读契约、Gate A/B 审计和全程序实施计划均已完成；目标机 qualification 与 Release Gate R 仍待执行。
 
 ## 支持的发行目标
 
@@ -78,8 +78,8 @@ v0.1 不提供 Web UI、图像/音频输入、transcription、TTS、公共 remot
 
 ## 开发资料
 
-建议先读[当前状态](.develope-docs/CURRENT-STATE.md)、[机读契约](.develope-docs/contracts/README.md)、[就绪门](.develope-docs/ARCHITECTURE-READINESS.md)和[技术证明清单](.develope-docs/TECHNICAL-PROOF-BACKLOG.md)。从仓库根运行当前设计一致性检查：
+建议先读[当前状态](.develope-docs/CURRENT-STATE.md)、[Gate A/B/R 审计](.develope-docs/GATE-AUDIT-2026-08-29.md)、[全程序实施计划](.develope-docs/IMPLEMENTATION-PLAN.md)、[机读契约](.develope-docs/contracts/README.md)和[技术证明清单](.develope-docs/TECHNICAL-PROOF-BACKLOG.md)。从仓库根运行完整编码就绪检查：
 
 ```sh
-bin/lua55 .tools/validate_design_contracts.lua
+bash .tools/run_coding_readiness.sh
 ```

@@ -2,7 +2,7 @@
 
 更新日期：2026-08-29
 
-状态：**W1-C 规格侧已冻结** — 内部事件目录、[`contracts/context.lua`](../contracts/context.lua) 语义 schema、[`contracts/context.rng`](../contracts/context.rng) 结构 schema 与最小 fixture 已对齐；平台原语与 hard 数字待 TP。非公共 API（D-068）。
+状态：**计划已确认（C15/C17/C18）** — event/schema/RNG/formats 已对齐，TP-008/010 modern 通过；target replace/lock/performance 仍是 M5 hard gate。非公共 API（D-068）。
 
 ## 职责
 

@@ -4,8 +4,8 @@
 
 ## 当前阶段
 
-**编码就绪收尾已启动（D-071，2026-08-29）**：产品选择与 SQ/负责人问题集已收口，W1--W3 首版已落盘。
-当前主线：校正 gate 真源 → 机器 schema/registry/fixture → modern proof → Gate A/B 与全程序实施计划。Gate B 前不写产品 `src/*.lua`。
+**编码就绪收尾已完成（D-071，2026-08-29）**：产品选择、16 contracts、12 fixture sets、modern proof、Gate A/B 审计和全程序实施计划均已闭环。
+当前主线：**从 C01 开始按 M0..M10 串行编码**。Gate A/B 已通过；Release Gate R 关闭，三目标 qualification 仍不可绕过。
 `../luainstaller` 现为 1.3.0：旧 x86 guard 结论失效，P0-16 转为 yaca-specific 候选/目标证据债务。
 Git：直接在 main 工作；D-071 要求完整核心节点提交并推送 `origin/main`。
 Web（D-058）仍仅预留。
@@ -42,29 +42,29 @@ Web（D-058）仍仅预留。
 
 | 编号 | 子系统 | 当前状态 | 主要依赖/共同确认 |
 | --- | --- | --- | --- |
-| 00 | 产品契约与兼容性基线 | **W4-A 规格侧冻结**（journey + zero-surface machine contract） | 无 |
-| 01 | 平台兼容抽象 | **W3-A 规格侧冻结**（窄端口/safe-load/identity contract） | 00 |
-| 02 | 进程执行与随包资源 | **W3-A 首版**（Process AsyncPort） | 00、01 |
-| 03 | 网络传输 | **W3-A 首版**（HTTP AsyncPort） | 00--02 |
-| 04 | 数据格式 | 候选 | 00、01 |
-| 05 | 配置与模型注册表 | **W1-B 规格侧冻结**（machine catalog/grammar/migration） | 00、01、04 |
-| 06 | 模型协议适配 | **W2-C canonical 规格侧冻结**（recorded wire 待 TP） | 03--05 |
-| 07 | Agent 工具系统 | **W2-B registry/matrix 规格侧冻结** | 01、02、04 |
-| 08 | 权限与安全 | **W2-B fold 规格侧冻结**（W3-C 交叉声明） | 05、07、18 |
-| 09 | AgentLoop 与会话状态机 | **W1-A 规格侧冻结**（machine state/outcome/trace） | 05--08、18、19 |
-| 10 | 上下文存储 | **W1-C 规格侧冻结**（RNG + semantic event schema） | 04、05、09、19 |
-| 11 | 上下文定位、实时索引与交互式浏览器 | **W3-B 首版**（LogicalPath/hash/Resolver） | 10 |
-| 12 | 上下文压缩 | **W3-D 首版**（model-view schema） | 06、09、10 |
-| 13 | CLI | **W2-A 规格侧冻结**（39-action machine registry） | 05、09--12 |
-| 14 | 兼容 TUI | **输入/prompt 规格侧冻结**（chrome/proof 待补） | 01、13 |
-| 15 | 诊断、自检与日志 | **W4-B 规格侧冻结**（error/exit/check registry） | 01--14、18、19 |
-| 16 | 打包、安装与发布 | 候选 | 00--15、18--20 |
+| 00 | 产品契约与兼容性基线 | **计划已确认**（C33 / Gate R） | 无 |
+| 01 | 平台兼容抽象 | **计划已确认**（C02--C04） | 00 |
+| 02 | 进程执行与随包资源 | **计划已确认**（C04/C25） | 00、01 |
+| 03 | 网络传输 | **计划已确认**（C19/C20） | 00--02 |
+| 04 | 数据格式 | **计划已确认**（C05--C09） | 00、01 |
+| 05 | 配置与模型注册表 | **计划已确认**（C10/C11） | 00、01、04 |
+| 06 | 模型协议适配 | **计划已确认**（C21/C22；TP-015 hard gate） | 03--05 |
+| 07 | Agent 工具系统 | **计划已确认**（C24/C25） | 01、02、04 |
+| 08 | 权限与安全 | **计划已确认**（C23） | 05、07、18 |
+| 09 | AgentLoop 与会话状态机 | **计划已确认**（C26/C27） | 05--08、18、19 |
+| 10 | 上下文存储 | **计划已确认**（C15/C17/C18） | 04、05、09、19 |
+| 11 | 上下文定位、实时索引与交互式浏览器 | **计划已确认**（C16/C18） | 10 |
+| 12 | 上下文压缩 | **计划已确认**（C28） | 06、09、10 |
+| 13 | CLI | **计划已确认**（C12） | 05、09--12 |
+| 14 | 兼容 TUI | **计划已确认**（C13/C14） | 01、13 |
+| 15 | 诊断、自检与日志 | **计划已确认**（C29/C30） | 01--14、18、19 |
+| 16 | 打包、安装与发布 | **计划已确认，Gate R 关闭**（C31--C34） | 00--15、18--20 |
 | 17 | Web 排除 + 双线预留 | v0.1 已排除（PJ-14 A）；D-058 预留 | 核心零 Web；`yaca-web`=Java 8，`yaca-ie6`=PHP 5.4+IE6；实现未开题 |
-| 18 | Prompt、指令与工作区发现 | 候选 | 01、05、08、09 |
-| 19 | 改动事务、审阅与撤销 | **W3-D 首版**（无 undo fault 矩阵） | 01、02、07--10 |
-| 20 | 测试、Agent 评估与平台验收 | 候选 | 全部核心系统的已确认契约 |
-| 21 | 扩展边界与未来兼容 | 候选 | 05--10、18、`PROD-11` |
-| 22 | 应用运行时、生命周期与并发 | **W3-A 规格侧冻结**（事件泵/platform machine contract） | 00--15、18、19、21 的共同契约；由 20 验证 |
+| 18 | Prompt、指令与工作区发现 | **计划已确认**（C22） | 01、05、08、09 |
+| 19 | 改动事务、审阅与撤销 | **计划已确认**（C25/C27；无 undo） | 01、02、07--10 |
+| 20 | 测试、Agent 评估与平台验收 | **计划已确认**（C01 + 每 task + C32） | 全部核心系统的已确认契约 |
+| 21 | 扩展边界与未来兼容 | **零表面计划已确认**（C01/C33） | 05--10、18、`PROD-11` |
+| 22 | 应用运行时、生命周期与并发 | **计划已确认**（C03/C26） | 00--15、18、19、21 的共同契约；由 20 验证 |
 
 ## 下一步
 
@@ -74,7 +74,7 @@ Web（D-058）仍仅预留。
 
 原子题库和十个 owner packet 继续承担完整性审计，但不再直接充当负责人问卷。`OWNER-QUESTIONS-01.md` 的 29 个集中问题已经全部答复；`DISCUSSION-BATCH-06.md` 保存原话与归一断言，`DECISION-PROJECTION-BATCH-06.md` 把它们回投到 248 个 atomic group。现行登记为 265 个 active 选择/排除、5 个 `not-applicable`、0 个 `unanswered`、0 个 conflict。库、内部状态、错误码、常量与性能数字继续下放到技术规格/证明，配置校验仍连续覆盖 `CV-001` 至 `CV-076`。答完问卷只关闭负责人输入门，不自动授权编码。
 
-`DISCUSSION-BATCH-02.md` 至 `04` 捕获产品旅程和早期补缝，`DISCUSSION-BATCH-05.md` 修正 luainstaller x86 证据外推，`DISCUSSION-BATCH-06.md` 完成集中产品决策。当前工作转为把 D-049 至 D-057 展开成唯一 owner 规格、完整 typed schema/状态表/action registry，以及给 XP x86、Win7+ x64、CentOS 7 和三个最终 zip 建立技术证明。全部 P0 规格与 proof plan 通过前继续只做设计，不开始实现；上下文分支功能保持移出当前范围。
+`DISCUSSION-BATCH-02.md` 至 `04` 捕获产品旅程和早期补缝，`DISCUSSION-BATCH-05.md` 修正 luainstaller x86 证据外推，`DISCUSSION-BATCH-06.md` 完成集中产品决策。D-049 至 D-057 现已展开为唯一 machine contract/fixture，目标平台未决事实已绑定实施 task 与 hard gate。下一步不再继续开设计长卷，而是从 C01 实现；上下文分支功能保持移出当前范围。
 
 ### 2026-08-29 进度快照
 
@@ -82,22 +82,23 @@ Web（D-058）仍仅预留。
 | --- | --- |
 | 负责人产品选择 | 已关闭（register `unanswered=0` / `conflict=0`） |
 | 项目级决定 | D-001..D-071；D-049..D-057 主链，D-058 Web 预留，D-059..069 SQ，D-070 离线授权，D-071 readiness/proof/push 授权 |
-| Owner 规格 | W1–W4 主脊柱已形成 11 份 machine contract + 6 组 fixtures；P1/页面/路径/wire 边角仍待收口 |
+| Owner 规格 | 16 份 machine contract + 12 组 fixtures；当前编码输入已闭合 |
 | 技术证明 | luainstaller 1.3.0 upstream modern；TP-003/006/008/010 已 proven-modern 并归档；无 proven-target |
-| 实施就绪门 | P0 gate 仍未 passed（规格侧冻结≠目标 proof）；Gate A/B 审计前不写产品代码 |
+| 实施就绪门 | Gate A/B **passed**；Release Gate R **closed**；实施计划 M0..M10 / C01..C34 |
+| 产品源码 | 0%；14 个现有 skeleton 仍为空；首任务 C01 |
 | Web | v0.1 仍零表面；双线预留：`yaca-web`/Java 8、`yaca-ie6`/PHP 5.4+IE6 |
 
-**近期设计工作优先级（核心优先于 Web）：**
+**近期开发优先级（核心优先于 Web）：**
 
-1. 关闭 P1/ASCII chrome/path/wire 的实施计划前规格缺口。
-2. 审计 Gate A，形成全程序实施计划并通过 Gate B。
-3. 保留 XP/Win64/CentOS 与最终 zip qualification 为实现/发布硬门。
+1. C01 建立 harness/release manifest/loader negative tests，完成 M0 核心推送。
+2. C02 pure platform identity + fake-native；C03 deterministic event pump。
+3. 按 milestone 收集 XP/Win64/CentOS 与最终 zip qualification，保持 Gate R 诚实关闭。
 4. Web 双线仅维护预留文档，除非负责人开题。
 
 主线就绪差距与 Wave 工作包见 **[`READINESS-GAP.md`](READINESS-GAP.md)**。  
 规格冻结问答见 **[`SPEC-FREEZE-QUEUE.md`](SPEC-FREEZE-QUEUE.md)**：**主队列已完成**（至 D-069）。
 
-**当前工作路线（2026-08-29）：** W1–W4 机器契约节点完成 → modern proof → P1/README 收尾 → Gate A/B 与实施计划。P0 门仍 **未通过**（主要剩 TP/目标证据）；不写产品代码直至门 A/B。
+**当前工作路线（2026-08-29）：** readiness 节点完成 → **C01 → C02 → C03 → M0..M10**。计划门已过；target/最终包证据只关闭对应 milestone 与 Gate R。
 
 
 ### 自动推进停止点 / 下一负责人问题集（2026-08-10）
@@ -119,6 +120,6 @@ Web（D-058）仍仅预留。
 | TP 失败改用户保证 | 停 → 最小 O 包；不擅自 WAL/弱 cancel |
 | Permission 扩展 | Std/Readonly 冻结；禁止静默改 |
 
-**仍有效禁令**：不新开 SQ 长卷；Gate A/B 前不开始产品 `src/*.lua`。D-071 已取代旧的“本轮不做 proof 原型”限制，允许可丢弃 modern proof、实施计划工具和核心节点推送。
-**可继续**：modern proof、P1/README/门禁收尾、全程序实施计划与保守技术择优。
+**仍有效禁令**：不新开 SQ 长卷；不把 modern proof 外推成 target pass；不在 Gate R 前发布；不静默改变 Permission/用户保证。
+**可继续**：按 `IMPLEMENTATION-PLAN.md` 从 C01 串行实现、执行对应 proof，并在核心节点推送 `main`。
 离线会话细则见 [`HANDOFF-AUTO-2026-08-10.md`](HANDOFF-AUTO-2026-08-10.md)。

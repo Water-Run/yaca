@@ -1,6 +1,8 @@
 # 18 Prompt、指令与工作区说明
 
-状态：四层 Prompt 与不自动发现项目规则的产品契约已确认；长度上限和 wire 投影待技术证明
+更新日期：2026-08-29
+
+状态：**计划已确认（C22）** — [`prompts.lua`](../contracts/prompts.lua) 与 fixtures 已冻结七 purpose 原文、层序、quoted-data 和 native controls；长度 cap 从 release manifest 注入
 
 ## 为什么需要独立子系统
 

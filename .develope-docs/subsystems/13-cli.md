@@ -2,7 +2,7 @@
 
 更新日期：2026-08-29
 
-状态：**W2-A 规格侧已冻结** — 人读表见 [ACTION-REGISTRY.md](../ACTION-REGISTRY.md)，机读 registry 与 synthetic argv/chat/REPL fixtures 见 [`contracts/actions.lua`](../contracts/actions.lua)；真实 parser/help 生成待实现
+状态：**计划已确认（C12）** — registry、argv/chat/REPL、`--machine`、JSON/JSONL 与 fd matrix 已冻结；真实 parser/help 由 C12 生成
 
 ## 职责
 

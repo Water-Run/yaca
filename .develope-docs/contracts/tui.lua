@@ -58,6 +58,26 @@ return {
     queue_id = "#N",
     stdout_is_primary_result = true,
     stderr_is_diagnostics = true,
+    renderer = "append-only-transcript-with-optional-current-status-enhancement",
+    interactive_gate = "stdin-and-stdout-are-tty-and-machine-not-requested",
+    program_chrome = "ASCII-only",
+    untrusted_control_bytes = "escape-before-render",
+    transcript_fixture = "fixtures/tui-transcripts.lua",
+  },
+
+  line_editor = {
+    ownership = "yaca-native-or-raw-editor",
+    draft_is_runtime_owned = true,
+    async_output = "atomically-hide-draft-append-complete-block-redraw-identical-draft",
+    character_level_interleave = false,
+    cooked_fallback = "coalesce-and-defer-until-safe-line-with-visible-backlog-status",
+    plain_mode_semantics_equal = true,
+  },
+
+  transcript_blocks = {
+    "USER", "ASSISTANT", "TOOL ID", "SIDE ID", "STATUS", "QUEUE ID",
+    "STEER ID", "NOTICE", "WARNING", "ERROR ID", "RECOVERY ID",
+    "DETAILS ID", "ACTION ID",
   },
 
   terminal_modes = {
@@ -65,6 +85,7 @@ return {
     plain_tty = "full-text-command-fallback",
     dumb_or_no_color = "same-ASCII-prompts-no-color",
     non_tty_chat = "reject-interactive-chat",
+    windows_xp_ansi_assumed = false,
   },
 
   proof_required = {

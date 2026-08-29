@@ -1,8 +1,8 @@
 # 03 网络传输
 
-更新日期：2026-08-10
+更新日期：2026-08-29
 
-状态：**W3-A 规格首版** — HTTP AsyncPort ABI、attempt 状态与 secret carrier 规则已冻结；curl 版本/数值待 TP（D-070）
+状态：**计划已确认（C19/C20）** — [`transport.lua`](../contracts/transport.lua) 与 fixtures 已冻结 curl carrier、retry/redirect/ambient 规则；TP-006 modern 通过，target curl/TLS/proxy/CA 仍是 M6 hard gate
 
 ## 职责
 

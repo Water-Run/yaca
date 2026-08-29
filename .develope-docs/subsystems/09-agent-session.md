@@ -2,7 +2,7 @@
 
 更新日期：2026-08-29
 
-状态：**W1-A 规格侧已冻结** — 状态/outcome/转换表与 [`contracts/runtime.lua`](../contracts/runtime.lua) 是实现和 synthetic golden trace 的共同语义真源；hard-cap **数值**、事件泵 ABI、平台取消时序仍待技术证明。
+状态：**计划已确认（C26/C27）** — 状态/outcome/转换/control 与 fixtures 是共同真源；hard-cap 数值由 manifest/benchmark 校准，平台取消时序保留 hard gate。
 
 ## 职责
 

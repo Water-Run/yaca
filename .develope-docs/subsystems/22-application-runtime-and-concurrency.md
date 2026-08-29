@@ -2,7 +2,7 @@
 
 更新日期：2026-08-29
 
-状态：**W3-A 规格侧已冻结** — 单线程事件泵、AsyncPort 组合、hard-cap 维度与 [`contracts/platform.lua`](../contracts/platform.lua) 的安全加载/identity/lock 边界已冻结；平台原语和数值待 TP 校准（D-070）
+状态：**计划已确认（C03/C26）** — event pump/AsyncPort/hard-cap dimensions/safe-load/identity/lock 已冻结；平台原语和数值由对应 target TP 校准
 
 ## 为什么需要独立子系统
 

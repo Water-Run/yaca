@@ -2,7 +2,7 @@
 
 更新日期：2026-08-29
 
-状态：**W3-A 规格侧已冻结** — 窄端口 ABI、safe-load、target identity 与 lock 边界已投影到 [`contracts/platform.lua`](../contracts/platform.lua)；目标机数值与 XP 原语证明仍属 TP
+状态：**计划已确认（C02--C04）** — 窄端口、safe-load、target identity、lock 与 planned module boundary 已冻结；目标机数值/XP 原语仍是 adapter hard gate
 
 ## 职责
 

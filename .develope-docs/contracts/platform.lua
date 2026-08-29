@@ -13,8 +13,18 @@ return {
 
   safe_loading = {
     lua_module_allowlist = {
-      "main", "cli", "compact", "config", "context", "index", "ini", "json", "model", "path", "safety", "session", "text", "tui",
+      "backend_linux", "backend_windows", "cli", "clock", "compact", "config",
+      "context", "diagnostics", "fs", "index", "ini", "json", "main", "model",
+      "network", "path", "permission", "platform", "process", "prompt", "runtime",
+      "safety", "session", "terminal", "text", "tools", "tui", "xml",
     },
+    planned_lua_module_allowlist = {
+      "backend_linux", "backend_windows", "cli", "clock", "compact", "config",
+      "context", "diagnostics", "fs", "index", "ini", "json", "main", "model",
+      "network", "path", "permission", "platform", "process", "prompt", "runtime",
+      "safety", "session", "terminal", "text", "tools", "tui", "xml",
+    },
+    native_module_allowlist = { "yaca_native", "lxp" },
     lua_search_source = "embedded-release-manifest-only",
     current_working_directory = false,
     environment_lua_path = false,

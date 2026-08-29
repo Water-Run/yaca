@@ -4,7 +4,7 @@
 
 yaca is the design for a simple, single-agent terminal Coding Agent, licensed under GPL v3.
 
-> **Project status (2026-08-29): coding-readiness closeout.** No working v0.1 Agent or qualified release exists yet; the Lua product modules are still empty. Everything below describes the frozen v0.1 target, not currently executable behavior. Product choices are closed, machine-readable design contracts now exist, and technical proofs plus the implementation plan are in progress.
+> **Project status (2026-08-29): coding-ready; implementation not started.** No working v0.1 Agent or qualified release exists yet; the Lua product modules are still empty. Everything below describes the frozen v0.1 target, not currently executable behavior. Product choices, machine-readable contracts, Gate A/B audit, and the whole-program implementation plan are complete. Target qualification remains incomplete, so Release Gate R is closed.
 
 ## Supported release targets
 
@@ -78,8 +78,8 @@ Future local Web product lines are design reservations only; they do not authori
 
 ## Development documents
 
-Start with the [current state](.develope-docs/CURRENT-STATE.md), [machine contracts](.develope-docs/contracts/README.md), [readiness gates](.develope-docs/ARCHITECTURE-READINESS.md), and [technical proof backlog](.develope-docs/TECHNICAL-PROOF-BACKLOG.md). From the repository root, the current design consistency check is:
+Start with the [current state](.develope-docs/CURRENT-STATE.md), [Gate A/B/R audit](.develope-docs/GATE-AUDIT-2026-08-29.md), [implementation plan](.develope-docs/IMPLEMENTATION-PLAN.md), [machine contracts](.develope-docs/contracts/README.md), and [technical proof backlog](.develope-docs/TECHNICAL-PROOF-BACKLOG.md). From the repository root, run the full coding-readiness check with:
 
 ```sh
-bin/lua55 .tools/validate_design_contracts.lua
+bash .tools/run_coding_readiness.sh
 ```

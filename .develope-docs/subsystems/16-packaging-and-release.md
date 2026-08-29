@@ -2,7 +2,7 @@
 
 更新日期：2026-08-29
 
-状态：发行目标、zip 布局、安装边界与证据要求已确认；具体构建工具 qualification 待实现阶段验证
+状态：**计划已确认（C31--C34），Release Gate R 关闭**；pins/allowlist/zip/evidence contract 已冻结，三目标 qualification 待执行
 
 > Context XML 对外承诺见 D-068（内部格式；export 为主），与打包证据门独立。
 

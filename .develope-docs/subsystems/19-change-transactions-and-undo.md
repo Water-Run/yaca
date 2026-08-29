@@ -2,7 +2,7 @@
 
 更新日期：2026-08-10
 
-状态：**W3-D 规格首版** — 无 undo 故障/fault 全表与 batch 语义已规范；`D-052` 零 backup/undo/rollback 表面
+状态：**计划已确认（C25/C27）** — 无 undo fault/batch 语义已规范；D-052 零 backup/undo/rollback 表面，target fault injection 保留
 
 ## 结论
 

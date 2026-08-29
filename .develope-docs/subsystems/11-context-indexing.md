@@ -2,7 +2,7 @@
 
 更新日期：2026-08-10
 
-状态：**W3-B 规格首版** — LogicalPathCodec、hash 输入向量、Resolver 结果与 **显示≠hash（D-070）** 已冻结；部分平台边角数值待 TP
+状态：**计划已确认（C16/C18）** — SHA-256 first-8/network-order hash、LogicalPath/path/selector vectors、Resolver 与 **显示≠hash** 已机器冻结；target identity/filesystem/cap 仍是 M5 hard gate
 
 ## 为什么这是一个独立子系统
 

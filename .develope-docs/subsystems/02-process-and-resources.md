@@ -1,8 +1,8 @@
 # 02 进程执行与随包资源
 
-更新日期：2026-08-10
+更新日期：2026-08-29
 
-状态：**W3-A 规格首版** — Process AsyncPort ABI 与 result 枚举已冻结；kill-tree/grace 数值待 TP 校准（D-070 技术推导）
+状态：**计划已确认（C04/C25）** — [`transport.lua`](../contracts/transport.lua) 已冻结 Process AsyncPort、shell/env/stdin/result；kill-tree/grace 仍由 target TP 校准并阻止 M7 完成
 
 ## 职责
 

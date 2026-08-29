@@ -2,7 +2,7 @@
 
 更新日期：2026-07-22
 
-状态：三目标完整测试与发行证据已确认；测试框架和场景阈值仍待确认
+状态：**计划已确认（C01 + 每 task + C32）**；test tree、golden/fault/integration/qualification 边界已冻结，场景阈值由 manifest/target benchmark 校准
 
 ## 为什么需要独立子系统
 

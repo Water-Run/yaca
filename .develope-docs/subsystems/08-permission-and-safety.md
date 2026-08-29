@@ -1,6 +1,6 @@
 # 08 权限与安全
 
-状态：Permission 形状与 DoubleCheck 边界已确认；发行模板数值和平台证明待收口
+状态：**计划已确认（C23）**；Permission fold/approval/DoubleCheck 边界已机器冻结，平台 target proof 保留
 
 ## 职责
 
@@ -106,4 +106,3 @@ v0.1 不宣称 OS sandbox，不提供 Web、媒体、remote/headless、direct ne
 
 Std/Readonly 与八工具 fold 表、越界 OutsideWorkspace、action-review 范围见
 [TOOL-PERMISSION-MATRIX.md](../TOOL-PERMISSION-MATRIX.md)。
-

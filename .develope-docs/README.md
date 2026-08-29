@@ -1,13 +1,13 @@
 # yaca 开发设计追踪区
 
-此目录用于在编码前追踪 yaca 的分析、讨论、设计和决策。
+此目录用于追踪 yaca 的分析、讨论、设计、编码计划、验证和决策。
 
 ## 目录性质
 
 - 本目录是项目正式的设计与开发追踪资料，纳入 Git 版本控制。
 - 设计资料直接在 `main` 分支维护并按完整批次提交；D-071 已授权本轮核心节点推送 `main`。
 - 这里可以持续修订；项目源码和公开用户文档只有在相关设计确认后才修改。
-- 当前阶段禁止编写实现代码，也不把占位模块填成伪实现。
+- Gate A/B 已在 2026-08-29 通过；当前可按 `IMPLEMENTATION-PLAN.md` 从 C01 串行实现。未完成的 target qualification 继续阻止 Gate R/发布，proof 不能伪装成产品实现。
 
 ## 工作方式
 
@@ -16,8 +16,8 @@
 3. 确认项目级目标、兼容性范围、子系统边界和依赖关系。
 4. 默认每次深入一个决策主题；项目负责人要求集中盘点时，可以先给出带依赖顺序的综合决策包，再把回复逐项归档。
 5. 每个子系统依次完成：现状分析、方案比较、设计确认、验收标准。
-6. 全部关键设计确认后，再编写实施计划。
-7. 实施阶段仍按子系统逐个完成，不并行铺开半成品。
+6. 全部关键设计确认后编写并机器校验实施计划；当前这一步已完成。
+7. 实施阶段按 C01--C34 逐项完成，不并行铺开半成品。
 
 ## 文件索引
 
@@ -32,11 +32,14 @@
 - `DESIGN-DECISION-ROADMAP.md`：解释原子题库、十个 owner packet、跨 packet 分批队列与实施就绪门的全局关系。
 - `DECISION-BATCH-QUEUE.md`：保留把全部正式问题按真实依赖重组后的 49 个旧原子审计批次；当前不再要求负责人逐批作答。
 - `ARCHITECTURE-READINESS.md`：区分题库、决定、规格与计划，列出进入实施计划前必须通过的 P0/P1 门和证据。
+- `GATE-AUDIT-2026-08-29.md`：Gate A/B/R 阶段拆分及 AR-P0-01..16 / AR-P1-01..12 的逐项审计。
+- `IMPLEMENTATION-PLAN.md`：M0--M10 / C01--C34 的全程序文件、依赖、测试、退出与提交边界。
 - `TOOL-PERMISSION-MATRIX.md`：W2-B tool×Permission 矩阵。
 - `MODEL-EVENT-SCHEMA.md`：W2-C canonical Model 事件/请求。
 - `ACTION-REGISTRY.md`：W2-A semantic action 注册表。
-- `contracts/`：2026-08-29 编码就绪机读真源；冻结 product/config/runtime/action/tool/model/context/TUI/platform/diagnostics/zero-surface contract 与 synthetic fixtures。
-- `.tools/validate_design_contracts.lua`：从仓库根用 `bin/lua55` 执行的跨契约校验器；当前覆盖 4,000+ 条集合、映射、状态、fixture 与零表面断言。
+- `contracts/`：2026-08-29 编码就绪机读真源；16 份 contract 冻结 product/config/runtime/action/tool/model/context/TUI/platform/diagnostics/formats/transport/Prompt/release/readiness/zero-surface 与 12 组 synthetic fixtures。
+- `.tools/validate_design_contracts.lua`：从仓库根用 `bin/lua55` 执行的跨契约校验器；当前覆盖 7,000+ 条集合、映射、状态、fixture、task graph 与零表面断言。
+- `.tools/validate_coding_readiness.lua`：校验 Gate A/B passed、Gate R closed、28 项 gate 路由、C01--C34 计划、公开状态与编码前空 skeleton。
 - `PROOF-PLANS-P0.md`：TP-003/006/008 证明提纲。
 - `READINESS-GAP.md`：主线就绪差距与 Wave 工作包（从“决定已收口”到“可开发”的运营清单）。
 - `SPEC-FREEZE-QUEUE.md`：规格冻结问答（主队列已完成 → D-059..D-069）；再有缺口另开题，不默认续 SQ。
@@ -76,7 +79,7 @@
 
 ## 当前阅读入口
 
-当前先读 [`CURRENT-STATE.md`](CURRENT-STATE.md)、[`contracts/README.md`](contracts/README.md)、[`ARCHITECTURE-READINESS.md`](ARCHITECTURE-READINESS.md) 与 [`TECHNICAL-PROOF-BACKLOG.md`](TECHNICAL-PROOF-BACKLOG.md)；历史选择恢复再读 `DECISION-REGISTER.md`/`DECISIONS.md`。`OWNER-QUESTIONS-01.md` 的 29 题已经全部答复，现行 `decision-inventory-v9` 为 `unanswered=0`；270 组、384 个 checklist ID、`AQ-001..AQ-437`、`CV-001..CV-076` 和 49 个旧批次继续保留为审计证据。负责人选择完成不等于目标平台证明或实施计划完成；Gate A/B 前仍不填写产品实现模块。
+当前先读 [`CURRENT-STATE.md`](CURRENT-STATE.md)、[`GATE-AUDIT-2026-08-29.md`](GATE-AUDIT-2026-08-29.md)、[`IMPLEMENTATION-PLAN.md`](IMPLEMENTATION-PLAN.md) 与 [`contracts/README.md`](contracts/README.md)；历史选择恢复再读 `DECISION-REGISTER.md`/`DECISIONS.md`。`OWNER-QUESTIONS-01.md` 的 29 题已经全部答复，现行 `decision-inventory-v9` 为 `unanswered=0`；270 组、384 个 checklist ID、`AQ-001..AQ-437`、`CV-001..CV-076` 和 49 个旧批次继续保留为审计证据。Gate A/B 已通过，可从 C01 填写产品实现；目标平台证明仍只在对应 milestone/Gate R 通过后成立。
 
 本轮新增拆分把 composer 输入召回、配置秘密文件权限、raw shell 继承环境、完整 model-yield 后续接、direct 文件属性、ignore/隐藏项、`exec` cwd、输出解码与 canonical 保留、active XML 外改恢复等交给独立 owner。M05-57..59、AL06-50/51 与 TS-40 等原子组也已随 Batch 06 收口；旧 packet 中的推荐仍只是收到回复前的历史候选，现行选择只看登记表和 D-049 至 D-057。
 

@@ -2,7 +2,7 @@
 
 更新日期：2026-08-29
 
-状态：v0.1 provider 范围、canonical 控制与 [`contracts/model.lua`](../contracts/model.lua) 机读 schema 已确认；recorded wire fixture 和具体限额待 TP-004/006
+状态：**计划已确认（C21/C22）**；canonical schema 与 exact synthetic wire fixtures 已冻结，TP-015 recorded provider fixture 与 target limits 是 M6 hard gate
 
 ## 职责
 
