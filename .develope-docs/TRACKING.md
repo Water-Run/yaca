@@ -1,13 +1,13 @@
 # 开发追踪
 
-更新日期：2026-08-10
+更新日期：2026-08-29
 
 ## 当前阶段
 
-**Wave 3 规格首版已落盘（D-070，2026-08-10）**：产品选择与 SQ/负责人问题集已收口。  
-W3-A/B/C/D 合同表已写入子系统与 `DATA-CLASSIFICATION.md`；**仍非**门 A/B，**不**写产品 `src/*.lua`。  
-下一设计主线：加深 W1–W2 至更近「设计已确认」、Wave 4 旅程/零表面、或 modern proof（需另授权）。  
-Git：main；Wave 3 完成可作为重大里程碑 push。交接：[`HANDOFF-AUTO-2026-08-10.md`](HANDOFF-AUTO-2026-08-10.md)。  
+**编码就绪收尾已启动（D-071，2026-08-29）**：产品选择与 SQ/负责人问题集已收口，W1--W3 首版已落盘。
+当前主线：校正 gate 真源 → 机器 schema/registry/fixture → modern proof → Gate A/B 与全程序实施计划。Gate B 前不写产品 `src/*.lua`。
+`../luainstaller` 现为 1.3.0：旧 x86 guard 结论失效，P0-16 转为 yaca-specific 候选/目标证据债务。
+Git：直接在 main 工作；D-071 要求完整核心节点提交并推送 `origin/main`。
 Web（D-058）仍仅预留。
 
 ## 已确认约束
@@ -81,7 +81,7 @@ Web（D-058）仍仅预留。
 | 层 | 状态 |
 | --- | --- |
 | 负责人产品选择 | 已关闭（register `unanswered=0` / `conflict=0`） |
-| 项目级决定 | D-001..D-070；D-049..D-057 主链，D-058 Web 预留，D-059..069 SQ，D-070 离线授权 |
+| 项目级决定 | D-001..D-071；D-049..D-057 主链，D-058 Web 预留，D-059..069 SQ，D-070 离线授权，D-071 readiness/proof/push 授权 |
 | Owner 规格 | W1–W3 **首版合同**已落；尚无全量子系统「设计已确认」 |
 | 技术证明 | 关键 TP `specified`；无 proven-target |
 | 实施就绪门 | P0 **全部未通过**（规格侧部分首版≠passed）；不可写完整实施计划/产品代码 |

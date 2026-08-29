@@ -24,6 +24,7 @@
 
 - `TRACKING.md`：阶段、子系统状态和下一步。
 - `HANDOFF-AUTO-2026-08-10.md`：2026-08-10 离线自动规格硬化交接笔记（D-070）。
+- `DECISIONS.md` D-071：2026-08-29 编码就绪收尾、modern proof 与核心节点推送 `main` 的现行授权。
 - `OWNER-QUESTIONS-01.md`：已经回答并冻结的负责人集中问卷；保留 29 题收到回复时的候选语境。
 - `DECISION-PROJECTION-BATCH-06.md`：把集中答复确定展开为 248 个 atomic `PR-006-*` 传播记录。
 - `CURRENT-STATE.md`：仓库与打包基础设施现状。

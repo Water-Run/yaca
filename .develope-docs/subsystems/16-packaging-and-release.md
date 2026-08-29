@@ -1,6 +1,6 @@
 # 16 打包、安装与发布
 
-更新日期：2026-08-10
+更新日期：2026-08-29
 
 状态：发行目标、zip 布局、安装边界与证据要求已确认；具体构建工具 qualification 待实现阶段验证
 
@@ -89,7 +89,9 @@ Linux 只发布 x86_64 产物，不发布 i686 或 ARM。CentOS 7 x86_64 是最�
 
 ### 当前 x86/XP qualification 与发布证据缺口
 
-相邻 `../luainstaller` 1.0 能识别 `x86`，但在 [`src/platform.lua`](../../../luainstaller/src/platform.lua) 中由默认 Windows profile guard 拒绝非 x86_64；[`docs/PLATFORMS-NATIVE-LIMITS.adoc`](../../../luainstaller/docs/PLATFORMS-NATIVE-LIMITS.adoc)、随附 MSVC recipe 和测试矩阵也只覆盖 x86_64。这证明当前未修改路径尚不能直接交付 yaca 的 x86 包，但不证明 launcher/bundler 的底层设计无法支持 x86，也不构成 XP 不兼容结论。因此当前三项约束：
+相邻 `../luainstaller` 已更新到 1.3.0（2026-08-24，tag `v1.3.0`）：native profile 已接受 x86/x86_64，生成的 Windows x86/x64 C surface 使用 XP API baseline，PE subsystem 为 5.01/5.02，并有 i686/x86_64 MinGW import/API 静态审计、Windows x64 MSVC 与 Linux native x86 CI。此前“profile guard 拒绝 x86、recipe 只有 x64”的风险事实已经失效。
+
+当前三项产品约束仍为：
 
 ```text
 Windows XP SP3 x86
@@ -97,7 +99,7 @@ Windows XP SP3 x86
 + 使用 ../luainstaller 打包
 ```
 
-尚不能由当前默认路径直接兑现。该缺口在项目最后的打包阶段成为 Win32 发布前置：审计并试构建现有 launcher/bundler，按证据判断是否只需解除/参数化 guard 与 x64 toolchain，还是确需更深 profile/launcher 适配；只做实际证据要求的最小修改，不在 yaca 中暗建另一套打包器，也不预判必须重写 luainstaller。Win64 与 Linux 候选同样需要以最终目标 ABI 做 qualification，不能因为现有默认路径偏向 x86_64 就跳过验证。
+现在已有可执行 qualification 路线，但尚未由 yaca 候选兑现。项目必须固定 luainstaller 版本，先生成匹配 Lua 5.5 与拟用 native 模块形状的最小 onedir，随后以最终依赖闭包构建三个候选；静态 XP surface 证据只能提前发现问题，不能替代真实 XP、Win7 和 CentOS 7 完整运行。只有证据要求时才对兄弟仓库做最小修改，不在 yaca 中暗建第二套打包器。
 
 即使解除架构拒绝，编译器、CRT、最低 Win32 API、Lua DLL、PowerShell 构建依赖和 launcher 仍需逐项验证。XP x86 原生模块候选应使用可生成 XP 程序的工具链；微软文档给出的最后一代官方 XP 工具集是 VS2017 `v141_xp`，并要求 XP SP3，见 [Configuring programs for Windows XP](https://learn.microsoft.com/en-us/cpp/build/configuring-programs-for-windows-xp?view=msvc-170)。
 

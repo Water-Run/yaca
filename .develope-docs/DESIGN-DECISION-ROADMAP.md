@@ -163,7 +163,7 @@ Key 留在 INI 已得到方向性回复，但它仍需要从 Lua 安全到达 cu
 
 ## 当前发布证据阻塞
 
-- 相邻 `../luainstaller` 1.0 的默认 Windows profile guard 拒绝非 x86_64，随附构建/测试路径也固定为 x64；这说明当前路径尚不能交付 yaca x86 包，但不证明底层 launcher/bundler 无法适配，也不证明 XP 不兼容。应先取得 qualification 授权，按证据做必要适配并完成 XP 至 11 验收。记录缺口不等于预判必须重写兄弟仓库。
+- 相邻 `../luainstaller` 1.3.0 已支持 native x86/x86_64 profile，并提供 XP API/subsystem、MinGW import closure 与 Linux native x86 的 upstream modern 证据；此前 1.0 的 x86 guard 风险事实已经失效。当前仍须固定版本、构建 yaca-specific Lua 5.5/依赖闭包并完成 XP 至 11、Win7 至 11 和 CentOS 7 验收。
 - 当前 Linux `bin/` 是 ELF32，其中 curl 为 x32 ABI；不是目标的普通 CentOS 7 x86_64 发行输入。
 - 当前 Win32 `curl.exe` 经 UPX 压缩，现有静态 imports 主要是解压 stub；PE 头 4.0 不能证明真实 XP 兼容。
 

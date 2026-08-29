@@ -1,10 +1,10 @@
 # 主线就绪差距：从“决定已收口”到“可开发”
 
-更新日期：2026-08-10
+更新日期：2026-08-29
 
 状态：运营清单（设计阶段）；**当前判定：未达实施计划就绪，未达编码就绪**
 
-进度注记：SQ 完成；D-070 收口。**W1–W2 首版 + Wave 3 四包首版齐**（见 HANDOFF）。Owner 规格粗估升至 ~35–40%；P0 门仍未 passed；**未** 达门 A/B；不写产品代码。权威门禁仍以 [`ARCHITECTURE-READINESS.md`](ARCHITECTURE-READINESS.md) 为准。本文回答三个实操问题：
+进度注记：SQ 完成；D-070 收口；D-071 已授权 readiness 收尾、modern proof 与核心节点推送 main。**W1–W2 首版 + Wave 3 四包首版齐**。Owner 规格仍在机器化收口，P0 门尚未 passed；**未** 达门 A/B，暂不写产品代码。`../luainstaller` 已从文档基线 1.0 升至 1.3.0，旧 x86 guard 阻塞已消失，但 yaca-specific 三包与目标机证据仍缺。权威门禁仍以 [`ARCHITECTURE-READINESS.md`](ARCHITECTURE-READINESS.md) 为准。本文回答三个实操问题：
 
 1. 现在站在哪一层？
 2. 离“可写实施计划 / 可开始编码”还缺什么？
@@ -89,7 +89,7 @@ Web 双线（D-058：`yaca-web`/Java 8、`yaca-ie6`/PHP 5.4）**不计入** v0.1
 | AR-P0-13 | CLI/点命令 × 状态 | 有 | **首版**（W2-A） | 缺 | **H** | golden argv / 机读 schema |
 | AR-P0-14 | 安全加载 / ambient | 方向 | 缺 | 缺 | H | module allowlist、DLL 搜索、curl/shell ambient isolation |
 | AR-P0-15 | 本地 ID / 锁 / 崩溃 | 有 | 缺 | 缺 | H | identity 表、lease、stale lock 协议 |
-| AR-P0-16 | 发布可行性 | 有 | 缺 | **阻塞** | **H*** | luainstaller x86/x64 qualification；三 zip 证据（*编码前可后置到发布阶段，但实施计划必须写清 qualification 任务与失败退路） |
+| AR-P0-16 | 发布可行性 | 有 | 路线首版 | upstream modern；目标缺 | **H*** | 固定 luainstaller 1.3.x；yaca x86/x64 qualification 与三 zip 证据（*完整发布证据可后置，但实施计划必须保留硬门） |
 
 P1 门（AR-P1-01..12）在写**全程序**计划前也应关闭；若只做**局部子系统**垂直切片，至少关闭该子系统及其上游 P1。
 
@@ -109,7 +109,7 @@ P1 门（AR-P1-01..12）在写**全程序**计划前也应关闭；若只做**�
 | TP-008 ★ | 单 XML 正确性 | P0-10 | 崩溃切点真值表 |
 | TP-009 ★ | 单 XML 写放大 | P0-10 | hard limit 数字来源 |
 | TP-010 ★ | LuaExpat + Lua 5.5 | P0-10、P1-01 | 三架构构建计划 |
-| TP-001 | luainstaller Win32 | P0-16 | qualification 计划（可后置实施，不可忽略） |
+| TP-001 | luainstaller Win32 | P0-16 | 1.3.0 upstream modern 已有；执行 yaca-specific qualification |
 | TP-015/016/017 | 协议 / control / outcome | P0-02、P0-03 | fixture 语料 |
 | TP-019 | INI 往返 | P0-09 | parser contract |
 | TP-024 | CLI grammar | P0-13 | golden argv |

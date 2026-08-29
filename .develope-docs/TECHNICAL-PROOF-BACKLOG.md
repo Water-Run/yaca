@@ -1,6 +1,6 @@
 # 技术证明债务表
 
-更新日期：2026-07-22
+更新日期：2026-08-29
 
 状态：设计阶段证明计划；全部条目均未因写入本文而视为已经通过
 
@@ -34,11 +34,11 @@
 
 ### TP-001 luainstaller 的 Win32 x86/XP qualification 与 CPU ISA 目标
 
-- **当前状态**：`unplanned`；现有 `../luainstaller` 1.0 认识 x86，但默认 Windows profile guard 与 x64-only recipe/tests 尚不能构建合格 x86 包；底层 x86/XP 可行性尚未评估。
+- **当前状态**：`specified` + upstream `proven-modern`；`../luainstaller` 1.3.0（tag `v1.3.0`，commit `97192d1`）已经消除旧 x86 profile guard，加入 Windows x86/x86_64 XP API/subsystem、MinGW import closure、watchdog 与 Linux native x86 CI 证据。尚未生成 yaca-specific Win32/Win64 包，也未取得 XP--11/Win7--11 目标机结果。
 - **要证明**：相邻打包器可以产生使用 Lua 5.5、Win32 x86、XP SP3 可启动的 yaca launcher，并能纳入项目所需 Lua/C 模块和资源；依照已确认的 RF-14 A，整个产物采用保守 IA-32 候选基线，精确最低 ISA 由最终工具链审计与旧 CPU/目标机证据冻结，而不是只有 launcher 服从。
-- **最小证据**：独立授权后先审计/试构建现有设计，记录无需修改或确需适配的 guard/toolchain/profile/launcher 边界；固定工具链与 ISA flags；最小 hello/package；PE machine、subsystem、imports、CRT 与指令审计；在满足最终选定 ISA 下限的真实旧 CPU/虚拟化约束环境及 XP SP3 到 Windows 11 上记录同一产物启动结果。
+- **最小证据**：固定消费 `v1.3.0` 或明确后继 commit；先构建与 yaca 相同 Lua 5.5 ABI/依赖形状的最小 hello onedir，记录 host/target/toolchain/profile；固定 ISA flags；审计 PE machine、subsystem、imports、CRT 与指令；再用完整 yaca 候选在满足最终 ISA 下限的真实旧 CPU/虚拟化约束环境及 XP SP3 到 Windows 11 上记录同一产物结果。Win64 与 Linux x86_64 各自重复，不把 luainstaller 自身 CI 代替 yaca 依赖闭包。
 - **通过条件**：不是修改 PE 标志伪装；最终包不引用最低 Vista+ API；Lua、C 模块和每个随包 executable/DLL 都没有暗中使用高于最终确认基线的指令；不依赖目标机预装 Lua/CRT；错误架构或 ISA 被构建门拒绝。
-- **失败后**：先由 `T` 在不改变产品承诺的范围内适配现有 guard/toolchain/profile；只有证明现有设计无法满足目标，才转 `O` 在“进一步扩展 luainstaller、更换 Windows 打包链、改变 XP/x86/Lua 5.5 硬目标”之间重新选择。
+- **失败后**：先由 `T` 在不改变产品承诺的范围内适配 toolchain/profile、依赖闭包或 yaca 装配；只有目标证据证明 1.3.x 路线无法满足保证，才转 `O` 在“进一步扩展 luainstaller、更换 Windows 打包链、改变 XP/x86/Lua 5.5 硬目标”之间重新选择。
 - **关联**：`REL-14`、`AQ-206`、`AQ-211`、`RF-04`、`AR-P0-16`。
 
 ### TP-002 Lua 5.5 与 native 模块 ABI

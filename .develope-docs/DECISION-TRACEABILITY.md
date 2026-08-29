@@ -239,7 +239,7 @@ owner 是最终规范的唯一修改责任，不等于只有该系统能引用�
 
 | 事实/风险 | 当前证据 | 仍需的 proof |
 | --- | --- | --- |
-| luainstaller Windows x86 | 当前 profile guard 拒绝非 x86_64，随附 MSVC recipe/tests 固定为 x64；这不证明底层 launcher/bundler 无法适配 x86，XP 也未验证 | 先 qualification 现有设计，按证据做必要 guard/toolchain/profile 适配；同一最终 x86 包在 XP--11 验收 |
+| luainstaller Windows x86 | 1.3.0 已消除旧 profile guard，并有 x86/x64 XP surface 静态审计；yaca-specific Lua 5.5/依赖闭包与真实 XP 尚未验证 | 固定 1.3.x，生成 yaca 候选、审计完整闭包；同一最终 x86 包在 XP--11 验收 |
 | 当前 Linux `bin/` ABI | 现有工具为 ELF32/i386，curl 是 x32 ABI，不是目标普通 x86_64 | 从最小 allowlist 重建 ELF64/x86_64 资源并在 CentOS 7 验收 |
 | Win32 curl/UPX | PE32 方向正确，但 UPX stub 遮蔽真实 imports | 审计未压缩来源、CRT/API/TLS/DLL，再对最终包装物重测 |
 | Lua 5.5 XML binding | LuaExpat 1.5.2 + Expat 2.8.2 现代 Linux smoke 可构建；上游公开支持止于 Lua 5.4 | Windows x86/XP 与 CentOS 7 原生构建、ABI、DTD/entity off、资源攻击 corpus |

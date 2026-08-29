@@ -1,6 +1,6 @@
 # 当前状态分析
 
-更新日期：2026-08-10
+更新日期：2026-08-29
 
 ## yaca 仓库
 
@@ -9,7 +9,7 @@ yaca 当前是“产品说明、配置草案、模块骨架、设计文档体系
 已有内容：
 
 - 中英文 README 已描述目标产品、命令、模型、上下文和权限概念。
-- `_CONFIG_.ini` 已形成较完整的配置 schema 草案。
+- `_CONFIG_.ini` 是已明确标记的 historical/non-normative 草案；现行字段真源在 `subsystems/05-configuration.md`。
 - `_CONTEXT_.xml` 提供了上下文文件头部草案。
 - `bin/` 本地放置 Lua 5.5.0、curl、BusyBox、jq、diff、patch、iconv、file、sqlite3 等 32 位工具。
 - `coding-style.txt` 规定了 Lua 5.5、旧终端、旧浏览器和保守工具链要求。
@@ -19,10 +19,9 @@ yaca 当前是“产品说明、配置草案、模块骨架、设计文档体系
 
 - 没有可运行入口、模块接口、测试、安装脚本或发布脚本。
 - README 目前描述的是目标行为，尚不能视为已实现契约。
-- CLI 短参数存在冲突：`-dc` 和 `-rc` 各自对应两个操作。
+- CLI 旧短参数冲突已在 `ACTION-REGISTRY.md` 的规格首版中消解，但尚无 parser、机读 registry 或 golden argv 实现证据。
 - 旧 README 曾混用 `_yaca_` 与 `__yaca__`；现行设计统一为 executable 相邻的 `__yaca__`，三个便携 zip 都不建立另一套系统用户数据根。
-- README 的模型预设清单与配置模板中的模型条目不一致。
-- `_CONFIG_.ini` 仍包含 `[Permission.Cautious]` 和 profile 内 `DoubleCheck`，尚未迁移到 D-021 的全局默认开关与 `.cautious` 会话覆盖设计。
+- `_CONFIG_.ini` 仍保存 `[Permission.Cautious]`、profile 内 `DoubleCheck` 等历史内容，只能用于迁移 fixture，不能成为实现输入。
 - `_CONTEXT_.xml` 仍只有头部注释，尚未表达 D-022 的镜像路径、完整对话、会话参数元数据和实时索引契约。
 - 图像/音频、remote/headless、transcription 与 TTS 仍被 D-044 明确排除。
 - Web：**v0.1 核心** 仍零表面（D-044）；2026-08-10 的 D-058 仅为未来 **本机本地 Web** 登记设计预留，产品线为 `yaca-web`（服务端 **Java 8**）与 `yaca-ie6`（服务端 **PHP 5.4**，浏览器有意兼容 IE6）。设计正文在 `.develope-docs/web-tracks/`；仓库根 `web/` 只作说明/空预留；JRE/PHP 与 Web 实现都不得进入 v0.1 loader、help、配置或核心 zip，也不得写成已实现能力。
@@ -56,7 +55,7 @@ yaca 当前是“产品说明、配置草案、模块骨架、设计文档体系
 
 ## luainstaller 能力
 
-相邻的 `../luainstaller` 已经是可用的 1.0.0 打包项目：
+相邻的 `../luainstaller` 当前为已打 tag 的 **1.3.0**（2026-08-24；commit `97192d1`）：
 
 - 支持官方 Lua 5.1--5.5；yaca 将固定使用 Lua 5.5 ABI。
 - 能生成目录包和自解压单文件；官方建议先验证目录包。
@@ -64,8 +63,10 @@ yaca 当前是“产品说明、配置草案、模块骨架、设计文档体系
 - Lua C 模块及匹配的 Lua runtime 可以复制到包内。
 - 打包必须在目标平台家族上原生完成，不提供跨平台编译。
 - Lua 5.5 安装路径要求 LuaRocks 3.13.0 或更新版本。
+- native profile 已覆盖 x86/x86_64，Windows 生成代码对 x86/x86_64 固定 `_WIN32_WINNT=0x0501`，PE subsystem 分别为 5.01/5.02。
+- 1.3.0 已加入 i686/x86_64 MinGW 生成源码与 XP import/subsystem 静态检查、Windows XP onefile watchdog 后备及 Linux native x86 CI。
 
-但当前检出的 1.0 默认路径还不能直接完成全部 Windows 发布目标：它能识别 `x86`，随后由 Windows profile guard 对非 x86_64 返回 `UnsupportedPlatformError`，随附 MSVC recipe 和测试矩阵也固定为 x64。这证明当前未修改路径不能直接交付 yaca 的 x86/XP 包，但不证明 launcher/bundler 的底层设计无法支持 x86，也不构成 XP 不兼容结论。x64 默认路线同样没有证明 Windows 7 SP1 最低系统、Lua 5.5 与 yaca 最终依赖闭包。正确前置是在最后打包阶段分别 qualification，再按证据判断无需修改或只做必要的 guard/toolchain/profile 适配；取得 Win32 XP--11、Win64 7 SP1--11 的最终产物与完整证据前，两条 Windows release 都保持 `evidence-blocked`。
+此前记录的“Windows profile guard 拒绝 x86 / recipe 仅 x64”已被 1.3.0 的实现与测试取代，不能继续作为当前阻塞原因。现存缺口是 **yaca-specific qualification**：尚未用 yaca 的 Lua 5.5 入口、XML 模块、curl/CA 与最终最小依赖闭包生成 Win32/Win64 候选，也没有 XP--11、Win7--11 的完整目标机证据。luainstaller 自身把真实 XP 列为 supplemental evidence，而 yaca 的 D-007/D-056 仍把 XP 完整测试设为硬门，因此 P0-16 只从“工具链能力未知”降为“候选与目标证据未完成”，没有通过。
 
 ## XML 库候选现状
 
@@ -79,7 +80,7 @@ luainstaller 负责把 Lua 入口、Lua/C 模块和最终确认的最小运行�
 
 ### 旧 Windows
 
-luainstaller 当前公开验证的是现代 Windows x86_64 + MSVC，默认入口的 profile guard 会拒绝 Windows x86。这个门禁与 x64-only recipe 是当前发布路径事实，不是底层 x86 不可行证明；代码中也没有发现 XP 专用版本拒绝。Win32 x86/XP 能力仍须通过 qualification 得出，目录 launcher 能否在 XP 上运行取决于编译器、CRT、最低 Win32 API、Lua DLL、LuaExpat/Expat 和依赖工具；Win64 路线还需证明 Windows 7 SP1 下的同一闭包。yaca v0.1 采用目录 zip/原地 executable，不采用更复杂的单文件自解压产品形态。
+luainstaller 1.3.0 已消除旧的 x86 profile guard，并提供 XP API/subsystem、MinGW import closure 与 watchdog 的现代机静态证据；这足以支持制定 yaca qualification 计划，但不等于真实 XP 运行通过。Win32 x86/XP 仍取决于 XP-capable compiler/CRT、Lua DLL、LuaExpat/Expat、curl/TLS 与最终依赖闭包；Win64 路线还需证明 Windows 7 SP1 下的同一闭包。yaca v0.1 采用目录 zip/原地 executable，不采用更复杂的单文件自解压产品形态。
 
 ### CentOS 7
 
