@@ -242,6 +242,9 @@ local function input(double_check, context_generation)
         view_manifest_ref = "view-manifest",
         double_check = double_check == true,
         context_generation = context_generation or 1,
+        model_request_limit = 20,
+        tool_call_limit = 20,
+        queue_limit = 9,
     }
 end
 
@@ -263,6 +266,9 @@ local function published_handoff()
             prompt_snapshot = first.prompt_snapshot,
             tool_registry_snapshot = first.tool_registry_snapshot,
             view_manifest_snapshot = first.view_manifest_ref,
+            model_request_limit = first.model_request_limit,
+            tool_call_limit = first.tool_call_limit,
+            queue_limit = first.queue_limit,
         },
     }
 end
@@ -726,10 +732,10 @@ return {
         {
             name = "tool and request caps pair accepted calls before budget exhaustion",
             run = function()
-                local capped = fixture({}, {
-                    hard_caps = { tool_calls = 1, steps = 8 },
-                })
-                assert(capped.loop:begin_main(input(false)))
+                local capped = fixture({}, { hard_caps = { steps = 8 } })
+                local capped_input = input(false)
+                capped_input.tool_call_limit = 1
+                assert(capped.loop:begin_main(capped_input))
                 assert(capped.loop:accept_model_response(response(capped.loop, {
                     tag = "over-tool-cap",
                     calls = { call("read", 1), call("read", 2) },

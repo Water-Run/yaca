@@ -66,7 +66,7 @@ local function options(queue_maximum)
     }
 end
 
-local function turn_input(text_value, source, generation, double_check)
+local function turn_input(text_value, source, generation, double_check, queue_limit)
     return {
         text = text_value,
         source = source,
@@ -78,6 +78,9 @@ local function turn_input(text_value, source, generation, double_check)
         view_manifest_ref = "view-manifest-1",
         double_check = double_check == true,
         context_generation = generation,
+        model_request_limit = 20,
+        tool_call_limit = 20,
+        queue_limit = queue_limit or 9,
     }
 end
 
@@ -186,7 +189,8 @@ local function fixture(settings)
             specification.text,
             specification.source,
             specification.context_generation,
-            settings.double_check
+            settings.double_check,
+            settings.queue_maximum
         )
     end
 
@@ -210,7 +214,7 @@ local function fixture(settings)
         snapshots = snapshot_port,
         side = side_port,
         views = false,
-    }, options(settings.queue_maximum)))
+    }, options()))
     return {
         loop = loop,
         events = events,

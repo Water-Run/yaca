@@ -484,6 +484,9 @@ local function validate_publication_options(options)
         platform_kind = true,
         maximum_create_attempts = true,
         maximum_model_view_bytes = true,
+        default_model_request_limit = true,
+        default_tool_call_limit = true,
+        maximum_queue_items = true,
     }
     for key in pairs(options) do
         if type(key) ~= "string" or not allowed[key] then
@@ -498,6 +501,9 @@ local function validate_publication_options(options)
         or not valid_integer(options.maximum_create_attempts, 1)
         or options.maximum_create_attempts > 256
         or not valid_integer(options.maximum_model_view_bytes, 1)
+        or not valid_integer(options.default_model_request_limit, 1)
+        or not valid_integer(options.default_tool_call_limit, 1)
+        or not valid_integer(options.maximum_queue_items, 1)
     then
         return nil, failure(
             "InvalidContextPublication",
@@ -643,12 +649,32 @@ function M.new_context_publication(ports, options)
             specification.message
         )
         if not bundle then return nil, bundle_error end
+        local model_request_limit = generation.agent.max_turn_model_requests
+            or admitted.default_model_request_limit
+        local tool_call_limit = generation.agent.max_turn_tool_calls
+            or admitted.default_tool_call_limit
+        local queue_limit = generation.agent.queue_max_items
+        if not valid_integer(model_request_limit, 1)
+            or model_request_limit > admitted.default_model_request_limit
+            or not valid_integer(tool_call_limit, 1)
+            or tool_call_limit > admitted.default_tool_call_limit
+            or not valid_integer(queue_limit, 1)
+            or queue_limit > admitted.maximum_queue_items
+        then
+            return nil, failure(
+                "SnapshotUnavailable",
+                "configured Agent limits exceed the release turn caps"
+            )
+        end
         return {
             model = model_digest,
             permission = permission_digest,
             config = config_digest,
             prompt = bundle.digest,
             tool_registry = admitted_ports.tool_registry.digest,
+            model_request_limit = model_request_limit,
+            tool_call_limit = tool_call_limit,
+            queue_limit = queue_limit,
         }
     end
 
@@ -855,6 +881,9 @@ function M.new_context_publication(ports, options)
                         prompt_snapshot = snapshot.prompt,
                         tool_registry_snapshot = snapshot.tool_registry,
                         view_manifest_snapshot = snapshot.view,
+                        model_request_limit = snapshot.model_request_limit,
+                        tool_call_limit = snapshot.tool_call_limit,
+                        queue_limit = snapshot.queue_limit,
                     }, "first Context publication receipt")
                     active = { writer = writer, document = document, receipt = receipt }
                     return receipt
@@ -971,18 +1000,16 @@ function M.new_context_publication(ports, options)
         if not active or not active.document then
             return nil, failure("ContextNotPublished", "Context turn snapshot has no durable source")
         end
-        if type(observation) ~= "table"
-            or dense_count(observation) ~= nil
-            or type(observation.expected_context_generation) ~= "number"
-            or math.type(observation.expected_context_generation) ~= "integer"
-            or observation.expected_context_generation < 1
-        then
+        if type(observation) ~= "table" then
             return nil, failure("InvalidTurnSnapshot", "Context turn observation is invalid")
         end
         for key in pairs(observation) do
             if key ~= "expected_context_generation" then
                 return nil, failure("InvalidTurnSnapshot", "Context turn observation is ambiguous")
             end
+        end
+        if not valid_integer(observation.expected_context_generation, 1) then
+            return nil, failure("InvalidTurnSnapshot", "Context turn observation is invalid")
         end
         if observation.expected_context_generation ~= active.document.generation then
             return nil, failure("StaleContextObservation", "Context turn observation is stale")
@@ -1060,6 +1087,9 @@ function M.new_context_publication(ports, options)
             view_manifest_ref = active.document.model_view.active_manifest.digest,
             double_check = settings.double_check,
             context_generation = active.document.generation,
+            model_request_limit = snapshot.model_request_limit,
+            tool_call_limit = snapshot.tool_call_limit,
+            queue_limit = snapshot.queue_limit,
         }, "durable Runtime turn snapshot")
     end
 
@@ -1597,6 +1627,9 @@ function M.new_draft(generation, workspace, options, publication)
                 view_manifest_ref = publication_receipt.view_manifest_snapshot,
                 double_check = settings.double_check,
                 context_generation = publication_receipt.generation,
+                model_request_limit = publication_receipt.model_request_limit,
+                tool_call_limit = publication_receipt.tool_call_limit,
+                queue_limit = publication_receipt.queue_limit,
             }, "published first-turn input"),
             binding = readonly({
                 first_sequence = publication_receipt.first_sequence,
@@ -1612,6 +1645,9 @@ function M.new_draft(generation, workspace, options, publication)
                 prompt_snapshot = publication_receipt.prompt_snapshot,
                 tool_registry_snapshot = publication_receipt.tool_registry_snapshot,
                 view_manifest_snapshot = publication_receipt.view_manifest_snapshot,
+                model_request_limit = publication_receipt.model_request_limit,
+                tool_call_limit = publication_receipt.tool_call_limit,
+                queue_limit = publication_receipt.queue_limit,
             }, "published first-turn binding"),
         }, "published first-turn handoff")
     end

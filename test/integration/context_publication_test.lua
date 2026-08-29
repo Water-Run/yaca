@@ -85,7 +85,7 @@ local function generation()
         auto_rename_disabled = false,
         general = { system_prompt = "global instructions", startup_self_test = "off" },
         tui = { color = true },
-        agent = { double_check = true },
+        agent = { double_check = true, queue_max_items = 9 },
         network = { retry_count = 2 },
         exec = { timeout_ms = 1000 },
         context = { recent = 8 },
@@ -279,6 +279,9 @@ local function fixture(settings)
         platform_kind = settings.platform_kind or "posix",
         maximum_create_attempts = 4,
         maximum_model_view_bytes = 262144,
+        default_model_request_limit = 64,
+        default_tool_call_limit = 256,
+        maximum_queue_items = 9,
     }))
     return publication, observations, path_service, registry, safety_service
 end
@@ -309,6 +312,9 @@ return {
                 A.equal(receipt.generation, 1)
                 A.equal(receipt.event_count, 2)
                 A.equal(receipt.tool_registry_snapshot, registry.digest)
+                A.equal(receipt.model_request_limit, 64)
+                A.equal(receipt.tool_call_limit, 256)
+                A.equal(receipt.queue_limit, 9)
                 A.truthy(receipt.view_manifest_snapshot ~= receipt.prompt_snapshot)
                 A.equal(
                     receipt.context_hash,
@@ -460,6 +466,9 @@ return {
                 A.equal(turn_snapshot.view_manifest_ref, next_view.digest)
                 A.equal(turn_snapshot.tool_registry_snapshot, registry.digest)
                 A.falsy(turn_snapshot.double_check)
+                A.equal(turn_snapshot.model_request_limit, 64)
+                A.equal(turn_snapshot.tool_call_limit, 256)
+                A.equal(turn_snapshot.queue_limit, 9)
                 A.falsy(turn_snapshot.config_generation == next_generation.id)
                 A.falsy(turn_snapshot.prompt_snapshot == receipt.prompt_snapshot)
                 local stale, stale_error = publication.capture_turn({

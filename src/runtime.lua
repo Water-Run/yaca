@@ -689,6 +689,7 @@ local function validate_turn_input(input, limits)
         prompt_snapshot = true, tool_registry_snapshot = true,
         view_manifest_ref = true, double_check = true,
         context_generation = true,
+        model_request_limit = true, tool_call_limit = true, queue_limit = true,
     }
     if not exact_fields(input, allowed)
         or not valid_runtime_text(input.text, limits.hard_caps.message_bytes, false)
@@ -701,6 +702,12 @@ local function validate_turn_input(input, limits)
         or not valid_runtime_text(input.view_manifest_ref, limits.hard_caps.message_bytes, false)
         or type(input.double_check) ~= "boolean"
         or not integer_at_least(input.context_generation, 1)
+        or not integer_at_least(input.model_request_limit, 1)
+        or input.model_request_limit > limits.hard_caps.model_requests
+        or not integer_at_least(input.tool_call_limit, 1)
+        or input.tool_call_limit > limits.hard_caps.tool_calls
+        or not integer_at_least(input.queue_limit, 1)
+        or input.queue_limit > limits.lanes.queue_maximum
     then
         return nil, failure("InvalidTurnInput", "main input or its frozen snapshot is invalid")
     end
@@ -884,6 +891,7 @@ function M.new_agent_loop(ports, options)
     local pending
     local pending_steer
     local queue_items = {}
+    local current_queue_limit = limits.lanes.queue_maximum
     local queue_serial = 0
     local queue_display_serial = 0
     local side_serial = 0
@@ -1251,12 +1259,12 @@ function M.new_agent_loop(ports, options)
             return "active-time"
         end
         if prospective == "model" then
-            if turn.counters.model_requests >= limits.hard_caps.model_requests then
+            if turn.counters.model_requests >= turn.snapshot.model_request_limit then
                 return "model-requests"
             end
             if turn.counters.steps >= limits.hard_caps.steps then return "steps" end
         elseif prospective == "review" then
-            if turn.counters.model_requests >= limits.hard_caps.model_requests then
+            if turn.counters.model_requests >= turn.snapshot.model_request_limit then
                 return "model-requests"
             end
             if turn.counters.reviews >= limits.hard_caps.reviews then return "reviews" end
@@ -2055,6 +2063,7 @@ function M.new_agent_loop(ports, options)
         local turn_id = "turn-" .. tostring(turn_serial)
         local message_id = turn_id .. ":message:" .. tostring(message_serial)
         turn = initialize_main_turn(snapshot, turn_id)
+        current_queue_limit = snapshot.queue_limit
         local turn_fields = {
             kind = "main",
             configGeneration = snapshot.config_generation,
@@ -2154,6 +2163,9 @@ function M.new_agent_loop(ports, options)
             prompt_snapshot = true,
             tool_registry_snapshot = true,
             view_manifest_snapshot = true,
+            model_request_limit = true,
+            tool_call_limit = true,
+            queue_limit = true,
         })
             or binding.first_sequence ~= 1
             or binding.last_sequence ~= sequence
@@ -2169,6 +2181,9 @@ function M.new_agent_loop(ports, options)
             or binding.prompt_snapshot ~= snapshot.prompt_snapshot
             or binding.tool_registry_snapshot ~= snapshot.tool_registry_snapshot
             or binding.view_manifest_snapshot ~= snapshot.view_manifest_ref
+            or binding.model_request_limit ~= snapshot.model_request_limit
+            or binding.tool_call_limit ~= snapshot.tool_call_limit
+            or binding.queue_limit ~= snapshot.queue_limit
             or snapshot.context_generation ~= context_generation
         then
             return nil, failure(
@@ -2181,6 +2196,7 @@ function M.new_agent_loop(ports, options)
         turn_serial = 1
         message_serial = 1
         turn = initialize_main_turn(snapshot, binding.turn_id)
+        current_queue_limit = snapshot.queue_limit
         turn.trace.durable_barriers[1] = "turn-1:initial-publication"
         transition("Preparing")
         local admitted, request_error = request_model("main")
@@ -2245,11 +2261,11 @@ function M.new_agent_loop(ports, options)
         then
             return nil, failure("InvalidQueueAction", "queued input is invalid")
         end
-        if #queue_items >= limits.lanes.queue_maximum then
+        if #queue_items >= current_queue_limit then
             return nil, failure(
                 "QueueFull",
                 "queue hard limit reached; the new draft was not consumed",
-                { preserved_text = command.text, maximum = limits.lanes.queue_maximum }
+                { preserved_text = command.text, maximum = current_queue_limit }
             )
         end
         queue_serial = queue_serial + 1
@@ -2284,7 +2300,7 @@ function M.new_agent_loop(ports, options)
         return assert(freeze({
             items = items,
             count = #items,
-            maximum = limits.lanes.queue_maximum,
+            maximum = current_queue_limit,
             context_generation = context_generation,
         }, nil, "queue projection"))
     end
@@ -3145,7 +3161,7 @@ function M.new_agent_loop(ports, options)
             turn.trace.tool_calls[#turn.trace.tool_calls + 1] = call.id
         end
         transition("DispatchingTools")
-        if turn.counters.tool_calls > limits.hard_caps.tool_calls
+        if turn.counters.tool_calls > turn.snapshot.tool_call_limit
             or turn.counters.steps > limits.hard_caps.steps
         then
             local skipped, skip_error = skip_remaining(
@@ -3705,7 +3721,7 @@ function M.new_agent_loop(ports, options)
             concurrent_tools = active_tool and 1 or 0,
             queue = queue_projection,
             queue_count = #queue_projection,
-            queue_maximum = limits.lanes.queue_maximum,
+            queue_maximum = current_queue_limit,
             pending_steer_message_id = pending_steer and pending_steer.message_id or false,
             side_state = side and (side.cancel_pending and "cancelling" or "active") or "idle",
             active_side_id = side and side.id or false,

@@ -1379,16 +1379,237 @@ local function tool_options(composed, generation, workspace_path)
     }
 end
 
-local function runtime_options(generation)
+local function runtime_options()
     local candidate = copy_plain(AGENT_RELEASE_OPTIONS.runtime, {})
     if not candidate then return nil end
-    candidate.hard_caps.model_requests = generation.agent.max_turn_model_requests
-        or candidate.hard_caps.model_requests
-    candidate.hard_caps.tool_calls = generation.agent.max_turn_tool_calls
-        or candidate.hard_caps.tool_calls
-    candidate.lanes.queue_maximum = generation.agent.queue_max_items
-        or candidate.lanes.queue_maximum
     return candidate
+end
+
+local function build_turn_ports(composed, shared, turn)
+    local generation = turn.generation
+    local contexts = composed.contexts
+    local permission_module = require("permission")
+    local permission_service, permission_error = permission_module.new({
+        safety = contexts.safety,
+    }, AGENT_RELEASE_OPTIONS.permission)
+    if not permission_service then return nil, permission_error end
+    local configured_permission = generation.permissions[turn.permission]
+    local matrix = permission_matrix(configured_permission)
+    if not matrix then
+        return nil, failure(
+            "PermissionUnavailable",
+            "the selected Permission generation is unavailable"
+        )
+    end
+    local profile, profile_error = permission_service:profile({
+        name = turn.permission,
+        config_generation = generation.id,
+        matrix = matrix,
+        description = configured_permission.description,
+        system_prompt = configured_permission.system_prompt,
+    })
+    if not profile then return nil, profile_error end
+
+    local inspected, workspace = composed.backend.filesystem.direct_inspect(
+        turn.workspace
+    )
+    local workspace_key = inspected and workspace_identity_key(workspace.identity) or nil
+    if not inspected or not workspace_key then
+        return nil, inspected and failure(
+            "InvalidWorkspace",
+            "the durable workspace identity is unavailable to direct Tools"
+        ) or workspace
+    end
+    local authorization = tool_authorization_port(contexts.safety, {
+        permission_snapshot_digest = profile.snapshot_digest,
+        config_generation = generation.id,
+        workspace_identity = workspace_key,
+        double_check = turn.double_check,
+    })
+    local secret_registry = readonly({
+        scan = generation.scan_registered_secrets,
+        new_stream_scanner = generation.new_stream_scanner,
+    }, "turn secret scanner")
+    local tools_module = require("tools")
+    local tool_service, tool_error = tools_module.new({
+        filesystem = composed.backend.filesystem,
+        path = contexts.path,
+        safety = contexts.safety,
+        secret_registry = secret_registry,
+        authorization = authorization,
+        processes = composed.backend.processes,
+        operations = shared.operations,
+    }, tool_options(composed, generation, turn.workspace))
+    if not tool_service then return nil, tool_error end
+    if tool_service.registry_digest ~= turn.tool_registry_snapshot then
+        return nil, failure(
+            "ToolRegistryMismatch",
+            "the production Tool registry does not match the durable turn snapshot"
+        )
+    end
+    local tool_port, tool_port_error = tools_module.new_agent_port({
+        service = tool_service,
+        permission = permission_service,
+        profile = profile,
+        operation_journal = shared.operation_journal,
+        clock = shared.clock,
+    }, {
+        config_generation = generation.id,
+        double_check = turn.double_check,
+        action_review_enabled = generation.agent.action_review_enabled,
+        exec_policy = {
+            config_generation = generation.id,
+            environment_mode = generation.exec.environment_mode,
+            environment = {},
+            output_limit_bytes = (generation.exec.max_output_kb or 1024) * 1024,
+            deadline_ms = generation.exec.timeout_ms or 3600000,
+            decoder = "utf-8-strict-candidate-v1",
+        },
+    })
+    if not tool_port then return nil, tool_port_error end
+
+    local model_module = require("model")
+    local views = readonly({
+        resolve_view = composed.publication.resolve_view,
+    }, "active durable Model views")
+    local request_builder, builder_error = model_module.new_request_builder({
+        adapter = composed.model_adapter,
+        prompt = contexts.prompt,
+        views = views,
+        generation = generation,
+        tool_registry = contexts.tool_registry,
+    }, {
+        model_name = turn.model,
+        permission_name = turn.permission,
+        model_snapshot = turn.model_snapshot,
+        permission_snapshot = turn.permission_snapshot,
+        prompt_snapshot = turn.prompt_snapshot,
+        tool_registry_snapshot = turn.tool_registry_snapshot,
+        initial_message = turn.initial_message,
+        context_prompt = turn.context_prompt,
+        continuation_instruction = CONTINUATION_INSTRUCTION,
+        default_connect_timeout_ms = 120000,
+        default_request_timeout_ms = 3600000,
+        default_retry_base_delay_ms = 1000,
+        default_max_output_tokens = 4096,
+    })
+    if not request_builder then return nil, builder_error end
+    local model_activity, model_activity_error = model_module.new_activity({
+        adapter = composed.model_adapter,
+        transport = composed.network,
+        safety = contexts.safety,
+        clock = composed.backend.clock_port,
+        requests = request_builder,
+    }, composed.model_activity_options)
+    if not model_activity then return nil, model_activity_error end
+
+    local review_builder, review_builder_error = model_module.new_review_request_builder({
+        adapter = composed.model_adapter,
+        prompt = contexts.prompt,
+        views = views,
+        generation = generation,
+        codec = shared.codec,
+        safety = contexts.safety,
+    }, {
+        main_model_name = turn.model,
+        permission_name = turn.permission,
+        config_snapshot = turn.config_snapshot,
+        context_prompt = turn.context_prompt,
+        default_connect_timeout_ms = 120000,
+        default_request_timeout_ms = 3600000,
+        default_retry_base_delay_ms = 1000,
+        default_max_output_tokens = 1024,
+        maximum_binding_bytes = 65536,
+    })
+    if not review_builder then return nil, review_builder_error end
+    local review_activity, review_activity_error = model_module.new_activity({
+        adapter = composed.model_adapter,
+        transport = composed.network,
+        safety = contexts.safety,
+        clock = composed.backend.clock_port,
+        requests = review_builder,
+    }, composed.model_activity_options)
+    if not review_activity then return nil, review_activity_error end
+    local review_port, review_port_error = model_module.new_review_port({
+        activity = review_activity,
+        builder = review_builder,
+        safety = contexts.safety,
+        codec = shared.codec,
+    }, {
+        maximum_poll_events = 128,
+        maximum_reason_bytes = 32768,
+        maximum_gap_bytes = 32768,
+    })
+    if not review_port then return nil, review_port_error end
+
+    return {
+        generation = generation,
+        model = model_activity,
+        tools = tool_port,
+        reviews = review_port,
+    }
+end
+
+local function new_turn_catalog(initial)
+    local current = initial
+    local function invoke(domain, method, ...)
+        return current[domain][method](...)
+    end
+    local model = readonly({
+        start = function(...) return invoke("model", "start", ...) end,
+        cancel = function(...) return invoke("model", "cancel", ...) end,
+        poll = function(...) return invoke("model", "poll", ...) end,
+        status = function(...) return invoke("model", "status", ...) end,
+    }, "generation-bound Model port")
+    local tools = readonly({
+        admit = function(...) return invoke("tools", "admit", ...) end,
+        start = function(...) return invoke("tools", "start", ...) end,
+        cancel = function(...) return invoke("tools", "cancel", ...) end,
+        poll = function(...) return invoke("tools", "poll", ...) end,
+        prepare_approval = function(...)
+            return invoke("tools", "prepare_approval", ...)
+        end,
+        record_approval = function(...)
+            return invoke("tools", "record_approval", ...)
+        end,
+        active_handle = function(...) return invoke("tools", "active_handle", ...) end,
+    }, "generation-bound Tool port")
+    local reviews = readonly({
+        start = function(...) return invoke("reviews", "start", ...) end,
+        cancel = function(...) return invoke("reviews", "cancel", ...) end,
+        poll = function(...) return invoke("reviews", "poll", ...) end,
+        status = function(...) return invoke("reviews", "status", ...) end,
+    }, "generation-bound review port")
+    local catalog = {}
+
+    function catalog.idle()
+        local model_ok, model_status = pcall(current.model.status)
+        local review_ok, review_status = pcall(current.reviews.status)
+        local tool_ok, tool_handle = pcall(current.tools.active_handle)
+        return model_ok and type(model_status) == "table" and model_status.state == "idle"
+            and review_ok and type(review_status) == "table" and review_status.state == "idle"
+            and tool_ok and tool_handle == false
+    end
+
+    function catalog.replace(candidate)
+        if not catalog.idle() then
+            return nil, failure(
+                "TurnActivitiesBusy",
+                "a new generation cannot replace active turn activities"
+            )
+        end
+        current = candidate
+        return true
+    end
+
+    function catalog.generation()
+        return current.generation
+    end
+
+    catalog.model = model
+    catalog.tools = tools
+    catalog.reviews = reviews
+    return readonly(catalog, "production turn catalog")
 end
 
 local function network_options(layout)
@@ -2112,6 +2333,9 @@ function M.compose_runtime(runtime)
             platform_kind = runtime.identity.os == "windows" and "windows" or "posix",
             maximum_create_attempts = 16,
             maximum_model_view_bytes = 262144,
+            default_model_request_limit = AGENT_RELEASE_OPTIONS.runtime.hard_caps.model_requests,
+            default_tool_call_limit = AGENT_RELEASE_OPTIONS.runtime.hard_caps.tool_calls,
+            maximum_queue_items = AGENT_RELEASE_OPTIONS.runtime.lanes.queue_maximum,
         })
         if not publication then contexts = nil end
     end
@@ -2194,8 +2418,8 @@ end
 ---Publishes one draft's first main message and composes the production Agent
 -- owner over that exact durable generation. No Model request or Tool effect is
 -- reachable before draft.begin_main and Runtime's next journal barrier both
--- succeed. Later-turn snapshot/side admission remains deliberately unavailable
--- until the dynamic generation catalog is attached by the interactive owner.
+-- succeed. Every later main turn reloads the complete Config and atomically
+-- replaces its generation-bound Model/Tool/review ports while all are idle.
 function M.start_published_agent(composed, chat, message, source)
     if type(composed) ~= "table"
         or type(composed.backend) ~= "table"
@@ -2204,6 +2428,12 @@ function M.start_published_agent(composed, chat, message, source)
         or type(composed.model_adapter) ~= "table"
         or type(composed.network) ~= "table"
         or type(composed.identity) ~= "table"
+        or type(composed.config) ~= "table"
+        or type(composed.config.reload_file) ~= "function"
+        or type(composed.layout) ~= "table"
+        or type(composed.layout.config_path) ~= "string"
+        or type(composed.publication.turn_context) ~= "function"
+        or type(composed.publication.capture_turn) ~= "function"
         or type(chat) ~= "table"
         or chat.kind ~= "run-chat"
         or chat.outcome ~= "ready"
@@ -2227,15 +2457,6 @@ function M.start_published_agent(composed, chat, message, source)
     end
     local generation = chat.draft.config_generation()
     local status = chat.draft.status()
-    local configured_permission = generation.permissions[status.permission]
-    local matrix = permission_matrix(configured_permission)
-    if not matrix then
-        chat.draft.close()
-        return nil, failure(
-            "PermissionUnavailable",
-            "the published Permission generation is unavailable"
-        )
-    end
 
     local contexts = composed.contexts
     local operation_journal = composed.publication.operation_journal()
@@ -2245,162 +2466,85 @@ function M.start_published_agent(composed, chat, message, source)
         journal = operation_journal,
     }, assert(copy_plain(AGENT_RELEASE_OPTIONS.operation, {})))
     if not operations then chat.draft.close(); return nil, operation_error end
-
-    local permission_module = require("permission")
-    local permission_service, permission_error = permission_module.new({
-        safety = contexts.safety,
-    }, AGENT_RELEASE_OPTIONS.permission)
-    if not permission_service then chat.draft.close(); return nil, permission_error end
-    local profile, profile_error = permission_service:profile({
-        name = status.permission,
-        config_generation = generation.id,
-        matrix = matrix,
-        description = configured_permission.description,
-        system_prompt = configured_permission.system_prompt,
-    })
-    if not profile then chat.draft.close(); return nil, profile_error end
-
-    local inspected, workspace = composed.backend.filesystem.direct_inspect(
-        status.workspace
-    )
-    local workspace_key = inspected and workspace_identity_key(workspace.identity) or nil
-    if not inspected or not workspace_key then
-        chat.draft.close()
-        return nil, inspected and failure(
-            "InvalidWorkspace",
-            "the published workspace identity is unavailable to direct Tools"
-        ) or workspace
-    end
-    local authorization = tool_authorization_port(contexts.safety, {
-        permission_snapshot_digest = profile.snapshot_digest,
-        config_generation = generation.id,
-        workspace_identity = workspace_key,
-        double_check = status.double_check,
-    })
-    local secret_registry = readonly({
-        scan = generation.scan_registered_secrets,
-        new_stream_scanner = generation.new_stream_scanner,
-    }, "turn secret scanner")
-    local tools_module = require("tools")
-    local tool_service, tool_error = tools_module.new({
-        filesystem = composed.backend.filesystem,
-        path = contexts.path,
-        safety = contexts.safety,
-        secret_registry = secret_registry,
-        authorization = authorization,
-        processes = composed.backend.processes,
-        operations = operations,
-    }, tool_options(composed, generation, status.workspace))
-    if not tool_service then chat.draft.close(); return nil, tool_error end
-    if tool_service.registry_digest ~= handoff.input.tool_registry_snapshot then
-        chat.draft.close()
-        return nil, failure(
-            "ToolRegistryMismatch",
-            "the production Tool registry does not match the durable first turn"
-        )
-    end
-
     local clock = production_clock(composed.backend)
-    local tool_port, tool_port_error = tools_module.new_agent_port({
-        service = tool_service,
-        permission = permission_service,
-        profile = profile,
+    local json_module = require("json")
+    local codec, codec_error = json_module.new(AGENT_RELEASE_OPTIONS.json)
+    if not codec then chat.draft.close(); return nil, codec_error end
+    local shared = {
+        operations = operations,
         operation_journal = operation_journal,
         clock = clock,
-    }, {
-        config_generation = generation.id,
-        double_check = status.double_check,
-        action_review_enabled = generation.agent.action_review_enabled,
-        exec_policy = {
-            config_generation = generation.id,
-            environment_mode = generation.exec.environment_mode,
-            environment = {},
-            output_limit_bytes = (generation.exec.max_output_kb or 1024) * 1024,
-            deadline_ms = generation.exec.timeout_ms or 3600000,
-            decoder = "utf-8-strict-candidate-v1",
-        },
-    })
-    if not tool_port then chat.draft.close(); return nil, tool_port_error end
-
-    local model_module = require("model")
-    local views = readonly({
-        resolve_view = composed.publication.resolve_view,
-    }, "active durable Model views")
-    local request_builder, builder_error = model_module.new_request_builder({
-        adapter = composed.model_adapter,
-        prompt = contexts.prompt,
-        views = views,
+        codec = codec,
+    }
+    local first_ports, first_ports_error = build_turn_ports(composed, shared, {
         generation = generation,
-        tool_registry = contexts.tool_registry,
-    }, {
-        model_name = status.model,
-        permission_name = status.permission,
+        workspace = status.workspace,
+        model = status.model,
+        permission = status.permission,
+        double_check = status.double_check,
+        context_prompt = status.context_prompt,
+        initial_message = handoff.input.text,
+        config_snapshot = handoff.input.config_generation,
         model_snapshot = handoff.input.model_snapshot,
         permission_snapshot = handoff.input.permission_snapshot,
         prompt_snapshot = handoff.input.prompt_snapshot,
         tool_registry_snapshot = handoff.input.tool_registry_snapshot,
-        initial_message = handoff.input.text,
-        context_prompt = status.context_prompt,
-        continuation_instruction = CONTINUATION_INSTRUCTION,
-        default_connect_timeout_ms = 120000,
-        default_request_timeout_ms = 3600000,
-        default_retry_base_delay_ms = 1000,
-        default_max_output_tokens = 4096,
     })
-    if not request_builder then chat.draft.close(); return nil, builder_error end
-    local model_activity, model_activity_error = model_module.new_activity({
-        adapter = composed.model_adapter,
-        transport = composed.network,
-        safety = contexts.safety,
-        clock = composed.backend.clock_port,
-        requests = request_builder,
-    }, composed.model_activity_options)
-    if not model_activity then chat.draft.close(); return nil, model_activity_error end
-
-    local json_module = require("json")
-    local codec, codec_error = json_module.new(AGENT_RELEASE_OPTIONS.json)
-    if not codec then chat.draft.close(); return nil, codec_error end
-    local review_builder, review_builder_error = model_module.new_review_request_builder({
-        adapter = composed.model_adapter,
-        prompt = contexts.prompt,
-        views = views,
-        generation = generation,
-        codec = codec,
-        safety = contexts.safety,
-    }, {
-        main_model_name = status.model,
-        permission_name = status.permission,
-        config_snapshot = handoff.input.config_generation,
-        context_prompt = status.context_prompt,
-        default_connect_timeout_ms = 120000,
-        default_request_timeout_ms = 3600000,
-        default_retry_base_delay_ms = 1000,
-        default_max_output_tokens = 1024,
-        maximum_binding_bytes = 65536,
-    })
-    if not review_builder then chat.draft.close(); return nil, review_builder_error end
-    local review_activity, review_activity_error = model_module.new_activity({
-        adapter = composed.model_adapter,
-        transport = composed.network,
-        safety = contexts.safety,
-        clock = composed.backend.clock_port,
-        requests = review_builder,
-    }, composed.model_activity_options)
-    if not review_activity then chat.draft.close(); return nil, review_activity_error end
-    local review_port, review_port_error = model_module.new_review_port({
-        activity = review_activity,
-        builder = review_builder,
-        safety = contexts.safety,
-        codec = codec,
-    }, {
-        maximum_poll_events = 128,
-        maximum_reason_bytes = 32768,
-        maximum_gap_bytes = 32768,
-    })
-    if not review_port then chat.draft.close(); return nil, review_port_error end
+    if not first_ports then chat.draft.close(); return nil, first_ports_error end
+    local catalog = new_turn_catalog(first_ports)
+    local snapshots = readonly({
+        capture = function(specification)
+            if type(specification) ~= "table" or specification.kind ~= "main" then
+                return nil, failure(
+                    "InvalidTurnSnapshot",
+                    "production snapshot catalog accepts only main turns"
+                )
+            end
+            if not catalog.idle() then
+                return nil, failure(
+                    "TurnActivitiesBusy",
+                    "a later turn cannot replace active generation ports"
+                )
+            end
+            local turn_context, context_error = composed.publication.turn_context({
+                expected_context_generation = specification.context_generation,
+            })
+            if not turn_context then return nil, context_error end
+            local next_generation, generation_error = composed.config.reload_file(
+                composed.layout.config_path,
+                turn_context.overrides
+            )
+            if not next_generation then return nil, generation_error end
+            local snapshot, snapshot_error = composed.publication.capture_turn({
+                generation = next_generation,
+                text = specification.text,
+                source = specification.source,
+                expected_context_generation = specification.context_generation,
+            })
+            if not snapshot then return nil, snapshot_error end
+            local candidate, candidate_error = build_turn_ports(composed, shared, {
+                generation = next_generation,
+                workspace = status.workspace,
+                model = next_generation.current_model,
+                permission = next_generation.current_permission,
+                double_check = next_generation.effective_double_check,
+                context_prompt = next_generation.context_prompt or "",
+                initial_message = snapshot.text,
+                config_snapshot = snapshot.config_generation,
+                model_snapshot = snapshot.model_snapshot,
+                permission_snapshot = snapshot.permission_snapshot,
+                prompt_snapshot = snapshot.prompt_snapshot,
+                tool_registry_snapshot = snapshot.tool_registry_snapshot,
+            })
+            if not candidate then return nil, candidate_error end
+            local replaced, replace_error = catalog.replace(candidate)
+            if not replaced then return nil, replace_error end
+            return snapshot
+        end,
+    }, "production turn snapshot port")
 
     local runtime_module = require("runtime")
-    local loop_options = runtime_options(generation)
+    local loop_options = runtime_options()
     if not loop_options then
         chat.draft.close()
         return nil, failure("InvalidAgentOptions", "production Agent caps could not be copied")
@@ -2408,10 +2552,10 @@ function M.start_published_agent(composed, chat, message, source)
     local loop, loop_error = runtime_module.new_agent_loop({
         clock = clock,
         journal = composed.publication,
-        model = model_activity,
-        tools = tool_port,
-        reviews = review_port,
-        snapshots = false,
+        model = catalog.model,
+        tools = catalog.tools,
+        reviews = catalog.reviews,
+        snapshots = snapshots,
         side = false,
         views = readonly({
             prepare = composed.publication.prepare_view,
@@ -2430,9 +2574,9 @@ function M.start_published_agent(composed, chat, message, source)
     if not admission then return fail_after_loop(admission_error) end
     local driver, driver_error = runtime_module.new_agent_activity_driver({
         loop = loop,
-        model = model_activity,
-        tools = tool_port,
-        reviews = review_port,
+        model = catalog.model,
+        tools = catalog.tools,
+        reviews = catalog.reviews,
         clock = clock,
     }, AGENT_RELEASE_OPTIONS.driver)
     if not driver then return fail_after_loop(driver_error) end
@@ -2446,16 +2590,17 @@ function M.start_published_agent(composed, chat, message, source)
         loop = loop,
         driver = driver,
         session = agent_session,
-        tools = tool_port,
+        tools = catalog.tools,
         draft = chat.draft,
         generation = generation,
+        current_generation = catalog.generation,
         capabilities = readonly({
             published_first_turn = true,
             model = true,
             tools = true,
             reviews = true,
             approvals = true,
-            later_turn_snapshots = false,
+            later_turn_snapshots = true,
             side = false,
             target_qualified = false,
         }, "published Agent capabilities"),

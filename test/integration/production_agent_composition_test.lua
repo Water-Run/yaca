@@ -51,11 +51,21 @@ local function fixture(settings)
             view_manifest_ref = "view-1",
             double_check = true,
             context_generation = 1,
+            model_request_limit = 7,
+            tool_call_limit = 11,
+            queue_limit = 5,
         },
         binding = {},
     }
     local generation = {
         id = "config-generation-1",
+        agent_ready = true,
+        current_model = "Primary",
+        current_permission = "Std",
+        effective_double_check = true,
+        effective_double_check_goal = "",
+        context_prompt = "workspace context",
+        auto_rename_disabled = false,
         general = { system_prompt = "global" },
         network = {},
         exec = {
@@ -84,6 +94,16 @@ local function fixture(settings)
         scan_registered_secrets = function() return {} end,
         new_stream_scanner = function() return {} end,
     }
+    local next_generation = {}
+    for key, value in pairs(generation) do next_generation[key] = value end
+    next_generation.id = "config-generation-2"
+    next_generation.agent = {
+        action_review_enabled = true,
+        max_turn_model_requests = 6,
+        max_turn_tool_calls = 10,
+        queue_max_items = 4,
+    }
+    local active_generation = generation
     local loop_status = {
         state = "RequestingModel",
         context_generation = 2,
@@ -122,6 +142,43 @@ local function fixture(settings)
             log[#log + 1] = "operation-journal"
             return operation_journal
         end,
+        turn_context = function(observation)
+            A.truthy(published)
+            A.equal(observation.expected_context_generation, 2)
+            log[#log + 1] = "turn-context"
+            return {
+                context_generation = 2,
+                overrides = {
+                    CurrentModel = "Primary",
+                    CurrentPermission = "Std",
+                    DoubleCheckOverride = true,
+                    DoubleCheckGoalOverride = "inherit",
+                    ContextPrompt = "workspace context",
+                    AutoRenameDisabled = false,
+                },
+            }
+        end,
+        capture_turn = function(specification)
+            A.equal(specification.text, "second turn")
+            A.equal(specification.source, "terminal")
+            A.equal(specification.expected_context_generation, 2)
+            log[#log + 1] = "capture-turn"
+            return {
+                text = specification.text,
+                source = specification.source,
+                config_generation = "config-snapshot-2",
+                model_snapshot = "model-snapshot-2",
+                permission_snapshot = "permission-snapshot-2",
+                prompt_snapshot = "prompt-snapshot-2",
+                tool_registry_snapshot = "registry-1",
+                view_manifest_ref = "view-1",
+                double_check = true,
+                context_generation = 2,
+                model_request_limit = 6,
+                tool_call_limit = 10,
+                queue_limit = 4,
+            }
+        end,
         resolve_view = function() return {} end,
         prepare_view = function() return {} end,
         commit = function() return true end,
@@ -140,8 +197,15 @@ local function fixture(settings)
         tool_registry = { digest = "registry-1", tools = {} },
     }
     local model_activities = {}
-    local tool_port = { poll = function() return {}, false end }
-    local review_port = { poll = function() return {} end }
+    local tool_port = {
+        poll = function() return {}, false end,
+        active_handle = function() return false end,
+    }
+    local review_port = {
+        poll = function() return {} end,
+        status = function() return { state = "idle" } end,
+    }
+    local runtime_ports
 
     local modules = {}
     modules.context = {
@@ -157,11 +221,11 @@ local function fixture(settings)
             A.equal(options.maximum_name_bytes, 128)
             local service = {}
             function service:profile(spec)
-                A.equal(spec.config_generation, generation.id)
+                A.equal(spec.config_generation, active_generation.id)
                 A.equal(spec.matrix.Read, "allow")
                 A.equal(spec.matrix.OutsideWorkspace, "confirm")
                 log[#log + 1] = "permission-profile"
-                return { snapshot_digest = "profile-snapshot-1" }
+                return { snapshot_digest = "profile-snapshot-" .. active_generation.id:sub(-1) }
             end
             return service
         end,
@@ -172,10 +236,10 @@ local function fixture(settings)
             A.equal(options.reserved_paths[1], "/release/__yaca__")
             A.equal(options.maximum_exec_output_bytes, 65536)
             local facts = {
-                permission_snapshot_digest = "profile-snapshot-1",
+                permission_snapshot_digest = "profile-snapshot-" .. active_generation.id:sub(-1),
                 approval_digest = "",
                 durable_intent_digest = "not-required:call-digest",
-                config_generation = generation.id,
+                config_generation = active_generation.id,
                 workspace_identity = "volume-1\0workspace-1\0directory",
                 double_check = true,
                 action_review = "not-required",
@@ -191,7 +255,7 @@ local function fixture(settings)
             return { registry_digest = settings.tool_registry_digest or "registry-1" }
         end,
         new_agent_port = function(_, options)
-            A.equal(options.config_generation, generation.id)
+            A.equal(options.config_generation, active_generation.id)
             A.equal(options.exec_policy.decoder, "utf-8-strict-candidate-v1")
             log[#log + 1] = "tool-port"
             return tool_port
@@ -199,24 +263,33 @@ local function fixture(settings)
     }
     modules.model = {
         new_request_builder = function(_, options)
-            A.equal(options.model_snapshot, "model-snapshot-1")
-            A.equal(options.prompt_snapshot, "prompt-snapshot-1")
+            local suffix = active_generation.id:sub(-1)
+            A.equal(options.model_snapshot, "model-snapshot-" .. suffix)
+            A.equal(options.prompt_snapshot, "prompt-snapshot-" .. suffix)
             A.equal(options.default_max_output_tokens, 4096)
             log[#log + 1] = "model-builder"
             return {}
         end,
         new_review_request_builder = function(_, options)
             A.equal(options.main_model_name, "Primary")
-            A.equal(options.config_snapshot, "config-snapshot-1")
+            A.equal(
+                options.config_snapshot,
+                "config-snapshot-" .. active_generation.id:sub(-1)
+            )
             A.equal(options.default_max_output_tokens, 1024)
             log[#log + 1] = "review-builder"
             return {}
         end,
         new_activity = function()
+            local serial = #model_activities + 1
             local activity = {
-                start = function() return {} end,
+                start = function()
+                    log[#log + 1] = "effect:model-activity-" .. tostring(serial)
+                    return {}
+                end,
                 cancel = function() return { outcome = "cancelled" } end,
                 poll = function() return {} end,
+                status = function() return { state = "idle" } end,
             }
             model_activities[#model_activities + 1] = activity
             log[#log + 1] = "model-activity-" .. tostring(#model_activities)
@@ -236,19 +309,23 @@ local function fixture(settings)
     modules.runtime = {
         new_agent_loop = function(ports, options)
             A.equal(ports.journal, publication)
-            A.equal(ports.model, model_activities[1])
-            A.equal(ports.tools, tool_port)
-            A.equal(ports.reviews, review_port)
-            A.equal(ports.snapshots, false)
+            A.truthy(ports.model ~= model_activities[1])
+            A.truthy(ports.tools ~= tool_port)
+            A.truthy(ports.reviews ~= review_port)
+            A.equal(type(ports.snapshots.capture), "function")
             A.equal(ports.side, false)
-            A.equal(options.hard_caps.model_requests, 7)
-            A.equal(options.hard_caps.tool_calls, 11)
-            A.equal(options.lanes.queue_maximum, 5)
+            A.equal(options.hard_caps.model_requests, 64)
+            A.equal(options.hard_caps.tool_calls, 256)
+            A.equal(options.lanes.queue_maximum, 9)
+            runtime_ports = ports
             log[#log + 1] = "agent-loop"
             return loop
         end,
         new_agent_activity_driver = function(ports, options)
             A.equal(ports.loop, loop)
+            A.equal(ports.model, runtime_ports.model)
+            A.equal(ports.tools, runtime_ports.tools)
+            A.equal(ports.reviews, runtime_ports.reviews)
             A.equal(options.maximum_output_events, 512)
             log[#log + 1] = "driver"
             return { step = function() return {} end }
@@ -318,10 +395,22 @@ local function fixture(settings)
         },
         contexts = contexts,
         publication = publication,
+        config = {
+            reload_file = function(path, overrides)
+                A.equal(path, "/release/__yaca__/config.ini")
+                A.equal(overrides.CurrentModel, "Primary")
+                log[#log + 1] = "config-reload"
+                active_generation = next_generation
+                return next_generation
+            end,
+        },
         model_adapter = {},
         network = {},
         identity = { os = "linux" },
-        layout = { data_root = "/release/__yaca__" },
+        layout = {
+            data_root = "/release/__yaca__",
+            config_path = "/release/__yaca__/config.ini",
+        },
         model_activity_options = {
             maximum_poll_events = 128,
         },
@@ -334,6 +423,13 @@ local function fixture(settings)
         log = log,
         closed = function() return closed end,
         loop_closed = function() return loop_closed end,
+        capture = function(specification)
+            return runtime_ports.snapshots.capture(specification)
+        end,
+        start_current_model = function()
+            return runtime_ports.model.start({ request_id = "turn-2:request:1" })
+        end,
+        current_generation = function() return active_generation end,
     }
 end
 
@@ -353,7 +449,7 @@ return {
                 A.equal(agent.admission.request_id, "turn-1:request:1")
                 A.equal(agent.loop:status().state, "RequestingModel")
                 A.truthy(agent.capabilities.published_first_turn)
-                A.falsy(agent.capabilities.later_turn_snapshots)
+                A.truthy(agent.capabilities.later_turn_snapshots)
                 A.falsy(f.closed())
                 A.deep_equal(f.log, {
                     "publish-first",
@@ -388,6 +484,46 @@ return {
                 A.equal(agent_error.code, "ToolRegistryMismatch")
                 A.truthy(f.closed())
                 A.equal(f.log[#f.log], "draft-close")
+            end,
+        },
+        {
+            name = "later main snapshot reloads and atomically replaces turn ports",
+            run = function()
+                local f = fixture()
+                local agent = assert(f.main.start_published_agent(
+                    f.composed,
+                    f.chat,
+                    "implement the project",
+                    "terminal"
+                ))
+                local snapshot, snapshot_error = f.capture({
+                    kind = "main",
+                    text = "second turn",
+                    source = "terminal",
+                    context_generation = 2,
+                    active_turn_id = false,
+                    cause = { kind = "direct-main" },
+                })
+                A.truthy(
+                    snapshot,
+                    snapshot_error and (snapshot_error.code .. ": " .. snapshot_error.message)
+                )
+                A.equal(snapshot.config_generation, "config-snapshot-2")
+                A.equal(snapshot.model_request_limit, 6)
+                A.equal(snapshot.tool_call_limit, 10)
+                A.equal(snapshot.queue_limit, 4)
+                A.equal(agent.current_generation().id, "config-generation-2")
+                A.equal(f.current_generation().id, "config-generation-2")
+                A.truthy(f.start_current_model())
+                A.equal(f.log[#f.log], "effect:model-activity-3")
+                local context_index, reload_index, capture_index
+                for index, value in ipairs(f.log) do
+                    if value == "turn-context" then context_index = index end
+                    if value == "config-reload" then reload_index = index end
+                    if value == "capture-turn" then capture_index = index end
+                end
+                A.truthy(context_index < reload_index)
+                A.truthy(reload_index < capture_index)
             end,
         },
         {
