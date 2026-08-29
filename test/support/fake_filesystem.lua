@@ -195,6 +195,14 @@ function M.new(initial, maximum_chunk_bytes)
         files[path] = make_file(bytes)
     end
 
+    function controls.external_write(path, bytes)
+        local file = files[path]
+        if not file then return false end
+        file.bytes = bytes
+        touch(file)
+        return true
+    end
+
     function controls.external_delete(path)
         files[path] = nil
     end

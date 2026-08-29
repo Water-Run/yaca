@@ -339,12 +339,14 @@ return {
                     output_limit_bytes = 8,
                     environment = {
                         Path = "C:\\Windows\\System32",
+                        SystemRoot = "C:\\Windows",
                         lua_path = "removed",
                         Custom = "removed",
                     },
                 }))
                 port:start(1)
                 A.equal(native.calls.process_start.environment.Path, "C:\\Windows\\System32")
+                A.equal(native.calls.process_start.environment.SystemRoot, "C:\\Windows")
                 A.falsy(native.calls.process_start.environment.lua_path)
                 A.falsy(native.calls.process_start.environment.Custom)
                 A.equal(port:poll(2, 1)[1].outcome, "completed")
