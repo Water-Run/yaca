@@ -652,6 +652,39 @@ function M.new_context_publication(ports, options)
         }
     end
 
+    local function durable_context_overrides()
+        if not active or not active.document then return nil end
+        local document = active.document
+        local goal = document.session.double_check_goal_override
+        return {
+            CurrentModel = document.session.current_model.name,
+            CurrentPermission = document.session.current_permission.name,
+            DoubleCheckOverride = document.session.double_check_override,
+            DoubleCheckGoalOverride = goal.mode == "value" and goal.value or "inherit",
+            ContextPrompt = document.session.context_prompt,
+            AutoRenameDisabled = document.header.auto_rename_disabled == true,
+        }
+    end
+
+    local function generation_matches_context(generation, overrides)
+        if type(generation) ~= "table"
+            or generation.agent_ready ~= true
+            or generation.current_model ~= overrides.CurrentModel
+            or generation.current_permission ~= overrides.CurrentPermission
+            or generation.context_prompt ~= overrides.ContextPrompt
+            or generation.auto_rename_disabled ~= overrides.AutoRenameDisabled
+        then
+            return false
+        end
+        if type(overrides.DoubleCheckOverride) == "boolean"
+            and generation.effective_double_check ~= overrides.DoubleCheckOverride
+        then
+            return false
+        end
+        return overrides.DoubleCheckGoalOverride == "inherit"
+            or generation.effective_double_check_goal == overrides.DoubleCheckGoalOverride
+    end
+
     local function close_writer(writer, original_error)
         local closed_writer, close_error = store.close_writer(writer)
         if not closed_writer then
@@ -926,6 +959,108 @@ function M.new_context_publication(ports, options)
             return nil, failure("ModelViewUnavailable", "durable model view body is unavailable")
         end
         return view
+    end
+
+    ---Returns the exact durable session overrides used for the next complete
+    -- Config reload. The private config source digest never enters this view.
+    function service.turn_context(observation)
+        if closed then
+            return nil, failure("ContextPublicationClosed", "Context turn snapshot is closed")
+        end
+        if journal_failure then return nil, journal_failure end
+        if not active or not active.document then
+            return nil, failure("ContextNotPublished", "Context turn snapshot has no durable source")
+        end
+        if type(observation) ~= "table"
+            or dense_count(observation) ~= nil
+            or type(observation.expected_context_generation) ~= "number"
+            or math.type(observation.expected_context_generation) ~= "integer"
+            or observation.expected_context_generation < 1
+        then
+            return nil, failure("InvalidTurnSnapshot", "Context turn observation is invalid")
+        end
+        for key in pairs(observation) do
+            if key ~= "expected_context_generation" then
+                return nil, failure("InvalidTurnSnapshot", "Context turn observation is ambiguous")
+            end
+        end
+        if observation.expected_context_generation ~= active.document.generation then
+            return nil, failure("StaleContextObservation", "Context turn observation is stale")
+        end
+        return readonly({
+            context_generation = active.document.generation,
+            overrides = readonly(durable_context_overrides(), "durable Context overrides"),
+        }, "durable Context turn state")
+    end
+
+    ---Builds a complete immutable Runtime turn input from one already reloaded
+    -- ConfigGeneration and the current durable Model-view manifest.
+    function service.capture_turn(specification)
+        if closed then
+            return nil, failure("ContextPublicationClosed", "Context turn snapshot is closed")
+        end
+        if journal_failure then return nil, journal_failure end
+        if not active or not active.document then
+            return nil, failure("ContextNotPublished", "Context turn snapshot has no durable source")
+        end
+        if type(specification) ~= "table" then
+            return nil, failure("InvalidTurnSnapshot", "turn snapshot input is required")
+        end
+        local allowed = {
+            generation = true,
+            text = true,
+            source = true,
+            expected_context_generation = true,
+        }
+        for key in pairs(specification) do
+            if type(key) ~= "string" or not allowed[key] then
+                return nil, failure("InvalidTurnSnapshot", "turn snapshot input is ambiguous")
+            end
+        end
+        if type(specification.generation) ~= "table"
+            or not valid_text(specification.text, admitted.maximum_model_view_bytes)
+            or specification.text == ""
+            or not valid_text(specification.source, 256)
+            or specification.source == ""
+            or not valid_integer(specification.expected_context_generation, 1)
+            or specification.expected_context_generation ~= active.document.generation
+        then
+            return nil, failure("InvalidTurnSnapshot", "turn snapshot input is invalid or stale")
+        end
+        local overrides = durable_context_overrides()
+        local generation = specification.generation
+        if not generation_matches_context(generation, overrides) then
+            return nil, failure(
+                "ConfigGenerationMismatch",
+                "reloaded configuration does not bind the durable Context overrides"
+            )
+        end
+        local settings = {
+            model = generation.current_model,
+            permission = generation.current_permission,
+            double_check = generation.effective_double_check,
+            double_check_goal = generation.effective_double_check_goal or "",
+            context_prompt = generation.context_prompt or "",
+            auto_rename_disabled = generation.auto_rename_disabled == true,
+        }
+        local snapshot, snapshot_error = snapshots({
+            generation = generation,
+            settings = settings,
+            message = specification.text,
+        })
+        if not snapshot then return nil, snapshot_error end
+        return readonly({
+            text = specification.text,
+            source = specification.source,
+            config_generation = snapshot.config,
+            model_snapshot = snapshot.model,
+            permission_snapshot = snapshot.permission,
+            prompt_snapshot = snapshot.prompt,
+            tool_registry_snapshot = snapshot.tool_registry,
+            view_manifest_ref = active.document.model_view.active_manifest.digest,
+            double_check = settings.double_check,
+            context_generation = active.document.generation,
+        }, "durable Runtime turn snapshot")
     end
 
     ---Commits one AgentLoop batch through the already-owned writer lease. Each

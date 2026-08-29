@@ -425,6 +425,51 @@ return {
                 A.contains(resolved_next.body, "model_request")
                 A.equal(observed.published.document.model_view.active_manifest.digest, next_view.digest)
                 A.equal(observed.published.document.facts[4].type, "model_view_published")
+                local turn_context = assert(publication.turn_context({
+                    expected_context_generation = 3,
+                }))
+                A.equal(turn_context.context_generation, 3)
+                A.equal(turn_context.overrides.CurrentModel, "Primary")
+                A.equal(turn_context.overrides.CurrentPermission, "Std")
+                A.equal(turn_context.overrides.DoubleCheckOverride, false)
+                A.equal(
+                    turn_context.overrides.DoubleCheckGoalOverride,
+                    "check exact evidence"
+                )
+                A.equal(turn_context.overrides.ContextPrompt, "current session context")
+                A.truthy(turn_context.overrides.AutoRenameDisabled)
+                A.raises(function()
+                    turn_context.overrides.CurrentModel = "forged"
+                end, "cannot be modified")
+
+                local next_generation = generation()
+                next_generation.id = "config-generation-8"
+                next_generation.effective_double_check = false
+                next_generation.effective_double_check_goal = "check exact evidence"
+                next_generation.context_prompt = "current session context"
+                next_generation.auto_rename_disabled = true
+                local turn_snapshot = assert(publication.capture_turn({
+                    generation = next_generation,
+                    text = "继续实现第二个节点",
+                    source = "terminal",
+                    expected_context_generation = 3,
+                }))
+                A.equal(turn_snapshot.text, "继续实现第二个节点")
+                A.equal(turn_snapshot.source, "terminal")
+                A.equal(turn_snapshot.context_generation, 3)
+                A.equal(turn_snapshot.view_manifest_ref, next_view.digest)
+                A.equal(turn_snapshot.tool_registry_snapshot, registry.digest)
+                A.falsy(turn_snapshot.double_check)
+                A.falsy(turn_snapshot.config_generation == next_generation.id)
+                A.falsy(turn_snapshot.prompt_snapshot == receipt.prompt_snapshot)
+                local stale, stale_error = publication.capture_turn({
+                    generation = next_generation,
+                    text = "stale",
+                    source = "terminal",
+                    expected_context_generation = 2,
+                })
+                A.falsy(stale)
+                A.equal(stale_error.code, "InvalidTurnSnapshot")
                 A.truthy(draft.close())
                 A.equal(observed.closes, 1)
                 A.equal(draft.status().lifecycle, "closed")
