@@ -54,6 +54,22 @@ local function valid_absolute_path(path)
         or normalized:match("^//[^/]+/[^/]+") ~= nil
 end
 
+local function directory_of(path)
+    if type(path) ~= "string" then return nil end
+    local separator
+    for index = #path, 1, -1 do
+        local byte = path:byte(index)
+        if byte == 0x2F or byte == 0x5C then
+            separator = index
+            break
+        end
+    end
+    if not separator then return nil end
+    if separator == 1 then return path:sub(1, 1) end
+    if separator == 3 and path:sub(2, 2) == ":" then return path:sub(1, 3) end
+    return path:sub(1, separator - 1)
+end
+
 local function normalize_native_error(value)
     if type(value) ~= "table"
         or type(value.code) ~= "string"
@@ -134,7 +150,13 @@ function M.new(native, options)
         return nil, failure("InvalidFilesystemLimit", "maximum_chunk_bytes is required")
     end
 
+    local maximum_lease_bytes = options.maximum_lease_bytes or maximum_chunk_bytes
+    if not valid_integer(maximum_lease_bytes, 1) then
+        return nil, failure("InvalidFilesystemLimit", "maximum_lease_bytes is invalid")
+    end
+
     local service = {}
+    local lease_states = setmetatable({}, { __mode = "k" })
 
     ---Opens an existing absolute path for binary reading.
     -- @param path string Absolute operating-system path.
@@ -299,12 +321,119 @@ function M.new(native, options)
         return invoke(native, "fs_close", handle)
     end
 
+    local function cleanup_created(path, identity)
+        local stated, observed = service.stat_identity(path)
+        if stated then identity = observed end
+        if identity then service.delete_verified(path, identity) end
+        local directory = directory_of(path)
+        if directory then service.flush_directory(directory) end
+    end
+
+    ---Acquires an existence-backed exclusive lease with durable public metadata.
+    -- Exclusive create is the mutex. A process crash intentionally leaves a
+    -- stale file that only evidence-based self-fix may remove; age is never
+    -- treated as proof that another writer is gone.
+    -- @param path string Absolute stable lease path.
+    -- @param metadata string Bounded public lock metadata bytes.
+    -- @param permissions integer Permission mask for the lease file.
+    -- @return boolean ok Whether this process acquired the lease.
+    -- @return table lease_or_err Opaque lease or structured failure.
+    function service.acquire_lease(path, metadata, permissions)
+        if not valid_absolute_path(path) then
+            return false, failure("InvalidPath", "lease path must be absolute")
+        end
+        if type(metadata) ~= "string" or #metadata > maximum_lease_bytes then
+            return false, failure("LeaseLimit", "lease metadata exceeds its byte limit")
+        end
+        if not valid_integer(permissions, 0) or permissions > 511 then
+            return false, failure("InvalidPermissions", "lease permissions are invalid")
+        end
+        local created, handle_or_error = service.create_new(path, permissions)
+        if not created then
+            if type(handle_or_error) == "table" and handle_or_error.code == "DestinationExists" then
+                return false, failure("LockConflict", "exclusive lease already exists")
+            end
+            return false, handle_or_error
+        end
+        local handle = handle_or_error
+        local offset = 1
+        while offset <= #metadata do
+            local chunk = metadata:sub(offset, offset + maximum_chunk_bytes - 1)
+            local written, write_error = service.stream_write(handle, chunk)
+            if not written then
+                service.close(handle)
+                cleanup_created(path)
+                return false, write_error
+            end
+            offset = offset + #chunk
+        end
+        local flushed, flush_error = service.flush_file(handle)
+        if not flushed then
+            service.close(handle)
+            cleanup_created(path)
+            return false, flush_error
+        end
+        local stated, identity_or_error = service.stat_identity(handle)
+        if not stated then
+            service.close(handle)
+            cleanup_created(path)
+            return false, identity_or_error
+        end
+        local closed, close_error = service.close(handle)
+        if not closed then
+            cleanup_created(path, identity_or_error)
+            return false, close_error
+        end
+        local directory = directory_of(path)
+        local directory_flushed, directory_error = service.flush_directory(directory)
+        if not directory_flushed then
+            cleanup_created(path, identity_or_error)
+            return false, failure(
+                "LeaseAcquireUnknown",
+                "lease publication durability is unknown",
+                directory_error.code
+            )
+        end
+        local lease = readonly({}, "filesystem lease")
+        lease_states[lease] = {
+            path = path,
+            identity = identity_or_error,
+            active = true,
+        }
+        return true, lease
+    end
+
+    ---Releases only the exact lease file identity acquired by this service.
+    -- @param lease table Opaque lease returned by acquire_lease.
+    -- @return boolean ok Whether removal and directory durability are proven.
+    -- @return any result_or_err True or structured release failure.
+    function service.release_lease(lease)
+        local state = lease_states[lease]
+        if not state or not state.active then
+            return false, failure("InvalidLease", "filesystem lease is stale or foreign")
+        end
+        local deleted, delete_error = service.delete_verified(state.path, state.identity)
+        if not deleted then return false, delete_error end
+        state.active = false
+        local flushed, flush_error = service.flush_directory(assert(directory_of(state.path)))
+        if not flushed then
+            return false, failure(
+                "LeaseReleaseUnknown",
+                "lease removal durability is unknown",
+                flush_error.code
+            )
+        end
+        return true, true
+    end
+
     service.capabilities = readonly({
         atomic_replace_candidate = true,
         rename_no_replace_candidate = true,
         verified_delete_candidate = true,
+        exclusive_create_lease_candidate = true,
         target_qualified = false,
         maximum_chunk_bytes = maximum_chunk_bytes,
+        maximum_lease_bytes = maximum_lease_bytes,
     }, "filesystem capabilities")
 
     return readonly(service, "filesystem service")

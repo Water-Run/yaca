@@ -12,6 +12,7 @@ local M = {}
 
 local SCHEMA_VERSION = "0.1.0"
 local document_states = setmetatable({}, { __mode = "k" })
+local schema_service_states = setmetatable({}, { __mode = "k" })
 
 local function event(id, required, optional)
     return { id = id, required = required or {}, optional = optional or {} }
@@ -1942,11 +1943,45 @@ local function read_candidate(codec, safety_service, source, admitted)
         return true
     end
 
-    local stats, parse_error = codec.parse(source, {
+    local sink = {
         start_element = start_element,
         text = character_data,
         end_element = end_element,
-    })
+    }
+    local stats, parse_error
+    if type(source) == "function" then
+        local reader
+        reader, parse_error = codec.new_reader(sink)
+        if not reader then return nil, parse_error end
+        while true do
+            local called, ok, chunk_or_error = pcall(source)
+            if not called then
+                reader.close()
+                return nil, failure("ContextStream", "Context stream source raised an error")
+            end
+            if ok ~= true
+                or type(chunk_or_error) ~= "table"
+                or type(chunk_or_error.bytes) ~= "string"
+                or type(chunk_or_error.eof) ~= "boolean"
+            then
+                reader.close()
+                return nil, ok == false and chunk_or_error or failure(
+                    "ContextStream",
+                    "Context stream source returned a malformed chunk"
+                )
+            end
+            if #chunk_or_error.bytes == 0 and not chunk_or_error.eof then
+                reader.close()
+                return nil, failure("ContextStream", "Context stream made no progress")
+            end
+            local accepted, feed_error = reader.feed(chunk_or_error.bytes)
+            if not accepted then return nil, semantic_error or feed_error end
+            if chunk_or_error.eof then break end
+        end
+        stats, parse_error = reader.finish()
+    else
+        stats, parse_error = codec.parse(source, sink)
+    end
     if not stats then return nil, semantic_error or parse_error end
     if semantic_error then return nil, semantic_error end
     if #frames ~= 0 or candidate.schema_version == nil then
@@ -2150,10 +2185,35 @@ function M.new(options)
 
     ---Reads one untrusted internal Context XML source through the bounded SAX codec.
     function service.read(source)
+        if type(source) ~= "string" and type(source) ~= "table" then
+            return nil, failure(
+                "InvalidContextInput",
+                "Context reader requires bytes or a dense byte chunk array"
+            )
+        end
         local candidate, stats_or_error = read_candidate(
             admitted.codec,
             admitted.safety,
             source,
+            admitted
+        )
+        if not candidate then return nil, stats_or_error end
+        local document, document_error = normalize_document(candidate, admitted)
+        if not document then return nil, document_error end
+        return document, stats_or_error
+    end
+
+    ---Reads one untrusted Context from a bounded pull source without buffering XML bytes.
+    -- The callback returns `true, {bytes=string, eof=boolean}` or
+    -- `false, structured_error` on every invocation.
+    function service.read_stream(next_chunk)
+        if type(next_chunk) ~= "function" then
+            return nil, failure("InvalidContextInput", "Context stream callback is required")
+        end
+        local candidate, stats_or_error = read_candidate(
+            admitted.codec,
+            admitted.safety,
+            next_chunk,
             admitted
         )
         if not candidate then return nil, stats_or_error end
@@ -2230,7 +2290,1262 @@ function M.new(options)
         maximum_export_bytes = admitted.maximum_export_bytes,
     }, "Context limits")
 
-    return readonly(service, "Context service")
+    local exposed = readonly(service, "Context service")
+    schema_service_states[exposed] = admitted
+    return exposed
+end
+
+local STORE_FILESYSTEM_METHODS = {
+    "open_read",
+    "create_new",
+    "stat_identity",
+    "stream_read",
+    "stream_write",
+    "flush_file",
+    "flush_directory",
+    "replace",
+    "rename_no_replace",
+    "delete_verified",
+    "close",
+    "acquire_lease",
+    "release_lease",
+}
+
+local function valid_absolute_path(value)
+    if type(value) ~= "string" or value == "" or value:find("\0", 1, true) then
+        return false
+    end
+    local normalized = value:gsub("\\", "/")
+    local absolute = normalized:sub(1, 1) == "/"
+        or normalized:match("^[A-Za-z]:/") ~= nil
+        or normalized:match("^//[^/]+/[^/]+") ~= nil
+    if not absolute then return false end
+    for segment in normalized:gmatch("[^/]+") do
+        if segment == "." or segment == ".." then return false end
+    end
+    return true
+end
+
+local function directory_of(path)
+    if type(path) ~= "string" then return nil end
+    local separator
+    for index = #path, 1, -1 do
+        local byte = path:byte(index)
+        if byte == 0x2F or byte == 0x5C then
+            separator = index
+            break
+        end
+    end
+    if not separator then return nil end
+    if separator == 1 then return path:sub(1, 1) end
+    if separator == 3 and path:sub(2, 2) == ":" then return path:sub(1, 3) end
+    return path:sub(1, separator - 1)
+end
+
+local function basename_of(path)
+    if type(path) ~= "string" then return nil end
+    local normalized = path:gsub("\\", "/")
+    return normalized:match("([^/]+)$")
+end
+
+local function same_directory(left, right)
+    local left_directory, right_directory = directory_of(left), directory_of(right)
+    if not left_directory or not right_directory then return false end
+    return left_directory:gsub("\\", "/") == right_directory:gsub("\\", "/")
+end
+
+local function identity_equal(left, right)
+    if type(left) ~= "table" or type(right) ~= "table" then return false end
+    for _, key in ipairs({ "kind", "volume", "object", "size", "modified" }) do
+        if left[key] ~= right[key] then return false end
+    end
+    return true
+end
+
+local function deep_equal(left, right, visited)
+    if left == right then return true end
+    if type(left) ~= type(right) or type(left) ~= "table" then return false end
+    visited = visited or {}
+    visited[left] = visited[left] or {}
+    if visited[left][right] then return true end
+    visited[left][right] = true
+    for key, value in pairs(left) do
+        if not deep_equal(value, right[key], visited) then return false end
+    end
+    for key in pairs(right) do
+        if left[key] == nil then return false end
+    end
+    return true
+end
+
+local function validate_store_options(options, schema_state)
+    if type(options) ~= "table" then
+        return nil, failure("InvalidContextStoreOptions", "Context store limits are required")
+    end
+    local allowed = {
+        maximum_context_bytes = true,
+        maximum_lock_hostname_bytes = true,
+        maximum_temp_nonce_bytes = true,
+        context_permissions = true,
+        lock_permissions = true,
+    }
+    for key in pairs(options) do
+        if type(key) ~= "string" or not allowed[key] then
+            return nil, failure(
+                "InvalidContextStoreOptions",
+                "Context store options contain an unknown field"
+            )
+        end
+    end
+    for _, name in ipairs({
+        "maximum_context_bytes",
+        "maximum_lock_hostname_bytes",
+        "maximum_temp_nonce_bytes",
+    }) do
+        if not valid_integer(options[name], 1) then
+            return nil, failure("InvalidContextStoreOptions", name .. " must be positive")
+        end
+    end
+    for _, name in ipairs({ "context_permissions", "lock_permissions" }) do
+        if not valid_integer(options[name], 0) or options[name] > 511 then
+            return nil, failure("InvalidContextStoreOptions", name .. " is invalid")
+        end
+    end
+    if options.maximum_context_bytes > schema_state.codec.limits.maximum_bytes then
+        return nil, failure(
+            "InvalidContextStoreOptions",
+            "Context byte limit exceeds the XML codec limit"
+        )
+    end
+    return {
+        maximum_context_bytes = options.maximum_context_bytes,
+        maximum_lock_hostname_bytes = options.maximum_lock_hostname_bytes,
+        maximum_temp_nonce_bytes = options.maximum_temp_nonce_bytes,
+        context_permissions = options.context_permissions,
+        lock_permissions = options.lock_permissions,
+    }
+end
+
+local function validate_store_filesystem(filesystem)
+    if type(filesystem) ~= "table" then
+        return nil, failure("InvalidContextStorePort", "filesystem service is required")
+    end
+    local snapshot = {}
+    for _, name in ipairs(STORE_FILESYSTEM_METHODS) do
+        if type(filesystem[name]) ~= "function" then
+            return nil, failure(
+                "InvalidContextStorePort",
+                "filesystem service omits " .. name
+            )
+        end
+        snapshot[name] = filesystem[name]
+    end
+    local capabilities = filesystem.capabilities
+    if type(capabilities) ~= "table"
+        or not valid_integer(capabilities.maximum_chunk_bytes, 1)
+        or not valid_integer(capabilities.maximum_lease_bytes, 1)
+    then
+        return nil, failure(
+            "InvalidContextStorePort",
+            "filesystem capabilities are incomplete"
+        )
+    end
+    snapshot.capabilities = {
+        maximum_chunk_bytes = capabilities.maximum_chunk_bytes,
+        maximum_lease_bytes = capabilities.maximum_lease_bytes,
+        target_qualified = capabilities.target_qualified == true,
+        atomic_replace_candidate = capabilities.atomic_replace_candidate == true,
+        rename_no_replace_candidate = capabilities.rename_no_replace_candidate == true,
+        exclusive_create_lease_candidate = capabilities.exclusive_create_lease_candidate == true,
+    }
+    return snapshot
+end
+
+local function validate_context_target(path)
+    if not valid_absolute_path(path) then
+        return nil, failure("InvalidContextPath", "Context target must be absolute")
+    end
+    local basename = basename_of(path)
+    if not basename or #basename <= 4 or basename:sub(-4) ~= ".xml" then
+        return nil, failure("InvalidContextPath", "Context target must end in exact .xml")
+    end
+    local name = basename:sub(1, -5)
+    if name == "" then
+        return nil, failure("InvalidContextPath", "Context target name must not be empty")
+    end
+    return { basename = basename, name = name, directory = assert(directory_of(path)) }
+end
+
+local function encode_lock_metadata(metadata, limits)
+    if type(metadata) ~= "table" then
+        return nil, failure("InvalidWriterMetadata", "writer metadata is required")
+    end
+    local allowed = { pid = true, started_at = true, hostname = true }
+    for key in pairs(metadata) do
+        if type(key) ~= "string" or not allowed[key] then
+            return nil, failure("InvalidWriterMetadata", "writer metadata has an unknown field")
+        end
+    end
+    if not valid_integer(metadata.pid, 1) then
+        return nil, failure("InvalidWriterMetadata", "writer pid must be positive")
+    end
+    local started_at, time_error = canonical_time(metadata.started_at, "/Writer/startedAt")
+    if not started_at then return nil, time_error end
+    if metadata.hostname ~= nil then
+        local hostname, hostname_error = strict_text(
+            metadata.hostname,
+            limits.maximum_lock_hostname_bytes,
+            "/Writer/hostname",
+            false
+        )
+        if not hostname then return nil, hostname_error end
+        if hostname:find("[=\r\n]") then
+            return nil, failure(
+                "InvalidWriterMetadata",
+                "writer hostname is unsafe for lock metadata"
+            )
+        end
+    end
+    local lines = {
+        "version=1",
+        "pid=" .. tostring(metadata.pid),
+        "startedAt=" .. started_at,
+    }
+    if metadata.hostname ~= nil then lines[#lines + 1] = "hostname=" .. metadata.hostname end
+    return table.concat(lines, "\n") .. "\n"
+end
+
+local function validate_temp_path(target_path, temporary_path, limits)
+    if not valid_absolute_path(temporary_path)
+        or not same_directory(target_path, temporary_path)
+    then
+        return nil, failure(
+            "InvalidContextPath",
+            "Context temporary must be a same-directory absolute path"
+        )
+    end
+    local prefix = target_path .. ".yaca-tmp-"
+    if temporary_path:sub(1, #prefix) ~= prefix then
+        return nil, failure("InvalidContextPath", "Context temporary name is not canonical")
+    end
+    local nonce = temporary_path:sub(#prefix + 1)
+    if nonce == ""
+        or #nonce > limits.maximum_temp_nonce_bytes
+        or nonce:match("^[A-Za-z0-9]+$") == nil
+    then
+        return nil, failure("InvalidContextPath", "Context temporary nonce is invalid")
+    end
+    return temporary_path
+end
+
+local function target_absent(filesystem, path)
+    local opened, handle_or_error = filesystem.open_read(path)
+    if opened then
+        filesystem.close(handle_or_error)
+        return false, failure("DestinationExists", "Context target already exists")
+    end
+    if type(handle_or_error) == "table" and handle_or_error.code == "NotFound" then
+        return true
+    end
+    return nil, handle_or_error
+end
+
+local function cleanup_file(filesystem, path, identity)
+    local stated, observed = filesystem.stat_identity(path)
+    if stated then identity = observed end
+    if not identity then return true end
+    local deleted, delete_error = filesystem.delete_verified(path, identity)
+    if not deleted then return nil, delete_error end
+    local flushed, flush_error = filesystem.flush_directory(assert(directory_of(path)))
+    if not flushed then return nil, flush_error end
+    return true
+end
+
+local function stable_read(schema, filesystem, path, limits)
+    local opened, handle_or_error = filesystem.open_read(path)
+    if not opened then return nil, handle_or_error end
+    local handle = handle_or_error
+    local stated, initial_or_error = filesystem.stat_identity(handle)
+    if not stated then
+        filesystem.close(handle)
+        return nil, initial_or_error
+    end
+    if initial_or_error.kind ~= "file" then
+        filesystem.close(handle)
+        return nil, failure("ContextUnavailable", "Context target is not a regular file")
+    end
+    if initial_or_error.size > limits.maximum_context_bytes then
+        filesystem.close(handle)
+        return nil, failure("ContextLimit", "Context file exceeds its byte limit")
+    end
+    local total = 0
+    local document, stats_or_error = schema.read_stream(function()
+        local read, chunk_or_error = filesystem.stream_read(
+            handle,
+            filesystem.capabilities.maximum_chunk_bytes
+        )
+        if not read then return false, chunk_or_error end
+        total = total + #chunk_or_error.bytes
+        if total > limits.maximum_context_bytes then
+            return false, failure("ContextLimit", "Context stream exceeds its byte limit")
+        end
+        return true, chunk_or_error
+    end)
+    local restated, final_or_error = filesystem.stat_identity(handle)
+    local closed, close_error = filesystem.close(handle)
+    if not document then return nil, stats_or_error end
+    if not restated then return nil, final_or_error end
+    if not closed then return nil, close_error end
+    if not identity_equal(initial_or_error, final_or_error) then
+        return nil, failure("TargetChanged", "Context changed while it was read")
+    end
+    return document, initial_or_error, stats_or_error
+end
+
+local function write_new_document(schema, filesystem, path, document, limits)
+    local created, handle_or_error = filesystem.create_new(path, limits.context_permissions)
+    if not created then return nil, handle_or_error end
+    local handle = handle_or_error
+    local write_failure
+    local stats, write_error = schema.write(document, function(bytes)
+        for offset = 1, #bytes, filesystem.capabilities.maximum_chunk_bytes do
+            local chunk = bytes:sub(
+                offset,
+                offset + filesystem.capabilities.maximum_chunk_bytes - 1
+            )
+            local written, chunk_error = filesystem.stream_write(handle, chunk)
+            if not written then
+                write_failure = chunk_error
+                return false, chunk_error.message
+            end
+        end
+        return true
+    end)
+    if not stats then
+        filesystem.close(handle)
+        cleanup_file(filesystem, path)
+        return nil, write_failure or write_error
+    end
+    if stats.bytes > limits.maximum_context_bytes then
+        filesystem.close(handle)
+        cleanup_file(filesystem, path)
+        return nil, failure("ContextLimit", "Context publication exceeds its byte limit")
+    end
+    local flushed, flush_error = filesystem.flush_file(handle)
+    if not flushed then
+        filesystem.close(handle)
+        cleanup_file(filesystem, path)
+        return nil, flush_error
+    end
+    local stated, identity_or_error = filesystem.stat_identity(handle)
+    if not stated then
+        filesystem.close(handle)
+        cleanup_file(filesystem, path)
+        return nil, identity_or_error
+    end
+    local closed, close_error = filesystem.close(handle)
+    if not closed then
+        cleanup_file(filesystem, path, identity_or_error)
+        return nil, close_error
+    end
+    return identity_or_error, stats
+end
+
+local function compare_document_bytes(schema, filesystem, path, document, expected_identity)
+    local opened, handle_or_error = filesystem.open_read(path)
+    if not opened then return nil, handle_or_error end
+    local handle = handle_or_error
+    local stated, initial_or_error = filesystem.stat_identity(handle)
+    if not stated then
+        filesystem.close(handle)
+        return nil, initial_or_error
+    end
+    if expected_identity and not identity_equal(expected_identity, initial_or_error) then
+        filesystem.close(handle)
+        return nil, failure("ContextTemporaryMismatch", "Context file identity changed")
+    end
+    local buffer, eof, comparison_error = "", false, nil
+    local function fill()
+        if eof then return true end
+        local read, chunk_or_error = filesystem.stream_read(
+            handle,
+            filesystem.capabilities.maximum_chunk_bytes
+        )
+        if not read then return nil, chunk_or_error end
+        if #chunk_or_error.bytes == 0 and not chunk_or_error.eof then
+            return nil, failure("ContextFilesystemContract", "Context read made no progress")
+        end
+        buffer = buffer .. chunk_or_error.bytes
+        eof = chunk_or_error.eof
+        return true
+    end
+    local stats, write_error = schema.write(document, function(expected)
+        local offset = 1
+        while offset <= #expected do
+            if #buffer == 0 then
+                local filled, fill_error = fill()
+                if not filled then
+                    comparison_error = fill_error
+                    return false, fill_error.message
+                end
+                if #buffer == 0 and eof then
+                    comparison_error = failure(
+                        "ContextTemporaryMismatch",
+                        "Context file is shorter than canonical bytes"
+                    )
+                    return false, comparison_error.message
+                end
+            end
+            local count = math.min(#buffer, #expected - offset + 1)
+            if buffer:sub(1, count) ~= expected:sub(offset, offset + count - 1) then
+                comparison_error = failure(
+                    "ContextTemporaryMismatch",
+                    "Context file differs from canonical bytes"
+                )
+                return false, comparison_error.message
+            end
+            buffer = buffer:sub(count + 1)
+            offset = offset + count
+        end
+        return true
+    end)
+    if stats and #buffer == 0 and not eof then
+        local filled, fill_error = fill()
+        if not filled then comparison_error = fill_error end
+    end
+    if stats and not comparison_error and (#buffer > 0 or not eof) then
+        comparison_error = failure(
+            "ContextTemporaryMismatch",
+            "Context file is longer than canonical bytes"
+        )
+    end
+    local restated, final_or_error = filesystem.stat_identity(handle)
+    local closed, close_error = filesystem.close(handle)
+    if not stats then return nil, comparison_error or write_error end
+    if comparison_error then return nil, comparison_error end
+    if not restated then return nil, final_or_error end
+    if not closed then return nil, close_error end
+    if not identity_equal(initial_or_error, final_or_error) then
+        return nil, failure("ContextTemporaryMismatch", "Context file changed during validation")
+    end
+    return initial_or_error, stats
+end
+
+local function verify_document_path(schema, filesystem, path, document, expected_identity, limits)
+    local exact_identity, exact_error = compare_document_bytes(
+        schema,
+        filesystem,
+        path,
+        document,
+        expected_identity
+    )
+    if not exact_identity then return nil, exact_error end
+    local parsed, parsed_identity_or_error = stable_read(schema, filesystem, path, limits)
+    if not parsed then return nil, parsed_identity_or_error end
+    if not identity_equal(exact_identity, parsed_identity_or_error) then
+        return nil, failure("ContextTemporaryMismatch", "Context validation identity changed")
+    end
+    if parsed.generation ~= document.generation
+        or parsed.header.name ~= document.header.name
+        or parsed.event_count ~= document.event_count
+    then
+        return nil, failure("ContextTemporaryMismatch", "Context semantic validation changed")
+    end
+    return parsed_identity_or_error, parsed
+end
+
+local function copy_file_verified(filesystem, source_path, source_identity, target_path, limits)
+    local opened, source_or_error = filesystem.open_read(source_path)
+    if not opened then return nil, source_or_error end
+    local source = source_or_error
+    local stated, initial_or_error = filesystem.stat_identity(source)
+    if not stated or not identity_equal(source_identity, initial_or_error) then
+        filesystem.close(source)
+        return nil, stated and failure(
+            "TargetChanged",
+            "Context source changed before previous generation copy"
+        ) or initial_or_error
+    end
+    local created, target_or_error = filesystem.create_new(
+        target_path,
+        limits.context_permissions
+    )
+    if not created then
+        filesystem.close(source)
+        return nil, target_or_error
+    end
+    local target = target_or_error
+    local total, copy_error = 0, nil
+    while true do
+        local read, chunk_or_error = filesystem.stream_read(
+            source,
+            filesystem.capabilities.maximum_chunk_bytes
+        )
+        if not read then
+            copy_error = chunk_or_error
+            break
+        end
+        total = total + #chunk_or_error.bytes
+        if total > limits.maximum_context_bytes then
+            copy_error = failure("ContextLimit", "Context copy exceeds its byte limit")
+            break
+        end
+        if #chunk_or_error.bytes > 0 then
+            local written, write_error = filesystem.stream_write(target, chunk_or_error.bytes)
+            if not written then
+                copy_error = write_error
+                break
+            end
+        elseif not chunk_or_error.eof then
+            copy_error = failure("ContextFilesystemContract", "Context copy made no progress")
+            break
+        end
+        if chunk_or_error.eof then break end
+    end
+    if not copy_error then
+        local flushed, flush_error = filesystem.flush_file(target)
+        if not flushed then copy_error = flush_error end
+    end
+    local source_restat, final_source_or_error = filesystem.stat_identity(source)
+    local target_stated, target_identity_or_error = filesystem.stat_identity(target)
+    local source_closed, source_close_error = filesystem.close(source)
+    local target_closed, target_close_error = filesystem.close(target)
+    if copy_error then
+        cleanup_file(filesystem, target_path, target_stated and target_identity_or_error or nil)
+        return nil, copy_error
+    end
+    if not source_restat then
+        cleanup_file(filesystem, target_path, target_stated and target_identity_or_error or nil)
+        return nil, final_source_or_error
+    end
+    if not target_stated then
+        cleanup_file(filesystem, target_path)
+        return nil, target_identity_or_error
+    end
+    if not source_closed then
+        cleanup_file(filesystem, target_path, target_identity_or_error)
+        return nil, source_close_error
+    end
+    if not target_closed then
+        cleanup_file(filesystem, target_path, target_identity_or_error)
+        return nil, target_close_error
+    end
+    if not identity_equal(initial_or_error, final_source_or_error) then
+        cleanup_file(filesystem, target_path, target_identity_or_error)
+        return nil, failure("TargetChanged", "Context changed while previous was copied")
+    end
+    local flushed, flush_error = filesystem.flush_directory(assert(directory_of(target_path)))
+    if not flushed then
+        cleanup_file(filesystem, target_path, target_identity_or_error)
+        return nil, flush_error
+    end
+    return target_identity_or_error
+end
+
+local function validate_publication_document(state, document)
+    local canonical = document_states[document]
+    if not canonical then
+        return nil, failure(
+            "InvalidContextDocument",
+            "Context publication requires a canonical document"
+        )
+    end
+    if document.header.name ~= state.target.name then
+        return nil, failure(
+            "ContextNameMismatch",
+            "Context Header Name does not match the official basename"
+        )
+    end
+    if document.recovery.model_view_status ~= "current" then
+        return nil, failure(
+            "StaleModelView",
+            "Context ModelView must be rebuilt before publication"
+        )
+    end
+    if state.mode == "create" then
+        if document.generation ~= 1 then
+            return nil, failure(
+                "ContextGeneration",
+                "new Context publication must start at generation one"
+            )
+        end
+        return canonical
+    end
+    local base = state.base_document
+    if document.generation ~= base.generation + 1 then
+        return nil, failure(
+            "ContextGeneration",
+            "Context publication must increment generation exactly once"
+        )
+    end
+    if document.header.created_at ~= base.header.created_at
+        or document.header.updated_at <= base.header.updated_at
+    then
+        return nil, failure(
+            "ContextGeneration",
+            "Context publication must preserve CreatedAt and advance UpdatedAt"
+        )
+    end
+    if document.event_count < base.event_count then
+        return nil, failure("ContextHistoryRewrite", "Context publication removed durable Facts")
+    end
+    for index = 1, base.event_count do
+        if not deep_equal(document.facts[index], base.facts[index]) then
+            return nil, failure(
+                "ContextHistoryRewrite",
+                "Context publication rewrote a durable Fact"
+            )
+        end
+    end
+    return canonical
+end
+
+local function control_path_state(filesystem, path)
+    local opened, handle_or_error = filesystem.open_read(path)
+    if not opened then
+        if type(handle_or_error) == "table" and handle_or_error.code == "NotFound" then
+            return "absent"
+        end
+        return nil, handle_or_error
+    end
+    local stated, identity_or_error = filesystem.stat_identity(handle_or_error)
+    local closed, close_error = filesystem.close(handle_or_error)
+    if not stated then return nil, identity_or_error end
+    if not closed then return nil, close_error end
+    return "present", identity_or_error
+end
+
+---Creates a durable single-XML Context store around one schema and filesystem.
+-- Writer leases are long lived; the per-writer publication mutex exists only
+-- in memory and is held for the full write/validate/publish/confirm sequence.
+-- @param schema table Context schema service returned by M.new.
+-- @param ports table Contains the bounded filesystem service.
+-- @param options table Mandatory release storage limits and permissions.
+-- @return table|nil store Immutable Context store service.
+-- @return table|nil err Structured dependency or limit failure.
+function M.new_store(schema, ports, options)
+    local schema_state = schema_service_states[schema]
+    if not schema_state then
+        return nil, failure(
+            "InvalidContextStorePort",
+            "Context store requires a schema service from this module"
+        )
+    end
+    if type(schema_state.codec.new_reader) ~= "function" then
+        return nil, failure(
+            "InvalidContextStorePort",
+            "Context XML codec does not expose incremental reading"
+        )
+    end
+    if type(ports) ~= "table" or type(ports.filesystem) ~= "table" then
+        return nil, failure("InvalidContextStorePort", "filesystem port is required")
+    end
+    for key in pairs(ports) do
+        if key ~= "filesystem" then
+            return nil, failure(
+                "InvalidContextStorePort",
+                "Context store ports contain an unknown field"
+            )
+        end
+    end
+    local filesystem, filesystem_error = validate_store_filesystem(ports.filesystem)
+    if not filesystem then return nil, filesystem_error end
+    local limits, limits_error = validate_store_options(options, schema_state)
+    if not limits then return nil, limits_error end
+    if filesystem.capabilities.maximum_lease_bytes
+        < 64 + limits.maximum_lock_hostname_bytes
+    then
+        return nil, failure(
+            "InvalidContextStoreOptions",
+            "filesystem lease limit cannot carry writer metadata"
+        )
+    end
+
+    local store = {}
+    local owner = {}
+    local writer_states = setmetatable({}, { __mode = "k" })
+
+    local function new_writer(state)
+        local writer = readonly({}, "Context writer")
+        state.owner = owner
+        state.status = "active"
+        state.commit_active = false
+        writer_states[writer] = state
+        return writer
+    end
+
+    local function release_after_failure(lease, original_error)
+        local released, release_error = filesystem.release_lease(lease)
+        if not released then
+            return nil, failure(
+                "ContextLeaseUnknown",
+                "writer setup failed and lease release is unknown",
+                release_error.code,
+                nil,
+                original_error.code
+            )
+        end
+        return nil, original_error
+    end
+
+    local function recoverable_official_error(error_value)
+        if type(error_value) ~= "table" or type(error_value.code) ~= "string" then
+            return false
+        end
+        return error_value.code == "NotFound"
+            or error_value.code:match("^Xml") ~= nil
+            or ({
+                ContextSchema = true,
+                ContextIntegrity = true,
+                ContextSequence = true,
+                ContextRelation = true,
+            })[error_value.code] == true
+    end
+
+    local function recover_previous(path, previous_path, official_error)
+        if not recoverable_official_error(official_error) then
+            return nil, official_error, false
+        end
+        local previous_state, previous_identity_or_error = control_path_state(
+            filesystem,
+            previous_path
+        )
+        if not previous_state then return nil, previous_identity_or_error, false end
+        if previous_state == "absent" then return nil, official_error, false end
+        local previous_document, previous_read_identity_or_error = stable_read(
+            schema,
+            filesystem,
+            previous_path,
+            limits
+        )
+        if not previous_document then
+            return nil, failure(
+                "ContextRecoveryRequired",
+                "official and previous-valid Context generations are unusable",
+                previous_read_identity_or_error.code
+            ), false
+        end
+        if not identity_equal(previous_identity_or_error, previous_read_identity_or_error) then
+            return nil, failure(
+                "ContextRecoveryRequired",
+                "previous-valid Context changed during recovery"
+            ), false
+        end
+        local official_state, official_identity_or_error = control_path_state(filesystem, path)
+        if not official_state then return nil, official_identity_or_error, false end
+        local restored, restore_error
+        if official_state == "present" then
+            restored, restore_error = filesystem.replace(previous_path, path)
+        else
+            restored, restore_error = filesystem.rename_no_replace(previous_path, path)
+        end
+        if not restored then
+            return nil, failure(
+                "ContextRecoveryUnknown",
+                "previous-valid Context could not be restored",
+                restore_error.code
+            ), true
+        end
+        local flushed, flush_error = filesystem.flush_directory(assert(directory_of(path)))
+        if not flushed then
+            return nil, failure(
+                "ContextRecoveryUnknown",
+                "restored Context directory durability is unknown",
+                flush_error.code
+            ), true
+        end
+        local recovered, recovered_identity_or_error = stable_read(
+            schema,
+            filesystem,
+            path,
+            limits
+        )
+        if not recovered then
+            return nil, failure(
+                "ContextRecoveryUnknown",
+                "restored Context could not be confirmed",
+                recovered_identity_or_error.code
+            ), true
+        end
+        return recovered, recovered_identity_or_error, false
+    end
+
+    local function acquire(path, metadata, mode)
+        local target, target_error = validate_context_target(path)
+        if not target then return nil, target_error end
+        local lock_bytes, metadata_error = encode_lock_metadata(metadata, limits)
+        if not lock_bytes then return nil, metadata_error end
+        if #lock_bytes > filesystem.capabilities.maximum_lease_bytes then
+            return nil, failure("LeaseLimit", "writer metadata exceeds filesystem lease limit")
+        end
+        local lock_path = path .. ".yaca-lock"
+        local acquired, lease_or_error = filesystem.acquire_lease(
+            lock_path,
+            lock_bytes,
+            limits.lock_permissions
+        )
+        if not acquired then return nil, lease_or_error end
+
+        local previous_path = path .. ".yaca-prev"
+        if mode == "create" then
+            local absent, absence_error = target_absent(filesystem, path)
+            if not absent then return release_after_failure(lease_or_error, absence_error) end
+            local previous_state, previous_error = control_path_state(filesystem, previous_path)
+            if not previous_state then
+                return release_after_failure(lease_or_error, previous_error)
+            end
+            if previous_state ~= "absent" then
+                return release_after_failure(lease_or_error, failure(
+                    "ContextRecoveryRequired",
+                    "new Context path has a previous-valid control file"
+                ))
+            end
+            return new_writer({
+                mode = "create",
+                path = path,
+                target = target,
+                lock_path = lock_path,
+                previous_path = previous_path,
+                lease = lease_or_error,
+            })
+        end
+
+        local document, identity_or_error = stable_read(schema, filesystem, path, limits)
+        if not document then
+            local recovered, recovered_identity_or_error, retain_lease = recover_previous(
+                path,
+                previous_path,
+                identity_or_error
+            )
+            if not recovered then
+                if retain_lease then return nil, recovered_identity_or_error end
+                return release_after_failure(lease_or_error, recovered_identity_or_error)
+            end
+            document, identity_or_error = recovered, recovered_identity_or_error
+        end
+        if document.header.name ~= target.name then
+            return release_after_failure(lease_or_error, failure(
+                "ContextNameMismatch",
+                "Context Header Name does not match the official basename"
+            ))
+        end
+        local previous_state, previous_identity_or_error = control_path_state(
+            filesystem,
+            previous_path
+        )
+        if not previous_state then
+            return release_after_failure(lease_or_error, previous_identity_or_error)
+        end
+        if previous_state == "present" then
+            local cleaned, cleanup_error = cleanup_file(
+                filesystem,
+                previous_path,
+                previous_identity_or_error
+            )
+            if not cleaned then
+                return release_after_failure(lease_or_error, failure(
+                    "ContextRecoveryRequired",
+                    "previous-valid cleanup failed",
+                    cleanup_error.code
+                ))
+            end
+        end
+        local writer = new_writer({
+            mode = "replace",
+            path = path,
+            target = target,
+            lock_path = lock_path,
+            previous_path = previous_path,
+            lease = lease_or_error,
+            base_document = document,
+            base_identity = identity_or_error,
+        })
+        return writer, document
+    end
+
+    ---Acquires a long-lived writer lease before reading an existing Context body.
+    function store.open_writer(path, metadata)
+        return acquire(path, metadata, "replace")
+    end
+
+    ---Acquires a long-lived writer lease for a not-yet-published Context path.
+    function store.create_writer(path, metadata)
+        return acquire(path, metadata, "create")
+    end
+
+    ---Publishes one full canonical generation through the fixed commit state machine.
+    function store.publish(writer, document, temporary_path)
+        local state = writer_states[writer]
+        if not state or state.owner ~= owner or state.status ~= "active" then
+            return nil, failure("InvalidContextWriter", "Context writer is stale or foreign")
+        end
+        if state.commit_active then
+            return nil, failure("ContextCommitConflict", "Context publication is already active")
+        end
+        local valid_temp, temp_error = validate_temp_path(state.path, temporary_path, limits)
+        if not valid_temp then return nil, temp_error end
+        local canonical, document_error = validate_publication_document(state, document)
+        if not canonical then return nil, document_error end
+        state.commit_active = true
+
+        local function finish(value, error_value)
+            state.commit_active = false
+            return value, error_value
+        end
+        local function fault(code, message, reason)
+            state.status = "faulted"
+            return finish(nil, failure(code, message, reason))
+        end
+
+        if state.mode == "replace" then
+            local current, current_identity_or_error = stable_read(
+                schema,
+                filesystem,
+                state.path,
+                limits
+            )
+            if not current
+                or not identity_equal(state.base_identity, current_identity_or_error)
+                or current.generation ~= state.base_document.generation
+            then
+                return fault(
+                    "TargetChanged",
+                    "Context target changed before publication",
+                    current and "identity" or current_identity_or_error.code
+                )
+            end
+        else
+            local absent, absence_error = target_absent(filesystem, state.path)
+            if not absent then
+                if absence_error and absence_error.code == "DestinationExists" then
+                    state.status = "faulted"
+                end
+                return finish(nil, absence_error)
+            end
+        end
+
+        local temporary_identity, write_error = write_new_document(
+            schema,
+            filesystem,
+            temporary_path,
+            document,
+            limits
+        )
+        if not temporary_identity then return finish(nil, write_error) end
+        local verified_identity, verify_error = verify_document_path(
+            schema,
+            filesystem,
+            temporary_path,
+            document,
+            temporary_identity,
+            limits
+        )
+        if not verified_identity then
+            cleanup_file(filesystem, temporary_path, temporary_identity)
+            return finish(nil, verify_error)
+        end
+
+        local previous_identity
+        if state.mode == "replace" then
+            local current, current_identity_or_error = stable_read(
+                schema,
+                filesystem,
+                state.path,
+                limits
+            )
+            if not current
+                or not identity_equal(state.base_identity, current_identity_or_error)
+                or current.generation ~= state.base_document.generation
+            then
+                cleanup_file(filesystem, temporary_path, verified_identity)
+                return fault(
+                    "TargetChanged",
+                    "Context target changed after temporary validation",
+                    current and "identity" or current_identity_or_error.code
+                )
+            end
+            previous_identity, write_error = copy_file_verified(
+                filesystem,
+                state.path,
+                state.base_identity,
+                state.previous_path,
+                limits
+            )
+            if not previous_identity then
+                cleanup_file(filesystem, temporary_path, verified_identity)
+                return finish(nil, write_error)
+            end
+            local previous_document, previous_read_error = stable_read(
+                schema,
+                filesystem,
+                state.previous_path,
+                limits
+            )
+            if not previous_document
+                or previous_document.generation ~= state.base_document.generation
+            then
+                cleanup_file(filesystem, temporary_path, verified_identity)
+                cleanup_file(filesystem, state.previous_path, previous_identity)
+                return finish(nil, previous_read_error or failure(
+                    "ContextPreviousMismatch",
+                    "previous-valid generation failed validation"
+                ))
+            end
+            local restated, final_target_or_error = filesystem.stat_identity(state.path)
+            if not restated or not identity_equal(state.base_identity, final_target_or_error) then
+                cleanup_file(filesystem, temporary_path, verified_identity)
+                cleanup_file(filesystem, state.previous_path, previous_identity)
+                return fault(
+                    "TargetChanged",
+                    "Context target changed before replace",
+                    restated and "identity" or final_target_or_error.code
+                )
+            end
+        end
+
+        local restated, final_temporary_or_error = filesystem.stat_identity(temporary_path)
+        if not restated or not identity_equal(verified_identity, final_temporary_or_error) then
+            cleanup_file(filesystem, temporary_path, verified_identity)
+            if previous_identity then
+                cleanup_file(filesystem, state.previous_path, previous_identity)
+            end
+            return finish(nil, restated and failure(
+                "ContextTemporaryMismatch",
+                "Context temporary changed before publication"
+            ) or final_temporary_or_error)
+        end
+
+        local published, publish_error
+        if state.mode == "replace" then
+            published, publish_error = filesystem.replace(temporary_path, state.path)
+        else
+            published, publish_error = filesystem.rename_no_replace(
+                temporary_path,
+                state.path
+            )
+        end
+        if not published then
+            cleanup_file(filesystem, temporary_path, verified_identity)
+            if previous_identity then
+                cleanup_file(filesystem, state.previous_path, previous_identity)
+            end
+            return finish(nil, publish_error)
+        end
+
+        local directory_flushed, directory_error = filesystem.flush_directory(
+            state.target.directory
+        )
+        if not directory_flushed then
+            return fault(
+                "ContextPublishUnknown",
+                "Context was published but directory durability is unknown",
+                directory_error.code
+            )
+        end
+        local published_identity, confirm_error = verify_document_path(
+            schema,
+            filesystem,
+            state.path,
+            document,
+            nil,
+            limits
+        )
+        if not published_identity then
+            return fault(
+                "ContextPublishUnknown",
+                "published Context generation could not be confirmed",
+                confirm_error.code
+            )
+        end
+
+        if previous_identity then
+            local cleaned, cleanup_error = cleanup_file(
+                filesystem,
+                state.previous_path,
+                previous_identity
+            )
+            if not cleaned then
+                return fault(
+                    "ContextCleanupRequired",
+                    "new Context generation is valid but previous cleanup failed",
+                    cleanup_error.code
+                )
+            end
+        end
+        state.mode = "replace"
+        state.base_document = document
+        state.base_identity = published_identity
+        local receipt = assert(freeze({
+            outcome = "published",
+            path = state.path,
+            generation = document.generation,
+            event_count = document.event_count,
+            auto_continue = document.recovery.auto_continue,
+            unresolved_operation_ids = document.recovery.unresolved_operation_ids,
+            unresolved_tool_call_ids = document.recovery.unresolved_tool_call_ids,
+            unknown_operation_ids = document.recovery.unknown_operation_ids,
+            target_qualified = filesystem.capabilities.target_qualified,
+        }, "Context publication receipt"))
+        return finish(receipt)
+    end
+
+    ---Releases one writer lease after all synchronous publication work ends.
+    function store.close_writer(writer)
+        local state = writer_states[writer]
+        if not state or state.owner ~= owner or state.status == "closed" then
+            return nil, failure("InvalidContextWriter", "Context writer is stale or foreign")
+        end
+        if state.commit_active then
+            return nil, failure(
+                "ContextCommitConflict",
+                "Context writer cannot close during publication"
+            )
+        end
+        local released, release_error = filesystem.release_lease(state.lease)
+        state.status = "closed"
+        if not released then return nil, release_error end
+        return true
+    end
+
+    ---Returns non-secret writer lifecycle state for status and fault handling.
+    function store.writer_status(writer)
+        local state = writer_states[writer]
+        if not state or state.owner ~= owner then
+            return nil, failure("InvalidContextWriter", "Context writer is foreign")
+        end
+        return assert(freeze({
+            status = state.status,
+            path = state.path,
+            generation = state.base_document and state.base_document.generation or 0,
+            publication_active = state.commit_active,
+        }, "Context writer status"))
+    end
+
+    ---Inspects only bounded public lease metadata and never opens Context XML.
+    -- A malformed or unreadable lease remains busy with an unknown PID; this
+    -- method never treats age, hostname, or parse failure as stale evidence.
+    function store.inspect_writer(path)
+        local target, target_error = validate_context_target(path)
+        if not target then return nil, target_error end
+        local lock_path = path .. ".yaca-lock"
+        local opened, handle_or_error = filesystem.open_read(lock_path)
+        if not opened then
+            if type(handle_or_error) == "table" and handle_or_error.code == "NotFound" then
+                return assert(freeze({
+                    busy = false,
+                    pid = "unknown",
+                    metadata_state = "absent",
+                }, "Context writer inspection"))
+            end
+            return assert(freeze({
+                busy = true,
+                pid = "unknown",
+                metadata_state = "unavailable",
+            }, "Context writer inspection"))
+        end
+        local handle = handle_or_error
+        local stated, initial_or_error = filesystem.stat_identity(handle)
+        if not stated then
+            filesystem.close(handle)
+            return assert(freeze({
+                busy = true,
+                pid = "unknown",
+                metadata_state = "unavailable",
+            }, "Context writer inspection"))
+        end
+        local parts, total, read_error = {}, 0, nil
+        if initial_or_error.size > filesystem.capabilities.maximum_lease_bytes then
+            read_error = failure("LeaseLimit", "writer metadata exceeds its byte limit")
+        end
+        while not read_error do
+            local read, chunk_or_error = filesystem.stream_read(
+                handle,
+                filesystem.capabilities.maximum_chunk_bytes
+            )
+            if not read then
+                read_error = chunk_or_error
+                break
+            end
+            total = total + #chunk_or_error.bytes
+            if total > filesystem.capabilities.maximum_lease_bytes then
+                read_error = failure("LeaseLimit", "writer metadata exceeds its byte limit")
+                break
+            end
+            parts[#parts + 1] = chunk_or_error.bytes
+            if chunk_or_error.eof then break end
+            if #chunk_or_error.bytes == 0 then
+                read_error = failure("ContextFilesystemContract", "lease read made no progress")
+                break
+            end
+        end
+        local restated, final_or_error = filesystem.stat_identity(handle)
+        local closed = filesystem.close(handle)
+        if read_error or not restated or not closed
+            or not identity_equal(initial_or_error, final_or_error)
+        then
+            return assert(freeze({
+                busy = true,
+                pid = "unknown",
+                metadata_state = "unavailable",
+            }, "Context writer inspection"))
+        end
+        local bytes = table.concat(parts)
+        local version, pid_text, started_at, hostname = bytes:match(
+            "^version=([^\n]+)\npid=([^\n]+)\nstartedAt=([^\n]+)\n"
+                .. "hostname=([^\n]+)\n$"
+        )
+        if not version then
+            version, pid_text, started_at = bytes:match(
+                "^version=([^\n]+)\npid=([^\n]+)\nstartedAt=([^\n]+)\n$"
+            )
+        end
+        local pid = pid_text and canonical_decimal(pid_text, 1, "/Writer/pid") or nil
+        local valid_time = started_at and canonical_time(started_at, "/Writer/startedAt") or nil
+        local valid_hostname = hostname
+        if hostname ~= nil then
+            valid_hostname = strict_text(
+                hostname,
+                limits.maximum_lock_hostname_bytes,
+                "/Writer/hostname",
+                false
+            )
+        end
+        if version ~= "1" or not pid or not valid_time
+            or (hostname ~= nil and (not valid_hostname or hostname:find("[=\r\n]")))
+        then
+            return assert(freeze({
+                busy = true,
+                pid = "unknown",
+                metadata_state = "invalid",
+            }, "Context writer inspection"))
+        end
+        return assert(freeze({
+            busy = true,
+            pid = pid,
+            started_at = valid_time,
+            hostname = valid_hostname,
+            metadata_state = "valid",
+        }, "Context writer inspection"))
+    end
+
+    store.capabilities = readonly({
+        single_writer = true,
+        publication_mutex = true,
+        full_stream_rewrite = true,
+        previous_valid_generation = true,
+        atomic_replace_candidate = filesystem.capabilities.atomic_replace_candidate,
+        rename_no_replace_candidate = filesystem.capabilities.rename_no_replace_candidate,
+        target_qualified = filesystem.capabilities.target_qualified,
+    }, "Context store capabilities")
+    store.limits = readonly({
+        maximum_context_bytes = limits.maximum_context_bytes,
+        maximum_lock_hostname_bytes = limits.maximum_lock_hostname_bytes,
+        maximum_temp_nonce_bytes = limits.maximum_temp_nonce_bytes,
+        context_permissions = limits.context_permissions,
+        lock_permissions = limits.lock_permissions,
+    }, "Context store limits")
+
+    return readonly(store, "Context store")
 end
 
 return M
