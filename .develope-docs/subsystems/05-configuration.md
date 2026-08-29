@@ -1,8 +1,8 @@
 # 05 配置与模型注册表
 
-更新日期：2026-08-10
+更新日期：2026-08-29
 
-状态：**W1-B 规格展开进行中** — 下文「现行字段 catalog」为 v0.1 **唯一权威字段集合**（产品语义）；INI 多行 grammar、部分数值硬顶、原子写原语仍待技术证明。`src/_CONFIG_.ini` 与 `CONFIG-SCHEMA-CANDIDATE.md` **不是**现行契约（后者仅审计底稿）。
+状态：**W1-B 规格侧已冻结** — 下文「现行字段 catalog」与 [`contracts/config.lua`](../contracts/config.lua) 共同构成 v0.1 权威字段集合；机器契约拥有稳定 ID、INI grammar、XML 白名单与 migration fixture。Runtime 数值硬顶、原子写原语仍待技术证明。`src/_CONFIG_.ini` 与 `CONFIG-SCHEMA-CANDIDATE.md` **不是**现行契约（后者仅审计底稿）。
 
 ## 职责
 
@@ -49,7 +49,7 @@ Model/config INI 可以在 chat 持有 Context writer 时由独立 REPL 或外�
 
 | 区域 | 正式职责 |
 | --- | --- |
-| `General` | schema 版本、`SystemPrompt`、`StartupSelfTest` |
+| `General` | schema 版本、`SystemPrompt`、`StartupSelfTest`、`LogLevel` |
 | `TUI` | 启动头逐字段 bool；无 master/theme/language/mouse/Web |
 | `Agent` | DoubleCheck 族、reviewer 选择、queue 上限、用户可收紧预算 |
 | `Network` | Model HTTP 的 proxy/CA/no-proxy；无 UseStunnel/全局 Model retry/DirectHttp |
@@ -77,7 +77,7 @@ Model/config INI 可以在 chat 持有 Context writer 时由独立 REPL 或外�
 
 **Sentinel：** 不用布尔 false 表示“无限”。可选上限用 **缺失 = 不额外收紧 / Runtime 默认**；关闭能力用枚举（如 `Streaming=off`）。
 
-**禁止出现（非穷尽）：** `Permission.Cautious` 内置语义、`Permission.*.DoubleCheck`、`UseStunnel`、`UseTerminationEvaluator`、可关 finish 的 `DoubleCheckTargets`、`DirectHttp`/`DirectNetwork`、`SensitiveRead`、`Autonomy`、Web/telemetry/upload/update、`Language`/`Theme`/`Vivid`、`AutoJumpToDir`/`AutoNameOnExit`/`ResumeDirectory`、`Model.CustomPrompt`（迁到 SystemPrompt）、`CompactionModel`、金额字段、backup/undo 配置、multi-root、MCP/plugin。
+**禁止出现（非穷尽）：** `Permission.Cautious` 内置语义、`Permission.*.DoubleCheck`、`UseStunnel`、`UseTerminationEvaluator`、可关 finish 的 `DoubleCheckTargets`、任何 stuck/no-progress 阈值字段、`CompactThresholdOverride`、`DirectHttp`/`DirectNetwork`、`SensitiveRead`、`Autonomy`、Web/telemetry/upload/update、`Language`/`Theme`/`Vivid`、`AutoJumpToDir`/`AutoNameOnExit`/`ResumeDirectory`、`Model.CustomPrompt`（迁到 SystemPrompt）、`CompactionModel`、金额字段、backup/undo 配置、multi-root、MCP/plugin。
 
 ### `[General]`
 
@@ -86,6 +86,7 @@ Model/config INI 可以在 chat 持有 Context writer 时由独立 REPL 或外�
 | SchemaVersion | string | 发行写入 | no | no | 迁移与拒绝不兼容 |
 | SystemPrompt | UTF-8 text（有界） | 空 | no | no | Global Prompt；不能授权 |
 | StartupSelfTest | off\|stage1\|stage2\|stage3 | off | no | no | Agent 入口 gate；非 TTY≥2 须 D-062 |
+| LogLevel | error\|warn\|info\|debug\|trace | info | no | no | 只控制可丢弃终端/XML 诊断细节；不能删除 canonical facts |
 
 ### `[TUI]` 启动头
 
@@ -115,12 +116,11 @@ Model/config INI 可以在 chat 持有 Context writer 时由独立 REPL 或外�
 | ActionReviewModel | Model 名或空 | 空=turn Model | no | no | 跨 endpoint 首次 disclosure |
 | TerminationReviewModel | Model 名或空 | 空=turn Model | no | no | 与 Action 独立 |
 | QueueMaxItems | int 1..RuntimeMax | **9** | no | no | D-066 |
-| CompactThreshold | float (0,1) | 0.75 | no | 可选下调 | 只触发 model-view 压缩 |
+| CompactThreshold | float (0,1) | 0.75 | no | no | 只触发 model-view 压缩；M05-06=A 不提供 XML override |
 | MaxTurnModelRequests | int optional | unset | no | 可选下调 | 不可超 Runtime hard |
 | MaxTurnToolCalls | int optional | unset | no | 可选下调 | 同上 |
-| StuckNoProgressRounds | int optional | unset | no | no | 默认 TP |
 
-禁止 INI 关闭 hard cap；无金额字段。
+禁止 INI 关闭 hard cap；无金额字段；AL06-50=A 的 stuck/no-progress detector tuple 只来自版本化发行 manifest，INI/XML 对应字段数必须为零。
 
 ### `[Network]`
 
@@ -204,13 +204,22 @@ Model/config INI 可以在 chat 持有 Context writer 时由独立 REPL 或外�
 6. HTTP+Key → 保存警告。
 7. 旧 CustomPrompt / Permission.DoubleCheck / Cautious 身份 → migration diagnostic。
 
+### INI 字符串与多行 grammar（M05-07=A）
+
+- text/string/path/URL 值统一使用双引号；空值写作 `""`，UTF-8 正文直接保真。
+- 唯一转义集合为 `\\`、`\"`、`\n`、`\r`、`\t`；未知转义、字符串内物理换行、三引号和行尾 continuation 都是 error。
+- bool、number、enum 与逐字段登记的 sentinel 使用未加引号 ASCII token；不能把 `false` 泛化成无限。
+- `;`/`#` 只在双引号外开始注释；section/key 大小写敏感。reader 接受 LF/CRLF 和至多一个开头 UTF-8 BOM；REPL 保留未修改字段的注释、顺序与 concrete syntax。
+- [`contracts/fixtures/config.lua`](../contracts/fixtures/config.lua) 冻结合法/非法转义、migration 和负向字段向量；实现的 parser/writer/REPL 必须共用同一 codec。
+
 ### 发行模板骨架（示意）
 
 ```ini
 [General]
 SchemaVersion = 0.1.0
-SystemPrompt =
+SystemPrompt = ""
 StartupSelfTest = off
+LogLevel = info
 
 [TUI]
 StartupShowSlogan = true
@@ -227,10 +236,10 @@ StartupShowStatusHint = true
 
 [Agent]
 DoubleCheck = true
-DoubleCheckGoal =
+DoubleCheckGoal = ""
 ActionReviewEnabled = true
-ActionReviewModel =
-TerminationReviewModel =
+ActionReviewModel = ""
+TerminationReviewModel = ""
 QueueMaxItems = 9
 CompactThreshold = 0.75
 
@@ -247,22 +256,22 @@ ListSortBy = updated
 ListSortDirection = descending
 
 [Permission.Std]
-Description = Standard: confirm write/delete/shell/outside
+Description = "Standard: confirm write/delete/shell/outside"
 Read = allow
 Write = confirm
 Delete = confirm
 Shell = confirm
 OutsideWorkspace = confirm
-SystemPrompt =
+SystemPrompt = ""
 
 [Permission.Readonly]
-Description = Readonly: deny mutating capabilities
+Description = "Readonly: deny mutating capabilities"
 Read = allow
 Write = deny
 Delete = deny
 Shell = deny
 OutsideWorkspace = deny
-SystemPrompt =
+SystemPrompt = ""
 ```
 
 ### W1-B 完成定义
@@ -271,10 +280,11 @@ SystemPrompt =
 - [x] 默认值（QueueMaxItems=9、排序、Permission 矩阵等）
 - [x] XML 白名单与 secret 边界
 - [x] 跨字段校验要点
-- [ ] 多行 Prompt grammar + round-trip fixture
-- [ ] RuntimeMax / 预算发行数字表
-- [ ] 旧 ini migration 用例表
-- [ ] AR-P0-09 规格侧勾选
+- [x] 多行 Prompt grammar + round-trip fixture（M05-07=A：双引号 + `\\n`）
+- [x] 旧 INI migration 用例表
+- [x] 机读 schema、负向字段与跨规格 validator
+- [ ] RuntimeMax / 预算发行数字表（TP-017/022 实测后写入 release manifest）
+- [x] AR-P0-09 规格侧勾选；gate 仍等原子写与目标平台数字证明
 
 ### 下一步
 

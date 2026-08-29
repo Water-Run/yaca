@@ -2,53 +2,84 @@
 
 [中文](./README-zh.md)
 
-`yaca` is the design for a simple, single-agent Coding Agent, open-sourced under the `GPL v3` license on [GitHub](https://github.com/Water-Run/yaca). It targets Lua 5.5, Windows XP SP3 through Windows 11 on Win32 x86, and Linux x86_64 including CentOS 7.
+yaca is the design for a simple, single-agent terminal Coding Agent, licensed under GPL v3.
 
-> **Project status (2026-07-22): design phase.** There is no completed v0.1 binary or verified release yet. Platform support, installation, commands, presets, and examples below are design targets, not implemented behavior. Current decisions and unanswered design batches live in [`.develope-docs`](.develope-docs/README.md).
+> **Project status (2026-08-29): coding-readiness closeout.** No working v0.1 Agent or qualified release exists yet; the Lua product modules are still empty. Everything below describes the frozen v0.1 target, not currently executable behavior. Product choices are closed, machine-readable design contracts now exist, and technical proofs plus the implementation plan are in progress.
 
-## Installation
+## Supported release targets
 
-The planned release unit is a platform-specific `.zip` built with the sibling `luainstaller` project. Packaging, installer entry points, and real-machine evidence remain design/release gates; the repository must not claim an archive is available before those gates pass.
+v0.1 is planned as exactly three independently built and qualified portable archives:
 
-The semantic `version` action is planned to identify a built release. Its exact top-level CLI spelling is still pending design decision `TU-18`; the target output shape is:
+- Win32 x86: Windows XP SP3 through Windows 11;
+- Win64 x86_64: Windows 7 SP1 through Windows 11;
+- Linux x86_64: CentOS 7 is the minimum hard baseline.
 
-```cmd
-yaca v0.1.0
-Yet Another Coding Agent.
+Each archive embeds Lua 5.5 and does not depend on a system Lua installation. Windows archives contain `yaca.exe`, `Install.cmd`, `README.txt`, `LICENSE`, and `docs/`; Linux uses `yaca` and `Install.sh` with the same outer shape. The thin install helper may add the extracted directory to `PATH`; it does not copy the program or create an install database.
+
+The durable data root is always `__yaca__` next to the actual executable, regardless of the caller's current directory. v0.1 has no built-in updater or code-signing promise. There is no downloadable or verified archive yet.
+
+## Product shape
+
+- One terminal UI, one active Context, one active main turn, and serial tools.
+- One workspace root per Context. It is derived from the Context XML's parent in the `__yaca__/CONTEXT/` mirror tree; XML cannot override it.
+- Long-lived user facts are limited to `__yaca__/config.ini` and one complete XML per Context. There is no persistent WAL, index database, standalone log, backup history, trash, or general undo system.
+- Two Model adapters are in scope: `openai-chat` and `anthropic-messages`. A Model is an explicit full connection record; yaca never silently switches to another Model after failure.
+- A new chat remains an in-memory unsaved draft until its first main message. That message must create and durably publish the initial XML before any Model request or side effect.
+
+The internal Context XML is versioned yaca storage, not a stable third-party API. Export is the human/tool interoperability path.
+
+## Configuration and safety
+
+The complete INI is validated as one typed generation. Every new top-level main or side turn observes the whole file; an invalid, unreadable, or half-written candidate blocks the new turn instead of falling back silently. A turn and all of its retries, tools, reviews, and compaction work keep the immutable generation admitted with that turn.
+
+The distribution defines two Permission profiles:
+
+| Profile | Read | Write | Delete | Shell | OutsideWorkspace |
+| --- | --- | --- | --- | --- | --- |
+| Std (default) | allow | confirm | confirm | confirm | confirm |
+| Readonly | allow | deny | deny | deny | deny |
+
+The fixed Agent tool set is `list`, `read`, `search`, `write`, `patch`, `rename`, `delete`, and `exec`. Raw `exec` is governed by the broad `Shell` capability; yaca does not claim to infer or sandbox its filesystem/network effects from command text. Permission names, descriptions, and prompts never grant capabilities.
+
+`DoubleCheck` controls optional high-risk action review and mandatory finish review when enabled. `.cautious` changes only the current Context override; it is not a Permission profile.
+
+## Contexts
+
+Context files live in a mirror tree such as `__yaca__/CONTEXT/C/Program Files/My Task.xml`. The current logical path, including the XML filename, produces a displayed 16-character uppercase hexadecimal hash. There is no permanent Context ID: rename or rebind changes the path and hash immediately.
+
+Opening history is always explicit. A short name selects the first usable match by the specified scope/distance order; a hash is the precise selector and must be unique. Rename, rebind, permanent delete, import mapping, and metadata changes reverify the selected target. A live writer blocks another process from reading the XML body or mutating it; stale locks are never broken by age alone.
+
+## Planned command grammar
+
+These spellings are frozen design inputs but are not implemented yet:
+
+```text
+yaca [directory]
+yaca --help [topic]                 (-h, Windows /h)
+yaca --version                      (-v, Windows /v)
+yaca --self-test [options]          (-st, Windows /st)
+yaca --model-repl                   (-mr, Windows /mr)
+yaca --config-repl                  (-cfg, Windows /cfg)
+yaca --context-repl recent|full     (-ctx, Windows /ctx)
+yaca --continue <selector>          (-c, Windows /c)
+yaca --export [selector]            (-ex, Windows /ex)
+yaca --status                       (-stt, Windows /stt)
 ```
 
-The product has semantic `help` and `model-repl` entrances. A usable Model connection is required before Agent chat can sample an LLM. The final protocol/preset list and exact commands remain pending decisions; no provider list in an older README is a compatibility promise.
+Bare `yaca` is exactly `yaca .`. `--` ends option parsing, so a directory beginning with `-` remains expressible. Linux never treats `/...` as an option. Non-TTY self-test Stage 2 or 3 requires the explicit current-invocation flag `--i-accept-online-self-test`; otherwise it performs zero Model requests and fails closed.
 
-> `__yaca__` is the logical data root used by the design. Its installed-versus-portable physical location is still pending. Do not infer an implemented layout from legacy repository resources.
+Chat text fallbacks are `.queue` (`list|delete|move|edit|clear`), `.immediate`, `.side`, `.multiline`, `.cancel`, `.cautious`, `.model`, `.context`, `.status`, `.help`, `.details`, `.prompt`, `.compact`, and `.quit`. They project the same semantic actions as terminal shortcuts and do not create a remote/headless controller.
 
-## Configuration
+## Explicitly out of scope for v0.1
 
-The target design uses one complete INI under logical `__yaca__` plus explicit session overrides in each Context XML. Configuration inspection, reset, and interactive editing belong to the `config-repl` surface; Model lifecycle belongs to `model-repl`; the three-stage `self-test` is the explicit validation path.
+There is no Web UI, image/audio input, transcription, TTS, public remote/headless API, MCP, plugin/hook/skills runtime, sub-agent, Context branching, multi-root Context, telemetry, diagnostic upload, built-in update, general undo, or direct HTTP Agent tool. These exclusions must have zero surface in configuration, help, schemas, runtime, dependencies, and release archives.
 
-Physical Model order selects the new-Context default. A Context records its selected Model and the historical connection snapshot; if the logical Model was renamed, removed, disabled, or changed incompatibly, yaca must show a runtime mapping/repair prompt. It must not silently fall back to another Model or endpoint. In-session Model switching is a semantic action whose final chat spelling is pending `TU-32`.
+Future local Web product lines are design reservations only; they do not authorize a Web component in v0.1.
 
-## Context Mechanism
+## Development documents
 
-The design stores each Context as a `[name].xml` file under `__yaca__/CONTEXT/`, in a tree that mirrors the corresponding path on disk. For example, a Windows Context may be stored as `CONTEXT/C/Program Files/我的任务.xml`.
+Start with the [current state](.develope-docs/CURRENT-STATE.md), [machine contracts](.develope-docs/contracts/README.md), [readiness gates](.develope-docs/ARCHITECTURE-READINESS.md), and [technical proof backlog](.develope-docs/TECHNICAL-PROOF-BACKLOG.md). From the repository root, the current design consistency check is:
 
-The hash input is the logical path from the `CONTEXT` root, with a leading `/`, `/` separators, and the XML filename included. The example above uses exactly `/C/Program Files/我的任务.xml` to compute a fixed 16-character hash. yaca does not store a permanent context ID: a rename or path change recomputes the hash in real time and immediately invalidates the old hash. Context lists and hash lookups are derived from the current XML tree.
-
-A context XML contains the complete conversation, log-related information, session-level parameters, and their metadata. The semantic `context-list` action enumerates contexts by scope; `context-repl` provides interactive browsing and management.
-
-The semantic `continue(selector)` action accepts an exact context name or a fixed 16-character hash. Resume, rename, and delete entry points share one resolver: it starts at the mirror location for the current directory, then expands outward through recursive ancestor scopes to the `CONTEXT` root. Distance wins first; within one search scope, an exact name wins over a hash. The resolver checks both in one pass and stops after the current scope yields a conclusive result. The post-resolution working-directory policy remains pending decision `PJ-13`: options A/B retain the boolean `AutoJumpToDir`, while C replaces it with `ResumeDirectory=jump|ask|keep`.
-
-For simpler management, use the interactive `context-repl` surface to browse the directory tree, search, select and connect, rename, delete, and refresh. It shares the same path, hash, and safety rules as the command-line interface.
-
-## Permission Mechanism
-
-Permission profiles live in the INI. `Std` is first in the planned distribution template and therefore the new-Context default; the final built-in capability matrices remain pending safety decisions. `Cautious` is not a separate Permission mode: cautious review is controlled by `DoubleCheck` and the current Context may override it through the semantic `.cautious` action. Names and descriptions never grant capabilities.
-
-A Context records its selected Permission and historical effective snapshot. If the local profile was renamed, removed, or differs incompatibly, yaca must show a runtime mapping/repair prompt and remain fail-closed where required; it must not silently adopt the first profile. The chat spelling for Permission switching remains pending `TU-32`.
-
-## Command Overview
-
-The primary invocation is `yaca [directory]`. Bare `yaca` is exactly equivalent to `yaca .`: both enter the TUI with the current directory as the initial workspace location. `yaca <directory>` starts from the specified directory.
-
-The product design also establishes semantic actions for `help`, `version`, `self-test`, `model-repl`, `config-repl`, `context-repl`, `context-list(scope)`, and `continue(selector)`. Decision `TU-18` still has to project these actions into an exact top-level grammar: flags, subcommands, or a mixed form, including any short aliases. Therefore action labels in this README are not executable command spellings yet. Earlier draft flag names and their conflicting short aliases are not part of the confirmed contract.
-
-Chat also has semantic actions for status/help, queue/steer/side/cancel, Prompt and DoubleCheck overrides, Model/Permission/Context management, typed retry/recovery, and graceful exit. `TU-32` still decides the canonical dot-command namespace; conditional actions such as manual compaction exist only if their own upstream decision enables them. Older draft dot-command lists are not an executable or compatibility contract.
+```sh
+bin/lua55 .tools/validate_design_contracts.lua
+```

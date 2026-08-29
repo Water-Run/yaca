@@ -1,0 +1,106 @@
+return {
+  contract_version = "0.1.0-readiness.1",
+  product_version = "0.1.0",
+  decision_refs = { "D-044", "D-045", "D-053", "D-056", "D-068" },
+
+  product = {
+    kind = "single-agent-terminal-coding-agent",
+    workspace_roots_per_context = 1,
+    active_contexts_per_process = 1,
+    durable_fact_sources = { "main-ini", "context-xml" },
+    public_interaction_surfaces = {
+      "chat",
+      "model-repl",
+      "config-repl",
+      "context-repl",
+      "self-test",
+      "help",
+    },
+  },
+
+  release_targets = {
+    {
+      id = "win32-x86",
+      os = "windows",
+      arch = "x86",
+      minimum = "Windows XP SP3",
+      executable = "yaca.exe",
+      installer = "Install.cmd",
+      archive = "yaca-0.1.0-win32-x86.zip",
+      required_root_entries = { "yaca.exe", "Install.cmd", "README.txt", "LICENSE", "docs/" },
+      qualification = "independent-full-matrix",
+    },
+    {
+      id = "win64-x86_64",
+      os = "windows",
+      arch = "x86_64",
+      minimum = "Windows 7 SP1",
+      executable = "yaca.exe",
+      installer = "Install.cmd",
+      archive = "yaca-0.1.0-win64-x86_64.zip",
+      required_root_entries = { "yaca.exe", "Install.cmd", "README.txt", "LICENSE", "docs/" },
+      qualification = "independent-full-matrix",
+    },
+    {
+      id = "linux-x86_64",
+      os = "linux",
+      arch = "x86_64",
+      minimum = "CentOS 7 x86_64",
+      executable = "yaca",
+      installer = "Install.sh",
+      archive = "yaca-0.1.0-linux-x86_64.zip",
+      required_root_entries = { "yaca", "Install.sh", "README.txt", "LICENSE", "docs/" },
+      qualification = "independent-full-matrix",
+    },
+  },
+
+  package_invariants = {
+    runtime = "embedded-lua-5.5",
+    system_lua_dependency = false,
+    data_root = "executable-directory/__yaca__",
+    install_copies_files = false,
+    install_database = false,
+    built_in_update = false,
+    code_signing_v0_1 = false,
+    per_archive_evidence = { "sha256", "component-license-manifest", "sbom", "build-summary", "test-summary" },
+  },
+
+  journeys = {
+    {
+      id = "download-install-bootstrap",
+      entry = "extracted-package",
+      steps = { "verify-package-shape", "run-thin-installer-or-direct", "locate-adjacent-data-root", "load-safe-bootstrap" },
+      terminal_results = { "ready", "action-required", "error" },
+    },
+    {
+      id = "configure-and-self-test",
+      entry = "missing-or-present-config",
+      steps = { "bootstrap-config", "publish-config-generation", "self-test-stage1", "optional-consented-stage2", "optional-stage3-advisory" },
+      terminal_results = { "ready", "partial", "cancelled", "error" },
+    },
+    {
+      id = "new-context-main-turn",
+      entry = "run-chat",
+      steps = { "bounded-unsaved-draft", "first-main-input", "publish-context-no-replace", "model-request", "serial-tools", "typed-turn-outcome" },
+      terminal_results = { "completed", "waiting_user", "refused", "cancelled", "budget_exhausted", "stuck", "partial", "error", "unknown_side_effect" },
+    },
+    {
+      id = "continue-and-manage-context",
+      entry = "explicit-context-action",
+      steps = { "catalog-or-resolve", "verify-target", "acquire-writer", "map-local-config", "continue-or-manage", "durable-close" },
+      terminal_results = { "completed", "waiting_user", "cancelled", "error", "unknown_side_effect" },
+    },
+    {
+      id = "cancel-exit-crash-recovery",
+      entry = "active-or-stale-context",
+      steps = { "stop-admission", "cancel-and-join", "pair-known-results", "record-unknown", "publish-close-if-safe", "release-and-restore-terminal" },
+      terminal_results = { "completed", "cancelled", "partial", "error", "unknown_side_effect" },
+    },
+    {
+      id = "release-qualification",
+      entry = "release-candidate",
+      steps = { "build-three-targets", "scan-scope-and-components", "run-target-matrices", "verify-zero-surface", "publish-per-target-evidence" },
+      terminal_results = { "qualified", "rejected" },
+    },
+  },
+}

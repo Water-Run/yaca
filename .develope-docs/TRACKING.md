@@ -17,7 +17,7 @@ Web（D-058）仍仅预留。
 - 使用相邻仓库 `../luainstaller` 完成 Lua 程序打包。
 - 设计完成后按子系统逐个实施，不同时铺开多个未完成系统。
 - `.develope-docs/` 是正式设计资料，纳入 Git。
-- 一切开发直接在 `main` 分支进行；完整批次可以本地提交，但除非项目负责人当次明确要求，否则不推送或执行其他远端写操作。
+- 一切开发直接在 `main` 分支进行；D-071 与负责人本轮指令明确要求核心节点推送 `origin/main`。
 - Windows XP SP3 x86 与 CentOS 7 x86_64 都是 v0.1 硬性发布门槛。
 - Windows 客户端验证连续覆盖 XP SP3、Vista SP2、7 SP1、8、8.1、10 和 11；所有最终声明支持的平台都执行完整测试。
 - Windows v0.1 分别发布 Win32 x86 与 Win64 x86_64；x86 覆盖 XP SP3 至 11，x64 覆盖 Windows 7 SP1 至 11。两个架构独立完整测试和放行；不发布 ARM。
@@ -42,29 +42,29 @@ Web（D-058）仍仅预留。
 
 | 编号 | 子系统 | 当前状态 | 主要依赖/共同确认 |
 | --- | --- | --- | --- |
-| 00 | 产品契约与兼容性基线 | 讨论中（兼容性已确认） | 无 |
-| 01 | 平台兼容抽象 | **W3-A 首版**（窄端口 ABI） | 00 |
+| 00 | 产品契约与兼容性基线 | **W4-A 规格侧冻结**（journey + zero-surface machine contract） | 无 |
+| 01 | 平台兼容抽象 | **W3-A 规格侧冻结**（窄端口/safe-load/identity contract） | 00 |
 | 02 | 进程执行与随包资源 | **W3-A 首版**（Process AsyncPort） | 00、01 |
 | 03 | 网络传输 | **W3-A 首版**（HTTP AsyncPort） | 00--02 |
 | 04 | 数据格式 | 候选 | 00、01 |
-| 05 | 配置与模型注册表 | **W1-B 展开中**（字段 catalog 已首版） | 00、01、04 |
-| 06 | 模型协议适配 | 候选 | 03--05 |
-| 07 | Agent 工具系统 | 候选 | 01、02、04 |
-| 08 | 权限与安全 | 候选（矩阵冻结；W3-C 交叉声明） | 05、07、18 |
-| 09 | AgentLoop 与会话状态机 | **W1-A 展开中**（状态/outcome 表已首版） | 05--08、18、19 |
-| 10 | 上下文存储 | **W1-C 展开中**（事件目录/提交表已首版） | 04、05、09、19 |
+| 05 | 配置与模型注册表 | **W1-B 规格侧冻结**（machine catalog/grammar/migration） | 00、01、04 |
+| 06 | 模型协议适配 | **W2-C canonical 规格侧冻结**（recorded wire 待 TP） | 03--05 |
+| 07 | Agent 工具系统 | **W2-B registry/matrix 规格侧冻结** | 01、02、04 |
+| 08 | 权限与安全 | **W2-B fold 规格侧冻结**（W3-C 交叉声明） | 05、07、18 |
+| 09 | AgentLoop 与会话状态机 | **W1-A 规格侧冻结**（machine state/outcome/trace） | 05--08、18、19 |
+| 10 | 上下文存储 | **W1-C 规格侧冻结**（RNG + semantic event schema） | 04、05、09、19 |
 | 11 | 上下文定位、实时索引与交互式浏览器 | **W3-B 首版**（LogicalPath/hash/Resolver） | 10 |
 | 12 | 上下文压缩 | **W3-D 首版**（model-view schema） | 06、09、10 |
-| 13 | CLI | **W2-A 展开中**（ACTION-REGISTRY 首版） | 05、09--12 |
-| 14 | 兼容 TUI | 候选 | 01、13 |
-| 15 | 诊断、自检与日志 | 候选 | 01--14、18、19 |
+| 13 | CLI | **W2-A 规格侧冻结**（39-action machine registry） | 05、09--12 |
+| 14 | 兼容 TUI | **输入/prompt 规格侧冻结**（chrome/proof 待补） | 01、13 |
+| 15 | 诊断、自检与日志 | **W4-B 规格侧冻结**（error/exit/check registry） | 01--14、18、19 |
 | 16 | 打包、安装与发布 | 候选 | 00--15、18--20 |
 | 17 | Web 排除 + 双线预留 | v0.1 已排除（PJ-14 A）；D-058 预留 | 核心零 Web；`yaca-web`=Java 8，`yaca-ie6`=PHP 5.4+IE6；实现未开题 |
 | 18 | Prompt、指令与工作区发现 | 候选 | 01、05、08、09 |
 | 19 | 改动事务、审阅与撤销 | **W3-D 首版**（无 undo fault 矩阵） | 01、02、07--10 |
 | 20 | 测试、Agent 评估与平台验收 | 候选 | 全部核心系统的已确认契约 |
 | 21 | 扩展边界与未来兼容 | 候选 | 05--10、18、`PROD-11` |
-| 22 | 应用运行时、生命周期与并发 | **W3-A 首版**（事件泵组合） | 00--15、18、19、21 的共同契约；由 20 验证 |
+| 22 | 应用运行时、生命周期与并发 | **W3-A 规格侧冻结**（事件泵/platform machine contract） | 00--15、18、19、21 的共同契约；由 20 验证 |
 
 ## 下一步
 
@@ -76,28 +76,28 @@ Web（D-058）仍仅预留。
 
 `DISCUSSION-BATCH-02.md` 至 `04` 捕获产品旅程和早期补缝，`DISCUSSION-BATCH-05.md` 修正 luainstaller x86 证据外推，`DISCUSSION-BATCH-06.md` 完成集中产品决策。当前工作转为把 D-049 至 D-057 展开成唯一 owner 规格、完整 typed schema/状态表/action registry，以及给 XP x86、Win7+ x64、CentOS 7 和三个最终 zip 建立技术证明。全部 P0 规格与 proof plan 通过前继续只做设计，不开始实现；上下文分支功能保持移出当前范围。
 
-### 2026-08-10 进度快照
+### 2026-08-29 进度快照
 
 | 层 | 状态 |
 | --- | --- |
 | 负责人产品选择 | 已关闭（register `unanswered=0` / `conflict=0`） |
 | 项目级决定 | D-001..D-071；D-049..D-057 主链，D-058 Web 预留，D-059..069 SQ，D-070 离线授权，D-071 readiness/proof/push 授权 |
-| Owner 规格 | W1–W3 **首版合同**已落；尚无全量子系统「设计已确认」 |
-| 技术证明 | 关键 TP `specified`；无 proven-target |
-| 实施就绪门 | P0 **全部未通过**（规格侧部分首版≠passed）；不可写完整实施计划/产品代码 |
+| Owner 规格 | W1–W4 主脊柱已形成 11 份 machine contract + 6 组 fixtures；P1/页面/路径/wire 边角仍待收口 |
+| 技术证明 | luainstaller 1.3.0 upstream modern + 本地 contract/RNG；关键 modern proof 正在执行，无 proven-target |
+| 实施就绪门 | P0 gate 仍未 passed（规格侧冻结≠目标 proof）；Gate A/B 审计前不写产品代码 |
 | Web | v0.1 仍零表面；双线预留：`yaca-web`/Java 8、`yaca-ie6`/PHP 5.4+IE6 |
 
 **近期设计工作优先级（核心优先于 Web）：**
 
-1. 加深 W1–W3 首版至「设计已确认」检查表（fixture/golden 约定）。
-2. 获授权后 modern proof 原型（TP-003/006/008）；目标机证据。
-3. Wave 4 旅程矩阵 / zero-surface / README 诚实同步。
+1. 执行 TP-003/006/008/010 modern proof 并归档可复现证据。
+2. 关闭 P1/ASCII chrome/path/wire 的实施计划前规格缺口。
+3. 同步中英文 README，审计 Gate A/B 并形成全程序实施计划。
 4. Web 双线仅维护预留文档，除非负责人开题。
 
 主线就绪差距与 Wave 工作包见 **[`READINESS-GAP.md`](READINESS-GAP.md)**。  
 规格冻结问答见 **[`SPEC-FREEZE-QUEUE.md`](SPEC-FREEZE-QUEUE.md)**：**主队列已完成**（至 D-069）。
 
-**当前工作路线（2026-08-10）：** Wave 1–2 首版 + **Wave 3 四包首版齐** — W3-A `01/02/03/22`；W3-B `11`；W3-C [`DATA-CLASSIFICATION.md`](DATA-CLASSIFICATION.md)；W3-D `12/19`。P0 门仍 **未通过**（规格加深 + TP 证据）。不写产品代码直至门 A/B。
+**当前工作路线（2026-08-29）：** W1–W4 机器契约节点完成 → modern proof → P1/README 收尾 → Gate A/B 与实施计划。P0 门仍 **未通过**（主要剩 TP/目标证据）；不写产品代码直至门 A/B。
 
 
 ### 自动推进停止点 / 下一负责人问题集（2026-08-10）
@@ -119,6 +119,6 @@ Web（D-058）仍仅预留。
 | TP 失败改用户保证 | 停 → 最小 O 包；不擅自 WAL/弱 cancel |
 | Permission 扩展 | Std/Readonly 冻结；禁止静默改 |
 
-**仍有效禁令**：不新开 SQ 长卷；不开始产品 `src/*.lua`（D-001）；本轮不做 proof 可执行原型。  
-**可继续**：Wave 3 规格、W1–W2 加深、门禁文档、纯表格与保守技术择优。  
+**仍有效禁令**：不新开 SQ 长卷；Gate A/B 前不开始产品 `src/*.lua`。D-071 已取代旧的“本轮不做 proof 原型”限制，允许可丢弃 modern proof、实施计划工具和核心节点推送。
+**可继续**：modern proof、P1/README/门禁收尾、全程序实施计划与保守技术择优。
 离线会话细则见 [`HANDOFF-AUTO-2026-08-10.md`](HANDOFF-AUTO-2026-08-10.md)。

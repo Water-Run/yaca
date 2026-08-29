@@ -1,0 +1,30 @@
+return {
+  contract_version = "0.1.0-readiness.1",
+  cases = {
+    { id = "valid-minimal-template", field_ids = { "General.SchemaVersion", "Global.SystemPrompt", "General.StartupSelfTest", "General.LogLevel", "Agent.QueueMaxItems", "Agent.CompactThreshold", "Permission.*.Read", "Permission.*.Write", "Permission.*.Delete", "Permission.*.Shell", "Permission.*.OutsideWorkspace", "Model.*.Protocol", "Model.*.Endpoint", "Model.*.RemoteModel" }, valid = true },
+    { id = "log-level-does-not-delete-facts", field_id = "General.LogLevel", value = "error", valid = true, invariant = "canonical-facts-still-durable" },
+    { id = "stuck-threshold-is-not-user-config", field_id = "Agent.StuckNoProgressRounds", value = 3, valid = false, expected_error = "ConfigInvalid" },
+    { id = "compact-threshold-has-no-xml-override", field_id = "Context.CompactThresholdOverride", value = 0.5, valid = false, expected_error = "ConfigInvalid" },
+    { id = "unknown-field-fails-generation", field_id = "Agent.UnknownLimit", value = 1, valid = false, expected_error = "ConfigInvalid" },
+    { id = "key-is-registered-secret", field_id = "Model.*.Key", value = "canary-secret", valid = true, must_not_project_to = { "argv", "context-xml", "ordinary-error", "export" } },
+    { id = "runtime-limit-cannot-be-raised", field_id = "Agent.MaxTurnToolCalls", value = "above-runtime", valid = false, expected_error = "ConfigInvalid" },
+  },
+  string_vectors = {
+    { id = "empty", encoded = "\"\"", decoded = "", valid = true },
+    { id = "multiline", encoded = "\"line one\\nline two\"", decoded = "line one\nline two", valid = true },
+    { id = "quote-and-slash", encoded = "\"say \\\"ok\\\" at C:\\\\work\"", decoded = "say \"ok\" at C:\\work", valid = true },
+    { id = "tab-and-carriage-return", encoded = "\"a\\tb\\rc\"", decoded = "a\tb\rc", valid = true },
+    { id = "unknown-escape", encoded = "\"bad\\q\"", valid = false },
+    { id = "literal-newline", encoded = "\"bad\nline\"", valid = false },
+    { id = "triple-quote", encoded = "\"\"\"block\"\"\"", valid = false },
+  },
+  migration_cases = {
+    { id = "custom-prompt", source = "Model.*.CustomPrompt", expected_action = "copy-exact-then-validate-before-delete" },
+    { id = "profile-doublecheck", source = "Permission.*.DoubleCheck", expected_action = "diagnostic-explicit-Agent.DoubleCheck-choice-required" },
+    { id = "cautious-profile", source = "Permission.Cautious", expected_action = "diagnostic-explicit-profile-and-session-mapping-required" },
+    { id = "stunnel", source = "Network.UseStunnel", expected_action = "remove-and-explain-external-stunnel-endpoint-route" },
+    { id = "old-jump", source = "Context.AutoJumpToDir", expected_action = "remove-no-equivalent" },
+    { id = "old-resume", source = "Context.ResumeDirectory", expected_action = "remove-no-equivalent" },
+    { id = "false-numeric", source = "optional-numeric=false", expected_action = "diagnostic-explicit-missing-or-value-choice-required" },
+  },
+}

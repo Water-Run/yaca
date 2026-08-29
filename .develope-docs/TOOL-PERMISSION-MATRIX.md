@@ -1,8 +1,8 @@
 # W2-B Tool × Permission matrix（首版）
 
-更新日期：2026-08-10
+更新日期：2026-08-29
 
-状态：**技术规格**；产品轴仅来自 D-052 / D-043 / 08 号 Permission；**无新 A/B 产品分叉**。
+状态：**规格侧已冻结**；机读真源与 fold fixtures 为 [`contracts/tools.lua`](contracts/tools.lua) 和 [`contracts/fixtures/permission.lua`](contracts/fixtures/permission.lua)。产品轴仅来自 D-052 / D-043 / 08 号 Permission；**无新 A/B 产品分叉**。
 
 关联：[`subsystems/07-tool-system.md`](subsystems/07-tool-system.md)、[`subsystems/08-permission-and-safety.md`](subsystems/08-permission-and-safety.md)。
 
@@ -140,4 +140,5 @@ SensitiveRead、Network capability、persistent grant、OS sandbox 声明、从 
 - [x] OutsideWorkspace fold  
 - [x] exec 宽 Shell  
 - [x] approval snapshot  
+- [x] 机读 contract 与 fold fixtures
 - [ ] 平台 path identity 证明（TP）  

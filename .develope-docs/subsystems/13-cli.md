@@ -1,6 +1,8 @@
 # 13 CLI
 
-状态：**W2-A 展开中** — 见 [ACTION-REGISTRY.md](../ACTION-REGISTRY.md)；golden argv 待补
+更新日期：2026-08-29
+
+状态：**W2-A 规格侧已冻结** — 人读表见 [ACTION-REGISTRY.md](../ACTION-REGISTRY.md)，机读 registry 与 synthetic argv/chat/REPL fixtures 见 [`contracts/actions.lua`](../contracts/actions.lua)；真实 parser/help 生成待实现
 
 ## 职责
 

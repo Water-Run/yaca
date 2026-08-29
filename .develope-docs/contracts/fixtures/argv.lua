@@ -1,0 +1,21 @@
+return {
+  contract_version = "0.1.0-readiness.1",
+  cases = {
+    { id = "bare-chat", platform = "linux", tty = true, argv = {}, expected_action = "run-chat", normalized = { directory = "." } },
+    { id = "explicit-directory", platform = "linux", tty = true, argv = { "work tree" }, expected_action = "run-chat", normalized = { directory = "work tree" } },
+    { id = "linux-absolute-path-is-not-slash-option", platform = "linux", tty = true, argv = { "/srv/project" }, expected_action = "run-chat", normalized = { directory = "/srv/project" } },
+    { id = "end-options-leading-dash-directory", platform = "linux", tty = true, argv = { "--", "-project" }, expected_action = "run-chat", normalized = { directory = "-project" } },
+    { id = "windows-slash-help", platform = "windows", tty = false, argv = { "/h" }, expected_action = "help" },
+    { id = "context-recent", platform = "linux", tty = true, argv = { "--context-repl", "recent" }, expected_action = "context-repl", normalized = { view = "recent" } },
+    { id = "context-view-required", platform = "linux", tty = true, argv = { "--context-repl" }, expected_error = "UsageError" },
+    { id = "self-test-stage1-non-tty", platform = "linux", tty = false, argv = { "--self-test", "--through-stage", "1" }, expected_action = "self-test" },
+    { id = "self-test-stage2-non-tty-without-consent", platform = "linux", tty = false, argv = { "--self-test", "--through-stage", "2" }, expected_error = "OnlineConsentRequired" },
+    { id = "self-test-stage2-non-tty-consented", platform = "linux", tty = false, argv = { "--self-test", "--through-stage", "2", "--i-accept-online-self-test" }, expected_action = "self-test" },
+    { id = "removed-short-dc", platform = "linux", tty = true, argv = { "-dc" }, expected_error = "UsageError" },
+    { id = "removed-short-rc", platform = "windows", tty = true, argv = { "-rc" }, expected_error = "UsageError" },
+    { id = "misspelled-immediate", platform = "chat", tty = true, line = ".immidiate fix it", expected_error = "UsageError" },
+    { id = "canonical-immediate", platform = "chat", tty = true, line = ".immediate fix it", expected_action = "steer" },
+    { id = "delete-non-tty-without-yes", platform = "context-repl", tty = false, line = "delete ABCDEF0123456789", expected_error = "ApprovalRequired" },
+    { id = "delete-non-tty-with-yes", platform = "context-repl", tty = false, line = "delete ABCDEF0123456789 --yes", expected_action = "context-delete" },
+  },
+}

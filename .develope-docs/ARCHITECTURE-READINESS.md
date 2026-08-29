@@ -108,9 +108,9 @@ P0 gate 会同时改变多个子系统或决定能否安全恢复。编写全程
 
 ### AR-P0-01 产品闭环、非目标和发行形态
 
-当前状态：未通过；terminal-only、零 Web/媒体/remote/TTS、单 root、便携邻接数据、无 telemetry/upload/update 与三目标 zip 已确认，但完整旅程矩阵、公开文档同步和最终零表面扫描尚未完成。
+当前状态：未通过；规格侧已由 `contracts/product.lua` 与 `contracts/zero_surface.lua` 冻结六条旅程、三目标和零表面，公开中英文 README 已同步并通过本地 contract scan；仍缺最终 zip 的物理零表面/旅程证据。
 
-- **阻塞原因**：D-056 已确认三个解压后原地运行的便携 zip、邻接 `__yaca__` 和简单 Install 脚本；当前缺口不是产品形态，而是完整生命周期规格、公开文档同步和最终包证据。D-044 已排除 Web、图像、音频、remote/headless、transcription 和 TTS，D-045 已排除 multi-root，D-055/D-056 又排除 telemetry、诊断上传和内建更新；必须证明这些能力真正从发行面消失。
+- **阻塞原因**：D-056 已确认三个解压后原地运行的便携 zip、邻接 `__yaca__` 和简单 Install 脚本；当前缺口不是产品形态或公开文档，而是最终包证据。D-044 已排除 Web、图像、音频、remote/headless、transcription 和 TTS，D-045 已排除 multi-root，D-055/D-056 又排除 telemetry、诊断上传和内建更新；必须证明这些能力真正从发行 bytes 消失。
 - **权威工件**：产品闭环说明；v0.1 支持/排除矩阵；Web/媒体/remote/multi-root/telemetry/upload/update 的 zero-surface manifest 与重开条件；portable 邻接数据的安装→首次配置→新建/恢复→退出→手工升级→卸载状态表。
 - **通过证据**：每条用户旅程有唯一结果；排除能力在 CLI/help、配置 schema/模板、XML schema、Model/tool registry、页面/listener、loader/公开 API 与最终 zip 中都没有可触发空壳；唯一 root 可由 XML 镜像父目录解码；三个最终 zip 都匹配 D-056 的布局、邻接数据和手工升级语义；README 不再把候选或未实现能力写成现状。
 - **责任**：`O` 决定产品形态和数据保留；`T` 验证各目标平台能够实现。
@@ -118,7 +118,7 @@ P0 gate 会同时改变多个子系统或决定能否安全恢复。编写全程
 
 ### AR-P0-02 AgentLoop 的 terminal intent 和 typed outcome
 
-当前状态：未通过；W1-A 已给出 identity、状态、transition、typed outcome 与 golden trace 目录首版；仍缺与 W2-C control envelope 的机器对表、实际 golden trace 和 hard-cap 证明。
+当前状态：未通过；W1-A 的 identity/state/outcome、W2-C control envelope 已由 `contracts/runtime.lua`/`model.lua` 机器对表，12 条 synthetic trace 已通过；仍缺实现后的 fault trace、hard-cap 数字和目标平台证明。
 
 - **阻塞原因**：provider 响应结束只证明一次生成结束；“没有工具调用”无法区分完成、澄清问题、拒答和部分结果。Runtime 又不能靠搜索自然语言猜测 typed outcome。typed `ask-user` 后的用户回复尚未冻结 turn/快照/预算边界，错误页上的“retry”也尚未区分安全 transport attempt、新 request/new turn 和绝不可重放的 accepted/unknown operation。
 - **权威工件**：AgentLoop 状态机；主模型控制信号/envelope；`completed|waiting_user|partial|refused|cancelled|budget_exhausted|stuck|error` 枚举和转换表；turn/request/attempt/reply-to 因果表；manual action/retry registry；最终报告合成规则。
@@ -128,7 +128,7 @@ P0 gate 会同时改变多个子系统或决定能否安全恢复。编写全程
 
 ### AR-P0-03 Model/Provider canonical protocol
 
-当前状态：未通过；W2-C 已给出 `NormalizedRequest/ModelEvent/NormalizedResponse`、control 与双协议映射首版；仍缺精确 wire/header 版本、金标录制 fixture 和 adapter conformance 证明。
+当前状态：未通过；W2-C canonical schema、control/finish crosswalk 与 synthetic fixtures 已机读冻结；仍缺精确 wire/header 版本、金标录制字节 fixture 和 adapter conformance 证明。
 
 - **阻塞原因**：`OpenAI-compatible` 不是足够精确的协议规格。角色、工具调用 delta、同一响应中的文本和工具、重复/缺失 call ID、refusal/content filter、usage、HTTP error 与断流都可能不同；TS-23 选中的 carrier 还必须被所选 Protocol 无损承载，不能靠把 bare payload 偷包成另一语义。每 Model retry 的用户配置面、Runtime hard cap、`Retry-After` 和 request snapshot 也要闭合。D-044 已排除图像、音频、独立转写与语音输出，因此 provider profile、宽 passthrough 和 capability 探测都不得偷留可触发的 media content-part 或 purpose。
 - **权威工件**：内部 `ModelRequest`、`ModelEvent`、`ModelResult`、`ModelError` schema；v0.1 provider/content-part profile；capability/self-test 契约；六个核心 purpose与 D-041 周期 `context-name` 的权限/数据表；每 Model 调度/冷却与 aggregate budget 账本；D-044 的零 image/audio/transcription/speech purpose manifest。
@@ -148,7 +148,7 @@ P0 gate 会同时改变多个子系统或决定能否安全恢复。编写全程
 
 ### AR-P0-05 TUI full-duplex 输入与确定性交互
 
-当前状态：未通过；固定快捷键、完整点命令后备、追加式 transcript 和 `>>` 已确认，旧 console/TTY 的按键识别、draft 保护和 full-duplex 证据尚未完成。
+当前状态：未通过；`contracts/tui.lua` 已冻结提示符、输入状态、runtime projection 与完整文本 action fallback；ASCII chrome transcript、旧 console/TTY 按键、draft 保护和 full-duplex 证据尚未完成。
 
 - **阻塞原因**：在 cooked/canonical 输入中，模型或工具异步输出可能穿过用户未提交的输入行；renderer 看不到 OS 正在编辑的缓冲。快捷键不可识别时还必须保持 queue/steer/side/cancel 的领域语义。stdin/stdout/stderr 的 TTY 能力不能合成一个布尔值；D-051 已固定单 active Context，仍须冻结唯一焦点下的异步事件与 draft 保护。
 - **权威工件**：输入状态机；三条标准 fd 的独立能力与 prompt gate 矩阵；async output 与 line editing 协议；快捷键→文本后备映射；单 active Context 的焦点规则；Web/remote/media 零输入表面清单；每个 Agent 状态下 Esc/EOF/Ctrl+C/普通输入的动作表；ASCII golden transcripts。
@@ -158,7 +158,7 @@ P0 gate 会同时改变多个子系统或决定能否安全恢复。编写全程
 
 ### AR-P0-06 工具集、raw shell 与 Permission 能力矩阵
 
-当前状态：未通过；W2-B 已冻结八工具、五能力、Std/Readonly、OutsideWorkspace fold、approval snapshot 与 raw shell 宽边界；仍缺机读 contract、求值 fixture、path identity 和目标平台证明。
+当前状态：未通过；W2-B 的八工具、五能力、Std/Readonly、OutsideWorkspace fold、approval snapshot 与 raw shell 宽边界已机读冻结，10 条 fold fixture 已通过；仍缺 path identity 和目标平台证明。
 
 - **阻塞原因**：若 shell 只映射 `Execute`，其他细粒度权限无法约束 shell。若仍宣称能从任意 shell 文本精确识别副作用，又会制造不存在的 sandbox 保证。模型 raw `exec` 与 direct tool 的 input carrier/schema、stdin、命令物理传输上限，以及自动 Git 只读 adapter 是否会启动外部 helper，都尚未形成正式工具边界；`__yaca__` reserved tree 的 list/search、mutation 与 exact-read 必须分别闭合，且不得把 direct deny 冒充 shell containment；非 Agent 管理动作不能靠复用历史 tool approval 获得授权。D-044 同时禁止 screenshot/media capture tool 与 headless/remote approval source。
 - **权威工件**：首版 tool registry；TS-23 所选 ToolInputRegistry；每个工具的 carrier、参数/result schema、版本、capability、副作用、stdin、可取消性、unknown-field 规则和输出上限；raw command length/encoding contract；`tool × capability × Permission state` 矩阵，其中 M05-16 A/B 机械生成 coarse/split outside，M05-56 A 生成零 SensitiveRead surface、B 才接入 TS-21；provider 网络与工具网络分界；Git adapter/系统 Git 使用范围；Agent approval 与 `ManagementMutation` 的独立快照 schema；零 media-capture/remote-client tool 与 approval-source manifest。
@@ -188,7 +188,7 @@ P0 gate 会同时改变多个子系统或决定能否安全恢复。编写全程
 
 ### AR-P0-09 完整 typed 配置 schema 与 bootstrap
 
-当前状态：未通过；W1-B 已冻结唯一字段 catalog、默认、XML 白名单、secret 和跨字段校验首版；仍缺机读 schema、多行 grammar/round-trip、migration fixture、RuntimeMax 表与原子写证明。
+当前状态：未通过；W1-B 的唯一字段 catalog、默认、严格六项 XML 白名单、secret、M05-07=A 字符串 grammar、migration/负向 fixtures 已由 `contracts/config.lua` 冻结并校验；仍缺 RuntimeMax 实测数字表与目标平台原子写证明。
 
 - **阻塞原因**：正常启动要求完整校验，但配置缺失/损坏时 model/config REPL 和 self-test 又需要最小 bootstrap。字段、默认、INI/XML 合并、顺序语义、未知字段、手工编辑、并发外改和秘密输入尚未全部成为一个生成式契约；不过 Model/Permission selector、per-Model retry、stuck 阈值、过短 secret、reset/delete/migration 路线和排除字段都已有选择，不能再写成实现时任选。D-048 已固定每个顶层 main/side turn 的 immutable generation 边界；剩余责任是完成 catalog/校验表并证明半写、删除、无效引用和旧机延迟。
 - **权威工件**：唯一 typed schema；逐字段 catalog；INI grammar；XML 覆盖白名单；跨字段约束；可选能力的 choice→schema 投影和 zero-field manifest；bootstrap command allowlist；完整 INI bytes/digest→parse/validate→atomic `ConfigGeneration` contract；`ManagementMutation`；配置编辑事务和迁移协议。
@@ -198,10 +198,10 @@ P0 gate 会同时改变多个子系统或决定能否安全恢复。编写全程
 
 ### AR-P0-10 Context XML schema、durability 与恢复
 
-当前状态：未通过；W1-C 已给出内部 event catalog、局部 ID、提交状态机、崩溃真值表和恢复算法首版；仍缺机器 schema、replace/lock 证明及大小/延迟 hard-limit 证据。
+当前状态：未通过；W1-C 的内部 event/payload catalog、局部 ID、提交状态机、崩溃真值表和恢复算法已由 Lua semantic schema + Relax NG + fixtures 冻结；仍缺 replace/lock 证明及大小/延迟 hard-limit 证据。
 
 - **阻塞原因**：每个 canonical/durable 事件都整文件重写会形成 O(n²) I/O；在闭合 XML 根后原地追加元素又不是合法 well-formed XML。D-053 已选完整流式重写、短寿命 temp/lock/previous-valid 和无长期 WAL；当前只需证明该路线满足旧机 hard limit，不能暗中切换事实源。XML 还必须对全部排除能力保持零 element/namespace。
-- **权威工件**：公开 XML schema/namespace；event/relationship/ID schema；zero-element manifest；`AutoRenameDisabled` 元数据；确定性 writer；完整重写、flush、lock、temp、replace、恢复和外部读取状态机；文件大小/延迟门槛；损坏和迁移协议。
+- **权威工件**：内部 versioned XML 结构与 semantic schema（D-068，不是公共 API）；event/relationship/ID schema；zero-element manifest；`AutoRenameDisabled` 元数据；确定性 writer；完整重写、flush、lock、temp、replace、恢复和外部读取状态机；文件大小/延迟门槛；损坏和迁移协议。
 - **通过证据**：正常、每个崩溃切点、磁盘满、替换失败、第二写者和外部修改都有预期旧版/新版/只读损坏结果；排除能力、current-root/workdir/list/alias/selector、telemetry/upload/update 元素数为零；`AutoRenameDisabled` 的 rename/取消/迟到竞态稳定；XP x86 长会话满足冻结 hard limit。若证明失败，只提交改变 D-053 保证的最小反例供负责人重开，不自行加入长期 WAL。
 - **责任**：`T` 证明已选格式、原子性和性能；失败且替代路线改变单 XML保证时才回到 `O`。
 - **主要来源**：D-022、D-023、`FMT-01`、`CFG-25`、`PROD-05`、`PROD-17` 至 `PROD-21`、`DIAG-14`、`REL-11`、`CTX-01` 至 `CTX-18`、`CTX-21` 至 `CTX-29`、`AQ-041` 至 `AQ-043`、`AQ-161` 至 `AQ-180`、`AQ-227`、`AQ-228`、`AQ-246`、`AQ-303` 至 `AQ-308`、`AQ-368`、`AQ-378`、`AQ-380`、`AQ-383` 至 `AQ-390`、`AQ-420`、PJ-15 至 PJ-20、ED-13、ED-14、RF-16、CX-20。
@@ -228,7 +228,7 @@ P0 gate 会同时改变多个子系统或决定能否安全恢复。编写全程
 
 ### AR-P0-13 CLI、点命令和会话命令状态表
 
-当前状态：未通过；W2-A 已给出顶层/chat/context action、拼写、粗 action×state 与退出码首版；仍缺机读 registry、完整 state/admission/result、non-TTY schema 和 golden argv。
+当前状态：未通过；W2-A 已由 `contracts/actions.lua` 冻结 39 个顶层/chat/context action、唯一别名、完整 state/admission/confirm/result 与 synthetic argv/chat/REPL fixtures；仍缺真实 parser/help 生成、machine output 和目标平台 non-TTY 证明。
 
 - **阻塞原因**：Context 切换、Model/Permission/Prompt 修改、压缩、永久 delete 和 exit 在 busy/approval/tool/side/recovery/queued 状态中的行为会影响 AgentLoop 和 durable 事实，不能由各前端分别猜测。D-054 已冻结长式、跨平台短式、Windows `/` 式、点命令与快捷键共享 action registry；剩余责任是逐状态 admission/result 与 machine output，而不是再选择命名空间。排除能力、archive/trash、multi-root、telemetry/upload/update 动作都必须为零。
 - **权威工件**：CLI grammar；focus-scoped local/global command registry；长名/唯一简称/兼容别名；help topic/overview registry；可选范围选择到 action/help 成员的机械投影；`command × AgentState` 表；`ManagementMutation` 投影规则；stdin×stdout×stderr×显式 machine mode 矩阵；stdout/stderr/exit-class/machine-output schema；点命令与快捷键领域动作映射。
@@ -238,7 +238,7 @@ P0 gate 会同时改变多个子系统或决定能否安全恢复。编写全程
 
 ### AR-P0-14 安全模块/工具加载与文件目标复核
 
-当前状态：未通过；候选要求存在，但还没有权威加载契约。
+当前状态：未通过；`contracts/platform.lua` 已冻结 embedded-manifest-only Lua allowlist、零 cwd/LUA_PATH/LUA_CPATH、target identity、复核与 lock 顺序；仍缺恶意 CWD/PATH/DLL/ambient config 和链接替换的目标平台 proof。
 
 - **阻塞原因**：yaca 以陌生工作区为 cwd；若 `package.path/cpath`、DLL 搜索或内部工具解析使用 CWD/PATH，仓库中的同名 Lua/C 模块、DLL 或 curl 可以在权限系统之前执行。即使 executable 路径固定，`.curlrc`、shell AutoRun/rc、Git pager/external diff/textconv 等 ambient config 仍可能改变内部动作或启动外部 helper。文件工具也不能只做字符串前缀检查或审批前检查一次。所有已排除的 helper/listener/update/telemetry/upload 资源必须从 allowlist 消失。
 - **权威工件**：内部资源绝对路径解析规则；Lua/C module allowlist；DLL 搜索约束；内部进程 allowlisted environment/ambient-config disable contract；tool/component/listener negative manifest；普通文件/目录/symlink/junction/hardlink/device/FIFO/socket policy；open-then-verify 和 no-replace 契约。
@@ -248,7 +248,7 @@ P0 gate 会同时改变多个子系统或决定能否安全恢复。编写全程
 
 ### AR-P0-15 本地 ID、锁和崩溃收口
 
-当前状态：未通过；没有永久 ContextId 与 `CX-13=B` 已确认，但局部 ID/序号、lease 证据和 stale self-fix 尚未形成一个协议。
+当前状态：未通过；`contracts/runtime.lua`/`context.lua`/`platform.lua` 已把无永久 ContextId、10 类局部 ID、writer lease/commit mutex、target identity 和 unknown recovery 收成一个协议；仍缺 kill-point、双进程和 stale self-fix 的目标平台 proof。
 
 - **阻塞原因**：turn、request、attempt、side、tool call、operation、approval 和 compaction 都依赖稳定关联。若崩溃后复用 ID 或信任 provider ID，会错误配对结果或重放副作用。仅按时间删除 stale lock 也会产生双写者；若所选单进程拓扑允许加载多个 Context，还必须证明每个 lease、commit mutex 和关闭动作都绑定正确 Context。D-045 不建立永久 root ID 或 root list；operation/approval/request snapshot 必须绑定当时由 XML 镜像位置解码出的规范 root 与 Context generation，rebind 后旧快照不得被重定向到新 root。
 - **权威工件**：identity/namespace table；局部序号分配与持久化规则；provider ID 保存/映射；request-attempt 关系；所选单进程 Context 与 workspace-root 拓扑；write lease/commit mutex 取得顺序；stale lock 复核和恢复协议。

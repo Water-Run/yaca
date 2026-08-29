@@ -1,6 +1,8 @@
 # 14 兼容 TUI
 
-状态：规范逐行界面、输入后备与 Context 浏览器语义已确认；精确页面 chrome 和旧终端渲染待技术规格冻结
+更新日期：2026-08-29
+
+状态：规范逐行界面、输入后备与 Context 浏览器语义已确认；[`contracts/tui.lua`](../contracts/tui.lua) 已冻结提示符、输入状态与 action fallback；完整 ASCII transcript 和真实旧终端渲染仍待 proof
 
 ## 职责
 

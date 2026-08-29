@@ -1,8 +1,8 @@
 # 22 应用运行时、生命周期与并发
 
-更新日期：2026-08-10
+更新日期：2026-08-29
 
-状态：**W3-A 规格首版** — 单线程事件泵、AsyncPort 组合与 hard-cap 维度表已冻结；平台数值待 TP 校准（D-070）
+状态：**W3-A 规格侧已冻结** — 单线程事件泵、AsyncPort 组合、hard-cap 维度与 [`contracts/platform.lua`](../contracts/platform.lua) 的安全加载/identity/lock 边界已冻结；平台原语和数值待 TP 校准（D-070）
 
 ## 为什么需要独立子系统
 
@@ -264,4 +264,5 @@ while not shutting_down:
 - [x] 泵拓扑与事件类  
 - [x] AsyncPort 五方法全局语义  
 - [x] hard-cap 维度（无假精确偏好数）  
+- [x] safe-load / target identity / lock 机读 contract
 - [ ] XP/CentOS wait 原语证据（TP-003）  

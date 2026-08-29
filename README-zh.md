@@ -2,53 +2,84 @@
 
 [English](./README.md)
 
-`yaca`是一款简单、单 Agent Coding Agent 的设计，以`GPL v3`协议开源于[GitHub](https://github.com/Water-Run/yaca)。目标为 Lua 5.5、Windows XP SP3 至 Windows 11 的 Win32 x86，以及包含 CentOS 7 的 Linux x86_64。
+yaca 是一款简单、单 Agent、terminal-only Coding Agent 的设计，以 GPL v3 许可开源。
 
-> **项目状态（2026-07-22）：设计阶段。** 当前没有已经完成的 v0.1 二进制或通过验证的 Release。平台支持、安装、命令、预设和下面的示例都是设计目标，不是已实现行为。现行决定和待回复批次见 [`.develope-docs`](.develope-docs/README.md)。
+> **项目状态（2026-08-29）：编码就绪收尾。** 当前没有可工作的 v0.1 Agent 或通过验收的发行包，Lua 产品模块仍为空。下文描述的是已经冻结的 v0.1 目标，不是当前可执行行为。产品选择已关闭，机读设计契约已建立，正在完成技术证明与全程序实施计划。
 
-## 安装  
+## 支持的发行目标
 
-计划的发布单元是由上级目录`luainstaller`构建的各平台独立`.zip`。打包、安装入口和真实机器证据仍是设计/发布门；通过这些门之前，仓库不能宣称已有可下载发行包。
+v0.1 计划只发布三个彼此独立构建、独立验收的便携 zip：
 
-语义上的`version`动作将用于识别构建后的发行版；它的顶层 CLI 确切拼写仍等待设计决策`TU-18`。目标输出形态为：
+- Win32 x86：Windows XP SP3 至 Windows 11；
+- Win64 x86_64：Windows 7 SP1 至 Windows 11；
+- Linux x86_64：CentOS 7 是最低硬基线。
 
-```cmd
-yaca v0.1.0
-Yet Another Coding Agent.
+每个包嵌入 Lua 5.5，不依赖系统 Lua。Windows zip 根包含 `yaca.exe`、`Install.cmd`、`README.txt`、`LICENSE`、`docs/`；Linux 对应使用 `yaca` 与 `Install.sh`。薄安装脚本只可把解压目录加入 `PATH`，不复制程序，也不建立安装数据库。
+
+长期数据根始终是实际 executable 相邻的 `__yaca__`，不随调用者 cwd 漂移。v0.1 没有内建更新器，也不承诺代码签名。目前尚无可下载或已验证的发行包。
+
+## 产品形态
+
+- 一套逐行 TUI、一个 active Context、一个 active main turn，工具全部串行。
+- 每个 Context 恰好一个 workspace root；它由 XML 在 `__yaca__/CONTEXT/` 镜像树中的父目录解码，XML 字段不能覆盖。
+- 长期用户事实只允许 `__yaca__/config.ini` 与每个 Context 的一个完整 XML。没有长期 WAL、索引数据库、独立日志、备份历史、trash 或通用 undo。
+- 正式 Model adapter 只有 `openai-chat` 与 `anthropic-messages`。每个 Model 是显式完整连接记录；失败时不静默切换到另一 Model。
+- 新 chat 在第一条 main 消息前只是内存草稿；必须先建立并 durable 发布初始 XML，之后才允许 Model 请求或副作用。
+
+Context XML 是 yaca 内部版本化存储，不是稳定第三方 API；人类或其他工具的互操作主路径是 export。
+
+## 配置与安全
+
+主 INI 每次作为一个完整 typed generation 校验。每个新顶层 main/side turn 都观察整份文件；候选无效、不可读或半写时阻断新 turn，不静默回退。一个 turn 及其 retry、工具、review 和 compaction 始终使用 admission 时冻结的 immutable generation。
+
+发行模板包含两个 Permission profile：
+
+| Profile | Read | Write | Delete | Shell | OutsideWorkspace |
+| --- | --- | --- | --- | --- | --- |
+| Std（默认） | allow | confirm | confirm | confirm | confirm |
+| Readonly | allow | deny | deny | deny | deny |
+
+固定 Agent 工具集是 `list`、`read`、`search`、`write`、`patch`、`rename`、`delete`、`exec`。raw `exec` 只由宽能力 `Shell` 管理；yaca 不声称能从命令文本推断或沙箱化其文件系统/网络副作用。Permission 名称、Description 与 Prompt 都不授权。
+
+`DoubleCheck` 开启时控制可选的高风险 action review，并强制 finish review。`.cautious` 只修改当前 Context 的覆盖值，不是 Permission profile。
+
+## Context
+
+Context 文件位于镜像树，例如 `__yaca__/CONTEXT/C/Program Files/我的任务.xml`。包含 XML 文件名的当前逻辑路径产生一个用户可见的 16 位大写十六进制 hash。没有永久 Context ID：rename 或 rebind 后路径/hash 立即改变，旧 hash 失效。
+
+历史只通过显式动作打开。短名称按既定 scope/distance 顺序选择首个可用命中；hash 是精准 selector，必须唯一。rename、rebind、永久 delete、import mapping 和 metadata 修改都会复核目标。活动 writer 会阻止第二进程读取 XML 正文或修改该 Context；绝不只按锁龄破锁。
+
+## 已冻结的命令 grammar
+
+以下拼写已成为设计输入，但目前尚未实现：
+
+```text
+yaca [directory]
+yaca --help [topic]                 (-h，Windows /h)
+yaca --version                      (-v，Windows /v)
+yaca --self-test [options]          (-st，Windows /st)
+yaca --model-repl                   (-mr，Windows /mr)
+yaca --config-repl                  (-cfg，Windows /cfg)
+yaca --context-repl recent|full     (-ctx，Windows /ctx)
+yaca --continue <selector>          (-c，Windows /c)
+yaca --export [selector]            (-ex，Windows /ex)
+yaca --status                       (-stt，Windows /stt)
 ```
 
-产品具有语义上的`help`和`model-repl`入口。Agent chat 在采样 LLM 前必须有一个可用的完整 Model 连接。最终协议/预设清单和精确命令仍待决；旧 README 中出现过的 provider 名称不是兼容承诺。
+裸 `yaca` 与 `yaca .` 完全等价。`--` 结束选项解析，因此以 `-` 开头的目录仍可表达。Linux 永远不把 `/...` 当选项。非 TTY 执行 self-test Stage 2/3 时，必须显式带本次 invocation 的 `--i-accept-online-self-test`；否则零 Model 请求并 fail-closed。
 
-> `__yaca__`是设计使用的逻辑数据根；它最终位于安装用户数据目录还是便携目录仍待决。不能从仓库中的旧资源反推已经实现的布局。
+chat 文本后备包括 `.queue`（`list|delete|move|edit|clear`）、`.immediate`、`.side`、`.multiline`、`.cancel`、`.cautious`、`.model`、`.context`、`.status`、`.help`、`.details`、`.prompt`、`.compact`、`.quit`。它们与终端快捷键投影同一 semantic action，不形成 remote/headless controller。
 
-## 配置  
+## v0.1 明确排除
 
-目标设计使用逻辑`__yaca__`下的一份完整 INI，并允许每个 Context XML 保存明确的会话覆盖。配置查看、还原和交互式修改属于`config-repl`，Model 生命周期属于`model-repl`，三阶段`self-test`是显式验证路径。
+v0.1 不提供 Web UI、图像/音频输入、transcription、TTS、公共 remote/headless API、MCP、plugin/hook/skills runtime、子 Agent、Context 分支、multi-root Context、telemetry、诊断上传、内建更新、通用 undo 或 direct HTTP Agent 工具。这些排除项在配置、help、schema、Runtime、依赖与发行包中都必须为零表面。
 
-Model 的物理顺序决定新 Context 的默认项。Context 保存所选 Model 和历史连接快照；逻辑 Model 被改名、删除、禁用或发生不兼容变化时，yaca 必须在运行时提示映射/修复，不得静默 fallback 到另一个 Model 或 endpoint。会话内切换 Model 是语义动作，其最终 chat 拼写等待`TU-32`。
+未来本机 Web 产品线目前只是设计预留，不授权在 v0.1 中加入 Web 组件。
 
-## 上下文机制  
+## 开发资料
 
-设计把每个 Context 保存为`__yaca__/CONTEXT/`镜像路径树中的`[命名名称].xml`。例如 Windows 上的一个 Context 可以保存为`CONTEXT/C/Program Files/我的任务.xml`。
+建议先读[当前状态](.develope-docs/CURRENT-STATE.md)、[机读契约](.develope-docs/contracts/README.md)、[就绪门](.develope-docs/ARCHITECTURE-READINESS.md)和[技术证明清单](.develope-docs/TECHNICAL-PROOF-BACKLOG.md)。从仓库根运行当前设计一致性检查：
 
-哈希输入是从`CONTEXT`根开始的逻辑路径: 带前导`/`, 统一使用`/`分隔, 并包含 XML 文件名. 上述示例严格使用`/C/Program Files/我的任务.xml`计算固定 16 位哈希. yaca 不为上下文另存永久 ID; 名称或路径变化后哈希实时重算, 旧哈希立即失效. 上下文清单与哈希查找从当前 XML 树实时派生.
-
-上下文 XML 保存完整对话、日志相关信息、会话级参数及其元数据. 语义上的`context-list`动作按范围枚举上下文; `context-repl`提供交互式浏览和管理.
-
-语义上的`continue(selector)`动作接受上下文精确名称或固定 16 位哈希. 所有连接、重命名和删除入口共用一套解析器: 从当前目录对应的镜像位置开始, 再由近到远扩展到祖先的递归范围和`CONTEXT`根. 距离优先; 在同一个搜索范围内名称优先于哈希. 解析器单遍同时检查两者, 当前范围得到可裁决结果后不再扫描更远范围. 解析后的工作目录策略仍等待决策`PJ-13`: A/B 保留布尔字段`AutoJumpToDir`, C 则以`ResumeDirectory=jump|ask|keep`取代它.
-
-更简易的上下文管理方式可以使用交互式`context-repl`入口: 访问目录树、搜索、选择并连接, 以及重命名、删除和刷新. 它与命令行共用同一套路径、哈希和安全复核规则.
-
-## 权限机制  
-
-Permission profile 位于 INI。计划的发行模板把`Std`放在第一项，因此它是新 Context 默认项；内置 profile 的最终能力矩阵仍待安全决策。`Cautious`不是独立 Permission 模式：谨慎复核由`DoubleCheck`控制，当前 Context 可通过语义上的`.cautious`动作覆盖。名称和 Description 永远不授予能力。
-
-Context 保存所选 Permission 和历史 effective snapshot；本地 profile 被改名、删除或发生不兼容变化时，yaca 必须提示映射/修复，并在需要处 fail-closed，不得静默采用第一项。Permission 切换的 chat 拼写等待`TU-32`。
-
-## 命令一览  
-
-主入口是`yaca [目录]`. 裸`yaca`与`yaca .`完全等价: 都以当前目录作为初始工作区位置进入TUI. `yaca <目录>`则从指定目录启动.
-
-产品设计还确认了`help`、`version`、`self-test`、`model-repl`、`config-repl`、`context-repl`、`context-list(scope)`和`continue(selector)`等语义动作. 决策`TU-18`仍需把它们投影为确切的顶层 grammar: flag、subcommand 或混合形式, 以及是否提供简称. 因此本 README 中的动作标签目前不是可直接执行的命令拼写. 旧草案的 flag 名称及其互相冲突的简称不属于已确认契约.
-
-Chat 还具有 status/help、queue/steer/side/cancel、Prompt 与 DoubleCheck 覆盖、Model/Permission/Context 管理、typed retry/recovery 和优雅退出等语义动作。`TU-32`仍需决定 canonical dot-command namespace；手动压缩等条件动作只有在自己的上游决定启用时才存在。旧草案中的 dot-command 清单不是可执行契约或兼容承诺。
+```sh
+bin/lua55 .tools/validate_design_contracts.lua
+```

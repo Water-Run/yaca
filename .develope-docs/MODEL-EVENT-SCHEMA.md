@@ -1,8 +1,8 @@
-# W2-C Canonical Model request / event schema（首版）
+# W2-C Canonical Model request / event schema
 
-更新日期：2026-08-10
+更新日期：2026-08-29
 
-状态：**技术规格**；协议产品选择已冻结为 `openai-chat` + `anthropic-messages`（D-050）；**不** 重开产品分叉。
+状态：**canonical 规格侧已冻结**；机读真源与 synthetic crosswalk fixtures 为 [`contracts/model.lua`](contracts/model.lua) 和 [`contracts/fixtures/model-events.lua`](contracts/fixtures/model-events.lua)。协议产品选择已冻结为 `openai-chat` + `anthropic-messages`（D-050）；exact wire 仍由 TP-004 录制，**不** 重开产品分叉。
 
 关联：[`subsystems/06-model-protocols.md`](subsystems/06-model-protocols.md)、[`subsystems/09-agent-session.md`](subsystems/09-agent-session.md) W1-A。
 
@@ -162,5 +162,6 @@ Stage 1 不发 Model 请求。
 - [x] control 与 finish_class  
 - [x] 双协议映射要点  
 - [x] fixture 清单占位  
+- [x] canonical event/control/finish machine schema 与 synthetic fixtures
 - [ ] 精确 HTTP header/API 版本表（TP / 录制）  
 - [ ] 金标录制字节 fixture  

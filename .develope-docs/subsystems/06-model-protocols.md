@@ -1,6 +1,8 @@
 # 06 模型协议适配
 
-状态：v0.1 provider 范围与 canonical 控制已确认；wire fixture 和具体限额待技术证明
+更新日期：2026-08-29
+
+状态：v0.1 provider 范围、canonical 控制与 [`contracts/model.lua`](../contracts/model.lua) 机读 schema 已确认；recorded wire fixture 和具体限额待 TP-004/006
 
 ## 职责
 
@@ -101,4 +103,3 @@ adapter 对 header、单 event、累计文本、reasoning summary、tool count�
 
 Canonical **NormalizedRequest / ModelEvent / NormalizedResponse**、双协议映射与 fixture 清单见
 [MODEL-EVENT-SCHEMA.md](../MODEL-EVENT-SCHEMA.md)（openai-chat + anthropic-messages，不重开产品协议选择）。
-

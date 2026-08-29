@@ -1,8 +1,8 @@
-# W2-A Semantic Action Registry（首版）
+# W2-A Semantic Action Registry
 
-更新日期：2026-08-10
+更新日期：2026-08-29
 
-状态：**技术规格草稿**（无需负责人再选产品分支）。  
+状态：**规格侧已冻结**；精确机读真源为 [`contracts/actions.lua`](contracts/actions.lua)，本页保留人读投影。
 消费方：CLI parser、TUI 点命令/快捷键、help、completion、测试。  
 **非** headless/remote 公共 API。
 
@@ -117,11 +117,13 @@
 
 stdout 主结果；stderr 诊断与 STATUS。
 
+机器契约还补齐 `.context`、Context inspect/search/import/repair/refresh，以及每个动作的 args、admission state、confirm 与 typed result。这里的 CLI 等价投影包含 argv、chat 命令行和管理 REPL 命令行，不注册 daemon/IPC/RPC。
+
 ## 7. 完成度
 
 - [x] 顶层/chat/context id 与拼写初表  
 - [x] D-062 flag 候选  
 - [x] 粗 state 表与退出码  
-- [ ] 机读 schema 生成  
-- [ ] golden argv fixtures  
-- [ ] AR-P0-13 勾选  
+- [x] 机读 schema 生成
+- [x] synthetic golden argv/chat/REPL fixtures
+- [x] AR-P0-13 规格侧勾选；gate 仍等待 parser/非 TTY 与目标平台 proof

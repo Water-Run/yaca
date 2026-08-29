@@ -1,8 +1,8 @@
 # 09 AgentLoop 与会话状态机
 
-更新日期：2026-08-10
+更新日期：2026-08-29
 
-状态：**W1-A 规格展开进行中** — 状态/outcome/转换表下文为现行契约草案（产品语义已由 D-051 等确认）；hard-cap **数值**、事件泵 ABI、平台取消时序仍待技术证明，不阻塞本表作为实现与 golden trace 的语义真源。
+状态：**W1-A 规格侧已冻结** — 状态/outcome/转换表与 [`contracts/runtime.lua`](../contracts/runtime.lua) 是实现和 synthetic golden trace 的共同语义真源；hard-cap **数值**、事件泵 ABI、平台取消时序仍待技术证明。
 
 ## 职责
 
@@ -332,9 +332,9 @@ tests/golden/agentloop/
 - [x] busy 四 lane 与 queue 规则锚点（§6，D-066）  
 - [x] DoubleCheck 插入点（§7）  
 - [x] golden trace 目录约定（§9）  
-- [ ] 与 06 号 control envelope 字段一一对表（W2-C 联调）  
+- [x] 与 06 号 control envelope 字段一一对表（机器 validator）
 - [ ] hard-cap 数字证明（TP）  
-- [ ] AR-P0-02 在 ARCHITECTURE-READINESS 勾选“规格侧通过”
+- [x] AR-P0-02 规格侧通过；gate 仍等待 hard-cap/事件泵 proof
 
 ---
 

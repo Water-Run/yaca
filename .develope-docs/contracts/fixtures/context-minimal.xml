@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<YacaContext schemaVersion="0.1.0" generation="1">
+  <Header>
+    <Name>Untitled Conversation [0A1B]</Name>
+    <CreatedAt>2026-08-29T00:00:00Z</CreatedAt>
+    <UpdatedAt>2026-08-29T00:00:01Z</UpdatedAt>
+    <AutoRenameDisabled>false</AutoRenameDisabled>
+    <NamingWaterline>0</NamingWaterline>
+    <AutoNameBaseline>0</AutoNameBaseline>
+  </Header>
+  <Session>
+    <CurrentModel name="Local" snapshotDigest="sha256:model-snapshot"/>
+    <CurrentPermission name="Std" snapshotDigest="sha256:permission-snapshot"/>
+    <DoubleCheckOverride>inherit</DoubleCheckOverride>
+    <DoubleCheckGoalOverride mode="inherit"/>
+    <ContextPrompt></ContextPrompt>
+  </Session>
+  <Facts>
+    <Event seq="1" type="turn_started" at="2026-08-29T00:00:00Z" turnId="turn-1">
+      <Field name="kind">main</Field>
+      <Field name="configGeneration">sha256:config-generation</Field>
+      <Field name="modelSnapshot">sha256:model-snapshot</Field>
+      <Field name="permissionSnapshot">sha256:permission-snapshot</Field>
+      <Field name="promptSnapshot">sha256:prompt-snapshot</Field>
+      <Field name="toolRegistrySnapshot">sha256:tool-registry</Field>
+    </Event>
+    <Event seq="2" type="user_message" at="2026-08-29T00:00:01Z" turnId="turn-1">
+      <Field name="messageId">message-1</Field>
+      <Field name="text">hello</Field>
+      <Field name="source">main</Field>
+    </Event>
+  </Facts>
+  <ModelView>
+    <ActiveManifest digest="sha256:view-manifest" firstEventSeq="1" lastEventSeq="2"/>
+  </ModelView>
+</YacaContext>

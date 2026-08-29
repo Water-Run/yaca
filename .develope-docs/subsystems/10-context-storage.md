@@ -1,8 +1,8 @@
 # 10 上下文存储
 
-更新日期：2026-08-10
+更新日期：2026-08-29
 
-状态：**W1-C 规格展开进行中** — 内部事件目录与提交/崩溃表见文末；平台原语与 hard 数字待 TP。非公共 API（D-068）。
+状态：**W1-C 规格侧已冻结** — 内部事件目录、[`contracts/context.lua`](../contracts/context.lua) 语义 schema、[`contracts/context.rng`](../contracts/context.rng) 结构 schema 与最小 fixture 已对齐；平台原语与 hard 数字待 TP。非公共 API（D-068）。
 
 ## 职责
 
@@ -344,10 +344,10 @@ Markdown（或 registry 等价）从 Facts 投影；**不** 声称与 XML 元素
 - [x] Event 类型目录与屏障对齐  
 - [x] 提交状态机与崩溃真值表  
 - [x] 打开/新建/hardlimit/export 边界  
-- [ ] 精确 XSD/RNG 或等价机器 schema 文件  
+- [x] RNG 结构 schema + Lua event payload/cross-relation schema + minimal XML fixture
 - [ ] 平台 replace/lock 原语证明（TP-008/011）  
 - [ ] 大小/延迟 hard 数字（TP-009）  
-- [ ] AR-P0-10 规格侧勾选  
+- [x] AR-P0-10 规格侧勾选；gate 仍等待目标平台 proof
 
 ### 15. Wave 1 收束
 

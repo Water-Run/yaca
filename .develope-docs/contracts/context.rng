@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<grammar xmlns="http://relaxng.org/ns/structure/1.0"
+         datatypeLibrary="http://www.w3.org/2001/XMLSchema-datatypes">
+  <start>
+    <ref name="context"/>
+  </start>
+
+  <define name="context">
+    <element name="YacaContext">
+      <attribute name="schemaVersion"><value>0.1.0</value></attribute>
+      <attribute name="generation"><data type="positiveInteger"/></attribute>
+      <ref name="header"/>
+      <ref name="session"/>
+      <ref name="facts"/>
+      <ref name="model-view"/>
+    </element>
+  </define>
+
+  <define name="header">
+    <element name="Header">
+      <element name="Name"><text/></element>
+      <element name="CreatedAt"><data type="dateTime"/></element>
+      <element name="UpdatedAt"><data type="dateTime"/></element>
+      <optional><element name="AutoRenameDisabled"><choice><value>true</value><value>false</value></choice></element></optional>
+      <optional><element name="NamingWaterline"><data type="nonNegativeInteger"/></element></optional>
+      <optional><element name="AutoNameBaseline"><data type="nonNegativeInteger"/></element></optional>
+    </element>
+  </define>
+
+  <define name="session">
+    <element name="Session">
+      <element name="CurrentModel">
+        <attribute name="name"><text/></attribute>
+        <attribute name="snapshotDigest"><text/></attribute>
+        <empty/>
+      </element>
+      <element name="CurrentPermission">
+        <attribute name="name"><text/></attribute>
+        <attribute name="snapshotDigest"><text/></attribute>
+        <empty/>
+      </element>
+      <element name="DoubleCheckOverride">
+        <choice><value>inherit</value><value>true</value><value>false</value></choice>
+      </element>
+      <element name="DoubleCheckGoalOverride">
+        <attribute name="mode"><choice><value>inherit</value><value>value</value></choice></attribute>
+        <optional><text/></optional>
+      </element>
+      <element name="ContextPrompt"><text/></element>
+    </element>
+  </define>
+
+  <define name="facts">
+    <element name="Facts">
+      <zeroOrMore><ref name="event"/></zeroOrMore>
+    </element>
+  </define>
+
+  <define name="event">
+    <element name="Event">
+      <attribute name="seq"><data type="positiveInteger"/></attribute>
+      <attribute name="type"><ref name="event-type"/></attribute>
+      <attribute name="at"><data type="dateTime"/></attribute>
+      <optional><attribute name="turnId"><text/></attribute></optional>
+      <zeroOrMore><ref name="field"/></zeroOrMore>
+    </element>
+  </define>
+
+  <define name="event-type">
+    <choice>
+      <value>turn_started</value>
+      <value>user_message</value>
+      <value>model_request</value>
+      <value>model_message</value>
+      <value>model_control</value>
+      <value>model_yield</value>
+      <value>tool_call</value>
+      <value>permission_decision</value>
+      <value>approval</value>
+      <value>operation_intent</value>
+      <value>operation_result</value>
+      <value>tool_result</value>
+      <value>action_review</value>
+      <value>termination_review</value>
+      <value>turn_ended</value>
+      <value>cancel</value>
+      <value>steer</value>
+      <value>compaction</value>
+      <value>model_view_published</value>
+      <value>session_override</value>
+      <value>rename</value>
+      <value>rebind</value>
+      <value>auto_name</value>
+      <value>config_generation_ref</value>
+      <value>warning</value>
+      <value>unknown_side_effect</value>
+      <value>import_mapping</value>
+    </choice>
+  </define>
+
+  <define name="field">
+    <element name="Field">
+      <attribute name="name"><text/></attribute>
+      <optional><attribute name="representation"><choice><value>text</value><value>base64</value></choice></attribute></optional>
+      <optional><attribute name="rawBytes"><data type="nonNegativeInteger"/></attribute></optional>
+      <optional><attribute name="digest"><text/></attribute></optional>
+      <text/>
+    </element>
+  </define>
+
+  <define name="model-view">
+    <element name="ModelView">
+      <element name="ActiveManifest">
+        <attribute name="digest"><text/></attribute>
+        <attribute name="firstEventSeq"><data type="nonNegativeInteger"/></attribute>
+        <attribute name="lastEventSeq"><data type="nonNegativeInteger"/></attribute>
+        <empty/>
+      </element>
+      <zeroOrMore>
+        <element name="CompactionRecord">
+          <attribute name="id"><text/></attribute>
+          <attribute name="sourceFirstSeq"><data type="positiveInteger"/></attribute>
+          <attribute name="sourceLastSeq"><data type="positiveInteger"/></attribute>
+          <attribute name="sourceDigest"><text/></attribute>
+          <attribute name="status"><choice><value>ok</value><value>error</value><value>cancelled</value></choice></attribute>
+          <optional><text/></optional>
+        </element>
+      </zeroOrMore>
+    </element>
+  </define>
+</grammar>

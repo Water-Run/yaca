@@ -9,8 +9,8 @@ yaca 当前是“产品说明、配置草案、模块骨架、设计文档体系
 已有内容：
 
 - 中英文 README 已描述目标产品、命令、模型、上下文和权限概念。
-- `_CONFIG_.ini` 是已明确标记的 historical/non-normative 草案；现行字段真源在 `subsystems/05-configuration.md`。
-- `_CONTEXT_.xml` 提供了上下文文件头部草案。
+- `_CONFIG_.ini` 是已明确标记的 historical/non-normative 草案；现行字段真源在 `subsystems/05-configuration.md` 与 `contracts/config.lua`。
+- `_CONTEXT_.xml` 仍只是历史头部草案；现行内部结构/事件真源在 `contracts/context.rng` 与 `contracts/context.lua`。
 - `bin/` 本地放置 Lua 5.5.0、curl、BusyBox、jq、diff、patch、iconv、file、sqlite3 等 32 位工具。
 - `coding-style.txt` 规定了 Lua 5.5、旧终端、旧浏览器和保守工具链要求。
 - 核心 Lua 文件已经按职责命名，但当前均为空。
@@ -19,10 +19,10 @@ yaca 当前是“产品说明、配置草案、模块骨架、设计文档体系
 
 - 没有可运行入口、模块接口、测试、安装脚本或发布脚本。
 - README 目前描述的是目标行为，尚不能视为已实现契约。
-- CLI 旧短参数冲突已在 `ACTION-REGISTRY.md` 的规格首版中消解，但尚无 parser、机读 registry 或 golden argv 实现证据。
+- CLI 旧短参数冲突已在 `ACTION-REGISTRY.md`/`contracts/actions.lua` 中消解，synthetic argv/chat/REPL fixtures 已校验；尚无产品 parser/help 生成或目标平台执行证据。
 - 旧 README 曾混用 `_yaca_` 与 `__yaca__`；现行设计统一为 executable 相邻的 `__yaca__`，三个便携 zip 都不建立另一套系统用户数据根。
 - `_CONFIG_.ini` 仍保存 `[Permission.Cautious]`、profile 内 `DoubleCheck` 等历史内容，只能用于迁移 fixture，不能成为实现输入。
-- `_CONTEXT_.xml` 仍只有头部注释，尚未表达 D-022 的镜像路径、完整对话、会话参数元数据和实时索引契约。
+- `src/_CONTEXT_.xml` 仍只有头部注释，不能作为实现输入；D-022 的镜像路径、完整事实、会话 metadata 与 model-view 已在设计 machine contract 表达，但还没有产品 parser/writer。
 - 图像/音频、remote/headless、transcription 与 TTS 仍被 D-044 明确排除。
 - Web：**v0.1 核心** 仍零表面（D-044）；2026-08-10 的 D-058 仅为未来 **本机本地 Web** 登记设计预留，产品线为 `yaca-web`（服务端 **Java 8**）与 `yaca-ie6`（服务端 **PHP 5.4**，浏览器有意兼容 IE6）。设计正文在 `.develope-docs/web-tracks/`；仓库根 `web/` 只作说明/空预留；JRE/PHP 与 Web 实现都不得进入 v0.1 loader、help、配置或核心 zip，也不得写成已实现能力。
 

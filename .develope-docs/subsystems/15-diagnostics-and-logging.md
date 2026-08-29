@@ -1,6 +1,8 @@
 # 15 诊断、自检与日志
 
-状态：产品契约已确认；检查清单、稳定 ID 表和目标平台证据待规格/测试冻结
+更新日期：2026-08-29
+
+状态：产品契约与规格侧已冻结；[`contracts/diagnostics.lua`](../contracts/diagnostics.lua) 已提供稳定 error/exit/check registry 与依赖图，目标平台输出、脱敏和真实 Model 证据待测试
 
 ## 职责
 

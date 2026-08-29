@@ -1,8 +1,8 @@
 # 01 平台兼容抽象
 
-更新日期：2026-08-10
+更新日期：2026-08-29
 
-状态：**W3-A 规格首版** — 窄端口 ABI 与能力结果表已冻结为设计契约；目标机数值与 XP 原语证明仍属 TP（不阻塞本表作实现真源）
+状态：**W3-A 规格侧已冻结** — 窄端口 ABI、safe-load、target identity 与 lock 边界已投影到 [`contracts/platform.lua`](../contracts/platform.lua)；目标机数值与 XP 原语证明仍属 TP
 
 ## 职责
 

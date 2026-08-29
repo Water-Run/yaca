@@ -5,8 +5,7 @@
 ## 目录性质
 
 - 本目录是项目正式的设计与开发追踪资料，纳入 Git 版本控制。
-- 设计资料直接在 `main` 分支维护并按完整批次本地提交。
-- 除非项目负责人在当次任务中明确要求，否则不向远端推送或进行其他远端写操作。
+- 设计资料直接在 `main` 分支维护并按完整批次提交；D-071 已授权本轮核心节点推送 `main`。
 - 这里可以持续修订；项目源码和公开用户文档只有在相关设计确认后才修改。
 - 当前阶段禁止编写实现代码，也不把占位模块填成伪实现。
 
@@ -36,6 +35,8 @@
 - `TOOL-PERMISSION-MATRIX.md`：W2-B tool×Permission 矩阵。
 - `MODEL-EVENT-SCHEMA.md`：W2-C canonical Model 事件/请求。
 - `ACTION-REGISTRY.md`：W2-A semantic action 注册表。
+- `contracts/`：2026-08-29 编码就绪机读真源；冻结 product/config/runtime/action/tool/model/context/TUI/platform/diagnostics/zero-surface contract 与 synthetic fixtures。
+- `.tools/validate_design_contracts.lua`：从仓库根用 `bin/lua55` 执行的跨契约校验器；当前覆盖 4,000+ 条集合、映射、状态、fixture 与零表面断言。
 - `PROOF-PLANS-P0.md`：TP-003/006/008 证明提纲。
 - `READINESS-GAP.md`：主线就绪差距与 Wave 工作包（从“决定已收口”到“可开发”的运营清单）。
 - `SPEC-FREEZE-QUEUE.md`：规格冻结问答（主队列已完成 → D-059..D-069）；再有缺口另开题，不默认续 SQ。
@@ -75,7 +76,7 @@
 
 ## 当前阅读入口
 
-当前先读 [`DECISION-REGISTER.md`](DECISION-REGISTER.md) 的状态汇总、[`DECISIONS.md`](DECISIONS.md) 的 D-049 至 D-058，以及 [`ARCHITECTURE-READINESS.md`](ARCHITECTURE-READINESS.md)。`OWNER-QUESTIONS-01.md` 的 29 题已经全部答复，现行 `decision-inventory-v9` 为 `unanswered=0`；270 组、384 个 checklist ID、`AQ-001..AQ-437`、`CV-001..CV-076` 和 49 个旧批次继续保留为审计证据。负责人选择完成不等于技术证明、owner 规格或实施计划完成；P0 门通过前仍不开始编码。
+当前先读 [`CURRENT-STATE.md`](CURRENT-STATE.md)、[`contracts/README.md`](contracts/README.md)、[`ARCHITECTURE-READINESS.md`](ARCHITECTURE-READINESS.md) 与 [`TECHNICAL-PROOF-BACKLOG.md`](TECHNICAL-PROOF-BACKLOG.md)；历史选择恢复再读 `DECISION-REGISTER.md`/`DECISIONS.md`。`OWNER-QUESTIONS-01.md` 的 29 题已经全部答复，现行 `decision-inventory-v9` 为 `unanswered=0`；270 组、384 个 checklist ID、`AQ-001..AQ-437`、`CV-001..CV-076` 和 49 个旧批次继续保留为审计证据。负责人选择完成不等于目标平台证明或实施计划完成；Gate A/B 前仍不填写产品实现模块。
 
 本轮新增拆分把 composer 输入召回、配置秘密文件权限、raw shell 继承环境、完整 model-yield 后续接、direct 文件属性、ignore/隐藏项、`exec` cwd、输出解码与 canonical 保留、active XML 外改恢复等交给独立 owner。M05-57..59、AL06-50/51 与 TS-40 等原子组也已随 Batch 06 收口；旧 packet 中的推荐仍只是收到回复前的历史候选，现行选择只看登记表和 D-049 至 D-057。
 
