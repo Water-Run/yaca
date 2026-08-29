@@ -1,0 +1,43 @@
+yaca: Yet Another Coding Agent.
+
+Usage:
+  yaca [directory]
+  yaca --help [topic]
+  yaca --version
+  yaca --self-test [options]
+  yaca --model-repl
+  yaca --config-repl
+  yaca --context-repl recent|full
+  yaca --continue <selector>
+  yaca --export [selector]
+  yaca --status
+
+Canonical actions:
+  --help             -h     /h     Show registry-generated help without loading configuration.
+  --version          -v     /v     Show product, version, and release-target identity.
+  --self-test        -st    /st    Run ordered diagnostics through Stage 1, 2, or 3.
+  --model-repl       -mr    /mr    Open the offline-safe Model management REPL.
+  --config-repl      -cfg   /cfg   Open the offline-safe configuration REPL.
+  --context-repl     -ctx   /ctx   Open the Context browser in recent or full view.
+  --continue         -c     /c     Continue one Context selected by short name or precise hash.
+  --export           -ex    /ex    Export a selected or current Context through the public format.
+  --status           -stt   /stt   Show status for the explicitly opened current Context.
+
+Self-test options:
+  --through-stage 1|2|3
+  --list-checks
+  --exclude-model <value> (repeatable)
+  --exclude-check <value> (repeatable)
+  --check <value> (repeatable)
+  --i-accept-online-self-test
+
+Global modifier:
+  --machine  Emit versioned JSON/JSONL for help, version, or offline Stage 1.
+
+Rules:
+  -- ends option parsing; use it before a directory beginning with '-'.
+  / aliases are recognized only on Windows; Linux / paths stay positional.
+  Interactive actions require both stdin and stdout to be terminals.
+  Short Context name selects the first usable match; use hash for precision.
+
+Topics: chat, context, input, actions, or any semantic action ID.
