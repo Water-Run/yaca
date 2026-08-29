@@ -1,0 +1,5 @@
+near-name	Unique	/C/work/Alpha.xml	170613A156579BA8
+damaged-name	MatchedUnavailable	/C/work/Alpha.xml	header-corrupt
+hash-collision	HashCollision	/C/work/a.xml@AAAAAAAAAAAAAAAA,/C/work/z.xml@AAAAAAAAAAAAAAAA
+partial	ScanIncomplete	/C/work	DirectoryUnreadable
+missing	NotFound

@@ -302,6 +302,22 @@ local function context_hex(value)
     return table.concat(output)
 end
 
+local function byte_compare(left, right)
+    local shared = math.min(#left, #right)
+    for index = 1, shared do
+        local left_byte, right_byte = left:byte(index), right:byte(index)
+        if left_byte < right_byte then return -1 end
+        if left_byte > right_byte then return 1 end
+    end
+    if #left < #right then return -1 end
+    if #left > #right then return 1 end
+    return 0
+end
+
+local function context_name_error(message, reason)
+    return failure("InvalidContextName", message, reason)
+end
+
 ---Creates a pure LogicalPath codec backed by the bundled streaming hash port.
 -- @param native table Native module exposing the four SHA-256 handle methods.
 -- @param options table Required path, segment, and hash chunk limits.
@@ -414,6 +430,96 @@ function M.new(native, options)
         local root, root_error = service.comparison_key(root_logical, platform_kind)
         if not root then return nil, root_error end
         return root == "/" or key == root or key:sub(1, #root + 1) == root .. "/"
+    end
+
+    ---Compares two canonical LogicalPaths by exact UTF-8 bytes.
+    -- This does not consult the locale or filesystem case rules; it is the
+    -- stable resolver and catalog tie-break order.
+    -- @param left string First canonical LogicalPath.
+    -- @param right string Second canonical LogicalPath.
+    -- @return integer|nil order -1, 0, or 1.
+    -- @return table|nil err Structured canonicality failure.
+    function service.compare_logical(left, right)
+        local admitted, validation_error = service.validate_logical(left)
+        if not admitted then return nil, validation_error end
+        admitted, validation_error = service.validate_logical(right)
+        if not admitted then return nil, validation_error end
+        return byte_compare(left, right)
+    end
+
+    ---Returns the canonical parent of a LogicalPath.
+    -- @param logical string Canonical LogicalPath.
+    -- @return string|nil parent Root is its own parent.
+    -- @return table|nil err Structured canonicality failure.
+    function service.parent(logical)
+        local segments, parse_error = parse_logical(logical, limits)
+        if not segments then return nil, parse_error end
+        if #segments == 0 then return "/" end
+        segments[#segments] = nil
+        return logical_string(segments)
+    end
+
+    ---Validates an exact Context display name used by name selectors.
+    -- Names are opaque UTF-8 bytes, but path separators, dot navigation, and
+    -- ASCII controls are never admitted as a basename selector.
+    -- @param name string Candidate display/canonical name without .xml.
+    -- @return string|nil admitted Exact input when safe.
+    -- @return table|nil err Structured name failure.
+    function service.validate_context_name(name)
+        if type(name) ~= "string" or name == "" then
+            return nil, context_name_error("Context name must be non-empty", "empty")
+        end
+        if #name > limits.maximum_segment_bytes - 4 then
+            return nil, context_name_error("Context name exceeds its byte limit", "bytes")
+        end
+        local valid, metadata = text.validate_utf8(name)
+        if not valid then
+            return nil, context_name_error("Context name is not strict UTF-8", "utf8")
+        end
+        if metadata.contains_nul then
+            return nil, context_name_error("Context name contains NUL", "nul")
+        end
+        if name == "." or name == ".." then
+            return nil, context_name_error("Context name is path navigation", "navigation")
+        end
+        if name:find("/", 1, true) or name:find("\\", 1, true) then
+            return nil, context_name_error("Context name contains a path separator", "separator")
+        end
+        for index = 1, #name do
+            local byte = name:byte(index)
+            if byte < 0x20 or byte == 0x7F then
+                return nil, context_name_error("Context name contains an ASCII control", "control")
+            end
+        end
+        return name
+    end
+
+    ---Classifies one canonical LogicalPath as an official Context XML file.
+    -- Temp, previous-valid, lock, extension-only, and non-XML paths are not
+    -- catalog candidates because only an exact non-empty `.xml` suffix wins.
+    -- @param logical string Canonical LogicalPath.
+    -- @return table|nil details Logical parent, leaf, and display name.
+    -- @return table|nil err Structured path or candidate-role failure.
+    function service.context_file(logical)
+        local segments, parse_error = parse_logical(logical, limits)
+        if not segments then return nil, parse_error end
+        if #segments == 0 then
+            return nil, failure("NotContextFile", "Context candidate cannot be the catalog root")
+        end
+        local leaf = segments[#segments]
+        if #leaf <= 4 or leaf:sub(-4) ~= ".xml" then
+            return nil, failure("NotContextFile", "path is not an official Context XML file")
+        end
+        local display_name = leaf:sub(1, -5)
+        local admitted, name_error = service.validate_context_name(display_name)
+        if not admitted then return nil, name_error end
+        segments[#segments] = nil
+        return readonly({
+            logical_path = logical,
+            parent = logical_string(segments),
+            leaf = leaf,
+            display_name = display_name,
+        }, "Context path details")
     end
 
     ---Hashes exact canonical LogicalPath UTF-8 bytes with pinned SHA-256.
