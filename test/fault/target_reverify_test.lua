@@ -314,6 +314,9 @@ return {
                 A.equal(replaced.outcome, "unknown")
                 A.equal(replaced.error.code, "PublicationUnknown")
                 A.equal(controls.bytes("/work/a.txt"), "old\n")
+                A.truthy(controls.exists(
+                    "/work/a.txt.yaca-operation-replace-unknown.tmp"
+                ))
                 local replay, replay_error = service:execute(replace_token)
                 A.falsy(replay)
                 A.equal(replay_error.code, "AuthorizationConsumed")

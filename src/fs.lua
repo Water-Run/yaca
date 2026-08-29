@@ -52,6 +52,9 @@ local function readonly(values, label)
         __pairs = function()
             return next, values, nil
         end,
+        __len = function()
+            return #values
+        end,
         __metatable = "locked",
     })
 end
@@ -561,6 +564,24 @@ function M.new(native, options)
         return invoke(native, "fs_close", handle)
     end
 
+    ---Creates one exact absolute directory without creating parent segments.
+    -- Runtime composition uses this only for its fixed adjacent data tree.
+    function service.make_directory(path, permissions)
+        if type(native.fs_make_directory) ~= "function" then
+            return false, failure(
+                "DirectoryCreationUnavailable",
+                "the native directory creation port is unavailable"
+            )
+        end
+        if not valid_absolute_path(path) then
+            return false, failure("InvalidPath", "make_directory requires an absolute path")
+        end
+        if not valid_integer(permissions, 0) or permissions > 511 then
+            return false, failure("InvalidPermissions", "directory permissions are invalid")
+        end
+        return invoke(native, "fs_make_directory", path, permissions)
+    end
+
     ---Inspects one direct-tool path without following the final link.
     -- The native result binds canonical physical ancestry, final identity, and
     -- behavior/security metadata.  Incomplete ancestry is returned as data so
@@ -765,7 +786,8 @@ function M.new(native, options)
             current_target.canonical_path,
             copy_identity(current_temporary.identity),
             copy_identity(current_target.identity),
-            copy_identity(current_target.parent_identity)
+            copy_identity(current_target.parent_identity),
+            current_target.metadata.behavior_digest
         )
     end
 
@@ -936,6 +958,7 @@ function M.new(native, options)
         target_qualified = false,
         maximum_chunk_bytes = maximum_chunk_bytes,
         maximum_lease_bytes = maximum_lease_bytes,
+        directory_create_candidate = type(native.fs_make_directory) == "function",
         verified_direct_candidate = direct_available,
         maximum_direct_entries = maximum_direct_entries,
     }, "filesystem capabilities")

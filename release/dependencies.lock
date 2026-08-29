@@ -50,6 +50,20 @@ return {
             source_url = "https://github.com/Water-Run/luainstaller.git",
             tag = "v1.3.0",
             revision = "97192d100077b31b61dc8f94427e14df1c68a9eb",
+            downstream_patches = {
+                {
+                    path = "release/patches/luainstaller-1.3.0-resources.patch",
+                    sha256 = "df011b4a5f54e96a098a2dd235e6a7dc300f7ed7ff7e2a2c269b9b01ff203210",
+                    purpose = "explicit-hash-verified-resource-overlay",
+                    applies_to_revision = "97192d100077b31b61dc8f94427e14df1c68a9eb",
+                    base_file_sha256 = {
+                        ["src/init.lua"] = "55694d5e1c349362206e24a3ee8670977e5ea40fd51f0a457b221c95a84fce2d",
+                        ["src/manifest.lua"] = "d86f856d0346a5f42a6611532f29f745f4dab10f892bc2cdf25148e134fc3065",
+                        ["src/bundler.lua"] = "502da4a599ee0565d11d6c58455a1834d3333f31f8c247e6ee8260fb1dafcfae",
+                        ["src/onefile.lua"] = "363e9a78d157821be7d6e222a4494c1f65998f5cc920c6f4cfcc0eee01dae610",
+                    },
+                },
+            },
             license = "LGPL-3.0-or-later",
             shipped = true,
             qualification = "pending-all-targets",

@@ -2234,12 +2234,19 @@ function M.new(dependencies, options)
             target.snapshot
         )
         if not replaced then
-            cleanup_created(path)
             if replace_error.code == "Unknown" then
                 return nil, failure(
                     "PublicationUnknown",
                     "direct replacement outcome is unknown",
                     replace_error.code
+                )
+            end
+            local cleaned, cleanup_error = cleanup_created(path)
+            if not cleaned then
+                return nil, failure(
+                    "PublicationUnknown",
+                    "failed replacement cleanup could not be proven",
+                    cleanup_error.code
                 )
             end
             return nil, replace_error

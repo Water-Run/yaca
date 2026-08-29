@@ -1,0 +1,566 @@
+--- a/src/init.lua
++++ b/src/init.lua
+@@ -222,6 +222,66 @@
+     return nil
+ end
+
++local RESOURCE_FIELDS = {
++    source_path = true,
++    destination_path = true,
++    content_hash = true,
++}
++
++local function normalizeResources(opts)
++    local value = opts.resources
++    if value == nil then return {} end
++    if type(value) ~= "table" then
++        return nil, invalidOption("resources", "resources must be a sequence")
++    end
++    local count = 0
++    for key in pairs(value) do
++        if type(key) ~= "number" or key < 1 or key ~= math.floor(key) then
++            return nil, invalidOption("resources", "resources must be a dense sequence")
++        end
++        count = count + 1
++    end
++    local resources = {}
++    for index = 1, count do
++        local item = value[index]
++        if type(item) ~= "table" then
++            return nil, invalidOption("resources", "resource entries must be tables")
++        end
++        for key in pairs(item) do
++            if type(key) ~= "string" or not RESOURCE_FIELDS[key] then
++                return nil, invalidOption(
++                    "resources",
++                    "resource entries contain an unknown field"
++                )
++            end
++        end
++        local source = item.source_path
++        local destination = item.destination_path
++        local content_hash = item.content_hash
++        if type(source) ~= "string" or source == "" or source:find("%c")
++            or type(destination) ~= "string" or destination == ""
++            or destination:find("%c") or destination:find("\\", 1, true)
++            or destination ~= path.normalize(destination)
++            or not path.isSafeRelative(destination)
++            or type(content_hash) ~= "string" or #content_hash ~= 64
++            or content_hash:match("^[0-9a-f]+$") == nil
++        then
++            return nil, invalidOption(
++                "resources",
++                "resource paths and SHA-256 hashes must be explicit and portable"
++            )
++        end
++        local source_path_err = validateNotDriveRelative(source, "resources")
++        if source_path_err then return nil, source_path_err end
++        resources[index] = {
++            source_path = source,
++            destination_path = destination,
++            content_hash = content_hash,
++        }
++    end
++    return resources
++end
++
+ local ALLOWED_OPTIONS = {
+     action = true,
+     depscan = true,
+@@ -235,6 +295,7 @@
+     max_deps = true,
+     mode = true,
+     out = true,
++    resources = true,
+     run_args = true,
+     target_os = true,
+     verbose = true,
+@@ -273,6 +334,10 @@
+     if not run_args then
+         return nil, run_args_err
+     end
++    local resources, resources_err = normalizeResources(opts)
++    if not resources then
++        return nil, resources_err
++    end
+     for _, item_value in ipairs(include) do
+         local include_path_err = validateNotDriveRelative(item_value, "include")
+         if include_path_err then
+@@ -335,6 +400,7 @@
+     normalized.include = include
+     normalized.exclude = exclude
+     normalized.run_args = run_args
++    normalized.resources = resources
+     return normalized
+ end
+
+@@ -524,6 +590,7 @@
+         target_os = normalized.target_os or os.getenv("LUAI_TARGET_OS"),
+         lua_prefix = normalized.lua_prefix or os.getenv("LUAI_LUA_PREFIX"),
+         source_hashes = context.dependencies.source_hashes,
++        resources = normalized.resources,
+     })
+     if not built_manifest.ok then
+         return recordFailure("bundle", built_manifest)
+@@ -537,6 +604,7 @@
+         dependencies = context.dependencies,
+         trace = context.trace,
+         manifest = built_manifest.manifest,
++        resources = normalized.resources,
+     }
+
+     if normalized.mode == "onefile" then
+--- a/src/manifest.lua
++++ b/src/manifest.lua
+@@ -164,6 +164,100 @@
+     }
+ end
+
++local RESOURCE_FIELDS = {
++    source_path = true,
++    destination_path = true,
++    content_hash = true,
++}
++
++local function resourceEntry(item, target_os)
++    if type(item) ~= "table" then
++        return nil, {
++            ok = false,
++            error = {
++                type = "InvalidOptionsError",
++                message = "Resource entry must be a table",
++            },
++        }
++    end
++    for key in pairs(item) do
++        if type(key) ~= "string" or not RESOURCE_FIELDS[key] then
++            return nil, {
++                ok = false,
++                error = {
++                    type = "InvalidOptionsError",
++                    message = "Resource entry contains an unknown field",
++                },
++            }
++        end
++    end
++    local destination = item.destination_path
++    local expected_hash = item.content_hash
++    if type(item.source_path) ~= "string" or item.source_path == ""
++        or item.source_path:find("%c")
++        or type(destination) ~= "string" or destination == ""
++        or destination:find("%c") or destination:find("\\", 1, true)
++        or destination ~= normalizePath(destination)
++        or type(expected_hash) ~= "string" or #expected_hash ~= 64
++        or expected_hash:match("^[0-9a-f]+$") == nil
++    then
++        return nil, {
++            ok = false,
++            error = {
++                type = "InvalidOptionsError",
++                message = "Resource paths and SHA-256 hashes must be explicit and portable",
++            },
++        }
++    end
++    local valid, reason = path.validateTargetRelative(destination, target_os)
++    if not valid then
++        return nil, {
++            ok = false,
++            error = {
++                type = "InvalidOptionsError",
++                message = "Resource destination is not portable for the target",
++                destination_path = destination,
++                target_os = target_os,
++                reason = reason,
++            },
++        }
++    end
++    local source = absolutePath(item.source_path)
++    local actual_hash, hash_err = fileHash(source)
++    if not actual_hash then
++        return nil, {
++            ok = false,
++            error = {
++                type = "FilesystemError",
++                message = "Cannot snapshot resource file: " .. tostring(source),
++                source_path = source,
++                cause = hash_err,
++            },
++        }
++    end
++    if actual_hash ~= expected_hash then
++        return nil, {
++            ok = false,
++            error = {
++                type = "SourceChangedError",
++                message = "Resource does not match its declared SHA-256: " .. tostring(source),
++                source_path = source,
++                expected_hash = expected_hash,
++                actual_hash = actual_hash,
++                hash_algorithm = HASH_ALGORITHM,
++            },
++        }
++    end
++    local name = basename(source):gsub("[^%w._-]", "_")
++    if name == "" or name == "." or name == ".." then name = "resource" end
++    return {
++        source_path = source,
++        source_id = normalizePath("resource/" .. expected_hash .. "/" .. name),
++        destination_path = destination,
++        content_hash = expected_hash,
++    }
++end
++
+ local function copyValue(value)
+     if type(value) ~= "table" then return value end
+     local copied = {}
+@@ -256,6 +350,7 @@
+             native = distributionEntries(manifest.modules and manifest.modules.native),
+             external = distributionEntries(manifest.modules and manifest.modules.external),
+         },
++        resources = distributionEntries(manifest.resources),
+         manual = {
+             depscan = manifest.manual and manifest.manual.depscan ~= false,
+             include_count = #(manifest.manual and manifest.manual.include or {}),
+@@ -305,11 +400,16 @@
+
+ local function checkDuplicateDestinations(manifest, target_os)
+     local seen = {}
++    local resource_destinations = {}
++    for _, item in ipairs(manifest.resources or {}) do
++        resource_destinations[path.targetKey(item.destination_path, target_os)] = true
++    end
+     local groups = {
+         { manifest.entry },
+         manifest.modules.lua,
+         manifest.modules.native,
+         manifest.modules.external,
++        manifest.resources,
+     }
+     for _, group in ipairs(groups) do
+         for _, item in ipairs(group) do
+@@ -333,7 +433,8 @@
+             end
+             local key = path.targetKey(item.destination_path, target_os)
+             local existing = seen[key]
+-            if existing and existing.source_path ~= item.source_path then
++            if existing and (existing.source_path ~= item.source_path
++                or resource_destinations[key]) then
+                 return duplicateDestinationError(
+                     item.destination_path,
+                     existing.source_path,
+@@ -384,6 +485,7 @@
+             native = {},
+             external = {},
+         },
++        resources = {},
+         manual = {
+             include = opts.include or {},
+             exclude = opts.exclude or {},
+@@ -418,6 +520,25 @@
+     )
+     if append_err then return append_err end
+
++    local resource_count = 0
++    for key in pairs(opts.resources or {}) do
++        if type(key) ~= "number" or key < 1 or key ~= math.floor(key) then
++            return {
++                ok = false,
++                error = {
++                    type = "InvalidOptionsError",
++                    message = "resources must be a dense sequence",
++                },
++            }
++        end
++        resource_count = resource_count + 1
++    end
++    for index = 1, resource_count do
++        local resource, resource_err = resourceEntry(opts.resources[index], profile.target_os)
++        if not resource then return resource_err end
++        manifest.resources[index] = resource
++    end
++
+     local duplicate = checkDuplicateDestinations(manifest, profile.target_os)
+     if duplicate then
+         return duplicate
+--- a/src/bundler.lua
++++ b/src/bundler.lua
+@@ -129,6 +129,15 @@
+             entries[#entries + 1] = entry
+         end
+     end
++    if manifest.resources ~= nil and type(manifest.resources) ~= "table" then
++        return nil, makeError("InvalidManifestError", "Manifest resources must be a table")
++    end
++    for _, entry in ipairs(manifest.resources or {}) do
++        if type(entry) ~= "table" then
++            return nil, makeError("InvalidManifestError", "Manifest resource entry must be a table")
++        end
++        entries[#entries + 1] = entry
++    end
+     return entries
+ end
+
+@@ -1673,6 +1682,194 @@
+     return nil
+ end
+
++local REQUESTED_RESOURCE_FIELDS = {
++    source_path = true,
++    destination_path = true,
++    content_hash = true,
++}
++
++local MANIFEST_RESOURCE_FIELDS = {
++    source_path = true,
++    source_id = true,
++    destination_path = true,
++    content_hash = true,
++}
++
++local function denseResourceCount(values, label)
++    if values == nil then return 0 end
++    if type(values) ~= "table" then
++        return nil, makeError("InvalidOptionsError", label .. " must be a sequence")
++    end
++    local count = 0
++    for key in pairs(values) do
++        if type(key) ~= "number" or key < 1 or key ~= math.floor(key) then
++            return nil, makeError("InvalidOptionsError", label .. " must be a dense sequence")
++        end
++        count = count + 1
++    end
++    for index = 1, count do
++        if values[index] == nil then
++            return nil, makeError("InvalidOptionsError", label .. " must be a dense sequence")
++        end
++    end
++    return count
++end
++
++local function exactResourceFields(value, allowed)
++    if type(value) ~= "table" then return false end
++    for key in pairs(value) do
++        if type(key) ~= "string" or not allowed[key] then return false end
++    end
++    return true
++end
++
++local function targetPathWithin(candidate, root, target_os)
++    local candidate_key = targetKey(candidate, target_os)
++    local root_key = targetKey(root, target_os)
++    return candidate_key == root_key
++        or candidate_key:sub(1, #root_key + 1) == root_key .. "/"
++end
++
++local function targetPathsOverlap(left, right, target_os)
++    return targetPathWithin(left, right, target_os)
++        or targetPathWithin(right, left, target_os)
++end
++
++local function validateBundleResources(requested, declared, target_os, hash_algorithm)
++    local requested_count, requested_err = denseResourceCount(requested, "resources")
++    if not requested_count then return nil, requested_err end
++    local declared_count, declared_err = denseResourceCount(
++        declared,
++        "manifest resources"
++    )
++    if not declared_count then return nil, declared_err end
++    if requested_count ~= declared_count then
++        return nil, makeError(
++            "InvalidManifestError",
++            "Manifest resources do not match the requested resource overlay"
++        )
++    end
++    local resources = {}
++    for index = 1, requested_count do
++        local item = requested[index]
++        local record = declared[index]
++        if not exactResourceFields(item, REQUESTED_RESOURCE_FIELDS)
++            or not exactResourceFields(record, MANIFEST_RESOURCE_FIELDS)
++        then
++            return nil, makeError(
++                "InvalidManifestError",
++                "Resource overlay contains an unknown or missing field",
++                { resource_index = index }
++            )
++        end
++        local source = type(item.source_path) == "string"
++            and normalizePath(absolutePath(item.source_path)) or nil
++        local destination = item.destination_path
++        local expected_hash = item.content_hash
++        local valid, reason = false, "destination is not a string"
++        if type(destination) == "string" then
++            valid, reason = validateTargetRelative(destination, target_os)
++        end
++        if not source or source == "" or source:find("%c")
++            or type(destination) ~= "string" or destination == ""
++            or destination:find("%c") or destination:find("\\", 1, true)
++            or destination ~= normalizePath(destination) or not valid
++            or type(expected_hash) ~= "string" or #expected_hash ~= 64
++            or expected_hash:match("^[0-9a-f]+$") == nil
++            or type(record.source_path) ~= "string" or record.source_path == ""
++            or type(record.source_id) ~= "string" or record.source_id == ""
++            or record.source_id:find("%c")
++            or type(record.destination_path) ~= "string"
++            or type(record.content_hash) ~= "string"
++            or normalizePath(record.source_path) ~= source
++            or record.destination_path ~= destination
++            or record.content_hash ~= expected_hash
++        then
++            return nil, makeError(
++                "InvalidManifestError",
++                "Resource overlay disagrees with its manifest snapshot",
++                {
++                    resource_index = index,
++                    destination_path = destination,
++                    target_os = target_os,
++                    reason = reason,
++                }
++            )
++        end
++        local actual_hash, hash_err = fileContentHash(source, hash_algorithm)
++        if actual_hash == nil then
++            return nil, sourceChangedError(
++                source,
++                expected_hash,
++                nil,
++                hash_algorithm,
++                { cause = hash_err }
++            )
++        end
++        if actual_hash ~= expected_hash then
++            return nil, sourceChangedError(
++                source,
++                expected_hash,
++                actual_hash,
++                hash_algorithm
++            )
++        end
++        for _, previous in ipairs(resources) do
++            if targetPathsOverlap(destination, previous.destination_path, target_os) then
++                return nil, makeError(
++                    "DuplicateModuleError",
++                    "Resource destinations collide",
++                    {
++                        first_destination = previous.destination_path,
++                        second_destination = destination,
++                        target_os = target_os,
++                    }
++                )
++            end
++        end
++        resources[index] = record
++    end
++    return resources
++end
++
++local function validateResourceReservations(
++    resources,
++    executable_name,
++    runtime_name,
++    target_os
++)
++    local reserved = {
++        ".luai/lua",
++        ".luai/native",
++        ".luai/build",
++        ".luai/manifest.lua",
++        GENERATED_MARKER_RELATIVE,
++        "THIRD_PARTY_NOTICES.md",
++        executable_name,
++    }
++    if runtime_name then reserved[#reserved + 1] = runtime_name end
++    for _, resource in ipairs(resources) do
++        for _, reserved_path in ipairs(reserved) do
++            if targetPathsOverlap(
++                resource.destination_path,
++                reserved_path,
++                target_os
++            ) then
++                return makeError(
++                    "DuplicateModuleError",
++                    "Resource destination collides with reserved bundle output",
++                    {
++                        destination_path = resource.destination_path,
++                        reserved_path = reserved_path,
++                        target_os = target_os,
++                    }
++                )
++            end
++        end
++    end
++    return nil
++end
++
+ local function bundleOnedir(opts, lifecycle)
+     opts = opts or {}
+     local manifest = opts.manifest
+@@ -1742,6 +1939,24 @@
+     local runtime_name = native_toolchain.runtime_name
+         or (native_toolchain.runtime_path
+             and basename(native_toolchain.runtime_path) or nil)
++    local resources, resources_err = validateBundleResources(
++        opts.resources,
++        manifest.resources,
++        profile.target_os,
++        manifest.hash_algorithm
++    )
++    if not resources then return resources_err end
++    local resource_reservation_err = validateResourceReservations(
++        resources,
++        exe_name,
++        profile.target_os == "windows" and runtime_name or nil,
++        profile.target_os
++    )
++    if resource_reservation_err then return resource_reservation_err end
++    for _, resource in ipairs(resources) do
++        local top_level = resource.destination_path:match("^[^/]+")
++        allowed_generated_entries[top_level] = true
++    end
+     if profile.target_os == "windows" and runtime_name then
+         allowed_generated_entries[runtime_name] = true
+     end
+@@ -2024,6 +2239,33 @@
+         }))
+     end
+
++    for _, resource in ipairs(resources) do
++        local destination = normalizePath(out_dir .. "/" .. resource.destination_path)
++        if not isWithin(destination, out_dir)
++            or destination == normalizePath(out_dir)
++        then
++            return abandon(makeError(
++                "InvalidOptionsError",
++                "Resource destination escapes the bundle",
++                { destination_path = resource.destination_path }
++            ))
++        end
++        if pathExists(destination) or isSymlink(destination) then
++            return abandon(makeError(
++                "DuplicateModuleError",
++                "Resource destination collides with generated output",
++                { destination_path = resource.destination_path }
++            ))
++        end
++        err = copyFile(
++            resource.source_path,
++            destination,
++            resource.content_hash,
++            manifest.hash_algorithm
++        )
++        if err then return abandon(err) end
++    end
++
+     err = verifyManifestSources(manifest)
+     if err then
+         return abandon(err)
+--- a/src/onefile.lua
++++ b/src/onefile.lua
+@@ -1587,6 +1587,7 @@
+         target_arch = opts.target_arch,
+         lua_prefix = opts.lua_prefix,
+         dependencies = opts.dependencies,
++        resources = opts.resources,
+         trace = opts.trace,
+         manifest = opts.manifest,
+     })

@@ -174,6 +174,14 @@ return {
                     plan.luainstaller.commit,
                     "97192d100077b31b61dc8f94427e14df1c68a9eb"
                 )
+                A.deep_equal(
+                    plan.luainstaller.downstream_patches,
+                    lock.components.luainstaller.downstream_patches
+                )
+                A.equal(
+                    plan.luainstaller.downstream_patches[1].sha256,
+                    "df011b4a5f54e96a098a2dd235e6a7dc300f7ed7ff7e2a2c269b9b01ff203210"
+                )
                 A.equal(plan.luainstaller.prerequisite_mode, "onedir")
                 A.equal(plan.luainstaller.final_mode, "onefile")
                 A.equal(plan.luainstaller.discovery_mode, "manual")
@@ -214,6 +222,10 @@ return {
                     "required-before-onefile-build-and-target-proof"
                 )
                 A.falsy(plan.luainstaller.resource_overlay.tree_copy)
+                A.deep_equal(
+                    planner.policy.builder_patches,
+                    lock.components.luainstaller.downstream_patches
+                )
             end,
         },
         {

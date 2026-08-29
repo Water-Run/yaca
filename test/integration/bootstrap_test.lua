@@ -139,6 +139,118 @@ local function valid_source(settings)
     }, "\n")
 end
 
+local function production_native()
+    local outer = "/release"
+    local inner = "/runtime/payload"
+    local data_root = outer .. "/__yaca__"
+    local native_path = inner .. "/.luai/native/yaca_native.so"
+    local initial = {
+        [outer .. "/yaca"] = "outer",
+        [inner .. "/yaca"] = "runtime",
+        [inner .. "/.luai/components/curl"] = "curl",
+        [inner .. "/.luai/components/cacert.pem"] = "not-the-release-ca",
+        [native_path] = "native",
+    }
+    local raw, controls = fake_filesystem.new(initial, 65536)
+    local directories = {
+        [outer] = true,
+        [inner] = true,
+        [inner .. "/.luai"] = true,
+        [inner .. "/.luai/components"] = true,
+        [inner .. "/.luai/native"] = true,
+    }
+    local hashes = hash_port()
+    local calls = { directory_creates = 0, process_starts = 0 }
+    local function native_error(code, message)
+        return { code = code, message = message or code }
+    end
+    local native = {}
+    function native.abi_version() return "yaca-native-v0.1.0" end
+    function native.platform_identity() return { os = "linux", arch = "x86_64" } end
+    function native.stdio_facts()
+        return { stdin_is_tty = true, stdout_is_tty = true, stderr_is_tty = true }
+    end
+    function native.executable_paths()
+        return { application = outer .. "/yaca", runtime = inner .. "/yaca" }
+    end
+    function native.workspace_inspect()
+        return {
+            path = "/workspace",
+            enterable = true,
+            identity = {
+                kind = "directory", volume = "fake-volume", object = "workspace",
+                size = 0, modified = "1",
+            },
+        }
+    end
+    function native.monotonic_now() return 1 end
+    function native.utc_now() return "2026-08-30T00:00:00Z" end
+    for _, name in ipairs({
+        "sha256_start", "sha256_update", "sha256_finish", "sha256_close",
+    }) do
+        native[name] = hashes[name]
+    end
+    function native.fs_open_read(path) return raw.open_read(path) end
+    function native.fs_create_new(path, permissions)
+        return raw.create_new(path, permissions)
+    end
+    function native.fs_stat_identity(handle_or_path)
+        if type(handle_or_path) == "string" and directories[handle_or_path] then
+            return true, {
+                kind = "directory",
+                volume = "fake-volume",
+                object = "dir:" .. handle_or_path,
+                size = 0,
+                modified = "1",
+            }
+        end
+        return raw.stat_identity(handle_or_path)
+    end
+    function native.fs_read(handle, maximum) return raw.stream_read(handle, maximum) end
+    function native.fs_write(handle, bytes) return raw.stream_write(handle, bytes) end
+    function native.fs_flush_file(handle) return raw.flush_file(handle) end
+    function native.fs_flush_directory(path) return raw.flush_directory(path) end
+    function native.fs_replace(temporary, target) return raw.replace(temporary, target) end
+    function native.fs_rename_no_replace(source, target)
+        return raw.rename_no_replace(source, target)
+    end
+    function native.fs_delete_verified(path, identity)
+        return raw.delete_verified(path, identity)
+    end
+    function native.fs_close(handle) return raw.close(handle) end
+    function native.fs_make_directory(path)
+        if directories[path] then
+            return false, native_error("DestinationExists", "directory already exists")
+        end
+        if path ~= data_root then
+            return false, native_error("NotFound", "directory parent is unavailable")
+        end
+        directories[path] = true
+        calls.directory_creates = calls.directory_creates + 1
+        return true, true
+    end
+    function native.process_start()
+        calls.process_starts = calls.process_starts + 1
+        return false, native_error("UnexpectedProcess", "process start was not expected")
+    end
+    function native.process_poll() return true, {} end
+    function native.process_cancel() return true, true end
+    function native.process_join()
+        return true, {
+            outcome = "completed", exit_kind = "exit-code", exit_code = 0,
+            duration_ms = 0, descendants_proven_stopped = true,
+        }
+    end
+    function native.process_close() return true, true end
+    function native.terminal_start() return true, {} end
+    function native.terminal_poll() return true, {} end
+    function native.terminal_cancel() return true, true end
+    function native.terminal_join() return true, { outcome = "completed" } end
+    function native.terminal_close() return true, true end
+    function native.terminal_restore() return true, true end
+    return native, controls, calls, native_path, data_root
+end
+
 local function application(source)
     local initial = source and { [CONFIG_PATH] = source } or {}
     local filesystem, filesystem_controls = fake_filesystem.new(initial, 23)
@@ -245,6 +357,203 @@ end
 return {
     name = "integration/bootstrap",
     cases = {
+        {
+            name = "packaged layout separates outer durable data from inner runtime resources",
+            run = function()
+                local calls = {}
+                local layout = assert(main.resolve_runtime_layout({
+                    executable_paths = function(argv0)
+                        calls[#calls + 1] = argv0
+                        return {
+                            application = "/opt/yaca release/yaca",
+                            runtime = "/tmp/luainstaller-onefile-42/payload/yaca",
+                        }
+                    end,
+                }, "yaca", "linux-x86_64"))
+                A.deep_equal(calls, { "yaca" })
+                A.equal(layout.application_executable, "/opt/yaca release/yaca")
+                A.equal(layout.runtime_executable, "/tmp/luainstaller-onefile-42/payload/yaca")
+                A.equal(layout.application_root, "/opt/yaca release")
+                A.equal(layout.runtime_root, "/tmp/luainstaller-onefile-42/payload")
+                A.equal(layout.data_root, "/opt/yaca release/__yaca__")
+                A.equal(
+                    layout.config_path,
+                    "/opt/yaca release/__yaca__/config.ini"
+                )
+                A.equal(
+                    layout.curl_executable,
+                    "/tmp/luainstaller-onefile-42/payload/.luai/components/curl"
+                )
+                A.equal(
+                    layout.ca_bundle_path,
+                    "/tmp/luainstaller-onefile-42/payload/.luai/components/cacert.pem"
+                )
+                A.raises(function() layout.data_root = "/tmp/escape" end, "cannot be modified")
+            end,
+        },
+        {
+            name = "packaged layout rejects relative swapped and cross-target paths",
+            run = function()
+                local relative, relative_error = main.resolve_runtime_layout({
+                    executable_paths = function()
+                        return { application = "yaca", runtime = "/tmp/cache/yaca" }
+                    end,
+                }, "yaca", "linux-x86_64")
+                A.falsy(relative)
+                A.equal(relative_error.code, "InvalidExecutableLayout")
+
+                local same, same_error = main.resolve_runtime_layout({
+                    executable_paths = function()
+                        return {
+                            application = "/tmp/cache/yaca",
+                            runtime = "/tmp/cache/yaca",
+                        }
+                    end,
+                }, "yaca", "linux-x86_64")
+                A.falsy(same)
+                A.equal(same_error.code, "InvalidExecutableLayout")
+
+                local target, target_error = main.resolve_runtime_layout({
+                    executable_paths = function()
+                        return {
+                            application = "C:\\Yaca\\yaca.exe",
+                            runtime = "C:\\Temp\\payload\\yaca.exe",
+                        }
+                    end,
+                }, "yaca.exe", "linux-x86_64")
+                A.falsy(target)
+                A.equal(target_error.code, "InvalidExecutableLayout")
+            end,
+        },
+        {
+            name = "executable help and machine version use real fd facts without bootstrap reads",
+            run = function()
+                local calls = { platform = 0, stdio = 0, paths = 0 }
+                local native = {}
+                function native.abi_version() return "yaca-native-v0.1.0" end
+                function native.platform_identity()
+                    calls.platform = calls.platform + 1
+                    return { os = "linux", arch = "x86_64" }
+                end
+                function native.stdio_facts()
+                    calls.stdio = calls.stdio + 1
+                    return {
+                        stdin_is_tty = false,
+                        stdout_is_tty = false,
+                        stderr_is_tty = false,
+                    }
+                end
+                function native.executable_paths()
+                    calls.paths = calls.paths + 1
+                    error("help and version must not resolve writable roots")
+                end
+
+                local stdout, stderr = {}, {}
+                local ports = {
+                    native = native,
+                    stdout = function(bytes) stdout[#stdout + 1] = bytes return true end,
+                    stderr = function(bytes) stderr[#stderr + 1] = bytes return true end,
+                }
+                A.equal(main.run_cli({ [0] = "/opt/yaca", "--help" }, ports), 0)
+                A.contains(table.concat(stdout), "yaca: Yet Another Coding Agent.")
+                A.deep_equal(stderr, {})
+
+                stdout = {}
+                A.equal(main.run_cli({
+                    [0] = "/opt/yaca", "--machine", "--version",
+                }, ports), 0)
+                local machine = table.concat(stdout)
+                A.contains(machine, '"kind":"version"')
+                A.contains(machine, '"outcome":"success"')
+                A.contains(machine, '"release_target":"linux-x86_64"')
+                A.equal(calls.platform, 2)
+                A.equal(calls.stdio, 2)
+                A.equal(calls.paths, 0)
+            end,
+        },
+        {
+            name = "executable entry maps typed usage and tty failures to stable exits",
+            run = function()
+                local native = {
+                    abi_version = function() return "yaca-native-v0.1.0" end,
+                    platform_identity = function()
+                        return { os = "linux", arch = "x86_64" }
+                    end,
+                    stdio_facts = function()
+                        return {
+                            stdin_is_tty = false,
+                            stdout_is_tty = false,
+                            stderr_is_tty = false,
+                        }
+                    end,
+                }
+                local stderr = {}
+                local ports = {
+                    native = native,
+                    stdout = function() return true end,
+                    stderr = function(bytes) stderr[#stderr + 1] = bytes return true end,
+                }
+                A.equal(main.run_cli({ [0] = "/opt/yaca", "--unknown" }, ports), 2)
+                A.contains(table.concat(stderr), "UsageError")
+                stderr = {}
+                A.equal(main.run_cli({ [0] = "/opt/yaca" }, ports), 5)
+                A.contains(table.concat(stderr), "TtyRequired")
+            end,
+        },
+        {
+            name = "production composition creates only an explicit offline repair template",
+            run = function()
+                local native, filesystem, calls, native_path, data_root = production_native()
+                local stdout, stderr = {}, {}
+                local ports = {
+                    native = native,
+                    native_path = native_path,
+                    stdout = function(bytes) stdout[#stdout + 1] = bytes return true end,
+                    stderr = function(bytes) stderr[#stderr + 1] = bytes return true end,
+                }
+                A.equal(main.run_cli({
+                    [0] = "/release/yaca", "--config-repl",
+                }, ports), 0)
+                local config_path = data_root .. "/config.ini"
+                local template = filesystem.bytes(config_path)
+                A.truthy(template)
+                A.contains(template, "[Permission.Readonly]")
+                A.contains(template, "Enabled = false")
+                A.equal(filesystem.permissions(config_path), 384)
+                A.equal(calls.directory_creates, 1)
+                A.equal(calls.process_starts, 0)
+                A.deep_equal(stderr, {})
+                A.contains(table.concat(stdout), "repair template")
+
+                stdout = {}
+                A.equal(main.run_cli({
+                    [0] = "/release/yaca", "--config-repl",
+                }, ports), 1)
+                A.equal(filesystem.bytes(config_path), template)
+                A.equal(calls.directory_creates, 1)
+                A.equal(calls.process_starts, 0)
+                A.contains(table.concat(stdout), "requires repair")
+
+                native.workspace_inspect = function()
+                    return {
+                        path = "/workspace",
+                        enterable = true,
+                        identity = {
+                            kind = "directory",
+                            volume = "fake-volume",
+                            object = "workspace",
+                            size = 0,
+                            modified = "1",
+                            alias = "not-an-identity-field",
+                        },
+                    }
+                end
+                stdout, stderr = {}, {}
+                A.equal(main.run_cli({ [0] = "/release/yaca" }, ports), 1)
+                A.contains(table.concat(stderr), "InvalidWorkspace")
+                A.equal(calls.process_starts, 0)
+            end,
+        },
         {
             name = "construction help and version perform no probes reads scans or network",
             run = function()

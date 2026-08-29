@@ -15,3 +15,4 @@ python3 .tools/proofs/tp008_xml_commit.py \
   .develope-docs/contracts/fixtures/context-minimal.xml \
   .develope-docs/contracts/context.rng
 bash .tools/proofs/tp010_build.sh
+bash .tools/proofs/rp001_resource_overlay.sh

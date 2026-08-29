@@ -51,6 +51,27 @@ local PURPOSES = {
     data = "FILE",
 }
 
+local LUAINSTALLER_PATCH = {
+    path = "release/patches/luainstaller-1.3.0-resources.patch",
+    sha256 = "df011b4a5f54e96a098a2dd235e6a7dc300f7ed7ff7e2a2c269b9b01ff203210",
+    purpose = "explicit-hash-verified-resource-overlay",
+    applies_to_revision = "97192d100077b31b61dc8f94427e14df1c68a9eb",
+    base_file_sha256 = {
+        ["src/init.lua"] = "55694d5e1c349362206e24a3ee8670977e5ea40fd51f0a457b221c95a84fce2d",
+        ["src/manifest.lua"] = "d86f856d0346a5f42a6611532f29f745f4dab10f892bc2cdf25148e134fc3065",
+        ["src/bundler.lua"] = "502da4a599ee0565d11d6c58455a1834d3333f31f8c247e6ee8260fb1dafcfae",
+        ["src/onefile.lua"] = "363e9a78d157821be7d6e222a4494c1f65998f5cc920c6f4cfcc0eee01dae610",
+    },
+}
+
+local PATCH_FIELDS = {
+    path = true,
+    sha256 = true,
+    purpose = true,
+    applies_to_revision = true,
+    base_file_sha256 = true,
+}
+
 local function failure(code, message, detail)
     local result = { code = code, message = message }
     if detail ~= nil then result.detail = detail end
@@ -161,6 +182,73 @@ local function unique_array(values, label)
     return seen
 end
 
+local function validate_luainstaller_patches(patches, revision)
+    if dense_count(patches) ~= 1 then
+        return nil, "luainstaller must have exactly one pinned downstream patch"
+    end
+    local patch = patches[1]
+    local fields_ok, fields_error = known_fields(
+        patch,
+        PATCH_FIELDS,
+        "luainstaller downstream patch"
+    )
+    if not fields_ok then return nil, fields_error end
+    if patch.path ~= LUAINSTALLER_PATCH.path
+        or patch.sha256 ~= LUAINSTALLER_PATCH.sha256
+        or patch.purpose ~= LUAINSTALLER_PATCH.purpose
+        or patch.applies_to_revision ~= revision
+        or patch.applies_to_revision ~= LUAINSTALLER_PATCH.applies_to_revision
+        or not safe_path(patch.path, false)
+        or not is_sha256(patch.sha256)
+    then
+        return nil, "luainstaller downstream patch is not exactly pinned"
+    end
+    if type(patch.base_file_sha256) ~= "table" then
+        return nil, "luainstaller patch base file hashes are missing"
+    end
+    local base_count = 0
+    for path, digest in pairs(patch.base_file_sha256) do
+        base_count = base_count + 1
+        if LUAINSTALLER_PATCH.base_file_sha256[path] ~= digest
+            or not safe_path(path, false)
+            or not is_sha256(digest)
+        then
+            return nil, "luainstaller patch base file hash changed"
+        end
+    end
+    local expected_count = 0
+    for path, digest in pairs(LUAINSTALLER_PATCH.base_file_sha256) do
+        expected_count = expected_count + 1
+        if patch.base_file_sha256[path] ~= digest then
+            return nil, "luainstaller patch omits a pinned base file"
+        end
+    end
+    if base_count ~= expected_count then
+        return nil, "luainstaller patch base file set changed"
+    end
+    return true
+end
+
+local function same_luainstaller_patches(left, right)
+    if dense_count(left) ~= 1 or dense_count(right) ~= 1 then return false end
+    local left_patch, right_patch = left[1], right[1]
+    if type(left_patch) ~= "table" or type(right_patch) ~= "table" then return false end
+    for field in pairs(PATCH_FIELDS) do
+        if field ~= "base_file_sha256" and left_patch[field] ~= right_patch[field] then
+            return false
+        end
+    end
+    local left_base, right_base = left_patch.base_file_sha256, right_patch.base_file_sha256
+    if type(left_base) ~= "table" or type(right_base) ~= "table" then return false end
+    for path, digest in pairs(left_base) do
+        if right_base[path] ~= digest then return false end
+    end
+    for path, digest in pairs(right_base) do
+        if left_base[path] ~= digest then return false end
+    end
+    return true
+end
+
 local function validate_lock(lock)
     if type(lock) ~= "table" or lock.schema_version ~= "yaca-dependency-lock-v1" then
         return nil, "unexpected dependency lock schema"
@@ -196,6 +284,13 @@ local function validate_lock(lock)
         elseif component.source_type == "git" then
             if name == "luainstaller" and not is_revision(component.revision) then
                 return nil, "luainstaller revision is not fully pinned"
+            end
+            if name == "luainstaller" then
+                local patches_ok, patches_error = validate_luainstaller_patches(
+                    component.downstream_patches,
+                    component.revision
+                )
+                if not patches_ok then return nil, patches_error end
             end
             if name == "yaca" and component.revision_policy ~= "exact-build-commit" then
                 return nil, "yaca source revision policy is not exact"
@@ -256,6 +351,12 @@ local function validate_manifest(manifest, lock)
     end
     if manifest.dependencies.luainstaller.full_commit
         ~= lock.components.luainstaller.revision
+        or manifest.dependencies.luainstaller.status
+            ~= "source-and-patch-pinned-target-artifact-pending"
+        or not same_luainstaller_patches(
+            manifest.dependencies.luainstaller.downstream_patches,
+            lock.components.luainstaller.downstream_patches
+        )
         or manifest.dependencies.curl.sha256 ~= lock.components.curl.sha256
         or manifest.dependencies.mbedtls.sha256 ~= lock.components.mbedtls.sha256
         or manifest.dependencies.ca_bundle.sha256 ~= lock.components["ca-bundle"].sha256
@@ -438,6 +539,11 @@ local function spdx_package(name, component, source_revision)
             },
         }
     end
+    if name == "luainstaller" then
+        local patch = component.downstream_patches[1]
+        package.comment = package.comment .. "; downstream patch " .. patch.path
+            .. " SHA256=" .. patch.sha256
+    end
     return package
 end
 
@@ -586,6 +692,9 @@ function M.new(manifest, lock)
                 version = admitted_lock.components.luainstaller.version,
                 tag = admitted_lock.components.luainstaller.tag,
                 commit = admitted_lock.components.luainstaller.revision,
+                downstream_patches = copy(
+                    admitted_lock.components.luainstaller.downstream_patches
+                ),
                 prerequisite_mode = "onedir",
                 final_mode = "onefile",
                 entry = "src/main.lua",
@@ -712,6 +821,9 @@ function M.new(manifest, lock)
             }
             if component.sha256 then entry.source_sha256 = component.sha256 end
             if component.revision then entry.source_revision = component.revision end
+            if component.downstream_patches then
+                entry.downstream_patches = copy(component.downstream_patches)
+            end
             if name == "yaca" then entry.source_revision = canonical.source_revision end
             components[#components + 1] = entry
         end
@@ -743,6 +855,7 @@ function M.new(manifest, lock)
         exact_files_only = true,
         builder_version = admitted_lock.components.luainstaller.version,
         builder_commit = admitted_lock.components.luainstaller.revision,
+        builder_patches = copy(admitted_lock.components.luainstaller.downstream_patches),
     }
     return service
 end

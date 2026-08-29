@@ -305,7 +305,14 @@ function M.new(initial)
         return true, open_handle(node, path, "write")
     end
 
-    function native.fs_replace_verified(temporary, target, expected_temporary, expected_target, expected_parent)
+    function native.fs_replace_verified(
+        temporary,
+        target,
+        expected_temporary,
+        expected_target,
+        expected_parent,
+        expected_behavior_digest
+    )
         controls.operations[#controls.operations + 1] = "replace-verified:" .. target
         if controls.faults.replace then return false, failure(controls.faults.replace) end
         local temporary_node, target_node = nodes[temporary], nodes[target]
@@ -314,6 +321,7 @@ function M.new(initial)
             or not same_identity(temporary_node, expected_temporary)
             or not same_identity(target_node, expected_target)
             or not same_object(parent, expected_parent)
+            or target_node.behavior_digest ~= expected_behavior_digest
         then
             return false, failure("TargetChanged")
         end

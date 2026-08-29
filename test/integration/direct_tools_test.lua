@@ -190,6 +190,7 @@ local function fixture(settings)
     return tools, controls, authorization_controls, {
         modules = modules,
         safety = safety,
+        filesystem = filesystem,
         operations = operation_controls,
     }
 end
@@ -340,7 +341,19 @@ return {
         {
             name = "list read and search are stable bounded typed results with continuation",
             run = function()
-                local service, controls = fixture()
+                local service, controls, _, context = fixture()
+                local inspected, snapshot = context.filesystem.direct_inspect(
+                    "/work/sub/b.txt"
+                )
+                A.truthy(inspected)
+                A.equal(#snapshot.ancestors, 3)
+                A.raises(function() snapshot.ancestors[1] = false end, "cannot be modified")
+                local workspace_ok, workspace = context.filesystem.direct_inspect("/work")
+                A.truthy(workspace_ok)
+                local walked, raw_walk = context.filesystem.direct_walk(workspace, 2, 8)
+                A.truthy(walked)
+                A.equal(#raw_walk.entries, 4)
+                A.raises(function() raw_walk.entries[1] = false end, "cannot be modified")
                 local first = run(service, "list", {
                     path = "/work", depth = 2, page_size = 2,
                 }, "list-1")

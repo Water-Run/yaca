@@ -176,6 +176,14 @@ return {
                     lock.components.luainstaller.revision,
                     "97192d100077b31b61dc8f94427e14df1c68a9eb"
                 )
+                A.deep_equal(
+                    manifest.dependencies.luainstaller.downstream_patches,
+                    lock.components.luainstaller.downstream_patches
+                )
+                A.equal(
+                    lock.components.luainstaller.downstream_patches[1].sha256,
+                    "df011b4a5f54e96a098a2dd235e6a7dc300f7ed7ff7e2a2c269b9b01ff203210"
+                )
                 A.equal(lock.components.curl.version, "8.21.0")
                 A.equal(
                     lock.components.curl.sha256,
@@ -254,6 +262,10 @@ return {
                         .referenceLocator,
                     lock.components.luainstaller.revision
                 )
+                A.contains(
+                    packages["SPDXRef-Package-luainstaller"].comment,
+                    lock.components.luainstaller.downstream_patches[1].sha256
+                )
             end,
         },
         {
@@ -325,6 +337,11 @@ return {
                     A.equal(component.declared_license, lock.components[name].license)
                     if name == "yaca" then
                         A.equal(component.source_revision, plan.source_revision)
+                    elseif name == "luainstaller" then
+                        A.deep_equal(
+                            component.downstream_patches,
+                            lock.components.luainstaller.downstream_patches
+                        )
                     end
                 end
             end,
@@ -364,6 +381,23 @@ return {
                 local admitted, admitted_error = module.new(altered_manifest, lock)
                 A.falsy(admitted)
                 A.equal(admitted_error.code, "InvalidReleaseManifest")
+
+                local altered_patch_lock = clone(lock)
+                altered_patch_lock.components.luainstaller.downstream_patches[1].sha256
+                    = string.rep("0", 64)
+                local patch_planner, patch_error = module.new(manifest, altered_patch_lock)
+                A.falsy(patch_planner)
+                A.equal(patch_error.code, "InvalidDependencyLock")
+
+                local altered_patch_manifest = clone(manifest)
+                altered_patch_manifest.dependencies.luainstaller.downstream_patches[1].purpose
+                    = "different-purpose"
+                local manifest_planner, manifest_error = module.new(
+                    altered_patch_manifest,
+                    lock
+                )
+                A.falsy(manifest_planner)
+                A.equal(manifest_error.code, "InvalidReleaseManifest")
             end,
         },
         {

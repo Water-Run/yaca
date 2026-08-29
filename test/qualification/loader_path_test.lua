@@ -88,10 +88,21 @@ return {
             run = function()
                 local source = read_all("native/yaca_native.c")
                 for _, symbol in ipairs({
+                    "executable_paths",
+                    "stdio_facts",
+                    "workspace_inspect",
+                    "fs_make_directory",
                     "sha256_start",
                     "sha256_update",
                     "sha256_finish",
                     "sha256_close",
+                    "fs_inspect_direct",
+                    "fs_walk_direct",
+                    "fs_open_read_verified",
+                    "fs_create_new_verified",
+                    "fs_replace_verified",
+                    "fs_rename_no_replace_verified",
+                    "fs_delete_direct_verified",
                 }) do
                     A.contains(source, '{ "' .. symbol .. '", l_' .. symbol .. " }")
                 end
