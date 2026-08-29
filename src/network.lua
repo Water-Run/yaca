@@ -1,6 +1,6 @@
 --[[
 File: network.lua
-Date: 2026-08-29
+Date: 2026-08-30
 Author: WaterRun
 Description: Builds a secret-safe curl carrier over structured process ports.
 ]]
@@ -1644,6 +1644,7 @@ function M.new_retry_controller(spec)
     local history = { current_url }
     local redirect_count = 0
     local retry_number = 0
+    local fallback_number = 0
     local attempts_started = 0
     local active
     local waiting
@@ -1669,6 +1670,7 @@ function M.new_retry_controller(spec)
             attempts = attempts_started,
             retries = retry_number,
             redirects = redirect_count,
+            streaming_fallbacks = fallback_number,
             canonical_events = canonical_events,
         }
         if detail ~= nil then values.detail = detail end
@@ -1709,7 +1711,7 @@ function M.new_retry_controller(spec)
         end
         local deadline, deadline_error = check_deadline(now)
         if not deadline then return nil, deadline_error end
-        local maximum_attempts = 1 + snapshot.retry_count + snapshot.maximum_redirects
+        local maximum_attempts = 2 + snapshot.retry_count + snapshot.maximum_redirects
         if attempts_started >= maximum_attempts then
             return nil, finish("failed", "AttemptLimit", maximum_attempts)
         end
@@ -1741,6 +1743,39 @@ function M.new_retry_controller(spec)
         end
         canonical_events = canonical_events + 1
         return canonical_events
+    end
+
+    ---Abandons one streaming attempt before any canonical provider event and
+    -- admits the contract's sole immediate non-streaming fallback attempt.
+    -- Model semantics decide whether fallback is appropriate; this controller
+    -- owns only attempt identity, replay safety, and the shared deadline.
+    function controller:streaming_fallback(attempt_id, now)
+        local time_ok, time_error = observe_now(now)
+        if not time_ok then return nil, time_error end
+        if state ~= "active" or not active or attempt_id ~= active.id then
+            return nil, failure("RetryState", "streaming fallback does not match the active attempt")
+        end
+        if canonical_events > 0 then
+            return finish("failed", "CanonicalEventReplayForbidden")
+        end
+        if fallback_number >= 1 then
+            return finish("failed", "StreamingFallbackExhausted")
+        end
+        local deadline, deadline_error = check_deadline(now)
+        if not deadline then return nil, deadline_error end
+        active = nil
+        fallback_number = fallback_number + 1
+        waiting = immutable_decision({
+            action = "wait",
+            kind = "streaming-fallback",
+            delay_ms = 0,
+            resume_at = now,
+            target_url = current_url,
+            key_reused = true,
+            streaming_fallback_number = fallback_number,
+        })
+        state = "waiting"
+        return waiting
     end
 
     ---Finishes one active attempt and decides terminal, redirect, or bounded retry.
@@ -1901,6 +1936,7 @@ function M.new_retry_controller(spec)
             attempts = attempts_started,
             retries = retry_number,
             redirects = redirect_count,
+            streaming_fallbacks = fallback_number,
             canonical_events = canonical_events,
             cancel_active = cancel_active,
             active_attempt_id = active_attempt_id,
@@ -1920,6 +1956,7 @@ function M.new_retry_controller(spec)
             attempts = attempts_started,
             retries = retry_number,
             redirects = redirect_count,
+            streaming_fallbacks = fallback_number,
             canonical_events = canonical_events,
             terminal = terminal,
         }, "retry controller status")

@@ -1150,7 +1150,7 @@ local BACKEND_OPTIONS = {
         maximum_direct_entries = 10000,
     },
     process = {
-        maximum_output_bytes = 8 * 1024 * 1024,
+        maximum_output_bytes = 40 * 1024 * 1024,
         maximum_poll_bytes = 65536,
     },
     terminal = { maximum_input_bytes = 65536 },
@@ -1168,6 +1168,64 @@ local SELF_TEST_OPTIONS = {
     maximum_snapshot_bytes = 65536,
     maximum_identifier_bytes = 128,
 }
+
+local MODEL_ADAPTER_OPTIONS = {
+    maximum_json_bytes = 1024 * 1024,
+    maximum_json_depth = 32,
+    maximum_json_nodes = 16384,
+    maximum_string_bytes = 262144,
+    maximum_number_bytes = 64,
+    maximum_sse_line_bytes = 65536,
+    maximum_sse_event_bytes = 262144,
+    maximum_sse_buffered_bytes = 512 * 1024,
+    maximum_sse_events_per_push = 256,
+    maximum_response_bytes = 16 * 1024 * 1024,
+    maximum_text_bytes = 65536,
+    maximum_reasoning_bytes = 65536,
+    maximum_tool_calls = 64,
+    maximum_tool_argument_bytes = 32768,
+    maximum_total_tool_argument_bytes = 262144,
+    maximum_content_blocks = 256,
+    maximum_events = 512,
+}
+
+local MODEL_ACTIVITY_OPTIONS = {
+    maximum_poll_events = 128,
+    maximum_queued_events = 1024,
+    maximum_header_bytes = 262144,
+    maximum_header_line_bytes = 16384,
+    maximum_header_lines = 1024,
+    maximum_redirects = 3,
+    maximum_turn_time_ms = 3600000,
+    maximum_runtime_time_ms = 3600000,
+    maximum_canonical_body_bytes = 65536,
+    retry_manifest = {
+        identity = "tp006-modern-candidate-v1",
+        maximum_count = 10,
+        exponent = 2,
+        maximum_delay_ms = 30000,
+        runtime_wait_cap_ms = 60000,
+        deterministic_jitter_permille = 100,
+    },
+}
+
+local function network_options(layout)
+    return {
+        curl_executable = layout.curl_executable,
+        bundled_ca_path = layout.ca_bundle_path,
+        temporary_directory = layout.data_root,
+        private_permissions = 384,
+        maximum_body_bytes = 1024 * 1024,
+        maximum_header_bytes = 262144,
+        maximum_config_bytes = 512 * 1024,
+        maximum_output_bytes = 32 * 1024 * 1024,
+        maximum_io_chunk_bytes = 65536,
+        maximum_attempt_id_bytes = 128,
+        maximum_connect_timeout_ms = 120000,
+        maximum_total_timeout_ms = 3600000,
+        component_environment = {},
+    }
+end
 
 local CONFIG_REPAIR_TEMPLATE = table.concat({
     "; yaca bootstrap repair template",
@@ -1847,6 +1905,15 @@ function M.compose_runtime(runtime)
         runtime.native,
         backend.filesystem
     )
+    local model_module = require("model")
+    local model_adapter, model_error = model_module.new(MODEL_ADAPTER_OPTIONS)
+    if not model_adapter then return nil, model_error end
+    local network_module = require("network")
+    local network_service, network_error = network_module.new({
+        filesystem = backend.filesystem,
+        processes = backend.processes,
+    }, network_options(layout))
+    if not network_service then return nil, network_error end
     local publication
     if contexts then
         publication, contexts_error = session.new_context_publication({
@@ -1876,6 +1943,8 @@ function M.compose_runtime(runtime)
         backend = backend,
         context_services = contexts,
         context_error = contexts_error,
+        model_adapter = model_adapter,
+        network = network_service,
     }
     local diagnostics = require("diagnostics")
     local self_test, self_test_error = diagnostics.new_self_test({
@@ -1928,6 +1997,13 @@ function M.compose_runtime(runtime)
         contexts = contexts or false,
         context_error = contexts_error or false,
         publication = publication or false,
+        model_adapter = model_adapter,
+        network = network_service,
+        model_activity_options = assert(freeze(
+            MODEL_ACTIVITY_OPTIONS,
+            {},
+            "production model activity options"
+        )),
     }, "production runtime composition")
 end
 

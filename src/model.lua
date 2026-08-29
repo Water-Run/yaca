@@ -1518,6 +1518,20 @@ local function new_response_session(codec, options, request_data, registry, cont
         return freeze(batch, "model event batch"), terminal_response
     end
 
+    function session:transport_error(error_id)
+        if state ~= "open" then return nil, failure("ModelState", "response session is closed") end
+        batch = {}
+        if control_barrier then release_deferred_events() end
+        if not valid_token(error_id, 128) then error_id = "transport-failure" end
+        append_event("transport_error", {
+            error_id = error_id,
+            retryable = false,
+        })
+        state = "failed"
+        build_response("incomplete", error_id)
+        return freeze(batch, "model event batch"), terminal_response
+    end
+
     function session:response()
         return terminal_response
     end
@@ -1662,6 +1676,1157 @@ function M.new(options)
     service.limits = freeze(limits, "model limits")
 
     return readonly(service, "model service")
+end
+
+local function exact_activity_fields(value, allowed)
+    if type(value) ~= "table" then return false end
+    for key in pairs(value) do
+        if type(key) ~= "string" or not allowed[key] then return false end
+    end
+    return true
+end
+
+local function canonical_value(value, visiting)
+    local value_type = type(value)
+    if value == nil then return "n;" end
+    if value_type == "string" then return "s" .. tostring(#value) .. ":" .. value end
+    if value_type == "boolean" then return value and "b1;" or "b0;" end
+    if value_type == "number" and math.type(value) == "integer" then
+        return "i" .. tostring(value) .. ";"
+    end
+    if value_type ~= "table" then
+        return nil, failure("InvalidCanonicalResponse", "response contains an unsupported value")
+    end
+    visiting = visiting or {}
+    if visiting[value] then
+        return nil, failure("InvalidCanonicalResponse", "response contains a cycle")
+    end
+    visiting[value] = true
+    local count = dense_count(value)
+    local parts = {}
+    if count ~= nil then
+        parts[1] = "a" .. tostring(count) .. ":"
+        for index = 1, count do
+            local encoded, encode_error = canonical_value(value[index], visiting)
+            if not encoded then visiting[value] = nil return nil, encode_error end
+            parts[#parts + 1] = encoded
+        end
+    else
+        local keys = {}
+        for key in pairs(value) do
+            if type(key) ~= "string" then
+                visiting[value] = nil
+                return nil, failure(
+                    "InvalidCanonicalResponse",
+                    "response maps require string keys"
+                )
+            end
+            keys[#keys + 1] = key
+        end
+        table.sort(keys)
+        parts[1] = "m" .. tostring(#keys) .. ":"
+        for _, key in ipairs(keys) do
+            local encoded, encode_error = canonical_value(value[key], visiting)
+            if not encoded then visiting[value] = nil return nil, encode_error end
+            parts[#parts + 1] = "k" .. tostring(#key) .. ":" .. key
+            parts[#parts + 1] = encoded
+        end
+    end
+    visiting[value] = nil
+    return table.concat(parts)
+end
+
+local function response_body(response)
+    local parts = {}
+    for _, block in ipairs(response.content_blocks or {}) do
+        if block.kind == "text" and type(block.text) == "string" then
+            parts[#parts + 1] = block.text
+        end
+    end
+    if #parts == 0 and type(response.control) == "table" then
+        local payload = response.control.payload or {}
+        local value = response.control.control == "finish" and payload.summary
+            or response.control.control == "ask-user" and payload.question
+            or response.control.control == "refuse" and payload.reason
+            or nil
+        if type(value) == "string" then parts[1] = value end
+    end
+    return table.concat(parts)
+end
+
+local function leap_year(year)
+    return year % 4 == 0 and (year % 100 ~= 0 or year % 400 == 0)
+end
+
+local function days_in_month(year, month)
+    local lengths = { 31, leap_year(year) and 29 or 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 }
+    return lengths[month]
+end
+
+local function days_from_civil(year, month, day)
+    year = year - (month <= 2 and 1 or 0)
+    local era = year >= 0 and year // 400 or (year - 399) // 400
+    local year_of_era = year - era * 400
+    local adjusted_month = month + (month > 2 and -3 or 9)
+    local day_of_year = (153 * adjusted_month + 2) // 5 + day - 1
+    local day_of_era = year_of_era * 365 + year_of_era // 4
+        - year_of_era // 100 + day_of_year
+    return era * 146097 + day_of_era - 719468
+end
+
+local function utc_epoch(value)
+    if type(value) ~= "string" then return nil end
+    local year, month, day, hour, minute, second = value:match(
+        "^(%d%d%d%d)%-(%d%d)%-(%d%d)T(%d%d):(%d%d):(%d%d)Z$"
+    )
+    year, month, day = tonumber(year), tonumber(month), tonumber(day)
+    hour, minute, second = tonumber(hour), tonumber(minute), tonumber(second)
+    if not year or year < 1970 or year > 9999
+        or not month or month < 1 or month > 12
+        or not day or day < 1 or day > days_in_month(year, month)
+        or not hour or hour > 23
+        or not minute or minute > 59
+        or not second or second > 59
+    then
+        return nil
+    end
+    return days_from_civil(year, month, day) * 86400
+        + hour * 3600 + minute * 60 + second
+end
+
+local ACTIVITY_OPTION_FIELDS = {
+    maximum_poll_events = true,
+    maximum_queued_events = true,
+    maximum_header_bytes = true,
+    maximum_header_line_bytes = true,
+    maximum_header_lines = true,
+    maximum_redirects = true,
+    maximum_turn_time_ms = true,
+    maximum_runtime_time_ms = true,
+    maximum_canonical_body_bytes = true,
+    retry_manifest = true,
+}
+
+local RETRY_MANIFEST_FIELDS = {
+    identity = true,
+    maximum_count = true,
+    exponent = true,
+    maximum_delay_ms = true,
+    runtime_wait_cap_ms = true,
+    deterministic_jitter_permille = true,
+}
+
+local function validate_activity_options(options)
+    if not exact_activity_fields(options, ACTIVITY_OPTION_FIELDS)
+        or not valid_integer(options.maximum_poll_events, 1)
+        or not valid_integer(options.maximum_queued_events, 1)
+        or options.maximum_queued_events < options.maximum_poll_events
+        or not valid_integer(options.maximum_header_bytes, 1)
+        or not valid_integer(options.maximum_header_line_bytes, 1)
+        or options.maximum_header_line_bytes > options.maximum_header_bytes
+        or not valid_integer(options.maximum_header_lines, 1)
+        or not valid_integer(options.maximum_redirects, 0)
+        or not valid_integer(options.maximum_turn_time_ms, 1)
+        or not valid_integer(options.maximum_runtime_time_ms, 1)
+        or not valid_integer(options.maximum_canonical_body_bytes, 1)
+        or not exact_activity_fields(options.retry_manifest, RETRY_MANIFEST_FIELDS)
+    then
+        return nil, failure("InvalidModelActivityOptions", "model activity limits are incomplete")
+    end
+    local retry = options.retry_manifest
+    if not valid_token(retry.identity, 128)
+        or not valid_integer(retry.maximum_count, 0)
+        or not valid_integer(retry.exponent, 1)
+        or not valid_integer(retry.maximum_delay_ms, 0)
+        or not valid_integer(retry.runtime_wait_cap_ms, 0)
+        or not valid_integer(retry.deterministic_jitter_permille, 0)
+        or retry.deterministic_jitter_permille > 1000
+    then
+        return nil, failure("InvalidModelActivityOptions", "retry manifest is invalid")
+    end
+    return options
+end
+
+local function validate_activity_ports(ports)
+    local allowed = {
+        adapter = true,
+        transport = true,
+        safety = true,
+        clock = true,
+        requests = true,
+    }
+    if not exact_activity_fields(ports, allowed)
+        or type(ports.adapter) ~= "table"
+        or type(ports.adapter.encode) ~= "function"
+        or type(ports.adapter.new_response) ~= "function"
+        or type(ports.adapter.streaming_fallback) ~= "function"
+        or type(ports.transport) ~= "table"
+        or type(ports.transport.new_attempt) ~= "function"
+        or type(ports.transport.new_retry_controller) ~= "function"
+        or type(ports.transport.parse_http_headers) ~= "function"
+        or type(ports.transport.single_header) ~= "function"
+        or type(ports.transport.parse_retry_after) ~= "function"
+        or type(ports.safety) ~= "table"
+        or type(ports.safety.digest) ~= "function"
+        or type(ports.clock) ~= "table"
+        or type(ports.clock.monotonic_now) ~= "function"
+        or type(ports.clock.utc_now) ~= "function"
+        or type(ports.requests) ~= "table"
+        or type(ports.requests.prepare) ~= "function"
+    then
+        return nil, failure("InvalidModelActivityPorts", "model activity ports are incomplete")
+    end
+    return ports
+end
+
+local ACTIVITY_START_FIELDS = {
+    request_id = true,
+    turn_id = true,
+    purpose = true,
+    continuation = true,
+    view_manifest_ref = true,
+    progress_identity = true,
+}
+
+local PREPARED_REQUEST_FIELDS = {
+    request = true,
+    secret_source = true,
+    proxy = true,
+    ca_bundle_path = true,
+    connect_timeout_ms = true,
+    total_timeout_ms = true,
+}
+
+local function validate_activity_start(spec)
+    if not exact_activity_fields(spec, ACTIVITY_START_FIELDS)
+        or not valid_token(spec.request_id, 128)
+        or not valid_token(spec.turn_id, 128)
+        or not PURPOSES[spec.purpose]
+        or not valid_token(spec.view_manifest_ref, 256)
+        or not valid_token(spec.progress_identity, 256)
+        or (spec.continuation ~= false and type(spec.continuation) ~= "table")
+    then
+        return nil, failure("InvalidModelActivity", "model activity request is invalid")
+    end
+    return spec
+end
+
+local function validate_prepared_request(prepared, spec)
+    local request = type(prepared) == "table" and prepared.request or nil
+    local policy = type(request) == "table" and request.retry_policy or nil
+    if not exact_activity_fields(prepared, PREPARED_REQUEST_FIELDS)
+        or type(request) ~= "table"
+        or request.request_id ~= spec.request_id
+        or request.purpose ~= spec.purpose
+        or not exact_activity_fields(policy, { count = true, base_delay_ms = true })
+        or not valid_integer(policy.count, 0)
+        or not valid_integer(policy.base_delay_ms, 0)
+        or (prepared.secret_source ~= false and type(prepared.secret_source) ~= "table")
+        or type(prepared.proxy) ~= "table"
+        or type(prepared.ca_bundle_path) ~= "string"
+        or prepared.ca_bundle_path == ""
+        or not valid_integer(prepared.connect_timeout_ms, 1)
+        or not valid_integer(prepared.total_timeout_ms, 1)
+        or prepared.connect_timeout_ms > prepared.total_timeout_ms
+    then
+        return nil, failure("InvalidPreparedModelRequest", "prepared request is incomplete or unbound")
+    end
+    return prepared
+end
+
+local REQUEST_BUILDER_OPTION_FIELDS = {
+    model_name = true,
+    permission_name = true,
+    model_snapshot = true,
+    permission_snapshot = true,
+    prompt_snapshot = true,
+    tool_registry_snapshot = true,
+    initial_message = true,
+    context_prompt = true,
+    continuation_instruction = true,
+    default_connect_timeout_ms = true,
+    default_request_timeout_ms = true,
+    default_retry_base_delay_ms = true,
+}
+
+local function validate_request_builder(ports, options)
+    local port_fields = {
+        adapter = true,
+        prompt = true,
+        views = true,
+        generation = true,
+        tool_registry = true,
+    }
+    if not exact_activity_fields(ports, port_fields)
+        or type(ports.adapter) ~= "table"
+        or type(ports.adapter.normalize_request) ~= "function"
+        or type(ports.prompt) ~= "table"
+        or type(ports.prompt.assemble) ~= "function"
+        or type(ports.views) ~= "table"
+        or type(ports.views.resolve_view) ~= "function"
+        or type(ports.generation) ~= "table"
+        or type(ports.generation.reveal_secret) ~= "function"
+        or type(ports.generation.secret_descriptors) ~= "function"
+        or type(ports.generation.scan_registered_secrets) ~= "function"
+        or type(ports.tool_registry) ~= "table"
+        or not exact_activity_fields(options, REQUEST_BUILDER_OPTION_FIELDS)
+        or not valid_token(options.model_name, 128)
+        or not valid_token(options.permission_name, 128)
+        or not valid_token(options.model_snapshot, 256)
+        or not valid_token(options.permission_snapshot, 256)
+        or not valid_token(options.prompt_snapshot, 256)
+        or not valid_token(options.tool_registry_snapshot, 256)
+        or type(options.initial_message) ~= "string"
+        or options.initial_message == ""
+        or type(options.context_prompt) ~= "string"
+        or type(options.continuation_instruction) ~= "string"
+        or options.continuation_instruction == ""
+        or not valid_integer(options.default_connect_timeout_ms, 1)
+        or not valid_integer(options.default_request_timeout_ms, 1)
+        or options.default_connect_timeout_ms > options.default_request_timeout_ms
+        or not valid_integer(options.default_retry_base_delay_ms, 0)
+    then
+        return nil, failure("InvalidModelRequestBuilder", "model request builder is incomplete")
+    end
+    local generation = ports.generation
+    local model_ref = generation.models and generation.models[options.model_name]
+    local permission_ref = generation.permissions
+        and generation.permissions[options.permission_name]
+    if not valid_token(generation.id, 256)
+        or type(generation.general) ~= "table"
+        or type(generation.network) ~= "table"
+        or type(model_ref) ~= "table"
+        or type(permission_ref) ~= "table"
+        or model_ref.enabled ~= true
+        or model_ref.tools_enabled ~= true
+        or ports.tool_registry.digest ~= options.tool_registry_snapshot
+    then
+        return nil, failure(
+            "InvalidModelRequestBuilder",
+            "configuration, Model, Permission, or tool snapshot is unavailable"
+        )
+    end
+    return {
+        ports = ports,
+        options = options,
+        generation = generation,
+        model = model_ref,
+        permission = permission_ref,
+    }
+end
+
+---Builds exact adapter and transport snapshots for a session's frozen main
+-- Model. Secret values remain in ConfigGeneration and are referenced only by
+-- their typed carrier identities.
+function M.new_request_builder(ports, options)
+    local admitted, admission_error = validate_request_builder(ports, options)
+    if not admitted then return nil, admission_error end
+    local generation = admitted.generation
+    local model_ref = admitted.model
+    local permission_ref = admitted.permission
+    local service = {}
+
+    local function prompt_input(spec)
+        if spec.continuation == false then return admitted.options.initial_message end
+        return admitted.options.continuation_instruction
+    end
+
+    local function proxy_snapshot()
+        local configured = generation.network
+        if configured.follow_proxy ~= true then return { mode = "off" } end
+        if configured.proxy_url_configured == true then
+            return {
+                mode = "explicit",
+                secret_id = "Network.ProxyUrl",
+                destination = "network-proxy",
+                no_proxy = configured.no_proxy or "",
+            }
+        end
+        if type(configured.proxy_url) == "string" and configured.proxy_url ~= "" then
+            return {
+                mode = "explicit",
+                url = configured.proxy_url,
+                no_proxy = configured.no_proxy or "",
+            }
+        end
+        return { mode = "off" }
+    end
+
+    function service.prepare(spec)
+        local start, start_error = validate_activity_start(spec)
+        if not start then return nil, start_error end
+        if start.purpose ~= "main" then
+            return nil, failure("InvalidModelPurpose", "main request builder received another purpose")
+        end
+        local called, view, view_error = pcall(
+            admitted.ports.views.resolve_view,
+            start.view_manifest_ref
+        )
+        if not called or type(view) ~= "table"
+            or view.digest ~= start.view_manifest_ref
+            or not valid_integer(view.first_sequence, 0)
+            or not valid_integer(view.last_sequence, 0)
+            or view.first_sequence > view.last_sequence
+            or type(view.body) ~= "string"
+        then
+            return nil, called and view_error
+                or failure("ModelViewUnavailable", "durable model view could not be resolved")
+        end
+        local bundle, bundle_error = admitted.ports.prompt:assemble({
+            purpose = "main",
+            config_generation = generation.id,
+            layers = {
+                global = {
+                    source = "General.SystemPrompt",
+                    version = generation.id,
+                    text = generation.general.system_prompt,
+                },
+                model = {
+                    source = "Model." .. admitted.options.model_name .. ".SystemPrompt",
+                    version = generation.id,
+                    text = model_ref.system_prompt,
+                },
+                permission = {
+                    source = "Permission." .. admitted.options.permission_name .. ".SystemPrompt",
+                    version = generation.id,
+                    text = permission_ref.system_prompt,
+                },
+                context = {
+                    source = "ContextPrompt",
+                    version = generation.id,
+                    text = admitted.options.context_prompt,
+                },
+            },
+            input = { user_message = prompt_input(start) },
+            tool_mode = "registered",
+        })
+        if not bundle then return nil, bundle_error end
+        if start.continuation == false and bundle.digest ~= admitted.options.prompt_snapshot then
+            return nil, failure(
+                "PromptSnapshotMismatch",
+                "first Model request does not reproduce the durable Prompt snapshot"
+            )
+        end
+        local public_model_ref = {
+            name = admitted.options.model_name,
+            protocol = model_ref.protocol,
+            endpoint = model_ref.endpoint,
+            remote_model = model_ref.remote_model,
+            capabilities_digest = admitted.options.model_snapshot,
+            adapter_options = model_ref.adapter_options or {},
+        }
+        if model_ref.key_configured == true then
+            public_model_ref.auth_secret_id = "Model."
+                .. admitted.options.model_name .. ".Key"
+        end
+        local limits = {}
+        if model_ref.max_output_tokens ~= nil then
+            limits.max_output_tokens = model_ref.max_output_tokens
+        end
+        local retry_count = model_ref.retry_count
+        local retry_base_delay = model_ref.retry_base_delay_ms
+            or admitted.options.default_retry_base_delay_ms
+        local normalized, normalize_error = admitted.ports.adapter:normalize_request({
+            request_id = start.request_id,
+            purpose = "main",
+            model_ref = public_model_ref,
+            config_generation = generation.id,
+            prompt_bundle = bundle,
+            model_view_manifest = {
+                digest = view.digest,
+                first_sequence = view.first_sequence,
+                last_sequence = view.last_sequence,
+                body = view.body,
+            },
+            tool_registry = admitted.ports.tool_registry,
+            controls_schema = bundle.controls_schema,
+            streaming = model_ref.streaming,
+            limits = limits,
+            retry_policy = {
+                count = retry_count,
+                base_delay_ms = retry_base_delay,
+            },
+        })
+        if not normalized then return nil, normalize_error end
+        local connect_timeout = generation.network.connect_timeout_ms
+            or admitted.options.default_connect_timeout_ms
+        local total_timeout = model_ref.request_timeout_ms
+            or admitted.options.default_request_timeout_ms
+        if connect_timeout > total_timeout then connect_timeout = total_timeout end
+        return readonly({
+            request = normalized,
+            secret_source = generation,
+            proxy = freeze(proxy_snapshot(), "model proxy snapshot"),
+            ca_bundle_path = generation.network.ca_bundle_path,
+            connect_timeout_ms = connect_timeout,
+            total_timeout_ms = total_timeout,
+        }, "prepared model request")
+    end
+
+    service.snapshots = freeze({
+        generation = generation.id,
+        model = admitted.options.model_snapshot,
+        permission = admitted.options.permission_snapshot,
+        prompt = admitted.options.prompt_snapshot,
+        tools = admitted.options.tool_registry_snapshot,
+    }, "model request builder snapshots")
+    return readonly(service, "model request builder")
+end
+
+local function transport_category(result)
+    if type(result) ~= "table"
+        or type(result.response_body) ~= "string"
+        or type(result.response_headers) ~= "string"
+        or type(result.outcome) ~= "string"
+        or type(result.body_truncated) ~= "boolean"
+        or type(result.descendants_proven_stopped) ~= "boolean"
+    then
+        return "outcome-unknown"
+    end
+    if result.body_truncated or not result.descendants_proven_stopped then
+        return "body-outcome-unknown"
+    end
+    if result.outcome == "cancelled" then return "cancel" end
+    if result.outcome == "unknown" then return "outcome-unknown" end
+    if result.outcome == "completed"
+        and result.exit_kind == "exit-code"
+        and result.exit_code == 0
+    then
+        return "completed"
+    end
+    if result.response_body ~= "" or result.response_headers ~= "" then
+        return "body-outcome-unknown"
+    end
+    if result.exit_kind == "exit-code" and result.exit_code == 6 then return "dns" end
+    if result.exit_kind == "exit-code" and result.exit_code == 7 then return "connect" end
+    if result.exit_kind == "exit-code"
+        and (result.exit_code == 35 or result.exit_code == 60)
+    then
+        return "tls-before-body"
+    end
+    return "outcome-unknown"
+end
+
+---Creates the single-active logical Model request coordinator used by
+-- AgentLoop. Provider bytes remain behind the HTTP status barrier; only the
+-- final canonical adapter response can cross back into Runtime.
+function M.new_activity(ports, options)
+    local admitted_ports, ports_error = validate_activity_ports(ports)
+    if not admitted_ports then return nil, ports_error end
+    local admitted, options_error = validate_activity_options(options)
+    if not admitted then return nil, options_error end
+    local active
+    local activity_serial = 0
+    local last_now
+    local service = {}
+
+    local function now()
+        local called, value, clock_error = pcall(admitted_ports.clock.monotonic_now)
+        if not called or not valid_integer(value, 0) or last_now and value < last_now then
+            return nil, called and (clock_error or failure(
+                "MonotonicClockDegraded",
+                "model activity clock regressed or returned an invalid tick"
+            )) or failure("MonotonicClockDegraded", "model activity clock failed")
+        end
+        last_now = value
+        return value
+    end
+
+    local function append_output(activity, value)
+        if #activity.output >= admitted.maximum_queued_events then
+            return nil, failure("ModelActivityQueueLimit", "model activity output queue is full")
+        end
+        activity.output[#activity.output + 1] = freeze(value, "model activity event")
+        return true
+    end
+
+    local function append_adapter_events(activity, events)
+        for _, event in ipairs(events or {}) do
+            local appended, append_error = append_output(activity, {
+                kind = "adapter-event",
+                request_id = activity.spec.request_id,
+                event = event,
+            })
+            if not appended then return nil, append_error end
+        end
+        return true
+    end
+
+    local function canonical_wrapper(activity, response)
+        local body = response_body(response)
+        if #body > admitted.maximum_canonical_body_bytes then
+            return nil, failure("CanonicalModelBodyLimit", "canonical assistant body is too large")
+        end
+        local encoded, encode_error = canonical_value(response)
+        if not encoded then return nil, encode_error end
+        local called, digest, digest_error = pcall(
+            admitted_ports.safety.digest,
+            "yaca-model-response-v1\0" .. encoded
+        )
+        if not called or type(digest) ~= "string" or not digest:match("^[0-9a-f]+$")
+            or #digest ~= 64
+        then
+            return nil, called and digest_error
+                or failure("DigestFailure", "canonical response digest failed")
+        end
+        return freeze({
+            request_id = activity.spec.request_id,
+            canonical_body = body,
+            canonical_digest = digest,
+            progress_identity = activity.spec.progress_identity,
+            normalized = response,
+        }, "canonical model response")
+    end
+
+    local function finish_response(activity, events, response, canonical_seen)
+        if canonical_seen and not activity.canonical_emitted then
+            local observed_now, clock_error = now()
+            if not observed_now then return nil, clock_error end
+            local observed, observe_error = activity.retry:observe_canonical_event(
+                activity.attempt_id,
+                observed_now
+            )
+            if not observed then return nil, observe_error end
+            activity.canonical_emitted = true
+            local appended, append_error = append_output(activity, {
+                kind = "canonical-event",
+                request_id = activity.spec.request_id,
+            })
+            if not appended then return nil, append_error end
+        end
+        local appended, append_error = append_adapter_events(activity, events)
+        if not appended then return nil, append_error end
+        local wrapper, wrapper_error = canonical_wrapper(activity, response)
+        if not wrapper then return nil, wrapper_error end
+        appended, append_error = append_output(activity, {
+            kind = "response",
+            request_id = activity.spec.request_id,
+            wrapper = wrapper,
+        })
+        if not appended then return nil, append_error end
+        activity.state = "terminal"
+        return true
+    end
+
+    local function terminal_transport_error(activity, error_id)
+        local response_session = activity.response_session
+        if not response_session then
+            local created, create_error = admitted_ports.adapter:new_response(
+                activity.prepared.request,
+                activity.current_streaming
+            )
+            if not created then return nil, create_error end
+            response_session = created
+            activity.response_session = created
+        end
+        local events, response = response_session:transport_error(error_id)
+        if not events then return nil, response end
+        return finish_response(activity, events, response, false)
+    end
+
+    local function terminal_cancel(activity, error_id)
+        local response_session = activity.response_session
+        if not response_session then
+            local created, create_error = admitted_ports.adapter:new_response(
+                activity.prepared.request,
+                activity.current_streaming
+            )
+            if not created then return nil, create_error end
+            response_session = created
+            activity.response_session = created
+        end
+        local events, response = response_session:cancel(error_id)
+        if not events then return nil, response end
+        return finish_response(activity, events, response, false)
+    end
+
+    local function close_attempt(activity)
+        if not activity.attempt then return true end
+        local attempt = activity.attempt
+        activity.attempt = nil
+        local called, closed = pcall(attempt.close, attempt)
+        if not called or closed ~= true then
+            return nil, failure("ModelTransportClose", "network attempt cleanup is unknown")
+        end
+        return true
+    end
+
+    local function finish_retry(activity, observation, observed_now)
+        local decision, decision_error = activity.retry:finish_attempt(
+            activity.attempt_id,
+            observation,
+            observed_now
+        )
+        if not decision then return nil, decision_error end
+        if decision.action == "wait" then
+            activity.state = "waiting"
+            activity.waiting = decision
+            activity.response_session = nil
+            return decision
+        end
+        return decision
+    end
+
+    local function start_attempt(activity, observed_now)
+        activity.attempt_serial = activity.attempt_serial + 1
+        local attempt_id = "model" .. tostring(activity.serial)
+            .. "_attempt" .. tostring(activity.attempt_serial)
+        local admission, admission_error = activity.retry:start_attempt(attempt_id, observed_now)
+        if not admission then return nil, admission_error end
+        local wire, wire_error = admitted_ports.adapter:encode(
+            activity.prepared.request,
+            activity.streaming_override
+        )
+        if not wire then return nil, wire_error end
+        local response_session, response_error = admitted_ports.adapter:new_response(
+            activity.prepared.request,
+            activity.streaming_override
+        )
+        if not response_session then return nil, response_error end
+        activity.current_streaming = wire.streaming
+        activity.response_session = response_session
+        activity.attempt_id = attempt_id
+        local remaining = admission.deadline_at - observed_now
+        if remaining < 1 then return nil, failure("RequestDeadlineExceeded", "request deadline elapsed") end
+        local total_timeout = math.min(activity.prepared.total_timeout_ms, remaining)
+        local connect_timeout = math.min(activity.prepared.connect_timeout_ms, total_timeout)
+        local attempt, attempt_error = admitted_ports.transport.new_attempt({
+            attempt_id = attempt_id,
+            url = admission.url,
+            method = "POST",
+            public_headers = wire.public_headers,
+            secret_headers = wire.secret_headers,
+            body = wire.body,
+            secret_source = activity.prepared.secret_source ~= false
+                and activity.prepared.secret_source or nil,
+            proxy = activity.prepared.proxy,
+            ca_bundle_path = activity.prepared.ca_bundle_path,
+            connect_timeout_ms = connect_timeout,
+            total_timeout_ms = total_timeout,
+        })
+        if not attempt then return nil, attempt_error end
+        activity.attempt = attempt
+        activity.state = "active"
+        activity.waiting = nil
+        local called, started = pcall(attempt.start, attempt, observed_now)
+        if not called or started ~= true then
+            activity.attempt = nil
+            local decision = activity.retry:finish_attempt(
+                attempt_id,
+                { category = "outcome-unknown" },
+                observed_now
+            )
+            activity.state = "terminal"
+            local finished, finish_error = terminal_transport_error(
+                activity,
+                decision and decision.code or "transport-start-unknown"
+            )
+            if not finished then return nil, finish_error end
+        end
+        return true
+    end
+
+    local function canonical_observation(events)
+        local canonical, protocol_error, provider_error = false, false, false
+        for _, event in ipairs(events) do
+            if event.kind == "protocol_error" then
+                protocol_error = true
+            elseif event.kind == "transport_error" then
+                provider_error = true
+            else
+                canonical = true
+            end
+        end
+        return canonical, protocol_error, provider_error
+    end
+
+    local function parse_provider_response(activity, body, observed_now)
+        local events = {}
+        local pushed, push_error = activity.response_session:push(body)
+        if not pushed then return nil, push_error end
+        for _, event in ipairs(pushed) do events[#events + 1] = event end
+        local tail, response = activity.response_session:finish()
+        if not tail then return nil, response end
+        for _, event in ipairs(tail) do events[#events + 1] = event end
+        local canonical_seen, protocol_error, provider_error = canonical_observation(events)
+        if response.incomplete and protocol_error and not provider_error
+            and not activity.cancel_requested
+        then
+            local fallback, fallback_error = admitted_ports.adapter:streaming_fallback(
+                activity.prepared.request,
+                canonical_seen,
+                activity.streaming_fallbacks
+            )
+            if not fallback then return nil, fallback_error end
+            if fallback.allowed then
+                local decision, decision_error = activity.retry:streaming_fallback(
+                    activity.attempt_id,
+                    observed_now
+                )
+                if not decision then return nil, decision_error end
+                activity.streaming_fallbacks = activity.streaming_fallbacks + 1
+                activity.streaming_override = fallback.next_streaming
+                activity.state = "waiting"
+                activity.waiting = decision
+                activity.response_session = nil
+                return "fallback"
+            end
+        end
+        if canonical_seen then
+            if not activity.cancel_requested then
+                local observed, observe_error = activity.retry:observe_canonical_event(
+                    activity.attempt_id,
+                    observed_now
+                )
+                if not observed then return nil, observe_error end
+            end
+            activity.canonical_emitted = true
+            local appended, append_error = append_output(activity, {
+                kind = "canonical-event",
+                request_id = activity.spec.request_id,
+            })
+            if not appended then return nil, append_error end
+        end
+        if not activity.cancel_requested then
+            local category = response.incomplete and "protocol" or "completed"
+            local decision, decision_error = finish_retry(activity, {
+                category = category,
+            }, observed_now)
+            if not decision then return nil, decision_error end
+            if decision.action == "wait" then
+                return nil, failure("ModelRetryContradiction", "canonical response requested a retry")
+            end
+        end
+        local appended, append_error = append_adapter_events(activity, events)
+        if not appended then return nil, append_error end
+        local wrapper, wrapper_error = canonical_wrapper(activity, response)
+        if not wrapper then return nil, wrapper_error end
+        appended, append_error = append_output(activity, {
+            kind = "response",
+            request_id = activity.spec.request_id,
+            wrapper = wrapper,
+        })
+        if not appended then return nil, append_error end
+        activity.state = "terminal"
+        return "terminal"
+    end
+
+    local function retry_after(activity, response, observed_now)
+        local value, header_error = admitted_ports.transport.single_header(response, "Retry-After")
+        if header_error then return nil, header_error end
+        if value == nil then return nil end
+        local epoch = 0
+        if not value:match("^%d+$") then
+            local called, utc_value = pcall(admitted_ports.clock.utc_now)
+            epoch = called and utc_epoch(utc_value) or nil
+            if not epoch then
+                return nil, failure("UtcClockReadFailed", "Retry-After date needs trusted UTC")
+            end
+        end
+        return admitted_ports.transport.parse_retry_after(
+            value,
+            epoch,
+            admitted.retry_manifest.runtime_wait_cap_ms
+        )
+    end
+
+    local function process_http(activity, result, observed_now)
+        local response, header_error = admitted_ports.transport.parse_http_headers(
+            result.response_headers,
+            {
+                maximum_bytes = admitted.maximum_header_bytes,
+                maximum_line_bytes = admitted.maximum_header_line_bytes,
+                maximum_lines = admitted.maximum_header_lines,
+            }
+        )
+        if not response then
+            local decision = finish_retry(activity, { category = "protocol" }, observed_now)
+            if not decision then return nil, header_error end
+            return terminal_transport_error(activity, "invalid-http-headers")
+        end
+        local status = response.status
+        if activity.cancel_requested then
+            if status >= 200 and status <= 299 then
+                return parse_provider_response(activity, result.response_body, observed_now)
+            end
+            local events, normalized = activity.response_session:http_error(
+                status,
+                "completed-during-cancel",
+                false
+            )
+            if not events then return nil, normalized end
+            return finish_response(activity, events, normalized, false)
+        end
+        if status == 307 or status == 308 then
+            local location, location_error = admitted_ports.transport.single_header(
+                response,
+                "Location"
+            )
+            if location_error then
+                finish_retry(activity, { category = "protocol" }, observed_now)
+                return terminal_transport_error(activity, "ambiguous-location")
+            end
+            local decision, decision_error = finish_retry(activity, {
+                category = "completed",
+                status = status,
+                location = location,
+            }, observed_now)
+            if not decision then return nil, decision_error end
+            if decision.action == "wait" then return "wait" end
+            local events, normalized = activity.response_session:http_error(
+                status,
+                decision.code,
+                false
+            )
+            if not events then return nil, normalized end
+            return finish_response(activity, events, normalized, false)
+        end
+        if status == 429 or status == 503 then
+            local delay, delay_error = retry_after(activity, response, observed_now)
+            if delay_error then
+                finish_retry(activity, { category = "protocol" }, observed_now)
+                local events, normalized = activity.response_session:http_error(
+                    status,
+                    "invalid-retry-after",
+                    false
+                )
+                if not events then return nil, normalized end
+                return finish_response(activity, events, normalized, false)
+            end
+            local observation = { category = "completed", status = status }
+            if delay ~= nil then observation.retry_after_ms = delay end
+            local decision, decision_error = finish_retry(activity, observation, observed_now)
+            if not decision then return nil, decision_error end
+            if decision.action == "wait" then return "wait" end
+            local events, normalized = activity.response_session:http_error(
+                status,
+                decision.code,
+                false
+            )
+            if not events then return nil, normalized end
+            return finish_response(activity, events, normalized, false)
+        end
+        if status < 200 or status > 299 then
+            local decision, decision_error = finish_retry(activity, {
+                category = "content-refusal",
+                status = status,
+            }, observed_now)
+            if not decision then return nil, decision_error end
+            local events, normalized = activity.response_session:http_error(
+                status,
+                decision.code,
+                false
+            )
+            if not events then return nil, normalized end
+            return finish_response(activity, events, normalized, false)
+        end
+        return parse_provider_response(activity, result.response_body, observed_now)
+    end
+
+    local function process_terminal(activity, observed_now)
+        local attempt = activity.attempt
+        local called, result = pcall(attempt.join, attempt, observed_now)
+        local closed, close_error = close_attempt(activity)
+        if not called or not closed then
+            finish_retry(activity, { category = "outcome-unknown" }, observed_now)
+            return terminal_transport_error(
+                activity,
+                not called and "transport-join-unknown" or close_error.code
+            )
+        end
+        local category = transport_category(result)
+        if activity.cancel_requested then
+            if category == "cancel" then
+                return terminal_cancel(activity, "user-cancel")
+            elseif category ~= "completed" then
+                return terminal_transport_error(activity, "cancel-outcome-unknown")
+            end
+            return process_http(activity, result, observed_now)
+        end
+        if category == "completed" then return process_http(activity, result, observed_now) end
+        local decision, decision_error = finish_retry(activity, {
+            category = category,
+        }, observed_now)
+        if not decision then return nil, decision_error end
+        if decision.action == "wait" then return "wait" end
+        if decision.outcome == "cancelled" then
+            return terminal_cancel(activity, decision.code)
+        end
+        return terminal_transport_error(activity, decision.code)
+    end
+
+    function service.start(spec)
+        if active then return nil, failure("ModelActivityBusy", "a Model request is already active") end
+        local start, start_error = validate_activity_start(spec)
+        if not start then return nil, start_error end
+        local called, prepared, prepare_error = pcall(admitted_ports.requests.prepare, start)
+        if not called then
+            return nil, failure("ModelRequestPreparation", "request preparation raised an exception")
+        end
+        prepared, prepare_error = validate_prepared_request(prepared, start)
+        if not prepared then return nil, prepare_error end
+        if prepared.request.retry_policy.count > admitted.retry_manifest.maximum_count then
+            return nil, failure("ModelRetryLimit", "request retry count exceeds the release manifest")
+        end
+        local observed_now, clock_error = now()
+        if not observed_now then return nil, clock_error end
+        local function deadline(duration)
+            if duration > math.maxinteger - observed_now then return nil end
+            return observed_now + duration
+        end
+        local logical_deadline = deadline(prepared.total_timeout_ms)
+        local turn_deadline = deadline(admitted.maximum_turn_time_ms)
+        local runtime_deadline = deadline(admitted.maximum_runtime_time_ms)
+        if not logical_deadline or not turn_deadline or not runtime_deadline then
+            return nil, failure("InvalidDeadline", "model activity deadline overflows")
+        end
+        local retry, retry_error = admitted_ports.transport.new_retry_controller({
+            logical_request_id = start.request_id,
+            initial_url = prepared.request.model_ref.endpoint,
+            retry_count = prepared.request.retry_policy.count,
+            base_delay_ms = prepared.request.retry_policy.base_delay_ms,
+            maximum_redirects = admitted.maximum_redirects,
+            logical_deadline_at = logical_deadline,
+            turn_deadline_at = turn_deadline,
+            runtime_deadline_at = runtime_deadline,
+            manifest = admitted.retry_manifest,
+        })
+        if not retry then return nil, retry_error end
+        activity_serial = activity_serial + 1
+        local handle = freeze({
+            request_id = start.request_id,
+            serial = activity_serial,
+        }, "model activity handle")
+        active = {
+            serial = activity_serial,
+            handle = handle,
+            spec = start,
+            prepared = prepared,
+            retry = retry,
+            output = {},
+            output_cursor = 1,
+            state = "created",
+            attempt_serial = 0,
+            streaming_override = nil,
+            current_streaming = nil,
+            streaming_fallbacks = 0,
+            canonical_emitted = false,
+            cancel_requested = false,
+        }
+        local started, attempt_error = start_attempt(active, observed_now)
+        if not started then active = nil return nil, attempt_error end
+        return handle
+    end
+
+    function service.cancel(handle, reason)
+        if not active or handle ~= active.handle then
+            return { outcome = "unknown" }
+        end
+        if not valid_token(reason, 128) then return { outcome = "unknown" } end
+        local observed_now = now()
+        if not observed_now then return { outcome = "unknown" } end
+        local decision = active.retry:cancel(observed_now)
+        active.cancel_requested = true
+        if active.state == "waiting" or not active.attempt then
+            active = nil
+            return { outcome = "cancelled" }
+        end
+        local called, accepted = pcall(active.attempt.cancel, active.attempt, observed_now)
+        if not called then return { outcome = "unknown" } end
+        if accepted == true or accepted == false then return { outcome = "pending" } end
+        return { outcome = decision and "pending" or "unknown" }
+    end
+
+    local function drain(activity, budget)
+        local result = {}
+        while #result < budget and activity.output_cursor <= #activity.output do
+            result[#result + 1] = activity.output[activity.output_cursor]
+            activity.output_cursor = activity.output_cursor + 1
+        end
+        if activity.output_cursor > #activity.output then
+            activity.output = {}
+            activity.output_cursor = 1
+        end
+        return result
+    end
+
+    function service.poll(budget)
+        if not valid_integer(budget, 0) or budget > admitted.maximum_poll_events then
+            return nil, failure("InvalidModelPoll", "model poll budget is invalid")
+        end
+        if not active or budget == 0 then return freeze({}, "model activity batch") end
+        local output = drain(active, budget)
+        if #output == budget then return freeze(output, "model activity batch") end
+        if active.state == "terminal" then
+            if #active.output == 0 then active = nil end
+            return freeze(output, "model activity batch")
+        end
+        local observed_now, clock_error = now()
+        if not observed_now then return nil, clock_error end
+        if active.state == "waiting" then
+            if observed_now < active.waiting.resume_at then
+                return freeze(output, "model activity batch")
+            end
+            local started, start_error = start_attempt(active, observed_now)
+            if not started then
+                terminal_transport_error(active, start_error.code or "attempt-start-failed")
+            end
+        end
+        if active.state == "active" then
+            local remaining = budget - #output
+            local called, events = pcall(
+                active.attempt.poll,
+                active.attempt,
+                observed_now,
+                remaining
+            )
+            if not called or dense_count(events) == nil or #events > remaining then
+                finish_retry(active, { category = "outcome-unknown" }, observed_now)
+                terminal_transport_error(active, "transport-poll-unknown")
+            else
+                local terminal = false
+                for _, event in ipairs(events) do
+                    if event.kind == "transport_terminal" then terminal = true end
+                end
+                if terminal then
+                    local processed, process_error = process_terminal(active, observed_now)
+                    if not processed then
+                        terminal_transport_error(
+                            active,
+                            type(process_error) == "table" and process_error.code
+                                or "transport-terminal-failure"
+                        )
+                    end
+                end
+            end
+        end
+        local tail = drain(active, budget - #output)
+        for _, event in ipairs(tail) do output[#output + 1] = event end
+        if active and active.state == "terminal" and #active.output == 0 then active = nil end
+        return freeze(output, "model activity batch")
+    end
+
+    function service.status()
+        if not active then return freeze({ state = "idle" }, "model activity status") end
+        return freeze({
+            state = active.state,
+            request_id = active.spec.request_id,
+            attempt_number = active.attempt_serial,
+            streaming_fallbacks = active.streaming_fallbacks,
+            cancel_requested = active.cancel_requested,
+            waiting_until = active.waiting and active.waiting.resume_at or false,
+        }, "model activity status")
+    end
+
+    service.capabilities = freeze({
+        http_status_barrier = true,
+        retries = "runtime-controller",
+        redirects = "same-origin-307-308",
+        streaming_fallbacks = 1,
+        concurrent_requests = 1,
+        target_qualified = false,
+    }, "model activity capabilities")
+    return readonly(service, "model activity service")
 end
 
 return M

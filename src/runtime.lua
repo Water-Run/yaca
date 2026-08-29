@@ -1285,12 +1285,16 @@ function M.new_agent_loop(ports, options)
         turn.counters.steps = turn.counters.steps + 1
         turn.trace.purposes[#turn.trace.purposes + 1] = purpose
         if state ~= "RequestingModel" then transition("RequestingModel") end
+        local progress_identity = turn.detector.last_progress ~= false
+            and turn.detector.last_progress
+            or "turn-baseline:" .. turn.snapshot.view_manifest_ref
         local specification = freeze({
             request_id = request_id,
             turn_id = turn.id,
             purpose = purpose,
             continuation = continuation or false,
             view_manifest_ref = view_manifest_ref,
+            progress_identity = progress_identity,
         }, nil, "model request")
         local handle, start_error = start_effect(
             admitted_ports.model,
