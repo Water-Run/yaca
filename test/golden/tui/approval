@@ -1,0 +1,6 @@
+[ACTION op-7]
+exec: make test
+cwd: C:\Work\demo
+allow 7 | deny 7 | details 7
+default: deny
+??

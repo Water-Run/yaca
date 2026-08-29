@@ -1,0 +1,10 @@
+yaca: Yet Another Coding Agent.
+version: 0.1.0
+work directory: C:\Work\demo
+config: valid
+context: new (not saved)
+model: Work
+permission: Std
+double check: on
+Run .status for details.
+>>
