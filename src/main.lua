@@ -1209,6 +1209,188 @@ local MODEL_ACTIVITY_OPTIONS = {
     },
 }
 
+-- These are release-owned candidate caps. C32 may only tighten/calibrate them
+-- per target; ordinary configuration cannot raise them.
+local AGENT_RELEASE_OPTIONS = {
+    permission = {
+        maximum_name_bytes = 128,
+        maximum_generation_bytes = 256,
+        maximum_arguments_bytes = 65536,
+        maximum_target_bytes = 32768,
+        maximum_identity_bytes = 65536,
+        maximum_prompt_bytes = 32768,
+    },
+    operation = {
+        maximum_identifier_bytes = 256,
+        maximum_evidence_bytes = 17 * 1024 * 1024,
+        unresolved_operation_ids = {},
+    },
+    json = {
+        maximum_bytes = 1024 * 1024,
+        maximum_depth = 32,
+        maximum_nodes = 16384,
+        maximum_string_bytes = 262144,
+        maximum_number_bytes = 64,
+    },
+    driver = {
+        model_poll_events = 128,
+        tool_poll_events = 128,
+        review_poll_events = 128,
+        maximum_output_events = 512,
+    },
+    runtime = {
+        hard_caps = {
+            active_time_ms = 3600000,
+            model_requests = 64,
+            tool_calls = 256,
+            reviews = 64,
+            steps = 512,
+            message_bytes = 262144,
+            result_bytes = 16 * 1024 * 1024,
+        },
+        stuck = {
+            snapshot_id = "tp017-modern-candidate-v1",
+            exact_repeat = 3,
+            same_error = 3,
+            abab_cycle = 2,
+            semantic_no_progress = 4,
+            runtime_maximum = 16,
+        },
+        initial_sequence = 2,
+        initial_context_generation = 1,
+        maximum_identifier_bytes = 256,
+        hard_cap_snapshot_id = "tp017-modern-candidate-v1",
+        lanes = {
+            queue_maximum = 9,
+            side_active_time_ms = 120000,
+            side_response_bytes = 65536,
+            side_snapshot_id = "tp022-modern-candidate-v1",
+        },
+    },
+}
+
+local CONTINUATION_INSTRUCTION = table.concat({
+    "Continue from the latest durable Context facts.",
+    " Treat those facts as the canonical conversation and tool history.",
+    " Use a typed control when the current turn has a reportable outcome.",
+})
+
+local function production_clock(backend)
+    return readonly({
+        now = backend.clock_port.monotonic_now,
+    }, "production Agent clock")
+end
+
+local function permission_matrix(configured)
+    if type(configured) ~= "table" then return nil end
+    return {
+        Read = configured.read,
+        Write = configured.write,
+        Delete = configured.delete,
+        Shell = configured.shell,
+        OutsideWorkspace = configured.outside_workspace,
+    }
+end
+
+local function workspace_identity_key(identity)
+    if type(identity) ~= "table"
+        or type(identity.volume) ~= "string"
+        or type(identity.object) ~= "string"
+        or type(identity.kind) ~= "string"
+    then
+        return nil
+    end
+    return identity.volume .. "\0" .. identity.object .. "\0" .. identity.kind
+end
+
+local function tool_authorization_port(safety_service, expected)
+    local function authority_digest(call, facts)
+        if type(call) ~= "table"
+            or type(call.call_digest) ~= "string"
+            or type(facts) ~= "table"
+            or facts.permission_snapshot_digest ~= expected.permission_snapshot_digest
+            or facts.config_generation ~= expected.config_generation
+            or facts.workspace_identity ~= expected.workspace_identity
+            or facts.double_check ~= expected.double_check
+            or type(facts.approval_digest) ~= "string"
+            or type(facts.durable_intent_digest) ~= "string"
+            or (facts.action_review ~= "not-required"
+                and facts.action_review ~= "approved"
+                and facts.action_review ~= "tightened")
+        then
+            return nil
+        end
+        return safety_service.binding_digest("yaca-tool-authority-v1", {
+            { name = "call_digest", value = call.call_digest },
+            {
+                name = "permission_snapshot_digest",
+                value = facts.permission_snapshot_digest,
+            },
+            { name = "approval_digest", value = facts.approval_digest },
+            { name = "durable_intent_digest", value = facts.durable_intent_digest },
+            { name = "config_generation", value = facts.config_generation },
+            { name = "workspace_identity", value = facts.workspace_identity },
+            { name = "double_check", value = tostring(facts.double_check) },
+            { name = "action_review", value = facts.action_review },
+        })
+    end
+    return readonly({
+        admit = function(call, facts)
+            local digest = authority_digest(call, facts)
+            if not digest then return false end
+            return true, digest
+        end,
+        reverify = function(call, facts, digest)
+            local current = authority_digest(call, facts)
+            return current ~= nil and current == digest
+        end,
+    }, "production Tool authorization")
+end
+
+local function tool_options(composed, generation, workspace_path)
+    local output_limit = (generation.exec.max_output_kb or 1024) * 1024
+    local deadline = generation.exec.timeout_ms or 3600000
+    return {
+        maximum_argument_bytes = 65536,
+        maximum_path_bytes = 32768,
+        maximum_content_bytes = 32768,
+        maximum_file_bytes = 16 * 1024 * 1024,
+        maximum_result_bytes = AGENT_RELEASE_OPTIONS.runtime.hard_caps.result_bytes,
+        maximum_list_depth = 8,
+        maximum_page_entries = 256,
+        maximum_walk_entries = 10000,
+        maximum_search_pattern_bytes = 4096,
+        maximum_search_matches = 1000,
+        maximum_patch_hunks = 256,
+        maximum_patch_lines = 4096,
+        maximum_line_bytes = 32768,
+        maximum_continuations = 64,
+        maximum_identifier_bytes = 256,
+        filesystem_chunk_bytes = 65536,
+        create_permissions = 384,
+        maximum_json_depth = 32,
+        maximum_json_nodes = 16384,
+        maximum_number_bytes = 64,
+        maximum_exec_output_bytes = output_limit,
+        maximum_exec_deadline_ms = deadline,
+        platform_kind = composed.identity.os == "windows" and "windows" or "posix",
+        workspace_path = workspace_path,
+        reserved_paths = { composed.layout.data_root },
+    }
+end
+
+local function runtime_options(generation)
+    local candidate = copy_plain(AGENT_RELEASE_OPTIONS.runtime, {})
+    if not candidate then return nil end
+    candidate.hard_caps.model_requests = generation.agent.max_turn_model_requests
+        or candidate.hard_caps.model_requests
+    candidate.hard_caps.tool_calls = generation.agent.max_turn_tool_calls
+        or candidate.hard_caps.tool_calls
+    candidate.lanes.queue_maximum = generation.agent.queue_max_items
+        or candidate.lanes.queue_maximum
+    return candidate
+end
+
 local function network_options(layout)
     return {
         curl_executable = layout.curl_executable,
@@ -1991,6 +2173,8 @@ function M.compose_runtime(runtime)
     if not application then return nil, application_error end
     return readonly({
         application = application,
+        native = runtime.native,
+        identity = runtime.identity,
         layout = layout,
         backend = backend,
         config = config_service,
@@ -2005,6 +2189,276 @@ function M.compose_runtime(runtime)
             "production model activity options"
         )),
     }, "production runtime composition")
+end
+
+---Publishes one draft's first main message and composes the production Agent
+-- owner over that exact durable generation. No Model request or Tool effect is
+-- reachable before draft.begin_main and Runtime's next journal barrier both
+-- succeed. Later-turn snapshot/side admission remains deliberately unavailable
+-- until the dynamic generation catalog is attached by the interactive owner.
+function M.start_published_agent(composed, chat, message, source)
+    if type(composed) ~= "table"
+        or type(composed.backend) ~= "table"
+        or type(composed.contexts) ~= "table"
+        or type(composed.publication) ~= "table"
+        or type(composed.model_adapter) ~= "table"
+        or type(composed.network) ~= "table"
+        or type(composed.identity) ~= "table"
+        or type(chat) ~= "table"
+        or chat.kind ~= "run-chat"
+        or chat.outcome ~= "ready"
+        or type(chat.draft) ~= "table"
+        or type(chat.draft.begin_main) ~= "function"
+        or type(message) ~= "string"
+        or message == ""
+    then
+        return nil, failure(
+            "InvalidAgentComposition",
+            "a ready production chat and nonempty first message are required"
+        )
+    end
+    source = source or "terminal"
+    local receipt, publication_error = chat.draft.begin_main(message, source)
+    if not receipt then return nil, publication_error end
+    local handoff, handoff_error = chat.draft.agent_handoff()
+    if not handoff then
+        chat.draft.close()
+        return nil, handoff_error
+    end
+    local generation = chat.draft.config_generation()
+    local status = chat.draft.status()
+    local configured_permission = generation.permissions[status.permission]
+    local matrix = permission_matrix(configured_permission)
+    if not matrix then
+        chat.draft.close()
+        return nil, failure(
+            "PermissionUnavailable",
+            "the published Permission generation is unavailable"
+        )
+    end
+
+    local contexts = composed.contexts
+    local operation_journal = composed.publication.operation_journal()
+    local context_module = require("context")
+    local operations, operation_error = context_module.new_operation_service({
+        safety = contexts.safety,
+        journal = operation_journal,
+    }, assert(copy_plain(AGENT_RELEASE_OPTIONS.operation, {})))
+    if not operations then chat.draft.close(); return nil, operation_error end
+
+    local permission_module = require("permission")
+    local permission_service, permission_error = permission_module.new({
+        safety = contexts.safety,
+    }, AGENT_RELEASE_OPTIONS.permission)
+    if not permission_service then chat.draft.close(); return nil, permission_error end
+    local profile, profile_error = permission_service:profile({
+        name = status.permission,
+        config_generation = generation.id,
+        matrix = matrix,
+        description = configured_permission.description,
+        system_prompt = configured_permission.system_prompt,
+    })
+    if not profile then chat.draft.close(); return nil, profile_error end
+
+    local inspected, workspace = composed.backend.filesystem.direct_inspect(
+        status.workspace
+    )
+    local workspace_key = inspected and workspace_identity_key(workspace.identity) or nil
+    if not inspected or not workspace_key then
+        chat.draft.close()
+        return nil, inspected and failure(
+            "InvalidWorkspace",
+            "the published workspace identity is unavailable to direct Tools"
+        ) or workspace
+    end
+    local authorization = tool_authorization_port(contexts.safety, {
+        permission_snapshot_digest = profile.snapshot_digest,
+        config_generation = generation.id,
+        workspace_identity = workspace_key,
+        double_check = status.double_check,
+    })
+    local secret_registry = readonly({
+        scan = generation.scan_registered_secrets,
+        new_stream_scanner = generation.new_stream_scanner,
+    }, "turn secret scanner")
+    local tools_module = require("tools")
+    local tool_service, tool_error = tools_module.new({
+        filesystem = composed.backend.filesystem,
+        path = contexts.path,
+        safety = contexts.safety,
+        secret_registry = secret_registry,
+        authorization = authorization,
+        processes = composed.backend.processes,
+        operations = operations,
+    }, tool_options(composed, generation, status.workspace))
+    if not tool_service then chat.draft.close(); return nil, tool_error end
+    if tool_service.registry_digest ~= handoff.input.tool_registry_snapshot then
+        chat.draft.close()
+        return nil, failure(
+            "ToolRegistryMismatch",
+            "the production Tool registry does not match the durable first turn"
+        )
+    end
+
+    local clock = production_clock(composed.backend)
+    local tool_port, tool_port_error = tools_module.new_agent_port({
+        service = tool_service,
+        permission = permission_service,
+        profile = profile,
+        operation_journal = operation_journal,
+        clock = clock,
+    }, {
+        config_generation = generation.id,
+        double_check = status.double_check,
+        action_review_enabled = generation.agent.action_review_enabled,
+        exec_policy = {
+            config_generation = generation.id,
+            environment_mode = generation.exec.environment_mode,
+            environment = {},
+            output_limit_bytes = (generation.exec.max_output_kb or 1024) * 1024,
+            deadline_ms = generation.exec.timeout_ms or 3600000,
+            decoder = "utf-8-strict-candidate-v1",
+        },
+    })
+    if not tool_port then chat.draft.close(); return nil, tool_port_error end
+
+    local model_module = require("model")
+    local views = readonly({
+        resolve_view = composed.publication.resolve_view,
+    }, "active durable Model views")
+    local request_builder, builder_error = model_module.new_request_builder({
+        adapter = composed.model_adapter,
+        prompt = contexts.prompt,
+        views = views,
+        generation = generation,
+        tool_registry = contexts.tool_registry,
+    }, {
+        model_name = status.model,
+        permission_name = status.permission,
+        model_snapshot = handoff.input.model_snapshot,
+        permission_snapshot = handoff.input.permission_snapshot,
+        prompt_snapshot = handoff.input.prompt_snapshot,
+        tool_registry_snapshot = handoff.input.tool_registry_snapshot,
+        initial_message = handoff.input.text,
+        context_prompt = status.context_prompt,
+        continuation_instruction = CONTINUATION_INSTRUCTION,
+        default_connect_timeout_ms = 120000,
+        default_request_timeout_ms = 3600000,
+        default_retry_base_delay_ms = 1000,
+        default_max_output_tokens = 4096,
+    })
+    if not request_builder then chat.draft.close(); return nil, builder_error end
+    local model_activity, model_activity_error = model_module.new_activity({
+        adapter = composed.model_adapter,
+        transport = composed.network,
+        safety = contexts.safety,
+        clock = composed.backend.clock_port,
+        requests = request_builder,
+    }, composed.model_activity_options)
+    if not model_activity then chat.draft.close(); return nil, model_activity_error end
+
+    local json_module = require("json")
+    local codec, codec_error = json_module.new(AGENT_RELEASE_OPTIONS.json)
+    if not codec then chat.draft.close(); return nil, codec_error end
+    local review_builder, review_builder_error = model_module.new_review_request_builder({
+        adapter = composed.model_adapter,
+        prompt = contexts.prompt,
+        views = views,
+        generation = generation,
+        codec = codec,
+        safety = contexts.safety,
+    }, {
+        main_model_name = status.model,
+        permission_name = status.permission,
+        context_prompt = status.context_prompt,
+        default_connect_timeout_ms = 120000,
+        default_request_timeout_ms = 3600000,
+        default_retry_base_delay_ms = 1000,
+        default_max_output_tokens = 1024,
+        maximum_binding_bytes = 65536,
+    })
+    if not review_builder then chat.draft.close(); return nil, review_builder_error end
+    local review_activity, review_activity_error = model_module.new_activity({
+        adapter = composed.model_adapter,
+        transport = composed.network,
+        safety = contexts.safety,
+        clock = composed.backend.clock_port,
+        requests = review_builder,
+    }, composed.model_activity_options)
+    if not review_activity then chat.draft.close(); return nil, review_activity_error end
+    local review_port, review_port_error = model_module.new_review_port({
+        activity = review_activity,
+        builder = review_builder,
+        safety = contexts.safety,
+        codec = codec,
+    }, {
+        maximum_poll_events = 128,
+        maximum_reason_bytes = 32768,
+        maximum_gap_bytes = 32768,
+    })
+    if not review_port then chat.draft.close(); return nil, review_port_error end
+
+    local runtime_module = require("runtime")
+    local loop_options = runtime_options(generation)
+    if not loop_options then
+        chat.draft.close()
+        return nil, failure("InvalidAgentOptions", "production Agent caps could not be copied")
+    end
+    local loop, loop_error = runtime_module.new_agent_loop({
+        clock = clock,
+        journal = composed.publication,
+        model = model_activity,
+        tools = tool_port,
+        reviews = review_port,
+        snapshots = false,
+        side = false,
+        views = readonly({
+            prepare = composed.publication.prepare_view,
+        }, "active durable Model view publication"),
+    }, loop_options)
+    if not loop then chat.draft.close(); return nil, loop_error end
+    local function fail_after_loop(agent_error)
+        -- resume_published_main may already own an active network/tool handle.
+        -- Closing is best-effort here: the original construction failure stays
+        -- authoritative, while AgentLoop still gets its typed cancellation path.
+        pcall(loop.close, loop, "agent-composition-failed")
+        chat.draft.close()
+        return nil, agent_error
+    end
+    local admission, admission_error = loop:resume_published_main(handoff)
+    if not admission then return fail_after_loop(admission_error) end
+    local driver, driver_error = runtime_module.new_agent_activity_driver({
+        loop = loop,
+        model = model_activity,
+        tools = tool_port,
+        reviews = review_port,
+        clock = clock,
+    }, AGENT_RELEASE_OPTIONS.driver)
+    if not driver then return fail_after_loop(driver_error) end
+    local agent_session, session_error = session.new_agent_session(loop, {
+        maximum_draft_bytes = 16384,
+    })
+    if not agent_session then return fail_after_loop(session_error) end
+
+    return readonly({
+        admission = admission,
+        loop = loop,
+        driver = driver,
+        session = agent_session,
+        tools = tool_port,
+        draft = chat.draft,
+        generation = generation,
+        capabilities = readonly({
+            published_first_turn = true,
+            model = true,
+            tools = true,
+            reviews = true,
+            approvals = true,
+            later_turn_snapshots = false,
+            side = false,
+            target_qualified = false,
+        }, "published Agent capabilities"),
+    }, "published production Agent")
 end
 
 local function render_self_test(cli_service, request, result)

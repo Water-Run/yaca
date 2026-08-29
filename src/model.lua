@@ -1947,6 +1947,7 @@ local REQUEST_BUILDER_OPTION_FIELDS = {
     default_connect_timeout_ms = true,
     default_request_timeout_ms = true,
     default_retry_base_delay_ms = true,
+    default_max_output_tokens = true,
 }
 
 local function validate_request_builder(ports, options)
@@ -1985,6 +1986,7 @@ local function validate_request_builder(ports, options)
         or not valid_integer(options.default_request_timeout_ms, 1)
         or options.default_connect_timeout_ms > options.default_request_timeout_ms
         or not valid_integer(options.default_retry_base_delay_ms, 0)
+        or not valid_integer(options.default_max_output_tokens, 1)
     then
         return nil, failure("InvalidModelRequestBuilder", "model request builder is incomplete")
     end
@@ -2119,10 +2121,10 @@ function M.new_request_builder(ports, options)
             public_model_ref.auth_secret_id = "Model."
                 .. admitted.options.model_name .. ".Key"
         end
-        local limits = {}
-        if model_ref.max_output_tokens ~= nil then
-            limits.max_output_tokens = model_ref.max_output_tokens
-        end
+        local limits = {
+            max_output_tokens = model_ref.max_output_tokens
+                or admitted.options.default_max_output_tokens,
+        }
         local retry_count = model_ref.retry_count
         local retry_base_delay = model_ref.retry_base_delay_ms
             or admitted.options.default_retry_base_delay_ms

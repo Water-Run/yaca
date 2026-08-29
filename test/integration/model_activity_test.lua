@@ -353,6 +353,7 @@ return {
                     default_connect_timeout_ms = 100,
                     default_request_timeout_ms = 5000,
                     default_retry_base_delay_ms = 5,
+                    default_max_output_tokens = 256,
                 }))
                 local spec = {
                     request_id = "turn-1:request:1",
@@ -368,6 +369,7 @@ return {
                 A.equal(prepared.proxy.secret_id, "Network.ProxyUrl")
                 A.equal(prepared.proxy.destination, "network-proxy")
                 A.equal(prepared.request.retry_policy.base_delay_ms, 5)
+                A.equal(prepared.request.limits.max_output_tokens, 256)
                 local wire, wire_error = adapter:encode(prepared.request)
                 A.truthy(wire, wire_error and wire_error.code)
                 A.equal(wire.secret_headers[1].secret_id, "Model.Primary.Key")
