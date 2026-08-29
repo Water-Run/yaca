@@ -187,8 +187,16 @@ function M.new(initial, maximum_chunk_bytes)
         return files[path] and files[path].permissions or nil
     end
 
+    function controls.identity(path)
+        return files[path] and identity(files[path]) or nil
+    end
+
     function controls.external_replace(path, bytes)
         files[path] = make_file(bytes)
+    end
+
+    function controls.external_delete(path)
+        files[path] = nil
     end
 
     function controls.exists(path)

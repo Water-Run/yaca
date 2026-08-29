@@ -17,6 +17,7 @@ local PATH_METHODS = {
 }
 
 local SCANNER_METHODS = { "begin", "next_ring", "close" }
+local VERIFIER_METHODS = { "observe" }
 
 local HEADER_STATES = {
     valid = true,
@@ -145,7 +146,7 @@ local function validate_ports(ports)
     if type(ports) ~= "table" then
         return nil, failure("InvalidIndexPorts", "Context index ports are required")
     end
-    local allowed = { path = true, scanner = true }
+    local allowed = { path = true, scanner = true, verifier = true }
     for key in pairs(ports) do
         if type(key) ~= "string" or not allowed[key] then
             return nil, failure("InvalidIndexPorts", "Context index ports have an unknown field")
@@ -165,7 +166,17 @@ local function validate_ports(ports)
         "Context catalog scanner"
     )
     if not scanner then return nil, scanner_error end
-    return { path = path, scanner = scanner }
+    local verifier
+    if ports.verifier ~= nil then
+        verifier, scanner_error = snapshot_methods(
+            ports.verifier,
+            VERIFIER_METHODS,
+            "InvalidVerifierPort",
+            "Context target verifier"
+        )
+        if not verifier then return nil, scanner_error end
+    end
+    return { path = path, scanner = scanner, verifier = verifier }
 end
 
 local function safe_reason(value, limits, fallback)
@@ -232,6 +243,22 @@ local function valid_text(value, allow_empty)
         and value:find("\0", 1, true) == nil
 end
 
+local function deep_equal(left, right, visited)
+    if left == right then return true end
+    if type(left) ~= type(right) or type(left) ~= "table" then return false end
+    visited = visited or {}
+    visited[left] = visited[left] or {}
+    if visited[left][right] then return true end
+    visited[left][right] = true
+    for key, value in pairs(left) do
+        if not deep_equal(value, right[key], visited) then return false end
+    end
+    for key in pairs(right) do
+        if left[key] == nil then return false end
+    end
+    return true
+end
+
 local function validate_candidate(candidate, rank, path)
     if type(candidate) ~= "table" then return nil, "candidate-contract" end
     for key in pairs(candidate) do
@@ -284,7 +311,7 @@ local function validate_candidate(candidate, rank, path)
             return nil, "candidate-header"
         end
     end
-    return {
+    local admitted = {
         physical_path = candidate.physical_path,
         logical_path = candidate.logical_path,
         display_path = candidate.display_path or candidate.physical_path,
@@ -296,6 +323,9 @@ local function validate_candidate(candidate, rank, path)
         header_state = candidate.header_state,
         scope_rank = rank,
     }
+    local frozen = freeze(admitted, nil, "Context catalog candidate")
+    if not frozen then return nil, "candidate-observation" end
+    return frozen
 end
 
 local function validate_ring(ring, expected_rank, path, limits)
@@ -350,9 +380,9 @@ local function hash_candidate(candidate, path)
     return hash
 end
 
-local function unique(candidate, hash)
+local function selected_result(candidate, hash, tag, selections)
     local value = {
-        tag = "Unique",
+        tag = tag,
         logical_path = candidate.logical_path,
         display_path = candidate.display_path,
         hash = hash,
@@ -360,10 +390,17 @@ local function unique(candidate, hash)
     if candidate.physical_path ~= candidate.display_path then
         value.physical_hint = candidate.physical_path
     end
-    return result(value)
+    if tag == "TargetSnapshot" then value.header_state = candidate.header_state end
+    local exposed = result(value)
+    selections[exposed] = assert(freeze(candidate, nil, "Context target snapshot"))
+    return exposed
 end
 
-local function decide_name(candidates, selector, path, scope)
+local function unique(candidate, hash, selections)
+    return selected_result(candidate, hash, "Unique", selections)
+end
+
+local function decide_name(candidates, selector, path, scope, selections)
     for _, candidate in ipairs(candidates) do
         if candidate.display_name == selector or candidate.canonical_name == selector then
             if candidate.header_state ~= "valid" then
@@ -371,13 +408,13 @@ local function decide_name(candidates, selector, path, scope)
             end
             local hash = hash_candidate(candidate, path)
             if not hash then return scan_incomplete(scope, "context-hash") end
-            return unique(candidate, hash)
+            return unique(candidate, hash, selections)
         end
     end
     return nil
 end
 
-local function decide_hash(candidates, selector, path, scope, limits)
+local function decide_hash(candidates, selector, path, scope, limits, selections)
     local usable, unavailable = {}, {}
     for _, candidate in ipairs(candidates) do
         local hash = hash_candidate(candidate, path)
@@ -401,7 +438,9 @@ local function decide_hash(candidates, selector, path, scope, limits)
         end
         return result({ tag = "HashCollision", candidates = collisions })
     end
-    if #usable == 1 then return unique(usable[1].candidate, usable[1].hash) end
+    if #usable == 1 then
+        return unique(usable[1].candidate, usable[1].hash, selections)
+    end
     if #unavailable > 0 then return matched_unavailable(unavailable[1]) end
     return nil
 end
@@ -419,8 +458,9 @@ function M.new(ports, options)
     if not admitted then return nil, ports_error end
     local limits, limits_error = validate_options(options)
     if not limits then return nil, limits_error end
-    local path, scanner = admitted.path, admitted.scanner
+    local path, scanner, verifier = admitted.path, admitted.scanner, admitted.verifier
     local service = {}
+    local selections = setmetatable({}, { __mode = "k" })
 
     ---Resolves one exact Context name or canonical 16-hex path hash.
     -- @param selector string Exact display name or hash token.
@@ -502,9 +542,22 @@ function M.new(ports, options)
 
             local outcome
             if classified.kind == "hash" then
-                outcome = decide_hash(candidates, classified.canonical, path, scope, limits)
+                outcome = decide_hash(
+                    candidates,
+                    classified.canonical,
+                    path,
+                    scope,
+                    limits,
+                    selections
+                )
             else
-                outcome = decide_name(candidates, classified.canonical, path, scope)
+                outcome = decide_name(
+                    candidates,
+                    classified.canonical,
+                    path,
+                    scope,
+                    selections
+                )
             end
             if outcome then return finish(outcome) end
         end
@@ -521,6 +574,134 @@ function M.new(ports, options)
         return path.context_hash(details.logical_path)
     end
 
+    ---Captures one browser/catalog row without resolving its short name again.
+    -- The snapshot remains an observation only and must pass `verify_target`
+    -- immediately before open or mutation.
+    function service.capture_target(candidate)
+        local rank = type(candidate) == "table" and candidate.scope_rank or 0
+        if not valid_integer(rank, 0) then
+            return nil, failure("InvalidTargetSnapshot", "target scope rank is invalid")
+        end
+        local admitted_candidate, candidate_error = validate_candidate(candidate, rank, path)
+        if not admitted_candidate then
+            return nil, failure(
+                "InvalidTargetSnapshot",
+                "target snapshot is malformed",
+                candidate_error
+            )
+        end
+        local hash = hash_candidate(admitted_candidate, path)
+        if not hash then
+            return nil, failure("InvalidTargetSnapshot", "target hash could not be computed")
+        end
+        return selected_result(
+            admitted_candidate,
+            hash,
+            "TargetSnapshot",
+            selections
+        )
+    end
+
+    ---Re-observes one selected target and compares its complete credential.
+    -- This never resolves by name/hash a second time and never scans for a
+    -- replacement when the selected path has changed.
+    function service.verify_target(selection, purpose)
+        purpose = purpose or "open"
+        if purpose ~= "open" and purpose ~= "mutation" and purpose ~= "delete" then
+            return result({ tag = "TargetUnavailable", reason = "invalid-purpose" })
+        end
+        local expected = selections[selection]
+        if not expected then
+            return result({ tag = "TargetUnavailable", reason = "invalid-selection" })
+        end
+        if not verifier then
+            return result({ tag = "TargetUnavailable", reason = "verifier-unavailable" })
+        end
+        local observed_ok, observed_or_error = invoke(verifier, "observe", {
+            physical_path = expected.physical_path,
+            logical_path = expected.logical_path,
+        })
+        if not observed_ok then
+            local reason = safe_reason(observed_or_error, limits, "target-unavailable")
+            if reason == "TargetChanged" or reason == "IdentityChanged" then
+                return result({
+                    tag = "TargetChanged",
+                    logical_path = expected.logical_path,
+                    reason = reason,
+                })
+            end
+            return result({
+                tag = "TargetUnavailable",
+                logical_path = expected.logical_path,
+                reason = reason,
+            })
+        end
+        local observed, candidate_error = validate_candidate(
+            observed_or_error,
+            expected.scope_rank,
+            path
+        )
+        if not observed then
+            return result({
+                tag = "TargetUnavailable",
+                logical_path = expected.logical_path,
+                reason = candidate_error,
+            })
+        end
+        local same = observed.logical_path == expected.logical_path
+            and observed.physical_path == expected.physical_path
+            and observed.display_path == expected.display_path
+            and observed.display_name == expected.display_name
+            and observed.canonical_name == expected.canonical_name
+            and observed.created_at == expected.created_at
+            and observed.updated_at == expected.updated_at
+            and observed.header_state == expected.header_state
+            and deep_equal(observed.observed_stat, expected.observed_stat)
+        if not same then
+            return result({
+                tag = "TargetChanged",
+                logical_path = expected.logical_path,
+                reason = "observation-changed",
+            })
+        end
+        local delete_damaged = purpose == "delete"
+            and observed.header_state == "corrupt"
+            and type(observed.observed_stat) == "table"
+        if observed.header_state ~= "valid" and not delete_damaged then
+            return result({
+                tag = "TargetUnavailable",
+                logical_path = expected.logical_path,
+                reason = "header-" .. observed.header_state,
+            })
+        end
+        local current_hash = hash_candidate(observed, path)
+        if not current_hash or current_hash ~= selection.hash then
+            return result({
+                tag = "TargetChanged",
+                logical_path = expected.logical_path,
+                reason = "hash-changed",
+            })
+        end
+        return result({
+            tag = "Verified",
+            purpose = purpose,
+            header_state = observed.header_state,
+            logical_path = observed.logical_path,
+            display_path = observed.display_path,
+            hash = current_hash,
+            physical_hint = observed.physical_path,
+            credential = {
+                physical_path = observed.physical_path,
+                logical_path = observed.logical_path,
+                observed_stat = observed.observed_stat,
+                canonical_name = observed.canonical_name,
+                created_at = observed.created_at,
+                updated_at = observed.updated_at,
+                header_state = observed.header_state,
+            },
+        })
+    end
+
     service.limits = readonly({
         maximum_scan_candidates = limits.maximum_scan_candidates,
         maximum_search_rings = limits.maximum_search_rings,
@@ -532,6 +713,7 @@ function M.new(ports, options)
         real_time_scan = true,
         incremental_rings = true,
         stable_logical_order = true,
+        target_verifier = verifier ~= nil,
         target_qualified = false,
     }, "Context index capabilities")
 

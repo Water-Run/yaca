@@ -296,11 +296,37 @@ function M.new(modules, initial_candidates)
         maximum_export_bytes = 1024 * 1024,
     }))
 
+    local function semantic_candidate(built)
+        local facts = {}
+        for index, event in ipairs(built.facts) do
+            facts[index] = {
+                seq = event.seq,
+                type = event.type,
+                at = event.at,
+                turn_id = event.turn_id,
+                fields = copy(event.fields),
+            }
+        end
+        return {
+            schema_version = built.schema_version,
+            generation = built.generation,
+            header = copy(built.header),
+            session = copy(built.session),
+            facts = facts,
+            model_view = copy(built.model_view),
+        }
+    end
+
+    local function register_document(built, candidate)
+        local bytes = assert(schema.encode(built))
+        documents[bytes] = candidate and copy(candidate) or semantic_candidate(built)
+        return bytes
+    end
+
     local function document(candidate)
         local stable = copy(candidate)
         local built = assert(schema.build(stable))
-        local bytes = assert(schema.encode(built))
-        documents[bytes] = stable
+        local bytes = register_document(built, stable)
         return built, bytes
     end
 
@@ -331,6 +357,7 @@ function M.new(modules, initial_candidates)
         hooks = hooks,
         documents = documents,
         document = document,
+        register_document = register_document,
         copy = copy,
         metadata = function(pid)
             return {

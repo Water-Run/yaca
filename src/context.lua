@@ -2167,6 +2167,261 @@ local function export_document(canonical, admitted, sink)
     return table.concat(output)
 end
 
+local function mutable_copy(value, visiting)
+    if type(value) ~= "table" then return value end
+    visiting = visiting or {}
+    if visiting[value] then
+        return nil, failure("InvalidContextValue", "Context values must not contain cycles")
+    end
+    visiting[value] = true
+    local copied = {}
+    for key, item in pairs(value) do
+        local mutable, copy_error = mutable_copy(item, visiting)
+        if mutable == nil and copy_error then
+            visiting[value] = nil
+            return nil, copy_error
+        end
+        copied[key] = mutable
+    end
+    visiting[value] = nil
+    return copied
+end
+
+local function lifecycle_candidate(document)
+    local canonical = document_states[document]
+    if not canonical then
+        return nil, failure(
+            "InvalidContextDocument",
+            "Context lifecycle mutation requires a canonical document"
+        )
+    end
+    local facts = {}
+    for index, item in ipairs(canonical.events) do
+        facts[index] = {
+            seq = item.seq,
+            type = item.type,
+            at = item.at,
+            turn_id = item.turn_id,
+            fields = item.fields,
+        }
+    end
+    local candidate, copy_error = mutable_copy({
+        schema_version = SCHEMA_VERSION,
+        generation = canonical.generation,
+        header = canonical.header,
+        session = canonical.session,
+        facts = facts,
+        model_view = canonical.model_view,
+    })
+    if not candidate then return nil, copy_error end
+    return candidate, canonical
+end
+
+local LIFECYCLE_FIELDS = {
+    rename = {
+        new_name = true,
+        manual = true,
+        old_logical_path = true,
+        new_logical_path = true,
+    },
+    rebind = {
+        old_logical_path = true,
+        new_logical_path = true,
+        old_root_identity = true,
+        new_root_identity = true,
+    },
+    import = {
+        source_schema = true,
+        model_mappings = true,
+        permission_mappings = true,
+        decision = true,
+        notes = true,
+    },
+    repair = {
+        error_id = true,
+        summary = true,
+        cause_id = true,
+    },
+    set_auto_rename_disabled = {
+        value = true,
+        old_value_digest = true,
+        new_value_digest = true,
+        effective_at = true,
+        naming_waterline = true,
+    },
+    resolve_operation = {
+        operation_id = true,
+        status = true,
+        evidence = true,
+        error_id = true,
+    },
+}
+
+local function lifecycle_event(candidate, mutation)
+    local kind = mutation.kind
+    if kind == "rename" then
+        if type(mutation.manual) ~= "boolean" then
+            return nil, failure("InvalidLifecycleMutation", "rename manual must be boolean")
+        end
+        if mutation.manual then
+            candidate.header.auto_rename_disabled = true
+        elseif candidate.header.auto_rename_disabled == true then
+            return nil, failure(
+                "AutoRenameDisabled",
+                "automatic rename is disabled for this Context"
+            )
+        end
+        local old_name = candidate.header.name
+        candidate.header.name = mutation.new_name
+        return "rename", {
+            oldName = old_name,
+            newName = mutation.new_name,
+            manual = tostring(mutation.manual),
+            autoRenameDisabled = tostring(candidate.header.auto_rename_disabled == true),
+            oldLogicalPath = mutation.old_logical_path,
+            newLogicalPath = mutation.new_logical_path,
+        }
+    end
+    if kind == "rebind" then
+        return "rebind", {
+            oldLogicalPath = mutation.old_logical_path,
+            newLogicalPath = mutation.new_logical_path,
+            oldRootIdentity = mutation.old_root_identity,
+            newRootIdentity = mutation.new_root_identity,
+        }
+    end
+    if kind == "import" then
+        local fields = {
+            sourceSchema = mutation.source_schema,
+            modelMappings = mutation.model_mappings,
+            permissionMappings = mutation.permission_mappings,
+            decision = mutation.decision,
+        }
+        if mutation.notes ~= nil then fields.notes = mutation.notes end
+        return "import_mapping", fields
+    end
+    if kind == "repair" then
+        local fields = { errorId = mutation.error_id, summary = mutation.summary }
+        if mutation.cause_id ~= nil then fields.causeId = mutation.cause_id end
+        return "warning", fields
+    end
+    if kind == "set_auto_rename_disabled" then
+        if type(mutation.value) ~= "boolean" then
+            return nil, failure(
+                "InvalidLifecycleMutation",
+                "AutoRenameDisabled value must be boolean"
+            )
+        end
+        candidate.header.auto_rename_disabled = mutation.value
+        if mutation.naming_waterline ~= nil then
+            if not valid_integer(mutation.naming_waterline, 0) then
+                return nil, failure(
+                    "InvalidLifecycleMutation",
+                    "naming waterline must be a non-negative integer"
+                )
+            end
+            candidate.header.naming_waterline = mutation.naming_waterline
+            if not mutation.value then
+                candidate.header.auto_name_baseline = mutation.naming_waterline
+            end
+        end
+        local fields = {
+            name = "AutoRenameDisabled",
+            oldValueDigest = mutation.old_value_digest,
+            newValueDigest = mutation.new_value_digest,
+        }
+        if mutation.effective_at ~= nil then fields.effectiveAt = mutation.effective_at end
+        return "session_override", fields
+    end
+    if kind == "resolve_operation" then
+        local fields = {
+            operationId = mutation.operation_id,
+            status = mutation.status,
+            evidence = mutation.evidence,
+        }
+        if mutation.error_id ~= nil then fields.errorId = mutation.error_id end
+        return "operation_result", fields
+    end
+    return nil, failure("InvalidLifecycleMutation", "Context lifecycle kind is unknown")
+end
+
+local function build_lifecycle_document(document, mutation, admitted)
+    if type(mutation) ~= "table" or type(mutation.kind) ~= "string" then
+        return nil, failure("InvalidLifecycleMutation", "typed lifecycle mutation is required")
+    end
+    local kind_fields = LIFECYCLE_FIELDS[mutation.kind]
+    if not kind_fields then
+        return nil, failure("InvalidLifecycleMutation", "Context lifecycle kind is unknown")
+    end
+    local allowed = { kind = true, updated_at = true, view_manifest_digest = true }
+    for name in pairs(kind_fields) do allowed[name] = true end
+    for key in pairs(mutation) do
+        if type(key) ~= "string" or not allowed[key] then
+            return nil, failure(
+                "InvalidLifecycleMutation",
+                "Context lifecycle mutation contains an unknown field",
+                nil,
+                nil,
+                tostring(key)
+            )
+        end
+    end
+    local updated_at, time_error = canonical_time(
+        mutation.updated_at,
+        "/Lifecycle/UpdatedAt"
+    )
+    if not updated_at then return nil, time_error end
+    local manifest_digest, digest_error = attribute_text(
+        mutation.view_manifest_digest,
+        admitted.maximum_field_bytes,
+        "/Lifecycle/ViewManifestDigest",
+        false
+    )
+    if not manifest_digest then return nil, digest_error end
+
+    local candidate, canonical_or_error = lifecycle_candidate(document)
+    if not candidate then return nil, canonical_or_error end
+    local canonical = canonical_or_error
+    if updated_at <= canonical.header.updated_at then
+        return nil, failure(
+            "ContextGeneration",
+            "lifecycle mutation must advance UpdatedAt"
+        )
+    end
+    local event_type, fields_or_error = lifecycle_event(candidate, mutation)
+    if not event_type then return nil, fields_or_error end
+
+    candidate.generation = canonical.generation + 1
+    candidate.header.updated_at = updated_at
+    candidate.facts[#candidate.facts + 1] = {
+        seq = #candidate.facts + 1,
+        type = event_type,
+        at = updated_at,
+        fields = fields_or_error,
+    }
+
+    -- A lifecycle mutation publishes a new complete model-view generation.
+    -- Recording the publication event prevents an older manifest event from
+    -- making the rebuilt document stale after import or compaction history.
+    candidate.facts[#candidate.facts + 1] = {
+        seq = #candidate.facts + 1,
+        type = "model_view_published",
+        at = updated_at,
+        fields = {
+            manifestDigest = manifest_digest,
+            firstEventSeq = #candidate.facts == 0 and "0" or "1",
+            lastEventSeq = tostring(#candidate.facts + 1),
+            replacesManifestDigest = canonical.model_view.active_manifest.digest,
+        },
+    }
+    candidate.model_view.active_manifest = {
+        digest = manifest_digest,
+        first_event_seq = #candidate.facts == 0 and 0 or 1,
+        last_event_seq = #candidate.facts,
+    }
+    return normalize_document(candidate, admitted)
+end
+
 ---Creates the internal v0.1 Context document service.
 -- The XML codec and SHA-256 service are injected from the release loader. All
 -- dimensions are mandatory release limits; callers cannot disable them.
@@ -2181,6 +2436,13 @@ function M.new(options)
     ---Validates and freezes one semantic Context candidate.
     function service.build(candidate)
         return normalize_document(candidate, admitted)
+    end
+
+    ---Builds one full lifecycle generation without rewriting durable Facts.
+    -- Supported kinds are rename, rebind, import, repair,
+    -- set_auto_rename_disabled, and resolve_operation.
+    function service.lifecycle_document(document, mutation)
+        return build_lifecycle_document(document, mutation, admitted)
     end
 
     ---Reads one untrusted internal Context XML source through the bounded SAX codec.
@@ -2378,6 +2640,87 @@ local function deep_equal(left, right, visited)
     return true
 end
 
+local function validate_target_credential(credential, path)
+    if credential == nil then return true end
+    if type(credential) ~= "table" then
+        return nil, failure("InvalidTargetCredential", "target credential must be a table")
+    end
+    local allowed = {
+        physical_path = true,
+        logical_path = true,
+        observed_stat = true,
+        canonical_name = true,
+        created_at = true,
+        updated_at = true,
+        header_state = true,
+    }
+    for key in pairs(credential) do
+        if type(key) ~= "string" or not allowed[key] then
+            return nil, failure(
+                "InvalidTargetCredential",
+                "target credential contains an unknown field"
+            )
+        end
+    end
+    if credential.physical_path ~= path
+        or type(credential.logical_path) ~= "string"
+        or type(credential.observed_stat) ~= "table"
+    then
+        return nil, failure(
+            "InvalidTargetCredential",
+            "target credential does not bind the requested path"
+        )
+    end
+    local identity = credential.observed_stat
+    if identity.kind ~= "file"
+        or type(identity.volume) ~= "string"
+        or type(identity.object) ~= "string"
+        or not valid_integer(identity.size, 0)
+        or type(identity.modified) ~= "string"
+    then
+        return nil, failure(
+            "InvalidTargetCredential",
+            "target credential has an incomplete file identity"
+        )
+    end
+    for _, name in ipairs({ "canonical_name", "created_at", "updated_at" }) do
+        if credential[name] ~= nil and type(credential[name]) ~= "string" then
+            return nil, failure(
+                "InvalidTargetCredential",
+                "target credential header fields are malformed"
+            )
+        end
+    end
+    return true
+end
+
+local function credential_matches(credential, path, identity, document)
+    if credential == nil then return true end
+    if credential.physical_path ~= path
+        or not identity_equal(credential.observed_stat, identity)
+    then
+        return false
+    end
+    if document then
+        if credential.canonical_name ~= nil
+            and credential.canonical_name ~= document.header.name
+        then
+            return false
+        end
+        if credential.created_at ~= nil
+            and credential.created_at ~= document.header.created_at
+        then
+            return false
+        end
+        if credential.updated_at ~= nil
+            and credential.updated_at ~= document.header.updated_at
+        then
+            return false
+        end
+    end
+    return true
+end
+
 local function validate_store_options(options, schema_state)
     if type(options) ~= "table" then
         return nil, failure("InvalidContextStoreOptions", "Context store limits are required")
@@ -2552,7 +2895,15 @@ end
 
 local function cleanup_file(filesystem, path, identity)
     local stated, observed = filesystem.stat_identity(path)
-    if stated then identity = observed end
+    if stated then
+        if identity == nil
+            or (identity.kind == observed.kind
+                and identity.volume == observed.volume
+                and identity.object == observed.object)
+        then
+            identity = observed
+        end
+    end
     if not identity then return true end
     local deleted, delete_error = filesystem.delete_verified(path, identity)
     if not deleted then return nil, delete_error end
@@ -2842,7 +3193,7 @@ local function copy_file_verified(filesystem, source_path, source_identity, targ
     return target_identity_or_error
 end
 
-local function validate_publication_document(state, document)
+local function validate_publication_document(state, document, expected_name)
     local canonical = document_states[document]
     if not canonical then
         return nil, failure(
@@ -2850,7 +3201,8 @@ local function validate_publication_document(state, document)
             "Context publication requires a canonical document"
         )
     end
-    if document.header.name ~= state.target.name then
+    expected_name = expected_name or state.target.name
+    if document.header.name ~= expected_name then
         return nil, failure(
             "ContextNameMismatch",
             "Context Header Name does not match the official basename"
@@ -2970,6 +3322,7 @@ function M.new_store(schema, ports, options)
         state.owner = owner
         state.status = "active"
         state.commit_active = false
+        state.leases = state.leases or { state.lease }
         writer_states[writer] = state
         return writer
     end
@@ -3070,9 +3423,14 @@ function M.new_store(schema, ports, options)
         return recovered, recovered_identity_or_error, false
     end
 
-    local function acquire(path, metadata, mode)
+    local function acquire(path, metadata, mode, expected_credential)
         local target, target_error = validate_context_target(path)
         if not target then return nil, target_error end
+        local credential_valid, credential_error = validate_target_credential(
+            expected_credential,
+            path
+        )
+        if not credential_valid then return nil, credential_error end
         local lock_bytes, metadata_error = encode_lock_metadata(metadata, limits)
         if not lock_bytes then return nil, metadata_error end
         if #lock_bytes > filesystem.capabilities.maximum_lease_bytes then
@@ -3085,6 +3443,24 @@ function M.new_store(schema, ports, options)
             limits.lock_permissions
         )
         if not acquired then return nil, lease_or_error end
+
+        if expected_credential ~= nil then
+            local stated, observed_or_error = filesystem.stat_identity(path)
+            if not stated
+                or not credential_matches(
+                    expected_credential,
+                    path,
+                    observed_or_error,
+                    nil
+                )
+            then
+                return release_after_failure(lease_or_error, failure(
+                    "TargetChanged",
+                    "selected Context changed before its body was opened",
+                    stated and "identity" or observed_or_error.code
+                ))
+            end
+        end
 
         local previous_path = path .. ".yaca-prev"
         if mode == "create" then
@@ -3110,6 +3486,7 @@ function M.new_store(schema, ports, options)
             })
         end
 
+        local recovered_previous = false
         local document, identity_or_error = stable_read(schema, filesystem, path, limits)
         if not document then
             local recovered, recovered_identity_or_error, retain_lease = recover_previous(
@@ -3122,6 +3499,20 @@ function M.new_store(schema, ports, options)
                 return release_after_failure(lease_or_error, recovered_identity_or_error)
             end
             document, identity_or_error = recovered, recovered_identity_or_error
+            recovered_previous = true
+        end
+        if expected_credential ~= nil
+            and not credential_matches(
+                expected_credential,
+                path,
+                identity_or_error,
+                document
+            )
+        then
+            return release_after_failure(lease_or_error, failure(
+                "TargetChanged",
+                "selected Context header or identity changed before mutation"
+            ))
         end
         if document.header.name ~= target.name then
             return release_after_failure(lease_or_error, failure(
@@ -3136,6 +3527,7 @@ function M.new_store(schema, ports, options)
         if not previous_state then
             return release_after_failure(lease_or_error, previous_identity_or_error)
         end
+        local cleaned_previous = false
         if previous_state == "present" then
             local cleaned, cleanup_error = cleanup_file(
                 filesystem,
@@ -3149,6 +3541,7 @@ function M.new_store(schema, ports, options)
                     cleanup_error.code
                 ))
             end
+            cleaned_previous = true
         end
         local writer = new_writer({
             mode = "replace",
@@ -3159,18 +3552,180 @@ function M.new_store(schema, ports, options)
             lease = lease_or_error,
             base_document = document,
             base_identity = identity_or_error,
+            recovered_previous = recovered_previous,
+            cleaned_previous = cleaned_previous,
+            lock_bytes = lock_bytes,
         })
         return writer, document
     end
 
+    local function acquire_delete(path, metadata, expected_credential)
+        local target, target_error = validate_context_target(path)
+        if not target then return nil, target_error end
+        local credential_valid, credential_error = validate_target_credential(
+            expected_credential,
+            path
+        )
+        if not credential_valid then return nil, credential_error end
+        if expected_credential ~= nil
+            and expected_credential.canonical_name ~= nil
+            and expected_credential.canonical_name ~= target.name
+        then
+            return nil, failure(
+                "TargetChanged",
+                "selected Context name no longer matches its basename"
+            )
+        end
+        local lock_bytes, metadata_error = encode_lock_metadata(metadata, limits)
+        if not lock_bytes then return nil, metadata_error end
+        if #lock_bytes > filesystem.capabilities.maximum_lease_bytes then
+            return nil, failure("LeaseLimit", "writer metadata exceeds filesystem lease limit")
+        end
+        local lock_path = path .. ".yaca-lock"
+        local acquired, lease_or_error = filesystem.acquire_lease(
+            lock_path,
+            lock_bytes,
+            limits.lock_permissions
+        )
+        if not acquired then return nil, lease_or_error end
+        local stated, identity_or_error = filesystem.stat_identity(path)
+        if not stated then return release_after_failure(lease_or_error, identity_or_error) end
+        if identity_or_error.kind ~= "file" then
+            return release_after_failure(lease_or_error, failure(
+                "ContextUnavailable",
+                "Context target is not a regular file"
+            ))
+        end
+        if expected_credential ~= nil
+            and not credential_matches(
+                expected_credential,
+                path,
+                identity_or_error,
+                nil
+            )
+        then
+            return release_after_failure(lease_or_error, failure(
+                "TargetChanged",
+                "selected Context changed before permanent deletion"
+            ))
+        end
+        return new_writer({
+            mode = "delete",
+            path = path,
+            target = target,
+            lock_path = lock_path,
+            previous_path = path .. ".yaca-prev",
+            lease = lease_or_error,
+            lock_bytes = lock_bytes,
+            base_identity = identity_or_error,
+        })
+    end
+
+    ---Validates an in-place foreign Context without acquiring a writer lease.
+    -- Historical approvals remain data only; this report never activates a
+    -- local Model, Permission, mapping, or pending operation.
+    function store.inspect_import(path, expected_credential)
+        local target, target_error = validate_context_target(path)
+        if not target then return nil, target_error end
+        local credential_valid, credential_error = validate_target_credential(
+            expected_credential,
+            path
+        )
+        if not credential_valid then return nil, credential_error end
+        local lock_state, lock_identity_or_error = control_path_state(
+            filesystem,
+            path .. ".yaca-lock"
+        )
+        if not lock_state then return nil, lock_identity_or_error end
+        if lock_state == "present" then
+            return nil, failure(
+                "LockConflict",
+                "active Context writer blocks in-place import inspection"
+            )
+        end
+        local document, identity_or_error = stable_read(schema, filesystem, path, limits)
+        if not document then return nil, identity_or_error end
+        if document.header.name ~= target.name then
+            return nil, failure(
+                "ContextNameMismatch",
+                "imported Context Header Name does not match its in-place basename"
+            )
+        end
+        if expected_credential ~= nil
+            and not credential_matches(
+                expected_credential,
+                path,
+                identity_or_error,
+                document
+            )
+        then
+            return nil, failure(
+                "TargetChanged",
+                "in-place imported Context changed during read-only validation"
+            )
+        end
+        local report = assert(freeze({
+            outcome = "validated-readonly",
+            path = path,
+            generation = document.generation,
+            event_count = document.event_count,
+            schema_version = document.schema_version,
+            history_approvals = "audit-only",
+            local_mapping_required = true,
+            auto_replay = false,
+            auto_continue = false,
+            unresolved_operation_ids = document.recovery.unresolved_operation_ids,
+            unresolved_tool_call_ids = document.recovery.unresolved_tool_call_ids,
+            unknown_operation_ids = document.recovery.unknown_operation_ids,
+        }, "Context import inspection"))
+        return document, report
+    end
+
     ---Acquires a long-lived writer lease before reading an existing Context body.
-    function store.open_writer(path, metadata)
-        return acquire(path, metadata, "replace")
+    function store.open_writer(path, metadata, expected_credential)
+        return acquire(path, metadata, "replace", expected_credential)
     end
 
     ---Acquires a long-lived writer lease for a not-yet-published Context path.
     function store.create_writer(path, metadata)
         return acquire(path, metadata, "create")
+    end
+
+    ---Acquires a mutation lease and exact identity without parsing the XML body.
+    -- This permits confirmed deletion of a corrupt Context while still binding
+    -- the operation to the selected file object.
+    function store.open_delete_writer(path, metadata, expected_credential)
+        return acquire_delete(path, metadata, expected_credential)
+    end
+
+    ---Runs only evidence-safe previous-valid recovery under the normal lease.
+    -- A stale-looking lock remains a conflict; age is never repair evidence.
+    function store.repair(path, metadata, expected_credential)
+        local writer, document_or_error = acquire(
+            path,
+            metadata,
+            "replace",
+            expected_credential
+        )
+        if not writer then
+            if document_or_error.code == "LockConflict" then return nil, document_or_error end
+            return nil, failure(
+                "NoSafeRepair",
+                "no evidence-safe Context repair could be applied",
+                document_or_error.code
+            )
+        end
+        local state = writer_states[writer]
+        local outcome = state.recovered_previous and "restored-previous"
+            or state.cleaned_previous and "cleaned-previous"
+            or "no-repair-needed"
+        return writer, document_or_error, assert(freeze({
+            outcome = outcome,
+            path = path,
+            generation = document_or_error.generation,
+            requires_repair_generation = state.recovered_previous == true,
+            auto_replay = false,
+        }, "Context repair receipt"))
     end
 
     ---Publishes one full canonical generation through the fixed commit state machine.
@@ -3389,6 +3944,522 @@ function M.new_store(schema, ports, options)
         return finish(receipt)
     end
 
+    ---Moves a complete lifecycle generation to a new official path no-replace.
+    -- Same-directory moves are rename transactions; cross-directory moves are
+    -- explicit rebind transactions. The old official is hidden as the one
+    -- recognized previous-valid generation before the new path is published,
+    -- so Catalog observation never treats both paths as active Contexts.
+    function store.move(writer, document, destination_path, temporary_path, action)
+        local state = writer_states[writer]
+        if not state or state.owner ~= owner or state.status ~= "active"
+            or state.mode ~= "replace"
+        then
+            return nil, failure("InvalidContextWriter", "Context move requires an active writer")
+        end
+        if state.commit_active then
+            return nil, failure("ContextCommitConflict", "Context publication is already active")
+        end
+        local destination, destination_error = validate_context_target(destination_path)
+        if not destination then return nil, destination_error end
+        local source_path = state.path
+        local source_target = state.target
+        local source_previous_path = state.previous_path
+        if destination_path == state.path then
+            return nil, failure("InvalidLifecycleMove", "Context move destination is unchanged")
+        end
+        action = action or (same_directory(state.path, destination_path) and "rename" or "rebind")
+        if action ~= "rename" and action ~= "rebind" then
+            return nil, failure("InvalidLifecycleMove", "Context move action is invalid")
+        end
+        if (action == "rename") ~= same_directory(state.path, destination_path) then
+            return nil, failure(
+                "InvalidLifecycleMove",
+                action == "rename"
+                    and "rename must remain in the same mirror directory"
+                    or "rebind must change the mirror directory"
+            )
+        end
+        local valid_temp, temp_error = validate_temp_path(
+            destination_path,
+            temporary_path,
+            limits
+        )
+        if not valid_temp then return nil, temp_error end
+        local canonical, document_error = validate_publication_document(
+            state,
+            document,
+            destination.name
+        )
+        if not canonical then return nil, document_error end
+        local lifecycle_found = false
+        for index = state.base_document.event_count + 1, document.event_count do
+            if document.facts[index].type == action then
+                lifecycle_found = true
+                break
+            end
+        end
+        if not lifecycle_found then
+            return nil, failure(
+                "ContextLifecycleMissing",
+                "Context move generation omits its durable lifecycle event"
+            )
+        end
+
+        state.commit_active = true
+        local destination_lock_path = destination_path .. ".yaca-lock"
+        local destination_previous_path = destination_path .. ".yaca-prev"
+        local destination_lease
+
+        local function finish(value, error_value)
+            state.commit_active = false
+            return value, error_value
+        end
+        local function fault(code, message, reason)
+            state.status = "faulted"
+            return finish(nil, failure(code, message, reason))
+        end
+        local function retain_destination_lease()
+            if destination_lease then
+                state.leases[#state.leases + 1] = destination_lease
+                destination_lease = nil
+            end
+        end
+        local function move_unknown(message, reason)
+            retain_destination_lease()
+            return fault("ContextMoveUnknown", message, reason)
+        end
+        local function release_destination(original_error)
+            if not destination_lease then return finish(nil, original_error) end
+            local released, release_error = filesystem.release_lease(destination_lease)
+            if not released then
+                retain_destination_lease()
+                return fault(
+                    "ContextLeaseUnknown",
+                    "Context move failed and destination lease release is unknown",
+                    release_error.code
+                )
+            end
+            destination_lease = nil
+            return finish(nil, original_error)
+        end
+
+        local acquired, lease_or_error = filesystem.acquire_lease(
+            destination_lock_path,
+            state.lock_bytes,
+            limits.lock_permissions
+        )
+        if not acquired then return finish(nil, lease_or_error) end
+        destination_lease = lease_or_error
+
+        local absent, absence_error = target_absent(filesystem, destination_path)
+        if not absent then return release_destination(absence_error) end
+        local previous_state, previous_error = control_path_state(
+            filesystem,
+            destination_previous_path
+        )
+        if not previous_state then return release_destination(previous_error) end
+        if previous_state ~= "absent" then
+            return release_destination(failure(
+                "ContextRecoveryRequired",
+                "move destination has a previous-valid control file"
+            ))
+        end
+
+        local current, current_identity_or_error = stable_read(
+            schema,
+            filesystem,
+            state.path,
+            limits
+        )
+        if not current
+            or not identity_equal(state.base_identity, current_identity_or_error)
+            or current.generation ~= state.base_document.generation
+        then
+            state.status = "faulted"
+            return release_destination(failure(
+                "TargetChanged",
+                "Context source changed before lifecycle move",
+                current and "identity" or current_identity_or_error.code
+            ))
+        end
+
+        local temporary_identity, write_error = write_new_document(
+            schema,
+            filesystem,
+            temporary_path,
+            document,
+            limits
+        )
+        if not temporary_identity then return release_destination(write_error) end
+        local verified_identity, verify_error = verify_document_path(
+            schema,
+            filesystem,
+            temporary_path,
+            document,
+            temporary_identity,
+            limits
+        )
+        if not verified_identity then
+            cleanup_file(filesystem, temporary_path, temporary_identity)
+            return release_destination(verify_error)
+        end
+
+        current, current_identity_or_error = stable_read(
+            schema,
+            filesystem,
+            state.path,
+            limits
+        )
+        if not current
+            or not identity_equal(state.base_identity, current_identity_or_error)
+            or current.generation ~= state.base_document.generation
+        then
+            cleanup_file(filesystem, temporary_path, verified_identity)
+            state.status = "faulted"
+            return release_destination(failure(
+                "TargetChanged",
+                "Context source changed after move generation validation",
+                current and "identity" or current_identity_or_error.code
+            ))
+        end
+        local source_previous_state, source_previous_error = control_path_state(
+            filesystem,
+            state.previous_path
+        )
+        if not source_previous_state then
+            cleanup_file(filesystem, temporary_path, verified_identity)
+            return release_destination(source_previous_error)
+        end
+        if source_previous_state ~= "absent" then
+            cleanup_file(filesystem, temporary_path, verified_identity)
+            return release_destination(failure(
+                "ContextRecoveryRequired",
+                "move source already has a previous-valid generation"
+            ))
+        end
+
+        local hidden, hide_error = filesystem.rename_no_replace(
+            state.path,
+            state.previous_path
+        )
+        if not hidden then
+            cleanup_file(filesystem, temporary_path, verified_identity)
+            return release_destination(hide_error)
+        end
+        local hidden_stated, hidden_identity_or_error = filesystem.stat_identity(
+            state.previous_path
+        )
+        if not hidden_stated or not identity_equal(state.base_identity, hidden_identity_or_error) then
+            local restored = filesystem.rename_no_replace(state.previous_path, state.path)
+            cleanup_file(filesystem, temporary_path, verified_identity)
+            if not restored then
+                return move_unknown(
+                    "source identity changed and its official path could not be restored",
+                    hidden_stated and "identity" or hidden_identity_or_error.code
+                )
+            end
+            filesystem.flush_directory(state.target.directory)
+            return release_destination(failure(
+                "TargetChanged",
+                "Context source identity changed during lifecycle move"
+            ))
+        end
+        local source_flushed, source_flush_error = filesystem.flush_directory(
+            state.target.directory
+        )
+        if not source_flushed then
+            local restored = filesystem.rename_no_replace(state.previous_path, state.path)
+            cleanup_file(filesystem, temporary_path, verified_identity)
+            if restored then filesystem.flush_directory(state.target.directory) end
+            if not restored then
+                return move_unknown(
+                    "source publication state is unknown after directory failure",
+                    source_flush_error.code
+                )
+            end
+            return release_destination(source_flush_error)
+        end
+
+        absent, absence_error = target_absent(filesystem, destination_path)
+        if not absent then
+            local restored, restore_error = filesystem.rename_no_replace(
+                state.previous_path,
+                state.path
+            )
+            cleanup_file(filesystem, temporary_path, verified_identity)
+            if restored then filesystem.flush_directory(state.target.directory) end
+            if not restored then
+                return move_unknown(
+                    "destination collision occurred and source restoration failed",
+                    restore_error.code
+                )
+            end
+            return release_destination(absence_error)
+        end
+        local restated, final_temporary_or_error = filesystem.stat_identity(temporary_path)
+        if not restated or not identity_equal(verified_identity, final_temporary_or_error) then
+            local restored = filesystem.rename_no_replace(state.previous_path, state.path)
+            cleanup_file(filesystem, temporary_path, verified_identity)
+            if restored then filesystem.flush_directory(state.target.directory) end
+            if not restored then
+                return move_unknown(
+                    "temporary changed and source restoration failed",
+                    restated and "identity" or final_temporary_or_error.code
+                )
+            end
+            return release_destination(restated and failure(
+                "ContextTemporaryMismatch",
+                "Context temporary changed before lifecycle publication"
+            ) or final_temporary_or_error)
+        end
+
+        local published, publish_error = filesystem.rename_no_replace(
+            temporary_path,
+            destination_path
+        )
+        if not published then
+            local restored, restore_error = filesystem.rename_no_replace(
+                state.previous_path,
+                state.path
+            )
+            cleanup_file(filesystem, temporary_path, verified_identity)
+            if restored then filesystem.flush_directory(state.target.directory) end
+            if not restored then
+                return move_unknown(
+                    "new path publication failed and source restoration is unknown",
+                    restore_error.code
+                )
+            end
+            return release_destination(publish_error)
+        end
+
+        local destination_flushed, destination_flush_error = filesystem.flush_directory(
+            destination.directory
+        )
+        if destination_flushed and destination.directory ~= state.target.directory then
+            destination_flushed, destination_flush_error = filesystem.flush_directory(
+                state.target.directory
+            )
+        end
+        local published_identity, confirm_error = verify_document_path(
+            schema,
+            filesystem,
+            destination_path,
+            document,
+            nil,
+            limits
+        )
+        if not destination_flushed or not published_identity then
+            state.path = destination_path
+            state.target = destination
+            state.base_document = document
+            state.base_identity = published_identity
+            state.leases[#state.leases + 1] = destination_lease
+            destination_lease = nil
+            return fault(
+                "ContextMoveUnknown",
+                "new Context path exists but lifecycle move could not be confirmed durable",
+                not destination_flushed and destination_flush_error.code or confirm_error.code
+            )
+        end
+
+        state.path = destination_path
+        state.target = destination
+        state.base_document = document
+        state.base_identity = published_identity
+        state.previous_path = destination_previous_path
+        state.lock_path = destination_lock_path
+        state.leases[#state.leases + 1] = destination_lease
+        destination_lease = nil
+
+        local cleaned, cleanup_error = filesystem.delete_verified(
+            source_previous_path,
+            hidden_identity_or_error
+        )
+        if not cleaned then
+            return fault(
+                "ContextCleanupRequired",
+                "new Context path is valid but source previous cleanup failed",
+                cleanup_error.code
+            )
+        end
+        local cleanup_flushed, cleanup_flush_error = filesystem.flush_directory(
+            source_target.directory
+        )
+        if not cleanup_flushed then
+            return fault(
+                "ContextCleanupRequired",
+                "source previous was removed but directory durability is unknown",
+                cleanup_flush_error.code
+            )
+        end
+
+        return finish(assert(freeze({
+            outcome = "moved",
+            action = action,
+            old_path = source_path,
+            path = destination_path,
+            generation = document.generation,
+            event_count = document.event_count,
+            target_qualified = filesystem.capabilities.target_qualified,
+        }, "Context lifecycle receipt")))
+    end
+
+    ---Permanently deletes the four known Context storage targets best-effort.
+    -- There is no trash, archive, restore, tombstone, secure-erase, or remote
+    -- provider withdrawal claim. Every directory entry is removed only against
+    -- the identity observed for that exact role.
+    function store.delete(writer, temporary_or_options)
+        local state = writer_states[writer]
+        if not state or state.owner ~= owner or state.status ~= "active"
+            or (state.mode ~= "replace" and state.mode ~= "delete")
+        then
+            return nil, failure(
+                "InvalidContextWriter",
+                "permanent deletion requires an active mutation writer"
+            )
+        end
+        if state.commit_active then
+            return nil, failure("ContextCommitConflict", "Context publication is already active")
+        end
+        local temporary_path
+        if temporary_or_options == nil then
+            temporary_path = state.path .. ".yaca-tmp-delete"
+        elseif type(temporary_or_options) == "string" then
+            temporary_path = temporary_or_options
+        elseif type(temporary_or_options) == "table" then
+            for key in pairs(temporary_or_options) do
+                if key ~= "temporary_path" then
+                    return nil, failure(
+                        "InvalidContextDelete",
+                        "Context delete options contain an unknown field"
+                    )
+                end
+            end
+            temporary_path = temporary_or_options.temporary_path
+        else
+            return nil, failure("InvalidContextDelete", "Context delete options are invalid")
+        end
+        local valid_temp, temp_error = validate_temp_path(
+            state.path,
+            temporary_path,
+            limits
+        )
+        if not valid_temp then return nil, temp_error end
+
+        local stated, current_identity_or_error = filesystem.stat_identity(state.path)
+        if not stated or not identity_equal(state.base_identity, current_identity_or_error) then
+            state.status = "faulted"
+            return nil, failure(
+                "TargetChanged",
+                "Context target changed before permanent deletion",
+                stated and "identity" or current_identity_or_error.code
+            )
+        end
+
+        state.commit_active = true
+        local targets = {}
+        local function observed_role(role, path, known_identity)
+            if known_identity ~= nil then
+                return { role = role, path = path, identity = known_identity }
+            end
+            local path_state, identity_or_error = control_path_state(filesystem, path)
+            if not path_state then
+                return {
+                    role = role,
+                    path = path,
+                    observation_error = identity_or_error,
+                }
+            end
+            if path_state == "absent" then return { role = role, path = path } end
+            return { role = role, path = path, identity = identity_or_error }
+        end
+        local observed = {
+            observed_role("official", state.path, current_identity_or_error),
+            observed_role("temporary", temporary_path),
+            observed_role("previous-valid", state.previous_path),
+        }
+        local all_complete = true
+        for _, item in ipairs(observed) do
+            local outcome, error_code
+            if item.observation_error then
+                outcome = "unavailable"
+                error_code = item.observation_error.code
+                all_complete = false
+            elseif item.identity == nil then
+                outcome = "absent"
+            else
+                local deleted, delete_error = filesystem.delete_verified(
+                    item.path,
+                    item.identity
+                )
+                if deleted then
+                    local flushed, flush_error = filesystem.flush_directory(
+                        assert(directory_of(item.path))
+                    )
+                    if flushed then
+                        outcome = "deleted"
+                    else
+                        outcome = "durability-unknown"
+                        error_code = flush_error.code
+                        all_complete = false
+                    end
+                else
+                    outcome = delete_error.code == "IdentityChanged"
+                        and "changed" or "failed"
+                    error_code = delete_error.code
+                    all_complete = false
+                end
+            end
+            local target = { role = item.role, path = item.path, outcome = outcome }
+            if error_code then target.error = error_code end
+            targets[#targets + 1] = target
+        end
+
+        local lock_outcome, lock_error_code = "deleted", nil
+        local remaining_leases = {}
+        local released_any = false
+        local seen = {}
+        for _, lease in ipairs(state.leases or { state.lease }) do
+            if lease ~= nil and not seen[lease] then
+                seen[lease] = true
+                local released, release_error = filesystem.release_lease(lease)
+                if released then
+                    released_any = true
+                else
+                    remaining_leases[#remaining_leases + 1] = lease
+                    lock_outcome = release_error.code == "IdentityChanged"
+                        and "changed" or "failed"
+                    lock_error_code = lock_error_code or release_error.code
+                    all_complete = false
+                end
+            end
+        end
+        if not released_any and #remaining_leases == 0 then lock_outcome = "absent" end
+        state.leases = remaining_leases
+        local lock_target = {
+            role = "writer-lock",
+            path = state.lock_path,
+            outcome = lock_outcome,
+        }
+        if lock_error_code then lock_target.error = lock_error_code end
+        targets[#targets + 1] = lock_target
+
+        state.commit_active = false
+        state.status = all_complete and "deleted" or "faulted"
+        local receipt = assert(freeze({
+            outcome = all_complete and "deleted" or "partial",
+            path = state.path,
+            permanent = true,
+            recoverable = false,
+            secure_erase = false,
+            provider_withdrawal = false,
+            targets = targets,
+            target_qualified = filesystem.capabilities.target_qualified,
+        }, "Context permanent deletion receipt"))
+        return receipt
+    end
+
     ---Releases one writer lease after all synchronous publication work ends.
     function store.close_writer(writer)
         local state = writer_states[writer]
@@ -3401,9 +4472,17 @@ function M.new_store(schema, ports, options)
                 "Context writer cannot close during publication"
             )
         end
-        local released, release_error = filesystem.release_lease(state.lease)
+        local release_error
+        local seen = {}
+        for _, lease in ipairs(state.leases or { state.lease }) do
+            if lease ~= nil and not seen[lease] then
+                seen[lease] = true
+                local released, current_error = filesystem.release_lease(lease)
+                if not released and not release_error then release_error = current_error end
+            end
+        end
         state.status = "closed"
-        if not released then return nil, release_error end
+        if release_error then return nil, release_error end
         return true
     end
 
@@ -3533,6 +4612,12 @@ function M.new_store(schema, ports, options)
         publication_mutex = true,
         full_stream_rewrite = true,
         previous_valid_generation = true,
+        identity_bound_lifecycle = true,
+        no_replace_move = true,
+        in_place_import = true,
+        permanent_delete = true,
+        trash_restore_surface = false,
+        secure_erase_claim = false,
         atomic_replace_candidate = filesystem.capabilities.atomic_replace_candidate,
         rename_no_replace_candidate = filesystem.capabilities.rename_no_replace_candidate,
         target_qualified = filesystem.capabilities.target_qualified,
