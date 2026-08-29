@@ -149,7 +149,7 @@ local function append(candidate, type_name, fields, extras)
 end
 
 local EXPECTED_EVENTS = {
-    "turn_started", "user_message", "model_request", "model_message",
+    "turn_started", "user_message", "queue_item", "model_request", "model_message",
     "model_control", "model_yield", "tool_call", "permission_decision", "approval",
     "operation_intent", "operation_result", "tool_result", "action_review",
     "termination_review", "turn_ended", "cancel", "steer", "compaction",
@@ -161,7 +161,7 @@ return {
     name = "unit/context-schema",
     cases = {
         {
-            name = "event registry is the exact frozen 27-type semantic schema",
+            name = "event registry is the exact frozen 28-type semantic schema",
             run = function()
                 local service = new_service()
                 A.deep_equal(service.event_types, EXPECTED_EVENTS)
@@ -370,6 +370,95 @@ return {
                 A.falsy(rejected)
                 A.equal(relation_error.code, "ContextRelation")
                 A.equal(relation_error.reason, "duplicate-operation-result")
+            end,
+        },
+        {
+            name = "queue side steer and yield continuations preserve ordered local causality",
+            run = function()
+                local service = new_service()
+                local candidate = minimal()
+                append(candidate, "model_request", {
+                    requestId = "request-1", purpose = "main", viewManifestRef = "view-1",
+                })
+                append(candidate, "model_message", {
+                    messageId = "message-yield", requestId = "request-1",
+                    role = "assistant", status = "complete", body = "first response",
+                })
+                append(candidate, "model_yield", {
+                    requestId = "request-1", messageId = "message-yield",
+                })
+                append(candidate, "turn_ended", {
+                    outcome = "partial", reason = "superseded-by-new-input",
+                })
+                local queued = append(candidate, "queue_item", {
+                    queueItemId = "queue-item-1", displayId = "#1",
+                    action = "enqueue", text = "next",
+                })
+                queued.turn_id = nil
+                local edited = append(candidate, "queue_item", {
+                    queueItemId = "queue-item-1", displayId = "#1",
+                    action = "edit", text = "next edited",
+                })
+                edited.turn_id = nil
+                local consumed = append(candidate, "queue_item", {
+                    queueItemId = "queue-item-1", displayId = "#1",
+                    action = "consume", text = "next edited",
+                })
+                consumed.turn_id = nil
+                append(candidate, "turn_started", {
+                    kind = "main",
+                    configGeneration = "config-2",
+                    modelSnapshot = "model-2",
+                    permissionSnapshot = "permission-2",
+                    promptSnapshot = "prompt-2",
+                    toolRegistrySnapshot = "tools-2",
+                    queueItemId = "queue-item-1",
+                    supersedesResponseId = "message-yield",
+                }, { turn_id = "turn-2" })
+                append(candidate, "user_message", {
+                    messageId = "message-2", text = "next edited", source = "user",
+                }, { turn_id = "turn-2" })
+                append(candidate, "turn_started", {
+                    kind = "side",
+                    configGeneration = "config-2",
+                    modelSnapshot = "model-2",
+                    permissionSnapshot = "permission-2",
+                    promptSnapshot = "prompt-2",
+                    toolRegistrySnapshot = "tools-2",
+                }, { turn_id = "side-1" })
+                append(candidate, "user_message", {
+                    messageId = "side-message-1", text = "side question", source = "user",
+                }, { turn_id = "side-1" })
+                append(candidate, "model_request", {
+                    requestId = "side-request-1", purpose = "side", viewManifestRef = "view-2",
+                }, { turn_id = "side-1" })
+                append(candidate, "model_message", {
+                    messageId = "side-message-2", requestId = "side-request-1",
+                    role = "assistant", status = "complete", body = "side answer",
+                }, { turn_id = "side-1" })
+                append(candidate, "turn_ended", { outcome = "completed" }, {
+                    turn_id = "side-1",
+                })
+                append(candidate, "steer", {
+                    messageId = "steer-message-1", targetTurnId = "turn-2",
+                    summary = "use side", sideId = "side-1",
+                }, { turn_id = "turn-2" })
+                local side_queue = append(candidate, "queue_item", {
+                    queueItemId = "queue-item-2", displayId = "#2",
+                    action = "enqueue", text = "side answer", sideId = "side-1",
+                })
+                side_queue.turn_id = nil
+
+                local document = assert(service.build(candidate))
+                A.equal(document.facts[10].fields.supersedesResponseId, "message-yield")
+                A.equal(document.facts[17].fields.sideId, "side-1")
+                A.equal(document.facts[18].fields.sideId, "side-1")
+
+                local forged = copy(candidate)
+                forged.facts[#forged.facts].fields.sideId = "turn-2"
+                local rejected, relation_error = service.build(forged)
+                A.falsy(rejected)
+                A.equal(relation_error.code, "ContextRelation")
             end,
         },
         {

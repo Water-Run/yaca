@@ -91,30 +91,32 @@ local PAUSED_AGENT_STATES = {
 local AGENT_TRANSITIONS = {
     Idle = { Preparing = true, Closing = true },
     Preparing = { RequestingModel = true, Finalizing = true, Closing = true },
-    RequestingModel = { Streaming = true, Finalizing = true, Closing = true },
+    RequestingModel = {
+        Streaming = true, Preparing = true, Finalizing = true, Closing = true,
+    },
     Streaming = {
-        DispatchingTools = true, WaitingUser = true,
+        Preparing = true, DispatchingTools = true, WaitingUser = true,
         EvaluatingTermination = true, Finalizing = true, Closing = true,
     },
     DispatchingTools = {
         AwaitingApproval = true, ExecutingTool = true, EvaluatingAction = true,
-        RequestingModel = true, Finalizing = true, Closing = true,
+        Preparing = true, RequestingModel = true, Finalizing = true, Closing = true,
     },
     AwaitingApproval = {
         ExecutingTool = true, DispatchingTools = true, WaitingUser = true,
-        Finalizing = true, Closing = true,
+        Preparing = true, Finalizing = true, Closing = true,
     },
     ExecutingTool = {
         DispatchingTools = true, RequestingModel = true,
-        Finalizing = true, Closing = true,
+        Preparing = true, Finalizing = true, Closing = true,
     },
     EvaluatingAction = {
         AwaitingApproval = true, ExecutingTool = true,
         DispatchingTools = true, WaitingUser = true,
-        Finalizing = true, Closing = true,
+        Preparing = true, Finalizing = true, Closing = true,
     },
     EvaluatingTermination = {
-        RequestingModel = true, WaitingUser = true,
+        Preparing = true, RequestingModel = true, WaitingUser = true,
         Finalizing = true, Closing = true,
     },
     WaitingUser = {
@@ -532,6 +534,12 @@ local STUCK_FIELDS = {
     semantic_no_progress = true,
     runtime_maximum = true,
 }
+local LANE_FIELDS = {
+    queue_maximum = true,
+    side_active_time_ms = true,
+    side_response_bytes = true,
+    side_snapshot_id = true,
+}
 
 local function validate_agent_options(options)
     if type(options) ~= "table" then
@@ -540,12 +548,15 @@ local function validate_agent_options(options)
     if not exact_fields(options, {
         hard_caps = true, stuck = true, initial_sequence = true,
         maximum_identifier_bytes = true, hard_cap_snapshot_id = true,
+        initial_context_generation = true, lanes = true,
     }) then
         return nil, failure("InvalidAgentOptions", "AgentLoop options are ambiguous")
     end
     if not exact_fields(options.hard_caps, AGENT_HARD_CAP_FIELDS)
         or not exact_fields(options.stuck, STUCK_FIELDS)
+        or not exact_fields(options.lanes, LANE_FIELDS)
         or not integer_at_least(options.initial_sequence, 0)
+        or not integer_at_least(options.initial_context_generation, 1)
         or not integer_at_least(options.maximum_identifier_bytes, 16)
         or not valid_runtime_id(
             options.hard_cap_snapshot_id,
@@ -553,6 +564,16 @@ local function validate_agent_options(options)
         )
     then
         return nil, failure("InvalidAgentOptions", "AgentLoop option shape is invalid")
+    end
+    if not integer_at_least(options.lanes.queue_maximum, 1)
+        or not integer_at_least(options.lanes.side_active_time_ms, 1)
+        or not integer_at_least(options.lanes.side_response_bytes, 1)
+        or not valid_runtime_id(
+            options.lanes.side_snapshot_id,
+            options.maximum_identifier_bytes
+        )
+    then
+        return nil, failure("InvalidAgentOptions", "busy-lane hard caps are invalid")
     end
     for name in pairs(AGENT_HARD_CAP_FIELDS) do
         if not integer_at_least(options.hard_caps[name], 1) then
@@ -580,11 +601,14 @@ local function validate_agent_options(options)
         hard_caps = {},
         stuck = {},
         initial_sequence = options.initial_sequence,
+        initial_context_generation = options.initial_context_generation,
         maximum_identifier_bytes = options.maximum_identifier_bytes,
         hard_cap_snapshot_id = options.hard_cap_snapshot_id,
+        lanes = {},
     }
     for name in pairs(AGENT_HARD_CAP_FIELDS) do copy.hard_caps[name] = options.hard_caps[name] end
     for name in pairs(STUCK_FIELDS) do copy.stuck[name] = options.stuck[name] end
+    for name in pairs(LANE_FIELDS) do copy.lanes[name] = options.lanes[name] end
     local runtime_snapshot = {
         "yaca-runtime-snapshot-v1",
         "hard=" .. copy.hard_cap_snapshot_id,
@@ -602,6 +626,12 @@ local function validate_agent_options(options)
     }) do
         runtime_snapshot[#runtime_snapshot + 1] = name .. "=" .. tostring(copy.stuck[name])
     end
+    runtime_snapshot[#runtime_snapshot + 1] = "lanes=" .. copy.lanes.side_snapshot_id
+    for _, name in ipairs({
+        "queue_maximum", "side_active_time_ms", "side_response_bytes",
+    }) do
+        runtime_snapshot[#runtime_snapshot + 1] = name .. "=" .. tostring(copy.lanes[name])
+    end
     copy.runtime_snapshot = table.concat(runtime_snapshot, ";")
     if #copy.runtime_snapshot > copy.hard_caps.message_bytes then
         return nil, failure(
@@ -615,6 +645,7 @@ end
 local function validate_agent_ports(ports)
     if type(ports) ~= "table" or not exact_fields(ports, {
         clock = true, journal = true, model = true, tools = true, reviews = true,
+        snapshots = true, side = true,
     }) then
         return nil, failure("InvalidAgentPorts", "AgentLoop ports are required and unambiguous")
     end
@@ -632,6 +663,15 @@ local function validate_agent_ports(ports)
             or type(ports.reviews.start) ~= "function"
             or type(ports.reviews.cancel) ~= "function"
         ))
+        or (ports.snapshots ~= false and (
+            type(ports.snapshots) ~= "table"
+            or type(ports.snapshots.capture) ~= "function"
+        ))
+        or (ports.side ~= false and (
+            type(ports.side) ~= "table"
+            or type(ports.side.start) ~= "function"
+            or type(ports.side.cancel) ~= "function"
+        ))
     then
         return nil, failure("InvalidAgentPorts", "AgentLoop port contract is incomplete")
     end
@@ -644,6 +684,7 @@ local function validate_turn_input(input, limits)
         model_snapshot = true, permission_snapshot = true,
         prompt_snapshot = true, tool_registry_snapshot = true,
         view_manifest_ref = true, double_check = true,
+        context_generation = true,
     }
     if not exact_fields(input, allowed)
         or not valid_runtime_text(input.text, limits.hard_caps.message_bytes, false)
@@ -655,6 +696,7 @@ local function validate_turn_input(input, limits)
         or not valid_runtime_text(input.tool_registry_snapshot, limits.hard_caps.message_bytes, false)
         or not valid_runtime_text(input.view_manifest_ref, limits.hard_caps.message_bytes, false)
         or type(input.double_check) ~= "boolean"
+        or not integer_at_least(input.context_generation, 1)
     then
         return nil, failure("InvalidTurnInput", "main input or its frozen snapshot is invalid")
     end
@@ -822,6 +864,7 @@ function M.new_agent_loop(ports, options)
     local halted = false
     local halt_error
     local sequence = limits.initial_sequence
+    local context_generation = limits.initial_context_generation
     local barrier_serial = 0
     local turn_serial = 0
     local message_serial = 0
@@ -835,7 +878,21 @@ function M.new_agent_loop(ports, options)
     local active_review
     local active_tool
     local pending
+    local pending_steer
+    local queue_items = {}
+    local queue_serial = 0
+    local queue_display_serial = 0
+    local side_serial = 0
+    local side
+    local side_history = {}
     local loop = {}
+    local request_model
+    local dispatch_next
+    local accept_result
+    local skip_remaining
+    local start_main
+    local auto_start_queue
+    local inject_steer
 
     local function current_trace()
         return turn and turn.trace or (last_turn and last_turn.trace)
@@ -892,16 +949,23 @@ function M.new_agent_loop(ports, options)
         local first_sequence = sequence + 1
         local records = {}
         for index, event in ipairs(events) do
-            if not exact_fields(event, { type = true, fields = true })
+            if not exact_fields(event, { type = true, fields = true, turn_id = true })
                 or not valid_runtime_id(event.type, limits.maximum_identifier_bytes)
                 or type(event.fields) ~= "table"
             then
                 return durability_failure("invalid-event")
             end
+            local event_turn_id = event.turn_id
+            if event_turn_id == nil then event_turn_id = turn and turn.id or false end
+            if event_turn_id ~= false
+                and not valid_runtime_id(event_turn_id, limits.maximum_identifier_bytes)
+            then
+                return durability_failure("invalid-event-turn")
+            end
             records[index] = {
                 seq = sequence + index,
                 type = event.type,
-                turn_id = turn and turn.id or false,
+                turn_id = event_turn_id,
                 fields = event.fields,
             }
         end
@@ -910,6 +974,7 @@ function M.new_agent_loop(ports, options)
             first_sequence = first_sequence,
             last_sequence = sequence + count,
             event_count = count,
+            expected_context_generation = context_generation,
             events = records,
         }, nil, "durable AgentLoop batch")
         if not batch then return durability_failure("cyclic-event") end
@@ -920,15 +985,130 @@ function M.new_agent_loop(ports, options)
             or receipt.last_sequence ~= sequence + count
             or receipt.event_count ~= count
             or receipt.binding ~= batch
+            or not integer_at_least(receipt.previous_context_generation, context_generation)
+            or not integer_at_least(
+                receipt.context_generation,
+                receipt.previous_context_generation + 1
+            )
         then
             local detail = called and receipt or committed
             return durability_failure("commit-not-exact", detail)
         end
         sequence = sequence + count
+        context_generation = receipt.context_generation
         if turn then
             turn.trace.durable_barriers[#turn.trace.durable_barriers + 1] = barrier_id
         end
         return receipt
+    end
+
+    local function observed_turn_id()
+        return turn and turn.id or false
+    end
+
+    local function validate_lane_observation(candidate)
+        if not integer_at_least(candidate.expected_context_generation, 1)
+            or (candidate.expected_turn_id ~= false
+                and not valid_runtime_id(
+                    candidate.expected_turn_id,
+                    limits.maximum_identifier_bytes
+                ))
+        then
+            return nil, failure(
+                "InvalidLaneObservation",
+                "busy-lane action requires an exact Context and turn observation"
+            )
+        end
+        if candidate.expected_context_generation ~= context_generation
+            or candidate.expected_turn_id ~= observed_turn_id()
+        then
+            return nil, failure(
+                "StaleLaneObservation",
+                "busy-lane action observed stale Context or main-turn state",
+                {
+                    expected_context_generation = context_generation,
+                    expected_turn_id = observed_turn_id(),
+                }
+            )
+        end
+        return true
+    end
+
+    local function capture_snapshot(kind, text_value, source, cause)
+        if admitted_ports.snapshots == false then
+            return nil, failure(
+                "SnapshotUnavailable",
+                "a fresh top-level turn snapshot cannot be captured"
+            )
+        end
+        local specification = freeze({
+            kind = kind,
+            text = text_value,
+            source = source,
+            context_generation = context_generation,
+            active_turn_id = observed_turn_id(),
+            cause = cause or false,
+        }, nil, "turn snapshot request")
+        local called, candidate, capture_error = pcall(
+            admitted_ports.snapshots.capture,
+            specification
+        )
+        if not called or candidate == nil or candidate == false then
+            return nil, failure(
+                "SnapshotCaptureFailure",
+                "the current immutable turn snapshot could not be captured",
+                called and capture_error or candidate
+            )
+        end
+        local snapshot, snapshot_error = validate_turn_input(candidate, limits)
+        if not snapshot then return nil, snapshot_error end
+        if snapshot.text ~= text_value or snapshot.source ~= source
+            or snapshot.context_generation ~= context_generation
+        then
+            return nil, failure(
+                "SnapshotBindingMismatch",
+                "captured turn snapshot does not bind the accepted input and Context generation"
+            )
+        end
+        return snapshot
+    end
+
+    local function queue_index(queue_item_id)
+        for index, item in ipairs(queue_items) do
+            if item.id == queue_item_id then return index, item end
+        end
+        return nil
+    end
+
+    local function reset_queue_display_if_empty()
+        if #queue_items == 0 then queue_display_serial = 0 end
+    end
+
+    local function public_queue_item(item)
+        return {
+            queue_item_id = item.id,
+            display_id = item.display_id,
+            text = item.text,
+            source = item.source,
+            side_id = item.side_id or false,
+        }
+    end
+
+    local function queue_event(item, action, extra)
+        local fields = {
+            queueItemId = item.id,
+            displayId = item.display_id,
+            action = action,
+            text = item.text,
+        }
+        if item.side_id then fields.sideId = item.side_id end
+        if extra then
+            if extra.before_queue_item_id then
+                fields.beforeQueueItemId = extra.before_queue_item_id
+            end
+            if extra.reason then fields.reason = extra.reason end
+        end
+        return { type = "queue_item", fields = fields, turn_id = false }
     end
 
     local function final_snapshot(outcome)
@@ -966,14 +1146,26 @@ function M.new_agent_loop(ports, options)
         if not receipt then return nil, commit_error end
         local snapshot = final_snapshot(outcome)
         active_request, active_review, active_tool, pending = nil, nil, nil, nil
+        pending_steer = nil
         if closing then transition("Closing") else transition("Idle") end
         last_turn = snapshot
         turn = nil
-        return readonly({
+        local result = {
             outcome = outcome,
             turn_id = snapshot.id,
             last_durable_sequence = sequence,
-        }, "turn outcome")
+        }
+        if outcome == "completed" and not closing and #queue_items > 0 then
+            local started, start_error = auto_start_queue()
+            if started then
+                result.auto_started_queue_item = started.queue_item_id
+                result.next_turn_id = started.turn_id
+            elseif start_error then
+                result.queue_paused_error = start_error.code
+            end
+            result.last_durable_sequence = sequence
+        end
+        return assert(freeze(result, nil, "turn outcome"))
     end
 
     local function budget_reason(prospective)
@@ -994,11 +1186,6 @@ function M.new_agent_loop(ports, options)
         end
         return nil
     end
-
-    local request_model
-    local dispatch_next
-    local accept_result
-    local skip_remaining
 
     local function start_effect(port, method, specification, label)
         local called, handle, start_error = pcall(port[method], specification)
@@ -1081,6 +1268,10 @@ function M.new_agent_loop(ports, options)
             turn_id = turn.id,
             purpose = purpose,
             binding = binding,
+            model_snapshot = turn.snapshot.model_snapshot,
+            config_generation = turn.snapshot.config_generation,
+            view_manifest_ref = turn.snapshot.view_manifest_ref,
+            no_tools = true,
         }, nil, "review request")
         local handle, start_error = start_effect(
             admitted_ports.reviews,
@@ -1223,6 +1414,32 @@ function M.new_agent_loop(ports, options)
         return request_model("main", after_failure and { tool_failure = after_failure } or nil)
     end
 
+    inject_steer = function()
+        if not pending_steer or not turn then
+            return nil, failure("NoPendingSteer", "no durable steer awaits injection")
+        end
+        if active_tool or active_request or active_review then
+            return nil, failure("SteerActivityPending", "steer awaits the active activity result")
+        end
+        if turn.call_cursor <= #turn.calls then
+            if state ~= "DispatchingTools" then transition("DispatchingTools") end
+            local skipped, skip_error = skip_remaining(
+                "skipped-by-steer",
+                pending_steer.message_id
+            )
+            if not skipped then return nil, skip_error end
+        end
+        local steering = pending_steer
+        pending_steer = nil
+        pending = nil
+        turn.reported_outcome = false
+        if state ~= "Preparing" then transition("Preparing") end
+        return request_model("main", {
+            steer_message_id = steering.message_id,
+            side_id = steering.side_id or false,
+        })
+    end
+
     accept_result = function(result)
         if state ~= "ExecutingTool" or not active_tool then
             return nil, failure("NoExecutingTool", "no foreground tool awaits a result")
@@ -1232,6 +1449,17 @@ function M.new_agent_loop(ports, options)
         if not paired then return nil, pair_error end
         active_tool = nil
         turn.call_cursor = turn.call_cursor + 1
+        if pending_steer then
+            if turn.call_cursor <= #turn.calls then
+                transition("DispatchingTools")
+                local skipped, skip_error = skip_remaining(
+                    "skipped-by-steer",
+                    pending_steer.message_id
+                )
+                if not skipped then return nil, skip_error end
+            end
+            return inject_steer()
+        end
         local status = TOOL_RESULT_KINDS[result.kind]
         if result.progress_identity ~= false then
             turn.detector.last_progress = result.progress_identity
@@ -1564,12 +1792,17 @@ function M.new_agent_loop(ports, options)
         return finalize("refused", control.payload.reason)
     end
 
-    ---Accepts a new main message only after its complete turn snapshot validates.
-    function loop:begin_main(input)
+    start_main = function(input, cause)
         if halted then return nil, halt_error end
         if state ~= "Idle" then return nil, failure("AgentBusy", "a main turn is already active") end
         local snapshot, input_error = validate_turn_input(input, limits)
         if not snapshot then return nil, input_error end
+        if snapshot.context_generation ~= context_generation then
+            return nil, failure(
+                "StaleContextObservation",
+                "main input observed a different Context generation"
+            )
+        end
         local now, clock_error = clock_now()
         if not now then return nil, clock_error end
         turn_serial = turn_serial + 1
@@ -1615,27 +1848,917 @@ function M.new_agent_loop(ports, options)
             outcome_durable = false,
             reported_outcome = false,
         }
+        local turn_fields = {
+            kind = "main",
+            configGeneration = snapshot.config_generation,
+            modelSnapshot = snapshot.model_snapshot,
+            permissionSnapshot = snapshot.permission_snapshot,
+            promptSnapshot = snapshot.prompt_snapshot,
+            toolRegistrySnapshot = snapshot.tool_registry_snapshot,
+            runtimeSnapshot = limits.runtime_snapshot,
+            contextDocumentGeneration = tostring(snapshot.context_generation),
+        }
+        local events = {}
+        if cause and cause.queue_item then
+            turn_fields.queueItemId = cause.queue_item.id
+            events[#events + 1] = queue_event(cause.queue_item, "consume", {
+                reason = "started-as-next-main-turn",
+            })
+        end
+        if cause and cause.continues_response_id then
+            turn_fields.continuesResponseId = cause.continues_response_id
+        end
+        if cause and cause.supersedes_response_id then
+            turn_fields.supersedesResponseId = cause.supersedes_response_id
+        end
+        events[#events + 1] = {
+            type = "turn_started",
+            turn_id = turn_id,
+            fields = turn_fields,
+        }
+        events[#events + 1] = {
+            type = "user_message",
+            turn_id = turn_id,
+            fields = { messageId = message_id, text = snapshot.text, source = snapshot.source },
+        }
+        local receipt, commit_error = commit_events(events)
+        if not receipt then return nil, commit_error end
+        if cause and cause.queue_item then
+            local index = queue_index(cause.queue_item.id)
+            if not index then
+                return durability_failure("queue-consume-binding-lost")
+            end
+            table.remove(queue_items, index)
+            reset_queue_display_if_empty()
+        end
+        transition("Preparing")
+        local admitted, request_error = request_model("main", cause and {
+            queue_item_id = cause.queue_item and cause.queue_item.id or false,
+            continues_response_id = cause.continues_response_id or false,
+            supersedes_response_id = cause.supersedes_response_id or false,
+        } or nil)
+        if not admitted then return nil, request_error end
+        return assert(freeze({
+            state = admitted.state,
+            request_id = admitted.request_id or false,
+            turn_id = turn_id,
+            queue_item_id = cause and cause.queue_item and cause.queue_item.id or false,
+        }, nil, "main turn admission"))
+    end
+
+    ---Accepts a new main message only after its complete turn snapshot validates.
+    function loop:begin_main(input)
+        return start_main(input, nil)
+    end
+
+    ---Captures and admits a fresh main snapshot from an exact idle observation.
+    function loop:submit_main(command)
+        if halted then return nil, halt_error end
+        if not exact_fields(command, {
+            text = true, source = true,
+            expected_context_generation = true, expected_turn_id = true,
+        }) then
+            return nil, failure("InvalidMainSubmission", "main submission is ambiguous")
+        end
+        local observed, observation_error = validate_lane_observation(command)
+        if not observed then return nil, observation_error end
+        if state ~= "Idle" then return nil, failure("AgentBusy", "main submission requires idle") end
+        if not valid_runtime_text(command.text, limits.hard_caps.message_bytes, false)
+            or not valid_runtime_id(command.source, limits.maximum_identifier_bytes)
+        then
+            return nil, failure("InvalidMainSubmission", "main input is invalid")
+        end
+        local snapshot, snapshot_error = capture_snapshot(
+            "main",
+            command.text,
+            command.source,
+            { kind = "direct-main" }
+        )
+        if not snapshot then return nil, snapshot_error end
+        return start_main(snapshot, nil)
+    end
+
+    local function validate_queue_mutation(command, allowed)
+        if not exact_fields(command, allowed) then
+            return nil, failure("InvalidQueueAction", "queue action contains unknown fields")
+        end
+        return validate_lane_observation(command)
+    end
+
+    ---Durably enqueues one bounded future main input without freezing its turn snapshot.
+    function loop:enqueue(command)
+        if halted then return nil, halt_error end
+        if closing or state == "Closing" then
+            return nil, failure("SessionClosing", "queue admission is closed")
+        end
+        local valid, valid_error = validate_queue_mutation(command, {
+            text = true, source = true, side_id = true,
+            expected_context_generation = true, expected_turn_id = true,
+        })
+        if not valid then return nil, valid_error end
+        if not valid_runtime_text(command.text, limits.hard_caps.message_bytes, false)
+            or not valid_runtime_id(command.source, limits.maximum_identifier_bytes)
+            or (command.side_id ~= nil
+                and not valid_runtime_id(command.side_id, limits.maximum_identifier_bytes))
+        then
+            return nil, failure("InvalidQueueAction", "queued input is invalid")
+        end
+        if #queue_items >= limits.lanes.queue_maximum then
+            return nil, failure(
+                "QueueFull",
+                "queue hard limit reached; the new draft was not consumed",
+                { preserved_text = command.text, maximum = limits.lanes.queue_maximum }
+            )
+        end
+        queue_serial = queue_serial + 1
+        queue_display_serial = queue_display_serial + 1
+        local item = {
+            id = "queue-item-" .. tostring(queue_serial),
+            display_id = "#" .. tostring(queue_display_serial),
+            text = command.text,
+            source = command.source,
+            side_id = command.side_id,
+        }
+        local receipt, commit_error = commit_events({ queue_event(item, "enqueue") })
+        if not receipt then return nil, commit_error end
+        queue_items[#queue_items + 1] = item
+        return assert(freeze({
+            accepted = true,
+            queue_item_id = item.id,
+            display_id = item.display_id,
+            position = #queue_items,
+            queued = #queue_items,
+            context_generation = context_generation,
+        }, nil, "queue admission"))
+    end
+
+    ---Returns the ordered queue projection without changing Context state.
+    function loop:list_queue()
+        local items = {}
+        for index, item in ipairs(queue_items) do
+            items[index] = public_queue_item(item)
+            items[index].position = index
+        end
+        return assert(freeze({
+            items = items,
+            count = #items,
+            maximum = limits.lanes.queue_maximum,
+            context_generation = context_generation,
+        }, nil, "queue projection"))
+    end
+
+    ---Appends a queue tombstone and removes only the exactly observed item.
+    function loop:drop_queue(command)
+        if halted then return nil, halt_error end
+        local valid, valid_error = validate_queue_mutation(command, {
+            queue_item_id = true, reason = true,
+            expected_context_generation = true, expected_turn_id = true,
+        })
+        if not valid then return nil, valid_error end
+        if not valid_runtime_id(command.queue_item_id, limits.maximum_identifier_bytes)
+            or not valid_runtime_text(command.reason, limits.hard_caps.message_bytes, true)
+        then
+            return nil, failure("InvalidQueueAction", "queue drop binding is invalid")
+        end
+        local index, item = queue_index(command.queue_item_id)
+        if not index then return nil, failure("QueueItemMissing", "queue item is not active") end
+        local receipt, commit_error = commit_events({ queue_event(item, "drop", {
+            reason = command.reason ~= "" and command.reason or "user-drop",
+        }) })
+        if not receipt then return nil, commit_error end
+        table.remove(queue_items, index)
+        reset_queue_display_if_empty()
+        return assert(freeze({
+            dropped = item.id,
+            queued = #queue_items,
+            context_generation = context_generation,
+        }, nil, "queue drop"))
+    end
+
+    ---Appends an amendment while preserving the queue-item identity and position.
+    function loop:edit_queue(command)
+        if halted then return nil, halt_error end
+        local valid, valid_error = validate_queue_mutation(command, {
+            queue_item_id = true, text = true,
+            expected_context_generation = true, expected_turn_id = true,
+        })
+        if not valid then return nil, valid_error end
+        if not valid_runtime_id(command.queue_item_id, limits.maximum_identifier_bytes)
+            or not valid_runtime_text(command.text, limits.hard_caps.message_bytes, false)
+        then
+            return nil, failure("InvalidQueueAction", "queue edit is invalid")
+        end
+        local index, item = queue_index(command.queue_item_id)
+        if not index then return nil, failure("QueueItemMissing", "queue item is not active") end
+        local amended = {
+            id = item.id, display_id = item.display_id, text = command.text,
+            source = item.source, side_id = item.side_id,
+        }
+        local receipt, commit_error = commit_events({ queue_event(amended, "edit") })
+        if not receipt then return nil, commit_error end
+        item.text = command.text
+        return assert(freeze({
+            edited = item.id,
+            position = index,
+            context_generation = context_generation,
+        }, nil, "queue edit"))
+    end
+
+    ---Appends a reorder amendment and moves the item before another item or to the end.
+    function loop:reorder_queue(command)
+        if halted then return nil, halt_error end
+        local valid, valid_error = validate_queue_mutation(command, {
+            queue_item_id = true, before_queue_item_id = true,
+            expected_context_generation = true, expected_turn_id = true,
+        })
+        if not valid then return nil, valid_error end
+        if not valid_runtime_id(command.queue_item_id, limits.maximum_identifier_bytes)
+            or (command.before_queue_item_id ~= false
+                and not valid_runtime_id(
+                    command.before_queue_item_id,
+                    limits.maximum_identifier_bytes
+                ))
+            or command.before_queue_item_id == command.queue_item_id
+        then
+            return nil, failure("InvalidQueueAction", "queue reorder binding is invalid")
+        end
+        local index, item = queue_index(command.queue_item_id)
+        if not index then return nil, failure("QueueItemMissing", "queue item is not active") end
+        if command.before_queue_item_id ~= false
+            and not queue_index(command.before_queue_item_id)
+        then
+            return nil, failure("QueueItemMissing", "queue reorder target is not active")
+        end
+        local receipt, commit_error = commit_events({ queue_event(item, "move", {
+            before_queue_item_id = command.before_queue_item_id ~= false
+                and command.before_queue_item_id or nil,
+            reason = command.before_queue_item_id == false and "move-to-end" or nil,
+        }) })
+        if not receipt then return nil, commit_error end
+        table.remove(queue_items, index)
+        local destination = #queue_items + 1
+        if command.before_queue_item_id ~= false then
+            destination = assert(queue_index(command.before_queue_item_id))
+        end
+        table.insert(queue_items, destination, item)
+        return assert(freeze({
+            moved = item.id,
+            position = destination,
+            context_generation = context_generation,
+        }, nil, "queue reorder"))
+    end
+
+    ---Appends one tombstone per active item and clears the bounded queue atomically.
+    function loop:clear_queue(command)
+        if halted then return nil, halt_error end
+        local valid, valid_error = validate_queue_mutation(command, {
+            reason = true, expected_context_generation = true, expected_turn_id = true,
+        })
+        if not valid then return nil, valid_error end
+        if not valid_runtime_text(command.reason, limits.hard_caps.message_bytes, true) then
+            return nil, failure("InvalidQueueAction", "queue clear reason is invalid")
+        end
+        if #queue_items == 0 then
+            return assert(freeze({
+                cleared = 0,
+                context_generation = context_generation,
+            }, nil, "empty queue clear"))
+        end
+        local events = {}
+        for _, item in ipairs(queue_items) do
+            events[#events + 1] = queue_event(item, "drop", {
+                reason = command.reason ~= "" and command.reason or "user-clear",
+            })
+        end
+        local receipt, commit_error = commit_events(events)
+        if not receipt then return nil, commit_error end
+        local cleared = #queue_items
+        queue_items = {}
+        reset_queue_display_if_empty()
+        return assert(freeze({
+            cleared = cleared,
+            context_generation = context_generation,
+        }, nil, "queue clear"))
+    end
+
+    auto_start_queue = function()
+        if halted then return nil, halt_error end
+        if state ~= "Idle" or closing or #queue_items == 0 then return false end
+        local item = queue_items[1]
+        local snapshot, snapshot_error = capture_snapshot(
+            "main",
+            item.text,
+            item.source,
+            { kind = "queue", queue_item_id = item.id }
+        )
+        if not snapshot then return nil, snapshot_error end
+        local admitted, admission_error = start_main(snapshot, { queue_item = item })
+        if not admitted then return nil, admission_error end
+        return assert(freeze({
+            queue_item_id = item.id,
+            turn_id = admitted.turn_id,
+            request_id = admitted.request_id,
+        }, nil, "queued main admission"))
+    end
+
+    ---Explicitly consumes the oldest queue item from a durable idle observation.
+    function loop:run_next(command)
+        if halted then return nil, halt_error end
+        if not exact_fields(command, {
+            expected_context_generation = true, expected_turn_id = true,
+        }) then
+            return nil, failure("InvalidQueueAction", "run-next action is ambiguous")
+        end
+        local valid, valid_error = validate_lane_observation(command)
+        if not valid then return nil, valid_error end
+        if state ~= "Idle" then return nil, failure("AgentBusy", "run-next requires idle main") end
+        if #queue_items == 0 then return nil, failure("QueueEmpty", "no queue item is active") end
+        return auto_start_queue()
+    end
+
+    local function finish_side(outcome, reason, error_id, response)
+        if not side then return nil, failure("NoSideTurn", "no side turn is active") end
+        local fields = { outcome = outcome }
+        if valid_runtime_text(reason, limits.hard_caps.message_bytes, false) then
+            fields.reason = reason
+        end
+        if error_id then fields.errorId = error_id end
+        local receipt, commit_error = commit_events({ {
+            type = "turn_ended",
+            turn_id = side.id,
+            fields = fields,
+        } })
+        if not receipt then return nil, commit_error end
+        local completed = side
+        completed.outcome = outcome
+        completed.reason = reason or false
+        completed.error_id = error_id or false
+        completed.response = response or false
+        completed.handle = false
+        side_history[completed.id] = completed
+        side = nil
+        return assert(freeze({
+            side_id = completed.id,
+            outcome = outcome,
+            response_id = response and response.message_id or false,
+            context_generation = context_generation,
+        }, nil, "side turn outcome"))
+    end
+
+    ---Starts one no-tool side turn from a fresh durable snapshot.
+    function loop:start_side(command)
+        if halted then return nil, halt_error end
+        if closing or state == "Closing" then
+            return nil, failure("SessionClosing", "side admission is closed")
+        end
+        if admitted_ports.side == false then
+            return nil, failure("SideUnavailable", "side request transport is unavailable")
+        end
+        if not exact_fields(command, {
+            text = true, source = true,
+            expected_context_generation = true, expected_turn_id = true,
+        }) then
+            return nil, failure("InvalidSideAction", "side action is ambiguous")
+        end
+        local observed, observation_error = validate_lane_observation(command)
+        if not observed then return nil, observation_error end
+        if not valid_runtime_text(command.text, limits.lanes.side_response_bytes, false)
+            or not valid_runtime_id(command.source, limits.maximum_identifier_bytes)
+        then
+            return nil, failure("InvalidSideAction", "side input is invalid")
+        end
+        if side then
+            return nil, failure(
+                "SideBusy",
+                "one side turn is already active; the new draft was not consumed",
+                { preserved_text = command.text, active_side_id = side.id }
+            )
+        end
+        local snapshot, snapshot_error = capture_snapshot(
+            "side",
+            command.text,
+            command.source,
+            { kind = "side" }
+        )
+        if not snapshot then return nil, snapshot_error end
+        local now, clock_error = clock_now()
+        if not now then return nil, clock_error end
+        side_serial = side_serial + 1
+        turn_serial = turn_serial + 1
+        message_serial = message_serial + 1
+        request_serial = request_serial + 1
+        local side_id = "side-" .. tostring(side_serial)
+        local message_id = side_id .. ":message:" .. tostring(message_serial)
+        local request_id = side_id .. ":request:" .. tostring(request_serial)
+        local candidate = {
+            id = side_id,
+            snapshot = snapshot,
+            message_id = message_id,
+            request_id = request_id,
+            started_at = now,
+            canonical_event_seen = false,
+            cancel_pending = false,
+            handle = false,
+        }
         local receipt, commit_error = commit_events({
             {
                 type = "turn_started",
+                turn_id = side_id,
                 fields = {
-                    kind = "main",
+                    kind = "side",
                     configGeneration = snapshot.config_generation,
                     modelSnapshot = snapshot.model_snapshot,
                     permissionSnapshot = snapshot.permission_snapshot,
                     promptSnapshot = snapshot.prompt_snapshot,
                     toolRegistrySnapshot = snapshot.tool_registry_snapshot,
                     runtimeSnapshot = limits.runtime_snapshot,
+                    contextDocumentGeneration = tostring(snapshot.context_generation),
                 },
             },
             {
                 type = "user_message",
-                fields = { messageId = message_id, text = snapshot.text, source = snapshot.source },
+                turn_id = side_id,
+                fields = {
+                    messageId = message_id,
+                    text = snapshot.text,
+                    source = snapshot.source,
+                },
+            },
+            {
+                type = "model_request",
+                turn_id = side_id,
+                fields = {
+                    requestId = request_id,
+                    purpose = "side",
+                    viewManifestRef = snapshot.view_manifest_ref,
+                },
             },
         })
         if not receipt then return nil, commit_error end
-        transition("Preparing")
-        return request_model("main")
+        side = candidate
+        local specification = freeze({
+            side_id = side_id,
+            turn_id = side_id,
+            request_id = request_id,
+            purpose = "side",
+            view_manifest_ref = snapshot.view_manifest_ref,
+            no_tools = true,
+            active_time_cap_ms = limits.lanes.side_active_time_ms,
+            response_byte_cap = limits.lanes.side_response_bytes,
+            budget_snapshot_id = limits.lanes.side_snapshot_id,
+        }, nil, "side request")
+        local handle, start_error = start_effect(
+            admitted_ports.side,
+            "start",
+            specification,
+            "Side"
+        )
+        if not handle then
+            return finish_side("error", start_error.message, start_error.code)
+        end
+        side.handle = handle
+        return assert(freeze({
+            state = "active",
+            side_id = side_id,
+            request_id = request_id,
+            context_generation = context_generation,
+        }, nil, "side admission"))
+    end
+
+    ---Marks a canonical provider event for the independently active side request.
+    function loop:accept_side_event(side_id, request_id)
+        if halted then return nil, halt_error end
+        if not side or side.id ~= side_id or side.request_id ~= request_id then
+            return nil, failure("StaleSideResponse", "side provider event is stale")
+        end
+        local now, clock_error = clock_now()
+        if not now then return nil, clock_error end
+        side.canonical_event_seen = true
+        return assert(freeze({
+            side_id = side.id,
+            request_id = side.request_id,
+            canonical_event_seen = true,
+            automatic_replay = false,
+        }, nil, "canonical side event"))
+    end
+
+    ---Accepts one bounded canonical direct response and terminates the side turn.
+    function loop:accept_side_response(side_id, wrapper)
+        if halted then return nil, halt_error end
+        if not side or side.id ~= side_id then
+            return nil, failure("StaleSideResponse", "side response is stale")
+        end
+        local now, clock_error = clock_now()
+        if not now then return nil, clock_error end
+        if now - side.started_at >= limits.lanes.side_active_time_ms then
+            return finish_side("budget_exhausted", "side-active-time", "SideBudgetExhausted")
+        end
+        local admitted, response_error = validate_model_response(wrapper, limits)
+        if not admitted then
+            return finish_side("error", response_error.message, response_error.code)
+        end
+        if wrapper.request_id ~= side.request_id then
+            return nil, failure("StaleSideResponse", "side response request binding is stale")
+        end
+        if #wrapper.canonical_body > limits.lanes.side_response_bytes
+            or #wrapper.normalized.tool_calls ~= 0
+            or wrapper.normalized.control ~= nil
+        then
+            return finish_side(
+                "error",
+                "side response violated its no-tool direct-response envelope",
+                "InvalidSideResponse"
+            )
+        end
+        message_serial = message_serial + 1
+        local response_message_id = side.id .. ":message:" .. tostring(message_serial)
+        local outcome = "completed"
+        local error_id
+        if wrapper.normalized.incomplete then
+            outcome = wrapper.normalized.finish_class == "cancelled" and "cancelled" or "error"
+            error_id = outcome == "cancelled" and "SideCancelled" or "SideResponseIncomplete"
+        end
+        local receipt, commit_error = commit_events({ {
+            type = "model_message",
+            turn_id = side.id,
+            fields = {
+                messageId = response_message_id,
+                requestId = side.request_id,
+                role = "assistant",
+                status = wrapper.normalized.incomplete and "interrupted" or "complete",
+                body = wrapper.canonical_body,
+                rawBytes = tostring(#wrapper.canonical_body),
+                digest = wrapper.canonical_digest,
+            },
+        } })
+        if not receipt then return nil, commit_error end
+        return finish_side(
+            outcome,
+            wrapper.normalized.incomplete_reason or "side-response",
+            error_id,
+            {
+                message_id = response_message_id,
+                body = wrapper.canonical_body,
+                digest = wrapper.canonical_digest,
+            }
+        )
+    end
+
+    ---Cancels the exact active side without redirecting a stale command.
+    function loop:cancel_side(command)
+        if halted then return nil, halt_error end
+        if not exact_fields(command, {
+            side_id = true, reason = true,
+            expected_context_generation = true, expected_turn_id = true,
+        }) then
+            return nil, failure("InvalidSideAction", "side cancellation is ambiguous")
+        end
+        local observed, observation_error = validate_lane_observation(command)
+        if not observed then return nil, observation_error end
+        if not valid_runtime_id(command.side_id, limits.maximum_identifier_bytes)
+            or not valid_runtime_text(command.reason, limits.hard_caps.message_bytes, false)
+        then
+            return nil, failure("InvalidSideAction", "side cancellation binding is invalid")
+        end
+        if not side or side.id ~= command.side_id then
+            return nil, failure("NoSideTurn", "the observed side turn is not active")
+        end
+        local receipt, commit_error = commit_events({ {
+            type = "cancel",
+            turn_id = side.id,
+            fields = {
+                targetKind = "LogicalRequest",
+                targetId = side.request_id,
+                reason = command.reason,
+                result = "requested",
+            },
+        } })
+        if not receipt then
+            pcall(admitted_ports.side.cancel, side.handle, command.reason)
+            return nil, commit_error
+        end
+        local called, result = pcall(
+            admitted_ports.side.cancel,
+            side.handle,
+            command.reason
+        )
+        if not called or type(result) ~= "table"
+            or (result.outcome ~= "cancelled"
+                and result.outcome ~= "pending"
+                and result.outcome ~= "unknown")
+        then
+            return finish_side("error", "side cancel result is unknown", "SideCancelUnknown")
+        end
+        if result.result ~= nil then
+            return self:accept_side_response(side.id, result.result)
+        end
+        if result.outcome == "pending" then
+            side.cancel_pending = true
+            side.cancel_reason = command.reason
+            return assert(freeze({
+                side_id = side.id,
+                cancel_pending = true,
+                context_generation = context_generation,
+            }, nil, "pending side cancellation"))
+        end
+        if result.outcome == "unknown" then
+            return finish_side("error", "side cancel result is unknown", "SideCancelUnknown")
+        end
+        return finish_side("cancelled", command.reason, "SideCancelled")
+    end
+
+    ---Settles the terminal fact of an asynchronously cancelled side request.
+    function loop:settle_side_cancel(settlement)
+        if halted then return nil, halt_error end
+        if not side or not side.cancel_pending then
+            return nil, failure("NoPendingSideCancel", "no side cancellation awaits settlement")
+        end
+        if not exact_fields(settlement, {
+            side_id = true, request_id = true, outcome = true, response = true,
+        })
+            or settlement.side_id ~= side.id
+            or settlement.request_id ~= side.request_id
+            or (settlement.response ~= nil and type(settlement.response) ~= "table")
+            or (settlement.outcome ~= "cancelled"
+                and settlement.outcome ~= "unknown"
+                and settlement.outcome ~= "completed")
+        then
+            return nil, failure("InvalidSideSettlement", "side settlement binding is invalid")
+        end
+        if settlement.response ~= nil then
+            return self:accept_side_response(side.id, settlement.response)
+        end
+        if settlement.outcome == "completed" then
+            return nil, failure(
+                "InvalidSideSettlement",
+                "completed side settlement requires its canonical response"
+            )
+        end
+        if settlement.outcome == "unknown" then
+            return finish_side("error", "side cancel result is unknown", "SideCancelUnknown")
+        end
+        return finish_side(
+            "cancelled",
+            side.cancel_reason or "side-cancelled",
+            "SideCancelled"
+        )
+    end
+
+    ---Returns a retained completed side result for an explicit side-use action.
+    function loop:side_result(side_id)
+        if not valid_runtime_id(side_id, limits.maximum_identifier_bytes) then
+            return nil, failure("InvalidSideAction", "side identity is invalid")
+        end
+        local completed = side_history[side_id]
+        if not completed then return nil, failure("SideResultMissing", "side result is unavailable") end
+        return assert(freeze({
+            side_id = completed.id,
+            outcome = completed.outcome,
+            response = completed.response,
+        }, nil, "retained side result"))
+    end
+
+    ---Durably steers the active main turn and preempts only at a factual safe point.
+    function loop:steer(command)
+        if halted then return nil, halt_error end
+        if not exact_fields(command, {
+            text = true, source = true, side_id = true,
+            expected_context_generation = true, expected_turn_id = true,
+        }) then
+            return nil, failure("InvalidSteer", "steer action is ambiguous")
+        end
+        local observed, observation_error = validate_lane_observation(command)
+        if not observed then return nil, observation_error end
+        if not turn or state == "Idle" or state == "Finalizing" or state == "Closing" then
+            return nil, failure("NoMainTurn", "steer requires an active main turn")
+        end
+        if pending_steer then
+            return nil, failure("SteerBusy", "a durable steer already awaits its safe point")
+        end
+        if not valid_runtime_text(command.text, limits.hard_caps.message_bytes, false)
+            or not valid_runtime_id(command.source, limits.maximum_identifier_bytes)
+            or (command.side_id ~= nil
+                and not valid_runtime_id(command.side_id, limits.maximum_identifier_bytes))
+            or (command.side_id ~= nil and not side_history[command.side_id])
+        then
+            return nil, failure("InvalidSteer", "steer input or side reference is invalid")
+        end
+        local now, clock_error = clock_now()
+        if not now then return nil, clock_error end
+        message_serial = message_serial + 1
+        local message_id = turn.id .. ":message:" .. tostring(message_serial)
+        local steer_fields = {
+            messageId = message_id,
+            targetTurnId = turn.id,
+            summary = command.text,
+        }
+        if command.side_id then steer_fields.sideId = command.side_id end
+        local events = { {
+            type = "steer",
+            fields = steer_fields,
+        } }
+        local target_kind, target_id
+        if active_tool then
+            target_kind, target_id = "ToolCall", active_tool.call.id
+        elseif active_review then
+            target_kind, target_id = "LogicalRequest", active_review.id
+        elseif active_request then
+            target_kind, target_id = "LogicalRequest", active_request.id
+        end
+        if target_id then
+            events[#events + 1] = {
+                type = "cancel",
+                fields = {
+                    targetKind = target_kind,
+                    targetId = target_id,
+                    reason = "steer:" .. message_id,
+                    result = "requested",
+                },
+            }
+        end
+        local receipt, commit_error = commit_events(events)
+        if not receipt then return nil, commit_error end
+        pending_steer = {
+            message_id = message_id,
+            text = command.text,
+            source = command.source,
+            side_id = command.side_id,
+            activity_id = target_id or false,
+        }
+
+        local port, handle
+        if active_tool then
+            port, handle = admitted_ports.tools, active_tool.handle
+        elseif active_review then
+            port, handle = admitted_ports.reviews, active_review.handle
+        elseif active_request then
+            port, handle = admitted_ports.model, active_request.handle
+        end
+        if not port or handle == false or handle == nil then
+            active_request, active_review = nil, nil
+            return inject_steer()
+        end
+        local called, result = pcall(port.cancel, handle, "steer:" .. message_id)
+        if not called or type(result) ~= "table"
+            or (result.outcome ~= "cancelled"
+                and result.outcome ~= "pending"
+                and result.outcome ~= "unknown")
+        then
+            result = { outcome = "unknown" }
+        end
+        if active_tool then
+            if result.result ~= nil then return accept_result(result.result) end
+            if result.outcome == "pending" then
+                return assert(freeze({
+                    state = state,
+                    steer_message_id = message_id,
+                    activity_pending = true,
+                }, nil, "pending tool steer"))
+            end
+            local result_kind = result.outcome == "unknown"
+                and "unknown" or "real-cancelled"
+            local settled = synthetic_result(result_kind, "steer:" .. message_id)
+            settled.error_id = result.outcome == "unknown"
+                and "ToolCancelUnknown" or "ToolSteered"
+            settled.external_effects_unsettled = result.outcome == "unknown"
+            return accept_result(settled)
+        end
+        if result.outcome == "pending" or result.outcome == "unknown" then
+            return assert(freeze({
+                state = state,
+                steer_message_id = message_id,
+                activity_pending = true,
+                cancel_outcome = result.outcome,
+            }, nil, "pending request steer"))
+        end
+        active_request, active_review = nil, nil
+        return inject_steer()
+    end
+
+    ---Settles a provider-confirmed request/review cancellation for a pending steer.
+    function loop:settle_steer_cancel(settlement)
+        if halted then return nil, halt_error end
+        if not pending_steer or active_tool
+            or (not active_request and not active_review)
+        then
+            return nil, failure("NoPendingSteer", "no request/review steer cancellation is pending")
+        end
+        if not exact_fields(settlement, { activity_id = true, outcome = true })
+            or settlement.activity_id ~= pending_steer.activity_id
+            or (settlement.outcome ~= "cancelled" and settlement.outcome ~= "unknown")
+        then
+            return nil, failure("InvalidSteerSettlement", "steer settlement binding is invalid")
+        end
+        active_request, active_review = nil, nil
+        return inject_steer()
+    end
+
+    ---Explicitly authorizes one completed side result into queue or steer.
+    function loop:use_side(command)
+        if halted then return nil, halt_error end
+        if not exact_fields(command, {
+            side_id = true, lane = true,
+            expected_context_generation = true, expected_turn_id = true,
+        }) then
+            return nil, failure("InvalidSideUse", "side-use action is ambiguous")
+        end
+        local observed, observation_error = validate_lane_observation(command)
+        if not observed then return nil, observation_error end
+        if not valid_runtime_id(command.side_id, limits.maximum_identifier_bytes)
+            or (command.lane ~= "queue" and command.lane ~= "steer")
+        then
+            return nil, failure("InvalidSideUse", "side-use binding or target lane is invalid")
+        end
+        local completed = side_history[command.side_id]
+        if not completed or completed.outcome ~= "completed" or not completed.response then
+            return nil, failure("SideResultMissing", "only a completed side response can be used")
+        end
+        local body = completed.response.body
+        if not valid_runtime_text(body, limits.hard_caps.message_bytes, false) then
+            return nil, failure("SideResultLimit", "side result exceeds the main-message limit")
+        end
+        local action = {
+            text = body,
+            source = "side-use",
+            side_id = command.side_id,
+            expected_context_generation = command.expected_context_generation,
+            expected_turn_id = command.expected_turn_id,
+        }
+        if command.lane == "queue" then return self:enqueue(action) end
+        return self:steer(action)
+    end
+
+    ---Closes a complete model-yield and creates an explicitly causal new turn.
+    function loop:resolve_yield(command)
+        if halted then return nil, halt_error end
+        if not exact_fields(command, {
+            response_id = true, action = true, text = true, source = true,
+            expected_context_generation = true, expected_turn_id = true,
+        }) then
+            return nil, failure("InvalidYieldResolution", "response resolution is ambiguous")
+        end
+        local observed, observation_error = validate_lane_observation(command)
+        if not observed then return nil, observation_error end
+        if state ~= "WaitingUser" or not pending or pending.kind ~= "model-yield" then
+            return nil, failure("NoModelYield", "no complete model response awaits resolution")
+        end
+        if command.response_id ~= pending.message_id
+            or (command.action ~= "continue" and command.action ~= "supersede")
+            or not valid_runtime_text(command.text, limits.hard_caps.message_bytes, false)
+            or not valid_runtime_id(command.source, limits.maximum_identifier_bytes)
+        then
+            return nil, failure("InvalidYieldResolution", "response resolution binding is invalid")
+        end
+        if admitted_ports.snapshots == false then
+            return nil, failure(
+                "SnapshotUnavailable",
+                "a response resolution cannot create its required fresh turn snapshot"
+            )
+        end
+        local response_id = pending.message_id
+        local old_turn_id = turn.id
+        local terminal, terminal_error = finalize(
+            "partial",
+            command.action == "continue"
+                and "continued-in-new-turn" or "superseded-by-new-input"
+        )
+        if not terminal then return nil, terminal_error end
+        local snapshot, snapshot_error = capture_snapshot(
+            "main",
+            command.text,
+            command.source,
+            {
+                kind = "model-yield-resolution",
+                action = command.action,
+                response_id = response_id,
+            }
+        )
+        if not snapshot then
+            return nil, failure(
+                snapshot_error.code,
+                snapshot_error.message,
+                {
+                    old_turn_id = old_turn_id,
+                    old_turn_outcome = "partial",
+                    response_id = response_id,
+                    cause = snapshot_error.detail,
+                }
+            )
+        end
+        local cause = command.action == "continue"
+            and { continues_response_id = response_id }
+            or { supersedes_response_id = response_id }
+        local admitted, admission_error = start_main(snapshot, cause)
+        if not admitted then return nil, admission_error end
+        return assert(freeze({
+            action = command.action,
+            response_id = response_id,
+            previous_turn_id = old_turn_id,
+            previous_outcome = "partial",
+            turn_id = admitted.turn_id,
+            request_id = admitted.request_id,
+            context_generation = context_generation,
+        }, nil, "model-yield resolution"))
     end
 
     ---Accepts one complete canonical adapter response for the active request.
@@ -1667,6 +2790,24 @@ function M.new_agent_loop(ports, options)
         local request_id = active_request.id
         active_request = nil
 
+        if pending_steer then
+            if #calls > 0 then
+                turn.calls = calls
+                turn.call_cursor = 1
+                turn.counters.tool_calls = turn.counters.tool_calls + #calls
+                turn.counters.steps = turn.counters.steps + #calls
+                for _, call_value in ipairs(calls) do
+                    turn.trace.tool_calls[#turn.trace.tool_calls + 1] = call_value.id
+                end
+                transition("DispatchingTools")
+                local skipped, skip_error = skip_remaining(
+                    "skipped-by-steer",
+                    pending_steer.message_id
+                )
+                if not skipped then return nil, skip_error end
+            end
+            return inject_steer()
+        end
         if wrapper.normalized.incomplete then
             local outcome = wrapper.normalized.finish_class == "cancelled"
                 and "cancelled" or "error"
@@ -1903,6 +3044,7 @@ function M.new_agent_loop(ports, options)
         } })
         if not receipt then return nil, commit_error end
         active_review = nil
+        if pending_steer then return inject_steer() end
         if verdict.verdict == "uncertain" then
             if state ~= "WaitingUser" then transition("WaitingUser") end
             turn.reported_outcome = "waiting_user"
@@ -1974,6 +3116,7 @@ function M.new_agent_loop(ports, options)
         } })
         if not receipt then return nil, commit_error end
         active_review, pending = nil, nil
+        if pending_steer then return inject_steer() end
         if state == "WaitingUser" and verdict.verdict ~= "uncertain" then
             transition("EvaluatingTermination")
         end
@@ -2166,6 +3309,17 @@ function M.new_agent_loop(ports, options)
         if halted then return nil, halt_error end
         local now, clock_error = clock_now()
         if not now then return nil, clock_error end
+        if side and not side.cancel_pending
+            and now - side.started_at >= limits.lanes.side_active_time_ms
+        then
+            local cancelled, cancel_error = self:cancel_side({
+                side_id = side.id,
+                reason = "side-active-time-budget",
+                expected_context_generation = context_generation,
+                expected_turn_id = observed_turn_id(),
+            })
+            if not cancelled then return nil, cancel_error end
+        end
         if turn and not PAUSED_AGENT_STATES[state]
             and turn.counters.active_time_ms >= limits.hard_caps.active_time_ms
         then
@@ -2183,6 +3337,23 @@ function M.new_agent_loop(ports, options)
         if state == "Closing" then return false end
         closing = true
         reason = reason or "close"
+        if side then
+            local cancelled, cancel_error = self:cancel_side({
+                side_id = side.id,
+                reason = reason,
+                expected_context_generation = context_generation,
+                expected_turn_id = observed_turn_id(),
+            })
+            if not cancelled and not halted then return nil, cancel_error end
+        end
+        if #queue_items > 0 and not halted then
+            local cleared, clear_error = self:clear_queue({
+                reason = reason,
+                expected_context_generation = context_generation,
+                expected_turn_id = observed_turn_id(),
+            })
+            if not cleared then return nil, clear_error end
+        end
         if state == "Idle" then
             transition("Closing")
             return true
@@ -2219,12 +3390,21 @@ function M.new_agent_loop(ports, options)
             reported_outcome = last_turn and last_turn.outcome or false
             reportable = last_turn ~= nil
         end
+        local queue_projection = {}
+        for index, item in ipairs(queue_items) do
+            queue_projection[index] = public_queue_item(item)
+            queue_projection[index].position = index
+        end
+        local side_history_count = 0
+        for _ in pairs(side_history) do side_history_count = side_history_count + 1 end
         return assert(freeze({
             state = state,
             turn_id = active_turn and active_turn.id or false,
             active_request_id = active_request and active_request.id or false,
             active_tool_call_id = active_tool and active_tool.call.id or false,
             pending_kind = pending and pending.kind or false,
+            pending_response_id = pending and pending.kind == "model-yield"
+                and pending.message_id or false,
             reported_outcome = reported_outcome,
             last_outcome = last_turn and last_turn.outcome or false,
             outcome_durable = active_turn ~= nil
@@ -2233,6 +3413,7 @@ function M.new_agent_loop(ports, options)
             halted = halted,
             reportable = not halted and reportable,
             last_durable_sequence = sequence,
+            context_generation = context_generation,
             counters = counters,
             trace = trace,
             hard_cap_snapshot_id = limits.hard_cap_snapshot_id,
@@ -2240,6 +3421,15 @@ function M.new_agent_loop(ports, options)
             runtime_snapshot = limits.runtime_snapshot,
             auto_replay = false,
             concurrent_tools = active_tool and 1 or 0,
+            queue = queue_projection,
+            queue_count = #queue_projection,
+            queue_maximum = limits.lanes.queue_maximum,
+            pending_steer_message_id = pending_steer and pending_steer.message_id or false,
+            side_state = side and (side.cancel_pending and "cancelling" or "active") or "idle",
+            active_side_id = side and side.id or false,
+            active_side_request_id = side and side.request_id or false,
+            side_history_count = side_history_count,
+            side_budget_snapshot_id = limits.lanes.side_snapshot_id,
         }, nil, "AgentLoop status"))
     end
 
@@ -2254,6 +3444,15 @@ function M.new_agent_loop(ports, options)
         natural_language_done_means_finish = false,
         durable_before_effect = true,
         no_auto_replay = true,
+        queue_actions = {
+            enqueue = true, list = true, drop = true,
+            edit = true, reorder = true, clear = true,
+        },
+        queue_autostart_outcome = "completed",
+        steer_same_turn = true,
+        side_concurrency_maximum = 1,
+        side_tools = false,
+        side_use_lanes = { queue = true, steer = true },
     }, nil, "AgentLoop capabilities"))
     return readonly(loop, "AgentLoop")
 end

@@ -44,6 +44,7 @@ return {
     "approvalId",
     "reviewId",
     "compactionId",
+    "queueItemId",
   },
 
   event_base = {
@@ -55,8 +56,9 @@ return {
   },
 
   event_types = {
-    event("turn_started", { "kind", "configGeneration", "modelSnapshot", "permissionSnapshot", "promptSnapshot", "toolRegistrySnapshot" }, { "runtimeSnapshot" }, "after-admission-before-model"),
+    event("turn_started", { "kind", "configGeneration", "modelSnapshot", "permissionSnapshot", "promptSnapshot", "toolRegistrySnapshot" }, { "runtimeSnapshot", "contextDocumentGeneration", "queueItemId", "continuesResponseId", "supersedesResponseId" }, "after-admission-before-model"),
     event("user_message", { "messageId", "text", "source" }, { "replyToMessageId" }, "before-model-request"),
+    event("queue_item", { "queueItemId", "displayId", "action", "text" }, { "beforeQueueItemId", "sideId", "reason" }, "before-queue-report-or-consume"),
     event("model_request", { "requestId", "purpose", "viewManifestRef" }, { "attemptId" }, "request-intent"),
     event("model_message", { "messageId", "requestId", "role", "status", "body" }, { "representation", "rawBytes", "digest" }, "before-interpretation"),
     event("model_control", { "requestId", "control", "payload" }, {}, "before-interpretation"),
@@ -71,7 +73,7 @@ return {
     event("termination_review", { "reviewId", "requestId", "verdict", "bindingDigest" }, { "gap", "reason" }, "before-verdict-effect"),
     event("turn_ended", { "outcome" }, { "reason", "errorId" }, "before-external-report"),
     event("cancel", { "targetKind", "targetId", "reason" }, { "result" }, "cancel-fact"),
-    event("steer", { "messageId", "targetTurnId", "summary" }, {}, "before-steered-request"),
+    event("steer", { "messageId", "targetTurnId", "summary" }, { "sideId" }, "before-steered-request"),
     event("compaction", { "compactionId", "sourceFirstSeq", "sourceLastSeq", "sourceDigest", "status" }, { "summary", "errorId" }, "before-view-publish"),
     event("model_view_published", { "manifestDigest", "firstEventSeq", "lastEventSeq" }, { "replacesManifestDigest" }, "before-model-use"),
     event("session_override", { "name", "oldValueDigest", "newValueDigest" }, { "effectiveAt" }, "before-next-turn"),

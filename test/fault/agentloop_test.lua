@@ -41,8 +41,15 @@ local function options(overrides)
             runtime_maximum = 20,
         },
         initial_sequence = 0,
+        initial_context_generation = 1,
         maximum_identifier_bytes = 128,
         hard_cap_snapshot_id = "manifest-hard-caps-v1",
+        lanes = {
+            queue_maximum = 9,
+            side_active_time_ms = 1000,
+            side_response_bytes = 4096,
+            side_snapshot_id = "manifest-side-v1",
+        },
     }
     for key, value in pairs(overrides.hard_caps or {}) do result.hard_caps[key] = value end
     for key, value in pairs(overrides.stuck or {}) do result.stuck[key] = value end
@@ -71,9 +78,11 @@ local function fixture(settings, option_overrides)
     local log, durable_events, batches = {}, {}, {}
     local model_starts, tool_starts, review_starts = {}, {}, {}
     local start_cursor = 1
+    local context_generation = 1
     local journal = {}
 
     function journal.commit(batch)
+        local previous_context_generation = context_generation
         batches[#batches + 1] = batch
         for _, event in ipairs(batch.events) do
             log[#log + 1] = "durable:" .. event.type
@@ -91,12 +100,15 @@ local function fixture(settings, option_overrides)
             }
         end
         for _, event in ipairs(batch.events) do durable_events[#durable_events + 1] = event end
+        context_generation = context_generation + 1
         return true, {
             barrier_id = batch.barrier_id,
             first_sequence = batch.first_sequence,
             last_sequence = batch.last_sequence,
             event_count = batch.event_count,
             binding = batch,
+            previous_context_generation = previous_context_generation,
+            context_generation = context_generation,
         }
     end
 
@@ -159,6 +171,8 @@ local function fixture(settings, option_overrides)
         model = model,
         tools = tools,
         reviews = review_port,
+        snapshots = false,
+        side = false,
     }, options(option_overrides))
     A.truthy(loop, loop_error and loop_error.code)
     return {
@@ -173,7 +187,7 @@ local function fixture(settings, option_overrides)
     }
 end
 
-local function input(double_check)
+local function input(double_check, context_generation)
     return {
         text = "Implement the task",
         source = "user",
@@ -184,6 +198,7 @@ local function input(double_check)
         tool_registry_snapshot = "tool-registry-snapshot",
         view_manifest_ref = "view-manifest",
         double_check = double_check == true,
+        context_generation = context_generation or 1,
     }
 end
 
@@ -777,9 +792,15 @@ return {
                 A.raises(function() capability.single_owner = false end, "cannot be modified")
 
                 local repeated = fixture()
-                assert(repeated.loop:begin_main(input(false)))
+                assert(repeated.loop:begin_main(input(
+                    false,
+                    repeated.loop:status().context_generation
+                )))
                 assert(repeated.loop:accept_model_response(finish(repeated.loop, "first")))
-                assert(repeated.loop:begin_main(input(false)))
+                assert(repeated.loop:begin_main(input(
+                    false,
+                    repeated.loop:status().context_generation
+                )))
                 local active_status = repeated.loop:status()
                 A.falsy(active_status.reportable)
                 A.equal(active_status.reported_outcome, false)
@@ -802,6 +823,8 @@ return {
                         cancel = function() end,
                     },
                     reviews = false,
+                    snapshots = false,
+                    side = false,
                 }, bad_options)
                 A.falsy(loop)
                 A.equal(option_error.code, "InvalidAgentOptions")

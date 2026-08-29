@@ -258,4 +258,287 @@ function M.new_draft(generation, workspace, options)
     return readonly(draft, "unsaved chat draft")
 end
 
+---Creates the saved-session input owner over one typed AgentLoop.
+-- Draft observation is captured when text is staged, so a delayed submission
+-- cannot silently redirect itself to a newer Context generation or turn.
+-- @param loop table Typed Runtime AgentLoop facade.
+-- @param options table Contains maximum_draft_bytes.
+-- @return table|nil session Readonly saved-session facade.
+-- @return table|nil err Structured construction failure.
+function M.new_agent_session(loop, options)
+    if type(loop) ~= "table"
+        or type(loop.status) ~= "function"
+        or type(loop.submit_main) ~= "function"
+        or type(loop.enqueue) ~= "function"
+        or type(loop.steer) ~= "function"
+        or type(loop.start_side) ~= "function"
+        or type(loop.resolve_yield) ~= "function"
+        or type(loop.reply) ~= "function"
+        or type(loop.list_queue) ~= "function"
+        or type(loop.drop_queue) ~= "function"
+        or type(loop.edit_queue) ~= "function"
+        or type(loop.reorder_queue) ~= "function"
+        or type(loop.clear_queue) ~= "function"
+        or type(loop.use_side) ~= "function"
+        or type(loop.close) ~= "function"
+    then
+        return nil, failure("InvalidAgentSession", "a typed AgentLoop is required")
+    end
+    if type(options) ~= "table" then
+        return nil, failure("InvalidSessionOptions", "saved-session limits are required")
+    end
+    for key in pairs(options) do
+        if key ~= "maximum_draft_bytes" then
+            return nil, failure("InvalidSessionOptions", "saved-session options are ambiguous")
+        end
+    end
+    if not valid_integer(options.maximum_draft_bytes, 1) then
+        return nil, failure("InvalidSessionOptions", "maximum_draft_bytes must be positive")
+    end
+
+    local lifecycle = "open"
+    local staged
+    local session = {}
+
+    local function require_open()
+        if lifecycle ~= "open" then
+            return nil, failure("SessionClosed", "the saved Agent session is closed")
+        end
+        return true
+    end
+
+    local function observation(status)
+        return {
+            expected_context_generation = status.context_generation,
+            expected_turn_id = status.turn_id,
+        }
+    end
+
+    local function current_observation()
+        return observation(loop:status())
+    end
+
+    local function command_from_draft()
+        if not staged then return nil, failure("DraftEmpty", "no chat draft is staged") end
+        return {
+            text = staged.text,
+            source = staged.source,
+            expected_context_generation = staged.context_generation,
+            expected_turn_id = staged.turn_id,
+        }
+    end
+
+    local function consume_on_success(result, action_error)
+        if not result then return nil, action_error end
+        staged = nil
+        return result
+    end
+
+    local function resolve_display(display_id)
+        if type(display_id) ~= "string" or not display_id:match("^#[1-9][0-9]*$") then
+            return nil, failure("InvalidQueueId", "queue display id is invalid")
+        end
+        local projection = loop:list_queue()
+        for _, item in ipairs(projection.items) do
+            if item.display_id == display_id then return item.queue_item_id end
+        end
+        return nil, failure("QueueItemMissing", "queue display id is not active")
+    end
+
+    ---Captures a bounded draft plus the exact Context/turn observation it saw.
+    function session:stage(text_value, source)
+        local open, open_error = require_open()
+        if not open then return nil, open_error end
+        source = source or "user"
+        if not valid_text(text_value, options.maximum_draft_bytes) or text_value == ""
+            or type(source) ~= "string" or source == ""
+        then
+            return nil, failure("InvalidDraft", "saved-session draft is invalid")
+        end
+        local status = loop:status()
+        staged = {
+            text = text_value,
+            source = source,
+            context_generation = status.context_generation,
+            turn_id = status.turn_id,
+        }
+        return self:draft()
+    end
+
+    ---Returns the detached current draft; its text is preserved on lane rejection.
+    function session:draft()
+        if not staged then return false end
+        return readonly({
+            text = staged.text,
+            source = staged.source,
+            context_generation = staged.context_generation,
+            turn_id = staged.turn_id,
+        }, "saved-session draft")
+    end
+
+    ---Submits staged text to reply, supersede-yield, direct-main, or queue by state.
+    function session:submit()
+        local open, open_error = require_open()
+        if not open then return nil, open_error end
+        local command, command_error = command_from_draft()
+        if not command then return nil, command_error end
+        local status = loop:status()
+        local result, action_error
+        if command.expected_context_generation ~= status.context_generation
+            or command.expected_turn_id ~= status.turn_id
+        then
+            return nil, failure(
+                "StaleDraftObservation",
+                "draft was preserved because the active Context or turn changed"
+            )
+        elseif status.state == "Idle" then
+            result, action_error = loop:submit_main(command)
+        elseif status.state == "WaitingUser"
+            and (status.pending_kind == "ask-user"
+                or status.pending_kind == "termination-review")
+        then
+            result, action_error = loop:reply(command.text, command.source)
+        elseif status.state == "WaitingUser" and status.pending_kind == "model-yield" then
+            command.response_id = status.pending_response_id
+            command.action = "supersede"
+            result, action_error = loop:resolve_yield(command)
+        else
+            result, action_error = loop:enqueue(command)
+        end
+        return consume_on_success(result, action_error)
+    end
+
+    ---Explicit queue admission for the staged draft.
+    function session:queue()
+        local open, open_error = require_open()
+        if not open then return nil, open_error end
+        local command, command_error = command_from_draft()
+        if not command then return nil, command_error end
+        local result, action_error = loop:enqueue(command)
+        return consume_on_success(result, action_error)
+    end
+
+    ---Explicit same-turn steer for the staged draft.
+    function session:steer()
+        local open, open_error = require_open()
+        if not open then return nil, open_error end
+        local command, command_error = command_from_draft()
+        if not command then return nil, command_error end
+        local result, action_error = loop:steer(command)
+        return consume_on_success(result, action_error)
+    end
+
+    ---Explicit single-concurrency side request for the staged draft.
+    function session:side()
+        local open, open_error = require_open()
+        if not open then return nil, open_error end
+        local command, command_error = command_from_draft()
+        if not command then return nil, command_error end
+        local result, action_error = loop:start_side(command)
+        return consume_on_success(result, action_error)
+    end
+
+    ---Continues the exact yielded response in a new turn using the staged text.
+    function session:continue_response(response_id)
+        local open, open_error = require_open()
+        if not open then return nil, open_error end
+        local command, command_error = command_from_draft()
+        if not command then return nil, command_error end
+        command.response_id = response_id
+        command.action = "continue"
+        local result, action_error = loop:resolve_yield(command)
+        return consume_on_success(result, action_error)
+    end
+
+    function session:queue_list()
+        local open, open_error = require_open()
+        if not open then return nil, open_error end
+        return loop:list_queue()
+    end
+
+    function session:queue_drop(display_id, reason)
+        local open, open_error = require_open()
+        if not open then return nil, open_error end
+        local queue_item_id, id_error = resolve_display(display_id)
+        if not queue_item_id then return nil, id_error end
+        local observed = current_observation()
+        observed.queue_item_id = queue_item_id
+        observed.reason = reason or "user-drop"
+        return loop:drop_queue(observed)
+    end
+
+    function session:queue_edit(display_id, text_value)
+        local open, open_error = require_open()
+        if not open then return nil, open_error end
+        if not valid_text(text_value, options.maximum_draft_bytes) or text_value == "" then
+            return nil, failure("InvalidDraft", "queue amendment text is invalid")
+        end
+        local queue_item_id, id_error = resolve_display(display_id)
+        if not queue_item_id then return nil, id_error end
+        local observed = current_observation()
+        observed.queue_item_id = queue_item_id
+        observed.text = text_value
+        return loop:edit_queue(observed)
+    end
+
+    function session:queue_move(display_id, before_display_id)
+        local open, open_error = require_open()
+        if not open then return nil, open_error end
+        local queue_item_id, id_error = resolve_display(display_id)
+        if not queue_item_id then return nil, id_error end
+        local before_queue_item_id = false
+        if before_display_id ~= false then
+            before_queue_item_id, id_error = resolve_display(before_display_id)
+            if not before_queue_item_id then return nil, id_error end
+        end
+        local observed = current_observation()
+        observed.queue_item_id = queue_item_id
+        observed.before_queue_item_id = before_queue_item_id
+        return loop:reorder_queue(observed)
+    end
+
+    function session:queue_clear(reason)
+        local open, open_error = require_open()
+        if not open then return nil, open_error end
+        local observed = current_observation()
+        observed.reason = reason or "user-clear"
+        return loop:clear_queue(observed)
+    end
+
+    function session:use_side(side_id, lane)
+        local open, open_error = require_open()
+        if not open then return nil, open_error end
+        local observed = current_observation()
+        observed.side_id = side_id
+        observed.lane = lane
+        return loop:use_side(observed)
+    end
+
+    function session:clear_draft()
+        local existed = staged ~= nil
+        staged = nil
+        return existed
+    end
+
+    function session:status()
+        return readonly({
+            lifecycle = lifecycle,
+            has_draft = staged ~= nil,
+            draft = self:draft(),
+            loop = loop:status(),
+        }, "saved Agent session status")
+    end
+
+    function session:close(reason)
+        if lifecycle ~= "open" then return false end
+        local closed, close_error = loop:close(reason or "session-close")
+        if closed == nil then return nil, close_error end
+        lifecycle = "closed"
+        staged = nil
+        return true
+    end
+
+    return readonly(session, "saved Agent session")
+end
+
 return M

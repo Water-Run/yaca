@@ -710,10 +710,10 @@ end
 
 -- Context structural and semantic schema.
 exact_set("Context local ids", context.local_ids, {
-  "eventSeq", "turnId", "requestId", "attemptId", "messageId", "toolCallId", "operationId", "approvalId", "reviewId", "compactionId",
+  "eventSeq", "turnId", "requestId", "attemptId", "messageId", "toolCallId", "operationId", "approvalId", "reviewId", "compactionId", "queueItemId",
 })
 local expected_context_events = {
-  "turn_started", "user_message", "model_request", "model_message", "model_control", "model_yield", "tool_call", "permission_decision",
+  "turn_started", "user_message", "queue_item", "model_request", "model_message", "model_control", "model_yield", "tool_call", "permission_decision",
   "approval", "operation_intent", "operation_result", "tool_result", "action_review", "termination_review", "turn_ended", "cancel", "steer",
   "compaction", "model_view_published", "session_override", "rename", "rebind", "auto_name", "config_generation_ref", "warning",
   "unknown_side_effect", "import_mapping",

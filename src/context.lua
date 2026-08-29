@@ -22,10 +22,14 @@ local EVENT_DEFINITIONS = {
     event("turn_started", {
         "kind", "configGeneration", "modelSnapshot", "permissionSnapshot",
         "promptSnapshot", "toolRegistrySnapshot",
-    }, { "runtimeSnapshot" }),
+    }, { "runtimeSnapshot", "contextDocumentGeneration", "queueItemId",
+        "continuesResponseId", "supersedesResponseId" }),
     event("user_message", { "messageId", "text", "source" }, {
         "replyToMessageId",
     }),
+    event("queue_item", {
+        "queueItemId", "displayId", "action", "text",
+    }, { "beforeQueueItemId", "sideId", "reason" }),
     event("model_request", { "requestId", "purpose", "viewManifestRef" }, {
         "attemptId",
     }),
@@ -60,7 +64,7 @@ local EVENT_DEFINITIONS = {
     }, { "gap", "reason" }),
     event("turn_ended", { "outcome" }, { "reason", "errorId" }),
     event("cancel", { "targetKind", "targetId", "reason" }, { "result" }),
-    event("steer", { "messageId", "targetTurnId", "summary" }),
+    event("steer", { "messageId", "targetTurnId", "summary" }, { "sideId" }),
     event("compaction", {
         "compactionId", "sourceFirstSeq", "sourceLastSeq", "sourceDigest", "status",
     }, { "summary", "errorId" }),
@@ -114,6 +118,9 @@ local MODEL_PURPOSES = {
     ["self-test"] = true,
     ["context-name"] = true,
 }
+local QUEUE_ACTIONS = {
+    enqueue = true, edit = true, move = true, drop = true, consume = true,
+}
 local MODEL_CONTROLS = { finish = true, ["ask-user"] = true, refuse = true }
 local BOOLEAN_FIELDS = {
     truncated = true,
@@ -129,6 +136,7 @@ local DECIMAL_FIELDS = {
     lastEventSeq = true,
     waterline = true,
     baseline = true,
+    contextDocumentGeneration = true,
 }
 local IDENTIFIER_FIELDS = {
     messageId = true,
@@ -145,6 +153,11 @@ local IDENTIFIER_FIELDS = {
     compactionId = true,
     errorId = true,
     causeId = true,
+    queueItemId = true,
+    beforeQueueItemId = true,
+    sideId = true,
+    continuesResponseId = true,
+    supersedesResponseId = true,
 }
 
 local function failure(code, message, reason, path, detail)
@@ -714,6 +727,14 @@ local function normalize_event(candidate, expected_seq, admitted)
     if candidate.type == "model_control" and not MODEL_CONTROLS[fields.control] then
         return nil, failure("ContextSchema", "model control is invalid", "enum", path)
     end
+    if candidate.type == "queue_item" and not QUEUE_ACTIONS[fields.action] then
+        return nil, failure(
+            "ContextSchema",
+            "queue item action is invalid",
+            "enum",
+            path
+        )
+    end
     if candidate.type == "turn_started"
         and fields.kind ~= "main" and fields.kind ~= "side"
     then
@@ -779,6 +800,8 @@ end
 local function validate_relations(events)
     local requests, messages, tool_calls, operations = {}, {}, {}, {}
     local approvals, reviews, compactions, turns = {}, {}, {}, {}
+    local turn_kinds, ended_turns = {}, {}
+    local queue_items = {}
     local tool_results, operation_results, permission_decisions = {}, {}, {}
     local unknown_operations = {}
     local published_views = {}
@@ -789,6 +812,15 @@ local function validate_relations(events)
         if item.type == "turn_started" and item.turn_id then
             local ok, id_error = unique_id(turns, item.turn_id, "turn", path)
             if not ok then return nil, id_error end
+            turn_kinds[item.turn_id] = fields.kind
+            if fields.queueItemId and not queue_items[fields.queueItemId] then
+                return nil, reference_error("queue item", fields.queueItemId, path)
+            end
+            for _, name in ipairs({ "continuesResponseId", "supersedesResponseId" }) do
+                if fields[name] and not messages[fields[name]] then
+                    return nil, reference_error("message", fields[name], path)
+                end
+            end
         elseif item.turn_id and not turns[item.turn_id] then
             return nil, reference_error("turn", item.turn_id, path .. "/@turnId")
         end
@@ -803,6 +835,42 @@ local function validate_relations(events)
             end
             local ok, id_error = unique_id(messages, fields.messageId, "message", path)
             if not ok then return nil, id_error end
+        elseif item.type == "queue_item" then
+            if fields.sideId and turn_kinds[fields.sideId] ~= "side" then
+                return nil, reference_error("side turn", fields.sideId, path)
+            end
+            local prior = queue_items[fields.queueItemId]
+            if fields.action == "enqueue" then
+                if prior ~= nil then
+                    return nil, failure(
+                        "ContextRelation",
+                        "queue item identity is duplicated",
+                        "duplicate-queue-item",
+                        path
+                    )
+                end
+                queue_items[fields.queueItemId] = "active"
+            else
+                if prior ~= "active" then
+                    return nil, reference_error(
+                        "active queue item",
+                        fields.queueItemId,
+                        path
+                    )
+                end
+                if fields.action == "drop" or fields.action == "consume" then
+                    queue_items[fields.queueItemId] = fields.action
+                end
+            end
+            if fields.beforeQueueItemId
+                and queue_items[fields.beforeQueueItemId] ~= "active"
+            then
+                return nil, reference_error(
+                    "active queue item",
+                    fields.beforeQueueItemId,
+                    path
+                )
+            end
         elseif item.type == "model_request" then
             local ok, id_error = unique_id(requests, fields.requestId, "request", path)
             if not ok then return nil, id_error end
@@ -906,8 +974,21 @@ local function validate_relations(events)
             if not turns[fields.targetTurnId] then
                 return nil, reference_error("turn", fields.targetTurnId, path)
             end
+            if fields.sideId and turn_kinds[fields.sideId] ~= "side" then
+                return nil, reference_error("side turn", fields.sideId, path)
+            end
             local ok, id_error = unique_id(messages, fields.messageId, "message", path)
             if not ok then return nil, id_error end
+        elseif item.type == "turn_ended" then
+            if not item.turn_id or ended_turns[item.turn_id] then
+                return nil, failure(
+                    "ContextRelation",
+                    "turn must have exactly one ordered terminal event",
+                    "duplicate-or-unbound-turn-end",
+                    path
+                )
+            end
+            ended_turns[item.turn_id] = true
         elseif item.type == "compaction" then
             local ok, id_error = unique_id(
                 compactions,

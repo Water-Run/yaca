@@ -70,6 +70,7 @@
     <choice>
       <value>turn_started</value>
       <value>user_message</value>
+      <value>queue_item</value>
       <value>model_request</value>
       <value>model_message</value>
       <value>model_control</value>
