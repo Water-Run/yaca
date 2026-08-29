@@ -21,6 +21,22 @@ local REQUIRED_METHODS = {
     "fs_close",
 }
 
+-- These methods are deliberately a separate capability set.  The basic
+-- filesystem port is sufficient for Runtime-owned configuration and Context
+-- publication, while model-visible direct tools additionally require
+-- no-follow inspection and identity-bound mutation primitives.  A target that
+-- does not provide the complete set remains usable for management, but direct
+-- tools fail closed before admission.
+local DIRECT_METHODS = {
+    "fs_inspect_direct",
+    "fs_walk_direct",
+    "fs_open_read_verified",
+    "fs_create_new_verified",
+    "fs_replace_verified",
+    "fs_rename_no_replace_verified",
+    "fs_delete_direct_verified",
+}
+
 local function failure(code, message, detail)
     local result = { code = code, message = message }
     if detail ~= nil then result.detail = detail end
@@ -128,6 +144,194 @@ local function validate_identity(identity)
     }, "filesystem identity")
 end
 
+local function copy_identity(identity)
+    return {
+        kind = identity.kind,
+        volume = identity.volume,
+        object = identity.object,
+        size = identity.size,
+        modified = identity.modified,
+    }
+end
+
+local function same_identity(left, right)
+    return type(left) == "table" and type(right) == "table"
+        and left.kind == right.kind
+        and left.volume == right.volume
+        and left.object == right.object
+        and left.size == right.size
+        and left.modified == right.modified
+end
+
+local function same_object_identity(left, right)
+    return type(left) == "table" and type(right) == "table"
+        and left.kind == right.kind
+        and left.volume == right.volume
+        and left.object == right.object
+end
+
+local function exact_fields(value, allowed)
+    if type(value) ~= "table" then return false end
+    for key in pairs(value) do
+        if type(key) ~= "string" or not allowed[key] then return false end
+    end
+    return true
+end
+
+local function dense_count(values)
+    if type(values) ~= "table" then return nil end
+    local count = 0
+    for key in pairs(values) do
+        if math.type(key) ~= "integer" or key < 1 then return nil end
+        count = count + 1
+    end
+    for index = 1, count do
+        if values[index] == nil then return nil end
+    end
+    return count
+end
+
+local function valid_relative_path(value)
+    if type(value) ~= "string" or value == ""
+        or value:find("\0", 1, true)
+        or value:sub(1, 1) == "/"
+        or value:find("\\", 1, true)
+    then
+        return false
+    end
+    for segment in value:gmatch("[^/]+") do
+        if segment == "." or segment == ".." then return false end
+    end
+    return value:sub(-1) ~= "/" and not value:find("//", 1, true)
+end
+
+local function join_direct_path(root, relative)
+    local separator = root:find("\\", 1, true) and "\\" or "/"
+    local suffix = relative:gsub("/", separator)
+    if root:sub(-1) == "/" or root:sub(-1) == "\\" then return root .. suffix end
+    return root .. separator .. suffix
+end
+
+local function validate_direct_metadata(metadata)
+    if not exact_fields(metadata, {
+        link_count = true,
+        behavior_digest = true,
+        preservation = true,
+        link_target = true,
+    })
+        or not valid_integer(metadata.link_count, 1)
+        or type(metadata.behavior_digest) ~= "string"
+        or metadata.behavior_digest == ""
+        or (metadata.preservation ~= "proven" and metadata.preservation ~= "unsupported")
+        or (metadata.link_target ~= false and not valid_absolute_path(metadata.link_target))
+    then
+        return nil, failure("NativeContract", "direct filesystem metadata is invalid")
+    end
+    return readonly({
+        link_count = metadata.link_count,
+        behavior_digest = metadata.behavior_digest,
+        preservation = metadata.preservation,
+        link_target = metadata.link_target,
+    }, "direct filesystem metadata")
+end
+
+local function validate_ancestor(ancestor)
+    if not exact_fields(ancestor, { path = true, identity = true })
+        or not valid_absolute_path(ancestor.path)
+    then
+        return nil, failure("NativeContract", "direct filesystem ancestor is invalid")
+    end
+    local identity, identity_error = validate_identity(ancestor.identity)
+    if not identity then return nil, identity_error end
+    return readonly({ path = ancestor.path, identity = identity }, "filesystem ancestor")
+end
+
+local function validate_direct_snapshot(value)
+    if not exact_fields(value, {
+        requested_path = true,
+        canonical_path = true,
+        exists = true,
+        identity = true,
+        parent_identity = true,
+        metadata = true,
+        ancestors = true,
+        ancestry_complete = true,
+    })
+        or not valid_absolute_path(value.requested_path)
+        or not valid_absolute_path(value.canonical_path)
+        or type(value.exists) ~= "boolean"
+        or type(value.ancestry_complete) ~= "boolean"
+    then
+        return nil, failure("NativeContract", "direct filesystem snapshot is invalid")
+    end
+    local parent, parent_error = validate_identity(value.parent_identity)
+    if not parent then return nil, parent_error end
+    local identity = false
+    local metadata = false
+    if value.exists then
+        identity, parent_error = validate_identity(value.identity)
+        if not identity then return nil, parent_error end
+        metadata, parent_error = validate_direct_metadata(value.metadata)
+        if not metadata then return nil, parent_error end
+    elseif value.identity ~= false or value.metadata ~= false then
+        return nil, failure(
+            "NativeContract",
+            "missing direct target must not carry identity or metadata"
+        )
+    end
+    local ancestor_count = dense_count(value.ancestors)
+    if ancestor_count == nil or ancestor_count == 0 then
+        return nil, failure("NativeContract", "direct ancestry must be a non-empty dense array")
+    end
+    local ancestors = {}
+    for index, ancestor in ipairs(value.ancestors) do
+        local admitted, ancestor_error = validate_ancestor(ancestor)
+        if not admitted then return nil, ancestor_error end
+        ancestors[index] = admitted
+    end
+    return readonly({
+        requested_path = value.requested_path,
+        canonical_path = value.canonical_path,
+        exists = value.exists,
+        identity = identity,
+        parent_identity = parent,
+        metadata = metadata,
+        ancestors = readonly(ancestors, "filesystem ancestors"),
+        ancestry_complete = value.ancestry_complete,
+    }, "direct filesystem snapshot")
+end
+
+local function direct_snapshot_equal(left, right)
+    if left.requested_path ~= right.requested_path
+        or left.canonical_path ~= right.canonical_path
+        or left.exists ~= right.exists
+        or left.ancestry_complete ~= right.ancestry_complete
+        or not same_object_identity(left.parent_identity, right.parent_identity)
+        or #left.ancestors ~= #right.ancestors
+    then
+        return false
+    end
+    if left.exists then
+        if not same_identity(left.identity, right.identity)
+            or left.metadata.link_count ~= right.metadata.link_count
+            or left.metadata.behavior_digest ~= right.metadata.behavior_digest
+            or left.metadata.preservation ~= right.metadata.preservation
+            or left.metadata.link_target ~= right.metadata.link_target
+        then
+            return false
+        end
+    end
+    for index = 1, #left.ancestors do
+        local left_ancestor, right_ancestor = left.ancestors[index], right.ancestors[index]
+        if left_ancestor.path ~= right_ancestor.path
+            or not same_object_identity(left_ancestor.identity, right_ancestor.identity)
+        then
+            return false
+        end
+    end
+    return true
+end
+
 ---Creates a filesystem service around an injected native module.
 -- Every path is required to be absolute and NUL-free. Write sizes are bounded
 -- by the release-manifest value supplied by the composition root.
@@ -155,8 +359,44 @@ function M.new(native, options)
         return nil, failure("InvalidFilesystemLimit", "maximum_lease_bytes is invalid")
     end
 
+    local maximum_direct_entries = options.maximum_direct_entries or maximum_chunk_bytes
+    if not valid_integer(maximum_direct_entries, 1) then
+        return nil, failure("InvalidFilesystemLimit", "maximum_direct_entries is invalid")
+    end
+
+    local direct_available = true
+    for _, method in ipairs(DIRECT_METHODS) do
+        if type(native[method]) ~= "function" then
+            direct_available = false
+            break
+        end
+    end
+
     local service = {}
     local lease_states = setmetatable({}, { __mode = "k" })
+    local direct_snapshot_states = setmetatable({}, { __mode = "k" })
+
+    local function mark_direct_snapshot(snapshot)
+        direct_snapshot_states[snapshot] = true
+        return snapshot
+    end
+
+    local function require_direct_snapshot(snapshot, label)
+        if not direct_snapshot_states[snapshot] then
+            return nil, failure(
+                "InvalidDirectSnapshot",
+                (label or "direct operation") .. " requires a snapshot from this service"
+            )
+        end
+        return snapshot
+    end
+
+    local function direct_unavailable()
+        return false, failure(
+            "DirectFilesystemUnavailable",
+            "the complete no-follow direct filesystem port is unavailable"
+        )
+    end
 
     ---Opens an existing absolute path for binary reading.
     -- @param path string Absolute operating-system path.
@@ -321,6 +561,268 @@ function M.new(native, options)
         return invoke(native, "fs_close", handle)
     end
 
+    ---Inspects one direct-tool path without following the final link.
+    -- The native result binds canonical physical ancestry, final identity, and
+    -- behavior/security metadata.  Incomplete ancestry is returned as data so
+    -- callers can fail closed at the reserved-tree boundary.
+    -- @param path string Absolute target path.
+    -- @return boolean ok Whether inspection completed.
+    -- @return table snapshot_or_err Immutable marked snapshot or failure.
+    function service.direct_inspect(path)
+        if not direct_available then return direct_unavailable() end
+        if not valid_absolute_path(path) then
+            return false, failure("InvalidPath", "direct_inspect requires an absolute path")
+        end
+        local ok, value = invoke(native, "fs_inspect_direct", path)
+        if not ok then return false, value end
+        local snapshot, snapshot_error = validate_direct_snapshot(value)
+        if not snapshot then return false, snapshot_error end
+        if snapshot.requested_path ~= path then
+            return false, failure("NativeContract", "direct snapshot changed the requested path")
+        end
+        return true, mark_direct_snapshot(snapshot)
+    end
+
+    ---Re-inspects and compares every safety-relevant direct path fact.
+    -- @param snapshot table Marked snapshot returned by direct_inspect/walk.
+    -- @return boolean ok True only when the exact snapshot is still current.
+    -- @return table current_or_err Current marked snapshot or typed stale error.
+    function service.direct_reverify(snapshot)
+        local admitted, snapshot_error = require_direct_snapshot(snapshot, "direct_reverify")
+        if not admitted then return false, snapshot_error end
+        local ok, current = service.direct_inspect(snapshot.requested_path)
+        if not ok then return false, current end
+        if not direct_snapshot_equal(snapshot, current) then
+            return false, failure("TargetChanged", "direct filesystem snapshot is stale")
+        end
+        return true, current
+    end
+
+    ---Performs one bounded no-follow walk with a fixed ignore grammar.
+    -- @param root_snapshot table Existing directory snapshot.
+    -- @param depth integer Maximum recursive depth, where zero is the root.
+    -- @param maximum_entries integer Maximum candidate records to return.
+    -- @return boolean ok Whether a bounded result was obtained.
+    -- @return table result_or_err Immutable walk result.
+    function service.direct_walk(root_snapshot, depth, maximum_entries)
+        if not direct_available then return direct_unavailable() end
+        local admitted, snapshot_error = require_direct_snapshot(root_snapshot, "direct_walk")
+        if not admitted then return false, snapshot_error end
+        if not root_snapshot.exists or root_snapshot.identity.kind ~= "directory" then
+            return false, failure("InvalidTargetType", "direct walk root must be a directory")
+        end
+        if not valid_integer(depth, 0)
+            or not valid_integer(maximum_entries, 1)
+            or maximum_entries > maximum_direct_entries
+        then
+            return false, failure("Limit", "direct walk bounds are invalid")
+        end
+        local current_ok, current = service.direct_reverify(root_snapshot)
+        if not current_ok then return false, current end
+        local ok, value = invoke(
+            native,
+            "fs_walk_direct",
+            current.canonical_path,
+            depth,
+            maximum_entries,
+            "git-compatible-v1"
+        )
+        if not ok then return false, value end
+        if not exact_fields(value, {
+            generation = true,
+            entries = true,
+            complete = true,
+            partial_reason = true,
+        })
+            or type(value.generation) ~= "string"
+            or value.generation == ""
+            or type(value.complete) ~= "boolean"
+            or (value.partial_reason ~= false and type(value.partial_reason) ~= "string")
+        then
+            return false, failure("NativeContract", "direct walk result is invalid")
+        end
+        local count = dense_count(value.entries)
+        if count == nil or count > maximum_entries then
+            return false, failure("NativeContract", "direct walk entries violate the bound")
+        end
+        if value.complete and value.partial_reason ~= false then
+            return false, failure("NativeContract", "complete direct walk has a partial reason")
+        end
+        if not value.complete and value.partial_reason == false then
+            return false, failure("NativeContract", "partial direct walk omits its reason")
+        end
+        local entries, seen = {}, {}
+        for index, entry in ipairs(value.entries) do
+            if not exact_fields(entry, { relative_path = true, snapshot = true })
+                or not valid_relative_path(entry.relative_path)
+                or seen[entry.relative_path]
+            then
+                return false, failure("NativeContract", "direct walk entry path is invalid")
+            end
+            seen[entry.relative_path] = true
+            local snapshot, entry_error = validate_direct_snapshot(entry.snapshot)
+            if not snapshot then return false, entry_error end
+            if snapshot.requested_path ~= join_direct_path(
+                current.canonical_path,
+                entry.relative_path
+            ) then
+                return false, failure(
+                    "NativeContract",
+                    "direct walk entry is not rooted below the requested directory"
+                )
+            end
+            entries[index] = readonly({
+                relative_path = entry.relative_path,
+                snapshot = mark_direct_snapshot(snapshot),
+            }, "direct walk entry")
+        end
+        return true, readonly({
+            generation = value.generation,
+            entries = readonly(entries, "direct walk entries"),
+            complete = value.complete,
+            partial_reason = value.partial_reason,
+        }, "direct walk result")
+    end
+
+    ---Opens only the exact previously inspected ordinary file.
+    function service.direct_open_read(snapshot)
+        if not direct_available then return direct_unavailable() end
+        local admitted, snapshot_error = require_direct_snapshot(snapshot, "direct_open_read")
+        if not admitted then return false, snapshot_error end
+        if not snapshot.exists or snapshot.identity.kind ~= "file" then
+            return false, failure("InvalidTargetType", "direct read requires an ordinary file")
+        end
+        local current_ok, current = service.direct_reverify(snapshot)
+        if not current_ok then return false, current end
+        local ok, handle_or_error = invoke(
+            native,
+            "fs_open_read_verified",
+            current.canonical_path,
+            copy_identity(current.identity)
+        )
+        if not ok then return false, handle_or_error end
+        local stated, identity_or_error = service.stat_identity(handle_or_error)
+        if not stated or not same_identity(identity_or_error, current.identity) then
+            service.close(handle_or_error)
+            return false, stated and failure("TargetChanged", "opened direct file identity changed")
+                or identity_or_error
+        end
+        return true, handle_or_error
+    end
+
+    ---Creates a final or temporary ordinary file against an exact parent.
+    function service.direct_create_new(missing_snapshot, permissions)
+        if not direct_available then return direct_unavailable() end
+        local admitted, snapshot_error = require_direct_snapshot(
+            missing_snapshot,
+            "direct_create_new"
+        )
+        if not admitted then return false, snapshot_error end
+        if missing_snapshot.exists then
+            return false, failure("DestinationExists", "direct create target already exists")
+        end
+        if not valid_integer(permissions, 0) or permissions > 511 then
+            return false, failure("InvalidPermissions", "direct create permissions are invalid")
+        end
+        local current_ok, current = service.direct_reverify(missing_snapshot)
+        if not current_ok then return false, current end
+        return invoke(
+            native,
+            "fs_create_new_verified",
+            current.canonical_path,
+            copy_identity(current.parent_identity),
+            permissions
+        )
+    end
+
+    ---Replaces an exact target with an exact same-directory temporary.
+    function service.direct_replace(temporary_snapshot, target_snapshot)
+        if not direct_available then return direct_unavailable() end
+        local temporary, temporary_error = require_direct_snapshot(
+            temporary_snapshot,
+            "direct_replace temporary"
+        )
+        if not temporary then return false, temporary_error end
+        local target, target_error = require_direct_snapshot(target_snapshot, "direct_replace target")
+        if not target then return false, target_error end
+        if not temporary.exists or temporary.identity.kind ~= "file"
+            or not target.exists or target.identity.kind ~= "file"
+            or not same_object_identity(temporary.parent_identity, target.parent_identity)
+        then
+            return false, failure(
+                "InvalidTargetType",
+                "direct replace requires ordinary files in one exact directory"
+            )
+        end
+        local temporary_ok, current_temporary = service.direct_reverify(temporary)
+        if not temporary_ok then return false, current_temporary end
+        local target_ok, current_target = service.direct_reverify(target)
+        if not target_ok then return false, current_target end
+        return invoke(
+            native,
+            "fs_replace_verified",
+            current_temporary.canonical_path,
+            current_target.canonical_path,
+            copy_identity(current_temporary.identity),
+            copy_identity(current_target.identity),
+            copy_identity(current_target.parent_identity)
+        )
+    end
+
+    ---Renames one exact source to an exact absent target without replacement.
+    function service.direct_rename(source_snapshot, target_snapshot)
+        if not direct_available then return direct_unavailable() end
+        local source, source_error = require_direct_snapshot(source_snapshot, "direct_rename source")
+        if not source then return false, source_error end
+        local target, target_error = require_direct_snapshot(target_snapshot, "direct_rename target")
+        if not target then return false, target_error end
+        if not source.exists or (source.identity.kind ~= "file" and source.identity.kind ~= "directory")
+            or target.exists
+        then
+            return false, failure(
+                "InvalidTargetType",
+                "direct rename requires an ordinary source and absent target"
+            )
+        end
+        local source_ok, current_source = service.direct_reverify(source)
+        if not source_ok then return false, current_source end
+        local target_ok, current_target = service.direct_reverify(target)
+        if not target_ok then return false, current_target end
+        return invoke(
+            native,
+            "fs_rename_no_replace_verified",
+            current_source.canonical_path,
+            current_target.canonical_path,
+            copy_identity(current_source.identity),
+            copy_identity(current_source.parent_identity),
+            copy_identity(current_target.parent_identity)
+        )
+    end
+
+    ---Permanently deletes one exact ordinary file or empty directory.
+    function service.direct_delete(snapshot)
+        if not direct_available then return direct_unavailable() end
+        local admitted, snapshot_error = require_direct_snapshot(snapshot, "direct_delete")
+        if not admitted then return false, snapshot_error end
+        if not snapshot.exists
+            or (snapshot.identity.kind ~= "file" and snapshot.identity.kind ~= "directory")
+        then
+            return false, failure(
+                "InvalidTargetType",
+                "direct delete requires an ordinary file or empty directory"
+            )
+        end
+        local current_ok, current = service.direct_reverify(snapshot)
+        if not current_ok then return false, current end
+        return invoke(
+            native,
+            "fs_delete_direct_verified",
+            current.canonical_path,
+            copy_identity(current.identity),
+            copy_identity(current.parent_identity)
+        )
+    end
+
     local function cleanup_created(path, identity)
         local stated, observed = service.stat_identity(path)
         if stated then identity = observed end
@@ -434,6 +936,8 @@ function M.new(native, options)
         target_qualified = false,
         maximum_chunk_bytes = maximum_chunk_bytes,
         maximum_lease_bytes = maximum_lease_bytes,
+        verified_direct_candidate = direct_available,
+        maximum_direct_entries = maximum_direct_entries,
     }, "filesystem capabilities")
 
     return readonly(service, "filesystem service")
