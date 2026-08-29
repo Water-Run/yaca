@@ -222,6 +222,112 @@ local function snapshot_digest(safety, domain, value)
     return safety.binding_digest(domain, { { name = "public", value = bytes } })
 end
 
+local function model_view_escape(value)
+    return value
+        :gsub("&", "&amp;")
+        :gsub("<", "&lt;")
+        :gsub(">", "&gt;")
+        :gsub('"', "&quot;")
+end
+
+local function render_model_view(safety, facts, context_generation, maximum_bytes)
+    local count = dense_count(facts)
+    if count == nil then
+        return nil, failure("InvalidModelView", "Context Facts are not a dense array")
+    end
+    local first_sequence = count == 0 and 0 or 1
+    local parts = {
+        '<DurableFacts schemaVersion="1" contextGeneration="',
+        tostring(context_generation),
+        '" firstSequence="',
+        tostring(first_sequence),
+        '" lastSequence="',
+        tostring(count),
+        '">\n',
+    }
+    local size = 0
+    local function add(value)
+        size = size + #value
+        if size > maximum_bytes then
+            return nil, failure("ModelViewLimit", "durable model view exceeds its byte limit")
+        end
+        parts[#parts + 1] = value
+        return true
+    end
+    -- Account for the fixed header assembled above before appending event data.
+    local header = table.concat(parts)
+    parts = {}
+    local added, add_error = add(header)
+    if not added then return nil, add_error end
+    for index, event in ipairs(facts) do
+        if type(event) ~= "table"
+            or event.seq ~= index
+            or type(event.type) ~= "string"
+            or type(event.at) ~= "string"
+            or type(event.fields) ~= "table"
+        then
+            return nil, failure("InvalidModelView", "Context event cannot enter the model view")
+        end
+        local turn = event.turn_id and ' turnId="'
+            .. model_view_escape(event.turn_id) .. '"' or ""
+        added, add_error = add(table.concat({
+            '  <Event seq="', tostring(event.seq), '" type="',
+            model_view_escape(event.type), '" at="', model_view_escape(event.at),
+            '"', turn, '>\n',
+        }))
+        if not added then return nil, add_error end
+        local names = {}
+        for name in pairs(event.fields) do names[#names + 1] = name end
+        table.sort(names)
+        for _, name in ipairs(names) do
+            local value = event.fields[name]
+            local metadata = event.field_metadata and event.field_metadata[name]
+            if type(name) ~= "string" or type(value) ~= "string" then
+                return nil, failure("InvalidModelView", "Context field cannot enter the model view")
+            end
+            local visible
+            if metadata and metadata.representation == "base64" then
+                visible = table.concat({
+                    "[binary omitted; rawBytes=", tostring(metadata.raw_bytes),
+                    "; sha256=", tostring(metadata.digest), "]",
+                })
+            elseif text.xml_carrier_kind(value) == "text" then
+                visible = model_view_escape(value)
+            else
+                visible = "[non-text field omitted]"
+            end
+            added, add_error = add(table.concat({
+                '    <Field name="', model_view_escape(name), '" bytes="',
+                tostring(#value), '">', visible, '</Field>\n',
+            }))
+            if not added then return nil, add_error end
+        end
+        added, add_error = add("  </Event>\n")
+        if not added then return nil, add_error end
+    end
+    added, add_error = add("</DurableFacts>")
+    if not added then return nil, add_error end
+    local body = table.concat(parts)
+    local digest, digest_error = snapshot_digest(
+        safety,
+        "yaca-model-view-manifest-v1",
+        {
+            schema_version = 1,
+            context_generation = context_generation,
+            first_sequence = first_sequence,
+            last_sequence = count,
+            body = body,
+        }
+    )
+    if not digest then return nil, digest_error end
+    return {
+        digest = digest,
+        first_sequence = first_sequence,
+        last_sequence = count,
+        body = body,
+    }
+end
+
 local function public_generation_snapshot(generation, settings)
     return {
         id = generation.id,
@@ -377,6 +483,7 @@ local function validate_publication_options(options)
         data_root = true,
         platform_kind = true,
         maximum_create_attempts = true,
+        maximum_model_view_bytes = true,
     }
     for key in pairs(options) do
         if type(key) ~= "string" or not allowed[key] then
@@ -390,6 +497,7 @@ local function validate_publication_options(options)
         or (options.platform_kind ~= "windows" and options.platform_kind ~= "posix")
         or not valid_integer(options.maximum_create_attempts, 1)
         or options.maximum_create_attempts > 256
+        or not valid_integer(options.maximum_model_view_bytes, 1)
     then
         return nil, failure(
             "InvalidContextPublication",
@@ -420,6 +528,20 @@ function M.new_context_publication(ports, options)
     local closed = false
     local journal_failure
     local service = {}
+    local model_views = {}
+
+    local function cache_model_view(facts, context_generation)
+        local candidate, view_error = render_model_view(
+            safety,
+            facts,
+            context_generation,
+            admitted.maximum_model_view_bytes
+        )
+        if not candidate then return nil, view_error end
+        local frozen = readonly(candidate, "durable model view")
+        model_views[candidate.digest] = frozen
+        return frozen
+    end
 
     local function prepare_mirror(workspace_path)
         local logical, logical_error = path.to_logical(workspace_path)
@@ -518,31 +640,11 @@ function M.new_context_publication(ports, options)
             specification.message
         )
         if not bundle then return nil, bundle_error end
-        local view_digest
-        view_digest, digest_error = snapshot_digest(
-            safety,
-            "yaca-initial-model-view-manifest-v1",
-            {
-                schema_version = 1,
-                context_generation = 1,
-                event_range = "1-2",
-                kind = "main",
-                config_snapshot = config_digest,
-                model_snapshot = model_digest,
-                permission_snapshot = permission_digest,
-                prompt_snapshot = bundle.digest,
-                tool_registry_snapshot = admitted_ports.tool_registry.digest,
-                message = specification.message,
-                source = specification.source,
-            }
-        )
-        if not view_digest then return nil, digest_error end
         return {
             model = model_digest,
             permission = permission_digest,
             config = config_digest,
             prompt = bundle.digest,
-            view = view_digest,
             tool_registry = admitted_ports.tool_registry.digest,
         }
     end
@@ -644,6 +746,9 @@ function M.new_context_publication(ports, options)
                     },
                 },
             }
+            local initial_view, view_error = cache_model_view(facts, 1)
+            if not initial_view then return nil, view_error end
+            snapshot.view = initial_view.digest
             local goal_override = settings.double_check_goal_override == "value"
                 and { mode = "value", value = settings.double_check_goal }
                 or { mode = "inherit" }
@@ -739,6 +844,87 @@ function M.new_context_publication(ports, options)
         )
     end
 
+    ---Builds a bounded quoted-data model view from the exact current durable
+    -- Fact prefix. A changed view is only a candidate until AgentLoop commits
+    -- the matching model_view_published event through this journal.
+    function service.prepare_view(specification)
+        if closed then
+            return nil, failure("ContextPublicationClosed", "Context model view is closed")
+        end
+        if journal_failure then return nil, journal_failure end
+        if not active or not active.document then
+            return nil, failure("ContextNotPublished", "Context model view has no durable source")
+        end
+        local allowed = {
+            expected_context_generation = true,
+            expected_last_sequence = true,
+            current_manifest_ref = true,
+        }
+        if type(specification) ~= "table" then
+            return nil, failure("InvalidModelView", "model view observation is required")
+        end
+        for key in pairs(specification) do
+            if type(key) ~= "string" or not allowed[key] then
+                return nil, failure("InvalidModelView", "model view observation is ambiguous")
+            end
+        end
+        local document = active.document
+        local manifest = document.model_view.active_manifest
+        if specification.expected_context_generation ~= document.generation
+            or specification.expected_last_sequence ~= document.event_count
+            or specification.current_manifest_ref ~= manifest.digest
+        then
+            return nil, failure(
+                "StaleModelView",
+                "model view observation does not bind the active Context"
+            )
+        end
+        local view
+        local changed = manifest.first_event_seq ~= (document.event_count == 0 and 0 or 1)
+            or manifest.last_event_seq ~= document.event_count
+        if not changed then
+            view = model_views[manifest.digest]
+            if not view then
+                return nil, failure(
+                    "ModelViewUnavailable",
+                    "active model view body is not available to this writer"
+                )
+            end
+        else
+            local view_error
+            view, view_error = cache_model_view(document.facts, document.generation)
+            if not view then return nil, view_error end
+            changed = view.digest ~= manifest.digest
+                or view.first_sequence ~= manifest.first_event_seq
+                or view.last_sequence ~= manifest.last_event_seq
+        end
+        return readonly({
+            digest = view.digest,
+            first_sequence = view.first_sequence,
+            last_sequence = view.last_sequence,
+            changed = changed,
+            replaces_manifest_ref = manifest.digest,
+            binding = specification,
+        }, "prepared durable model view")
+    end
+
+    ---Returns one body only after its manifest is the active durable view.
+    function service.resolve_view(digest)
+        if closed then
+            return nil, failure("ContextPublicationClosed", "Context model view is closed")
+        end
+        if not active or type(digest) ~= "string"
+            or digest ~= active.document.model_view.active_manifest.digest
+        then
+            return nil, failure("StaleModelView", "model view is not the active durable manifest")
+        end
+        local view = model_views[digest]
+        if not view then
+            return nil, failure("ModelViewUnavailable", "durable model view body is unavailable")
+        end
+        return view
+    end
+
     ---Commits one AgentLoop batch through the already-owned writer lease. Each
     -- acknowledged batch is a fully validated replacement generation.
     function service.commit(batch)
@@ -779,6 +965,28 @@ function M.new_context_publication(ports, options)
                 "InvalidContextBatch",
                 "Context journal batch does not bind the current generation"
             )
+        end
+        local view_publications = 0
+        for _, event in ipairs(batch.events) do
+            if event.type == "model_view_published" then
+                view_publications = view_publications + 1
+                local fields = event.fields
+                local prepared = type(fields) == "table"
+                    and model_views[fields.manifestDigest]
+                    or nil
+                local current = active.document.model_view.active_manifest
+                if view_publications > 1
+                    or not prepared
+                    or fields.firstEventSeq ~= tostring(prepared.first_sequence)
+                    or fields.lastEventSeq ~= tostring(prepared.last_sequence)
+                    or fields.replacesManifestDigest ~= current.digest
+                then
+                    return nil, failure(
+                        "InvalidModelView",
+                        "Context journal model-view event has no exact prepared body"
+                    )
+                end
+            end
         end
         local observed, time_error = system.utc_now()
         if not observed then return nil, time_error end

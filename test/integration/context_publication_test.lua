@@ -278,6 +278,7 @@ local function fixture(settings)
         data_root = settings.data_root or "/release/__yaca__",
         platform_kind = settings.platform_kind or "posix",
         maximum_create_attempts = 4,
+        maximum_model_view_bytes = 262144,
     }))
     return publication, observations, path_service, registry
 end
@@ -348,6 +349,17 @@ return {
                 A.equal(document.facts[2].fields.source, "terminal")
                 A.equal(draft.status().lifecycle, "saved")
                 A.truthy(draft.status().durable)
+                local initial_view = assert(publication.prepare_view({
+                    expected_context_generation = 1,
+                    expected_last_sequence = 2,
+                    current_manifest_ref = receipt.view_manifest_snapshot,
+                }))
+                A.falsy(initial_view.changed)
+                A.equal(initial_view.digest, receipt.view_manifest_snapshot)
+                A.equal(initial_view.last_sequence, 2)
+                local resolved_initial = assert(publication.resolve_view(initial_view.digest))
+                A.contains(resolved_initial.body, "<DurableFacts")
+                A.contains(resolved_initial.body, "实现首个持久化节点")
                 local batch = {
                     barrier_id = "turn-1:barrier:1",
                     first_sequence = 3,
@@ -374,6 +386,45 @@ return {
                 A.equal(publication.status().event_count, 3)
                 A.equal(observed.published.document.header.updated_at, "2026-08-30T12:34:57Z")
                 A.equal(observed.published.document.facts[3].type, "model_request")
+                local next_observation = {
+                    expected_context_generation = 2,
+                    expected_last_sequence = 3,
+                    current_manifest_ref = receipt.view_manifest_snapshot,
+                }
+                local next_view = assert(publication.prepare_view(next_observation))
+                A.truthy(next_view.changed)
+                A.equal(next_view.binding, next_observation)
+                A.equal(next_view.first_sequence, 1)
+                A.equal(next_view.last_sequence, 3)
+                local unresolved, unresolved_error = publication.resolve_view(next_view.digest)
+                A.falsy(unresolved)
+                A.equal(unresolved_error.code, "StaleModelView")
+                local view_batch = {
+                    barrier_id = "turn-1:barrier:2",
+                    first_sequence = 4,
+                    last_sequence = 4,
+                    event_count = 1,
+                    expected_context_generation = 2,
+                    events = { {
+                        seq = 4,
+                        type = "model_view_published",
+                        turn_id = "turn-1",
+                        fields = {
+                            manifestDigest = next_view.digest,
+                            firstEventSeq = tostring(next_view.first_sequence),
+                            lastEventSeq = tostring(next_view.last_sequence),
+                            replacesManifestDigest = next_view.replaces_manifest_ref,
+                        },
+                    } },
+                }
+                A.truthy(publication.commit(view_batch))
+                A.equal(publication.status().generation, 3)
+                A.equal(publication.status().event_count, 4)
+                local resolved_next = assert(publication.resolve_view(next_view.digest))
+                A.equal(resolved_next.digest, next_view.digest)
+                A.contains(resolved_next.body, "model_request")
+                A.equal(observed.published.document.model_view.active_manifest.digest, next_view.digest)
+                A.equal(observed.published.document.facts[4].type, "model_view_published")
                 A.truthy(draft.close())
                 A.equal(observed.closes, 1)
                 A.equal(draft.status().lifecycle, "closed")

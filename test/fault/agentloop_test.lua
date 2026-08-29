@@ -76,7 +76,7 @@ local function fixture(settings, option_overrides)
     settings = settings or {}
     local now = 0
     local log, durable_events, batches = {}, {}, {}
-    local model_starts, tool_starts, review_starts = {}, {}, {}
+    local model_starts, tool_starts, review_starts, view_prepares = {}, {}, {}, {}
     local start_cursor = 1
     local context_generation = 1
     local journal = {}
@@ -165,6 +165,16 @@ local function fixture(settings, option_overrides)
 
     local review_port = reviews
     if settings.reviews_false then review_port = false end
+    local view_port = settings.views or false
+    if view_port ~= false then
+        local original_prepare = view_port.prepare
+        view_port = {
+            prepare = function(observation)
+                view_prepares[#view_prepares + 1] = observation
+                return original_prepare(observation, #view_prepares)
+            end,
+        }
+    end
     local loop, loop_error = runtime.new_agent_loop({
         clock = { now = function() return now end },
         journal = journal,
@@ -173,6 +183,7 @@ local function fixture(settings, option_overrides)
         reviews = review_port,
         snapshots = false,
         side = false,
+        views = view_port,
     }, options(option_overrides))
     A.truthy(loop, loop_error and loop_error.code)
     return {
@@ -183,6 +194,7 @@ local function fixture(settings, option_overrides)
         model_starts = model_starts,
         tool_starts = tool_starts,
         review_starts = review_starts,
+        view_prepares = view_prepares,
         advance = function(delta) now = now + delta end,
     }
 end
@@ -347,6 +359,71 @@ return {
                 A.falsy(result)
                 A.equal(handoff_error.code, "PublishedTurnMismatch")
                 A.equal(#rejected.log, 0)
+            end,
+        },
+        {
+            name = "every later model request publishes its exact durable fact view first",
+            run = function()
+                local views = {}
+                function views.prepare(observation, call_number)
+                    if call_number == 1 then
+                        return {
+                            digest = "view-manifest",
+                            first_sequence = 1,
+                            last_sequence = 2,
+                            changed = false,
+                            replaces_manifest_ref = "view-manifest",
+                            binding = observation,
+                        }
+                    end
+                    return {
+                        digest = "view-manifest-2",
+                        first_sequence = 1,
+                        last_sequence = observation.expected_last_sequence,
+                        changed = true,
+                        replaces_manifest_ref = observation.current_manifest_ref,
+                        binding = observation,
+                    }
+                end
+                local f = fixture({ views = views }, { initial_sequence = 2 })
+                assert(f.loop:resume_published_main(published_handoff()))
+                assert(f.loop:accept_model_response(ask_user(f.loop, "Which target?")))
+                assert(f.loop:reply("Use the current workspace", "user"))
+
+                A.equal(#f.view_prepares, 2)
+                A.equal(f.view_prepares[1].expected_last_sequence, 2)
+                A.equal(f.view_prepares[2].expected_last_sequence, 6)
+                A.equal(f.events[5].type, "model_view_published")
+                A.equal(f.events[5].fields.manifestDigest, "view-manifest-2")
+                A.equal(f.events[5].fields.lastEventSeq, "6")
+                A.equal(f.events[6].type, "model_request")
+                A.equal(f.events[6].fields.viewManifestRef, "view-manifest-2")
+                A.equal(f.model_starts[2].view_manifest_ref, "view-manifest-2")
+                A.truthy(index_of(f.log, "durable:model_view_published")
+                    < index_of(f.log, "effect:model:turn-1:request:2"))
+
+                local malformed_views = {
+                    prepare = function(observation)
+                        return {
+                            digest = "unbound-view",
+                            first_sequence = 1,
+                            last_sequence = observation.expected_last_sequence,
+                            changed = true,
+                            replaces_manifest_ref = observation.current_manifest_ref,
+                            binding = {},
+                        }
+                    end,
+                }
+                local rejected = fixture(
+                    { views = malformed_views },
+                    { initial_sequence = 2 }
+                )
+                local started, view_error = rejected.loop:resume_published_main(
+                    published_handoff()
+                )
+                A.falsy(started)
+                A.equal(view_error.code, "AgentDurabilityFailure")
+                A.equal(#rejected.model_starts, 0)
             end,
         },
         {
@@ -873,6 +950,7 @@ return {
                     reviews = false,
                     snapshots = false,
                     side = false,
+                    views = false,
                 }, bad_options)
                 A.falsy(loop)
                 A.equal(option_error.code, "InvalidAgentOptions")

@@ -209,6 +209,7 @@ local function fixture(settings)
         reviews = reviews,
         snapshots = snapshot_port,
         side = side_port,
+        views = false,
     }, options(settings.queue_maximum)))
     return {
         loop = loop,

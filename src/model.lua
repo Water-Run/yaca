@@ -1,6 +1,6 @@
 --[[
 File: model.lua
-Date: 2026-08-29
+Date: 2026-08-30
 Author: WaterRun
 Description: Maps bounded OpenAI Chat and Anthropic Messages wire data to canonical model events.
 ]]
@@ -303,7 +303,23 @@ local function encode_message_array(codec, messages)
     return table.concat(result)
 end
 
-local function encode_messages(codec, bundle, protocol)
+local function model_view_message(manifest)
+    if manifest.body == nil then return nil end
+    return {
+        role = "user",
+        content = table.concat({
+            "YACA-MODEL-VIEW/1\n",
+            "authority=quoted-data\n",
+            "digest=", manifest.digest, "\n",
+            "first-sequence=", tostring(manifest.first_sequence), "\n",
+            "last-sequence=", tostring(manifest.last_sequence), "\n",
+            "bytes=", tostring(#manifest.body), "\n\n",
+            manifest.body,
+        }),
+    }
+end
+
+local function encode_messages(codec, bundle, manifest, protocol)
     local messages = bundle.messages
     if dense_count(messages) == nil then
         return nil, nil, failure("InvalidPromptBundle", "prompt messages must be a dense array")
@@ -315,7 +331,16 @@ local function encode_messages(codec, bundle, protocol)
         end
         projected[#projected + 1] = { role = "system", content = bundle.system }
     end
-    for _, message in ipairs(messages) do projected[#projected + 1] = message end
+    local view_message = model_view_message(manifest)
+    local inserted_view = view_message == nil
+    for _, message in ipairs(messages) do
+        if not inserted_view and message.role ~= "system" then
+            projected[#projected + 1] = view_message
+            inserted_view = true
+        end
+        projected[#projected + 1] = message
+    end
+    if not inserted_view then projected[#projected + 1] = view_message end
     if protocol == "openai-chat" then
         for _, message in ipairs(projected) do
             if message.role ~= "system" and message.role ~= "user" and message.role ~= "assistant" then
@@ -442,6 +467,59 @@ local function normalize_controls(controls, purpose)
     return { public = controls, lookup = lookup }
 end
 
+local function normalize_model_view(manifest, options)
+    if type(manifest) ~= "table" then
+        return nil, failure("InvalidModelViewManifest", "model view manifest is required")
+    end
+    local allowed = {
+        digest = true,
+        first_sequence = true,
+        last_sequence = true,
+        body = true,
+    }
+    for key in pairs(manifest) do
+        if type(key) ~= "string" or not allowed[key] then
+            return nil, failure(
+                "InvalidModelViewManifest",
+                "model view manifest contains an unknown field"
+            )
+        end
+    end
+    if not valid_token(manifest.digest, 256) then
+        return nil, failure("InvalidModelViewManifest", "model view manifest digest is required")
+    end
+    local has_first = manifest.first_sequence ~= nil
+    local has_last = manifest.last_sequence ~= nil
+    if has_first ~= has_last
+        or (has_first and (
+            not valid_integer(manifest.first_sequence, 0)
+            or not valid_integer(manifest.last_sequence, 0)
+            or manifest.first_sequence > manifest.last_sequence
+            or (manifest.first_sequence == 0 and manifest.last_sequence ~= 0)
+        ))
+    then
+        return nil, failure(
+            "InvalidModelViewManifest",
+            "model view manifest range is invalid"
+        )
+    end
+    if manifest.body ~= nil then
+        if not has_first
+            or type(manifest.body) ~= "string"
+            or #manifest.body > options.maximum_string_bytes
+            or manifest.body:find("\0", 1, true)
+        then
+            return nil, failure(
+                "InvalidModelViewManifest",
+                "model view body is unbounded or lacks an exact range"
+            )
+        end
+        local valid, utf8_error = text.validate_utf8(manifest.body)
+        if not valid then return nil, utf8_error end
+    end
+    return manifest
+end
+
 local function validate_request_shape(spec, options)
     if type(spec) ~= "table" then
         return nil, failure("InvalidRequest", "normalized request must be a table")
@@ -497,9 +575,8 @@ local function validate_request_shape(spec, options)
     if spec.prompt_bundle.system ~= nil and type(spec.prompt_bundle.system) ~= "string" then
         return nil, failure("InvalidPromptBundle", "prompt bundle system value must be text")
     end
-    if not valid_token(spec.model_view_manifest.digest, 256) then
-        return nil, failure("InvalidModelViewManifest", "model view manifest digest is required")
-    end
+    local view, view_error = normalize_model_view(spec.model_view_manifest, options)
+    if not view then return nil, view_error end
     if spec.prompt_bundle.version ~= nil then
         local bound, bundle_error = prompt.validate_bundle(
             spec.prompt_bundle,
@@ -703,6 +780,7 @@ local function encode_request(codec, request_data, streaming)
     local messages, system, messages_error = encode_messages(
         codec,
         request_data.prompt_bundle,
+        request_data.model_view_manifest,
         protocol
     )
     if not messages then return nil, messages_error end

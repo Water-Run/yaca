@@ -1862,6 +1862,7 @@ function M.compose_runtime(runtime)
             data_root = layout.data_root,
             platform_kind = runtime.identity.os == "windows" and "windows" or "posix",
             maximum_create_attempts = 16,
+            maximum_model_view_bytes = 262144,
         })
         if not publication then contexts = nil end
     end

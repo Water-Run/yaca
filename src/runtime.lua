@@ -645,7 +645,7 @@ end
 local function validate_agent_ports(ports)
     if type(ports) ~= "table" or not exact_fields(ports, {
         clock = true, journal = true, model = true, tools = true, reviews = true,
-        snapshots = true, side = true,
+        snapshots = true, side = true, views = true,
     }) then
         return nil, failure("InvalidAgentPorts", "AgentLoop ports are required and unambiguous")
     end
@@ -671,6 +671,10 @@ local function validate_agent_ports(ports)
             type(ports.side) ~= "table"
             or type(ports.side.start) ~= "function"
             or type(ports.side.cancel) ~= "function"
+        ))
+        or (ports.views ~= false and (
+            type(ports.views) ~= "table"
+            or type(ports.views.prepare) ~= "function"
         ))
     then
         return nil, failure("InvalidAgentPorts", "AgentLoop port contract is incomplete")
@@ -1199,15 +1203,81 @@ function M.new_agent_loop(ports, options)
         return handle
     end
 
+    local function prepare_model_view()
+        if admitted_ports.views == false then return turn.active_view_manifest_ref end
+        local observation = freeze({
+            expected_context_generation = context_generation,
+            expected_last_sequence = sequence,
+            current_manifest_ref = turn.active_view_manifest_ref,
+        }, nil, "model view observation")
+        local called, prepared, prepare_error = pcall(
+            admitted_ports.views.prepare,
+            observation
+        )
+        if not called or not exact_fields(prepared, {
+            digest = true,
+            first_sequence = true,
+            last_sequence = true,
+            changed = true,
+            replaces_manifest_ref = true,
+            binding = true,
+        })
+            or not valid_runtime_text(
+                prepared.digest,
+                limits.hard_caps.message_bytes,
+                false
+            )
+            or not integer_at_least(prepared.first_sequence, 0)
+            or not integer_at_least(prepared.last_sequence, 0)
+            or prepared.first_sequence > prepared.last_sequence
+            or (prepared.first_sequence == 0 and prepared.last_sequence ~= 0)
+            or type(prepared.changed) ~= "boolean"
+            or prepared.replaces_manifest_ref ~= turn.active_view_manifest_ref
+            or prepared.binding ~= observation
+        then
+            return durability_failure(
+                "model-view-prepare",
+                called and (prepare_error or prepared) or "view-prepare-exception"
+            )
+        end
+        if not prepared.changed then
+            if prepared.digest ~= turn.active_view_manifest_ref
+                or prepared.last_sequence ~= sequence
+            then
+                return durability_failure("model-view-stale")
+            end
+            return prepared.digest
+        end
+        if prepared.digest == turn.active_view_manifest_ref
+            or prepared.last_sequence ~= sequence
+        then
+            return durability_failure("model-view-not-advanced")
+        end
+        local receipt, commit_error = commit_events({ {
+            type = "model_view_published",
+            fields = {
+                manifestDigest = prepared.digest,
+                firstEventSeq = tostring(prepared.first_sequence),
+                lastEventSeq = tostring(prepared.last_sequence),
+                replacesManifestDigest = prepared.replaces_manifest_ref,
+            },
+        } })
+        if not receipt then return nil, commit_error end
+        turn.active_view_manifest_ref = prepared.digest
+        return prepared.digest
+    end
+
     request_model = function(purpose, continuation)
         local reason = budget_reason("model")
         if reason then return finalize("budget_exhausted", reason, "AgentBudgetExhausted") end
         request_serial = request_serial + 1
         local request_id = turn.id .. ":request:" .. tostring(request_serial)
+        local view_manifest_ref, view_error = prepare_model_view()
+        if not view_manifest_ref then return nil, view_error end
         local fields = {
             requestId = request_id,
             purpose = purpose,
-            viewManifestRef = turn.snapshot.view_manifest_ref,
+            viewManifestRef = view_manifest_ref,
         }
         local receipt, commit_error = commit_events({ { type = "model_request", fields = fields } })
         if not receipt then return nil, commit_error end
@@ -1220,7 +1290,7 @@ function M.new_agent_loop(ports, options)
             turn_id = turn.id,
             purpose = purpose,
             continuation = continuation or false,
-            view_manifest_ref = turn.snapshot.view_manifest_ref,
+            view_manifest_ref = view_manifest_ref,
         }, nil, "model request")
         local handle, start_error = start_effect(
             admitted_ports.model,
@@ -1250,12 +1320,14 @@ function M.new_agent_loop(ports, options)
         request_serial = request_serial + 1
         local request_id = turn.id .. ":request:" .. tostring(request_serial)
         local purpose = kind == "termination" and "termination-review" or "action-review"
+        local view_manifest_ref, view_error = prepare_model_view()
+        if not view_manifest_ref then return nil, view_error end
         local receipt, commit_error = commit_events({ {
             type = "model_request",
             fields = {
                 requestId = request_id,
                 purpose = purpose,
-                viewManifestRef = turn.snapshot.view_manifest_ref,
+                viewManifestRef = view_manifest_ref,
             },
         } })
         if not receipt then return nil, commit_error end
@@ -1270,7 +1342,7 @@ function M.new_agent_loop(ports, options)
             binding = binding,
             model_snapshot = turn.snapshot.model_snapshot,
             config_generation = turn.snapshot.config_generation,
-            view_manifest_ref = turn.snapshot.view_manifest_ref,
+            view_manifest_ref = view_manifest_ref,
             no_tools = true,
         }, nil, "review request")
         local handle, start_error = start_effect(
@@ -1831,6 +1903,7 @@ function M.new_agent_loop(ports, options)
             outcome = false,
             outcome_durable = false,
             reported_outcome = false,
+            active_view_manifest_ref = snapshot.view_manifest_ref,
         }
     end
 

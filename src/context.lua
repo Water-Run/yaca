@@ -2337,6 +2337,7 @@ local function build_event_document(document, mutation, admitted)
     end
     candidate.generation = canonical.generation + 1
     candidate.header.updated_at = updated_at
+    local published_view = false
     for index, event_candidate in ipairs(mutation.events) do
         if type(event_candidate) ~= "table" then
             return nil, failure("InvalidEventMutation", "Context event must be a table")
@@ -2367,6 +2368,39 @@ local function build_event_document(document, mutation, admitted)
             turn_id = event_candidate.turn_id ~= false and event_candidate.turn_id or nil,
             fields = event_candidate.fields,
         }
+        if event_candidate.type == "model_view_published" then
+            local fields = event_candidate.fields
+            local first = canonical_decimal(
+                fields.firstEventSeq,
+                0,
+                "/EventMutation/ModelView/FirstEventSeq"
+            )
+            local last = canonical_decimal(
+                fields.lastEventSeq,
+                0,
+                "/EventMutation/ModelView/LastEventSeq"
+            )
+            if published_view or not first or not last
+                or first > last
+                or last > expected_sequence
+                or (first == 0 and last ~= 0)
+                or fields.replacesManifestDigest
+                    ~= candidate.model_view.active_manifest.digest
+                or type(fields.manifestDigest) ~= "string"
+                or fields.manifestDigest == ""
+            then
+                return nil, failure(
+                    "InvalidEventMutation",
+                    "Context model-view publication is invalid"
+                )
+            end
+            published_view = true
+            candidate.model_view.active_manifest = {
+                digest = fields.manifestDigest,
+                first_event_seq = first,
+                last_event_seq = last,
+            }
+        end
     end
     return normalize_document(candidate, admitted)
 end

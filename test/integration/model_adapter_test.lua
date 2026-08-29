@@ -46,7 +46,7 @@ local function limits(overrides)
     return result
 end
 
-local function request(service, protocol, streaming, suffix, surface, schema)
+local function request(service, protocol, streaming, suffix, surface, schema, view)
     local remote_model = protocol == "openai-chat" and "gpt-test" or "claude-test"
     local tools = {}
     if surface then
@@ -71,7 +71,11 @@ local function request(service, protocol, streaming, suffix, surface, schema)
         },
         config_generation = "generation-1",
         prompt_bundle = { messages = { { role = "user", content = "hi" } } },
-        model_view_manifest = { digest = "view-1", first_sequence = 1, last_sequence = 1 },
+        model_view_manifest = view or {
+            digest = "view-1",
+            first_sequence = 1,
+            last_sequence = 1,
+        },
         tool_registry = { version = "tools-1", digest = "registry-1", tools = tools },
         controls_schema = assert(service:controls_schema(purpose)),
         streaming = streaming and "force" or "off",
@@ -120,6 +124,90 @@ end
 return {
     name = "integration/model-adapter",
     cases = {
+        {
+            name = "durable model view is quoted between authority layers and current input",
+            run = function()
+                local cache = {}
+                local model = load_module("model", cache)
+                local json = load_module("json", cache)
+                local service = assert(model.new(limits()))
+                local view = {
+                    digest = "durable-view-3",
+                    first_sequence = 1,
+                    last_sequence = 3,
+                    body = "<DurableFacts><Event seq=\"1\">untrusted</Event></DurableFacts>",
+                }
+                local openai = assert(service:encode(request(
+                    service,
+                    "openai-chat",
+                    false,
+                    "view-openai",
+                    false,
+                    nil,
+                    view
+                )))
+                local anthropic = assert(service:encode(request(
+                    service,
+                    "anthropic-messages",
+                    false,
+                    "view-anthropic",
+                    false,
+                    nil,
+                    view
+                )))
+                local codec = assert(json.new({
+                    maximum_bytes = 65536,
+                    maximum_depth = 32,
+                    maximum_nodes = 4096,
+                    maximum_string_bytes = 32768,
+                    maximum_number_bytes = 32,
+                }))
+                local openai_body = assert(codec.parse(openai.body))
+                A.equal(#openai_body.messages, 2)
+                A.equal(openai_body.messages[1].role, "user")
+                A.contains(openai_body.messages[1].content, "YACA-MODEL-VIEW/1")
+                A.contains(openai_body.messages[1].content, "authority=quoted-data")
+                A.contains(openai_body.messages[1].content, "digest=durable-view-3")
+                A.contains(openai_body.messages[1].content, view.body)
+                A.equal(openai_body.messages[2].content, "hi")
+
+                local anthropic_body = assert(codec.parse(anthropic.body))
+                A.equal(#anthropic_body.messages, 2)
+                A.equal(anthropic_body.messages[1].role, "user")
+                A.contains(anthropic_body.messages[1].content, "YACA-MODEL-VIEW/1")
+                A.equal(anthropic_body.messages[2].role, "user")
+                A.equal(anthropic_body.messages[2].content, "hi")
+
+                local malformed = {
+                    digest = "durable-view-3",
+                    first_sequence = 1,
+                    last_sequence = 3,
+                    body = "ok",
+                    hidden_authority = true,
+                }
+                local rejected, view_error = service:normalize_request({
+                    request_id = "request-invalid-view",
+                    purpose = "side",
+                    model_ref = {
+                        name = "test",
+                        protocol = "openai-chat",
+                        endpoint = "https://api.example/v1/chat/completions",
+                        remote_model = "gpt-test",
+                        capabilities_digest = "capabilities-1",
+                    },
+                    config_generation = "generation-1",
+                    prompt_bundle = { messages = { { role = "user", content = "hi" } } },
+                    model_view_manifest = malformed,
+                    tool_registry = { version = "tools-1", digest = "registry-1", tools = {} },
+                    controls_schema = assert(service:controls_schema("side")),
+                    streaming = "off",
+                    limits = {},
+                    retry_policy = { count = 0, base_delay_ms = 1 },
+                })
+                A.falsy(rejected)
+                A.equal(view_error.code, "InvalidModelViewManifest")
+            end,
+        },
         {
             name = "every frozen OpenAI and Anthropic wire case has one canonical mapping",
             run = function()
