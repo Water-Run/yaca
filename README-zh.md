@@ -4,7 +4,7 @@
 
 yaca 是一款简单、单 Agent、terminal-only Coding Agent 的设计，以 GPL v3 许可开源。
 
-> **项目状态（2026-08-29）：正在实现。** M0 测试/manifest 基础设施已完成，首个产品模块正在落地；当前仍没有可工作的 v0.1 Agent 或通过验收的发行包。除非某项能力明确标为已实现并通过测试，下文仍描述冻结的 v0.1 目标。Gate A/B 保持通过；目标机 qualification 未完成，Release Gate R 仍关闭。
+> **项目状态（2026-08-30）：实现已完成；目标资格验证待完成。** v0.1 产品源码及其平台无关测试已完成至 M9，但还没有任何目标发行包通过资格验证。下文描述已经实现的 v0.1 契约；Win32 x86、Win64 x86_64 与 Linux x86_64 的目标相关行为仍须分别验证。Gate A/B 保持通过，Release Gate R 仍关闭。
 
 ## 支持的发行目标
 
@@ -49,9 +49,9 @@ Context 文件位于镜像树，例如 `__yaca__/CONTEXT/C/Program Files/我的�
 
 历史只通过显式动作打开。短名称按既定 scope/distance 顺序选择首个可用命中；hash 是精准 selector，必须唯一。rename、rebind、永久 delete、import mapping 和 metadata 修改都会复核目标。活动 writer 会阻止第二进程读取 XML 正文或修改该 Context；绝不只按锁龄破锁。
 
-## 已冻结的命令 grammar
+## 已实现的命令 grammar
 
-以下拼写已成为设计输入，但目前尚未实现：
+以下拼写已在源码中实现；目前仍没有可下载且通过目标资格验证的 executable：
 
 ```text
 yaca [directory]

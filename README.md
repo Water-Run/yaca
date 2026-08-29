@@ -4,7 +4,7 @@
 
 yaca is the design for a simple, single-agent terminal Coding Agent, licensed under GPL v3.
 
-> **Project status (2026-08-29): implementation in progress.** M0 test/manifest infrastructure is complete and the first product module is being implemented; there is still no working v0.1 Agent or qualified release. Everything below describes the frozen v0.1 target unless a capability is explicitly marked implemented and tested. Gate A/B remain passed; target qualification is incomplete, so Release Gate R is closed.
+> **Project status (2026-08-30): implementation complete; target qualification pending.** The v0.1 product source and its platform-independent test suite are complete through M9, but no target archive has qualified for release. Everything below describes the implemented v0.1 contract; target-specific behavior remains unqualified until it passes independently on Win32 x86, Win64 x86_64, and Linux x86_64. Gate A/B remain passed and Release Gate R remains closed.
 
 ## Supported release targets
 
@@ -49,9 +49,9 @@ Context files live in a mirror tree such as `__yaca__/CONTEXT/C/Program Files/My
 
 Opening history is always explicit. A short name selects the first usable match by the specified scope/distance order; a hash is the precise selector and must be unique. Rename, rebind, permanent delete, import mapping, and metadata changes reverify the selected target. A live writer blocks another process from reading the XML body or mutating it; stale locks are never broken by age alone.
 
-## Planned command grammar
+## Implemented command grammar
 
-These spellings are frozen design inputs but are not implemented yet:
+These spellings are implemented in the source tree; no downloadable target-qualified executable is available yet:
 
 ```text
 yaca [directory]

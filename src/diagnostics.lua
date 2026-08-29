@@ -143,6 +143,71 @@ local ERROR_DEFINITIONS = {
 local ERROR_BY_ID = {}
 for _, item in ipairs(ERROR_DEFINITIONS) do ERROR_BY_ID[item.id] = item end
 
+local function check(id, stage, required, online, dependencies, owner)
+    return {
+        id = id,
+        stage = stage,
+        required = required,
+        online = online,
+        dependencies = dependencies or {},
+        owner = owner,
+    }
+end
+
+local SELF_TEST_CHECKS = {
+    check("ST1-PLATFORM", 1, true, false, {}, "platform"),
+    check("ST1-PACKAGE", 1, true, false, { "ST1-PLATFORM" }, "release"),
+    check("ST1-SAFE-LOAD", 1, true, false,
+        { "ST1-PLATFORM", "ST1-PACKAGE" }, "runtime"),
+    check("ST1-DATA-ROOT", 1, true, false, { "ST1-PLATFORM" }, "platform"),
+    check("ST1-CONFIG-SCHEMA", 1, true, false, { "ST1-PACKAGE" }, "config"),
+    check("ST1-CONFIG-SOURCE", 1, true, false,
+        { "ST1-CONFIG-SCHEMA", "ST1-DATA-ROOT" }, "config"),
+    check("ST1-ATOMIC-WRITE", 1, true, false, { "ST1-DATA-ROOT" }, "platform"),
+    check("ST1-CONTEXT-CODEC", 1, true, false, { "ST1-PLATFORM" }, "context"),
+    check("ST1-CONTEXT-SCHEMA", 1, true, false,
+        { "ST1-CONTEXT-CODEC" }, "context"),
+    check("ST1-CONTEXT-CATALOG", 1, true, false,
+        { "ST1-DATA-ROOT", "ST1-CONTEXT-CODEC" }, "context"),
+    check("ST1-CONTEXT-LOCK", 1, true, false,
+        { "ST1-CONTEXT-CATALOG" }, "context"),
+    check("ST1-TOOLS", 1, true, false, { "ST1-SAFE-LOAD" }, "tools"),
+    check("ST1-CA-BUNDLE", 1, true, false, { "ST1-PACKAGE" }, "network"),
+    check("ST1-TTY-INPUT", 1, false, false, { "ST1-PLATFORM" }, "tui"),
+    check("ST1-ZERO-SURFACE", 1, true, false,
+        { "ST1-PACKAGE", "ST1-CONFIG-SCHEMA" }, "release"),
+
+    check("ST2-MODEL-TRANSPORT", 2, true, true,
+        { "ST1-CA-BUNDLE", "ST1-CONFIG-SOURCE" }, "model"),
+    check("ST2-MODEL-AUTH", 2, true, true,
+        { "ST2-MODEL-TRANSPORT" }, "model"),
+    check("ST2-MODEL-WIRE", 2, true, true, { "ST2-MODEL-AUTH" }, "model"),
+    check("ST2-MODEL-STREAM", 2, true, true, { "ST2-MODEL-WIRE" }, "model"),
+    check("ST2-MODEL-TOOLS", 2, true, true,
+        { "ST2-MODEL-WIRE", "ST1-TOOLS" }, "model"),
+    check("ST2-MODEL-CONTROL", 2, true, true,
+        { "ST2-MODEL-TOOLS" }, "model"),
+    check("ST2-MODEL-USAGE-CANCEL", 2, true, true,
+        { "ST2-MODEL-STREAM" }, "model"),
+
+    check("ST3-CONFIG-SEMANTICS", 3, false, true,
+        { "ST2-MODEL-CONTROL" }, "diagnostics"),
+    check("ST3-PERMISSION-SEMANTICS", 3, false, true,
+        { "ST2-MODEL-CONTROL" }, "diagnostics"),
+    check("ST3-NAMING-AND-SPELLING", 3, false, true,
+        { "ST2-MODEL-CONTROL" }, "diagnostics"),
+}
+
+local SELF_TEST_CHECK_BY_ID = {}
+for index, item in ipairs(SELF_TEST_CHECKS) do
+    SELF_TEST_CHECK_BY_ID[item.id] = item
+    for _, dependency in ipairs(item.dependencies) do
+        local dependency_check = SELF_TEST_CHECK_BY_ID[dependency]
+        assert(dependency_check and dependency_check.stage <= item.stage,
+            "self-test check registry is not topological at " .. tostring(index))
+    end
+end
+
 local SEVERITIES = { info = true, warning = true, error = true, fatal = true }
 local SAVED_STATES = { none = true, durable = true, partial = true, unknown = true }
 local SIDE_EFFECT_STATES = { none = true, settled = true, unknown = true }
@@ -857,6 +922,637 @@ function M.new(ports, options)
         explicit_report_policy = "stdout-only",
     }, nil, "diagnostic persistence policy"))
     return readonly(service, "diagnostic service")
+end
+
+local SELF_TEST_OUTCOMES = {
+    passed = true,
+    warning = true,
+    failed = true,
+    skipped = true,
+    cancelled = true,
+    unknown = true,
+}
+
+local function validate_self_test_options(options)
+    if not exact_fields(options, {
+        maximum_models = true,
+        maximum_filters = true,
+        maximum_results = true,
+        maximum_summary_bytes = true,
+        maximum_evidence_items = true,
+        maximum_evidence_bytes = true,
+        maximum_online_requests = true,
+        maximum_snapshot_nodes = true,
+        maximum_snapshot_bytes = true,
+        maximum_identifier_bytes = true,
+    })
+    then
+        return nil, failure("InvalidSelfTestOptions", "self-test limits are required")
+    end
+    for _, name in ipairs({
+        "maximum_models", "maximum_results", "maximum_summary_bytes",
+        "maximum_evidence_bytes", "maximum_online_requests",
+        "maximum_snapshot_nodes", "maximum_snapshot_bytes",
+        "maximum_identifier_bytes",
+    }) do
+        if not integer_at_least(options[name], 1) then
+            return nil, failure("InvalidSelfTestOptions", "self-test cap is invalid", name)
+        end
+    end
+    for _, name in ipairs({ "maximum_filters", "maximum_evidence_items" }) do
+        if not integer_at_least(options[name], 0) then
+            return nil, failure("InvalidSelfTestOptions", "self-test cap is invalid", name)
+        end
+    end
+    if options.maximum_models > options.maximum_results
+        or options.maximum_identifier_bytes < 32
+        or options.maximum_summary_bytes < 16
+    then
+        return nil, failure("InvalidSelfTestOptions", "self-test caps disagree")
+    end
+    local copied = {}
+    for key, value in pairs(options) do copied[key] = value end
+    return copied
+end
+
+local function validate_self_test_ports(ports)
+    if not exact_fields(ports, { offline = true, model = true, advisory = true })
+        or not exact_fields(ports.offline, { online = true, run = true })
+        or ports.offline.online ~= false
+        or type(ports.offline.run) ~= "function"
+        or not exact_fields(ports.model, { online = true, run = true })
+        or ports.model.online ~= true
+        or type(ports.model.run) ~= "function"
+        or not exact_fields(ports.advisory, {
+            online = true, auto_fix = true, run = true,
+        })
+        or ports.advisory.online ~= true
+        or ports.advisory.auto_fix ~= false
+        or type(ports.advisory.run) ~= "function"
+    then
+        return nil, failure(
+            "InvalidSelfTestPorts",
+            "self-test ports must separate offline, Model, and no-auto-fix advisory checks"
+        )
+    end
+    return {
+        offline = { run = ports.offline.run },
+        model = { run = ports.model.run },
+        advisory = { run = ports.advisory.run },
+    }
+end
+
+local function bounded_snapshot(value, limits, state, visiting)
+    local value_type = type(value)
+    if value_type == "string" then
+        state.bytes = state.bytes + #value
+        if state.bytes > limits.maximum_snapshot_bytes or value:find("\0", 1, true) then
+            return nil
+        end
+        return value
+    end
+    if value_type == "number" then
+        if value ~= value or value == math.huge or value == -math.huge then return nil end
+        return value
+    end
+    if value_type == "boolean" then return value end
+    if value_type ~= "table" then return nil end
+    visiting = visiting or {}
+    if visiting[value] then return nil end
+    visiting[value] = true
+    state.nodes = state.nodes + 1
+    if state.nodes > limits.maximum_snapshot_nodes then
+        visiting[value] = nil
+        return nil
+    end
+    local copied = {}
+    for key, item in pairs(value) do
+        if type(key) ~= "string" and math.type(key) ~= "integer" then
+            visiting[value] = nil
+            return nil
+        end
+        if type(key) == "string" then
+            state.bytes = state.bytes + #key
+            if state.bytes > limits.maximum_snapshot_bytes
+                or key:find("\0", 1, true)
+            then
+                visiting[value] = nil
+                return nil
+            end
+        end
+        local copied_item = bounded_snapshot(item, limits, state, visiting)
+        if copied_item == nil then
+            visiting[value] = nil
+            return nil
+        end
+        copied[key] = copied_item
+    end
+    visiting[value] = nil
+    return copied
+end
+
+local function self_test_registry_snapshot()
+    local result = {}
+    for index, item in ipairs(SELF_TEST_CHECKS) do
+        result[index] = {
+            id = item.id,
+            stage = item.stage,
+            required = item.required,
+            online = item.online,
+            owner = item.owner,
+            dependencies = item.dependencies,
+        }
+    end
+    return assert(freeze(result, nil, "self-test check registry"))
+end
+
+local FROZEN_SELF_TEST_CHECKS = self_test_registry_snapshot()
+
+local function validate_filter(values, maximum, known, label, validator)
+    if dense_count(values) == nil or #values > maximum then
+        return nil, failure("InvalidSelfTestRequest", label .. " filter is invalid")
+    end
+    local result = {}
+    for _, value in ipairs(values) do
+        if not validator(value) or not known[value] or result[value] then
+            return nil, failure("InvalidSelfTestRequest", label .. " filter is invalid", value)
+        end
+        result[value] = true
+    end
+    return result
+end
+
+local function validate_check_result(result, check_item, limits)
+    if not exact_fields(result, {
+        outcome = true,
+        summary = true,
+        evidence = true,
+        online_requests = true,
+        auto_fixes = true,
+    })
+        or not SELF_TEST_OUTCOMES[result.outcome]
+        or not printable_ascii(result.summary, limits.maximum_summary_bytes, false)
+        or dense_count(result.evidence) == nil
+        or #result.evidence > limits.maximum_evidence_items
+        or not integer_at_least(result.online_requests, 0)
+        or result.online_requests > limits.maximum_online_requests
+        or result.auto_fixes ~= 0
+    then
+        return nil, failure("SelfTestContract", "check returned an invalid result", check_item.id)
+    end
+    local evidence = {}
+    for index, value in ipairs(result.evidence) do
+        if not printable_ascii(value, limits.maximum_evidence_bytes, true) then
+            return nil, failure("SelfTestContract", "check evidence is unsafe", check_item.id)
+        end
+        evidence[index] = value
+    end
+    if not check_item.online and result.online_requests ~= 0 then
+        return nil, failure("SelfTestContract", "offline check attempted network", check_item.id)
+    end
+    if check_item.online
+        and (result.outcome == "passed" or result.outcome == "warning")
+        and result.online_requests == 0
+    then
+        return nil, failure("SelfTestContract", "online pass has no real request", check_item.id)
+    end
+    local outcome = result.outcome
+    if not check_item.required and (outcome == "failed" or outcome == "unknown") then
+        outcome = "warning"
+    end
+    return {
+        outcome = outcome,
+        summary = result.summary,
+        evidence = evidence,
+        online_requests = result.online_requests,
+    }
+end
+
+---Creates the strict Stage 1 -> Stage 2 -> Stage 3 self-test executor.
+function M.new_self_test(ports, options)
+    local admitted_ports, ports_error = validate_self_test_ports(ports)
+    if not admitted_ports then return nil, ports_error end
+    local limits, options_error = validate_self_test_options(options)
+    if not limits then return nil, options_error end
+
+    local running = false
+    local service = {}
+
+    local function run_internal(request)
+        if not exact_fields(request, {
+            mode = true,
+            through_stage = true,
+            list_checks = true,
+            online_consent = true,
+            excluded_models = true,
+            excluded_checks = true,
+            selected_checks = true,
+            snapshot_id = true,
+            snapshot = true,
+            models = true,
+        })
+            or (request.mode ~= "explicit" and request.mode ~= "startup")
+            or not integer_at_least(request.through_stage, 1)
+            or request.through_stage > 3
+            or type(request.list_checks) ~= "boolean"
+            or type(request.online_consent) ~= "boolean"
+            or not safe_identifier(request.snapshot_id, limits.maximum_identifier_bytes)
+            or type(request.snapshot) ~= "table"
+            or dense_count(request.models) == nil
+            or #request.models > limits.maximum_models
+            or dense_count(request.excluded_models) == nil
+            or dense_count(request.excluded_checks) == nil
+            or dense_count(request.selected_checks) == nil
+        then
+            return nil, failure("InvalidSelfTestRequest", "self-test request is invalid")
+        end
+        if request.mode == "startup" and (
+            request.list_checks or #request.excluded_models > 0
+            or #request.excluded_checks > 0 or #request.selected_checks > 0
+        ) then
+            return nil, failure("InvalidSelfTestRequest", "startup self-test cannot narrow scope")
+        end
+        local snapshot_copy = bounded_snapshot(
+            request.snapshot,
+            limits,
+            { nodes = 0, bytes = 0 },
+            {}
+        )
+        if not snapshot_copy then
+            return nil, failure("InvalidSelfTestRequest", "self-test snapshot is unsafe")
+        end
+        local snapshot = assert(freeze(snapshot_copy, nil, "self-test snapshot"))
+        local model_by_id, models = {}, {}
+        for index, model in ipairs(request.models) do
+            if not exact_fields(model, { id = true, endpoint = true, snapshot_id = true })
+                or not valid_text(model.id, limits.maximum_identifier_bytes, false)
+                or not valid_text(model.endpoint, limits.maximum_snapshot_bytes, false)
+                or not safe_identifier(model.snapshot_id, limits.maximum_identifier_bytes)
+                or model_by_id[model.id]
+            then
+                return nil, failure("InvalidSelfTestRequest", "enabled Model snapshot is invalid")
+            end
+            models[index] = {
+                id = model.id,
+                endpoint = model.endpoint,
+                snapshot_id = model.snapshot_id,
+            }
+            model_by_id[model.id] = models[index]
+        end
+        local excluded_models, filter_error = validate_filter(
+            request.excluded_models,
+            limits.maximum_filters,
+            model_by_id,
+            "Model exclusion",
+            function(value)
+                return valid_text(value, limits.maximum_identifier_bytes, false)
+            end
+        )
+        if not excluded_models then return nil, filter_error end
+        local excluded_checks
+        excluded_checks, filter_error = validate_filter(
+            request.excluded_checks,
+            limits.maximum_filters,
+            SELF_TEST_CHECK_BY_ID,
+            "check exclusion",
+            function(value)
+                return safe_identifier(value, limits.maximum_identifier_bytes)
+            end
+        )
+        if not excluded_checks then return nil, filter_error end
+        local selected_checks
+        selected_checks, filter_error = validate_filter(
+            request.selected_checks,
+            limits.maximum_filters,
+            SELF_TEST_CHECK_BY_ID,
+            "check selection",
+            function(value)
+                return safe_identifier(value, limits.maximum_identifier_bytes)
+            end
+        )
+        if not selected_checks then return nil, filter_error end
+        for id in pairs(selected_checks) do
+            if excluded_checks[id] or SELF_TEST_CHECK_BY_ID[id].stage > request.through_stage then
+                return nil, failure("InvalidSelfTestRequest", "selected check is excluded or out of stage", id)
+            end
+        end
+        if request.through_stage >= 2 and not request.list_checks
+            and request.online_consent ~= true
+        then
+            return nil, failure(
+                "OnlineConsentRequired",
+                "online self-test requires explicit current-invocation consent"
+            )
+        end
+
+        local selected_effective = {}
+        local function include_with_dependencies(id)
+            if selected_effective[id] then return end
+            selected_effective[id] = true
+            for _, dependency in ipairs(SELF_TEST_CHECK_BY_ID[id].dependencies) do
+                include_with_dependencies(dependency)
+            end
+        end
+        for id in pairs(selected_checks) do include_with_dependencies(id) end
+        local has_selection = next(selected_checks) ~= nil
+        local frozen_models = assert(freeze(models, nil, "enabled self-test Models"))
+        if request.list_checks then
+            return assert(freeze({
+                kind = "self-test",
+                outcome = "passed",
+                listed = true,
+                through_stage = request.through_stage,
+                completed_stage = 0,
+                checks = FROZEN_SELF_TEST_CHECKS,
+                models = frozen_models,
+                results = {},
+                online_requests = 0,
+                auto_fixes = 0,
+                required_exclusions = 0,
+                advisories = 0,
+                snapshot_id = request.snapshot_id,
+                consent_consumed = false,
+            }, nil, "self-test listing"))
+        end
+
+        local results, result_sequence = {}, 0
+        local online_requests, required_exclusions, advisories = 0, 0, 0
+        local hard_failure, cancelled, partial = false, false, false
+        local stage1_status, model_status = {}, {}
+        local function append_result(check_item, model_id, result, excluded, reason)
+            if #results >= limits.maximum_results then
+                return nil, failure("SelfTestLimit", "self-test result cap reached")
+            end
+            result_sequence = result_sequence + 1
+            results[#results + 1] = {
+                sequence = result_sequence,
+                check_id = check_item.id,
+                stage = check_item.stage,
+                required = check_item.required,
+                online = check_item.online,
+                owner = check_item.owner,
+                model_id = model_id or false,
+                outcome = result.outcome,
+                summary = result.summary,
+                evidence = result.evidence or {},
+                advisory = check_item.stage == 3,
+                excluded = excluded == true,
+                reason = reason or false,
+            }
+            online_requests = online_requests + (result.online_requests or 0)
+            if online_requests > limits.maximum_online_requests then
+                return nil, failure("SelfTestLimit", "self-test online request cap reached")
+            end
+            if result.outcome == "cancelled" then
+                cancelled = true
+            elseif check_item.required then
+                if result.outcome == "failed" or result.outcome == "unknown" then
+                    hard_failure = true
+                elseif result.outcome == "skipped" or result.outcome == "warning" then
+                    partial = true
+                    if result.outcome == "skipped" and excluded then
+                        required_exclusions = required_exclusions + 1
+                    end
+                end
+            elseif check_item.stage == 3 and result.outcome == "warning" then
+                advisories = advisories + 1
+            end
+            return true
+        end
+        local function skipped(check_item, reason)
+            return {
+                outcome = "skipped",
+                summary = reason,
+                evidence = {},
+                online_requests = 0,
+            }
+        end
+        local function dependencies_pass(check_item, statuses)
+            for _, dependency in ipairs(check_item.dependencies) do
+                local status = dependency:sub(1, 3) == "ST1"
+                    and stage1_status[dependency] or statuses[dependency]
+                if status ~= "passed" then return false end
+            end
+            return true
+        end
+        local function call_port(port, specification, check_item)
+            local frozen_spec = freeze(specification, nil, "self-test check request")
+            if not frozen_spec then
+                return nil, failure("SelfTestContract", "check request contains a cycle")
+            end
+            local called, raw = pcall(port.run, frozen_spec)
+            if not called then
+                return nil, failure("SelfTestContract", "check executor raised", check_item.id)
+            end
+            return validate_check_result(raw, check_item, limits)
+        end
+
+        for _, check_item in ipairs(SELF_TEST_CHECKS) do
+            if check_item.stage == 1 then
+                local excluded = excluded_checks[check_item.id]
+                    or (has_selection and not selected_effective[check_item.id])
+                local result, result_error
+                if excluded then
+                    result = skipped(check_item, "Check was excluded from this invocation.")
+                elseif not dependencies_pass(check_item, stage1_status) then
+                    result = skipped(check_item, "A required dependency did not pass.")
+                else
+                    result, result_error = call_port(admitted_ports.offline, {
+                        check = check_item,
+                        snapshot_id = request.snapshot_id,
+                        snapshot = snapshot,
+                        mode = request.mode,
+                        no_network = true,
+                        no_auto_fix = true,
+                    }, check_item)
+                    if not result then return nil, result_error end
+                end
+                local appended, append_error = append_result(
+                    check_item,
+                    false,
+                    result,
+                    excluded,
+                    excluded and "excluded" or false
+                )
+                if not appended then return nil, append_error end
+                stage1_status[check_item.id] = result.outcome
+            end
+        end
+        local function overall_outcome()
+            if cancelled then return "cancelled" end
+            if hard_failure then return "error" end
+            if partial then return "partial" end
+            return "passed"
+        end
+        if request.through_stage == 1 or overall_outcome() ~= "passed" then
+            return assert(freeze({
+                kind = "self-test",
+                outcome = overall_outcome(),
+                listed = false,
+                through_stage = request.through_stage,
+                completed_stage = 1,
+                checks = FROZEN_SELF_TEST_CHECKS,
+                models = frozen_models,
+                results = results,
+                online_requests = online_requests,
+                auto_fixes = 0,
+                required_exclusions = required_exclusions,
+                advisories = advisories,
+                snapshot_id = request.snapshot_id,
+                consent_consumed = false,
+            }, nil, "Stage 1 self-test result"))
+        end
+
+        if #models == 0 then
+            partial = true
+            for _, check_item in ipairs(SELF_TEST_CHECKS) do
+                if check_item.stage == 2 then
+                    local appended, append_error = append_result(
+                        check_item,
+                        false,
+                        skipped(check_item, "No enabled Model is available."),
+                        true,
+                        "no-enabled-model"
+                    )
+                    if not appended then return nil, append_error end
+                end
+            end
+        end
+        local confirmed_models = {}
+        for _, model in ipairs(models) do
+            local statuses = {}
+            model_status[model.id] = statuses
+            local model_confirmed = not excluded_models[model.id]
+            for _, check_item in ipairs(SELF_TEST_CHECKS) do
+                if check_item.stage == 2 then
+                    local excluded = excluded_models[model.id]
+                        or excluded_checks[check_item.id]
+                        or (has_selection and not selected_effective[check_item.id])
+                    local result, result_error
+                    if excluded then
+                        result = skipped(check_item, "Model or check was excluded.")
+                    elseif not dependencies_pass(check_item, statuses) then
+                        result = skipped(check_item, "A required dependency did not pass.")
+                    else
+                        result, result_error = call_port(admitted_ports.model, {
+                            check = check_item,
+                            model = model,
+                            snapshot_id = request.snapshot_id,
+                            online_consent = true,
+                            no_tools_outside_fixture = true,
+                            no_auto_fix = true,
+                        }, check_item)
+                        if not result then return nil, result_error end
+                    end
+                    local appended, append_error = append_result(
+                        check_item,
+                        model.id,
+                        result,
+                        excluded,
+                        excluded and "excluded" or false
+                    )
+                    if not appended then return nil, append_error end
+                    statuses[check_item.id] = result.outcome
+                    if result.outcome ~= "passed" then model_confirmed = false end
+                end
+            end
+            if model_confirmed then confirmed_models[#confirmed_models + 1] = model end
+        end
+        if request.through_stage == 2 or overall_outcome() ~= "passed"
+            or #confirmed_models ~= #models
+        then
+            return assert(freeze({
+                kind = "self-test",
+                outcome = overall_outcome(),
+                listed = false,
+                through_stage = request.through_stage,
+                completed_stage = 2,
+                checks = FROZEN_SELF_TEST_CHECKS,
+                models = frozen_models,
+                confirmed_models = confirmed_models,
+                results = results,
+                online_requests = online_requests,
+                auto_fixes = 0,
+                required_exclusions = required_exclusions,
+                advisories = advisories,
+                snapshot_id = request.snapshot_id,
+                consent_consumed = online_requests > 0,
+            }, nil, "Stage 2 self-test result"))
+        end
+
+        local frozen_confirmed = assert(freeze(
+            confirmed_models,
+            nil,
+            "Stage 3 confirmed Models"
+        ))
+        for _, check_item in ipairs(SELF_TEST_CHECKS) do
+            if check_item.stage == 3 then
+                local excluded = excluded_checks[check_item.id]
+                    or (has_selection and not selected_effective[check_item.id])
+                local result, result_error
+                if excluded then
+                    result = skipped(check_item, "Advisory check was excluded.")
+                else
+                    result, result_error = call_port(admitted_ports.advisory, {
+                        check = check_item,
+                        confirmed_models = frozen_confirmed,
+                        snapshot_id = request.snapshot_id,
+                        snapshot = snapshot,
+                        online_consent = true,
+                        advisory_only = true,
+                        no_auto_fix = true,
+                    }, check_item)
+                    if not result then return nil, result_error end
+                    if result.outcome == "failed" or result.outcome == "unknown" then
+                        result.outcome = "warning"
+                    end
+                end
+                local appended, append_error = append_result(
+                    check_item,
+                    false,
+                    result,
+                    excluded,
+                    excluded and "excluded" or false
+                )
+                if not appended then return nil, append_error end
+            end
+        end
+        return assert(freeze({
+            kind = "self-test",
+            outcome = overall_outcome(),
+            listed = false,
+            through_stage = request.through_stage,
+            completed_stage = 3,
+            checks = FROZEN_SELF_TEST_CHECKS,
+            models = frozen_models,
+            confirmed_models = confirmed_models,
+            results = results,
+            online_requests = online_requests,
+            auto_fixes = 0,
+            required_exclusions = required_exclusions,
+            advisories = advisories,
+            snapshot_id = request.snapshot_id,
+            consent_consumed = online_requests > 0,
+        }, nil, "Stage 3 self-test result"))
+    end
+
+    function service:run(request)
+        if running then return nil, failure("SelfTestBusy", "one self-test is already active") end
+        running = true
+        local called, result, run_error = pcall(run_internal, request)
+        running = false
+        if not called then
+            return nil, failure("SelfTestContract", "self-test execution raised internally")
+        end
+        return result, run_error
+    end
+
+    service.online = "explicit-current-invocation-only"
+    service.checks = FROZEN_SELF_TEST_CHECKS
+    service.stage3_is_advisory = true
+    service.auto_fix = false
+    service.strict_dependency_order = true
+    return readonly(service, "self-test service")
 end
 
 return M

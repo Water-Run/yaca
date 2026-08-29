@@ -186,14 +186,27 @@ local function application(source)
         }
     end
 
-    local stage1 = { online = false }
-    function stage1.run(request)
+    local self_test = {
+        online = "explicit-current-invocation-only",
+        auto_fix = false,
+    }
+    function self_test:run(request)
         calls.stage1 = calls.stage1 + 1
         calls.catalog = calls.catalog + 1
         calls.last_stage1 = request
+        local online_requests = calls.stage1_online_requests
+        if request.through_stage >= 2 and not request.list_checks
+            and online_requests == 0
+        then
+            online_requests = 1
+            calls.network = calls.network + 1
+        end
         return {
+            kind = "self-test",
             outcome = calls.stage1_outcome,
-            online_requests = calls.stage1_online_requests,
+            online_requests = online_requests,
+            auto_fixes = 0,
+            completed_stage = request.list_checks and 0 or request.through_stage,
             check_count = 15,
         }
     end
@@ -214,7 +227,7 @@ local function application(source)
         platform = platform,
         config = counted_config,
         workspace = workspace,
-        stage1 = stage1,
+        self_test = self_test,
         management = management,
         network = { request = function() calls.network = calls.network + 1 end },
         context_catalog = { scan = function() calls.catalog = calls.catalog + 1 end },
@@ -286,7 +299,7 @@ return {
                 }))
                 A.equal(result.outcome, "passed")
                 A.equal(calls.stage1, 1)
-                A.equal(calls.last_stage1.config_error.code, "ConfigInvalid")
+                A.equal(calls.last_stage1.snapshot.config.error.code, "ConfigInvalid")
                 A.equal(calls.catalog, 1)
                 A.equal(calls.network, 0)
                 A.equal(calls.agent, 0)
@@ -299,14 +312,14 @@ return {
                 A.equal(online_error.code, "OnlineConsentRequired")
                 A.equal(calls.network, 0)
 
-                online, online_error = app.dispatch({
+                online = assert(app.dispatch({
                     id = "self-test",
                     through_stage = 2,
                     online_consent = true,
-                })
-                A.falsy(online)
-                A.equal(online_error.code, "SelfTestStageUnavailable")
-                A.equal(calls.network, 0)
+                }))
+                A.equal(online.outcome, "passed")
+                A.equal(online.completed_stage, 2)
+                A.equal(calls.network, 1)
             end,
         },
         {
@@ -316,7 +329,7 @@ return {
                 calls.stage1_online_requests = 1
                 local result, result_error = app.dispatch({ id = "self-test" })
                 A.falsy(result)
-                A.equal(result_error.code, "Stage1Contract")
+                A.equal(result_error.code, "SelfTestContract")
                 A.equal(calls.network, 0)
             end,
         },
@@ -398,6 +411,19 @@ return {
                 A.equal(calls.stage1, 1)
                 A.equal(calls.catalog, 1)
                 A.equal(calls.network, 0)
+                A.equal(#calls.last_stage1.models, 1)
+                A.equal(calls.last_stage1.models[1].id, "Primary")
+                A.truthy(calls.last_stage1.snapshot.config.available)
+                A.truthy(calls.last_stage1.snapshot.config.generation
+                    .models.Primary.key_configured)
+                A.falsy(A.render(calls.last_stage1):find(
+                    "bootstrap-secret",
+                    1,
+                    true
+                ))
+                A.raises(function()
+                    calls.last_stage1.snapshot.config.available = false
+                end, "cannot be modified")
 
                 app, calls = application(valid_source({ startup_self_test = "stage1" }))
                 calls.stage1_outcome = "partial"
@@ -410,7 +436,7 @@ return {
                 result, result_error = app.dispatch({ id = "run-chat" })
                 A.falsy(result)
                 A.equal(result_error.code, "OnlineConsentRequired")
-                A.equal(calls.stage1, 1)
+                A.equal(calls.stage1, 0)
                 A.equal(calls.network, 0)
             end,
         },
@@ -431,7 +457,11 @@ return {
                     platform = { identity = function() return {} end },
                     config = { reload_file = function() return nil end },
                     workspace = { inspect = function() return nil end },
-                    stage1 = { online = true, run = function() return {} end },
+                    self_test = {
+                        online = true,
+                        auto_fix = false,
+                        run = function() return {} end,
+                    },
                     management = { online = false, run = function() return {} end },
                 }, {
                     product_name = "yaca",

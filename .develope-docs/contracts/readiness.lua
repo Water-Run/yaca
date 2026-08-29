@@ -51,7 +51,7 @@ return {
 
   source_start = {
     authorized_after_this_contract_and_validators_commit = true,
-    implementation_phase = "implementing",
+    implementation_phase = "implemented-unqualified",
     allowed_implementation_phases = { "pre-coding", "implementing", "implemented-unqualified" },
     source_is_currently_skeleton_only = false,
     release_is_not_authorized = true,

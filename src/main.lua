@@ -39,6 +39,7 @@ end
 
 local function freeze(value, visiting, label)
     if type(value) ~= "table" then return value end
+    visiting = visiting or {}
     if visiting[value] then return nil end
     visiting[value] = true
     local copy = {}
@@ -58,6 +59,52 @@ local function valid_integer(value, minimum)
     return math.type(value) == "integer" and value >= minimum
 end
 
+local function dense_string_array(values)
+    if type(values) ~= "table" then return false end
+    local count = 0
+    for key in pairs(values) do
+        if math.type(key) ~= "integer" or key < 1 then return false end
+        count = count + 1
+    end
+    for index = 1, count do
+        local value = values[index]
+        if type(value) ~= "string" or value == "" or value:find("\0", 1, true) then
+            return false
+        end
+    end
+    return true
+end
+
+local function copy_plain(value, visiting)
+    local value_type = type(value)
+    if value_type == "nil" or value_type == "string" or value_type == "boolean" then
+        return value, true
+    end
+    if value_type == "number" then
+        if value ~= value or value == math.huge or value == -math.huge then return nil, false end
+        return value, true
+    end
+    if value_type ~= "table" then return nil, false end
+    visiting = visiting or {}
+    if visiting[value] then return nil, false end
+    visiting[value] = true
+    local copy = {}
+    for key, item in pairs(value) do
+        if type(key) ~= "string" and math.type(key) ~= "integer" then
+            visiting[value] = nil
+            return nil, false
+        end
+        local copied, copied_ok = copy_plain(item, visiting)
+        if not copied_ok then
+            visiting[value] = nil
+            return nil, false
+        end
+        copy[key] = copied
+    end
+    visiting[value] = nil
+    return copy, true
+end
+
 local function valid_absolute_path(value)
     if type(value) ~= "string" or value == "" or value:find("\0", 1, true) then return false end
     local normalized = value:gsub("\\", "/")
@@ -74,7 +121,7 @@ local function validate_components(components)
         platform = true,
         config = true,
         workspace = true,
-        stage1 = true,
+        self_test = true,
         management = true,
         network = true,
         context_catalog = true,
@@ -100,13 +147,14 @@ local function validate_components(components)
             "platform, config, and workspace services are incomplete"
         )
     end
-    if type(components.stage1) ~= "table"
-        or components.stage1.online ~= false
-        or type(components.stage1.run) ~= "function"
+    if type(components.self_test) ~= "table"
+        or components.self_test.online ~= "explicit-current-invocation-only"
+        or components.self_test.auto_fix ~= false
+        or type(components.self_test.run) ~= "function"
     then
         return nil, failure(
             "InvalidBootstrapComponents",
-            "Stage 1 must declare an offline run method"
+            "self-test must declare explicit-consent online and no-auto-fix semantics"
         )
     end
     if type(components.management) ~= "table"
@@ -161,6 +209,10 @@ local function validate_request(request)
         ["self-test"] = {
             id = true,
             through_stage = true,
+            list_checks = true,
+            excluded_models = true,
+            excluded_checks = true,
+            selected_checks = true,
             online_consent = true,
             machine = true,
         },
@@ -189,6 +241,16 @@ local function validate_request(request)
         end
         if request.online_consent ~= nil and type(request.online_consent) ~= "boolean" then
             return nil, failure("UsageError", "online consent must be boolean")
+        end
+        if request.list_checks ~= nil and type(request.list_checks) ~= "boolean" then
+            return nil, failure("UsageError", "self-test list flag must be boolean")
+        end
+        for _, name in ipairs({
+            "excluded_models", "excluded_checks", "selected_checks",
+        }) do
+            if request[name] ~= nil and not dense_string_array(request[name]) then
+                return nil, failure("UsageError", "self-test filters must be string arrays")
+            end
         end
     end
     if request.id == "run-chat"
@@ -273,38 +335,184 @@ function M.new(components, options)
         return generation
     end
 
-    local function stage1_context(mode, generation, config_error)
-        return readonly({
-            stage = 1,
-            online = false,
-            mode = mode,
-            release_target = admitted.release_target,
-            product_version = admitted.product_version,
-            config_generation = generation,
-            config_error = config_error and readonly({
-                code = config_error.code,
-                reason = config_error.reason,
-            }, "Stage 1 config error") or false,
-        }, "Stage 1 request")
+    local function self_test_snapshot(identity, generation, config_error)
+        local config_snapshot
+        local models = {}
+        local snapshot_id = "self-test-config-unavailable"
+        if generation then
+            if type(generation.id) ~= "string"
+                or type(generation.model_order) ~= "table"
+                or type(generation.models) ~= "table"
+            then
+                return nil, failure(
+                    "SelfTestSnapshotInvalid",
+                    "configuration generation cannot be projected for self-test"
+                )
+            end
+            snapshot_id = generation.id
+            config_snapshot = {
+                available = true,
+                generation = {
+                    id = generation.id,
+                    schema_version = generation.schema_version,
+                    general = generation.general,
+                    tui = generation.tui,
+                    agent = generation.agent,
+                    network = generation.network,
+                    exec = generation.exec,
+                    context = generation.context,
+                    permissions = generation.permissions,
+                    permission_order = generation.permission_order,
+                    models = generation.models,
+                    model_order = generation.model_order,
+                    current_model = generation.current_model,
+                    current_permission = generation.current_permission,
+                    default_model = generation.default_model,
+                    default_permission = generation.default_permission,
+                    effective_double_check = generation.effective_double_check,
+                    effective_double_check_goal = generation.effective_double_check_goal,
+                    context_prompt = generation.context_prompt,
+                    auto_rename_disabled = generation.auto_rename_disabled,
+                    agent_ready = generation.agent_ready,
+                    agent_block_reason = generation.agent_block_reason or false,
+                    warnings = generation.warnings,
+                },
+            }
+            local count = 0
+            for index, name in ipairs(generation.model_order) do
+                count = count + 1
+                if index ~= count or type(name) ~= "string" or name == "" then
+                    return nil, failure(
+                        "SelfTestSnapshotInvalid",
+                        "configuration Model order is invalid"
+                    )
+                end
+                local model = generation.models[name]
+                if type(model) ~= "table" then
+                    return nil, failure(
+                        "SelfTestSnapshotInvalid",
+                        "configuration Model snapshot is missing"
+                    )
+                end
+                if model.enabled == true then
+                    if type(model.endpoint) ~= "string" or model.endpoint == "" then
+                        return nil, failure(
+                            "SelfTestSnapshotInvalid",
+                            "enabled Model endpoint is unavailable"
+                        )
+                    end
+                    models[#models + 1] = {
+                        id = name,
+                        endpoint = model.endpoint,
+                        snapshot_id = generation.id .. ":model:" .. tostring(index),
+                    }
+                end
+            end
+            for key in pairs(generation.model_order) do
+                if math.type(key) ~= "integer" or key < 1 or key > count then
+                    return nil, failure(
+                        "SelfTestSnapshotInvalid",
+                        "configuration Model order is not dense"
+                    )
+                end
+            end
+        else
+            config_snapshot = {
+                available = false,
+                error = {
+                    code = config_error and config_error.code or "ConfigInvalid",
+                    message = config_error and config_error.message
+                        or "configuration is unavailable",
+                },
+            }
+        end
+        local raw_snapshot = {
+            product = {
+                name = admitted.product_name,
+                version = admitted.product_version,
+                release_target = admitted.release_target,
+            },
+            platform = {
+                os = identity.os,
+                arch = identity.arch,
+                target = identity.target,
+                supported = identity.supported,
+            },
+            config_path = admitted.config_path,
+            config = config_snapshot,
+        }
+        local copied_snapshot, copied_ok = copy_plain(raw_snapshot, {})
+        local copied_models, models_ok = copy_plain(models, {})
+        if not copied_ok or not models_ok then
+            return nil, failure(
+                "SelfTestSnapshotInvalid",
+                "self-test snapshot contains a non-data value or cycle"
+            )
+        end
+        local snapshot = freeze(copied_snapshot, {}, "self-test configuration snapshot")
+        local frozen_models = freeze(copied_models, {}, "self-test Model snapshots")
+        if not snapshot or not frozen_models then
+            return nil, failure("SelfTestSnapshotInvalid", "self-test snapshot cannot be frozen")
+        end
+        return {
+            snapshot_id = snapshot_id,
+            snapshot = snapshot,
+            models = frozen_models,
+        }
     end
 
-    local function run_stage1(mode, generation, config_error)
-        local called, result = pcall(
-            admitted_components.stage1.run,
-            stage1_context(mode, generation, config_error)
+    local function run_self_test(mode, request, identity, generation, config_error)
+        local projection, projection_error = self_test_snapshot(
+            identity,
+            generation,
+            config_error
         )
-        if not called or type(result) ~= "table" or type(result.outcome) ~= "string" then
-            return nil, failure("Stage1Failed", "offline Stage 1 returned an invalid result")
+        if not projection then return nil, projection_error end
+        local specification = freeze({
+            mode = mode,
+            through_stage = request.through_stage or 1,
+            list_checks = request.list_checks == true,
+            online_consent = request.online_consent == true,
+            excluded_models = request.excluded_models or {},
+            excluded_checks = request.excluded_checks or {},
+            selected_checks = request.selected_checks or {},
+            snapshot_id = projection.snapshot_id,
+            snapshot = projection.snapshot,
+            models = projection.models,
+        }, {}, "self-test run specification")
+        if not specification then
+            return nil, failure("SelfTestSnapshotInvalid", "self-test request contains a cycle")
+        end
+        local called, result, run_error = pcall(
+            admitted_components.self_test.run,
+            admitted_components.self_test,
+            specification
+        )
+        if not called then
+            return nil, failure("SelfTestFailed", "self-test runner raised an exception")
+        end
+        if result == nil then
+            if type(run_error) == "table" and type(run_error.code) == "string" then
+                return nil, run_error
+            end
+            return nil, failure("SelfTestFailed", "self-test runner returned no result")
         end
         local outcomes = { passed = true, partial = true, cancelled = true, error = true }
-        if not outcomes[result.outcome]
-            or (result.online_requests ~= nil and result.online_requests ~= 0)
+        local through_stage = request.through_stage or 1
+        if type(result) ~= "table"
+            or result.kind ~= "self-test"
+            or not outcomes[result.outcome]
+            or not valid_integer(result.online_requests, 0)
+            or result.auto_fixes ~= 0
+            or not valid_integer(result.completed_stage, 0)
+            or result.completed_stage > through_stage
+            or (through_stage == 1 and result.online_requests ~= 0)
         then
-            return nil, failure("Stage1Contract", "Stage 1 violated its offline result contract")
+            return nil, failure("SelfTestContract", "self-test runner violated its result contract")
         end
-        local frozen = freeze(result, {}, "Stage 1 result")
+        local frozen = freeze(result, {}, "self-test result")
         if not frozen then
-            return nil, failure("Stage1Contract", "Stage 1 result contains a cycle")
+            return nil, failure("SelfTestContract", "self-test result contains a cycle")
         end
         return frozen
     end
@@ -312,21 +520,17 @@ function M.new(components, options)
     local function dispatch_self_test(request)
         local identity, identity_error = check_platform()
         if not identity then return nil, identity_error end
-        local generation, config_error = load_config()
-        local result, stage_error = run_stage1("explicit", generation, config_error)
-        if not result then return nil, stage_error end
         local through_stage = request.through_stage or 1
-        if through_stage == 1 or result.outcome ~= "passed" then return result end
-        if request.online_consent ~= true then
+        if through_stage >= 2 and request.list_checks ~= true
+            and request.online_consent ~= true
+        then
             return nil, failure(
                 "OnlineConsentRequired",
                 "online self-test requires explicit current-invocation consent"
             )
         end
-        return nil, failure(
-            "SelfTestStageUnavailable",
-            "online self-test stages are not attached to this implementation node"
-        )
+        local generation, config_error = load_config()
+        return run_self_test("explicit", request, identity, generation, config_error)
     end
 
     local function dispatch_management(request)
@@ -360,18 +564,32 @@ function M.new(components, options)
     local function run_startup_self_test(generation)
         local requested = generation.general.startup_self_test
         if requested == "off" then return true end
-        local result, stage_error = run_stage1("startup", generation)
+        local stage_by_name = { stage1 = 1, stage2 = 2, stage3 = 3 }
+        local through_stage = stage_by_name[requested]
+        if not through_stage then
+            return nil, failure("StartupSelfTestFailed", "startup self-test setting is invalid")
+        end
+        if through_stage >= 2 then
+            return nil, failure(
+                "OnlineConsentRequired",
+                "startup online self-test requires visible current-invocation consent"
+            )
+        end
+        local identity, identity_error = check_platform()
+        if not identity then return nil, identity_error end
+        local result, stage_error = run_self_test("startup", {
+            through_stage = through_stage,
+            list_checks = false,
+            online_consent = false,
+            excluded_models = {},
+            excluded_checks = {},
+            selected_checks = {},
+        }, identity, generation)
         if not result then return nil, stage_error end
         if result.outcome ~= "passed" then
             return nil, failure(
                 "StartupSelfTestFailed",
-                "required startup Stage 1 did not pass"
-            )
-        end
-        if requested ~= "stage1" then
-            return nil, failure(
-                "OnlineConsentRequired",
-                "startup online self-test requires visible current-invocation consent"
+                "required startup self-test did not pass"
             )
         end
         return true
