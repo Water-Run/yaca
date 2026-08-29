@@ -55,7 +55,7 @@ return {
   },
 
   event_types = {
-    event("turn_started", { "kind", "configGeneration", "modelSnapshot", "permissionSnapshot", "promptSnapshot", "toolRegistrySnapshot" }, {}, "after-admission-before-model"),
+    event("turn_started", { "kind", "configGeneration", "modelSnapshot", "permissionSnapshot", "promptSnapshot", "toolRegistrySnapshot" }, { "runtimeSnapshot" }, "after-admission-before-model"),
     event("user_message", { "messageId", "text", "source" }, { "replyToMessageId" }, "before-model-request"),
     event("model_request", { "requestId", "purpose", "viewManifestRef" }, { "attemptId" }, "request-intent"),
     event("model_message", { "messageId", "requestId", "role", "status", "body" }, { "representation", "rawBytes", "digest" }, "before-interpretation"),

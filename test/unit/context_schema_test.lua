@@ -105,6 +105,7 @@ local function minimal()
                     permissionSnapshot = "sha256:permission-snapshot",
                     promptSnapshot = "sha256:prompt-snapshot",
                     toolRegistrySnapshot = "sha256:tool-registry",
+                    runtimeSnapshot = "yaca-runtime-snapshot-v1;hard=manifest-v1",
                 },
             },
             {
@@ -209,6 +210,10 @@ return {
                 A.equal(document.session.context_prompt, "")
                 A.equal(document.facts[3].fields.reason, "")
                 A.equal(document.facts[3].fields.errorId, nil)
+                A.equal(
+                    document.facts[1].fields.runtimeSnapshot,
+                    "yaca-runtime-snapshot-v1;hard=manifest-v1"
+                )
                 A.equal(document.event_count, 3)
                 A.equal(document.last_event_seq, 3)
                 A.equal(document.recovery.model_view_status, "current")

@@ -22,7 +22,7 @@ local EVENT_DEFINITIONS = {
     event("turn_started", {
         "kind", "configGeneration", "modelSnapshot", "permissionSnapshot",
         "promptSnapshot", "toolRegistrySnapshot",
-    }),
+    }, { "runtimeSnapshot" }),
     event("user_message", { "messageId", "text", "source" }, {
         "replyToMessageId",
     }),
