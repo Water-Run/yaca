@@ -142,7 +142,132 @@ function M.new(native, options)
     local handle
     local terminal_outcome
     local restored = false
+    local pending_batch = {}
+    local pending_batch_index = 1
+    local pending_text = false
+    local pending_text_offset = 1
+    local skip_leading_lf = false
     local port = {}
+
+    local function copy_observations(observations, budget)
+        local event_count = 0
+        for key in pairs(observations) do
+            if math.type(key) ~= "integer" or key < 1 then
+                return nil, failure("NativeContract", "native terminal poll returned a map")
+            end
+            event_count = event_count + 1
+        end
+        if event_count > budget then
+            return nil, failure("NativeContract", "native terminal exceeded poll budget")
+        end
+        local copied = {}
+        local terminal_seen = false
+        for index = 1, event_count do
+            local observation, observation_error = validate_observation(
+                observations[index],
+                maximum_input_bytes
+            )
+            if not observation then return nil, observation_error end
+            if terminal_seen then
+                return nil, failure("NativeContract", "terminal emitted data after terminal")
+            end
+            copied[index] = observation.kind == "terminal" and {
+                kind = "terminal",
+                outcome = observation.outcome,
+            } or {
+                kind = "action",
+                intent = observation.intent,
+                text = observation.text,
+            }
+            terminal_seen = observation.kind == "terminal"
+        end
+        return copied
+    end
+
+    local function begin_pending_text(value)
+        pending_text = value
+        pending_text_offset = 1
+        if skip_leading_lf then
+            if value:sub(1, 1) == "\n" then pending_text_offset = 2 end
+            skip_leading_lf = false
+        end
+    end
+
+    local function next_pending_text_event()
+        while pending_text do
+            if pending_text_offset > #pending_text then
+                pending_text = false
+                pending_text_offset = 1
+                return nil
+            end
+            local start = pending_text_offset
+            while pending_text_offset <= #pending_text do
+                local byte = pending_text:byte(pending_text_offset)
+                local lone_escape = byte == 0x1B
+                    and pending_text_offset == #pending_text
+                if byte == 0x0D or byte == 0x0A or lone_escape then break end
+                pending_text_offset = pending_text_offset + 1
+            end
+            if pending_text_offset > start then
+                return {
+                    kind = "user_action",
+                    action = "text",
+                    text = pending_text:sub(start, pending_text_offset - 1),
+                }
+            end
+            local byte = pending_text:byte(pending_text_offset)
+            if byte == 0x1B then
+                pending_text_offset = pending_text_offset + 1
+                return { kind = "user_action", action = "cancel" }
+            end
+            pending_text_offset = pending_text_offset + 1
+            if byte == 0x0D then
+                if pending_text:sub(pending_text_offset, pending_text_offset) == "\n" then
+                    pending_text_offset = pending_text_offset + 1
+                elseif pending_text_offset > #pending_text then
+                    skip_leading_lf = true
+                end
+            end
+            return { kind = "user_action", action = "submit-or-queue" }
+        end
+        return nil
+    end
+
+    local function drain_pending(events, budget)
+        while #events < budget do
+            local text_event = next_pending_text_event()
+            if text_event then
+                events[#events + 1] = text_event
+            else
+                local observation = pending_batch[pending_batch_index]
+                if not observation then
+                    pending_batch = {}
+                    pending_batch_index = 1
+                    break
+                end
+                pending_batch_index = pending_batch_index + 1
+                if observation.kind == "action" and observation.intent == "text" then
+                    begin_pending_text(observation.text)
+                else
+                    skip_leading_lf = false
+                    if observation.kind == "terminal" then
+                        terminal_outcome = observation.outcome
+                        events[#events + 1] = {
+                            kind = "io_terminal",
+                            outcome = observation.outcome,
+                        }
+                    else
+                        events[#events + 1] = {
+                            kind = "user_action",
+                            action = observation.intent,
+                            text = observation.text,
+                        }
+                    end
+                end
+            end
+        end
+        return events
+    end
 
     ---Starts terminal input without claiming unsupported key combinations.
     -- @param now integer Current monotonic tick.
@@ -170,49 +295,30 @@ function M.new(native, options)
     function port:poll(now, budget)
         if state ~= "started" then error("terminal port is " .. state, 2) end
         if terminal_outcome then return {} end
-        if not valid_integer(now, 0) or not valid_integer(budget, 0) then
+        if not valid_integer(now, 0) or not valid_integer(budget, 0)
+            or budget > maximum_input_bytes
+        then
             error("terminal poll arguments are invalid", 2)
         end
-        local ok, observations = call_native(native, "terminal_poll", handle, now, budget)
+        local events = drain_pending({}, budget)
+        if #events == budget or budget == 0 or terminal_outcome then return events end
+        local remaining = budget - #events
+        local ok, observations = call_native(
+            native,
+            "terminal_poll",
+            handle,
+            now,
+            remaining
+        )
         if not ok then raise_native(observations, 1) end
         if type(observations) ~= "table" then
             raise_native(failure("NativeContract", "native terminal poll returned no array"), 1)
         end
-        local event_count = 0
-        for key in pairs(observations) do
-            if math.type(key) ~= "integer" or key < 1 then
-                raise_native(failure("NativeContract", "native terminal poll returned a map"), 1)
-            end
-            event_count = event_count + 1
-        end
-        if event_count > budget then
-            raise_native(failure("NativeContract", "native terminal exceeded poll budget"), 1)
-        end
-        local events = {}
-        for index = 1, event_count do
-            local observation, observation_error = validate_observation(
-                observations[index],
-                maximum_input_bytes
-            )
-            if not observation then raise_native(observation_error, 1) end
-            if terminal_outcome then
-                raise_native(failure("NativeContract", "terminal emitted data after terminal"), 1)
-            end
-            if observation.kind == "terminal" then
-                terminal_outcome = observation.outcome
-                events[#events + 1] = {
-                    kind = "io_terminal",
-                    outcome = observation.outcome,
-                }
-            else
-                events[#events + 1] = {
-                    kind = "user_action",
-                    action = observation.intent,
-                    text = observation.text,
-                }
-            end
-        end
-        return events
+        local copied, copy_error = copy_observations(observations, remaining)
+        if not copied then raise_native(copy_error, 1) end
+        pending_batch = copied
+        pending_batch_index = 1
+        return drain_pending(events, budget)
     end
 
     ---Requests input cancellation without fabricating a terminal outcome.

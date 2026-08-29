@@ -162,6 +162,7 @@ local function success_native()
     end
 
     function native.terminal_poll(_, _, budget)
+        native.calls.terminal_poll = (native.calls.terminal_poll or 0) + 1
         local batch = table.remove(native.terminal_batches, 1) or {}
         A.truthy(#batch <= budget)
         return true, batch
@@ -411,6 +412,40 @@ return {
                 A.equal(native.calls.terminal_restore, 1)
                 A.truthy(port:close())
                 A.equal(native.calls.terminal_restore, 1)
+            end,
+        },
+        {
+            name = "terminal splits line chunks within budget and folds split CRLF",
+            run = function()
+                local terminal = load_module("terminal")
+                local native = success_native()
+                native.terminal_batches = {
+                    { { kind = "action", intent = "text", text = "hello\r" } },
+                    { { kind = "action", intent = "text", text = "\nworld\n" } },
+                    { { kind = "terminal", outcome = "completed" } },
+                }
+                local port = assert(terminal.new(native, {
+                    mode = "auto",
+                    maximum_input_bytes = 64,
+                }))
+                port:start(1)
+                A.deep_equal(port:poll(2, 2), {
+                    { kind = "user_action", action = "text", text = "hello" },
+                    { kind = "user_action", action = "submit-or-queue" },
+                })
+                A.deep_equal(port:poll(3, 1), {
+                    { kind = "user_action", action = "text", text = "world" },
+                })
+                A.deep_equal(port:poll(4, 1), {
+                    { kind = "user_action", action = "submit-or-queue" },
+                })
+                A.equal(native.calls.terminal_poll, 2)
+                A.deep_equal(port:poll(5, 1), {
+                    { kind = "io_terminal", outcome = "completed" },
+                })
+                A.equal(native.calls.terminal_poll, 3)
+                A.equal(port:join(6).outcome, "completed")
+                A.truthy(port:close())
             end,
         },
         {
