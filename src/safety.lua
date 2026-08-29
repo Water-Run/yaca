@@ -223,6 +223,69 @@ function M.new(hash_port, options)
         return digest(port, value, options.maximum_hash_chunk_bytes)
     end
 
+    ---Hashes an ordered, typed public binding without ambiguous concatenation.
+    -- Field order is part of the contract. Values are exact strings, booleans,
+    -- or integers; secrets must never be supplied by callers.
+    -- @param domain string Stable ASCII/UTF-8 binding domain.
+    -- @param fields table Dense ordered { name, value } records.
+    -- @return string|nil hex Lowercase SHA-256 binding digest.
+    -- @return table|nil err Structured shape or native hash failure.
+    function service.binding_digest(domain, fields)
+        if type(domain) ~= "string" or domain == "" or domain:find("\0", 1, true) then
+            return nil, failure("InvalidBinding", "binding domain is invalid")
+        end
+        local count = dense_count(fields)
+        if count == nil then
+            return nil, failure("InvalidBinding", "binding fields must be a dense array")
+        end
+        local parts = {
+            "yaca-public-binding-v1\0",
+            tostring(#domain), ":", domain,
+            "\0", tostring(count), "\0",
+        }
+        local names = {}
+        for _, field in ipairs(fields) do
+            if type(field) ~= "table" then
+                return nil, failure("InvalidBinding", "binding field must be a table")
+            end
+            for key in pairs(field) do
+                if key ~= "name" and key ~= "value" then
+                    return nil, failure("InvalidBinding", "binding field has an unknown key")
+                end
+            end
+            if type(field.name) ~= "string" or field.name == ""
+                or field.name:find("\0", 1, true) or names[field.name]
+            then
+                return nil, failure("InvalidBinding", "binding field identity is invalid")
+            end
+            names[field.name] = true
+            local value_type = type(field.value)
+            local tag, encoded
+            if value_type == "string" then
+                tag, encoded = "s", field.value
+            elseif value_type == "boolean" then
+                tag, encoded = "b", field.value and "1" or "0"
+            elseif math.type(field.value) == "integer" then
+                tag, encoded = "i", tostring(field.value)
+            else
+                return nil, failure("InvalidBinding", "binding value type is unsupported")
+            end
+            parts[#parts + 1] = tostring(#field.name)
+            parts[#parts + 1] = ":"
+            parts[#parts + 1] = field.name
+            parts[#parts + 1] = ":"
+            parts[#parts + 1] = tag
+            parts[#parts + 1] = ":"
+            parts[#parts + 1] = tostring(#encoded)
+            parts[#parts + 1] = ":"
+            parts[#parts + 1] = encoded
+            parts[#parts + 1] = "\0"
+        end
+        return digest(port, table.concat(parts), options.maximum_hash_chunk_bytes)
+    end
+
+    service.binding_version = "yaca-public-binding-v1"
+
     ---Creates a closure-backed typed registry for one configuration generation.
     -- @param entries table Dense id/class/value/destinations entries.
     -- @return table|nil registry Immutable registry facade.
