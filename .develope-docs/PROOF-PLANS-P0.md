@@ -1,13 +1,19 @@
 # 关键技术证明计划（TP-003 / 004 / 005 / 006 / 008 / 010）
 
-更新日期：2026-08-10
+更新日期：2026-08-29
 
-状态：下列条目 **`specified`**；**尚未** proven-modern/target。  
+状态：TP-003/006/008/010 已取得范围受限、可复现的 **`proven-modern`**；TP-004/005 仍为 `specified`；全部条目均 **尚未** `proven-target`。
 细节与失败退路仍以 [TECHNICAL-PROOF-BACKLOG.md](TECHNICAL-PROOF-BACKLOG.md) 为准。
+
+现代机证据、精确命令、输出和目标残项归档在 [`proofs/modern-2026-08-29/`](proofs/modern-2026-08-29/README.md)。统一复现入口为：
+
+    bash .tools/run_coding_readiness.sh
 
 ---
 
 ## TP-003 统一事件泵
+
+状态：`proven-modern`（确定性 fake-port/core 范围）；Win32/XP、CentOS 真实 wait/console/process/network adapter 与 suspend/resume 仍待 target proof。
 
 ### 范围
 
@@ -32,6 +38,8 @@
 
 ## TP-006 curl 流式与密钥
 
+状态：`proven-modern`（现代 curl + loopback carrier/cancel/scanner/retry oracle）；随包 curl、旧 TLS/proxy/CA、真实 target timer 与 redirect controller 联调仍待证明。门槛 `8` 与 `tp006-modern-candidate-v1` 只是在现代夹具中通过的候选，尚非发行 manifest 冻结值。
+
 ### 范围
 
 Key 不进 argv；carrier bake-off；ambient 隔离；retry；短 secret 门；零 telemetry purpose。
@@ -54,6 +62,8 @@ carrier 决策记录、canary 报告、jitter golden。
 ---
 
 ## TP-008 单 XML 提交正确性
+
+状态：`proven-modern`（Linux/POSIX 完整重写、31 个进程崩溃切点、lock、rename/rebind recovery）；Windows 原语、目标文件系统、断电与 AV/share 行为仍待 target proof。
 
 ### 范围
 
@@ -79,6 +89,8 @@ W1-C 流水线；崩溃点；rename/rebind 事务；不重放 unknown。
 
 ## TP-004 Windows XP console / QuickEdit
 
+状态：`specified`；尚未 proven-modern/target。
+
 ### 范围
 
 Enter / Ctrl+Enter / Shift+Enter / Alt+Enter / Esc 识别或诚实能力报告；点命令后备；QuickEdit 不永久挂死；退出后模式恢复。
@@ -99,6 +111,8 @@ Enter / Ctrl+Enter / Shift+Enter / Alt+Enter / Esc 识别或诚实能力报告�
 ---
 
 ## TP-005 子进程树、取消与 unknown
+
+状态：`specified`；尚未 proven-modern/target。
 
 ### 范围
 
@@ -121,6 +135,8 @@ process result schema 样例 + unknown 恢复说明。
 ---
 
 ## TP-010 XML parser/writer + Lua 5.5
+
+状态：`proven-modern`（Linux x86_64 固定源码 hash 构建与安全/Unicode/carrier corpus）；Win32 x86、Win64 和 CentOS 7 仍待 build/load/limit target proof。
 
 ### 范围
 

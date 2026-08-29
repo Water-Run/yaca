@@ -83,15 +83,15 @@ Web（D-058）仍仅预留。
 | 负责人产品选择 | 已关闭（register `unanswered=0` / `conflict=0`） |
 | 项目级决定 | D-001..D-071；D-049..D-057 主链，D-058 Web 预留，D-059..069 SQ，D-070 离线授权，D-071 readiness/proof/push 授权 |
 | Owner 规格 | W1–W4 主脊柱已形成 11 份 machine contract + 6 组 fixtures；P1/页面/路径/wire 边角仍待收口 |
-| 技术证明 | luainstaller 1.3.0 upstream modern + 本地 contract/RNG；关键 modern proof 正在执行，无 proven-target |
+| 技术证明 | luainstaller 1.3.0 upstream modern；TP-003/006/008/010 已 proven-modern 并归档；无 proven-target |
 | 实施就绪门 | P0 gate 仍未 passed（规格侧冻结≠目标 proof）；Gate A/B 审计前不写产品代码 |
 | Web | v0.1 仍零表面；双线预留：`yaca-web`/Java 8、`yaca-ie6`/PHP 5.4+IE6 |
 
 **近期设计工作优先级（核心优先于 Web）：**
 
-1. 执行 TP-003/006/008/010 modern proof 并归档可复现证据。
-2. 关闭 P1/ASCII chrome/path/wire 的实施计划前规格缺口。
-3. 同步中英文 README，审计 Gate A/B 并形成全程序实施计划。
+1. 关闭 P1/ASCII chrome/path/wire 的实施计划前规格缺口。
+2. 审计 Gate A，形成全程序实施计划并通过 Gate B。
+3. 保留 XP/Win64/CentOS 与最终 zip qualification 为实现/发布硬门。
 4. Web 双线仅维护预留文档，除非负责人开题。
 
 主线就绪差距与 Wave 工作包见 **[`READINESS-GAP.md`](READINESS-GAP.md)**。  

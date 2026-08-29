@@ -4,7 +4,7 @@
 
 状态：运营清单（设计阶段）；**当前判定：未达实施计划就绪，未达编码就绪**
 
-进度注记：SQ 完成；D-070 收口；D-071 已授权 readiness 收尾、modern proof 与核心节点推送 main。**W1–W4 规格脊柱已机器化**：11 份 contract、6 组 synthetic fixtures 与跨规格 validator 已落盘，配置漂移已消解。P0 proof 与公开 README 同步尚未完成；**未** 达门 A/B，暂不写产品代码。`../luainstaller` 已从文档基线 1.0 升至 1.3.0，旧 x86 guard 阻塞已消失，但 yaca-specific 三包与目标机证据仍缺。权威门禁仍以 [`ARCHITECTURE-READINESS.md`](ARCHITECTURE-READINESS.md) 为准。本文回答三个实操问题：
+进度注记：SQ 完成；D-070 收口；D-071 已授权 readiness 收尾、modern proof 与核心节点推送 main。**W1–W4 规格脊柱已机器化**：11 份 contract、6 组 synthetic fixtures 与跨规格 validator 已落盘，配置漂移已消解。TP-003/006/008/010 已在 2026-08-29 取得范围明确的 `proven-modern` 证据，公开 README 已同步；目标 proof 与 Gate A/B 审计仍未完成，暂不写产品代码。`../luainstaller` 已从文档基线 1.0 升至 1.3.0，旧 x86 guard 阻塞已消失，但 yaca-specific 三包与目标机证据仍缺。权威门禁仍以 [`ARCHITECTURE-READINESS.md`](ARCHITECTURE-READINESS.md) 为准。本文回答三个实操问题：
 
 1. 现在站在哪一层？
 2. 离“可写实施计划 / 可开始编码”还缺什么？
@@ -55,7 +55,7 @@ Web 双线（D-058：`yaca-web`/Java 8、`yaca-ie6`/PHP 5.4）**不计入** v0.1
 | 题库 / 审计覆盖 | ~95% | AQ-001..437、384 checklist、CV-001..076、10 决策包 |
 | 负责人产品选择 | **100%** | register `unanswered=0` / `conflict=0`；D-001..D-058 |
 | Owner **可编码规格** | **~70–75%** | W1–W4 机读 contracts/fixtures 已落；P1、ASCII chrome、路径 corpus 与 wire bytes 仍缺 |
-| 技术证明 | **~5–10%** | luainstaller 1.3.0 upstream modern + 本地 contract/RNG proof；无 proven-target |
+| 技术证明 | **~15–20%** | luainstaller 1.3.0 upstream modern；TP-003/006/008/010 proven-modern；无 proven-target |
 | 实施计划 / 源码 | **0%** | 无实施计划；`src/*.lua` 全空 |
 | 发布证据 | **0%** | 无三目标合格 zip |
 
@@ -77,13 +77,13 @@ Web 双线（D-058：`yaca-web`/Java 8、`yaca-ie6`/PHP 5.4）**不计入** v0.1
 | AR-P0-01 | 产品闭环 / 零表面 / 发行形态 | 有 | **机读冻结** | 本地 scan；目标缺 | M | README 与最终 zip/旅程证据 |
 | AR-P0-02 | AgentLoop typed outcome | 有 | **机读冻结** | synthetic trace | **H** | fault trace / hard-cap / 目标证明 |
 | AR-P0-03 | Model 协议 canonical | 有 | **机读冻结** | synthetic；recorded 缺 | **H** | 双 adapter 录制 fixture |
-| AR-P0-04 | 事件泵 / 可取消 I/O | 有 | **机读冻结** | **缺** | **H** | XP/CentOS 证明未做 |
+| AR-P0-04 | 事件泵 / 可取消 I/O | 有 | **机读冻结** | fake core modern；目标缺 | **H** | XP/CentOS adapter 证明未做 |
 | AR-P0-05 | TUI full-duplex / draft | 有 | **机读首版** | **缺** | H | fd 矩阵、ASCII transcript、旧终端 proof |
 | AR-P0-06 | 工具 × Permission 矩阵 | 有 | **机读冻结** | fold fixture；目标缺 | **H** | path identity / 目标平台 proof |
 | AR-P0-07 | 改动事务 / 无 undo | 有 | **首版**（W3-D 19） | 缺 | M | 目标机 fault 注入证据 |
-| AR-P0-08 | 数据分类 / 秘密 / 导入 | 有 | **首版**（W3-C） | 缺 | H | canary/exact-scan TP |
+| AR-P0-08 | 数据分类 / 秘密 / 导入 | 有 | **首版**（W3-C） | canary/scanner modern；目标缺 | H | 目标 carrier/secret qualification |
 | AR-P0-09 | 配置 typed schema | 有 | **机读冻结** | grammar fixture；目标缺 | **H** | RuntimeMax 表 / 原子写 proof；替换历史模板 |
-| AR-P0-10 | Context XML durability | 有 | **机读冻结** | RNG/minimal fixture；目标缺 | **H** | replace/lock/性能目标机证据 |
+| AR-P0-10 | Context XML durability | 有 | **机读冻结** | POSIX commit/parser modern；目标缺 | **H** | Windows/目标 FS replace/lock/性能证据 |
 | AR-P0-11 | 路径 / 索引 / 生命周期 | 有 | **首版**（W3-B） | 缺 | H | golden path vectors / 密码学原语锁定 |
 | AR-P0-12 | 压缩 model view | 有 | **首版**（W3-D 12） | 缺 | M | token 估算阈值 TP |
 | AR-P0-13 | CLI/点命令 × 状态 | 有 | **机读冻结** | synthetic argv | **H** | parser/help/machine output 与目标 proof |
@@ -101,14 +101,14 @@ P1 门（AR-P1-01..12）在写**全程序**计划前也应关闭；若只做**�
 
 | ID | 主题 | 与 P0 关系 | 最低就绪要求 |
 | --- | --- | --- | --- |
-| TP-003 ★ | 统一事件泵 | P0-04 | ABI + XP/CentOS 计划 |
+| TP-003 ★ | 统一事件泵 | P0-04 | `proven-modern` fake core；XP/CentOS 计划保留 |
 | TP-004 ★ | XP console / QuickEdit | P0-05 | 按键矩阵 + 后备策略证据 |
 | TP-005 | 子进程取消 / unknown | P0-06、P1-03 | kill-tree / 管道计划 |
-| TP-006 ★ | curl 流式 / 密钥 | P0-03、P1-02 | carrier + 取消 + 无 argv 泄漏 |
+| TP-006 ★ | curl 流式 / 密钥 | P0-03、P1-02 | `proven-modern` carrier/cancel/scanner；目标计划保留 |
 | TP-007 | TLS / CA / HTTP | P0-03 | 旧平台 TLS 基线 |
-| TP-008 ★ | 单 XML 正确性 | P0-10 | 崩溃切点真值表 |
+| TP-008 ★ | 单 XML 正确性 | P0-10 | `proven-modern` POSIX 崩溃矩阵；目标计划保留 |
 | TP-009 ★ | 单 XML 写放大 | P0-10 | hard limit 数字来源 |
-| TP-010 ★ | LuaExpat + Lua 5.5 | P0-10、P1-01 | 三架构构建计划 |
+| TP-010 ★ | LuaExpat + Lua 5.5 | P0-10、P1-01 | `proven-modern` Linux build/corpus；三架构计划保留 |
 | TP-001 | luainstaller Win32 | P0-16 | 1.3.0 upstream modern 已有；执行 yaca-specific qualification |
 | TP-015/016/017 | 协议 / control / outcome | P0-02、P0-03 | fixture 语料 |
 | TP-019 | INI 往返 | P0-09 | parser contract |
