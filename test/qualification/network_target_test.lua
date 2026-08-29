@@ -102,7 +102,7 @@ return {
             end,
         },
         {
-            name = "release manifest keeps every old-system target and curl lock pending",
+            name = "release manifest locks sources while every target artifact stays pending",
             run = function()
                 local manifest = assert(loadfile(
                     YACA_TEST_ROOT .. "/release/manifest.lua",
@@ -111,28 +111,31 @@ return {
                 ))()
                 A.equal(manifest.release_state, "unqualified")
                 A.falsy(manifest.release_authorized)
-                A.equal(manifest.dependencies.curl.status, "target-lock-pending")
-                A.equal(manifest.dependencies.ca_bundle.status, "target-lock-pending")
-                A.deep_equal(manifest.targets, {
-                    {
-                        id = "win32-x86",
-                        os = "windows",
-                        arch = "x86",
-                        qualification = "pending",
-                    },
-                    {
-                        id = "win64-x86_64",
-                        os = "windows",
-                        arch = "x86_64",
-                        qualification = "pending",
-                    },
-                    {
-                        id = "linux-x86_64",
-                        os = "linux",
-                        arch = "x86_64",
-                        qualification = "pending",
-                    },
-                })
+                A.falsy(manifest.target_qualification_complete)
+                A.equal(manifest.dependencies.curl.version, "8.21.0")
+                A.equal(manifest.dependencies.mbedtls.version, "3.6.7")
+                A.equal(manifest.dependencies.ca_bundle.version, "2026-08-13")
+                for _, dependency in ipairs({ "curl", "mbedtls", "ca_bundle" }) do
+                    A.equal(
+                        manifest.dependencies[dependency].status,
+                        "source-pinned-target-artifact-pending"
+                    )
+                    A.matches(manifest.dependencies[dependency].sha256, "^[0-9a-f]+$")
+                    A.equal(#manifest.dependencies[dependency].sha256, 64)
+                end
+                local expected = {
+                    { "win32-x86", "windows", "x86", "Windows XP SP3" },
+                    { "win64-x86_64", "windows", "x86_64", "Windows 7 SP1" },
+                    { "linux-x86_64", "linux", "x86_64", "CentOS 7 x86_64" },
+                }
+                for index, values in ipairs(expected) do
+                    local target = manifest.targets[index]
+                    A.equal(target.id, values[1])
+                    A.equal(target.os, values[2])
+                    A.equal(target.arch, values[3])
+                    A.equal(target.minimum, values[4])
+                    A.equal(target.qualification, "pending")
+                end
             end,
         },
     },

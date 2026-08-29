@@ -1,6 +1,6 @@
 --[[
 File: manifest.lua
-Date: 2026-08-29
+Date: 2026-08-30
 Author: WaterRun
 Description: Declares the versioned runtime and release assembly manifest.
 ]]
@@ -9,9 +9,11 @@ Description: Declares the versioned runtime and release assembly manifest.
 -- This table remains unqualified until all target evidence is complete.
 return {
     schema_version = "yaca-release-manifest-v0.1.0",
-    product_version = "0.1.0-dev",
+    product_version = "0.1.0",
     release_state = "unqualified",
     release_authorized = false,
+    target_qualification_complete = false,
+    dependency_lock = "release/dependencies.lock",
 
     layout = {
         lua_directory = "src",
@@ -45,19 +47,96 @@ return {
     },
 
     targets = {
-        { id = "win32-x86", os = "windows", arch = "x86", qualification = "pending" },
-        { id = "win64-x86_64", os = "windows", arch = "x86_64", qualification = "pending" },
-        { id = "linux-x86_64", os = "linux", arch = "x86_64", qualification = "pending" },
+        {
+            id = "win32-x86", os = "windows", arch = "x86",
+            minimum = "Windows XP SP3", executable = "yaca.exe",
+            installer = "Install.cmd", archive = "yaca-0.1.0-win32-x86.zip",
+            object_format = "PE32-i386", qualification = "pending",
+        },
+        {
+            id = "win64-x86_64", os = "windows", arch = "x86_64",
+            minimum = "Windows 7 SP1", executable = "yaca.exe",
+            installer = "Install.cmd", archive = "yaca-0.1.0-win64-x86_64.zip",
+            object_format = "PE32+-x86-64", qualification = "pending",
+        },
+        {
+            id = "linux-x86_64", os = "linux", arch = "x86_64",
+            minimum = "CentOS 7 x86_64", executable = "yaca",
+            installer = "Install.sh", archive = "yaca-0.1.0-linux-x86_64.zip",
+            object_format = "ELF64-x86-64", qualification = "pending",
+        },
     },
 
     dependencies = {
-        luainstaller = { version = "1.3.0", tag = "v1.3.0", commit = "97192d1", status = "source-pinned" },
-        lua = { version = "5.5.1", sha256 = "1c4b4068d67061f2a2231ad2b5422e77acea1487ea9890f6320af614f4373dce", status = "source-pinned" },
-        expat = { version = "2.8.2", sha256 = "ef7d1994f533c9e7343d6c19f31064fc8ebbcbcaa144be3812b4f43052a05f4c", status = "source-pinned" },
-        luaexpat = { version = "1.5.2", sha256 = "89d83f2141edec31be576425637216928221918fe95dc3854d1b7fd4c627213f", status = "source-pinned" },
-        curl = { version = "target-lock-before-network-integration", status = "target-lock-pending" },
-        ca_bundle = { version = "target-lock-before-network-integration", status = "target-lock-pending" },
-        yaca_native = { version = "same-as-product", status = "implementation-pending" },
+        luainstaller = {
+            version = "1.3.0", tag = "v1.3.0",
+            commit = "97192d1",
+            full_commit = "97192d100077b31b61dc8f94427e14df1c68a9eb",
+            status = "source-pinned-target-artifact-pending",
+        },
+        lua = {
+            version = "5.5.1",
+            sha256 = "1c4b4068d67061f2a2231ad2b5422e77acea1487ea9890f6320af614f4373dce",
+            status = "source-pinned-target-artifact-pending",
+        },
+        expat = {
+            version = "2.8.2",
+            sha256 = "ef7d1994f533c9e7343d6c19f31064fc8ebbcbcaa144be3812b4f43052a05f4c",
+            status = "source-pinned-target-artifact-pending",
+        },
+        luaexpat = {
+            version = "1.5.2",
+            sha256 = "89d83f2141edec31be576425637216928221918fe95dc3854d1b7fd4c627213f",
+            status = "source-pinned-target-artifact-pending",
+        },
+        curl = {
+            version = "8.21.0",
+            sha256 = "aa1b66a70eace83dc624508745646c08ae561de512ab403adffb93ac87fc72e6",
+            tls_backend = "mbedtls-3.6.7",
+            status = "source-pinned-target-artifact-pending",
+        },
+        mbedtls = {
+            version = "3.6.7",
+            sha256 = "a7e8bcbec0e6f761b4af24f25677626b35f762f68eef79c08677a363212d11f6",
+            status = "source-pinned-target-artifact-pending",
+        },
+        ca_bundle = {
+            version = "2026-08-13",
+            sha256 = "f66dff1bdf8f96060b8177976f8b7d9254bc89bc4db933d769f7384d28480bc9",
+            status = "source-pinned-target-artifact-pending",
+        },
+        yaca_native = {
+            version = "0.1.0", source = "native/yaca_native.c",
+            status = "implemented-target-artifact-pending",
+        },
+    },
+
+    packaging = {
+        builder = "luainstaller-1.3.0",
+        builder_mode = "onefile-from-qualified-onedir",
+        lua_discovery = "manual-exact-allowlist",
+        package_assembly = "explicit-files-only",
+        historical_bin_copy = false,
+        compression_of_native_inputs = false,
+        required_root_entries = {
+            windows = { "yaca.exe", "Install.cmd", "README.txt", "LICENSE", "docs/" },
+            linux = { "yaca", "Install.sh", "README.txt", "LICENSE", "docs/" },
+        },
+        shipped_component_allowlist = {
+            "launcher+embedded-lua", "yaca-lua-sources", "yaca-native",
+            "lxp+static-expat", "curl+static-mbedtls", "ca-bundle",
+            "Install-script", "README.txt", "LICENSE", "docs",
+        },
+        forbidden_shipped_components = {
+            "sqlite3", "jq", "7za", "busybox", "file", "iconv", "patch",
+            "diff", "web-server", "browser-assets", "media-codec",
+            "speech-runtime", "remote-controller", "plugin-loader", "mcp-client",
+            "telemetry-client", "update-client",
+        },
+        evidence_per_target = {
+            "sha256", "component-license-manifest", "SBOM", "build-summary",
+            "full-test-summary",
+        },
     },
 
     implementation_candidates = {
