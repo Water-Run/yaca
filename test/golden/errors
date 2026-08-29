@@ -1,0 +1,39 @@
+UsageError|error|usage|2|false|Invalid command usage.|Run --help for the canonical grammar.
+ConfigMissing|error|invalid_config|3|false|The main configuration is missing.|Run --config-repl or --model-repl.
+ConfigInvalid|error|invalid_config|3|false|The candidate configuration is invalid.|Open the reported field in --config-repl.
+ConfigChanged|error|invalid_config|3|true|The configuration changed during publication.|Reload, review, and retry the transaction.
+ModelUnavailable|error|invalid_config|3|true|The selected Model is unavailable.|Select or repair an enabled Model.
+PermissionUnavailable|error|invalid_config|3|false|The selected Permission is unavailable.|Map the Context to a valid Permission.
+TtyRequired|error|interaction_required|5|false|This action requires an interactive terminal.|Use a complete non-interactive projection where supported.
+OnlineConsentRequired|error|interaction_required|5|false|Online self-test consent is required.|Add the explicit invocation consent or use Stage 1.
+NotFound|error|resolver_negative|6|true|No matching Context was found.|Refresh the Catalog or use a precise hash.
+HashCollision|error|resolver_negative|6|false|The Context hash matches multiple paths.|Choose a displayed logical path explicitly.
+MatchedUnavailable|error|resolver_negative|6|true|A matching Context is unavailable.|Inspect permissions or repair the Context.
+ScanIncomplete|warning|resolver_negative|6|true|The Context scan is incomplete.|Review the unread scope before concluding absence.
+ScanLimit|warning|resolver_negative|6|true|The Context scan reached its hard limit.|Narrow the view or repair the Catalog layout.
+TargetChanged|error|general_error|1|true|The selected target changed after inspection.|Refresh and confirm the new target snapshot.
+OpenConflict|error|general_error|1|true|The Context cannot be opened in its observed state.|Refresh or use context-repl self-fix.
+DestinationExists|error|general_error|1|false|The destination already exists.|Choose another name or root; no overwrite occurred.
+LockConflict|error|lock_conflict|4|true|The Context has an active writer.|Wait for the writer or use evidence-based self-fix.
+UnsupportedPath|error|general_error|1|false|The path cannot be represented losslessly.|Choose a supported real path.
+UnsupportedObject|error|general_error|1|false|The target object kind is unsupported.|Use a regular file or directory as required.
+PathEscapesWorkspace|error|general_error|1|false|The target resolves outside the workspace.|Use an in-root target or satisfy OutsideWorkspace policy.
+PermissionDenied|error|general_error|1|false|Permission policy denied the operation.|Choose a permitted operation or change configuration explicitly.
+ApprovalRequired|warning|interaction_required|5|true|Human approval is required.|Review the bound operation snapshot.
+ApprovalStale|warning|interaction_required|5|true|The approved operation snapshot is stale.|Review and approve the new snapshot.
+ToolSchemaInvalid|error|general_error|1|false|Tool arguments failed schema validation.|Correct the tool call; it was not executed.
+ToolFailed|error|general_error|1|true|The tool returned an error.|Inspect the bounded result and retry only if safe.
+ToolCancelled|warning|cancelled|7|true|The tool was cancelled.|Inspect the paired result before continuing.
+ToolUnknown|fatal|general_error|1|false|The tool side effect cannot be proven.|Resolve the unknown operation before continuing.
+ProcessTimeout|error|general_error|1|true|The process exceeded its deadline.|Inspect termination evidence before retrying.
+NetworkError|error|general_error|1|true|The Model transport failed.|Inspect endpoint, proxy, CA, and retry state.
+ProtocolError|error|general_error|1|false|The Model response violated the adapter protocol.|Run Model self-test and inspect recorded diagnostics.
+StorageError|fatal|general_error|1|true|Durable storage publication failed.|Stop side effects and use context-repl self-fix.
+ContextCorrupt|fatal|general_error|1|false|The Context failed structural or relation validation.|Open it read-only and use context-repl self-fix.
+ContextVersionUnsupported|error|general_error|1|false|The Context schema version is unsupported.|Use a compatible yaca or an explicit migration.
+ContextHardLimit|fatal|general_error|1|false|The Context reached its hard resource limit.|Export it and start a new Context with a handoff prompt.
+ContextStale|fatal|general_error|1|true|The active Context target changed externally.|Stop, refresh, and explicitly recover or rebind.
+BudgetExhausted|error|general_error|1|false|A runtime hard budget was exhausted.|Review the partial facts and start a bounded follow-up.
+Stuck|error|general_error|1|false|The no-progress detector stopped the turn.|Review the durable warning and choose the next action.
+Cancelled|warning|cancelled|7|true|The action was cancelled.|Inspect the final typed outcome.
+InternalError|fatal|general_error|1|false|An internal invariant failed.|Preserve the Context and report the stable error details.
