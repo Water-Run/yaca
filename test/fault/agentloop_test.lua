@@ -519,6 +519,7 @@ return {
                 assert(asked.loop:begin_main(input(false)))
                 assert(asked.loop:accept_model_response(ask_user(asked.loop, "Which target?")))
                 A.equal(asked.loop:status().reported_outcome, "waiting_user")
+                A.equal(asked.loop:status().pending_question, "Which target?")
                 local turn_id = asked.loop:status().turn_id
                 assert(asked.loop:reply("Linux", "user"))
                 A.equal(asked.loop:status().turn_id, turn_id)
@@ -887,6 +888,9 @@ return {
                     reason = "keep the exact command",
                 }))
                 A.equal(f.loop:status().state, "AwaitingApproval")
+                A.equal(f.loop:status().pending_tool_call_id, "turn-1:tool:1")
+                A.equal(f.loop:status().pending_operation_id, "turn-1:operation:1")
+                A.equal(f.loop:status().pending_review_verdict, "tighten")
                 assert(f.loop:resolve_approval({
                     decision = "defer",
                     approval_id = "approval-deferred",

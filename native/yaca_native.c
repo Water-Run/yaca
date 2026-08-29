@@ -9192,6 +9192,46 @@ static int l_monotonic_now(lua_State *L)
   return 1;
 }
 
+/*
+** Lua:
+**   slept = module.sleep_ms(milliseconds)
+**
+** Waits for a bounded coordinator idle interval.  Windows uses the
+** XP-compatible Sleep API; POSIX retries nanosleep only after EINTR.
+** No domain state or deadline decision is owned by this primitive.
+*/
+static int l_sleep_ms(lua_State *L)
+{
+  lua_Integer milliseconds;
+
+  milliseconds = luaL_checkinteger(L, 1);
+  if (milliseconds < 0 || milliseconds > 60000)
+  {
+    return luaL_error(L, "native sleep interval is invalid");
+  }
+#if defined(_WIN32)
+  Sleep((DWORD)milliseconds);
+#else
+  {
+    struct timespec requested;
+    struct timespec remaining;
+
+    requested.tv_sec = (time_t)(milliseconds / 1000);
+    requested.tv_nsec = (long)((milliseconds % 1000) * 1000000);
+    while (nanosleep(&requested, &remaining) != 0)
+    {
+      if (errno != EINTR)
+      {
+        return luaL_error(L, "native sleep failed");
+      }
+      requested = remaining;
+    }
+  }
+#endif
+  lua_pushboolean(L, 1);
+  return 1;
+}
+
 static int l_current_process_id(lua_State *L)
 {
 #if defined(_WIN32)
@@ -9260,6 +9300,7 @@ static const luaL_Reg yaca_native_functions[] = {
   { "workspace_inspect", l_workspace_inspect },
   { "fs_make_directory", l_fs_make_directory },
   { "monotonic_now", l_monotonic_now },
+  { "sleep_ms", l_sleep_ms },
   { "utc_now", l_utc_now },
   { "secure_random", l_secure_random },
   { "current_process_id", l_current_process_id },

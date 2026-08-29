@@ -54,6 +54,11 @@ local function success_native()
         return 100
     end
 
+    function native.sleep_ms(milliseconds)
+        native.calls.sleep_ms = milliseconds
+        return true
+    end
+
     function native.utc_now()
         return "2026-08-29T00:00:00Z"
     end
@@ -462,6 +467,8 @@ return {
                 }, port_options()))
                 A.equal(linux_backend.target_id, "linux-x86_64")
                 A.equal(linux_backend.processes.capabilities.shell, "linux")
+                A.truthy(linux_backend.clock_port.sleep_ms(2))
+                A.equal(linux_native.calls.sleep_ms, 2)
                 A.equal(#assert(linux_backend.system.secure_random(10)), 10)
                 A.equal(linux_backend.system.current_process_id(), 41)
                 A.equal(linux_backend.qualification, "pending-target-evidence")
@@ -476,6 +483,8 @@ return {
                 }, port_options()))
                 A.equal(windows_backend.target_id, "win32-x86")
                 A.equal(windows_backend.processes.capabilities.shell, "windows")
+                A.truthy(windows_backend.clock_port.sleep_ms(3))
+                A.equal(windows_native.calls.sleep_ms, 3)
                 A.equal(#assert(windows_backend.system.secure_random(10)), 10)
                 A.equal(windows_backend.system.current_process_id(), 41)
                 A.equal(windows_backend.qualification, "pending-target-evidence")

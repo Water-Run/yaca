@@ -2607,6 +2607,1242 @@ function M.start_published_agent(composed, chat, message, source)
     }, "published production Agent")
 end
 
+local COORDINATOR_OPTION_FIELDS = {
+    close_poll_steps = true,
+    idle_wait_ms = true,
+    maximum_assistant_bytes = true,
+    maximum_draft_bytes = true,
+    terminal_poll_events = true,
+}
+
+local function coordinator_options(options)
+    if type(options) ~= "table" then
+        return nil, failure(
+            "InvalidCoordinatorOptions",
+            "ApplicationCoordinator hard limits are required"
+        )
+    end
+    for key in pairs(options) do
+        if type(key) ~= "string" or not COORDINATOR_OPTION_FIELDS[key] then
+            return nil, failure(
+                "InvalidCoordinatorOptions",
+                "ApplicationCoordinator options contain an unknown field"
+            )
+        end
+    end
+    if not valid_integer(options.close_poll_steps, 1)
+        or not valid_integer(options.idle_wait_ms, 0)
+        or options.idle_wait_ms > 60000
+        or not valid_integer(options.maximum_assistant_bytes, 1)
+        or not valid_integer(options.maximum_draft_bytes, 1)
+        or not valid_integer(options.terminal_poll_events, 1)
+        or options.terminal_poll_events > options.maximum_draft_bytes
+    then
+        return nil, failure(
+            "InvalidCoordinatorOptions",
+            "ApplicationCoordinator limits are invalid"
+        )
+    end
+    return {
+        close_poll_steps = options.close_poll_steps,
+        idle_wait_ms = options.idle_wait_ms,
+        maximum_assistant_bytes = options.maximum_assistant_bytes,
+        maximum_draft_bytes = options.maximum_draft_bytes,
+        terminal_poll_events = options.terminal_poll_events,
+    }
+end
+
+local function coordinator_ports(ports)
+    if type(ports) ~= "table"
+        or type(ports.terminal) ~= "table"
+        or type(ports.clock) ~= "table"
+        or type(ports.cli) ~= "table"
+        or type(ports.view) ~= "table"
+        or type(ports.chat) ~= "table"
+        or type(ports.chat.draft) ~= "table"
+        or type(ports.agent_factory) ~= "function"
+        or type(ports.idle_wait) ~= "function"
+        or type(ports.clock.now) ~= "function"
+        or type(ports.cli.parse_chat) ~= "function"
+        or type(ports.cli.render_help) ~= "function"
+        or type(ports.view.startup) ~= "function"
+        or type(ports.view.publish) ~= "function"
+        or type(ports.view.prompt) ~= "function"
+    then
+        return nil, failure(
+            "InvalidCoordinatorPorts",
+            "ApplicationCoordinator ports are incomplete"
+        )
+    end
+    for _, method in ipairs({
+        "start", "poll", "cancel", "join", "restore", "close",
+    }) do
+        if type(ports.terminal[method]) ~= "function" then
+            return nil, failure(
+                "InvalidCoordinatorPorts",
+                "terminal port omits " .. method
+            )
+        end
+    end
+    if type(ports.facts) ~= "table" then
+        return nil, failure(
+            "InvalidCoordinatorPorts",
+            "interactive file descriptor facts are required"
+        )
+    end
+    return ports
+end
+
+local function coordinator_call(owner, method, code, message, ...)
+    local called, result, result_error = pcall(owner[method], owner, ...)
+    if not called then return nil, failure(code, message .. " raised an exception") end
+    if result == nil then return nil, result_error or failure(code, message .. " failed") end
+    return result, result_error
+end
+
+local function coordinator_function(callable, code, message, ...)
+    local called, result, result_error = pcall(callable, ...)
+    if not called then return nil, failure(code, message .. " raised an exception") end
+    if result == nil then return nil, result_error or failure(code, message .. " failed") end
+    return result, result_error
+end
+
+local function coordinator_error_id(value)
+    local code = type(value) == "table" and value.code or "InternalError"
+    if type(code) ~= "string" or not code:match("^[A-Za-z][A-Za-z0-9]+$") then
+        return "InternalError"
+    end
+    return code
+end
+
+local function trim_coordinator_line(value)
+    return value:match("^%s*(.-)%s*$")
+end
+
+---Creates the single-threaded application owner for one interactive chat.
+-- Terminal observations, typed Agent actions, approvals, and renderer blocks
+-- all pass through this owner.  It uses bounded polling and an injected idle
+-- wait, never infers domain state from already-rendered output, and restores
+-- the terminal on every returned path.
+-- @param ports table Terminal, clock, CLI, view, chat, and Agent factory ports.
+-- @param options table Fixed input, output, polling, wait, and close limits.
+-- @return table|nil coordinator Readonly coordinator with a run method.
+-- @return table|nil err Structured construction failure.
+function M.new_application_coordinator(ports, options)
+    local admitted_ports, ports_error = coordinator_ports(ports)
+    if not admitted_ports then return nil, ports_error end
+    local admitted, options_error = coordinator_options(options)
+    if not admitted then return nil, options_error end
+
+    local lifecycle = "created"
+    local terminal_started = false
+    local terminal_ended = false
+    local terminal_outcome = false
+    local agent = false
+    local input_draft = ""
+    local assistant_draft = ""
+    local last_now
+    local prompt_needed = false
+    local approval = false
+    local approval_serial = 0
+    local tool_serial = 0
+    local steer_serial = 0
+    local tool_ids = {}
+    local last_wait_key = false
+    local coordinator = {}
+
+    local function now()
+        local observed, clock_error = coordinator_function(
+            admitted_ports.clock.now,
+            "MonotonicClockFailure",
+            "ApplicationCoordinator clock"
+        )
+        if not valid_integer(observed, 0)
+            or (last_now ~= nil and observed < last_now)
+        then
+            return nil, clock_error or failure(
+                "MonotonicClockFailure",
+                "ApplicationCoordinator clock is invalid"
+            )
+        end
+        last_now = observed
+        return observed
+    end
+
+    local function publish(block)
+        local published, publish_error = coordinator_call(
+            admitted_ports.view,
+            "publish",
+            "RendererFailure",
+            "semantic transcript publication",
+            block
+        )
+        if not published then return nil, publish_error end
+        return true
+    end
+
+    local function publish_error(value)
+        local message = type(value) == "table" and value.message or nil
+        if type(message) ~= "string" or message == "" then
+            message = "An internal operation failed."
+        end
+        return publish({
+            kind = "error",
+            id = coordinator_error_id(value),
+            text = safe_diagnostic(message, 4096),
+        })
+    end
+
+    local function publish_status(message)
+        return publish({ kind = "status", text = message })
+    end
+
+    local function show_prompt(focus)
+        local shown, prompt_error = coordinator_call(
+            admitted_ports.view,
+            "prompt",
+            "RendererFailure",
+            "interactive prompt publication",
+            focus
+        )
+        if not shown then return nil, prompt_error end
+        prompt_needed = false
+        return true
+    end
+
+    local function tool_display_id(canonical_id)
+        local display_id = tool_ids[canonical_id]
+        if display_id then return display_id end
+        tool_serial = tool_serial + 1
+        display_id = "tool-" .. tostring(tool_serial)
+        tool_ids[canonical_id] = display_id
+        return display_id
+    end
+
+    local function flush_assistant()
+        if assistant_draft == "" then return true end
+        local value = assistant_draft
+        assistant_draft = ""
+        return publish({ kind = "assistant", text = value })
+    end
+
+    local function append_assistant(value)
+        if type(value) ~= "string"
+            or #assistant_draft + #value > admitted.maximum_assistant_bytes
+        then
+            return nil, failure(
+                "CoordinatorOutputLimit",
+                "assistant transcript exceeds its fixed byte limit"
+            )
+        end
+        assistant_draft = assistant_draft .. value
+        return true
+    end
+
+    local function project_model_event(event)
+        if type(event) ~= "table" or type(event.kind) ~= "string" then
+            return nil, failure(
+                "ModelActivityContract",
+                "interactive Model event is invalid"
+            )
+        end
+        if event.kind == "response_start"
+            or event.kind == "usage_update"
+            or event.kind == "reasoning_summary_delta"
+            or event.kind == "tool_arguments_delta"
+        then
+            return true
+        end
+        if event.kind == "text_delta" then return append_assistant(event.text) end
+        if event.kind == "response_finish" then return flush_assistant() end
+        if event.kind == "tool_call_start" or event.kind == "tool_call_complete" then
+            local flushed, flush_error = flush_assistant()
+            if not flushed then return nil, flush_error end
+            local canonical_id = event.local_tool_call_id
+            if type(canonical_id) ~= "string" or canonical_id == "" then
+                return nil, failure(
+                    "ModelActivityContract",
+                    "Model Tool event omits its local identity"
+                )
+            end
+            local lines = { "name: " .. tostring(event.name or "unknown") }
+            if event.kind == "tool_call_complete" then
+                lines[#lines + 1] = "arguments: "
+                    .. tostring(event.canonical_arguments or "{}")
+            else
+                lines[#lines + 1] = "requested"
+            end
+            return publish({
+                kind = "tool",
+                id = tool_display_id(canonical_id),
+                lines = lines,
+            })
+        end
+        if event.kind == "control" then
+            local flushed, flush_error = flush_assistant()
+            if not flushed then return nil, flush_error end
+            return publish_status("Model control: " .. tostring(event.control))
+        end
+        if event.kind == "protocol_error" or event.kind == "transport_error" then
+            local flushed, flush_error = flush_assistant()
+            if not flushed then return nil, flush_error end
+            return publish_error({
+                code = "ModelResponseError",
+                message = "Model response failed: " .. tostring(event.error_id),
+            })
+        end
+        return nil, failure(
+            "ModelActivityContract",
+            "interactive Model event kind is unknown"
+        )
+    end
+
+    local function project_tool_event(event, active_tool_call_id)
+        if type(event) ~= "table" or type(event.kind) ~= "string" then
+            return nil, failure(
+                "ToolActivityContract",
+                "interactive Tool event is invalid"
+            )
+        end
+        local display_id = tool_display_id(active_tool_call_id or "active-tool")
+        if event.kind == "io_progress" then
+            return publish({
+                kind = "tool",
+                id = display_id,
+                text = tostring(event.stream or event.key or "output")
+                    .. ": " .. tostring(event.content or "progress received"),
+            })
+        end
+        if event.kind == "io_terminal" then
+            return publish({
+                kind = "tool",
+                id = display_id,
+                text = "process outcome: " .. tostring(event.outcome),
+            })
+        end
+        return nil, failure(
+            "ToolActivityContract",
+            "interactive Tool event kind is unknown"
+        )
+    end
+
+    local function project_transition(event)
+        local result = event.result
+        if type(result) ~= "table" then
+            return nil, failure(
+                "AgentDriverFailure",
+                "interactive Runtime transition omits its typed result"
+            )
+        end
+        if event.cause == "model-response" then
+            local flushed, flush_error = flush_assistant()
+            if not flushed then return nil, flush_error end
+            if type(result.question) == "string" and result.question ~= "" then
+                return publish({ kind = "notice", text = result.question })
+            end
+            if result.auto_started_queue_item then
+                return publish_status(
+                    "Started queued input " .. tostring(result.auto_started_queue_item)
+                )
+            end
+            return true
+        end
+        if event.cause == "tool-result" then
+            return publish_status("Tool result was committed before the next Model request.")
+        end
+        if event.cause == "action-review" then
+            return publish_status("Action review completed.")
+        end
+        if event.cause == "termination-review" then
+            return publish_status("Termination review completed.")
+        end
+        return nil, failure(
+            "AgentDriverFailure",
+            "interactive Runtime transition cause is unknown"
+        )
+    end
+
+    local function project_driver_events(step, before)
+        for _, event in ipairs(step.events) do
+            local projected, projection_error
+            if event.kind == "model-event" then
+                projected, projection_error = project_model_event(event.event)
+            elseif event.kind == "tool-event" then
+                projected, projection_error = project_tool_event(
+                    event.event,
+                    before.active_tool_call_id
+                )
+            elseif event.kind == "runtime-transition" then
+                projected, projection_error = project_transition(event)
+            else
+                projected, projection_error = nil, failure(
+                    "AgentDriverFailure",
+                    "interactive Agent driver event is unknown"
+                )
+            end
+            if not projected then return nil, projection_error end
+        end
+        return true
+    end
+
+    local function approval_lines(action_id, snapshot)
+        local capabilities = snapshot.required_capabilities
+        local rendered_capabilities = "none"
+        if type(capabilities) == "table" then
+            rendered_capabilities = table.concat(capabilities, ",")
+        end
+        local target = snapshot.canonical_target
+        if target == "" then target = "(opaque command)" end
+        return {
+            "tool: " .. tostring(snapshot.tool),
+            "target: " .. tostring(target),
+            "cwd: " .. tostring(snapshot.cwd),
+            "capabilities: " .. rendered_capabilities,
+            "arguments: " .. tostring(snapshot.canonical_arguments),
+            "snapshot: " .. tostring(snapshot.snapshot_digest),
+            "allow " .. action_id .. " once | deny " .. action_id
+                .. " | details " .. action_id,
+            "default: deny",
+        }
+    end
+
+    local function ensure_approval(status)
+        if status.state ~= "AwaitingApproval"
+            and not (status.state == "WaitingUser"
+                and status.pending_kind == "approval")
+        then
+            approval = false
+            return true
+        end
+        if approval and approval.tool_call_id == status.pending_tool_call_id then
+            return true
+        end
+        if type(status.pending_tool_call_id) ~= "string"
+            or status.pending_tool_call_id == ""
+        then
+            return nil, failure(
+                "ApprovalBindingUnavailable",
+                "Runtime did not project the exact pending Tool approval"
+            )
+        end
+        local review_verdict = status.pending_review_verdict
+        if review_verdict == false then review_verdict = nil end
+        local snapshot, snapshot_error = coordinator_function(
+            agent.tools.prepare_approval,
+            "ApprovalSnapshotFailure",
+            "Tool approval snapshot",
+            status.pending_tool_call_id,
+            review_verdict
+        )
+        if not snapshot then return nil, snapshot_error end
+        approval_serial = approval_serial + 1
+        local action_id = "approval-" .. tostring(approval_serial)
+        approval = {
+            action_id = action_id,
+            tool_call_id = status.pending_tool_call_id,
+            operation_id = status.pending_operation_id,
+            review_verdict = review_verdict,
+            snapshot = snapshot,
+            lines = approval_lines(action_id, snapshot),
+        }
+        local published, publish_error = publish({
+            kind = "action",
+            id = action_id,
+            lines = approval.lines,
+        })
+        if not published then return nil, publish_error end
+        prompt_needed = true
+        return true
+    end
+
+    local function project_wait(status)
+        local key = tostring(status.turn_id) .. "\0" .. tostring(status.state)
+            .. "\0" .. tostring(status.pending_kind)
+            .. "\0" .. tostring(status.last_outcome)
+        if key == last_wait_key then return true end
+        last_wait_key = key
+        if status.state == "WaitingUser" and status.pending_kind == "ask-user" then
+            if type(status.pending_question) == "string"
+                and status.pending_question ~= ""
+            then
+                return publish({ kind = "notice", text = status.pending_question })
+            end
+            return publish_status("The Agent is waiting for a user answer.")
+        end
+        if status.state == "WaitingUser" and status.pending_kind == "model-yield" then
+            return publish_status(
+                "The Model yielded without finish; the next message starts a fresh turn."
+            )
+        end
+        if status.state == "Idle" and status.last_outcome ~= false then
+            return publish_status("Turn outcome: " .. tostring(status.last_outcome))
+        end
+        if status.state == "Closing" then return publish_status("Session closed.") end
+        return true
+    end
+
+    local function drive_agent()
+        if not agent then return false end
+        local before = agent.loop:status()
+        local step, step_error = coordinator_function(
+            agent.driver.step,
+            "AgentDriverFailure",
+            "Agent activity driver"
+        )
+        if not step then return nil, step_error end
+        local projected, projection_error = project_driver_events(step, before)
+        if not projected then return nil, projection_error end
+        local approval_ready, approval_error = ensure_approval(step.status)
+        if not approval_ready then return nil, approval_error end
+        local waiting, waiting_error = project_wait(step.status)
+        if not waiting then return nil, waiting_error end
+        return step.progressed or #step.events > 0
+    end
+
+    local function status_lines()
+        if not agent then
+            local status = admitted_ports.chat.draft.status()
+            return {
+                "state: draft-ready",
+                "workspace: " .. tostring(status.workspace),
+                "context: new (not saved)",
+                "model: " .. tostring(status.model),
+                "permission: " .. tostring(status.permission),
+            }
+        end
+        local status = agent.loop:status()
+        return {
+            "state: " .. tostring(status.state),
+            "turn: " .. tostring(status.turn_id),
+            "context generation: " .. tostring(status.context_generation),
+            "pending: " .. tostring(status.pending_kind),
+            "queue: " .. tostring(status.queue_count)
+                .. "/" .. tostring(status.queue_maximum),
+            "last outcome: " .. tostring(status.last_outcome),
+        }
+    end
+
+    local function show_help(topic)
+        local rendered, render_error = coordinator_function(
+            admitted_ports.cli.render_help,
+            "HelpRenderFailure",
+            "chat help rendering",
+            topic or "chat"
+        )
+        if not rendered then return nil, render_error end
+        return publish({ kind = "notice", text = rendered })
+    end
+
+    local function stage_and_apply(method, message)
+        local staged, stage_error = coordinator_call(
+            agent.session,
+            "stage",
+            "SessionInputFailure",
+            "saved session draft staging",
+            message,
+            "terminal"
+        )
+        if not staged then return nil, stage_error end
+        local result, action_error = coordinator_call(
+            agent.session,
+            method,
+            "SessionInputFailure",
+            "saved session " .. method
+        )
+        if not result then return nil, action_error end
+        local shown, show_error = publish({ kind = "user", text = message })
+        if not shown then return nil, show_error end
+        if result.display_id then
+            return publish({
+                kind = "queue",
+                id = result.display_id,
+                text = "queued at position " .. tostring(result.position),
+            })
+        end
+        if method == "steer" then
+            steer_serial = steer_serial + 1
+            return publish({
+                kind = "steer",
+                id = "steer-" .. tostring(steer_serial),
+                text = "accepted for the active turn",
+            })
+        end
+        if method == "side" then
+            return publish_status("Side request accepted.")
+        end
+        return publish_status("Input accepted.")
+    end
+
+    local function list_queue()
+        local projection, queue_error = coordinator_call(
+            agent.session,
+            "queue_list",
+            "QueueActionFailure",
+            "queue listing"
+        )
+        if not projection then return nil, queue_error end
+        if projection.count == 0 then return publish_status("Queue is empty.") end
+        for _, item in ipairs(projection.items) do
+            local published, publish_error = publish({
+                kind = "queue",
+                id = item.display_id,
+                text = item.text,
+            })
+            if not published then return nil, publish_error end
+        end
+        return true
+    end
+
+    local function route_agent_action(request)
+        if request.id == "queue-add" then
+            return stage_and_apply("submit", request.message)
+        end
+        if request.id == "steer" then
+            return stage_and_apply("steer", request.message)
+        end
+        if request.id == "side" then
+            return stage_and_apply("side", request.message)
+        end
+        if request.id == "queue-list" then return list_queue() end
+        if request.id == "queue-delete" then
+            local result, action_error = coordinator_call(
+                agent.session,
+                "queue_drop",
+                "QueueActionFailure",
+                "queue deletion",
+                request.queue_id,
+                "user-drop"
+            )
+            if not result then return nil, action_error end
+            return publish_status("Queue item deleted.")
+        end
+        if request.id == "queue-edit" then
+            local result, action_error = coordinator_call(
+                agent.session,
+                "queue_edit",
+                "QueueActionFailure",
+                "queue edit",
+                request.queue_id,
+                request.message
+            )
+            if not result then return nil, action_error end
+            return publish_status("Queue item edited.")
+        end
+        if request.id == "queue-move" then
+            local result, action_error = coordinator_call(
+                agent.session,
+                "queue_move",
+                "QueueActionFailure",
+                "queue move",
+                request.from,
+                request.to
+            )
+            if not result then return nil, action_error end
+            return publish_status("Queue item moved.")
+        end
+        if request.id == "queue-clear" then
+            local result, action_error = coordinator_call(
+                agent.session,
+                "queue_clear",
+                "QueueActionFailure",
+                "queue clear",
+                "user-clear"
+            )
+            if not result then return nil, action_error end
+            return publish_status("Queue cleared.")
+        end
+        if request.id == "cancel" then
+            local result, action_error = coordinator_call(
+                agent.loop,
+                "cancel",
+                "CancelFailure",
+                "Agent cancellation",
+                "user-cancel"
+            )
+            if not result then return nil, action_error end
+            return publish_status("Cancellation requested.")
+        end
+        if request.id == "status-chat" then
+            return publish({ kind = "details", id = "status", lines = status_lines() })
+        end
+        if request.id == "help-chat" then return show_help(request.topic) end
+        if request.id == "multiline" then
+            return publish_status("Use Shift+Enter or embedded newlines, then submit.")
+        end
+        return nil, failure(
+            "InteractiveActionUnavailable",
+            "this registered chat action is not attached to the active coordinator"
+        )
+    end
+
+    local function start_first_agent(message)
+        local constructed, agent_error = coordinator_function(
+            admitted_ports.agent_factory,
+            "AgentCompositionFailure",
+            "published production Agent construction",
+            message,
+            "terminal"
+        )
+        if not constructed then return nil, agent_error end
+        if type(constructed) ~= "table"
+            or type(constructed.loop) ~= "table"
+            or type(constructed.driver) ~= "table"
+            or type(constructed.session) ~= "table"
+            or type(constructed.tools) ~= "table"
+            or type(constructed.draft) ~= "table"
+        then
+            return nil, failure(
+                "AgentCompositionFailure",
+                "published production Agent is incomplete"
+            )
+        end
+        agent = constructed
+        local published, publish_error = publish({ kind = "user", text = message })
+        if not published then return nil, publish_error end
+        local status = agent.draft.status()
+        published, publish_error = publish_status(
+            "Context saved: " .. tostring(status.display_name)
+                .. " [" .. tostring(status.context_hash) .. "]"
+        )
+        if not published then return nil, publish_error end
+        return true
+    end
+
+    local function record_approval(answer)
+        local envelope, envelope_error = coordinator_function(
+            agent.tools.record_approval,
+            "ApprovalRecordFailure",
+            "local Tool approval recording",
+            approval.tool_call_id,
+            approval.review_verdict,
+            approval.action_id,
+            answer == "allow" and "approve" or "reject"
+        )
+        if not envelope then return nil, envelope_error end
+        local resolved, resolve_error = coordinator_call(
+            agent.loop,
+            "resolve_approval",
+            "ApprovalResolutionFailure",
+            "Runtime Tool approval resolution",
+            envelope
+        )
+        if not resolved then return nil, resolve_error end
+        local action_id = approval.action_id
+        approval = false
+        return publish({
+            kind = "action",
+            id = action_id,
+            text = answer == "allow" and "allowed once" or "denied",
+        })
+    end
+
+    local function route_approval_line(source)
+        local normalized = trim_coordinator_line(source)
+        if normalized == "" then return record_approval("deny") end
+        local action_id = normalized:match("^allow%s+(%S+)%s+once$")
+        if action_id then
+            if action_id ~= approval.action_id then
+                return nil, failure("ApprovalStale", "approval action identity is stale")
+            end
+            return record_approval("allow")
+        end
+        action_id = normalized:match("^deny%s+(%S+)$")
+        if action_id then
+            if action_id ~= approval.action_id then
+                return nil, failure("ApprovalStale", "approval action identity is stale")
+            end
+            return record_approval("deny")
+        end
+        action_id = normalized:match("^details%s+(%S+)$")
+        if action_id then
+            if action_id ~= approval.action_id then
+                return nil, failure("ApprovalStale", "approval action identity is stale")
+            end
+            return publish({
+                kind = "details",
+                id = approval.action_id,
+                lines = approval.lines,
+            })
+        end
+        return nil, failure(
+            "ApprovalSelectionRequired",
+            "use allow <action-id> once, deny <action-id>, or details <action-id>"
+        )
+    end
+
+    local function parse_chat(source)
+        local request, parse_error = coordinator_function(
+            admitted_ports.cli.parse_chat,
+            "ChatParseFailure",
+            "chat semantic parsing",
+            source,
+            admitted_ports.facts
+        )
+        if not request then return nil, parse_error end
+        return request
+    end
+
+    local function route_line(source)
+        local normalized = trim_coordinator_line(source)
+        if approval and normalized:sub(1, 1) ~= "." then
+            return route_approval_line(source)
+        end
+        if normalized == "" then return true end
+        local request, parse_error = parse_chat(source)
+        if not request then return nil, parse_error end
+        if request.id == "quit" then
+            lifecycle = "closing"
+            return publish_status("Closing the current session.")
+        end
+        if request.id == "status-chat" then
+            return publish({ kind = "details", id = "status", lines = status_lines() })
+        end
+        if request.id == "help-chat" then return show_help(request.topic) end
+        if not agent then
+            if request.id == "queue-add" then
+                return start_first_agent(request.message)
+            end
+            return nil, failure(
+                "NoSavedContext",
+                "send the first main message before using this chat action"
+            )
+        end
+        return route_agent_action(request)
+    end
+
+    local function handle_submission(intent)
+        if input_draft == "" and intent ~= "submit-or-queue" then
+            return nil, failure("DraftEmpty", "the selected input lane has no draft")
+        end
+        local result, action_error
+        if intent == "submit-or-queue" then
+            result, action_error = route_line(input_draft)
+        elseif not agent then
+            result, action_error = nil, failure(
+                "NoSavedContext",
+                "send the first main message before using a busy input lane"
+            )
+        elseif intent == "steer" then
+            result, action_error = stage_and_apply("steer", input_draft)
+        else
+            result, action_error = stage_and_apply("side", input_draft)
+        end
+        if result then input_draft = "" end
+        prompt_needed = lifecycle ~= "closing"
+        return result, action_error
+    end
+
+    local function handle_cancel()
+        if input_draft ~= "" then
+            input_draft = ""
+            prompt_needed = true
+            return publish_status("Input draft cleared.")
+        end
+        if approval then return record_approval("deny") end
+        if not agent then return publish_status("Nothing to cancel.") end
+        return route_agent_action({ id = "cancel" })
+    end
+
+    local function handle_terminal_event(event)
+        if type(event) ~= "table" or type(event.kind) ~= "string" then
+            return nil, failure(
+                "TerminalContract",
+                "ApplicationCoordinator received an invalid terminal event"
+            )
+        end
+        if event.kind == "io_terminal" then
+            terminal_ended = true
+            terminal_outcome = event.outcome
+            lifecycle = "closing"
+            return true
+        end
+        if event.kind ~= "user_action" then
+            return nil, failure(
+                "TerminalContract",
+                "ApplicationCoordinator received an unknown terminal event"
+            )
+        end
+        if event.action == "text" then
+            if type(event.text) ~= "string"
+                or #input_draft + #event.text > admitted.maximum_draft_bytes
+            then
+                return nil, failure("DraftLimit", "terminal draft exceeds its byte limit")
+            end
+            input_draft = input_draft .. event.text
+            return true
+        end
+        if event.action == "newline" then
+            if #input_draft + 1 > admitted.maximum_draft_bytes then
+                return nil, failure("DraftLimit", "terminal draft exceeds its byte limit")
+            end
+            input_draft = input_draft .. "\n"
+            return true
+        end
+        if event.action == "submit-or-queue"
+            or event.action == "steer"
+            or event.action == "side"
+        then
+            return handle_submission(event.action)
+        end
+        if event.action == "cancel" then return handle_cancel() end
+        if event.action == "eof" then
+            terminal_ended = true
+            terminal_outcome = "completed"
+            lifecycle = "closing"
+            return true
+        end
+        return nil, failure(
+            "TerminalContract",
+            "ApplicationCoordinator received an unknown input action"
+        )
+    end
+
+    local function close_terminal()
+        if not terminal_started then return true end
+        local observed_now = last_now or 0
+        if not terminal_ended then
+            pcall(admitted_ports.terminal.cancel, admitted_ports.terminal, observed_now)
+            local polled, events = pcall(
+                admitted_ports.terminal.poll,
+                admitted_ports.terminal,
+                observed_now,
+                admitted.terminal_poll_events
+            )
+            if polled and type(events) == "table" then
+                for _, event in ipairs(events) do
+                    if event.kind == "io_terminal" then
+                        terminal_ended = true
+                        terminal_outcome = event.outcome
+                    end
+                end
+            end
+        end
+        if terminal_ended then
+            pcall(admitted_ports.terminal.join, admitted_ports.terminal, observed_now)
+        end
+        pcall(admitted_ports.terminal.restore, admitted_ports.terminal)
+        local closed, close_result = pcall(
+            admitted_ports.terminal.close,
+            admitted_ports.terminal
+        )
+        terminal_started = false
+        if not closed or close_result ~= true then
+            return nil, failure(
+                "TerminalRestoreFailure",
+                "terminal state could not be restored and closed"
+            )
+        end
+        return true
+    end
+
+    local function close_agent(reason)
+        if not agent then
+            return coordinator_call(
+                admitted_ports.chat.draft,
+                "close",
+                "SessionCloseFailure",
+                "unsaved chat close"
+            )
+        end
+        local closed, close_error = coordinator_call(
+            agent.session,
+            "close",
+            "SessionCloseFailure",
+            "saved Agent session close",
+            reason
+        )
+        if not closed then return nil, close_error end
+        for _ = 1, admitted.close_poll_steps do
+            local status = agent.loop:status()
+            if status.state == "Closing" then break end
+            local progressed, progress_error = drive_agent()
+            if progressed == nil then return nil, progress_error end
+            if not progressed then
+                local waited, wait_error = coordinator_function(
+                    admitted_ports.idle_wait,
+                    "IdleWaitFailure",
+                    "coordinator close wait",
+                    admitted.idle_wait_ms
+                )
+                if not waited then return nil, wait_error end
+            end
+        end
+        if agent.loop:status().state ~= "Closing" then
+            return nil, failure(
+                "SessionCloseTimeout",
+                "Agent activities did not reach terminal close truth"
+            )
+        end
+        return coordinator_call(
+            agent.draft,
+            "close",
+            "SessionCloseFailure",
+            "durable Context writer close"
+        )
+    end
+
+    local function finish_run(primary_error)
+        local closed_agent, agent_error = close_agent("application-close")
+        local closed_terminal, terminal_error = close_terminal()
+        lifecycle = "closed"
+        if primary_error then return nil, primary_error end
+        if not closed_agent then return nil, agent_error end
+        if not closed_terminal then return nil, terminal_error end
+        if terminal_outcome == "failed" or terminal_outcome == "unknown" then
+            return nil, failure(
+                "TerminalFailure",
+                "interactive terminal ended without a successful outcome"
+            )
+        end
+        return readonly({
+            kind = "interactive-chat",
+            outcome = "success",
+            terminal_outcome = terminal_outcome or "cancelled-by-close",
+            context_saved = agent ~= false,
+        }, "interactive chat result")
+    end
+
+    ---Runs until a typed quit or terminal outcome, then closes in dependency order.
+    -- @return table|nil result Immutable successful interactive result.
+    -- @return table|nil err Structured terminal, Agent, renderer, or close failure.
+    function coordinator:run()
+        if lifecycle ~= "created" then
+            return nil, failure(
+                "CoordinatorState",
+                "ApplicationCoordinator can run exactly once"
+            )
+        end
+        lifecycle = "running"
+        local started_view, view_error = coordinator_call(
+            admitted_ports.view,
+            "startup",
+            "RendererFailure",
+            "startup view publication",
+            admitted_ports.chat.status
+        )
+        if not started_view then return finish_run(view_error) end
+        local observed_now, clock_error = now()
+        if not observed_now then return finish_run(clock_error) end
+        local started_terminal, terminal_error = coordinator_call(
+            admitted_ports.terminal,
+            "start",
+            "TerminalStartFailure",
+            "terminal input start",
+            observed_now
+        )
+        if not started_terminal then return finish_run(terminal_error) end
+        terminal_started = true
+
+        while lifecycle == "running" do
+            observed_now, clock_error = now()
+            if not observed_now then return finish_run(clock_error) end
+            local events, poll_error = coordinator_call(
+                admitted_ports.terminal,
+                "poll",
+                "TerminalPollFailure",
+                "terminal input polling",
+                observed_now,
+                admitted.terminal_poll_events
+            )
+            if not events then return finish_run(poll_error) end
+            if type(events) ~= "table" then
+                return finish_run(failure(
+                    "TerminalContract",
+                    "terminal poll did not return an event array"
+                ))
+            end
+            local progressed = #events > 0
+            for _, event in ipairs(events) do
+                local handled, handle_error = handle_terminal_event(event)
+                if not handled then
+                    local displayed, display_error = publish_error(handle_error)
+                    if not displayed then return finish_run(display_error) end
+                    prompt_needed = lifecycle ~= "closing"
+                end
+                if lifecycle == "closing" then break end
+            end
+            if lifecycle == "running" and agent then
+                local agent_progress, agent_error = drive_agent()
+                if agent_progress == nil then return finish_run(agent_error) end
+                progressed = progressed or agent_progress
+            end
+            if lifecycle == "running" and prompt_needed then
+                local focus = approval and "approval" or "chat"
+                local prompted, prompt_error = show_prompt(focus)
+                if not prompted then return finish_run(prompt_error) end
+            end
+            if lifecycle == "running" and not progressed then
+                local waited, wait_error = coordinator_function(
+                    admitted_ports.idle_wait,
+                    "IdleWaitFailure",
+                    "coordinator idle wait",
+                    admitted.idle_wait_ms
+                )
+                if not waited then return finish_run(wait_error) end
+            end
+        end
+        return finish_run()
+    end
+
+    function coordinator:status()
+        return readonly({
+            lifecycle = lifecycle,
+            terminal_started = terminal_started,
+            terminal_ended = terminal_ended,
+            terminal_outcome = terminal_outcome,
+            context_saved = agent ~= false,
+            draft_bytes = #input_draft,
+            approval_action_id = approval and approval.action_id or false,
+        }, "ApplicationCoordinator status")
+    end
+
+    return readonly(coordinator, "ApplicationCoordinator")
+end
+
+local function production_chat_view(composed, runtime)
+    if type(runtime.stdout) ~= "function"
+        and (type(runtime.stdout) ~= "table"
+            or type(runtime.stdout.write) ~= "function")
+    then
+        return nil, failure(
+            "InvalidCoordinatorPorts",
+            "interactive stdout writer is unavailable"
+        )
+    end
+    local tui = require("tui")
+    local enhanced_keys = composed.identity.os == "windows"
+    local renderer, renderer_error = tui.new({
+        width = 80,
+        capabilities = {
+            ansi = false,
+            color = false,
+            unicode = false,
+            keys = {
+                Enter = true,
+                ["Ctrl+Enter"] = enhanced_keys,
+                ["Shift+Enter"] = enhanced_keys,
+                ["Alt+Enter"] = enhanced_keys,
+                Esc = true,
+            },
+        },
+        maximum_block_bytes = 524288,
+        maximum_line_bytes = 262144,
+        maximum_id_bytes = 256,
+        writer = runtime.stdout,
+    })
+    if not renderer then return nil, renderer_error end
+    local view = {}
+
+    local function write_rendered(bytes)
+        if not write_direct(runtime.stdout, bytes) then
+            return nil, failure(
+                "BrokenStdout",
+                "interactive transcript output could not be completed"
+            )
+        end
+        return true
+    end
+
+    ---Writes the independent ASCII-first startup fields before input starts.
+    function view:startup(status)
+        local rendered, render_error = renderer.render_startup({
+            version = "0.1.0",
+            work_directory = status.workspace,
+            data_root = composed.layout.data_root,
+            config_status = "valid",
+            context = "new (not saved)",
+            model = status.model,
+            permission = status.permission,
+            double_check = status.double_check,
+        }, {
+            slogan = true,
+            version = true,
+            work_directory = true,
+            data_root = true,
+            config_status = true,
+            context = true,
+            context_hash = false,
+            model = true,
+            permission = true,
+            double_check = true,
+            status_hint = true,
+        }, "chat")
+        if not rendered then return nil, render_error end
+        return write_rendered(rendered)
+    end
+
+    ---Appends one validated complete semantic transcript block.
+    function view:publish(block)
+        local rendered, render_error = renderer.append(block)
+        if not rendered then return nil, render_error end
+        return true
+    end
+
+    ---Writes one plain focus prompt without assuming ANSI or cursor movement.
+    function view:prompt(focus)
+        local rendered, render_error = renderer.render_prompt(focus)
+        if not rendered then return nil, render_error end
+        return write_rendered(rendered)
+    end
+
+    return readonly(view, "production chat view")
+end
+
+---Runs one production chat through the terminal ApplicationCoordinator.
+-- The plain cooked path requires no ANSI, raw keyboard mode, Unicode console,
+-- terminal size probe, or cursor movement.  Windows modifier keys are exposed
+-- only when the native console adapter reports their semantic events; every
+-- action retains its registry-generated text fallback.
+-- @param composed table Production runtime composition.
+-- @param chat table Ready run-chat bootstrap result.
+-- @param runtime table CLI invocation ports and exact fd facts.
+-- @return table|nil result Immutable interactive outcome.
+-- @return table|nil err Structured composition, runtime, or close failure.
+function M.run_interactive_chat(composed, chat, runtime)
+    if type(composed) ~= "table"
+        or type(composed.backend) ~= "table"
+        or type(composed.backend.new_terminal) ~= "function"
+        or type(composed.backend.clock_port) ~= "table"
+        or type(composed.backend.clock_port.monotonic_now) ~= "function"
+        or type(composed.backend.clock_port.sleep_ms) ~= "function"
+        or type(runtime) ~= "table"
+        or type(runtime.cli) ~= "table"
+        or type(runtime.stdio_facts) ~= "table"
+        or type(chat) ~= "table"
+        or chat.kind ~= "run-chat"
+        or chat.outcome ~= "ready"
+    then
+        return nil, failure(
+            "InvalidCoordinatorPorts",
+            "a ready production chat and terminal runtime are required"
+        )
+    end
+    local terminal_port, terminal_error = composed.backend.new_terminal("cooked")
+    if not terminal_port then return nil, terminal_error end
+    local view, view_error = production_chat_view(composed, runtime)
+    if not view then return nil, view_error end
+    local coordinator, coordinator_error = M.new_application_coordinator({
+        terminal = terminal_port,
+        clock = { now = composed.backend.clock_port.monotonic_now },
+        idle_wait = composed.backend.clock_port.sleep_ms,
+        cli = runtime.cli,
+        facts = runtime.stdio_facts,
+        view = view,
+        chat = chat,
+        agent_factory = function(message, source)
+            return M.start_published_agent(composed, chat, message, source)
+        end,
+    }, {
+        close_poll_steps = 1024,
+        idle_wait_ms = 10,
+        maximum_assistant_bytes = MODEL_ADAPTER_OPTIONS.maximum_text_bytes,
+        maximum_draft_bytes = 16384,
+        terminal_poll_events = 128,
+    })
+    if not coordinator then return nil, coordinator_error end
+    return coordinator:run()
+end
+
 local function render_self_test(cli_service, request, result)
     if request.machine == true then
         local records = {}
@@ -2704,15 +3940,10 @@ end
 local function render_runtime_result(cli_service, request, result)
     if request.id == "self-test" then return render_self_test(cli_service, request, result) end
     if BOOTSTRAP_ACTIONS[request.id] then return render_management(request, result) end
-    local status = result.status
-    return table.concat({
-        "New chat draft is ready (not saved).",
-        "Workspace: " .. safe_diagnostic(status.workspace, 1024),
-        "Model: " .. safe_diagnostic(status.model, 256),
-        "Permission: " .. safe_diagnostic(status.permission, 256),
-        "The interactive Agent loop is not yet attached; no message was accepted.",
-        "",
-    }, "\n")
+    return nil, failure(
+        "InteractiveDispatchRequired",
+        "run-chat must be owned by the terminal ApplicationCoordinator"
+    )
 end
 
 default_runtime_dispatch = function(request, runtime)
@@ -2720,6 +3951,15 @@ default_runtime_dispatch = function(request, runtime)
     if not composed then return nil, composition_error end
     local result, dispatch_error = composed.application.dispatch(request)
     if not result then return nil, dispatch_error end
+    if request.id == "run-chat" then
+        local interactive, interactive_error = M.run_interactive_chat(
+            composed,
+            result,
+            runtime
+        )
+        if not interactive then return nil, interactive_error end
+        return { output = "" }
+    end
     local output, render_error = render_runtime_result(runtime.cli, request, result)
     if not output then return nil, render_error end
     local successful = result.outcome == "success"

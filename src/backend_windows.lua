@@ -51,13 +51,14 @@ local function validate_native(native)
         return nil, failure("NativeAbiMismatch", "native ABI does not match this release")
     end
     if type(native.monotonic_now) ~= "function"
+        or type(native.sleep_ms) ~= "function"
         or type(native.utc_now) ~= "function"
         or type(native.secure_random) ~= "function"
         or type(native.current_process_id) ~= "function"
     then
         return nil, failure(
             "InvalidNativeModule",
-            "native clock, random, and process identity functions are required"
+            "native clock, idle wait, random, and process identity functions are required"
         )
     end
     return true
@@ -98,6 +99,7 @@ function M.new(native, identity, options)
 
     local clock_port = readonly({
         monotonic_now = native.monotonic_now,
+        sleep_ms = native.sleep_ms,
         utc_now = native.utc_now,
     }, "Windows clock port")
     local system_port = readonly({

@@ -184,6 +184,7 @@ local function production_native()
         }
     end
     function native.monotonic_now() return 1 end
+    function native.sleep_ms() return true end
     function native.utc_now() return "2026-08-30T00:00:00Z" end
     function native.secure_random(length) return string.rep("r", length) end
     function native.current_process_id() return 41 end

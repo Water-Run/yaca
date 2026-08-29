@@ -3701,6 +3701,14 @@ function M.new_agent_loop(ports, options)
             active_request_id = active_request and active_request.id or false,
             active_tool_call_id = active_tool and active_tool.call.id or false,
             pending_kind = pending and pending.kind or false,
+            pending_tool_call_id = pending and pending.kind == "approval"
+                and pending.call.id or false,
+            pending_operation_id = pending and pending.kind == "approval"
+                and pending.call.public.operation_id or false,
+            pending_review_verdict = pending and pending.kind == "approval"
+                and pending.admission.review_verdict or false,
+            pending_question = pending and pending.kind == "ask-user"
+                and pending.question or false,
             pending_response_id = pending and pending.kind == "model-yield"
                 and pending.message_id or false,
             reported_outcome = reported_outcome,
