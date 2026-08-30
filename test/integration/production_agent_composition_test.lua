@@ -150,6 +150,7 @@ local function fixture(settings)
             environment_mode = "minimal",
         },
         agent = {
+            double_check = true,
             action_review_enabled = true,
             max_turn_model_requests = 7,
             max_turn_tool_calls = 11,
@@ -179,6 +180,7 @@ local function fixture(settings)
     for key, value in pairs(generation) do next_generation[key] = value end
     next_generation.id = "config-generation-2"
     next_generation.agent = {
+        double_check = true,
         action_review_enabled = true,
         max_turn_model_requests = 6,
         max_turn_tool_calls = 10,
@@ -193,6 +195,7 @@ local function fixture(settings)
         active_view_manifest_ref = continuing and "sha256:restored-view" or "view-1",
         turn_id = continuing and false or "turn-1",
         halted = false,
+        compaction_state = "idle",
         compaction_preflight_state = "idle",
         compaction_preflight_id = false,
         compaction_preflight_purpose = false,
@@ -259,6 +262,29 @@ local function fixture(settings)
             last_sequence = loop_status.last_durable_sequence,
             manifest_digest = loop_status.active_view_manifest_ref,
         }
+    end
+    function loop:adopt_session_override(record, receipt)
+        A.equal(record.kind, "session-override")
+        A.equal(record.replaces_manifest_digest, loop_status.active_view_manifest_ref)
+        A.equal(receipt.previous_context_generation, loop_status.context_generation)
+        A.equal(receipt.context_generation, loop_status.context_generation + 1)
+        A.equal(receipt.first_sequence, loop_status.last_durable_sequence + 1)
+        A.equal(receipt.last_sequence, loop_status.last_durable_sequence + 2)
+        loop_status.context_generation = receipt.context_generation
+        loop_status.last_durable_sequence = receipt.last_sequence
+        loop_status.active_view_manifest_ref = record.manifest_digest
+        log[#log + 1] = "runtime-adopt:session-override"
+        return {
+            context_generation = loop_status.context_generation,
+            last_sequence = loop_status.last_durable_sequence,
+            manifest_digest = loop_status.active_view_manifest_ref,
+            effective_at = "next-turn",
+        }
+    end
+    function loop:fail_session_override_barrier(reason)
+        loop_status.halted = true
+        log[#log + 1] = "runtime-session-fail:" .. reason
+        return nil, { code = "AgentDurabilityFailure" }
     end
     function loop:fail_compaction_barrier(reason)
         if not compaction_lifecycle then
@@ -459,6 +485,7 @@ local function fixture(settings)
             return commit_compaction(record, false)
         end,
     }
+    local durable_double_check_override = true
     local publication = {
         operation_journal = function()
             log[#log + 1] = "operation-journal"
@@ -505,18 +532,102 @@ local function fixture(settings)
         end,
         turn_context = function(observation)
             A.truthy(published)
-            A.equal(observation.expected_context_generation, 2)
+            A.equal(
+                observation.expected_context_generation,
+                loop_status.context_generation
+            )
             log[#log + 1] = "turn-context"
             return {
-                context_generation = 2,
+                context_generation = loop_status.context_generation,
                 overrides = {
                     CurrentModel = "Primary",
                     CurrentPermission = "Std",
-                    DoubleCheckOverride = true,
+                    DoubleCheckOverride = durable_double_check_override,
                     DoubleCheckGoalOverride = "inherit",
                     ContextPrompt = "workspace context",
                     AutoRenameDisabled = false,
                 },
+            }
+        end,
+        update_session = function(specification)
+            if settings.session_update_exception then
+                error("injected Session publication exception")
+            end
+            if settings.session_update_unknown then
+                log[#log + 1] = "publication:session-unknown"
+                return nil, { code = "ContextPublicationUnknown" }
+            end
+            A.equal(
+                specification.expected_context_generation,
+                loop_status.context_generation
+            )
+            A.equal(
+                specification.expected_last_sequence,
+                loop_status.last_durable_sequence
+            )
+            A.equal(
+                specification.expected_manifest_digest,
+                loop_status.active_view_manifest_ref
+            )
+            A.equal(specification.name, "DoubleCheckOverride")
+            A.equal(specification.value, false)
+            A.falsy(specification.mode)
+            A.falsy(specification.generation.effective_double_check)
+            durable_double_check_override = specification.value
+            local first_sequence = loop_status.last_durable_sequence + 1
+            local manifest_digest = "view-session-override"
+            local record = {
+                kind = "session-override",
+                name = specification.name,
+                old_value_digest = "sha256:cautious-on",
+                new_value_digest = "sha256:cautious-off",
+                effective_at = "next-turn",
+                replaces_manifest_digest = loop_status.active_view_manifest_ref,
+                manifest_digest = manifest_digest,
+                compaction_id = false,
+                view_context_generation = loop_status.context_generation + 1,
+            }
+            local batch = {
+                barrier_id = "session-override:test",
+                first_sequence = first_sequence,
+                last_sequence = first_sequence + 1,
+                event_count = 2,
+                expected_context_generation = loop_status.context_generation,
+                events = {
+                    {
+                        seq = first_sequence,
+                        type = "session_override",
+                        turn_id = false,
+                        fields = {
+                            name = record.name,
+                            oldValueDigest = record.old_value_digest,
+                            newValueDigest = record.new_value_digest,
+                            effectiveAt = record.effective_at,
+                        },
+                    },
+                    {
+                        seq = first_sequence + 1,
+                        type = "model_view_published",
+                        turn_id = false,
+                        fields = {
+                            manifestDigest = manifest_digest,
+                            firstEventSeq = "1",
+                            lastEventSeq = tostring(first_sequence),
+                            replacesManifestDigest
+                                = record.replaces_manifest_digest,
+                        },
+                    },
+                },
+            }
+            log[#log + 1] = "publication:session-override"
+            return record, {
+                barrier_id = batch.barrier_id,
+                first_sequence = batch.first_sequence,
+                last_sequence = batch.last_sequence,
+                event_count = batch.event_count,
+                binding = batch,
+                previous_context_generation = loop_status.context_generation,
+                context_generation = loop_status.context_generation + 1,
             }
         end,
         capture_turn = function(specification)
@@ -890,8 +1001,17 @@ local function fixture(settings)
                 A.equal(path, "/release/__yaca__/config.ini")
                 A.equal(overrides.CurrentModel, "Primary")
                 log[#log + 1] = "config-reload"
-                active_generation = next_generation
-                return next_generation
+                local reloaded = next_generation
+                if overrides.DoubleCheckOverride == false then
+                    reloaded = {}
+                    for key, value in pairs(next_generation) do
+                        reloaded[key] = value
+                    end
+                    reloaded.id = "config-generation-cautious-off"
+                    reloaded.effective_double_check = false
+                end
+                active_generation = reloaded
+                return reloaded
             end,
         },
         model_adapter = {},
@@ -1052,6 +1172,91 @@ return {
             end,
         },
         {
+            name = "production Session settings publish and adopt cautious for the next turn",
+            run = function()
+                local f = fixture()
+                local agent = assert(f.main.start_published_agent(
+                    f.composed,
+                    f.chat,
+                    "implement the project",
+                    "terminal"
+                ))
+                A.truthy(agent.capabilities.session_settings)
+                local before = assert(agent.settings:status())
+                A.truthy(before.double_check_default)
+                A.truthy(before.double_check_override)
+                A.truthy(before.double_check_effective)
+                local updated = assert(agent.settings:update({
+                    name = "DoubleCheckOverride",
+                    value = false,
+                }))
+                A.falsy(updated.double_check_override)
+                A.falsy(updated.double_check_effective)
+                A.equal(updated.effective_at, "next-turn")
+                A.equal(updated.context_generation, 3)
+                A.equal(agent.loop:status().last_durable_sequence, 5)
+                A.equal(
+                    agent.loop:status().active_view_manifest_ref,
+                    "view-session-override"
+                )
+                -- Active turn ports retain their captured generation. The
+                -- reloaded settings generation is adopted only for next turn.
+                A.equal(agent.current_generation().id, "config-generation-1")
+                A.equal(
+                    f.current_generation().id,
+                    "config-generation-cautious-off"
+                )
+                local after = assert(agent.settings:status())
+                A.falsy(after.double_check_override)
+                A.falsy(after.double_check_effective)
+                local reload_index, publish_index, adopt_index
+                for index, value in ipairs(f.log) do
+                    if value == "config-reload" then reload_index = index end
+                    if value == "publication:session-override" then
+                        publish_index = index
+                    end
+                    if value == "runtime-adopt:session-override" then
+                        adopt_index = index
+                    end
+                end
+                A.truthy(reload_index < publish_index)
+                A.truthy(publish_index < adopt_index)
+            end,
+        },
+        {
+            name = "ambiguous Session publication and adoption exceptions halt the Runtime",
+            run = function()
+                for _, scenario in ipairs({
+                    {
+                        option = "session_update_unknown",
+                        log = "runtime-session-fail:publication-unknown",
+                    },
+                    {
+                        option = "session_update_exception",
+                        log = "runtime-session-fail:publication-exception",
+                    },
+                }) do
+                    local options = {}
+                    options[scenario.option] = true
+                    local f = fixture(options)
+                    local agent = assert(f.main.start_published_agent(
+                        f.composed,
+                        f.chat,
+                        "implement the project",
+                        "terminal"
+                    ))
+                    local updated, update_error = agent.settings:update({
+                        name = "DoubleCheckOverride",
+                        value = false,
+                    })
+                    A.falsy(updated)
+                    A.equal(update_error.code, "AgentDurabilityFailure")
+                    A.truthy(agent.loop:status().halted)
+                    A.contains(table.concat(f.log, "|"), scenario.log)
+                end
+            end,
+        },
+        {
             name = "production Context switcher reopens only the previewed exact hash",
             run = function()
                 local f = fixture()
@@ -1103,6 +1308,10 @@ return {
                     loop = {},
                     driver = {},
                     session = {},
+                    settings = {
+                        status = function() return {} end,
+                        update = function() return {} end,
+                    },
                     tools = {},
                     compaction = {},
                     draft = {},

@@ -63,6 +63,13 @@ local RUNTIME_ABORT_OUTCOMES = {
     unknown_side_effect = true,
 }
 local CONTROL_NAMES = { finish = true, ["ask-user"] = true, refuse = true }
+local SESSION_OVERRIDE_NAMES = {
+    CurrentModel = true,
+    CurrentPermission = true,
+    DoubleCheckOverride = true,
+    DoubleCheckGoalOverride = true,
+    ContextPrompt = true,
+}
 local TOOL_RESULT_KINDS = {
     ["real-success"] = "ok",
     ["real-failed"] = "error",
@@ -2283,6 +2290,145 @@ function M.new_agent_loop(ports, options)
             turn_id = turn_id,
             queue_item_id = cause and cause.queue_item and cause.queue_item.id or false,
         }, nil, "main turn admission"))
+    end
+
+    ---Adopts one already-durable Session override and its matching Model-view
+    -- publication. The turn snapshot remains immutable; only the Runtime
+    -- waterline and the view used by later Model requests advance.
+    function loop:adopt_session_override(record, receipt)
+        if halted then return nil, halt_error end
+        if closing or state == "Closing" or compaction_gate
+            or pending_model_preflight ~= nil
+        then
+            return durability_failure("external-session-override-busy")
+        end
+        if not exact_fields(record, {
+            kind = true,
+            name = true,
+            old_value_digest = true,
+            new_value_digest = true,
+            effective_at = true,
+            replaces_manifest_digest = true,
+            manifest_digest = true,
+            compaction_id = true,
+            view_context_generation = true,
+        })
+            or record.kind ~= "session-override"
+            or not SESSION_OVERRIDE_NAMES[record.name]
+            or not valid_runtime_text(
+                record.old_value_digest,
+                limits.hard_caps.message_bytes,
+                false
+            )
+            or not valid_runtime_text(
+                record.new_value_digest,
+                limits.hard_caps.message_bytes,
+                false
+            )
+            or record.old_value_digest == record.new_value_digest
+            or record.effective_at ~= "next-turn"
+            or not valid_runtime_text(
+                record.replaces_manifest_digest,
+                limits.hard_caps.message_bytes,
+                false
+            )
+            or record.replaces_manifest_digest ~= current_manifest_ref()
+            or not valid_runtime_text(
+                record.manifest_digest,
+                limits.hard_caps.message_bytes,
+                false
+            )
+            or record.manifest_digest == record.replaces_manifest_digest
+            or not integer_at_least(record.view_context_generation, 1)
+            or (record.compaction_id ~= false
+                and not valid_runtime_id(
+                    record.compaction_id,
+                    limits.maximum_identifier_bytes
+                ))
+        then
+            return durability_failure("external-session-override-identity")
+        end
+
+        local batch = type(receipt) == "table" and receipt.binding or nil
+        local first_sequence = type(receipt) == "table"
+            and receipt.first_sequence or nil
+        local function matches(event, index)
+            if event.turn_id ~= false then return false end
+            local fields = event.fields
+            if index == 1 then
+                return event.type == "session_override"
+                    and exact_fields(fields, {
+                        name = true,
+                        oldValueDigest = true,
+                        newValueDigest = true,
+                        effectiveAt = true,
+                    })
+                    and fields.name == record.name
+                    and fields.oldValueDigest == record.old_value_digest
+                    and fields.newValueDigest == record.new_value_digest
+                    and fields.effectiveAt == record.effective_at
+            end
+            local expected = {
+                manifestDigest = true,
+                firstEventSeq = true,
+                lastEventSeq = true,
+                replacesManifestDigest = true,
+            }
+            if record.compaction_id ~= false then
+                expected.compactionId = true
+                expected.viewContextGeneration = true
+            end
+            return index == 2
+                and event.type == "model_view_published"
+                and exact_fields(fields, expected)
+                and fields.manifestDigest == record.manifest_digest
+                and fields.firstEventSeq == "1"
+                and fields.lastEventSeq == tostring(first_sequence)
+                and fields.replacesManifestDigest
+                    == record.replaces_manifest_digest
+                and (record.compaction_id == false
+                    or (fields.compactionId == record.compaction_id
+                        and fields.viewContextGeneration
+                            == tostring(record.view_context_generation)))
+        end
+        local adopted, adoption_error = adopt_external_receipt(
+            receipt,
+            2,
+            matches,
+            "external-session-override"
+        )
+        if not adopted then return nil, adoption_error end
+        if type(batch) ~= "table"
+            or batch.events[2].fields.manifestDigest ~= record.manifest_digest
+        then
+            return durability_failure("external-session-override-manifest")
+        end
+        if turn then
+            turn.active_view_manifest_ref = record.manifest_digest
+        elseif last_turn then
+            last_turn.active_view_manifest_ref = record.manifest_digest
+        else
+            restored_view_manifest_ref = record.manifest_digest
+        end
+        return readonly({
+            context_generation = context_generation,
+            last_sequence = sequence,
+            manifest_digest = current_manifest_ref(),
+            effective_at = record.effective_at,
+        }, "adopted Session override receipt")
+    end
+
+    ---Halts the Runtime when the Session writer returned an ambiguous outcome
+    -- or receipt adoption raised after publication may have crossed storage.
+    function loop:fail_session_override_barrier(reason)
+        if halted then return nil, halt_error end
+        if not valid_runtime_id(reason, limits.maximum_identifier_bytes) then
+            return nil, failure(
+                "InvalidSessionBarrierFailure",
+                "ambiguous Session barrier reason is invalid"
+            )
+        end
+        return durability_failure("external-session-override-" .. reason)
     end
 
     ---Opens the exclusive external compaction lane at the exact Runtime
@@ -4519,6 +4665,8 @@ function M.new_agent_loop(ports, options)
         side_concurrency_maximum = 1,
         side_tools = false,
         side_use_lanes = { queue = true, steer = true },
+        external_session_override_receipts = true,
+        external_session_override_fail_stop = true,
         external_compaction_receipts = true,
         automatic_compaction_preflight = limits.automatic_compaction,
     }, nil, "AgentLoop capabilities"))

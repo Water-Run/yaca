@@ -41,7 +41,7 @@ Context XML 是 yaca 内部版本化存储，不是稳定第三方 API；人类�
 
 固定 Agent 工具集是 `list`、`read`、`search`、`write`、`patch`、`rename`、`delete`、`exec`。raw `exec` 只由宽能力 `Shell` 管理；yaca 不声称能从命令文本推断或沙箱化其文件系统/网络副作用。Permission 名称、Description 与 Prompt 都不授权。
 
-`DoubleCheck` 开启时控制可选的高风险 action review，并强制 finish review。`.cautious` 只修改当前 Context 的覆盖值，不是 Permission profile。
+`DoubleCheck` 开启时控制可选的高风险 action review，并强制 finish review。`.cautious [status|on|off|toggle|reset]` 只修改当前 Context 的覆盖值，不是 Permission profile。第一条消息前它只修改未保存的内存草稿；Context 已保存时，覆盖值与刷新后的 ModelView 原子发布，Runtime 采纳其精确回执，新值从下一轮生效，不改变当前轮冻结的配置快照。
 
 ## Context
 

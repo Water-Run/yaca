@@ -41,7 +41,7 @@ The distribution defines two Permission profiles:
 
 The fixed Agent tool set is `list`, `read`, `search`, `write`, `patch`, `rename`, `delete`, and `exec`. Raw `exec` is governed by the broad `Shell` capability; yaca does not claim to infer or sandbox its filesystem/network effects from command text. Permission names, descriptions, and prompts never grant capabilities.
 
-`DoubleCheck` controls optional high-risk action review and mandatory finish review when enabled. `.cautious` changes only the current Context override; it is not a Permission profile.
+`DoubleCheck` controls optional high-risk action review and mandatory finish review when enabled. `.cautious [status|on|off|toggle|reset]` changes only the current Context override; it is not a Permission profile. Before the first message it changes only the unsaved in-memory draft. In a saved Context the override and refreshed ModelView are published atomically, the Runtime adopts their exact receipt, and the new value applies at the next turn without changing the active turn's immutable configuration snapshot.
 
 ## Contexts
 

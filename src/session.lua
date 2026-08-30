@@ -525,7 +525,7 @@ local function validate_publication_ports(ports)
         filesystem = {
             "direct_inspect", "direct_reverify", "make_directory", "flush_directory",
         },
-        schema = { "build", "append_events", "encode" },
+        schema = { "build", "append_events", "session_document", "encode" },
         store = { "create_writer", "open_writer", "publish", "close_writer" },
         path = { "to_logical", "validate_context_name", "context_hash" },
         safety = { "binding_digest", "digest" },
@@ -1040,6 +1040,75 @@ function M.new_context_publication(ports, options)
         end
         return overrides.DoubleCheckGoalOverride == "inherit"
             or generation.effective_double_check_goal == overrides.DoubleCheckGoalOverride
+    end
+
+    local function copy_overrides(source)
+        local result = {}
+        for key, value in pairs(source) do result[key] = value end
+        return result
+    end
+
+    local function selector_snapshot(generation, name, selector)
+        local values
+        local domain
+        if name == "CurrentModel" then
+            values = generation.models[selector]
+            domain = "yaca-model-snapshot-v1"
+            if type(values) ~= "table" or values.enabled ~= true
+                or values.tools_enabled ~= true
+            then
+                return nil, failure(
+                    "ModelUnavailable",
+                    "selected Context Model cannot run the Agent"
+                )
+            end
+        else
+            values = generation.permissions[selector]
+            domain = "yaca-permission-snapshot-v1"
+            if type(values) ~= "table" then
+                return nil, failure(
+                    "PermissionUnavailable",
+                    "selected Context Permission is unavailable"
+                )
+            end
+        end
+        return snapshot_digest(safety, domain, {
+            name = selector,
+            generation = generation.id,
+            values = values,
+        })
+    end
+
+    local function override_value(document, name)
+        if name == "CurrentModel" then
+            return {
+                name = document.session.current_model.name,
+                snapshot_digest = document.session.current_model.snapshot_digest,
+            }
+        end
+        if name == "CurrentPermission" then
+            return {
+                name = document.session.current_permission.name,
+                snapshot_digest = document.session.current_permission.snapshot_digest,
+            }
+        end
+        if name == "DoubleCheckOverride" then
+            return document.session.double_check_override
+        end
+        if name == "DoubleCheckGoalOverride" then
+            local goal = document.session.double_check_goal_override
+            return goal.mode == "value"
+                and { mode = "value", value = goal.value }
+                or { mode = "inherit" }
+        end
+        return document.session.context_prompt
+    end
+
+    local function override_digest(name, value)
+        return snapshot_digest(safety, "yaca-session-override-value-v1", {
+            name = name,
+            value = value,
+        })
     end
 
     local function close_writer(writer, original_error)
@@ -1729,6 +1798,346 @@ function M.new_context_publication(ports, options)
             context_generation = active.document.generation,
             overrides = readonly(durable_context_overrides(), "durable Context overrides"),
         }, "durable Context turn state")
+    end
+
+    ---Atomically publishes one whitelisted Context Session override plus the
+    -- refreshed active Model view. The returned receipt must be adopted by the
+    -- sole Runtime before any later barrier is allowed to advance.
+    function service.update_session(specification)
+        if closed then
+            return nil, failure(
+                "ContextPublicationClosed",
+                "Context session update is closed"
+            )
+        end
+        if journal_failure then return nil, journal_failure end
+        if not active or not active.writer or not active.document then
+            return nil, failure(
+                "ContextNotPublished",
+                "Context session update has no durable owner"
+            )
+        end
+        local allowed = {
+            expected_context_generation = true,
+            expected_last_sequence = true,
+            expected_manifest_digest = true,
+            generation = true,
+            name = true,
+            value = true,
+            mode = true,
+        }
+        if type(specification) ~= "table" then
+            return nil, failure(
+                "InvalidSessionUpdate",
+                "Context session update specification is required"
+            )
+        end
+        for key in pairs(specification) do
+            if type(key) ~= "string" or not allowed[key] then
+                return nil, failure(
+                    "InvalidSessionUpdate",
+                    "Context session update specification is ambiguous"
+                )
+            end
+        end
+        local names = {
+            CurrentModel = true,
+            CurrentPermission = true,
+            DoubleCheckOverride = true,
+            DoubleCheckGoalOverride = true,
+            ContextPrompt = true,
+        }
+        local generation, generation_error = validate_generation(
+            specification.generation
+        )
+        local document = active.document
+        local manifest = document.model_view.active_manifest
+        if not generation then return nil, generation_error end
+        if not names[specification.name]
+            or specification.expected_context_generation ~= document.generation
+            or specification.expected_last_sequence ~= document.event_count
+            or specification.expected_manifest_digest ~= manifest.digest
+        then
+            return nil, failure(
+                "StaleSessionUpdate",
+                "Context session update does not bind the active generation"
+            )
+        end
+
+        local name = specification.name
+        local next_overrides = copy_overrides(durable_context_overrides())
+        local schema_value = specification.value
+        local schema_mode = specification.mode
+        if name == "CurrentModel" or name == "CurrentPermission" then
+            if type(schema_value) ~= "string" or schema_value == ""
+                or schema_mode ~= nil
+            then
+                return nil, failure(
+                    "InvalidSessionUpdate",
+                    "Context selector update is invalid"
+                )
+            end
+            next_overrides[name] = schema_value
+        elseif name == "DoubleCheckOverride" then
+            if schema_mode ~= nil
+                or (schema_value ~= "inherit" and type(schema_value) ~= "boolean")
+            then
+                return nil, failure(
+                    "InvalidSessionUpdate",
+                    "DoubleCheck Context update is invalid"
+                )
+            end
+            next_overrides.DoubleCheckOverride = schema_value
+        elseif name == "DoubleCheckGoalOverride" then
+            if (schema_mode ~= "inherit" and schema_mode ~= "value")
+                or (schema_mode == "inherit" and schema_value ~= nil)
+                or (schema_mode == "value"
+                    and not valid_text(schema_value, admitted.maximum_model_view_bytes))
+            then
+                return nil, failure(
+                    "InvalidSessionUpdate",
+                    "DoubleCheck goal Context update is invalid"
+                )
+            end
+            next_overrides.DoubleCheckGoalOverride = schema_mode == "inherit"
+                and "inherit" or schema_value
+        else
+            if schema_mode ~= nil
+                or not valid_text(schema_value, admitted.maximum_model_view_bytes)
+            then
+                return nil, failure(
+                    "InvalidSessionUpdate",
+                    "ContextPrompt update is invalid"
+                )
+            end
+            next_overrides.ContextPrompt = schema_value
+        end
+        if not generation_matches_context(generation, next_overrides) then
+            return nil, failure(
+                "ConfigGenerationMismatch",
+                "Context session update generation does not match its overrides"
+            )
+        end
+        if name == "ContextPrompt"
+            or (name == "DoubleCheckGoalOverride" and schema_mode == "value")
+        then
+            local hits, scan_error = generation.scan_registered_secrets(schema_value)
+            if not hits then return nil, scan_error end
+            if #hits > 0 then
+                return nil, failure(
+                    "RegisteredSecret",
+                    "Context session update matches a registered configuration secret"
+                )
+            end
+        end
+
+        local old_value = override_value(document, name)
+        local snapshot
+        local new_value = schema_value
+        if name == "CurrentModel" or name == "CurrentPermission" then
+            snapshot, generation_error = selector_snapshot(generation, name, schema_value)
+            if not snapshot then return nil, generation_error end
+            new_value = { name = schema_value, snapshot_digest = snapshot }
+        elseif name == "DoubleCheckGoalOverride" then
+            new_value = schema_mode == "value"
+                and { mode = "value", value = schema_value }
+                or { mode = "inherit" }
+        end
+        local old_bytes, old_bytes_error = canonical_public(old_value)
+        if not old_bytes then return nil, old_bytes_error end
+        local new_bytes, new_bytes_error = canonical_public(new_value)
+        if not new_bytes then return nil, new_bytes_error end
+        if old_bytes == new_bytes then
+            return nil, failure(
+                "SessionOverrideUnchanged",
+                "Context session override already has the requested value"
+            )
+        end
+        local old_digest, digest_error = override_digest(name, old_value)
+        if not old_digest then return nil, digest_error end
+        local new_digest
+        new_digest, digest_error = override_digest(name, new_value)
+        if not new_digest then return nil, digest_error end
+
+        local observed, time_error = system.utc_now()
+        if not observed then return nil, time_error end
+        local updated_at, next_error = next_utc_time(
+            observed,
+            document.header.updated_at
+        )
+        if not updated_at then return nil, next_error end
+        local session_event = {
+            seq = document.event_count + 1,
+            type = "session_override",
+            at = updated_at,
+            fields = {
+                name = name,
+                oldValueDigest = old_digest,
+                newValueDigest = new_digest,
+                effectiveAt = "next-turn",
+            },
+        }
+        local view_facts = {}
+        for index, event in ipairs(document.facts) do view_facts[index] = event end
+        view_facts[#view_facts + 1] = session_event
+        local projection
+        if manifest.compaction_id then
+            projection, generation_error = durable_compaction_projection(
+                document,
+                manifest
+            )
+            if not projection then return nil, generation_error end
+            projection.fact_limit = #view_facts
+            projection.waterline = #view_facts
+        end
+        local view, view_error = cache_model_view(
+            view_facts,
+            document.generation + 1,
+            projection
+        )
+        if not view then return nil, view_error end
+        local mutation = {
+            updated_at = updated_at,
+            name = name,
+            value = schema_value,
+            mode = schema_mode,
+            snapshot_digest = snapshot,
+            old_value_digest = old_digest,
+            new_value_digest = new_digest,
+            effective_at = "next-turn",
+            view_manifest_digest = view.digest,
+        }
+        if view.compaction_id then
+            mutation.view_compaction_id = view.compaction_id
+            mutation.view_context_generation = view.context_generation
+        end
+        local next_document, document_error = schema.session_document(
+            document,
+            mutation
+        )
+        if not next_document then
+            model_views[view.digest] = nil
+            return nil, document_error
+        end
+        if next_document.model_view.active_manifest.digest ~= view.digest
+            or next_document.model_view.active_manifest.first_event_seq
+                ~= view.first_sequence
+            or next_document.model_view.active_manifest.last_event_seq
+                ~= view.last_sequence
+            or next_document.event_count ~= document.event_count + 2
+        then
+            model_views[view.digest] = nil
+            return nil, failure(
+                "InvalidSessionUpdate",
+                "Context session update view publication is inexact"
+            )
+        end
+
+        local published, publish_error
+        for _ = 1, admitted.maximum_create_attempts do
+            local random, random_error = system.secure_random(8)
+            if type(random) ~= "string" or #random ~= 8 then
+                model_views[view.digest] = nil
+                return nil, random_error or failure(
+                    "SecureRandomUnavailable",
+                    "Context session update requires a temporary identity"
+                )
+            end
+            published, publish_error = store.publish(
+                active.writer,
+                next_document,
+                active.receipt.context_path .. ".yaca-tmp-" .. hex(random)
+            )
+            if published then break end
+            if type(publish_error) ~= "table"
+                or publish_error.code ~= "DestinationExists"
+            then
+                journal_failure = failure(
+                    "ContextPublicationUnknown",
+                    "Context session update returned no durable outcome",
+                    type(publish_error) == "table" and publish_error.code
+                        or "publish-failure"
+                )
+                model_views[view.digest] = nil
+                return nil, journal_failure
+            end
+        end
+        if not published then
+            model_views[view.digest] = nil
+            return nil, failure(
+                "ContextTemporaryNameExhausted",
+                "Context session temporary names exhausted the retry limit"
+            )
+        end
+        if type(published) ~= "table"
+            or published.generation ~= document.generation + 1
+            or published.event_count ~= document.event_count + 2
+        then
+            journal_failure = failure(
+                "ContextPublicationUnknown",
+                "Context session update returned an inexact durable receipt"
+            )
+            model_views[view.digest] = nil
+            return nil, journal_failure
+        end
+
+        local first_sequence = document.event_count + 1
+        local session_fact = next_document.facts[first_sequence]
+        local view_fact = next_document.facts[first_sequence + 1]
+        local events = readonly({
+            readonly({
+                seq = session_fact.seq,
+                type = session_fact.type,
+                turn_id = false,
+                fields = session_fact.fields,
+            }, "session override receipt event"),
+            readonly({
+                seq = view_fact.seq,
+                type = view_fact.type,
+                turn_id = false,
+                fields = view_fact.fields,
+            }, "session view receipt event"),
+        }, "session override receipt events")
+        local barrier_id = "session-override:" .. tostring(document.generation)
+            .. ":" .. tostring(first_sequence)
+        local batch = readonly({
+            barrier_id = barrier_id,
+            first_sequence = first_sequence,
+            last_sequence = first_sequence + 1,
+            event_count = 2,
+            expected_context_generation = document.generation,
+            events = events,
+        }, "session override receipt binding")
+        local record = readonly({
+            kind = "session-override",
+            name = name,
+            old_value_digest = old_digest,
+            new_value_digest = new_digest,
+            effective_at = "next-turn",
+            replaces_manifest_digest = manifest.digest,
+            manifest_digest = view.digest,
+            compaction_id = view.compaction_id or false,
+            view_context_generation = view.context_generation,
+        }, "durable session override record")
+        local receipt = readonly({
+            barrier_id = barrier_id,
+            first_sequence = first_sequence,
+            last_sequence = first_sequence + 1,
+            event_count = 2,
+            binding = batch,
+            previous_context_generation = document.generation,
+            context_generation = next_document.generation,
+        }, "Context session update receipt")
+
+        active.document = next_document
+        local status_values = {}
+        for key, value in pairs(active.receipt) do status_values[key] = value end
+        status_values.generation = next_document.generation
+        status_values.event_count = next_document.event_count
+        status_values.last_sequence = next_document.event_count
+        status_values.view_manifest_snapshot = view.digest
+        active.receipt = readonly(status_values, "Context publication receipt")
+        return record, receipt
     end
 
     ---Builds a complete immutable Runtime turn input from one already reloaded
@@ -3221,6 +3630,8 @@ function M.new_draft(generation, workspace, options, publication)
             model = settings.model,
             permission = settings.permission,
             double_check = settings.double_check,
+            double_check_default = generation.agent.double_check,
+            double_check_override = settings.double_check_override,
             double_check_goal = settings.double_check_goal,
             context_prompt = settings.context_prompt,
             auto_rename_disabled = settings.auto_rename_disabled,
@@ -3246,6 +3657,7 @@ function M.new_draft(generation, workspace, options, publication)
             model = true,
             permission = true,
             double_check = true,
+            double_check_override = true,
             double_check_goal = true,
             context_prompt = true,
             auto_rename_disabled = true,
@@ -3274,12 +3686,30 @@ function M.new_draft(generation, workspace, options, publication)
             end
             next_settings.permission = changes.permission
         end
-        if changes.double_check ~= nil then
-            if type(changes.double_check) ~= "boolean" then
-                return nil, failure("InvalidDraftUpdate", "double_check must be boolean")
+        if changes.double_check ~= nil
+            and changes.double_check_override ~= nil
+        then
+            return nil, failure(
+                "InvalidDraftUpdate",
+                "double_check and double_check_override are mutually exclusive"
+            )
+        end
+        local double_check_change = changes.double_check
+        if double_check_change == nil then
+            double_check_change = changes.double_check_override
+        end
+        if double_check_change ~= nil then
+            if double_check_change ~= "inherit"
+                and type(double_check_change) ~= "boolean"
+            then
+                return nil, failure(
+                    "InvalidDraftUpdate",
+                    "double_check override must be boolean or inherit"
+                )
             end
-            next_settings.double_check = changes.double_check
-            next_settings.double_check_override = changes.double_check
+            next_settings.double_check_override = double_check_change
+            next_settings.double_check = double_check_change == "inherit"
+                and generation.agent.double_check or double_check_change
         end
         for _, key in ipairs({ "double_check_goal", "context_prompt" }) do
             if changes[key] ~= nil then

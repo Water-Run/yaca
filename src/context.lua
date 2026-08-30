@@ -3227,6 +3227,231 @@ local function build_event_document(document, mutation, admitted)
     return normalize_document(candidate, admitted)
 end
 
+local SESSION_OVERRIDE_NAMES = {
+    CurrentModel = true,
+    CurrentPermission = true,
+    DoubleCheckOverride = true,
+    DoubleCheckGoalOverride = true,
+    ContextPrompt = true,
+}
+
+local function build_session_document(document, mutation, admitted)
+    if type(mutation) ~= "table" then
+        return nil, failure("InvalidSessionMutation", "typed session mutation is required")
+    end
+    local allowed = {
+        updated_at = true,
+        name = true,
+        value = true,
+        mode = true,
+        snapshot_digest = true,
+        old_value_digest = true,
+        new_value_digest = true,
+        effective_at = true,
+        view_manifest_digest = true,
+        view_compaction_id = true,
+        view_context_generation = true,
+    }
+    for key in pairs(mutation) do
+        if type(key) ~= "string" or not allowed[key] then
+            return nil, failure(
+                "InvalidSessionMutation",
+                "Context session mutation contains an unknown field"
+            )
+        end
+    end
+    if not SESSION_OVERRIDE_NAMES[mutation.name] then
+        return nil, failure(
+            "InvalidSessionMutation",
+            "Context session mutation name is unavailable"
+        )
+    end
+    local updated_at, time_error = canonical_time(
+        mutation.updated_at,
+        "/SessionMutation/UpdatedAt"
+    )
+    if not updated_at then return nil, time_error end
+    local old_digest, digest_error = attribute_text(
+        mutation.old_value_digest,
+        admitted.maximum_field_bytes,
+        "/SessionMutation/OldValueDigest",
+        false
+    )
+    if not old_digest then return nil, digest_error end
+    local new_digest
+    new_digest, digest_error = attribute_text(
+        mutation.new_value_digest,
+        admitted.maximum_field_bytes,
+        "/SessionMutation/NewValueDigest",
+        false
+    )
+    if not new_digest then return nil, digest_error end
+    if mutation.effective_at ~= "next-turn" then
+        return nil, failure(
+            "InvalidSessionMutation",
+            "Context session mutation must become effective at the next turn"
+        )
+    end
+    local manifest_digest
+    manifest_digest, digest_error = attribute_text(
+        mutation.view_manifest_digest,
+        admitted.maximum_field_bytes,
+        "/SessionMutation/ViewManifestDigest",
+        false
+    )
+    if not manifest_digest then return nil, digest_error end
+    local compaction_id
+    if mutation.view_compaction_id ~= nil then
+        compaction_id, digest_error = attribute_text(
+            mutation.view_compaction_id,
+            admitted.maximum_identifier_bytes,
+            "/SessionMutation/ViewCompactionId",
+            false
+        )
+        if not compaction_id then return nil, digest_error end
+        if not valid_integer(mutation.view_context_generation, 1) then
+            return nil, failure(
+                "InvalidSessionMutation",
+                "compacted session view requires its Context generation"
+            )
+        end
+    elseif mutation.view_context_generation ~= nil then
+        return nil, failure(
+            "InvalidSessionMutation",
+            "plain session view cannot carry a compaction Context generation"
+        )
+    end
+
+    local candidate, canonical_or_error = lifecycle_candidate(document)
+    if not candidate then return nil, canonical_or_error end
+    local canonical = canonical_or_error
+    if updated_at <= canonical.header.updated_at then
+        return nil, failure(
+            "ContextGeneration",
+            "session mutation must advance UpdatedAt"
+        )
+    end
+
+    local name = mutation.name
+    if name == "CurrentModel" or name == "CurrentPermission" then
+        if mutation.mode ~= nil then
+            return nil, failure(
+                "InvalidSessionMutation",
+                "selector session mutation cannot carry a mode"
+            )
+        end
+        local value, value_error = attribute_text(
+            mutation.value,
+            admitted.maximum_identifier_bytes,
+            "/SessionMutation/Value",
+            false
+        )
+        if not value then return nil, value_error end
+        local snapshot, snapshot_error = attribute_text(
+            mutation.snapshot_digest,
+            admitted.maximum_field_bytes,
+            "/SessionMutation/SnapshotDigest",
+            false
+        )
+        if not snapshot then return nil, snapshot_error end
+        candidate.session[name == "CurrentModel"
+            and "current_model" or "current_permission"] = {
+            name = value,
+            snapshot_digest = snapshot,
+        }
+    elseif name == "DoubleCheckOverride" then
+        if mutation.snapshot_digest ~= nil or mutation.mode ~= nil
+            or (mutation.value ~= "inherit" and type(mutation.value) ~= "boolean")
+        then
+            return nil, failure(
+                "InvalidSessionMutation",
+                "DoubleCheck session mutation is invalid"
+            )
+        end
+        candidate.session.double_check_override = mutation.value
+    elseif name == "DoubleCheckGoalOverride" then
+        if mutation.snapshot_digest ~= nil
+            or (mutation.mode ~= "inherit" and mutation.mode ~= "value")
+            or (mutation.mode == "inherit" and mutation.value ~= nil)
+        then
+            return nil, failure(
+                "InvalidSessionMutation",
+                "DoubleCheck goal session mutation is invalid"
+            )
+        end
+        local value
+        if mutation.mode == "value" then
+            local value_error
+            value, value_error = xml_text(
+                mutation.value,
+                admitted.maximum_field_bytes,
+                "/SessionMutation/Value",
+                true
+            )
+            if not value then return nil, value_error end
+        end
+        candidate.session.double_check_goal_override = {
+            mode = mutation.mode,
+            value = value,
+        }
+    else
+        if mutation.snapshot_digest ~= nil or mutation.mode ~= nil then
+            return nil, failure(
+                "InvalidSessionMutation",
+                "ContextPrompt session mutation has incompatible metadata"
+            )
+        end
+        local value, value_error = xml_text(
+            mutation.value,
+            admitted.maximum_field_bytes,
+            "/SessionMutation/Value",
+            true
+        )
+        if not value then return nil, value_error end
+        candidate.session.context_prompt = value
+    end
+
+    candidate.generation = canonical.generation + 1
+    candidate.header.updated_at = updated_at
+    candidate.facts[#candidate.facts + 1] = {
+        seq = #candidate.facts + 1,
+        type = "session_override",
+        at = updated_at,
+        fields = {
+            name = name,
+            oldValueDigest = old_digest,
+            newValueDigest = new_digest,
+            effectiveAt = mutation.effective_at,
+        },
+    }
+    local view_last_sequence = #candidate.facts
+    local view_fields = {
+        manifestDigest = manifest_digest,
+        firstEventSeq = view_last_sequence == 0 and "0" or "1",
+        lastEventSeq = tostring(view_last_sequence),
+        replacesManifestDigest = canonical.model_view.active_manifest.digest,
+    }
+    if compaction_id then
+        view_fields.compactionId = compaction_id
+        view_fields.viewContextGeneration = tostring(
+            mutation.view_context_generation
+        )
+    end
+    candidate.facts[#candidate.facts + 1] = {
+        seq = #candidate.facts + 1,
+        type = "model_view_published",
+        at = updated_at,
+        fields = view_fields,
+    }
+    candidate.model_view.active_manifest = {
+        digest = manifest_digest,
+        first_event_seq = view_last_sequence == 0 and 0 or 1,
+        last_event_seq = view_last_sequence,
+        compaction_id = compaction_id,
+    }
+    return normalize_document(candidate, admitted)
+end
+
 local LIFECYCLE_FIELDS = {
     rename = {
         new_name = true,
@@ -3452,6 +3677,12 @@ function M.new(options)
     -- generation without rewriting prior Facts or changing the active view.
     function service.append_events(document, mutation)
         return build_event_document(document, mutation, admitted)
+    end
+
+    ---Builds one atomic Session override generation, its privacy-preserving
+    -- audit event, and the matching already-prepared Model-view publication.
+    function service.session_document(document, mutation)
+        return build_session_document(document, mutation, admitted)
     end
 
     ---Builds one full lifecycle generation without rewriting durable Facts.

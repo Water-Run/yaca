@@ -274,6 +274,77 @@ return {
             end,
         },
         {
+            name = "session overrides atomically change Session and append digest-only audit facts",
+            run = function()
+                local service = new_service()
+                local document = assert(service.build(minimal()))
+                local updated = assert(service.session_document(document, {
+                    updated_at = "2026-08-29T00:00:02Z",
+                    name = "DoubleCheckOverride",
+                    value = false,
+                    old_value_digest = "sha256:old-double-check",
+                    new_value_digest = "sha256:new-double-check",
+                    effective_at = "next-turn",
+                    view_manifest_digest = "sha256:double-check-view",
+                }))
+                A.equal(updated.generation, 2)
+                A.equal(updated.event_count, 4)
+                A.falsy(updated.session.double_check_override)
+                A.equal(
+                    updated.model_view.active_manifest.digest,
+                    "sha256:double-check-view"
+                )
+                A.equal(updated.model_view.active_manifest.last_event_seq, 3)
+                local event = updated.facts[3]
+                A.equal(event.type, "session_override")
+                A.equal(event.turn_id, nil)
+                A.deep_equal(event.fields, {
+                    name = "DoubleCheckOverride",
+                    oldValueDigest = "sha256:old-double-check",
+                    newValueDigest = "sha256:new-double-check",
+                    effectiveAt = "next-turn",
+                })
+                A.equal(updated.facts[4].type, "model_view_published")
+                A.deep_equal(updated.facts[4].fields, {
+                    manifestDigest = "sha256:double-check-view",
+                    firstEventSeq = "1",
+                    lastEventSeq = "3",
+                    replacesManifestDigest = "sha256:view-manifest",
+                })
+
+                local prompted = assert(service.session_document(updated, {
+                    updated_at = "2026-08-29T00:00:03Z",
+                    name = "ContextPrompt",
+                    value = "keep exact evidence",
+                    old_value_digest = "sha256:old-prompt",
+                    new_value_digest = "sha256:new-prompt",
+                    effective_at = "next-turn",
+                    view_manifest_digest = "sha256:prompt-view",
+                }))
+                A.equal(prompted.session.context_prompt, "keep exact evidence")
+                A.deep_equal(prompted.facts[5].fields, {
+                    name = "ContextPrompt",
+                    oldValueDigest = "sha256:old-prompt",
+                    newValueDigest = "sha256:new-prompt",
+                    effectiveAt = "next-turn",
+                })
+
+                local invalid, invalid_error = service.session_document(document, {
+                    updated_at = "2026-08-29T00:00:02Z",
+                    name = "DoubleCheckOverride",
+                    value = "reset",
+                    old_value_digest = "sha256:old",
+                    new_value_digest = "sha256:new",
+                    effective_at = "next-turn",
+                    view_manifest_digest = "sha256:invalid-view",
+                })
+                A.falsy(invalid)
+                A.equal(invalid_error.code, "InvalidSessionMutation")
+                A.equal(document.generation, 1)
+                A.equal(document.event_count, 2)
+            end,
+        },
+        {
             name = "recovery projects unfinished lanes and every canonical Runtime serial waterline",
             run = function()
                 local service = new_service()

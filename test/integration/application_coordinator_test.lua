@@ -86,6 +86,9 @@ local function fixture(settings)
     local side_started = false
     local side_emitted = false
     local compaction_active = false
+    local cautious_override = "inherit"
+    local cautious_default = true
+    local settings_serial = 0
 
     local terminal = {}
     function terminal:start(observed_now)
@@ -220,6 +223,37 @@ local function fixture(settings)
             snapshot_digest = "approval-digest",
             approval_digest = answer == "approve" and "approval-digest" or "",
         }
+    end
+
+    local session_settings = {}
+    function session_settings:status()
+        return {
+            context_generation = loop_status.context_generation,
+            config_generation = "config-settings-" .. tostring(settings_serial),
+            model = "Primary",
+            permission = "Std",
+            double_check_default = cautious_default,
+            double_check_override = cautious_override,
+            double_check_effective = cautious_override == "inherit"
+                and cautious_default or cautious_override,
+            context_prompt = "",
+            effective_at = "current",
+        }
+    end
+    function session_settings:update(change)
+        A.equal(change.name, "DoubleCheckOverride")
+        A.truthy(change.value == "inherit" or type(change.value) == "boolean")
+        cautious_override = change.value
+        settings_serial = settings_serial + 1
+        log[#log + 1] = "settings-cautious:" .. tostring(change.value)
+        loop_status.context_generation = loop_status.context_generation + 1
+        loop_status.last_durable_sequence
+            = loop_status.last_durable_sequence + 2
+        loop_status.active_view_manifest_ref
+            = "view-settings-" .. tostring(settings_serial)
+        local projected = self:status()
+        projected.effective_at = "next-turn"
+        return projected
     end
 
     local driver = {}
@@ -376,6 +410,7 @@ local function fixture(settings)
         loop = loop,
         driver = driver,
         session = session,
+        settings = session_settings,
         tools = tools,
         compaction = compaction,
         draft = draft,
@@ -437,6 +472,7 @@ local function fixture(settings)
             loop = loop,
             driver = driver,
             session = session,
+            settings = session_settings,
             tools = tools,
             compaction = compaction,
             draft = next_draft,
@@ -456,6 +492,7 @@ local function fixture(settings)
     end
 
     local chat_draft = {}
+    local draft_cautious_override = "inherit"
     function chat_draft.status()
         return {
             lifecycle = "not-saved",
@@ -463,7 +500,20 @@ local function fixture(settings)
             model = "Primary",
             permission = "Std",
             double_check = true,
+            double_check_default = true,
+            double_check_override = draft_cautious_override,
         }
+    end
+    function chat_draft.update(changes)
+        A.truthy(changes.double_check_override == "inherit"
+            or type(changes.double_check_override) == "boolean")
+        draft_cautious_override = changes.double_check_override
+        log[#log + 1] = "draft-cautious:"
+            .. tostring(changes.double_check_override)
+        local projected = chat_draft.status()
+        projected.double_check = draft_cautious_override == "inherit"
+            and true or draft_cautious_override
+        return projected
     end
     function chat_draft:close()
         log[#log + 1] = "chat-draft-close"
@@ -570,6 +620,49 @@ return {
                 A.contains(joined, "session-close:application-close")
                 A.contains(joined, "draft-close")
                 A.falsy(joined:find("chat-draft-close", 1, true))
+            end,
+        },
+        {
+            name = "cautious changes stay in an unsaved draft until the first turn",
+            run = function()
+                local f = fixture({ freeze_driver = true, batches = {
+                    { { kind = "user_action", action = "text", text = ".cautious off" } },
+                    { { kind = "user_action", action = "submit-or-queue" } },
+                    { { kind = "user_action", action = "text", text = ".cautious" } },
+                    { { kind = "user_action", action = "submit-or-queue" } },
+                    { { kind = "user_action", action = "text", text = ".quit" } },
+                    { { kind = "user_action", action = "submit-or-queue" } },
+                } })
+                assert(f.coordinator:run())
+                local joined = table.concat(f.log, "|")
+                A.contains(joined, "draft-cautious:false")
+                A.falsy(joined:find("agent:terminal:", 1, true))
+                local rendered = A.render(f.blocks)
+                A.contains(rendered, "override=off effective=off")
+                A.contains(rendered, "applies when the first turn starts")
+            end,
+        },
+        {
+            name = "saved cautious change advances its Context for the next turn while busy",
+            run = function()
+                local f = fixture({
+                    initial_agent = true,
+                    initial_state = "RequestingModel",
+                    freeze_driver = true,
+                    batches = {
+                        { { kind = "user_action", action = "text", text = ".cautious off" } },
+                        { { kind = "user_action", action = "submit-or-queue" } },
+                        { { kind = "user_action", action = "text", text = ".cautious" } },
+                        { { kind = "user_action", action = "submit-or-queue" } },
+                        { { kind = "user_action", action = "text", text = ".quit" } },
+                        { { kind = "user_action", action = "submit-or-queue" } },
+                    },
+                })
+                assert(f.coordinator:run())
+                A.contains(table.concat(f.log, "|"), "settings-cautious:false")
+                local rendered = A.render(f.blocks)
+                A.contains(rendered, "override=off effective=off")
+                A.contains(rendered, "applies on the next turn")
             end,
         },
         {

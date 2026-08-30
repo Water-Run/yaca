@@ -319,6 +319,18 @@ return {
                     enterable = true,
                     identity = { object = "workspace-1" },
                 }, { maximum_draft_bytes = 16384 }, publication))
+                A.truthy(draft.status().double_check_default)
+                A.equal(draft.status().double_check_override, "inherit")
+                local cautious_off = assert(draft.update({
+                    double_check_override = false,
+                }))
+                A.falsy(cautious_off.double_check)
+                A.falsy(cautious_off.double_check_override)
+                local cautious_reset = assert(draft.update({
+                    double_check_override = "inherit",
+                }))
+                A.truthy(cautious_reset.double_check)
+                A.equal(cautious_reset.double_check_override, "inherit")
                 assert(draft.update({
                     double_check = false,
                     double_check_goal = "check exact evidence",
@@ -655,6 +667,111 @@ return {
                 A.truthy(draft.close())
                 A.equal(observed.closes, 1)
                 A.equal(draft.status().lifecycle, "closed")
+            end,
+        },
+        {
+            name = "session override publishes Session audit view and exact Runtime receipt atomically",
+            run = function()
+                local publication, observed = fixture()
+                local draft = assert(session.new_draft(generation(), {
+                    path = "/work/project",
+                    enterable = true,
+                    identity = { object = "workspace-1" },
+                }, { maximum_draft_bytes = 16384 }, publication))
+                local first = assert(draft.begin_main("start durable work", "terminal"))
+                local next_generation = generation()
+                next_generation.id = "config-generation-8"
+                next_generation.effective_double_check = false
+                local record, receipt = publication.update_session({
+                    expected_context_generation = first.generation,
+                    expected_last_sequence = first.last_sequence,
+                    expected_manifest_digest = first.view_manifest_snapshot,
+                    generation = next_generation,
+                    name = "DoubleCheckOverride",
+                    value = false,
+                })
+                A.truthy(record)
+                A.equal(record.kind, "session-override")
+                A.equal(record.name, "DoubleCheckOverride")
+                A.equal(record.effective_at, "next-turn")
+                A.equal(record.replaces_manifest_digest, first.view_manifest_snapshot)
+                A.falsy(record.manifest_digest == first.view_manifest_snapshot)
+                A.equal(receipt.event_count, 2)
+                A.equal(receipt.first_sequence, 3)
+                A.equal(receipt.last_sequence, 4)
+                A.equal(receipt.previous_context_generation, 1)
+                A.equal(receipt.context_generation, 2)
+                A.equal(receipt.binding.expected_context_generation, 1)
+                A.equal(receipt.binding.events[1].type, "session_override")
+                A.equal(receipt.binding.events[1].turn_id, false)
+                A.equal(receipt.binding.events[2].type, "model_view_published")
+                A.equal(
+                    receipt.binding.events[2].fields.manifestDigest,
+                    record.manifest_digest
+                )
+                A.equal(publication.status().generation, 2)
+                A.equal(publication.status().event_count, 4)
+                A.equal(
+                    publication.status().view_manifest_snapshot,
+                    record.manifest_digest
+                )
+
+                local document = observed.published.document
+                A.falsy(document.session.double_check_override)
+                A.equal(document.facts[3].type, "session_override")
+                A.equal(document.facts[3].fields.name, "DoubleCheckOverride")
+                A.equal(document.facts[3].fields.effectiveAt, "next-turn")
+                A.equal(document.facts[4].type, "model_view_published")
+                A.equal(
+                    document.model_view.active_manifest.digest,
+                    record.manifest_digest
+                )
+                local view = assert(publication.resolve_view(record.manifest_digest))
+                A.contains(view.body, 'type="session_override"')
+                A.contains(view.body, "oldValueDigest")
+                A.contains(view.body, "newValueDigest")
+                local turn_context = assert(publication.turn_context({
+                    expected_context_generation = 2,
+                }))
+                A.falsy(turn_context.overrides.DoubleCheckOverride)
+                local turn = assert(publication.capture_turn({
+                    generation = next_generation,
+                    text = "continue with next-turn settings",
+                    source = "terminal",
+                    expected_context_generation = 2,
+                }))
+                A.falsy(turn.double_check)
+                A.equal(turn.view_manifest_ref, record.manifest_digest)
+
+                local unchanged, unchanged_error = publication.update_session({
+                    expected_context_generation = 2,
+                    expected_last_sequence = 4,
+                    expected_manifest_digest = record.manifest_digest,
+                    generation = next_generation,
+                    name = "DoubleCheckOverride",
+                    value = false,
+                })
+                A.falsy(unchanged)
+                A.equal(unchanged_error.code, "SessionOverrideUnchanged")
+                A.equal(publication.status().generation, 2)
+
+                local secret_generation = generation()
+                secret_generation.id = "config-generation-9"
+                secret_generation.effective_double_check = false
+                secret_generation.context_prompt = "registered-secret"
+                local secret, secret_error = publication.update_session({
+                    expected_context_generation = 2,
+                    expected_last_sequence = 4,
+                    expected_manifest_digest = record.manifest_digest,
+                    generation = secret_generation,
+                    name = "ContextPrompt",
+                    value = "registered-secret",
+                })
+                A.falsy(secret)
+                A.equal(secret_error.code, "RegisteredSecret")
+                A.equal(publication.status().generation, 2)
+                A.equal(observed.published.document, document)
+                A.truthy(draft.close())
             end,
         },
         {

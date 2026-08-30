@@ -1109,6 +1109,115 @@ return {
             end,
         },
         {
+            name = "session override advances the Runtime receipt without changing the active turn snapshot",
+            run = function()
+                local f = fixture()
+                assert(f.loop:begin_main(input(true)))
+                local opened = f.loop:status()
+                local record = {
+                    kind = "session-override",
+                    name = "DoubleCheckOverride",
+                    old_value_digest = "sha256:double-check-inherit",
+                    new_value_digest = "sha256:double-check-off",
+                    effective_at = "next-turn",
+                    replaces_manifest_digest = opened.active_view_manifest_ref,
+                    manifest_digest = "view-after-session-override",
+                    compaction_id = false,
+                    view_context_generation = opened.context_generation + 1,
+                }
+                local receipt = f.external_commit({
+                    {
+                        type = "session_override",
+                        turn_id = false,
+                        fields = {
+                            name = record.name,
+                            oldValueDigest = record.old_value_digest,
+                            newValueDigest = record.new_value_digest,
+                            effectiveAt = record.effective_at,
+                        },
+                    },
+                    {
+                        type = "model_view_published",
+                        turn_id = false,
+                        fields = {
+                            manifestDigest = record.manifest_digest,
+                            firstEventSeq = "1",
+                            lastEventSeq = tostring(
+                                opened.last_durable_sequence + 1
+                            ),
+                            replacesManifestDigest
+                                = record.replaces_manifest_digest,
+                        },
+                    },
+                }, "session-override:double-check")
+                local adopted = assert(f.loop:adopt_session_override(
+                    record,
+                    receipt
+                ))
+                A.equal(
+                    adopted.context_generation,
+                    opened.context_generation + 1
+                )
+                A.equal(adopted.last_sequence, opened.last_durable_sequence + 2)
+                A.equal(adopted.manifest_digest, record.manifest_digest)
+                A.equal(adopted.effective_at, "next-turn")
+                A.equal(
+                    f.loop:status().active_view_manifest_ref,
+                    record.manifest_digest
+                )
+                A.equal(f.model_starts[1].view_manifest_ref, "view-manifest")
+
+                -- The durable override says "off", but this turn captured
+                -- true before publication and must still request a review.
+                assert(f.loop:accept_model_response(finish(f.loop)))
+                A.equal(#f.review_starts, 1)
+                A.truthy(f.loop.capabilities.external_session_override_receipts)
+                A.truthy(f.loop.capabilities.external_session_override_fail_stop)
+
+                local forged = fixture()
+                assert(forged.loop:begin_main(input(false)))
+                local forged_opened = forged.loop:status()
+                local forged_record = clone(record)
+                forged_record.replaces_manifest_digest = "unbound-view"
+                forged_record.manifest_digest = "forged-session-view"
+                forged_record.view_context_generation
+                    = forged_opened.context_generation + 1
+                local forged_receipt = forged.external_commit({
+                    {
+                        type = "session_override",
+                        turn_id = false,
+                        fields = {
+                            name = forged_record.name,
+                            oldValueDigest = forged_record.old_value_digest,
+                            newValueDigest = forged_record.new_value_digest,
+                            effectiveAt = forged_record.effective_at,
+                        },
+                    },
+                    {
+                        type = "model_view_published",
+                        turn_id = false,
+                        fields = {
+                            manifestDigest = forged_record.manifest_digest,
+                            firstEventSeq = "1",
+                            lastEventSeq = tostring(
+                                forged_opened.last_durable_sequence + 1
+                            ),
+                            replacesManifestDigest
+                                = forged_record.replaces_manifest_digest,
+                        },
+                    },
+                }, "session-override:forged")
+                local continued, adopt_error
+                    = forged.loop:adopt_session_override(
+                        forged_record,
+                        forged_receipt
+                    )
+                A.falsy(continued)
+                A.equal(adopt_error.code, "AgentDurabilityFailure")
+                A.truthy(forged.loop:status().halted)
+            end,
+        },
+        {
             name = "compaction owns one exact Runtime lane and publishes one bound manifest",
             run = function()
                 local f = fixture()

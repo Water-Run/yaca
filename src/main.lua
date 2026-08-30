@@ -4064,6 +4064,7 @@ function M.start_published_agent(composed, chat, message, source)
         or type(composed.layout.config_path) ~= "string"
         or type(composed.publication.turn_context) ~= "function"
         or type(composed.publication.capture_turn) ~= "function"
+        or type(composed.publication.update_session) ~= "function"
         or type(chat) ~= "table"
         or (chat.kind ~= "run-chat" and chat.kind ~= "continue-chat")
         or chat.outcome ~= "ready"
@@ -4169,6 +4170,7 @@ function M.start_published_agent(composed, chat, message, source)
     if not first_ports then chat.draft.close(); return nil, first_ports_error end
     local catalog = new_turn_catalog(first_ports)
     local side_catalog = new_side_catalog()
+    local durable_settings_generation = generation
 
     local function reload_turn_snapshot(specification)
         local turn_context, context_error = composed.publication.turn_context({
@@ -4236,6 +4238,7 @@ function M.start_published_agent(composed, chat, message, source)
                 if not candidate then return nil, candidate_error end
                 local replaced, replace_error = catalog.replace(candidate)
                 if not replaced then return nil, replace_error end
+                durable_settings_generation = next_generation
             else
                 local candidate, candidate_error = build_side_activity(composed, {
                     generation = next_generation,
@@ -4302,6 +4305,187 @@ function M.start_published_agent(composed, chat, message, source)
         chat.draft.close()
         return nil, agent_error
     end
+    if type(loop.adopt_session_override) ~= "function"
+        or type(loop.fail_session_override_barrier) ~= "function"
+    then
+        return fail_after_loop(failure(
+            "InvalidAgentComposition",
+            "Runtime Session receipt ports are incomplete"
+        ))
+    end
+    local session_settings = {}
+
+    local function settings_projection(
+        active_generation,
+        overrides,
+        context_generation,
+        effective_at
+    )
+        return readonly({
+            context_generation = context_generation,
+            config_generation = active_generation.id,
+            model = active_generation.current_model,
+            permission = active_generation.current_permission,
+            double_check_default = active_generation.agent.double_check,
+            double_check_override = overrides.DoubleCheckOverride,
+            double_check_effective = active_generation.effective_double_check,
+            context_prompt = active_generation.context_prompt or "",
+            effective_at = effective_at,
+        }, "durable Session settings")
+    end
+
+    local function session_update_observation()
+        local runtime_status = loop:status()
+        if runtime_status.halted == true then
+            return nil, failure(
+                "SessionUpdateUnavailable",
+                "the halted Runtime cannot change Session settings"
+            )
+        end
+        if runtime_status.state == "Closing"
+            or runtime_status.compaction_state ~= "idle"
+            or runtime_status.compaction_preflight_state ~= "idle"
+        then
+            return nil, failure(
+                "SessionUpdateBusy",
+                "Session settings cannot change during close or compaction"
+            )
+        end
+        local turn_context, context_error = composed.publication.turn_context({
+            expected_context_generation = runtime_status.context_generation,
+        })
+        if not turn_context then return nil, context_error end
+        return runtime_status, turn_context
+    end
+
+    function session_settings:status()
+        local runtime_status, turn_context = session_update_observation()
+        if not runtime_status then return nil, turn_context end
+        return settings_projection(
+            durable_settings_generation,
+            turn_context.overrides,
+            runtime_status.context_generation,
+            "current"
+        )
+    end
+
+    function session_settings:update(change)
+        if type(change) ~= "table" then
+            return nil, failure(
+                "InvalidSessionUpdate",
+                "a typed Session setting change is required"
+            )
+        end
+        local allowed = { name = true, value = true, mode = true }
+        for key in pairs(change) do
+            if type(key) ~= "string" or not allowed[key] then
+                return nil, failure(
+                    "InvalidSessionUpdate",
+                    "Session setting change contains an unknown field"
+                )
+            end
+        end
+        local runtime_status, turn_context = session_update_observation()
+        if not runtime_status then return nil, turn_context end
+        local next_overrides = {}
+        for key, value in pairs(turn_context.overrides) do
+            next_overrides[key] = value
+        end
+        if change.name == "CurrentModel"
+            or change.name == "CurrentPermission"
+            or change.name == "DoubleCheckOverride"
+            or change.name == "ContextPrompt"
+        then
+            if change.mode ~= nil then
+                return nil, failure(
+                    "InvalidSessionUpdate",
+                    "this Session setting does not accept a mode"
+                )
+            end
+            next_overrides[change.name] = change.value
+        elseif change.name == "DoubleCheckGoalOverride" then
+            if change.mode == "inherit" then
+                next_overrides.DoubleCheckGoalOverride = "inherit"
+            elseif change.mode == "value" then
+                next_overrides.DoubleCheckGoalOverride = change.value
+            else
+                return nil, failure(
+                    "InvalidSessionUpdate",
+                    "DoubleCheck goal change requires inherit or value mode"
+                )
+            end
+        else
+            return nil, failure(
+                "InvalidSessionUpdate",
+                "Session setting name is unavailable"
+            )
+        end
+        local next_generation, generation_error = composed.config.reload_file(
+            composed.layout.config_path,
+            next_overrides
+        )
+        if not next_generation then return nil, generation_error end
+        local publish_called, record, receipt = pcall(
+            composed.publication.update_session,
+            {
+                expected_context_generation = runtime_status.context_generation,
+                expected_last_sequence = runtime_status.last_durable_sequence,
+                expected_manifest_digest = runtime_status.active_view_manifest_ref,
+                generation = next_generation,
+                name = change.name,
+                value = change.value,
+                mode = change.mode,
+            }
+        )
+        if not publish_called then
+            local _, barrier_error = loop:fail_session_override_barrier(
+                "publication-exception"
+            )
+            return nil, barrier_error or failure(
+                "SessionUpdateFailure",
+                "Session publication raised an exception"
+            )
+        end
+        if not record then
+            if type(receipt) == "table"
+                and receipt.code == "ContextPublicationUnknown"
+            then
+                local _, barrier_error = loop:fail_session_override_barrier(
+                    "publication-unknown"
+                )
+                return nil, barrier_error or receipt
+            end
+            return nil, receipt
+        end
+        local adoption_called, adopted, adoption_error = pcall(
+            loop.adopt_session_override,
+            loop,
+            record,
+            receipt
+        )
+        if not adoption_called then
+            local _, barrier_error = loop:fail_session_override_barrier(
+                "adoption-exception"
+            )
+            return nil, barrier_error or failure(
+                "SessionUpdateFailure",
+                "Session receipt adoption raised an exception"
+            )
+        end
+        if not adopted then return nil, adoption_error end
+        durable_settings_generation = next_generation
+        return settings_projection(
+            next_generation,
+            next_overrides,
+            adopted.context_generation,
+            adopted.effective_at
+        )
+    end
+
+    session_settings = readonly(
+        session_settings,
+        "production Session settings owner"
+    )
     local compaction_owner, compaction_error = new_production_compaction(
         composed,
         catalog,
@@ -4335,6 +4519,7 @@ function M.start_published_agent(composed, chat, message, source)
         driver = driver,
         session = agent_session,
         tools = catalog.tools,
+        settings = session_settings,
         compaction = compaction_owner,
         draft = chat.draft,
         generation = generation,
@@ -4349,6 +4534,7 @@ function M.start_published_agent(composed, chat, message, source)
             approvals = true,
             later_turn_snapshots = true,
             side = true,
+            session_settings = true,
             compaction = true,
             target_qualified = false,
         }, "published Agent capabilities"),
@@ -4422,6 +4608,9 @@ local function coordinator_ports(ports)
             or type(ports.initial_agent.loop) ~= "table"
             or type(ports.initial_agent.driver) ~= "table"
             or type(ports.initial_agent.session) ~= "table"
+            or type(ports.initial_agent.settings) ~= "table"
+            or type(ports.initial_agent.settings.status) ~= "function"
+            or type(ports.initial_agent.settings.update) ~= "function"
             or type(ports.initial_agent.tools) ~= "table"
             or type(ports.initial_agent.compaction) ~= "table"
             or type(ports.initial_agent.draft) ~= "table"
@@ -5224,6 +5413,97 @@ function M.new_application_coordinator(ports, options)
         return publish({ kind = "details", id = record.id, lines = lines })
     end
 
+    local function cautious_word(value)
+        if value == true then return "on" end
+        if value == false then return "off" end
+        return tostring(value)
+    end
+
+    local function publish_cautious(values, suffix)
+        local effective = values.double_check_effective
+        if effective == nil then effective = values.double_check end
+        local text = "Cautious mode: default="
+            .. cautious_word(values.double_check_default)
+            .. " override=" .. cautious_word(values.double_check_override)
+            .. " effective=" .. cautious_word(effective)
+            .. "."
+        if suffix then text = text .. " " .. suffix end
+        return publish_status(text)
+    end
+
+    local function cautious_status()
+        if agent then
+            return coordinator_call(
+                agent.settings,
+                "status",
+                "SessionUpdateFailure",
+                "saved Session cautious status"
+            )
+        end
+        return coordinator_function(
+            admitted_ports.chat.draft.status,
+            "SessionUpdateFailure",
+            "unsaved Session cautious status"
+        )
+    end
+
+    local function apply_cautious(request)
+        local current, status_error = cautious_status()
+        if not current then return nil, status_error end
+        if request.operation == "status" then
+            return publish_cautious(current)
+        end
+        local value
+        if request.operation == "on" then
+            value = true
+        elseif request.operation == "off" then
+            value = false
+        elseif request.operation == "toggle" then
+            local effective = current.double_check_effective
+            if effective == nil then effective = current.double_check end
+            if type(effective) ~= "boolean" then
+                return nil, failure(
+                    "SessionUpdateFailure",
+                    "current cautious mode is not a boolean"
+                )
+            end
+            value = not effective
+        elseif request.operation == "reset" then
+            value = "inherit"
+        else
+            return nil, failure(
+                "InvalidSessionUpdate",
+                "unknown cautious operation"
+            )
+        end
+        if current.double_check_override == value then
+            return publish_cautious(current)
+        end
+        local updated, update_error
+        if agent then
+            updated, update_error = coordinator_call(
+                agent.settings,
+                "update",
+                "SessionUpdateFailure",
+                "saved Session cautious update",
+                { name = "DoubleCheckOverride", value = value }
+            )
+        else
+            updated, update_error = coordinator_function(
+                admitted_ports.chat.draft.update,
+                "SessionUpdateFailure",
+                "unsaved Session cautious update",
+                { double_check_override = value }
+            )
+        end
+        if not updated then return nil, update_error end
+        return publish_cautious(
+            updated,
+            agent and "The change applies on the next turn."
+                or "The change applies when the first turn starts."
+        )
+    end
+
     local function stage_and_apply(method, message)
         local staged, stage_error = coordinator_call(
             agent.session,
@@ -5451,6 +5731,9 @@ function M.new_application_coordinator(ports, options)
             or type(next_agent.loop) ~= "table"
             or type(next_agent.driver) ~= "table"
             or type(next_agent.session) ~= "table"
+            or type(next_agent.settings) ~= "table"
+            or type(next_agent.settings.status) ~= "function"
+            or type(next_agent.settings.update) ~= "function"
             or type(next_agent.tools) ~= "table"
             or type(next_agent.compaction) ~= "table"
             or type(next_agent.draft) ~= "table"
@@ -5652,6 +5935,9 @@ function M.new_application_coordinator(ports, options)
             or type(constructed.loop) ~= "table"
             or type(constructed.driver) ~= "table"
             or type(constructed.session) ~= "table"
+            or type(constructed.settings) ~= "table"
+            or type(constructed.settings.status) ~= "function"
+            or type(constructed.settings.update) ~= "function"
             or type(constructed.tools) ~= "table"
             or type(constructed.compaction) ~= "table"
             or type(constructed.draft) ~= "table"
@@ -5764,6 +6050,7 @@ function M.new_application_coordinator(ports, options)
         end
         if request.id == "help-chat" then return show_help(request.topic) end
         if request.id == "details" then return show_details(request.error_id) end
+        if request.id == "cautious" then return apply_cautious(request) end
         if request.id == "select-context" then return switch_context(request) end
         if not agent then
             if request.id == "queue-add" then
@@ -6383,6 +6670,9 @@ function M.new_context_switcher(initial_composed, runtime, dependencies)
             or type(next_agent.loop) ~= "table"
             or type(next_agent.driver) ~= "table"
             or type(next_agent.session) ~= "table"
+            or type(next_agent.settings) ~= "table"
+            or type(next_agent.settings.status) ~= "function"
+            or type(next_agent.settings.update) ~= "function"
             or type(next_agent.tools) ~= "table"
             or type(next_agent.compaction) ~= "table"
             or type(next_agent.draft) ~= "table"

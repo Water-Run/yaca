@@ -20,14 +20,15 @@ yaca 当前已有可执行 Lua 入口和平台无关的通用 Agent 核心；代
 - 公开 `--continue` 已接到 existing Context core：selector 必须精确解析并在加 writer 前后复核，调用 workspace 必须与 Context 镜像路径记录的 workspace 具有同一逻辑键和文件系统 identity；打开后先执行保守恢复门禁、整份配置重载与 self-test，再以 Idle Agent 恢复 event/config/ModelView 及八类 serial 水位，绝不自动重放未完成工作。跨 workspace 返回 typed confirmation requirement；存在 unfinished turn、active queue item、未决 operation/tool、unknown terminal outcome 或 pending compaction 时拒绝自动继续并释放 writer。
 - chat `.context` 已复用同一 reopen core：无参数只投影最多 32 行的 bounded recent Catalog；有 selector 时先只读解析并复核目标、冻结其精确 hash/逻辑路径，只有当前 Agent 为 Idle/WaitingUser 且 queue/side/approval/compaction 全部安全时才关闭旧 owner，随后只按该 hash 在全新 composition 中再次解析/复核并打开。关闭后的 target/config/lock 竞态会作为 fatal switch failure 恢复终端并退出，绝不按短名称改开替代对象；未保存 chat 切换不会发布空 Context。
 - chat `.details` 已接到 ApplicationCoordinator：每次交互错误分配当前进程内单调 `error-N`，只保留最多 64 条经控制字节清理且分别限长的 code/message/suggestion；无参数读取最新项，显式 ID 精确读取，过期 ID 返回 typed `NotFound`，不保存 raw exception、Tool body 或 transport payload。
+- chat `.cautious status|on|off|toggle|reset` 已接到唯一 Session owner：首条消息前只更新有界内存草稿；保存后先用完整 Context overrides 重载一个 Agent-ready ConfigGeneration，再由单一 Context writer 在同一 XML generation 追加不含明文值的 `session_override` 与匹配 `model_view_published`，最后由 AgentLoop 精确采纳双事件回执。当前 turn 的 Model/Permission/Prompt/DoubleCheck snapshot 不热换，新值只从下一 turn 生效；plain 与 compacted active ModelView 都保持原 publication/compaction identity 链，回执失配会 fail-stop。
 - 最小发行 allowlist、component/license manifest、SPDX SBOM、package planner、资源 overlay 和资源门禁测试 Harness。
 - 运行时 curl config 已逐请求用锁定 CLI 可解析的 standalone/no-option 语法显式固定 HTTP/1.1、TLS 1.2+、服务端/HTTPS 代理随包 CA 校验；代理 TLS 下限由 `proxy-tlsv1` 与只启用 TLS 1.2/1.3 的锁定 Mbed TLS 后端共同闭合。代理/主机 DNS 和普通握手只在无 canonical event 时有界重试，证书/CA/CRL/issuer/pin/status 错误立即终止。真实目标 TLS/代理资格仍待 C32。
-- 受 `.tools/run_with_resource_guard.sh` 保护的完整平台无关 Lua suite 当前为 `426/426`；这不是三目标资格证明。
+- 受 `.tools/run_with_resource_guard.sh` 保护的完整平台无关 Lua suite 当前为 `433/433`；这不是三目标资格证明。
 
 仍缺失或不得宣称完成：
 
 - `--continue` 与同 workspace `.context` 已接通，但显式跨 workspace 确认/rebind 尚未开放；三目标 token/资源阈值仍待校准。
-- `.cautious`、`.model`、`.prompt` 等注册但尚未全部接通 controller 的交互管理动作仍须逐项以 registry → dispatcher → production port → terminal result 证明；parser 可识别不等于 action 已实现。
+- `.cautious` 已接通；`.model`、`.prompt` 等注册但尚未接通 controller 的交互管理动作仍须逐项以 registry → dispatcher → production port → terminal result 证明；parser 可识别不等于 action 已实现。
 - 旧环境网络/HTTPS 的源码锁、XP compatibility patch、静态 import/CRT 黑名单和最小协议闭包已有可重复候选证据；仍须在真实 XP/Win7/CentOS 7 证明 TLS/CA、显式代理、redirect/retry/cancel、旧 CMD 路径与错误分类，不能据此开放 Release Gate R。
 - C32 的三个真实 target qualification、C33 的干净机发布旅程/零表面、C34 的最终 SHA-256/license/SBOM/build/test evidence 尚未执行。
 - README 中任何能力声明仍必须受实现和 target evidence 约束；现代 Linux fake/native 边界通过不能外推为 XP、Win7 或 CentOS 7 支持。
