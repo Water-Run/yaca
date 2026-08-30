@@ -226,6 +226,7 @@ local function fixture(settings, option_overrides)
         tool_starts = tool_starts,
         review_starts = review_starts,
         view_prepares = view_prepares,
+        external_commit = external_commit,
         advance = function(delta) now = now + delta end,
     }
 end
@@ -707,6 +708,214 @@ return {
                 A.equal(trace(f.loop).tool_results[1].kind, "real-success")
                 assert(f.loop:accept_model_response(finish(f.loop)))
                 A.equal(f.loop:status().last_outcome, "completed")
+            end,
+        },
+        {
+            name = "compaction owns one exact Runtime lane and publishes one bound manifest",
+            run = function()
+                local f = fixture()
+                assert(f.loop:begin_main(input(false)))
+                assert(f.loop:accept_model_response(finish(f.loop)))
+                local opened = f.loop:status()
+                local admission, admission_error = f.loop:begin_compaction({
+                    mode = "manual",
+                    expected_context_generation = opened.context_generation,
+                    expected_last_sequence = opened.last_durable_sequence,
+                    expected_manifest_digest = opened.active_view_manifest_ref,
+                })
+                A.truthy(
+                    admission,
+                    admission_error and (admission_error.code .. ": "
+                        .. admission_error.message)
+                )
+                A.equal(admission.manifest_digest, "view-manifest")
+                A.equal(f.loop:status().compaction_state, "active")
+
+                local started, busy_error = f.loop:begin_main(input(
+                    false,
+                    opened.context_generation
+                ))
+                A.falsy(started)
+                A.equal(busy_error.code, "CompactionBusy")
+                local cancelled, cancel_error = f.loop:cancel("wrong-owner")
+                A.falsy(cancelled)
+                A.equal(cancel_error.code, "CompactionBusy")
+                local closed, close_error = f.loop:close("wrong-owner")
+                A.falsy(closed)
+                A.equal(close_error.code, "CompactionBusy")
+
+                local request_record = {
+                    kind = "compaction-request",
+                    compaction_id = "compaction-1",
+                    request_id = "compaction-1:request:1",
+                    attempt = 1,
+                    expected_context_generation = opened.context_generation,
+                    expected_manifest_digest = "view-manifest",
+                }
+                local request_receipt = f.external_commit({ {
+                    type = "model_request",
+                    turn_id = false,
+                    fields = {
+                        requestId = request_record.request_id,
+                        purpose = "compaction",
+                        viewManifestRef = "view-manifest",
+                        attemptId = "1",
+                    },
+                } }, "compaction:request")
+                assert(f.loop:adopt_compaction_receipt(
+                    request_record,
+                    request_receipt
+                ))
+                local after_request = f.loop:status()
+
+                local response_record = {
+                    kind = "compaction-response",
+                    compaction_id = "compaction-1",
+                    request_id = request_record.request_id,
+                    attempt = 1,
+                    canonical_body = "canonical-summary",
+                    canonical_digest = "summary-digest",
+                    expected_context_generation = after_request.context_generation,
+                    expected_manifest_digest = "view-manifest",
+                }
+                local response_receipt = f.external_commit({ {
+                    type = "model_message",
+                    turn_id = false,
+                    fields = {
+                        requestId = request_record.request_id,
+                        status = "complete",
+                        body = "canonical-summary",
+                        digest = "summary-digest",
+                    },
+                } }, "compaction:response")
+                assert(f.loop:adopt_compaction_receipt(
+                    response_record,
+                    response_receipt
+                ))
+                local after_response = f.loop:status()
+
+                local publication_record = {
+                    kind = "compaction-publication",
+                    compaction_id = "compaction-1",
+                    request_id = request_record.request_id,
+                    summary_digest = "summary-digest",
+                    expected_context_generation = after_response.context_generation,
+                    expected_manifest_digest = "view-manifest",
+                    manifest = { digest = "view-compacted" },
+                }
+                local publication_receipt = f.external_commit({
+                    {
+                        type = "compaction",
+                        turn_id = false,
+                        fields = {
+                            compactionId = "compaction-1",
+                            status = "ok",
+                            summaryDigest = "summary-digest",
+                            manifestDigest = "view-compacted",
+                        },
+                    },
+                    {
+                        type = "model_view_published",
+                        turn_id = false,
+                        fields = {
+                            compactionId = "compaction-1",
+                            manifestDigest = "view-compacted",
+                            replacesManifestDigest = "view-manifest",
+                        },
+                    },
+                }, "compaction:publication")
+                assert(f.loop:adopt_compaction_receipt(
+                    publication_record,
+                    publication_receipt
+                ))
+                local published = f.loop:status()
+                A.equal(published.active_view_manifest_ref, "view-compacted")
+
+                local forged, forged_error = f.loop:finish_compaction({
+                    outcome = "completed",
+                    compaction_id = "compaction-other",
+                    expected_context_generation = published.context_generation,
+                    expected_last_sequence = published.last_durable_sequence,
+                    expected_manifest_digest = published.active_view_manifest_ref,
+                })
+                A.falsy(forged)
+                A.equal(forged_error.code, "CompactionSettlementMismatch")
+                local settlement = assert(f.loop:finish_compaction({
+                    outcome = "completed",
+                    compaction_id = "compaction-1",
+                    expected_context_generation = published.context_generation,
+                    expected_last_sequence = published.last_durable_sequence,
+                    expected_manifest_digest = published.active_view_manifest_ref,
+                }))
+                A.equal(settlement.manifest_digest, "view-compacted")
+                A.equal(f.loop:status().compaction_state, "idle")
+            end,
+        },
+        {
+            name = "out-of-order compaction persistence is fail-stop and cannot settle",
+            run = function()
+                local f = fixture()
+                assert(f.loop:begin_main(input(false)))
+                assert(f.loop:accept_model_response(finish(f.loop)))
+                local opened = f.loop:status()
+                local admission, admission_error = f.loop:begin_compaction({
+                    mode = "manual",
+                    expected_context_generation = opened.context_generation,
+                    expected_last_sequence = opened.last_durable_sequence,
+                    expected_manifest_digest = opened.active_view_manifest_ref,
+                })
+                A.truthy(
+                    admission,
+                    admission_error and (admission_error.code .. ": "
+                        .. admission_error.message)
+                )
+                local forged_record = {
+                    kind = "compaction-publication",
+                    compaction_id = "compaction-1",
+                    request_id = "compaction-1:request:1",
+                    summary_digest = "summary-digest",
+                    expected_context_generation = opened.context_generation,
+                    expected_manifest_digest = opened.active_view_manifest_ref,
+                    manifest = { digest = "forged-view" },
+                }
+                local forged_receipt = f.external_commit({
+                    {
+                        type = "compaction",
+                        turn_id = false,
+                        fields = {
+                            compactionId = "compaction-1",
+                            status = "ok",
+                            summaryDigest = "summary-digest",
+                            manifestDigest = "forged-view",
+                        },
+                    },
+                    {
+                        type = "model_view_published",
+                        turn_id = false,
+                        fields = {
+                            compactionId = "compaction-1",
+                            manifestDigest = "forged-view",
+                            replacesManifestDigest = opened.active_view_manifest_ref,
+                        },
+                    },
+                }, "compaction:forged-publication")
+                local continued, barrier_error = f.loop:adopt_compaction_receipt(
+                    forged_record,
+                    forged_receipt
+                )
+                A.falsy(continued)
+                A.equal(barrier_error.code, "AgentDurabilityFailure")
+                A.truthy(f.loop:status().halted)
+                A.equal(f.loop:status().compaction_state, "active")
+                local settled, settlement_error = f.loop:finish_compaction({
+                    outcome = "unknown",
+                    compaction_id = false,
+                    expected_context_generation = opened.context_generation,
+                    expected_last_sequence = opened.last_durable_sequence,
+                    expected_manifest_digest = opened.active_view_manifest_ref,
+                })
+                A.falsy(settled)
+                A.equal(settlement_error.code, "AgentDurabilityFailure")
             end,
         },
         {

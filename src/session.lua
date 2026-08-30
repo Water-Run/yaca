@@ -519,7 +519,7 @@ local function validate_publication_ports(ports)
         filesystem = {
             "direct_inspect", "direct_reverify", "make_directory", "flush_directory",
         },
-        schema = { "build", "append_events" },
+        schema = { "build", "append_events", "encode" },
         store = { "create_writer", "publish", "close_writer" },
         path = { "to_logical", "validate_context_name", "context_hash" },
         safety = { "binding_digest", "digest" },
@@ -1413,6 +1413,131 @@ function M.new_context_publication(ports, options)
         }, "durable Runtime turn snapshot")
     end
 
+    ---Returns the exact immutable Context and active Model-view facts needed
+    -- to plan compaction. The caller supplies the complete Runtime waterline;
+    -- a stale generation, sequence, or manifest fails before XML encoding.
+    function service.compaction_snapshot(observation)
+        if closed then
+            return nil, failure(
+                "ContextPublicationClosed",
+                "Context compaction snapshot is closed"
+            )
+        end
+        if journal_failure then return nil, journal_failure end
+        if not active or not active.document then
+            return nil, failure(
+                "ContextNotPublished",
+                "Context compaction snapshot has no durable source"
+            )
+        end
+        local allowed = {
+            expected_context_generation = true,
+            expected_last_sequence = true,
+            expected_manifest_digest = true,
+        }
+        if type(observation) ~= "table" then
+            return nil, failure(
+                "InvalidCompactionSnapshot",
+                "Context compaction observation is required"
+            )
+        end
+        for key in pairs(observation) do
+            if type(key) ~= "string" or not allowed[key] then
+                return nil, failure(
+                    "InvalidCompactionSnapshot",
+                    "Context compaction observation is ambiguous"
+                )
+            end
+        end
+        local document = active.document
+        local manifest = document.model_view.active_manifest
+        if observation.expected_context_generation ~= document.generation
+            or observation.expected_last_sequence ~= document.event_count
+            or observation.expected_manifest_digest ~= manifest.digest
+        then
+            return nil, failure(
+                "StaleCompactionSnapshot",
+                "Context compaction observation does not bind the active Context"
+            )
+        end
+        local encoded, encode_error = schema.encode(document)
+        if not encoded then return nil, encode_error end
+        if #encoded > admitted.maximum_compaction_source_bytes then
+            return nil, failure(
+                "CompactionInputLimit",
+                "canonical Context exceeds the compaction snapshot byte cap"
+            )
+        end
+        local context_digest, digest_error = safety.digest(encoded)
+        if type(context_digest) ~= "string" or context_digest == "" then
+            return nil, digest_error or failure(
+                "CompactionDigestFailure",
+                "canonical Context digest is unavailable"
+            )
+        end
+        local view, view_error = service.resolve_view(manifest.digest)
+        if not view then return nil, view_error end
+
+        local accepted = {}
+        local initial_serial = 0
+        for _, record in ipairs(document.model_view.compaction_records) do
+            accepted[record.id] = record.status == "ok"
+            local serial = record.id:match("^compaction%-([1-9][0-9]*)$")
+            serial = tonumber(serial)
+            if valid_integer(serial, 1) and serial > initial_serial then
+                initial_serial = serial
+            end
+        end
+        local corrections = {}
+        for _, event in ipairs(document.facts) do
+            local fields = event.fields
+            if event.type == "warning"
+                and type(fields.errorId) == "string"
+                and fields.errorId:match("^summary%-correction%-")
+                and accepted[fields.causeId]
+                and valid_text(fields.summary, admitted.maximum_model_view_bytes)
+                and fields.summary ~= ""
+            then
+                corrections[#corrections + 1] = readonly({
+                    correction_id = fields.errorId,
+                    compaction_id = fields.causeId,
+                    text = fields.summary,
+                }, "durable compaction correction")
+            end
+            if event.type == "compaction" then
+                local serial = fields.compactionId
+                    and fields.compactionId:match("^compaction%-([1-9][0-9]*)$")
+                serial = tonumber(serial)
+                if valid_integer(serial, 1) and serial > initial_serial then
+                    initial_serial = serial
+                end
+            end
+        end
+        local included_ranges = {}
+        if manifest.last_event_seq > 0 then
+            included_ranges[1] = readonly({
+                first = manifest.first_event_seq,
+                last = manifest.last_event_seq,
+            }, "active Model-view range")
+        end
+        return readonly({
+            document = document,
+            context_digest = context_digest,
+            context_generation = document.generation,
+            last_sequence = document.event_count,
+            manifest_digest = manifest.digest,
+            manifest_compaction_id = manifest.compaction_id or false,
+            view_body_bytes = #view.body,
+            included_ranges = readonly(
+                included_ranges,
+                "active Model-view ranges"
+            ),
+            corrections = readonly(corrections, "durable compaction corrections"),
+            initial_serial = initial_serial,
+            binding = observation,
+        }, "durable compaction snapshot")
+    end
+
     ---Commits one AgentLoop batch through the already-owned writer lease. Each
     -- acknowledged batch is a fully validated replacement generation.
     function service.commit(batch)
@@ -1934,6 +2059,7 @@ function M.new_context_publication(ports, options)
                 binding = record,
                 previous_context_generation = receipt.previous_context_generation,
                 context_generation = receipt.context_generation,
+                runtime_receipt = receipt,
             }
             if publishing then
                 values.previous_manifest_digest = previous_manifest

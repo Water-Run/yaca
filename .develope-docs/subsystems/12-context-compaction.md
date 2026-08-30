@@ -2,7 +2,7 @@
 
 更新日期：2026-08-30
 
-状态：**核心实现完成，生产入口接线中** — model-view/summary/atomic-group/admission、no-tool Model port、Context journal、原子 publication 与 accepted-view 恢复已实现；公开 `.compact`、自动触发、pending lifecycle 恢复和 target calibration 尚待闭合
+状态：**手工生产链路完成，自动链路与目标校准待闭合** — model-view/summary/atomic-group/admission、no-tool Model port、Context journal、原子 publication、accepted-view 恢复、公开 `.compact`、STATUS/cancel 和 Runtime receipt gate 已实现；自动触发、pending lifecycle 跨进程恢复和 target calibration 尚待闭合
 
 > D-063：XML **存储** hard limit 触顶时的解脱主路径是 **新开对话 + 接盘 Prompt**，不是依赖 compact 缩小事实 XML。compact 仍只服务 model view。
 
@@ -91,7 +91,11 @@ summary 同时保存 source event range/digest、生成 Model、完整 Prompt/vi
 - canonical source、structured summary 和 manifest 由 publication 端独立重建并校验，不能信任上游自报的 `canonical_bytes`/digest。
 - accepted terminal event、`CompactionRecord` 与 `model_view_published` 必须在同一 replacement generation 内匹配；错误、取消、伪造 manifest 或发布故障均保留原 XML 与 sole active manifest。
 - cache miss/重启读取 accepted bracket 时会复核 source/summary digest、相邻 publication 和 active manifest，再重建唯一 summary prefix；后续事实作为 tail 追加，内部 compaction bracket 不进入 main Model view。
-- 受 `.tools/run_with_resource_guard.sh` 保护的完整 Lua suite 为 `391/391`。这只证明平台无关核心与 fake/native adapter 边界，不能替代 XP/Win7/CentOS 7 target 证据，也不能证明尚未接线的公开 `.compact`。
+- production owner 已把当前 generation 的 no-tool compaction Model、Context journal 与 Runtime external-receipt gate 组合起来；每次 durable record 都先由 Runtime 采纳精确 sequence/generation/manifest 水位，才能继续 lifecycle。
+- Runtime 对 compaction 使用独占 lane 和 `opened -> request -> response|retry|cancelling -> published|terminal` 相位；普通 main、普通 cancel 和 close 不能越过该 owner。只有同一 `compaction_id` 的 accepted publication 能结算 `completed`，乱序 publication 或含混 journal receipt 一律 fail-stop。
+- ApplicationCoordinator 已执行 `.compact`，在 STATUS 显示 state/circuit，活动期间只放行 status/help/cancel；退出先收口 compaction，再关闭 Agent session 和唯一 Context writer。
+- production composition 测试使用真实 `compact` service 跑通手工触发、摘要 Model response、response receipt、原子 publication 和 Runtime terminal settlement，并注入 journal rejection 证明 lane 不会被错误释放。
+- 受 `.tools/run_with_resource_guard.sh` 保护的完整 Lua suite 为 `396/396`。这只证明平台无关核心与 fake/native adapter 边界，不能替代 XP/Win7/CentOS 7 target 证据，也不证明尚未实现的自动触发或 pending lifecycle 跨进程恢复。
 
 ## 仍需技术证明
 
@@ -185,6 +189,6 @@ summary 同时保存 source event range/digest、生成 Model、完整 Prompt/vi
 - [x] no-tool Model compaction builder/port 与完整性拒绝
 - [x] Context compaction journal、accepted summary + ModelView 原子 publication
 - [x] accepted view 的 XML 校验、cache-miss 重建与后续 tail 保留
-- [ ] ApplicationCoordinator `.compact`、STATUS/cancel 与 production transport composition
+- [x] ApplicationCoordinator `.compact`、STATUS/cancel 与 production transport composition
 - [ ] 自动阈值、pending lifecycle/circuit 跨进程恢复
 - [ ] token 估算与三目标阈值数值（TP/C32）

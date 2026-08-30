@@ -6,6 +6,7 @@ Description: Routes the offline bootstrap lifecycle from the unique composition 
 ]]
 
 local MODULE_NAME = ...
+local compact = require("compact")
 local session = require("session")
 
 local M = {}
@@ -1562,6 +1563,51 @@ local function build_turn_ports(composed, shared, turn)
     }, activity_options)
     if not model_activity then return nil, model_activity_error end
 
+    local compaction_builder, compaction_builder_error
+        = model_module.new_compaction_request_builder({
+            adapter = composed.model_adapter,
+            prompt = contexts.prompt,
+            generation = generation,
+            codec = shared.codec,
+            safety = contexts.safety,
+        }, {
+            model_name = turn.model,
+            permission_name = turn.permission,
+            config_snapshot = turn.config_snapshot,
+            model_snapshot = turn.model_snapshot,
+            prompt_snapshot = turn.prompt_snapshot,
+            context_prompt = turn.context_prompt,
+            default_connect_timeout_ms = 120000,
+            default_request_timeout_ms = 3600000,
+            default_retry_base_delay_ms = 1000,
+            default_max_output_tokens = 4096,
+            maximum_source_bytes = 16 * 1024 * 1024,
+            maximum_summary_bytes = 65536,
+            maximum_correction_bytes = 65536,
+        })
+    if not compaction_builder then return nil, compaction_builder_error end
+    local compaction_activity, compaction_activity_error = model_module.new_activity({
+        adapter = composed.model_adapter,
+        transport = composed.network,
+        safety = contexts.safety,
+        clock = composed.backend.clock_port,
+        requests = compaction_builder,
+    }, activity_options)
+    if not compaction_activity then return nil, compaction_activity_error end
+    local compaction_model, compaction_model_error = model_module.new_compaction_port({
+        activity = compaction_activity,
+        builder = compaction_builder,
+        safety = contexts.safety,
+        codec = shared.codec,
+        summary = readonly({
+            encode = compact.encode_summary,
+        }, "structured compaction summary encoder"),
+    }, {
+        maximum_poll_events = 128,
+        maximum_summary_bytes = 65536,
+    })
+    if not compaction_model then return nil, compaction_model_error end
+
     local review_builder, review_builder_error = model_module.new_review_request_builder({
         adapter = composed.model_adapter,
         prompt = contexts.prompt,
@@ -1606,6 +1652,16 @@ local function build_turn_ports(composed, shared, turn)
         model = model_activity,
         tools = tool_port,
         reviews = review_port,
+        compaction = compaction_model,
+        compaction_binding = readonly({
+            generation_id = generation.id,
+            model_name = turn.model,
+            permission_name = turn.permission,
+            config_snapshot = turn.config_snapshot,
+            model_snapshot = turn.model_snapshot,
+            prompt_snapshot = turn.prompt_snapshot,
+            context_prompt = turn.context_prompt,
+        }, "generation-bound compaction binding"),
     }
 end
 
@@ -1819,14 +1875,23 @@ local function new_turn_catalog(initial)
         poll = function(...) return invoke("reviews", "poll", ...) end,
         status = function(...) return invoke("reviews", "status", ...) end,
     }, "generation-bound review port")
+    local compaction = readonly({
+        start = function(...) return invoke("compaction", "start", ...) end,
+        cancel = function(...) return invoke("compaction", "cancel", ...) end,
+        poll = function(...) return invoke("compaction", "poll", ...) end,
+        status = function(...) return invoke("compaction", "status", ...) end,
+    }, "generation-bound compaction Model port")
     local catalog = {}
 
     function catalog.idle()
         local model_ok, model_status = pcall(current.model.status)
         local review_ok, review_status = pcall(current.reviews.status)
+        local compact_ok, compact_status = pcall(current.compaction.status)
         local tool_ok, tool_handle = pcall(current.tools.active_handle)
         return model_ok and type(model_status) == "table" and model_status.state == "idle"
             and review_ok and type(review_status) == "table" and review_status.state == "idle"
+            and compact_ok and type(compact_status) == "table"
+            and compact_status.state == "idle"
             and tool_ok and tool_handle == false
     end
 
@@ -1837,6 +1902,20 @@ local function new_turn_catalog(initial)
                 "a new generation cannot replace active turn activities"
             )
         end
+        if type(candidate) ~= "table"
+            or type(candidate.generation) ~= "table"
+            or type(candidate.compaction) ~= "table"
+            or type(candidate.compaction.start) ~= "function"
+            or type(candidate.compaction.cancel) ~= "function"
+            or type(candidate.compaction.poll) ~= "function"
+            or type(candidate.compaction.status) ~= "function"
+            or type(candidate.compaction_binding) ~= "table"
+        then
+            return nil, failure(
+                "InvalidTurnActivities",
+                "replacement generation omits its compaction Model port"
+            )
+        end
         current = candidate
         return true
     end
@@ -1845,10 +1924,548 @@ local function new_turn_catalog(initial)
         return current.generation
     end
 
+    function catalog.compaction_binding()
+        return current.compaction_binding
+    end
+
     catalog.model = model
     catalog.tools = tools
     catalog.reviews = reviews
+    catalog.compaction = compaction
     return readonly(catalog, "production turn catalog")
+end
+
+local function compaction_prompt_upper_bound(generation, binding)
+    local model = generation.models[binding.model_name]
+    local permission = generation.permissions[binding.permission_name]
+    if type(generation.general) ~= "table"
+        or type(model) ~= "table"
+        or type(permission) ~= "table"
+    then
+        return nil, failure(
+            "CompactionSnapshotUnavailable",
+            "compaction Prompt components are unavailable"
+        )
+    end
+    local values = {
+        generation.general.system_prompt,
+        model.system_prompt,
+        permission.system_prompt,
+        binding.context_prompt,
+    }
+    local total = 4096
+    for _, value in ipairs(values) do
+        if type(value) ~= "string" then
+            return nil, failure(
+                "CompactionSnapshotUnavailable",
+                "compaction Prompt component is not frozen text"
+            )
+        end
+        total = total + #value
+    end
+    return total
+end
+
+local function compaction_options(generation, binding, initial_serial)
+    local model = generation.models[binding.model_name]
+    local configured_threshold = generation.agent
+        and generation.agent.compact_threshold
+    if type(model) ~= "table"
+        or not valid_integer(model.context_length, 1)
+        or (configured_threshold ~= false
+            and (type(configured_threshold) ~= "number"
+                or configured_threshold <= 0
+                or configured_threshold > 1))
+    then
+        return nil, failure(
+            "CompactionCapacityUnknown",
+            "the current Model window or compaction threshold is unavailable"
+        )
+    end
+    local threshold = configured_threshold == false and 0.75
+        or configured_threshold
+    local numerator = math.floor(threshold * 1000 + 0.5)
+    if numerator < 1 then numerator = 1 end
+    if numerator >= 1000 then numerator = 999 end
+    local maximum_view_tokens = math.min(model.context_length, 262144)
+    if maximum_view_tokens < 2 then
+        return nil, failure(
+            "CompactionCapacityUnknown",
+            "the current Model window cannot admit a structured summary"
+        )
+    end
+    local output_tokens = model.max_output_tokens or 4096
+    output_tokens = math.min(output_tokens, 4096, maximum_view_tokens - 1)
+    return {
+        automatic_enabled = configured_threshold ~= false,
+        output_tokens = output_tokens,
+        service = {
+            maximum_identifier_bytes = 256,
+            initial_serial = initial_serial,
+            manifest = {
+                snapshot_id = "compaction-release-v1",
+                builder_algorithm = "structured-prefix-v1",
+                summary_schema = "1",
+                maximum_events = 256,
+                maximum_groups = 256,
+                maximum_input_bytes = 16 * 1024 * 1024,
+                maximum_summary_bytes = 65536,
+                maximum_summary_tokens = output_tokens,
+                maximum_view_tokens = maximum_view_tokens,
+                maximum_attempts = 2,
+                active_time_ms = 3600000,
+                failure_threshold = 3,
+                failure_cooldown_ms = 60000,
+                trigger_numerator = numerator,
+                trigger_denominator = 1000,
+                reserve_tokens = math.min(2048, maximum_view_tokens - 1),
+                minimum_benefit_tokens = math.min(256, maximum_view_tokens - 1),
+            },
+        },
+    }
+end
+
+---Composes the current turn's no-tool compaction Model with the Context
+-- journal and Runtime external-receipt gate. The owner is single-concurrency,
+-- polls in bounded batches, and never derives completion from rendered text.
+local function new_production_compaction(composed, catalog, loop, clock)
+    if type(composed.publication.compaction_snapshot) ~= "function"
+        or type(composed.publication.compaction_journal) ~= "function"
+        or type(catalog.compaction_binding) ~= "function"
+        or type(loop.begin_compaction) ~= "function"
+        or type(loop.adopt_compaction_receipt) ~= "function"
+        or type(loop.fail_compaction_barrier) ~= "function"
+        or type(loop.finish_compaction) ~= "function"
+    then
+        return nil, failure(
+            "InvalidCompactionComposition",
+            "production compaction ports are incomplete"
+        )
+    end
+    local durable_journal = composed.publication.compaction_journal()
+    if type(durable_journal) ~= "table" then
+        return nil, failure(
+            "InvalidCompactionComposition",
+            "durable compaction journal is unavailable"
+        )
+    end
+    local service
+    local service_generation = false
+    local automatic_enabled = false
+    local output_tokens = false
+    local reserve_tokens = false
+    local active = false
+    local last_result = false
+    local closed = false
+    local owner = {}
+
+    local function fail_compaction_barrier(reason, fallback)
+        local _, barrier_error = loop:fail_compaction_barrier(reason)
+        return false, barrier_error or fallback
+    end
+
+    local journal = {}
+    for _, method in ipairs({
+        "commit_intent", "commit_response", "commit_rejection",
+        "publish", "commit_correction",
+    }) do
+        journal[method] = function(record)
+            local called, committed, receipt = pcall(
+                durable_journal[method],
+                record
+            )
+            if not called or committed ~= true then
+                return fail_compaction_barrier(
+                    not called and "journal-exception" or "journal-rejected",
+                    receipt
+                )
+            end
+            local runtime_receipt = type(receipt) == "table"
+                and receipt.runtime_receipt or nil
+            local publishing = method == "publish"
+            if type(runtime_receipt) ~= "table"
+                or receipt.binding ~= record
+                or receipt.previous_context_generation
+                    ~= runtime_receipt.previous_context_generation
+                or receipt.context_generation ~= runtime_receipt.context_generation
+                or (publishing and (
+                    receipt.previous_manifest_digest
+                        ~= record.expected_manifest_digest
+                    or type(record.manifest) ~= "table"
+                    or receipt.published_manifest_digest ~= record.manifest.digest
+                ))
+                or (not publishing
+                    and receipt.active_manifest_digest
+                        ~= record.expected_manifest_digest)
+            then
+                return fail_compaction_barrier("receipt-contract", failure(
+                    "CompactionJournalContract",
+                    "durable compaction receipt omits its Runtime barrier"
+                ))
+            end
+            local adoption_called, adopted, adoption_error = pcall(
+                loop.adopt_compaction_receipt,
+                loop,
+                record,
+                runtime_receipt
+            )
+            if not adoption_called then
+                return fail_compaction_barrier("adoption-exception", adopted)
+            end
+            if not adopted then return false, adoption_error end
+            return true, receipt
+        end
+    end
+    journal = readonly(journal, "Runtime-adopting compaction journal")
+
+    local function ensure_service(snapshot, binding)
+        local generation = catalog.generation()
+        if type(generation) ~= "table" or generation.id ~= binding.generation_id then
+            return nil, failure(
+                "CompactionSnapshotUnavailable",
+                "current turn generation does not match its compaction binding"
+            )
+        end
+        if service and service_generation == generation.id then return service end
+        if service then
+            local status = service:status()
+            if status.state ~= "Idle" then
+                return nil, failure(
+                    "CompactionBusy",
+                    "the prior compaction generation is not idle"
+                )
+            end
+            service:close("compaction-generation-replaced")
+        end
+        local options, options_error = compaction_options(
+            generation,
+            binding,
+            snapshot.initial_serial
+        )
+        if not options then return nil, options_error end
+        local candidate, candidate_error = compact.new({
+            safety = composed.contexts.safety,
+            estimator = readonly({
+                estimate = function(bytes)
+                    if type(bytes) ~= "string" then
+                        return nil, failure(
+                            "CompactionEstimateFailure",
+                            "token estimator requires exact bytes"
+                        )
+                    end
+                    -- One token per input byte is deliberately conservative
+                    -- across old targets and avoids a modern tokenizer runtime.
+                    return #bytes
+                end,
+            }, "conservative compaction estimator"),
+            clock = clock,
+            model = catalog.compaction,
+            journal = journal,
+        }, options.service)
+        if not candidate then return nil, candidate_error end
+        service = candidate
+        service_generation = generation.id
+        automatic_enabled = options.automatic_enabled
+        output_tokens = options.output_tokens
+        reserve_tokens = options.service.manifest.reserve_tokens
+        return service
+    end
+
+    local function observation()
+        local status = loop:status()
+        if type(status.active_view_manifest_ref) ~= "string"
+            or status.active_view_manifest_ref == ""
+        then
+            return nil, failure(
+                "CompactionSnapshotUnavailable",
+                "Runtime has no active durable Model-view manifest"
+            )
+        end
+        return status, readonly({
+            expected_context_generation = status.context_generation,
+            expected_last_sequence = status.last_durable_sequence,
+            expected_manifest_digest = status.active_view_manifest_ref,
+        }, "compaction Runtime observation")
+    end
+
+    local function build_input(mode)
+        local status, observed = observation()
+        if not status then return nil, observed end
+        local snapshot, snapshot_error = composed.publication.compaction_snapshot(
+            observed
+        )
+        if not snapshot then return nil, snapshot_error end
+        if snapshot.binding ~= observed then
+            return nil, failure(
+                "CompactionSnapshotUnavailable",
+                "Context did not acknowledge the exact Runtime observation"
+            )
+        end
+        local binding = catalog.compaction_binding()
+        local current, current_error = ensure_service(snapshot, binding)
+        if not current then return nil, current_error end
+        if mode == "automatic" and not automatic_enabled then
+            return readonly({
+                disabled = true,
+                status = status,
+                observation = observed,
+                snapshot = snapshot,
+            }, "disabled automatic compaction input")
+        end
+        local generation = catalog.generation()
+        local model = generation.models[binding.model_name]
+        local prompt_tokens, prompt_error = compaction_prompt_upper_bound(
+            generation,
+            binding
+        )
+        if not prompt_tokens then return nil, prompt_error end
+        local active_estimated = snapshot.view_body_bytes + prompt_tokens
+            + output_tokens + reserve_tokens
+        return readonly({
+            status = status,
+            observation = observed,
+            snapshot = snapshot,
+            input = readonly({
+                mode = mode,
+                document = snapshot.document,
+                expected_context_generation = snapshot.context_generation,
+                expected_manifest_digest = snapshot.manifest_digest,
+                context_digest = snapshot.context_digest,
+                config_snapshot = binding.config_snapshot,
+                model_snapshot = readonly({
+                    id = binding.model_name,
+                    digest = binding.model_snapshot,
+                    window_tokens = model.context_length,
+                    maximum_output_tokens = output_tokens,
+                }, "frozen compaction Model snapshot"),
+                prompt_bundle_digest = binding.prompt_snapshot,
+                prompt_tokens = prompt_tokens,
+                tool_schema_tokens = 0,
+                control_schema_tokens = 0,
+                main_state = status.state,
+                active_view = readonly({
+                    manifest_digest = snapshot.manifest_digest,
+                    estimated_tokens = active_estimated,
+                    builder_algorithm = "structured-prefix-v1",
+                    summary_id = snapshot.manifest_compaction_id ~= false
+                        and snapshot.manifest_compaction_id .. ":summary" or false,
+                    included_ranges = snapshot.included_ranges,
+                }, "active compaction Model-view snapshot"),
+                corrections = snapshot.corrections,
+            }, "production compaction input"),
+        }, "bound production compaction input")
+    end
+
+    local function result_outcome(result)
+        if type(result) ~= "table" then return nil end
+        if type(result.outcome) == "string" then return result.outcome end
+        if result.decision == "no_op" then return "no_op" end
+        if result.decision == "fits" then return "fits" end
+        if result.decision == "suppressed" then return "suppressed" end
+        if result.decision == "waiting_user" then return "waiting_user" end
+        return nil
+    end
+
+    local function settle(result)
+        local outcome = result_outcome(result)
+        if not outcome then return false end
+        local status = loop:status()
+        local compaction_id = result.compaction_id
+        if compaction_id == nil then compaction_id = false end
+        local settled, settlement_error = loop:finish_compaction({
+            outcome = outcome,
+            compaction_id = compaction_id,
+            expected_context_generation = status.context_generation,
+            expected_last_sequence = status.last_durable_sequence,
+            expected_manifest_digest = status.active_view_manifest_ref,
+        })
+        if not settled then return nil, settlement_error end
+        active = false
+        last_result = readonly({
+            result = result,
+            settlement = settled,
+        }, "production compaction result")
+        return last_result
+    end
+
+    function owner:begin(mode)
+        if closed then
+            return nil, failure("CompactionClosed", "compaction owner is closed")
+        end
+        if mode ~= "manual" and mode ~= "automatic" then
+            return nil, failure("InvalidCompactionMode", "compaction mode is invalid")
+        end
+        if active then
+            return nil, failure(
+                mode == "manual" and "ManualCompactionBusy" or "CompactionBusy",
+                "one compaction lifecycle is already active"
+            )
+        end
+        local prepared, prepare_error = build_input(mode)
+        if not prepared then return nil, prepare_error end
+        if prepared.disabled then
+            last_result = readonly({
+                result = readonly({ decision = "fits", reason = "automatic-disabled" },
+                    "disabled automatic compaction"),
+                settlement = false,
+            }, "production compaction result")
+            return last_result
+        end
+        local admitted, admission_error = loop:begin_compaction({
+            mode = mode,
+            expected_context_generation = prepared.observation
+                .expected_context_generation,
+            expected_last_sequence = prepared.observation.expected_last_sequence,
+            expected_manifest_digest = prepared.observation
+                .expected_manifest_digest,
+        })
+        if not admitted then return nil, admission_error end
+        active = true
+        local result, begin_error = service:begin(prepared.input)
+        if not result then
+            local status = loop:status()
+            local released, release_error = loop:finish_compaction({
+                outcome = "unknown",
+                compaction_id = false,
+                expected_context_generation = status.context_generation,
+                expected_last_sequence = status.last_durable_sequence,
+                expected_manifest_digest = status.active_view_manifest_ref,
+            })
+            if not released then return nil, release_error end
+            active = false
+            return nil, begin_error
+        end
+        local terminal, settlement_error = settle(result)
+        if terminal == nil then return nil, settlement_error end
+        if terminal ~= false then return terminal end
+        return readonly({
+            state = "active",
+            compaction_id = result.compaction_id,
+            request_id = result.request_id,
+            mode = mode,
+        }, "production compaction admission")
+    end
+
+    function owner:poll()
+        if not active then
+            return readonly({
+                events = readonly({}, "empty compaction event batch"),
+                progressed = false,
+                status = self:status(),
+            }, "production compaction poll")
+        end
+        local output = {}
+        local ticked, tick_error = service:tick()
+        if not ticked then return nil, tick_error end
+        local tick_terminal, settlement_error = settle(ticked)
+        if tick_terminal == nil then return nil, settlement_error end
+        if tick_terminal ~= false then
+            output[1] = readonly({ kind = "terminal", result = tick_terminal },
+                "compaction terminal event")
+            return readonly({
+                events = readonly(output, "compaction event batch"),
+                progressed = true,
+                status = self:status(),
+            }, "production compaction poll")
+        end
+        local events, poll_error = catalog.compaction.poll(128)
+        if type(events) ~= "table" then return nil, poll_error end
+        local progressed = false
+        for _, event in ipairs(events) do
+            local result, result_error
+            if event.kind == "response" then
+                result, result_error = service:accept_response(event.response)
+            elseif event.kind == "cancel-settled" then
+                result, result_error = service:settle_cancel({
+                    request_id = event.request_id,
+                    outcome = event.outcome,
+                })
+            else
+                return nil, failure(
+                    "CompactionActivityContract",
+                    "compaction Model port returned an unknown event"
+                )
+            end
+            if not result then return nil, result_error end
+            progressed = true
+            local terminal, settlement_error = settle(result)
+            if terminal == nil then return nil, settlement_error end
+            if terminal ~= false then
+                output[#output + 1] = readonly({
+                    kind = "terminal",
+                    result = terminal,
+                }, "compaction terminal event")
+            else
+                output[#output + 1] = readonly({
+                    kind = "progress",
+                    state = result.state,
+                    attempt = result.attempt,
+                    request_id = result.request_id,
+                }, "compaction progress event")
+            end
+        end
+        return readonly({
+            events = readonly(output, "compaction event batch"),
+            progressed = progressed,
+            status = self:status(),
+        }, "production compaction poll")
+    end
+
+    function owner:cancel(reason)
+        if not active then
+            return nil, failure(
+                "NoCompactionRequest",
+                "no compaction request can be cancelled"
+            )
+        end
+        local result, cancel_error = service:cancel(reason)
+        if not result then return nil, cancel_error end
+        local terminal, settlement_error = settle(result)
+        if terminal == nil then return nil, settlement_error end
+        if terminal ~= false then return terminal end
+        return readonly({
+            state = result.state,
+            compaction_id = result.compaction_id,
+            cancel_pending = result.cancel_pending == true,
+        }, "production compaction cancellation")
+    end
+
+    function owner:status()
+        local compact_status = service and service:status() or false
+        return readonly({
+            state = active and (compact_status and compact_status.state or "Unknown")
+                or "Idle",
+            active = active,
+            active_compaction_id = compact_status
+                and compact_status.active_compaction_id or false,
+            active_request_id = compact_status
+                and compact_status.active_request_id or false,
+            automatic_enabled = automatic_enabled,
+            automatic_failure_count = compact_status
+                and compact_status.automatic_failure_count or 0,
+            automatic_circuit_state = compact_status
+                and compact_status.automatic_circuit_state or "closed",
+            last_result = last_result,
+            generation = service_generation,
+            closed = closed,
+        }, "production compaction status")
+    end
+
+    function owner:close(reason)
+        if closed then return false end
+        if active then
+            local cancelled, cancel_error = self:cancel(
+                reason or "compaction-owner-close"
+            )
+            if not cancelled then return nil, cancel_error end
+            if active then return cancelled end
+        end
+        if service then service:close(reason or "compaction-owner-close") end
+        closed = true
+        return true
+    end
+
+    return readonly(owner, "production compaction owner")
 end
 
 local function network_options(layout)
@@ -3190,6 +3807,13 @@ function M.start_published_agent(composed, chat, message, source)
         chat.draft.close()
         return nil, agent_error
     end
+    local compaction_owner, compaction_error = new_production_compaction(
+        composed,
+        catalog,
+        loop,
+        clock
+    )
+    if not compaction_owner then return fail_after_loop(compaction_error) end
     local admission, admission_error = loop:resume_published_main(handoff)
     if not admission then return fail_after_loop(admission_error) end
     local driver, driver_error = runtime_module.new_agent_activity_driver({
@@ -3212,6 +3836,7 @@ function M.start_published_agent(composed, chat, message, source)
         driver = driver,
         session = agent_session,
         tools = catalog.tools,
+        compaction = compaction_owner,
         draft = chat.draft,
         generation = generation,
         current_generation = catalog.generation,
@@ -3224,6 +3849,7 @@ function M.start_published_agent(composed, chat, message, source)
             approvals = true,
             later_turn_snapshots = true,
             side = true,
+            compaction = true,
             target_qualified = false,
         }, "published Agent capabilities"),
     }, "published production Agent")
@@ -3812,6 +4438,73 @@ function M.new_application_coordinator(ports, options)
         return step.progressed or #step.events > 0
     end
 
+    local function compaction_outcome(result)
+        local settlement = type(result) == "table" and result.settlement or nil
+        return type(settlement) == "table" and settlement.outcome or false
+    end
+
+    local function publish_compaction_result(result)
+        local outcome = compaction_outcome(result)
+        if outcome == "completed" then
+            local raw = result.result
+            return publish_status(
+                "Compaction completed: " .. tostring(raw.compaction_id)
+                    .. ", estimated benefit "
+                    .. tostring(raw.benefit_tokens or "unknown") .. " tokens."
+            )
+        end
+        if outcome == "no_op" or outcome == "fits" then
+            return publish_status("Compaction made no change; the current view already fits.")
+        end
+        if outcome == "suppressed" then
+            return publish_status("Automatic compaction is in cooldown; the old view was retained.")
+        end
+        if outcome == "waiting_user" then
+            return publish_status("Compaction could not safely reduce the view; the old view was retained.")
+        end
+        if outcome == "cancelled" then
+            return publish_status("Compaction cancelled; the old view was retained.")
+        end
+        if outcome == "unknown" then
+            return publish_status("Compaction cancellation is unknown; no new view was activated.")
+        end
+        return nil, failure(
+            "CompactionActivityContract",
+            "compaction terminal result has no typed outcome"
+        )
+    end
+
+    local function drive_compaction()
+        if not agent or type(agent.compaction) ~= "table" then return false end
+        local status = agent.compaction:status()
+        if status.active ~= true then return false end
+        local step, step_error = coordinator_call(
+            agent.compaction,
+            "poll",
+            "CompactionActivityFailure",
+            "compaction activity polling"
+        )
+        if not step then return nil, step_error end
+        for _, event in ipairs(step.events) do
+            local projected, projection_error
+            if event.kind == "progress" then
+                projected, projection_error = publish_status(
+                    "Compaction retry started: "
+                        .. tostring(event.request_id or "bound request") .. "."
+                )
+            elseif event.kind == "terminal" then
+                projected, projection_error = publish_compaction_result(event.result)
+            else
+                return nil, failure(
+                    "CompactionActivityContract",
+                    "compaction owner returned an unknown event"
+                )
+            end
+            if not projected then return nil, projection_error end
+        end
+        return step.progressed
+    end
+
     local function status_lines()
         if not agent then
             local status = admitted_ports.chat.draft.status()
@@ -3824,6 +4517,7 @@ function M.new_application_coordinator(ports, options)
             }
         end
         local status = agent.loop:status()
+        local compact_status = agent.compaction:status()
         return {
             "state: " .. tostring(status.state),
             "turn: " .. tostring(status.turn_id),
@@ -3834,6 +4528,12 @@ function M.new_application_coordinator(ports, options)
             "side: " .. tostring(status.side_state)
                 .. " " .. tostring(status.active_side_id),
             "last outcome: " .. tostring(status.last_outcome),
+            "compaction: " .. tostring(compact_status.state)
+                .. " " .. tostring(compact_status.active_compaction_id),
+            "compaction circuit: "
+                .. tostring(compact_status.automatic_circuit_state)
+                .. " failures="
+                .. tostring(compact_status.automatic_failure_count),
         }
     end
 
@@ -3912,6 +4612,34 @@ function M.new_application_coordinator(ports, options)
     end
 
     local function route_agent_action(request)
+        local compact_status = agent.compaction:status()
+        if compact_status.active == true
+            and request.id ~= "cancel"
+            and request.id ~= "status-chat"
+            and request.id ~= "help-chat"
+        then
+            return nil, failure(
+                "CompactionBusy",
+                "wait for compaction to finish or cancel it before this action"
+            )
+        end
+        if request.id == "compact-manual" then
+            local result, action_error = coordinator_call(
+                agent.compaction,
+                "begin",
+                "CompactionActionFailure",
+                "manual compaction",
+                "manual"
+            )
+            if not result then return nil, action_error end
+            if result.state == "active" then
+                return publish_status(
+                    "Compaction started: " .. tostring(result.compaction_id)
+                        .. "; source facts remain intact and cancellation is available."
+                )
+            end
+            return publish_compaction_result(result)
+        end
         if request.id == "queue-add" then
             return stage_and_apply("submit", request.message)
         end
@@ -3970,6 +4698,20 @@ function M.new_application_coordinator(ports, options)
             return publish_status("Queue cleared.")
         end
         if request.id == "cancel" then
+            if compact_status.active == true then
+                local result, action_error = coordinator_call(
+                    agent.compaction,
+                    "cancel",
+                    "CancelFailure",
+                    "compaction cancellation",
+                    "user-cancel"
+                )
+                if not result then return nil, action_error end
+                if result.cancel_pending == true then
+                    return publish_status("Compaction cancellation is pending.")
+                end
+                return publish_compaction_result(result)
+            end
             local current = agent.loop:status()
             if side_focus_id ~= false
                 and current.active_side_id == side_focus_id
@@ -4034,6 +4776,7 @@ function M.new_application_coordinator(ports, options)
             or type(constructed.driver) ~= "table"
             or type(constructed.session) ~= "table"
             or type(constructed.tools) ~= "table"
+            or type(constructed.compaction) ~= "table"
             or type(constructed.draft) ~= "table"
         then
             return nil, failure(
@@ -4289,6 +5032,55 @@ function M.new_application_coordinator(ports, options)
                 "unsaved chat close"
             )
         end
+        local compact_status = agent.compaction:status()
+        if compact_status.active == true then
+            local cancelling, cancel_error = coordinator_call(
+                agent.compaction,
+                "close",
+                "SessionCloseFailure",
+                "compaction close",
+                reason
+            )
+            if not cancelling then return nil, cancel_error end
+            for _ = 1, admitted.close_poll_steps do
+                compact_status = agent.compaction:status()
+                if compact_status.active ~= true then break end
+                local progressed, progress_error = drive_compaction()
+                if progressed == nil then return nil, progress_error end
+                if not progressed then
+                    local waited, wait_error = coordinator_function(
+                        admitted_ports.idle_wait,
+                        "IdleWaitFailure",
+                        "compaction close wait",
+                        admitted.idle_wait_ms
+                    )
+                    if not waited then return nil, wait_error end
+                end
+            end
+            if agent.compaction:status().active == true then
+                return nil, failure(
+                    "SessionCloseTimeout",
+                    "compaction did not reach terminal close truth"
+                )
+            end
+            local closed_compaction, close_error = coordinator_call(
+                agent.compaction,
+                "close",
+                "SessionCloseFailure",
+                "compaction owner close",
+                reason
+            )
+            if closed_compaction == nil then return nil, close_error end
+        else
+            local closed_compaction, close_error = coordinator_call(
+                agent.compaction,
+                "close",
+                "SessionCloseFailure",
+                "compaction owner close",
+                reason
+            )
+            if closed_compaction == nil then return nil, close_error end
+        end
         local closed, close_error = coordinator_call(
             agent.session,
             "close",
@@ -4407,9 +5199,14 @@ function M.new_application_coordinator(ports, options)
                 if lifecycle == "closing" then break end
             end
             if lifecycle == "running" and agent then
-                local agent_progress, agent_error = drive_agent()
-                if agent_progress == nil then return finish_run(agent_error) end
-                progressed = progressed or agent_progress
+                local compact_progress, compact_error = drive_compaction()
+                if compact_progress == nil then return finish_run(compact_error) end
+                progressed = progressed or compact_progress
+                if agent.compaction:status().active ~= true then
+                    local agent_progress, agent_error = drive_agent()
+                    if agent_progress == nil then return finish_run(agent_error) end
+                    progressed = progressed or agent_progress
+                end
             end
             if lifecycle == "running" and prompt_needed then
                 local focus = approval and "approval" or "chat"

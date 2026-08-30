@@ -553,8 +553,14 @@ local function validate_input(input, limits)
     then
         return nil, failure("InvalidCompactionInput", "compaction input is invalid")
     end
-    if input.mode == "manual" and input.main_state ~= "Idle" then
-        return nil, failure("ManualCompactionBusy", "manual compaction requires durable idle")
+    if input.mode == "manual"
+        and input.main_state ~= "Idle"
+        and input.main_state ~= "WaitingUser"
+    then
+        return nil, failure(
+            "ManualCompactionBusy",
+            "manual compaction requires durable idle or waiting-user state"
+        )
     end
     local document = input.document
     if dense_count(document.facts) == nil
@@ -1705,7 +1711,7 @@ function M.new(ports, options)
             automatic_failure_cooldown_ms = limits.manifest.failure_cooldown_ms,
             canonical_facts_mutable = false,
             automatic_consent_required = false,
-            manual_requires_idle = true,
+            manual_allowed_states = { "Idle", "WaitingUser" },
         }, nil, "compaction status"))
     end
 

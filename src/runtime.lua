@@ -897,6 +897,7 @@ function M.new_agent_loop(ports, options)
     local side_serial = 0
     local side
     local side_history = {}
+    local compaction_gate
     local loop = {}
     local request_model
     local dispatch_next
@@ -908,6 +909,11 @@ function M.new_agent_loop(ports, options)
 
     local function current_trace()
         return turn and turn.trace or (last_turn and last_turn.trace)
+    end
+
+    local function current_manifest_ref()
+        local current = turn or last_turn
+        return current and current.active_view_manifest_ref or false
     end
 
     local function transition(next_state)
@@ -1018,7 +1024,13 @@ function M.new_agent_loop(ports, options)
     -- inside tools.start so it can prove intent durability before the actual
     -- side effect. Adopt that exact publication receipt into AgentLoop's local
     -- waterline; no event is replayed and no second Context writer exists.
-    local function adopt_external_receipt(receipt, expected_count, validator)
+    local function adopt_external_receipt(
+        receipt,
+        expected_count,
+        validator,
+        failure_domain
+    )
+        failure_domain = failure_domain or "external-operation"
         if halted then return nil, halt_error end
         local batch = type(receipt) == "table" and receipt.binding or nil
         local event_count = type(batch) == "table" and dense_count(batch.events) or nil
@@ -1036,7 +1048,7 @@ function M.new_agent_loop(ports, options)
             or receipt.previous_context_generation ~= context_generation
             or receipt.context_generation ~= context_generation + 1
         then
-            return durability_failure("external-operation-receipt")
+            return durability_failure(failure_domain .. "-receipt")
         end
         for index, event in ipairs(batch.events) do
             if not exact_fields(event, {
@@ -1047,7 +1059,7 @@ function M.new_agent_loop(ports, options)
                 or type(event.fields) ~= "table"
                 or not validator(event, index)
             then
-                return durability_failure("external-operation-event")
+                return durability_failure(failure_domain .. "-event")
             end
         end
         sequence = receipt.last_sequence
@@ -1207,6 +1219,7 @@ function M.new_agent_loop(ports, options)
             outcome = outcome,
             counters = turn.counters,
             trace = turn.trace,
+            active_view_manifest_ref = turn.active_view_manifest_ref,
         }
     end
 
@@ -2065,6 +2078,12 @@ function M.new_agent_loop(ports, options)
 
     start_main = function(input, cause)
         if halted then return nil, halt_error end
+        if compaction_gate then
+            return nil, failure(
+                "CompactionBusy",
+                "a main turn cannot start while compaction owns the Context lane"
+            )
+        end
         if state ~= "Idle" then return nil, failure("AgentBusy", "a main turn is already active") end
         local snapshot, input_error = validate_turn_input(input, limits)
         if not snapshot then return nil, input_error end
@@ -2138,6 +2157,401 @@ function M.new_agent_loop(ports, options)
             turn_id = turn_id,
             queue_item_id = cause and cause.queue_item and cause.queue_item.id or false,
         }, nil, "main turn admission"))
+    end
+
+    ---Opens the exclusive external compaction lane at the exact Runtime
+    -- waterline. Journal receipts may advance that waterline only while this
+    -- gate is active; ordinary Agent effects remain unavailable until finish.
+    function loop:begin_compaction(command)
+        if halted then return nil, halt_error end
+        if not exact_fields(command, {
+            mode = true,
+            expected_context_generation = true,
+            expected_last_sequence = true,
+            expected_manifest_digest = true,
+        })
+            or (command.mode ~= "manual" and command.mode ~= "automatic")
+            or not integer_at_least(command.expected_context_generation, 1)
+            or not integer_at_least(command.expected_last_sequence, 0)
+            or not valid_runtime_text(
+                command.expected_manifest_digest,
+                limits.hard_caps.message_bytes,
+                false
+            )
+        then
+            return nil, failure(
+                "InvalidCompactionAdmission",
+                "compaction admission binding is invalid"
+            )
+        end
+        if compaction_gate
+            or (state ~= "Idle" and state ~= "WaitingUser")
+            or active_request ~= nil
+            or active_review ~= nil
+            or active_tool ~= nil
+            or side ~= nil
+        then
+            return nil, failure(
+                command.mode == "manual"
+                    and "ManualCompactionBusy" or "CompactionBusy",
+                "compaction requires a paused Agent with no active effect"
+            )
+        end
+        if command.expected_context_generation ~= context_generation
+            or command.expected_last_sequence ~= sequence
+            or command.expected_manifest_digest ~= current_manifest_ref()
+        then
+            return nil, failure(
+                "StaleCompactionAdmission",
+                "compaction admission does not bind the Runtime waterline"
+            )
+        end
+        compaction_gate = {
+            mode = command.mode,
+            opened_state = state,
+            opened_context_generation = context_generation,
+            opened_sequence = sequence,
+            opened_manifest_digest = command.expected_manifest_digest,
+            phase = "opened",
+            compaction_id = false,
+            request_id = false,
+            attempt = 0,
+            published_compaction_id = false,
+            published_manifest_digest = false,
+        }
+        return readonly({
+            state = state,
+            mode = command.mode,
+            context_generation = context_generation,
+            last_sequence = sequence,
+            manifest_digest = command.expected_manifest_digest,
+        }, "Runtime compaction admission")
+    end
+
+    ---Adopts one exact Context replacement committed by the compaction
+    -- journal. This is the same external-receipt pattern used for Tool
+    -- operation intent/result, but only compaction event shapes are admitted.
+    function loop:adopt_compaction_receipt(record, receipt)
+        if halted then return nil, halt_error end
+        if not compaction_gate or type(record) ~= "table" then
+            return nil, failure(
+                "CompactionAdmissionMissing",
+                "durable compaction receipt has no active Runtime gate"
+            )
+        end
+        if not valid_runtime_id(
+                record.compaction_id,
+                limits.maximum_identifier_bytes
+            )
+            or record.expected_context_generation ~= context_generation
+            or record.expected_manifest_digest
+                ~= compaction_gate.opened_manifest_digest
+            or (compaction_gate.compaction_id ~= false
+                and compaction_gate.compaction_id ~= record.compaction_id)
+        then
+            return durability_failure("external-compaction-identity")
+        end
+        local phase = compaction_gate.phase
+        local next_phase
+        if record.kind == "compaction-request" then
+            if (phase ~= "opened" and phase ~= "retry")
+                or not valid_runtime_id(
+                    record.request_id,
+                    limits.maximum_identifier_bytes
+                )
+                or not integer_at_least(record.attempt, 1)
+                or record.attempt ~= compaction_gate.attempt + 1
+            then
+                return durability_failure("external-compaction-order")
+            end
+            next_phase = "request"
+        elseif record.kind == "compaction-response" then
+            if phase ~= "request"
+                or record.request_id ~= compaction_gate.request_id
+                or record.attempt ~= compaction_gate.attempt
+            then
+                return durability_failure("external-compaction-order")
+            end
+            next_phase = "response"
+        elseif record.kind == "compaction-rejection" then
+            if (phase ~= "request" and phase ~= "response")
+                or record.request_id ~= compaction_gate.request_id
+                or record.attempt ~= compaction_gate.attempt
+                or type(record.terminal) ~= "boolean"
+            then
+                return durability_failure("external-compaction-order")
+            end
+            next_phase = record.terminal and "terminal-rejected" or "retry"
+        elseif record.kind == "compaction-cancel-request" then
+            if phase ~= "request"
+                or record.request_id ~= compaction_gate.request_id
+            then
+                return durability_failure("external-compaction-order")
+            end
+            next_phase = "cancelling"
+        elseif record.kind == "compaction-cancel-result" then
+            if phase ~= "cancelling"
+                or record.request_id ~= compaction_gate.request_id
+                or (record.outcome ~= "cancelled" and record.outcome ~= "unknown")
+            then
+                return durability_failure("external-compaction-order")
+            end
+            next_phase = record.outcome == "cancelled"
+                and "cancelled" or "cancel-unknown"
+        elseif record.kind == "compaction-publication" then
+            if phase ~= "response"
+                or record.request_id ~= compaction_gate.request_id
+                or type(record.manifest) ~= "table"
+                or not valid_runtime_text(
+                    record.manifest.digest,
+                    limits.hard_caps.message_bytes,
+                    false
+                )
+            then
+                return durability_failure("external-compaction-order")
+            end
+            next_phase = "published"
+        else
+            return durability_failure("external-compaction-kind")
+        end
+        local batch = type(receipt) == "table" and receipt.binding or nil
+        local count = type(batch) == "table" and dense_count(batch.events) or nil
+        if not integer_at_least(count, 1) or count > 4 then
+            return durability_failure("external-compaction-receipt-count")
+        end
+        local prior_manifest = current_manifest_ref()
+        local function matches(event, index)
+            if event.turn_id ~= nil and event.turn_id ~= false then return false end
+            local fields = event.fields
+            if type(fields) ~= "table" then return false end
+            if record.kind == "compaction-request" then
+                return count == 1 and index == 1
+                    and event.type == "model_request"
+                    and fields.requestId == record.request_id
+                    and fields.purpose == "compaction"
+                    and fields.viewManifestRef == record.expected_manifest_digest
+                    and fields.attemptId == tostring(record.attempt)
+            end
+            if record.kind == "compaction-response" then
+                return count == 1 and index == 1
+                    and event.type == "model_message"
+                    and fields.requestId == record.request_id
+                    and fields.status == "complete"
+                    and fields.body == record.canonical_body
+                    and fields.digest == record.canonical_digest
+            end
+            if record.kind == "compaction-rejection" then
+                if index == 1 then
+                    return event.type == "model_message"
+                        and fields.requestId == record.request_id
+                        and fields.status == "interrupted"
+                end
+                if index == 2 then
+                    return event.type == "warning"
+                        and fields.errorId == record.error_code
+                        and fields.causeId == record.compaction_id
+                end
+                return record.terminal == true and index == 3 and count == 3
+                    and event.type == "compaction"
+                    and fields.compactionId == record.compaction_id
+                    and fields.status == "error"
+                    and fields.sourceDigest == record.source_digest
+            end
+            if record.kind == "compaction-cancel-request" then
+                return count == 1 and index == 1 and event.type == "cancel"
+                    and fields.targetKind == "compaction-request"
+                    and fields.targetId == record.request_id
+                    and fields.reason == record.reason
+                    and fields.result == "pending"
+            end
+            if record.kind == "compaction-cancel-result" then
+                if index == 1 then
+                    return event.type == "cancel"
+                        and fields.targetKind == "compaction-request"
+                        and fields.targetId == record.request_id
+                        and fields.reason == record.reason
+                        and fields.result == record.outcome
+                end
+                return count == 2 and index == 2 and event.type == "compaction"
+                    and fields.compactionId == record.compaction_id
+                    and fields.sourceDigest == record.source_digest
+                    and fields.status == (record.outcome == "cancelled"
+                        and "cancelled" or "error")
+            end
+            if record.kind == "compaction-publication" then
+                if index == 1 then
+                    return count == 2 and event.type == "compaction"
+                        and fields.compactionId == record.compaction_id
+                        and fields.status == "ok"
+                        and fields.summaryDigest == record.summary_digest
+                        and fields.manifestDigest == record.manifest.digest
+                end
+                return index == 2 and event.type == "model_view_published"
+                    and fields.compactionId == record.compaction_id
+                    and fields.manifestDigest == record.manifest.digest
+                    and fields.replacesManifestDigest
+                        == record.expected_manifest_digest
+            end
+            if record.kind == "summary-correction" then
+                return count == 1 and index == 1 and event.type == "warning"
+                    and fields.errorId == record.correction_id
+                    and fields.causeId == record.compaction_id
+                    and fields.summary == record.text
+            end
+            return false
+        end
+        local adopted, adoption_error = adopt_external_receipt(
+            receipt,
+            count,
+            matches,
+            "external-compaction"
+        )
+        if not adopted then return nil, adoption_error end
+        if compaction_gate.compaction_id == false then
+            compaction_gate.compaction_id = record.compaction_id
+        end
+        if record.kind == "compaction-request" then
+            compaction_gate.request_id = record.request_id
+            compaction_gate.attempt = record.attempt
+        end
+        compaction_gate.phase = next_phase
+        for _, event in ipairs(batch.events) do
+            if event.type == "model_view_published" then
+                local fields = event.fields
+                if compaction_gate.published_compaction_id ~= false
+                    or fields.replacesManifestDigest ~= prior_manifest
+                    or not valid_runtime_text(
+                        fields.manifestDigest,
+                        limits.hard_caps.message_bytes,
+                        false
+                    )
+                then
+                    return durability_failure("external-compaction-manifest")
+                end
+                if turn then
+                    turn.active_view_manifest_ref = fields.manifestDigest
+                elseif last_turn then
+                    last_turn.active_view_manifest_ref = fields.manifestDigest
+                end
+                prior_manifest = fields.manifestDigest
+                compaction_gate.published_compaction_id = record.compaction_id
+                compaction_gate.published_manifest_digest = fields.manifestDigest
+            end
+        end
+        return readonly({
+            context_generation = context_generation,
+            last_sequence = sequence,
+            manifest_digest = current_manifest_ref(),
+        }, "adopted compaction receipt")
+    end
+
+    ---Halts the Runtime when the external compaction writer cannot prove whether
+    -- its attempted durable barrier was accepted. Continuing would let the
+    -- in-memory waterline diverge from Context, so this path is intentionally
+    -- fail-stop and cannot be cleared by a normal compaction settlement.
+    function loop:fail_compaction_barrier(reason)
+        if halted then return nil, halt_error end
+        if not compaction_gate
+            or not valid_runtime_id(reason, limits.maximum_identifier_bytes)
+        then
+            return nil, failure(
+                "CompactionAdmissionMissing",
+                "an ambiguous compaction barrier has no active Runtime gate"
+            )
+        end
+        return durability_failure("external-compaction-" .. reason)
+    end
+
+    ---Closes the external compaction lane only after its owner proves the
+    -- current Runtime waterline and active manifest. No outcome is inferred
+    -- from rendered STATUS text.
+    function loop:finish_compaction(command)
+        if halted then return nil, halt_error end
+        local outcomes = {
+            completed = true,
+            no_op = true,
+            fits = true,
+            suppressed = true,
+            waiting_user = true,
+            cancelled = true,
+            unknown = true,
+        }
+        local command_table = type(command) == "table"
+        local published = compaction_gate
+            and compaction_gate.published_compaction_id ~= false
+        local completed_exactly = compaction_gate
+            and command_table
+            and command.outcome == "completed"
+            and published
+            and command.compaction_id == compaction_gate.published_compaction_id
+            and command.expected_manifest_digest
+                == compaction_gate.published_manifest_digest
+            and command.expected_manifest_digest
+                ~= compaction_gate.opened_manifest_digest
+        local retained_exactly = compaction_gate
+            and command_table
+            and command.outcome ~= "completed"
+            and not published
+            and command.expected_manifest_digest
+                == compaction_gate.opened_manifest_digest
+        local phase_exact = compaction_gate and command_table and (
+            (command.outcome == "completed"
+                and compaction_gate.phase == "published")
+            or ((command.outcome == "no_op"
+                    or command.outcome == "fits"
+                    or command.outcome == "suppressed")
+                and compaction_gate.phase == "opened"
+                and command.compaction_id == false)
+            or (command.outcome == "waiting_user"
+                and ((compaction_gate.phase == "opened"
+                        and command.compaction_id == false)
+                    or (compaction_gate.phase == "terminal-rejected"
+                        and command.compaction_id == compaction_gate.compaction_id)))
+            or (command.outcome == "cancelled"
+                and compaction_gate.phase == "cancelled"
+                and command.compaction_id == compaction_gate.compaction_id)
+            or (command.outcome == "unknown"
+                and ((compaction_gate.phase == "opened"
+                        and command.compaction_id == false)
+                    or (compaction_gate.phase == "cancel-unknown"
+                        and command.compaction_id == compaction_gate.compaction_id)))
+        )
+        if not compaction_gate
+            or not exact_fields(command, {
+                outcome = true,
+                compaction_id = true,
+                expected_context_generation = true,
+                expected_last_sequence = true,
+                expected_manifest_digest = true,
+            })
+            or not outcomes[command.outcome]
+            or (command.compaction_id ~= false
+                and not valid_runtime_id(
+                    command.compaction_id,
+                    limits.maximum_identifier_bytes
+                ))
+            or command.expected_context_generation ~= context_generation
+            or command.expected_last_sequence ~= sequence
+            or command.expected_manifest_digest ~= current_manifest_ref()
+            or (not completed_exactly and not retained_exactly)
+            or not phase_exact
+        then
+            return nil, failure(
+                "CompactionSettlementMismatch",
+                "compaction settlement does not bind the Runtime waterline"
+            )
+        end
+        local mode = compaction_gate.mode
+        compaction_gate = nil
+        return readonly({
+            outcome = command.outcome,
+            compaction_id = command.compaction_id,
+            mode = mode,
+            state = state,
+            context_generation = context_generation,
+            last_sequence = sequence,
+            manifest_digest = command.expected_manifest_digest,
+        }, "Runtime compaction settlement")
     end
 
     ---Accepts a new main message only after its complete turn snapshot validates.
@@ -3517,6 +3931,12 @@ function M.new_agent_loop(ports, options)
     ---Cancels the innermost activity; accepted calls remain exactly paired.
     function loop:cancel(reason)
         if halted then return nil, halt_error end
+        if compaction_gate then
+            return nil, failure(
+                "CompactionBusy",
+                "the compaction owner must settle its own cancellation"
+            )
+        end
         if state == "Idle" or state == "Closing" or state == "Finalizing" then
             return nil, failure("NothingToCancel", "no cancellable main turn is active")
         end
@@ -3651,6 +4071,12 @@ function M.new_agent_loop(ports, options)
     ---Closes admission and uses the same cancellation/finalization path.
     function loop:close(reason)
         if state == "Closing" then return false end
+        if compaction_gate then
+            return nil, failure(
+                "CompactionBusy",
+                "compaction must settle before the AgentLoop can close"
+            )
+        end
         closing = true
         reason = reason or "close"
         if side then
@@ -3738,6 +4164,10 @@ function M.new_agent_loop(ports, options)
             reportable = not halted and reportable,
             last_durable_sequence = sequence,
             context_generation = context_generation,
+            active_view_manifest_ref = current_manifest_ref(),
+            compaction_state = compaction_gate and "active" or "idle",
+            compaction_mode = compaction_gate and compaction_gate.mode or false,
+            compaction_phase = compaction_gate and compaction_gate.phase or false,
             counters = counters,
             trace = trace,
             hard_cap_snapshot_id = limits.hard_cap_snapshot_id,
@@ -3778,6 +4208,7 @@ function M.new_agent_loop(ports, options)
         side_concurrency_maximum = 1,
         side_tools = false,
         side_use_lanes = { queue = true, steer = true },
+        external_compaction_receipts = true,
     }, nil, "AgentLoop capabilities"))
     return readonly(loop, "AgentLoop")
 end

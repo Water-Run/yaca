@@ -203,7 +203,7 @@ DSH 是 durable operation 和恢复方面最强参考。采用 tail-only repair�
 
 ## 4. yaca 当前实现审查
 
-### 4.1 Compaction：算法与 Context journal 已闭合，公开生产组合仍缺失
+### 4.1 Compaction：手工生产组合已闭合，自动与恢复仍缺失
 
 已经实现且优于多数参考的部分：
 
@@ -220,16 +220,19 @@ DSH 是 durable operation 和恢复方面最强参考。采用 tail-only repair�
 - `session.lua` 已提供 production Context compaction journal：request、response、rejection、cancel request/result、publication 与 correction 都按精确 generation、旧 manifest、source range/digest 和 lifecycle 绑定。
 - accepted summary 先独立重建 structured summary、canonical source 与 manifest，再把 terminal `compaction`、`CompactionRecord` 和 `model_view_published` 在一个 Context generation 内提交；任一验证或 publication 失败时旧 XML 与旧 active manifest 保持不变。
 - accepted view 的恢复不依赖内存 cache：启动或 cache miss 时从完整 XML 重新校验 accepted bracket、source/summary digest、publication adjacency 和 active manifest，再确定性重建 summary-prefix view；后续事实只追加 tail，不会把内部 compaction request/response 重送给 main Model。
+- `main.lua` 已为每个冻结 generation 构造独立 no-tool compaction builder/activity/port，并由 production owner 将它与 Context journal、保守估算器和 Runtime receipt gate 组合；generation replacement 只在全部活动 idle 时发生。
+- Runtime 已保存 Idle `last_turn` 的 active manifest，并对 compaction 建立独占 lane、精确 sequence/generation/manifest receipt adoption、单一 compaction identity 和 lifecycle 相位；只有 accepted publication 可结算 `completed`。
+- `.compact` 已从公开 action registry 路由到 ApplicationCoordinator；STATUS/cancel/close 由同一 owner 收口，活动压缩期间不能穿透执行普通 main、Tool 或 session close。
+- durable journal 拒绝、异常、缺少 Runtime receipt、收据乱序或 publication 身份不一致均进入 `AgentDurabilityFailure`，不会因为“旧 view 尚在”就释放 lane 继续运行。
 
-已确认的 P0 缺口：
+仍未闭合的 P0/qualification 缺口：
 
-1. `main.lua` 尚未实例化 `compact.new`、Model compaction port 与 Context journal 的完整生产 lifecycle。
-2. CLI 注册 `.compact`，但 ApplicationCoordinator 没有该 action 分支，当前会返回 `InteractiveActionUnavailable`。
-3. Model compaction builder/port 尚未经过 `main.lua` 的 endpoint-disclosure admission 与真实 transport composition；当前已完成 no-tool/frozen-binding 边界和 isolated adapter 测试。
-4. Runtime 没有 automatic threshold admission、跨进程恢复的 failure cooldown，或恢复 pending compaction marker 的 owner；现有 circuit 状态只覆盖同一 service lifetime。
-5. response wrapper 已在 Model port 与 `compact.lua` 双层验证 provider `incomplete`/finish class/tool/control，但仍需 production adapter 黑盒测试证明这些字段没有在组合层丢失。
+1. Runtime 尚未在每次 main/review Model request 前执行 automatic threshold admission；自动 compaction 的开始/结束 STATUS 也尚未接入请求前置门。
+2. failure cooldown/circuit 目前只在同一 service lifetime 内有效；重启后 pending request/cancel/rejection 的 owner 恢复和 circuit 恢复尚未实现。
+3. response wrapper 已在 Model port 与 `compact.lua` 双层验证 provider `incomplete`/finish class/tool/control，且 production owner 组合测试已跑通真实 compact service；仍需最终 OpenAI/Anthropic transport 黑盒和三目标 HTTPS 证据证明线上的 adapter 字段未在旧平台 carrier 中丢失。
+4. token 估算当前为跨旧平台安全的 `1 byte <= 1 token` 保守上界；最终阈值、延迟和内存需在 XP/Win7/CentOS 7 上校准，不能把现代 Linux 结果写成目标资格。
 
-2026-08-30 的受资源门禁串行 suite 为 `391/391`，其中已含 canonical manifest 伪造拒绝、失败前后 Context 字节/代不变、accepted summary + view 原子发布、cache-miss 恢复和取消 terminal truth；这些证据关闭 Context publication 缺口，但仍不能证明公开 `.compact` 可用。README 的“implementation complete”只有在剩余生产组合闭合后才成立。
+2026-08-30 的受资源门禁串行 suite 为 `396/396`，其中已含 canonical manifest 伪造拒绝、失败前后 Context 字节/代不变、accepted summary + view 原子发布、cache-miss 恢复、公开 `.compact` 路由、真实 production owner 成功链和 journal ambiguity fail-stop。它证明手工平台无关链路，不证明自动触发、跨进程 pending 恢复或真实 XP/Win7/CentOS 7 网络与文件系统资格。
 
 ### 4.2 Permission：精确单动作授权是强项
 

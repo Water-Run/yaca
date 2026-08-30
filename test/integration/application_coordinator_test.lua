@@ -79,6 +79,7 @@ local function fixture(settings)
     local driver_steps = 0
     local side_started = false
     local side_emitted = false
+    local compaction_active = false
 
     local terminal = {}
     function terminal:start(observed_now)
@@ -279,11 +280,54 @@ local function fixture(settings)
         return { events = {}, status = loop_status, progressed = false }
     end
 
+    local compaction = {}
+    function compaction:begin(mode)
+        log[#log + 1] = "compaction-begin:" .. mode
+        if settings.compaction_active then
+            compaction_active = true
+            return {
+                state = "active",
+                compaction_id = "compaction-1",
+                request_id = "compaction-1:request:1",
+                mode = mode,
+            }
+        end
+        return {
+            result = { decision = "no_op" },
+            settlement = { outcome = "no_op" },
+        }
+    end
+    function compaction:poll()
+        return { events = {}, progressed = false, status = self:status() }
+    end
+    function compaction:cancel(reason)
+        log[#log + 1] = "compaction-cancel:" .. reason
+        compaction_active = false
+        return {
+            result = { outcome = "cancelled", compaction_id = "compaction-1" },
+            settlement = { outcome = "cancelled" },
+        }
+    end
+    function compaction:status()
+        return {
+            state = compaction_active and "Compacting" or "Idle",
+            active = compaction_active,
+            active_compaction_id = compaction_active and "compaction-1" or false,
+            automatic_failure_count = 0,
+            automatic_circuit_state = "closed",
+        }
+    end
+    function compaction:close()
+        compaction_active = false
+        return true
+    end
+
     local constructed_agent = {
         loop = loop,
         driver = driver,
         session = session,
         tools = tools,
+        compaction = compaction,
         draft = draft,
     }
     local agent_factory = function(message, source)
@@ -472,6 +516,26 @@ return {
                 A.contains(A.render(f.blocks), "Side side-1 outcome: completed")
                 A.contains(table.concat(f.log, "|"), "stage:terminal:explain the durable facts")
                 A.contains(table.concat(f.log, "|"), "side")
+            end,
+        },
+        {
+            name = "manual compact is publicly routed and cancel owns its active lane",
+            run = function()
+                local f = fixture({ compaction_active = true, batches = {
+                    { { kind = "user_action", action = "text", text = "first" } },
+                    { { kind = "user_action", action = "submit-or-queue" } },
+                    { { kind = "user_action", action = "text", text = ".compact" } },
+                    { { kind = "user_action", action = "submit-or-queue" } },
+                    { { kind = "user_action", action = "text", text = ".cancel" } },
+                    { { kind = "user_action", action = "submit-or-queue" } },
+                    { { kind = "user_action", action = "text", text = ".quit" } },
+                    { { kind = "user_action", action = "submit-or-queue" } },
+                } })
+                assert(f.coordinator:run())
+                A.contains(table.concat(f.log, "|"), "compaction-begin:manual")
+                A.contains(table.concat(f.log, "|"), "compaction-cancel:user-cancel")
+                A.contains(A.render(f.blocks), "Compaction started: compaction-1")
+                A.contains(A.render(f.blocks), "Compaction cancelled")
             end,
         },
         {

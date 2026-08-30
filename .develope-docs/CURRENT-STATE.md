@@ -1,28 +1,31 @@
 # 当前状态分析
 
-更新日期：2026-08-29
+更新日期：2026-08-30
 
 ## yaca 仓库
 
-yaca 当前是“产品说明、配置草案、模块骨架、设计文档体系和本地运行工具集合”，还不是可执行的 Coding Agent。
+yaca 当前已有可执行 Lua 入口和平台无关的通用 Agent 核心；代码开发是核心常见场景，同时保留本机诊断与受控系统操作定位。C01--C31 的实现、供应链规划和现代 Linux 证明已进入 `main`，手工 `.compact` 生产链路也已接通。它仍不是可发布版本：Win32 x86/XP、Win64/Win7+、Linux x86_64/CentOS 7 的最终构建与真实目标资格尚未完成，Release Gate R 保持关闭。
 
-已有内容：
+当前已实现：
 
-- 中英文 README 已描述目标产品、命令、模型、上下文和权限概念。
-- `_CONFIG_.ini` 是已明确标记的 historical/non-normative 草案；现行字段真源在 `subsystems/05-configuration.md` 与 `contracts/config.lua`。
-- `_CONTEXT_.xml` 仍只是历史头部草案；现行内部结构/事件真源在 `contracts/context.rng` 与 `contracts/context.lua`。
-- `bin/` 本地放置 Lua 5.5.0、curl、BusyBox、jq、diff、patch、iconv、file、sqlite3 等 32 位工具。
-- `coding-style.txt` 规定了 Lua 5.5、旧终端、旧浏览器和保守工具链要求。
-- 现有 14 个 Lua skeleton 当前仍全为空；`contracts/release.lua` 与实施计划已把最终 28 个模块、native 边界和 C01--C34 归属冻结，尚未开始填入产品实现。
+- bootstrap、严格 action registry/CLI parser、旧终端 TUI/line editor、typed diagnostics 和分阶段 self-test；裸 chat 在第一条消息前仍不创建 Context。
+- immutable config generation、OpenAI/Anthropic adapter、HTTP/SSE/retry/cancel、匿名 curl secret carrier，以及固定无工具的 side/review/compaction purpose。
+- 单 XML Context schema/store/index/lock/recovery、首消息先 durable、operation intent/result、ModelView publication 和 cache-miss 重建。
+- typed AgentLoop、queue/steer/side、ask-user/yield、action/termination review、预算/stuck/cancel/finalization 和精确 Tool result 配对。
+- 八个 versioned Tool、current-process one-action Permission、direct path/identity/CAS 防护，以及明确 `opaque-uncontained` 的原生 `cmd.exe`/shell exec。
+- lossless model-view compaction：结构化摘要、atomic groups、Context journal、原子 manifest publication、Runtime receipt/lifecycle gate、公开 `.compact`、STATUS/cancel/close。
+- 最小发行 allowlist、component/license manifest、SPDX SBOM、package planner、资源 overlay 和资源门禁测试 Harness。
+- 受 `.tools/run_with_resource_guard.sh` 保护的完整平台无关 Lua suite 当前为 `396/396`；这不是三目标资格证明。
 
-缺失内容：
+仍缺失或不得宣称完成：
 
-- 没有可运行入口、模块接口、测试、安装脚本或发布脚本。
-- README 目前描述的是目标行为，尚不能视为已实现契约。
-- CLI 旧短参数冲突已在 `ACTION-REGISTRY.md`/`contracts/actions.lua` 中消解，synthetic argv/chat/REPL fixtures 已校验；尚无产品 parser/help 生成或目标平台执行证据。
-- 旧 README 曾混用 `_yaca_` 与 `__yaca__`；现行设计统一为 executable 相邻的 `__yaca__`，三个便携 zip 都不建立另一套系统用户数据根。
-- `_CONFIG_.ini` 仍保存 `[Permission.Cautious]`、profile 内 `DoubleCheck` 等历史内容，只能用于迁移 fixture，不能成为实现输入。
-- `src/_CONTEXT_.xml` 仍只有头部注释，不能作为实现输入；D-022 的镜像路径、完整事实、会话 metadata 与 model-view 已在设计 machine contract 表达，但还没有产品 parser/writer。
+- automatic compaction 请求前置门、自动 STATUS、pending lifecycle/circuit 跨进程恢复和三目标 token/资源阈值校准。
+- 注册但尚未全部接通 controller 的交互管理动作仍须逐项以 registry → dispatcher → production port → terminal result 证明；parser 可识别不等于 action 已实现。
+- 旧环境网络/HTTPS 仍须审计并加固：固定 curl/CA/TLS 闭包、XP/Win7 可用协议与证书链、代理/redirect/retry/cancel、旧 CMD carrier 和错误编码都需最终目标证据。
+- C32 的三个真实 target qualification、C33 的干净机发布旅程/零表面、C34 的最终 SHA-256/license/SBOM/build/test evidence 尚未执行。
+- README 中任何能力声明仍必须受实现和 target evidence 约束；现代 Linux fake/native 边界通过不能外推为 XP、Win7 或 CentOS 7 支持。
+- `_CONFIG_.ini`、`_CONTEXT_.xml` 和历史 `bin/` 仍是 non-normative/候选输入，不能覆盖当前 contracts、生成配置/Context 或最小发行 allowlist。
+- 图像/音频、remote/headless、核心 Web、notification 和内建 update 继续是 v0.1 零表面，不应因通用 Agent 定位而扩张。
 - 图像/音频、remote/headless、transcription 与 TTS 仍被 D-044 明确排除。
 - Web：**v0.1 核心** 仍零表面（D-044）；2026-08-10 的 D-058 仅为未来 **本机本地 Web** 登记设计预留，产品线为 `yaca-web`（服务端 **Java 8**）与 `yaca-ie6`（服务端 **PHP 5.4**，浏览器有意兼容 IE6）。设计正文在 `.develope-docs/web-tracks/`；仓库根 `web/` 只作说明/空预留；JRE/PHP 与 Web 实现都不得进入 v0.1 loader、help、配置或核心 zip，也不得写成已实现能力。
 
@@ -39,7 +42,7 @@ yaca 当前是“产品说明、配置草案、模块骨架、设计文档体系
 - 每个顶层 main/side turn admission 前完整读取并比较 INI bytes；变化时整份验证后原子激活 immutable generation，当前 turn 及其工具/复核/重试/压缩不热换。Stage 1 self-test 检查 Context 镜像、workspace 与 Catalog 扫描完整性/性能，Stage 3 只 advisory 检查 Model/Permission 名称、说明、Prompt 与实际配置的明显错配和拼写。
 - Permission 是命名 typed profile，`SystemPrompt` 不参与授权；普通对话没有独立 plan state。
 
-`OWNER-QUESTIONS-01.md` 的 29 个集中问题已经全部答复并由 `DISCUSSION-BATCH-06.md` 归档。现行 register 为 `unanswered=0/conflict=0`；D-049 至 D-057 已冻结四层 Prompt、双 Model 协议、typed AgentLoop、完整 Tool/Permission、单 XML 提交基线、统一 CLI/TUI action registry，以及 Win32 x86、Win64 x86_64、Linux x86_64 三个独立 zip。16 contracts、12 fixture sets、Gate Audit 与全程序实施计划现已使 Gate A/B 通过，可以从 C01 开始编码。三目标 proof 尚未通过，Release Gate R 保持关闭。
+`OWNER-QUESTIONS-01.md` 的 29 个集中问题已经全部答复并由 `DISCUSSION-BATCH-06.md` 归档。现行 register 为 `unanswered=0/conflict=0`；D-049 至 D-057 已冻结四层 Prompt、双 Model 协议、typed AgentLoop、完整 Tool/Permission、单 XML 提交基线、统一 CLI/TUI action registry，以及 Win32 x86、Win64 x86_64、Linux x86_64 三个独立 zip。16 contracts、12 fixture sets、Gate Audit 与实施计划维持 Gate A/B；C01--C31 平台无关实现已完成并持续回归。三目标 proof 尚未通过，Release Gate R 保持关闭。
 
 ### `bin/` 不是可直接发布的依赖集合
 
