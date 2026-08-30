@@ -1168,8 +1168,8 @@ function M.new(components, options)
             and left.object == right.object
     end
 
-    local function dispatch_continue(request)
-        if active_draft then
+    local function dispatch_continue(request, preview_only)
+        if not preview_only and active_draft then
             return nil, failure("SessionActive", "this process already owns an active chat")
         end
         local identity, identity_error = check_platform()
@@ -1230,6 +1230,9 @@ function M.new(components, options)
         end
         if type(verified.logical_path) ~= "string"
             or type(verified.physical_hint) ~= "string"
+            or type(verified.hash) ~= "string"
+            or not verified.hash:match("^[0-9A-F][0-9A-F]+$")
+            or #verified.hash ~= 16
             or type(verified.credential) ~= "table"
         then
             return nil, failure(
@@ -1310,6 +1313,16 @@ function M.new(components, options)
             )
         end
 
+        if preview_only then
+            return readonly({
+                kind = "continue-preview",
+                selector = request.selector,
+                logical_path = verified.logical_path,
+                context_hash = verified.hash,
+                recorded_workspace = recorded_workspace.path,
+            }, "existing Context continuation preview")
+        end
+
         local receipt, open_error = context_call(
             admitted_components.publication.open_existing,
             "ContextOpenUnknown",
@@ -1341,7 +1354,7 @@ function M.new(components, options)
             or receipt.durable ~= true
             or receipt.context_path ~= verified.physical_hint
             or receipt.logical_path ~= verified.logical_path
-            or type(receipt.context_hash) ~= "string"
+            or receipt.context_hash ~= verified.hash
             or type(receipt.display_name) ~= "string"
             or not valid_integer(receipt.generation, 1)
             or not valid_integer(receipt.event_count, 0)
@@ -1437,6 +1450,20 @@ function M.new(components, options)
             status = status,
             open_receipt = receipt,
         }, "existing chat bootstrap result")
+    end
+
+
+    ---Resolves and reverifies one continuation target without acquiring its
+    -- writer. This is the first phase of an in-chat Context switch; the later
+    -- open must use the returned precise hash and repeat all verification.
+    function application.preview_continue(selector)
+        if lifecycle == "closed" then
+            return nil, failure("ApplicationClosed", "the application lifecycle is closed")
+        end
+        if type(selector) ~= "string" or selector == "" then
+            return nil, failure("UsageError", "continue preview requires one Context selector")
+        end
+        return dispatch_continue({ id = "continue", selector = selector }, true)
     end
 
     ---Dispatches one already-normalized semantic action.
@@ -4381,6 +4408,7 @@ local function coordinator_ports(ports)
         or type(ports.view) ~= "table"
         or type(ports.chat) ~= "table"
         or type(ports.chat.draft) ~= "table"
+        or type(ports.context_switch) ~= "table"
         or type(ports.agent_factory) ~= "function"
         or type(ports.idle_wait) ~= "function"
         or type(ports.clock.now) ~= "function"
@@ -4411,6 +4439,14 @@ local function coordinator_ports(ports)
             return nil, failure(
                 "InvalidCoordinatorPorts",
                 "terminal port omits " .. method
+            )
+        end
+    end
+    for _, method in ipairs({ "list", "preview", "activate" }) do
+        if type(ports.context_switch[method]) ~= "function" then
+            return nil, failure(
+                "InvalidCoordinatorPorts",
+                "Context switch port omits " .. method
             )
         end
     end
@@ -4482,6 +4518,8 @@ function M.new_application_coordinator(ports, options)
     local steer_serial = 0
     local tool_ids = {}
     local last_wait_key = false
+    local deferred_failure = false
+    local close_agent
     local coordinator = {}
 
     local function now()
@@ -5191,6 +5229,199 @@ function M.new_application_coordinator(ports, options)
         return true
     end
 
+    local function publish_context_choices(result)
+        if type(result) ~= "table"
+            or result.action ~= "context-repl"
+            or type(result.rows) ~= "table"
+            or not valid_integer(result.total, 0)
+            or not valid_integer(result.shown, 0)
+            or result.shown ~= #result.rows
+            or type(result.truncated) ~= "boolean"
+        then
+            return nil, failure(
+                "ContextSwitchContract",
+                "Context picker returned an invalid bounded catalog"
+            )
+        end
+        local lines = {}
+        local maximum_rows = math.min(#result.rows, 32)
+        if maximum_rows == 0 then
+            lines[1] = "No available Contexts were found."
+        else
+            for index = 1, maximum_rows do
+                local row = result.rows[index]
+                if type(row) ~= "table"
+                    or type(row.hash16) ~= "string"
+                    or type(row.display_name) ~= "string"
+                    or type(row.logical_path) ~= "string"
+                    or type(row.header_state) ~= "string"
+                then
+                    return nil, failure(
+                        "ContextSwitchContract",
+                        "Context picker returned an invalid catalog row"
+                    )
+                end
+                lines[#lines + 1] = string.format(
+                    "%2d %s [%-11s] %s - %s",
+                    index,
+                    safe_diagnostic(row.hash16, 16),
+                    safe_diagnostic(row.header_state, 32),
+                    safe_diagnostic(row.display_name, 128),
+                    safe_diagnostic(row.logical_path, 256)
+                )
+            end
+        end
+        if result.truncated or maximum_rows < #result.rows then
+            lines[#lines + 1] = "More Contexts exist; use context-repl full to inspect them."
+        else
+            lines[#lines + 1] = "Use .context <name-or-hash> to switch explicitly."
+        end
+        return publish({ kind = "details", id = "contexts", lines = lines })
+    end
+
+    local function switch_context(request)
+        if request.selector == nil then
+            local result, list_error = coordinator_call(
+                admitted_ports.context_switch,
+                "list",
+                "ContextSwitchFailure",
+                "bounded Context picker"
+            )
+            if not result then return nil, list_error end
+            return publish_context_choices(result)
+        end
+
+        local current_status
+        if agent then
+            local runtime_status = agent.loop:status()
+            local compact_status = agent.compaction:status()
+            if runtime_status.state ~= "Idle" and runtime_status.state ~= "WaitingUser" then
+                return nil, failure(
+                    "InteractiveActionUnavailable",
+                    "Context switching requires an idle or waiting Agent"
+                )
+            end
+            if compact_status.active == true
+                or runtime_status.compaction_preflight_state ~= "idle"
+            then
+                return nil, failure(
+                    "InteractiveActionUnavailable",
+                    "finish or cancel compaction before switching Context"
+                )
+            end
+            if runtime_status.queue_count ~= 0 then
+                return nil, failure(
+                    "InteractiveActionUnavailable",
+                    "clear or finish every queued item before switching Context"
+                )
+            end
+            if runtime_status.side_state ~= "idle" then
+                return nil, failure(
+                    "InteractiveActionUnavailable",
+                    "finish or cancel the side request before switching Context"
+                )
+            end
+            if approval then
+                return nil, failure(
+                    "InteractiveActionUnavailable",
+                    "resolve the pending approval before switching Context"
+                )
+            end
+            current_status = agent.draft.status()
+            local selector_hash = request.selector:match("^[0-9A-Fa-f]+$")
+                and #request.selector == 16
+                and request.selector:upper() or false
+            if type(current_status) == "table"
+                and selector_hash == current_status.context_hash
+            then
+                return publish_status("That Context is already active.")
+            end
+        end
+
+        local preview, preview_error = coordinator_call(
+            admitted_ports.context_switch,
+            "preview",
+            "ContextSwitchFailure",
+            "Context switch preview",
+            request.selector
+        )
+        if not preview then return nil, preview_error end
+        if type(preview) ~= "table"
+            or preview.kind ~= "continue-preview"
+            or type(preview.logical_path) ~= "string"
+            or type(preview.context_hash) ~= "string"
+            or #preview.context_hash ~= 16
+            or not preview.context_hash:match("^[0-9A-F]+$")
+            or type(preview.recorded_workspace) ~= "string"
+        then
+            return nil, failure(
+                "ContextSwitchContract",
+                "Context switch preview is incomplete"
+            )
+        end
+        if current_status and preview.logical_path == current_status.logical_path then
+            return publish_status("That Context is already active.")
+        end
+
+        local closed, close_error = close_agent("context-switch")
+        if not closed then
+            deferred_failure = close_error or failure(
+                "ContextLeaseUnknown",
+                "the current Context could not be closed for switching"
+            )
+            lifecycle = "closing"
+            return nil, deferred_failure
+        end
+        local activated, activation_error = coordinator_call(
+            admitted_ports.context_switch,
+            "activate",
+            "ContextSwitchFailure",
+            "exact Context switch activation",
+            preview
+        )
+        if not activated then
+            deferred_failure = activation_error or failure(
+                "ContextSwitchFailure",
+                "the selected Context changed after the current session closed"
+            )
+            lifecycle = "closing"
+            return nil, deferred_failure
+        end
+        local next_agent = activated.agent
+        local next_status = activated.status
+        if type(next_agent) ~= "table"
+            or type(next_agent.loop) ~= "table"
+            or type(next_agent.driver) ~= "table"
+            or type(next_agent.session) ~= "table"
+            or type(next_agent.tools) ~= "table"
+            or type(next_agent.compaction) ~= "table"
+            or type(next_agent.draft) ~= "table"
+            or type(next_status) ~= "table"
+            or next_status.logical_path ~= preview.logical_path
+            or next_status.context_hash ~= preview.context_hash
+        then
+            deferred_failure = failure(
+                "ContextSwitchContract",
+                "Context switch activation did not preserve the previewed target"
+            )
+            lifecycle = "closing"
+            return nil, deferred_failure
+        end
+        agent = next_agent
+        approval = false
+        assistant_draft = ""
+        side_draft = ""
+        side_draft_id = false
+        side_focus_id = false
+        last_wait_key = false
+        tool_ids = {}
+        return publish_status(
+            "Context switched: " .. tostring(next_status.display_name)
+                .. " [" .. tostring(next_status.context_hash) .. "]"
+                .. " workspace=" .. tostring(next_status.workspace)
+        )
+    end
+
     local function route_agent_action(request)
         local compact_status = agent.compaction:status()
         local runtime_status = agent.loop:status()
@@ -5474,6 +5705,7 @@ function M.new_application_coordinator(ports, options)
             return publish({ kind = "details", id = "status", lines = status_lines() })
         end
         if request.id == "help-chat" then return show_help(request.topic) end
+        if request.id == "select-context" then return switch_context(request) end
         if not agent then
             if request.id == "queue-add" then
                 return start_first_agent(request.message)
@@ -5611,7 +5843,7 @@ function M.new_application_coordinator(ports, options)
         return true
     end
 
-    local function close_agent(reason)
+    close_agent = function(reason)
         if not agent then
             return coordinator_call(
                 admitted_ports.chat.draft,
@@ -5817,7 +6049,7 @@ function M.new_application_coordinator(ports, options)
                 if not waited then return finish_run(wait_error) end
             end
         end
-        return finish_run()
+        return finish_run(deferred_failure or nil)
     end
 
     function coordinator:status()
@@ -5926,6 +6158,194 @@ local function production_chat_view(composed, runtime)
     return readonly(view, "production chat view")
 end
 
+function M.new_context_switcher(initial_composed, runtime, dependencies)
+    dependencies = dependencies or {}
+    if type(initial_composed) ~= "table"
+        or type(initial_composed.application) ~= "table"
+        or type(initial_composed.application.dispatch) ~= "function"
+        or type(initial_composed.application.preview_continue) ~= "function"
+        or type(runtime) ~= "table"
+        or type(dependencies) ~= "table"
+    then
+        return nil, failure(
+            "InvalidContextSwitchPorts",
+            "production Context switch dependencies are incomplete"
+        )
+    end
+    for key in pairs(dependencies) do
+        if key ~= "compose" and key ~= "start_agent" then
+            return nil, failure(
+                "InvalidContextSwitchPorts",
+                "production Context switch dependencies are ambiguous"
+            )
+        end
+    end
+    local compose = dependencies.compose or M.compose_runtime
+    local start_agent = dependencies.start_agent or M.start_published_agent
+    if type(compose) ~= "function" or type(start_agent) ~= "function" then
+        return nil, failure(
+            "InvalidContextSwitchPorts",
+            "production Context switch factories are unavailable"
+        )
+    end
+    local current = initial_composed
+    local switcher = {}
+
+    function switcher:list()
+        local called, result, result_error = pcall(
+            current.application.dispatch,
+            { id = "context-repl", view = "recent" }
+        )
+        if not called then
+            return nil, failure(
+                "ContextSwitchFailure",
+                "the bounded Context catalog raised an exception"
+            )
+        end
+        if not result then return nil, result_error end
+        if result.action ~= "context-repl" or type(result.rows) ~= "table" then
+            return nil, failure(
+                result.error_code or "ContextSwitchFailure",
+                "the bounded Context catalog is unavailable"
+            )
+        end
+        return result
+    end
+
+    function switcher:preview(selector)
+        local called, result, result_error = pcall(
+            current.application.preview_continue,
+            selector
+        )
+        if not called then
+            return nil, failure(
+                "ContextSwitchFailure",
+                "Context switch preview raised an exception"
+            )
+        end
+        return result, result_error
+    end
+
+    function switcher:activate(preview)
+        if type(preview) ~= "table"
+            or preview.kind ~= "continue-preview"
+            or type(preview.context_hash) ~= "string"
+            or type(preview.logical_path) ~= "string"
+        then
+            return nil, failure(
+                "ContextSwitchContract",
+                "exact Context activation requires a verified preview"
+            )
+        end
+        local composed_call, next_composed, composition_error = pcall(compose, runtime)
+        if not composed_call then
+            return nil, failure(
+                "ContextSwitchFailure",
+                "replacement Runtime composition raised an exception"
+            )
+        end
+        if not next_composed then return nil, composition_error end
+        if type(next_composed) ~= "table"
+            or type(next_composed.application) ~= "table"
+            or type(next_composed.application.dispatch) ~= "function"
+            or type(next_composed.application.preview_continue) ~= "function"
+        then
+            return nil, failure(
+                "ContextSwitchContract",
+                "replacement Runtime composition is incomplete"
+            )
+        end
+        local dispatched, chat, dispatch_error = pcall(
+            next_composed.application.dispatch,
+            { id = "continue", selector = preview.context_hash }
+        )
+        if not dispatched then
+            return nil, failure(
+                "ContextSwitchFailure",
+                "exact Context activation raised an exception"
+            )
+        end
+        if not chat then return nil, dispatch_error end
+        if type(chat) ~= "table"
+            or type(chat.status) ~= "table"
+            or type(chat.draft) ~= "table"
+            or type(chat.draft.close) ~= "function"
+        then
+            return nil, failure(
+                "ContextSwitchContract",
+                "exact Context activation returned an incomplete chat"
+            )
+        end
+        local function release_chat_writer(message)
+            local close_called, closed, close_error = pcall(chat.draft.close)
+            if not close_called or closed == nil then
+                return nil, close_error or failure("ContextLeaseUnknown", message)
+            end
+            return true
+        end
+        if chat.status.logical_path ~= preview.logical_path
+            or chat.status.context_hash ~= preview.context_hash
+        then
+            local released, release_error = release_chat_writer(
+                "changed Context activation writer release is unknown"
+            )
+            if not released then return nil, release_error end
+            return nil, failure(
+                "TargetChanged",
+                "the selected Context changed after the prior session closed"
+            )
+        end
+        local started, next_agent, agent_error = pcall(
+            start_agent,
+            next_composed,
+            chat,
+            CONTINUATION_INSTRUCTION,
+            "context-switch"
+        )
+        if not started then
+            local released, release_error = release_chat_writer(
+                "failed Context activation writer release is unknown"
+            )
+            if not released then return nil, release_error end
+            return nil, failure(
+                "ContextSwitchFailure",
+                "replacement Agent composition raised an exception"
+            )
+        end
+        if not next_agent then
+            local released, release_error = release_chat_writer(
+                "failed replacement Agent writer release is unknown"
+            )
+            if not released then return nil, release_error end
+            return nil, agent_error
+        end
+        if type(next_agent) ~= "table"
+            or type(next_agent.loop) ~= "table"
+            or type(next_agent.driver) ~= "table"
+            or type(next_agent.session) ~= "table"
+            or type(next_agent.tools) ~= "table"
+            or type(next_agent.compaction) ~= "table"
+            or type(next_agent.draft) ~= "table"
+        then
+            local released, release_error = release_chat_writer(
+                "incomplete replacement Agent writer release is unknown"
+            )
+            if not released then return nil, release_error end
+            return nil, failure(
+                "ContextSwitchContract",
+                "replacement Agent composition is incomplete"
+            )
+        end
+        current = next_composed
+        return readonly({
+            agent = next_agent,
+            status = chat.status,
+        }, "activated Context switch")
+    end
+
+    return readonly(switcher, "production Context switch port")
+end
+
 ---Runs one production chat through the terminal ApplicationCoordinator.
 -- The plain cooked path requires no ANSI, raw keyboard mode, Unicode console,
 -- terminal size probe, or cursor movement.  Windows modifier keys are exposed
@@ -5977,6 +6397,8 @@ function M.run_interactive_chat(composed, chat, runtime, initial_agent)
     if not terminal_port then return fail_before_coordinator(terminal_error) end
     local view, view_error = production_chat_view(composed, runtime)
     if not view then return fail_before_coordinator(view_error) end
+    local context_switch, switch_error = M.new_context_switcher(composed, runtime)
+    if not context_switch then return fail_before_coordinator(switch_error) end
     local coordinator, coordinator_error = M.new_application_coordinator({
         terminal = terminal_port,
         clock = { now = composed.backend.clock_port.monotonic_now },
@@ -5985,6 +6407,7 @@ function M.run_interactive_chat(composed, chat, runtime, initial_agent)
         facts = runtime.stdio_facts,
         view = view,
         chat = chat,
+        context_switch = context_switch,
         initial_agent = initial_agent,
         agent_factory = function(message, source)
             return M.start_published_agent(composed, chat, message, source)

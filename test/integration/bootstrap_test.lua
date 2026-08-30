@@ -400,6 +400,7 @@ local function application(source, continuation)
             return {
                 tag = "Verified",
                 logical_path = logical_path,
+                hash = "0123456789ABCDEF",
                 physical_hint = physical_path,
                 credential = credential,
             }
@@ -1116,6 +1117,22 @@ return {
                     A.equal(calls.agent, 0)
                     A.equal(calls.stage1, 0)
                 end
+            end,
+        },
+        {
+            name = "continue preview freezes an exact target without acquiring its writer",
+            run = function()
+                local app, calls = application(valid_source(), {})
+                local preview = assert(app.preview_continue("Task"))
+                A.equal(preview.kind, "continue-preview")
+                A.equal(preview.logical_path, "/workspace/Task.xml")
+                A.equal(preview.context_hash, "0123456789ABCDEF")
+                A.equal(preview.recorded_workspace, "/workspace")
+                A.equal(calls.catalog, 1)
+                A.equal(calls.verify, 1)
+                A.equal(calls.open_existing or 0, 0)
+                A.equal(calls.config, 0)
+                A.equal(app.status().lifecycle, "constructed")
             end,
         },
         {

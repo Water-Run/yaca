@@ -81,7 +81,7 @@ local function fixture(settings)
     local prompts = {}
     local batches = settings.batches or {}
     local now = 0
-    local loop_status = status("RequestingModel")
+    local loop_status = status(settings.initial_state or "RequestingModel")
     local driver_steps = 0
     local side_started = false
     local side_emitted = false
@@ -122,6 +122,7 @@ local function fixture(settings)
             double_check = true,
             display_name = "first-task",
             context_hash = "0123456789ABCDEF",
+            logical_path = "/workspace/First.xml",
         }
     end
     function draft:close()
@@ -224,6 +225,9 @@ local function fixture(settings)
     local driver = {}
     function driver.step()
         driver_steps = driver_steps + 1
+        if settings.freeze_driver then
+            return { events = {}, status = loop_status, progressed = false }
+        end
         if settings.side_response and side_started and not side_emitted then
             side_emitted = true
             loop_status = status(loop_status.state, {
@@ -376,6 +380,69 @@ local function fixture(settings)
         compaction = compaction,
         draft = draft,
     }
+    local context_switch = {}
+    function context_switch:list()
+        log[#log + 1] = "context-list"
+        return {
+            action = "context-repl",
+            rows = { {
+                hash16 = "FEDCBA9876543210",
+                display_name = "second-task",
+                logical_path = "/workspace/Second.xml",
+                header_state = "valid",
+            } },
+            total = 1,
+            shown = 1,
+            truncated = false,
+        }
+    end
+    function context_switch:preview(selector)
+        log[#log + 1] = "context-preview:" .. selector
+        if settings.context_preview_error then
+            return nil, settings.context_preview_error
+        end
+        return {
+            kind = "continue-preview",
+            selector = selector,
+            logical_path = "/workspace/Second.xml",
+            context_hash = "FEDCBA9876543210",
+            recorded_workspace = "/workspace",
+        }
+    end
+    function context_switch:activate(preview)
+        log[#log + 1] = "context-activate:" .. preview.context_hash
+        if settings.context_activation_error then
+            return nil, settings.context_activation_error
+        end
+        loop_status = status("Idle", { turn_id = false })
+        local next_draft = {}
+        function next_draft.status()
+            return {
+                lifecycle = "saved",
+                durable = true,
+                workspace = "/workspace",
+                model = "Primary",
+                permission = "Std",
+                double_check = true,
+                display_name = "second-task",
+                context_hash = "FEDCBA9876543210",
+                logical_path = "/workspace/Second.xml",
+            }
+        end
+        function next_draft:close()
+            log[#log + 1] = "next-draft-close"
+            return true
+        end
+        local next_agent = {
+            loop = loop,
+            driver = driver,
+            session = session,
+            tools = tools,
+            compaction = compaction,
+            draft = next_draft,
+        }
+        return { agent = next_agent, status = next_draft.status() }
+    end
     local agent_factory = function(message, source)
         log[#log + 1] = "agent:" .. source .. ":" .. message
         if settings.automatic_preflight then
@@ -438,6 +505,7 @@ local function fixture(settings)
         },
         view = view,
         chat = chat,
+        context_switch = context_switch,
         agent_factory = agent_factory,
         initial_agent = settings.initial_agent and constructed_agent or nil,
     }, {
@@ -502,6 +570,157 @@ return {
                 A.contains(joined, "session-close:application-close")
                 A.contains(joined, "draft-close")
                 A.falsy(joined:find("chat-draft-close", 1, true))
+            end,
+        },
+        {
+            name = "context picker lists bounded recent targets without closing the draft",
+            run = function()
+                local f = fixture({ batches = {
+                    { { kind = "user_action", action = "text", text = ".context" } },
+                    { { kind = "user_action", action = "submit-or-queue" } },
+                    { { kind = "user_action", action = "text", text = ".quit" } },
+                    { { kind = "user_action", action = "submit-or-queue" } },
+                } })
+                assert(f.coordinator:run())
+                local joined = table.concat(f.log, "|")
+                A.contains(joined, "context-list")
+                A.falsy(joined:find("context-preview:", 1, true))
+                A.falsy(joined:find("context-activate:", 1, true))
+                A.contains(A.render(f.blocks), "FEDCBA9876543210")
+                A.contains(A.render(f.blocks), ".context <name-or-hash>")
+            end,
+        },
+        {
+            name = "context switch closes the old owner then activates only the previewed hash",
+            run = function()
+                local f = fixture({
+                    initial_agent = true,
+                    initial_state = "Idle",
+                    freeze_driver = true,
+                    batches = {
+                        {
+                            {
+                                kind = "user_action",
+                                action = "text",
+                                text = ".context 0123456789abcdef",
+                            },
+                        },
+                        { { kind = "user_action", action = "submit-or-queue" } },
+                        {
+                            {
+                                kind = "user_action",
+                                action = "text",
+                                text = ".context second-task",
+                            },
+                        },
+                        { { kind = "user_action", action = "submit-or-queue" } },
+                        { { kind = "user_action", action = "text", text = ".quit" } },
+                        { { kind = "user_action", action = "submit-or-queue" } },
+                    },
+                })
+                assert(f.coordinator:run())
+                local joined = table.concat(f.log, "|")
+                local preview = assert(joined:find("context-preview:second-task", 1, true))
+                local closed = assert(joined:find("session-close:context-switch", 1, true))
+                local activated = assert(joined:find(
+                    "context-activate:FEDCBA9876543210",
+                    1,
+                    true
+                ))
+                A.truthy(preview < closed and closed < activated)
+                A.contains(A.render(f.blocks), "That Context is already active")
+                A.contains(A.render(f.blocks), "Context switched: second-task")
+                A.contains(joined, "next-draft-close")
+            end,
+        },
+        {
+            name = "unsaved chat can switch without publishing an empty replacement Context",
+            run = function()
+                local f = fixture({
+                    freeze_driver = true,
+                    batches = {
+                        {
+                            {
+                                kind = "user_action",
+                                action = "text",
+                                text = ".context second-task",
+                            },
+                        },
+                        { { kind = "user_action", action = "submit-or-queue" } },
+                        { { kind = "user_action", action = "text", text = ".quit" } },
+                        { { kind = "user_action", action = "submit-or-queue" } },
+                    },
+                })
+                assert(f.coordinator:run())
+                local joined = table.concat(f.log, "|")
+                local closed = assert(joined:find("chat-draft-close", 1, true))
+                local activated = assert(joined:find(
+                    "context-activate:FEDCBA9876543210",
+                    1,
+                    true
+                ))
+                A.truthy(closed < activated)
+                A.falsy(joined:find("agent:terminal:", 1, true))
+                A.contains(joined, "next-draft-close")
+            end,
+        },
+        {
+            name = "post-close Context activation race is fatal and restores the terminal",
+            run = function()
+                local f = fixture({
+                    initial_agent = true,
+                    initial_state = "Idle",
+                    freeze_driver = true,
+                    context_activation_error = {
+                        code = "TargetChanged",
+                        message = "the previewed target changed",
+                    },
+                    batches = {
+                        {
+                            {
+                                kind = "user_action",
+                                action = "text",
+                                text = ".context second-task",
+                            },
+                        },
+                        { { kind = "user_action", action = "submit-or-queue" } },
+                    },
+                })
+                local result, result_error = f.coordinator:run()
+                A.falsy(result)
+                A.equal(result_error.code, "TargetChanged")
+                A.contains(table.concat(f.log, "|"), "session-close:context-switch")
+                A.contains(A.render(f.blocks), "the previewed target changed")
+                A.equal(f.log[#f.log - 1], "terminal-restore")
+                A.equal(f.log[#f.log], "terminal-close")
+            end,
+        },
+        {
+            name = "busy Context switch rejects before previewing or closing the owner",
+            run = function()
+                local f = fixture({
+                    initial_agent = true,
+                    initial_state = "RequestingModel",
+                    freeze_driver = true,
+                    batches = {
+                        {
+                            {
+                                kind = "user_action",
+                                action = "text",
+                                text = ".context second-task",
+                            },
+                        },
+                        { { kind = "user_action", action = "submit-or-queue" } },
+                        { { kind = "user_action", action = "cancel" } },
+                        { { kind = "user_action", action = "text", text = ".quit" } },
+                        { { kind = "user_action", action = "submit-or-queue" } },
+                    },
+                })
+                assert(f.coordinator:run())
+                local joined = table.concat(f.log, "|")
+                A.falsy(joined:find("context-preview:", 1, true))
+                A.falsy(joined:find("session-close:context-switch", 1, true))
+                A.contains(A.render(f.blocks), "requires an idle or waiting Agent")
             end,
         },
         {

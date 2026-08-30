@@ -51,6 +51,8 @@ Context 文件位于镜像树，例如 `__yaca__/CONTEXT/C/Program Files/我的�
 
 `--continue` 会解析并复核一个精确目标、取得其 writer，且当前要求从该 Context 记录的 workspace 调用。它把 durable event/config/ModelView 与各类标识符水位恢复到 Idle Agent，绝不自动重放未完成工作。若存在 unfinished turn、active queue item、未决 operation/tool、unknown terminal outcome 或 pending compaction，则必须先显式恢复。显式确认/rebind controller 实现前，跨 workspace 继续会以 typed confirmation requirement 拒绝。
 
+chat 中无 selector 的 `.context` 显示有界 recent 列表；`.context <selector>` 先冻结已复核的逻辑路径和精确 hash，只有当前 queue、side lane、approval 与 compaction 均安全时才关闭旧 owner，之后仅按该 hash 重新组合并打开。关闭后若发生竞态，本次 invocation 会致命失败，绝不退回短名称去打开替代对象。显式跨 workspace 确认实现前，该切换同样只限记录的 workspace。
+
 ## 已实现的命令 grammar
 
 以下拼写已在源码中实现；目前仍没有可下载且通过目标资格验证的 executable：

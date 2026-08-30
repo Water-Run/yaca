@@ -2,7 +2,7 @@
 
 更新日期：2026-08-30
 
-状态：**手工、自动、durable recovery core 与同 workspace `--continue` 完成，其余 controller 和目标校准待闭合** — model-view/summary/atomic-group/admission、no-tool Model port、Context journal、原子 publication、accepted/pending-view 恢复、公开 `.compact`、每次 main/review 请求前 automatic preflight、STATUS/cancel、Runtime receipt gate、跨进程 failure circuit 和 exact reopen 已实现；`.context`/select-context、跨 workspace 显式确认/rebind 与 target calibration 尚待闭合
+状态：**手工、自动、durable recovery core 与同 workspace `--continue`/`.context` 完成，其余 controller 和目标校准待闭合** — model-view/summary/atomic-group/admission、no-tool Model port、Context journal、原子 publication、accepted/pending-view 恢复、公开 `.compact`、每次 main/review 请求前 automatic preflight、STATUS/cancel、Runtime receipt gate、跨进程 failure circuit 和 exact reopen/switch 已实现；跨 workspace 显式确认/rebind 与 target calibration 尚待闭合
 
 > D-063：XML **存储** hard limit 触顶时的解脱主路径是 **新开对话 + 接盘 Prompt**，不是依赖 compact 缩小事实 XML。compact 仍只服务 model view。
 
@@ -99,8 +99,9 @@ summary 同时保存 source event range/digest、生成 Model、完整 Prompt/vi
 - existing Context open core 在向新 Runtime 暴露 writer 前恢复所有未闭合 lifecycle：request-only、response-only、cancel-pending 与 nonterminal-rejection 都归并为唯一 cancel pending/unknown 和 terminal error，保留旧 view且不重放 Model 请求；旧格式 pending 只追加 cancel unknown，不伪造无法证明的 CompactionRecord。
 - compaction serial 与连续 automatic failure streak 从 canonical XML 重建；automatic process-recovery unknown 计入 streak，旧终态缺少 circuit 语义时按 history-incomplete 保守开路。进程间不能比较 monotonic timestamp，因此恢复到阈值的 circuit 从首个本地单调时钟读数重新等待完整 cooldown，再允许一次 half-open probe。
 - `--continue` 只接受 exact resolved/reverified target，在同一 recorded workspace identity 下取得 writer；未完成 turn、active queue、未决 Tool/operation、unknown outcome 或 pending compaction 会阻断自动继续。quiescent Context 以 Idle Runtime 恢复 event/config/active manifest 与八类 canonical ID 水位，不自动执行或重放任何历史请求。
+- `.context` 无参数只显示 bounded recent Catalog；有 selector 时先冻结 exact verified path/hash，要求旧 Agent 为 Idle/WaitingUser 且 queue/side/approval/compaction 均安全，再关闭旧 writer，并在 fresh composition 中只按该 hash 重复完整 open/recovery。关闭后的 drift/lock/config failure 为 fatal，不退回短名称替代匹配；未保存 chat 不会因此发布空 Context。
 - production composition 测试使用真实 `compact` service 跑通手工/自动触发、摘要 Model response、response receipt、原子 publication、Runtime terminal settlement 和待发请求恢复，并注入 journal rejection 证明 lane 不会被错误释放。
-- 受 `.tools/run_with_resource_guard.sh` 保护的完整 Lua suite 为 `418/418`，其中包含手工/自动的五个跨实例 crash bracket、旧格式 pending、serial 不重用、process-recovery failure 传递、recovered-circuit cooldown 和同 workspace exact reopen。它只证明平台无关 core 与 fake/native adapter 边界，不能替代跨 workspace recovery controller 或 XP/Win7/CentOS 7 target 证据。
+- 受 `.tools/run_with_resource_guard.sh` 保护的完整 Lua suite 为 `425/425`，其中包含手工/自动的五个跨实例 crash bracket、旧格式 pending、serial 不重用、process-recovery failure 传递、recovered-circuit cooldown、同 workspace exact reopen 和 two-phase Context switch。它只证明平台无关 core 与 fake/native adapter 边界，不能替代跨 workspace recovery controller 或 XP/Win7/CentOS 7 target 证据。
 
 ## 仍需技术证明
 
@@ -197,5 +198,6 @@ summary 同时保存 source event range/digest、生成 Model、完整 Prompt/vi
 - [x] ApplicationCoordinator `.compact`、STATUS/cancel 与 production transport composition
 - [x] 每次 main/review Model request 前的自动阈值 preflight、可见 STATUS 与精确恢复/阻断
 - [x] pending lifecycle/circuit 跨进程恢复 core与同 workspace `--continue` exact reopen
-- [ ] `.context`/select-context 与跨 workspace 显式确认/rebind controller
+- [x] `.context`/select-context bounded list 与 two-phase exact-hash switch
+- [ ] 跨 workspace 显式确认/rebind controller
 - [ ] token 估算与三目标阈值数值（TP/C32）

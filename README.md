@@ -51,6 +51,8 @@ Opening history is always explicit. A short name selects the first usable match 
 
 `--continue` resolves and reverifies one exact target, acquires its writer, and currently requires invocation from the Context's recorded workspace. It restores the durable event/config/ModelView and identifier waterlines into an Idle Agent; it never replays unfinished work automatically. Unfinished turns, active queue items, unresolved operations or tools, unknown terminal outcomes, and pending compaction require explicit recovery instead. Cross-workspace continuation is refused with a typed confirmation requirement until an explicit confirmation/rebind controller is implemented.
 
+Within chat, `.context` without a selector shows a bounded recent list. `.context <selector>` first freezes the verified path and precise hash, closes the current owner only when its queue, side lane, approval, and compaction state are safe, then recomposes and reopens by that hash alone. A post-close race is fatal for that invocation; it never falls back to a replacement short-name match. This switch is also limited to the recorded workspace until explicit cross-workspace confirmation exists.
+
 ## Implemented command grammar
 
 These spellings are implemented in the source tree; no downloadable target-qualified executable is available yet:

@@ -1052,6 +1052,110 @@ return {
             end,
         },
         {
+            name = "production Context switcher reopens only the previewed exact hash",
+            run = function()
+                local f = fixture()
+                local current_preview_calls = 0
+                local next_preview_calls = 0
+                local closed = 0
+                local initial = { application = {} }
+                function initial.application.dispatch(request)
+                    A.equal(request.id, "context-repl")
+                    A.equal(request.view, "recent")
+                    return { action = "context-repl", rows = {} }
+                end
+                function initial.application.preview_continue(selector)
+                    current_preview_calls = current_preview_calls + 1
+                    return {
+                        kind = "continue-preview",
+                        selector = selector,
+                        logical_path = "/workspace/Second.xml",
+                        context_hash = "FEDCBA9876543210",
+                        recorded_workspace = "/workspace",
+                    }
+                end
+                local next_composed = { application = {} }
+                function next_composed.application.dispatch(request)
+                    A.equal(request.id, "continue")
+                    A.equal(request.selector, "FEDCBA9876543210")
+                    local draft = { close = function()
+                        closed = closed + 1
+                        return true
+                    end }
+                    return {
+                        kind = "continue-chat",
+                        outcome = "ready",
+                        draft = draft,
+                        status = {
+                            logical_path = "/workspace/Second.xml",
+                            context_hash = "FEDCBA9876543210",
+                            display_name = "Second",
+                            workspace = "/workspace",
+                        },
+                    }
+                end
+                function next_composed.application.preview_continue(selector)
+                    next_preview_calls = next_preview_calls + 1
+                    return { selector = selector }
+                end
+                local agent = {
+                    owner = "second",
+                    loop = {},
+                    driver = {},
+                    session = {},
+                    tools = {},
+                    compaction = {},
+                    draft = {},
+                }
+                local switcher = assert(f.main.new_context_switcher(initial, {}, {
+                    compose = function() return next_composed end,
+                    start_agent = function(composed, chat, message, source)
+                        A.equal(composed, next_composed)
+                        A.equal(chat.status.context_hash, "FEDCBA9876543210")
+                        A.contains(message, "latest durable Context facts")
+                        A.equal(source, "context-switch")
+                        return agent
+                    end,
+                }))
+                A.equal(assert(switcher:list()).action, "context-repl")
+                local preview = assert(switcher:preview("Second"))
+                local activated = assert(switcher:activate(preview))
+                A.equal(activated.agent, agent)
+                A.equal(activated.status.logical_path, preview.logical_path)
+                A.equal(current_preview_calls, 1)
+                assert(switcher:preview("after-switch"))
+                A.equal(next_preview_calls, 1)
+                A.equal(closed, 0)
+
+                local mismatch = assert(f.main.new_context_switcher(initial, {}, {
+                    compose = function()
+                        return { application = {
+                            preview_continue = function() return {} end,
+                            dispatch = function()
+                                return {
+                                    draft = { close = function()
+                                        closed = closed + 1
+                                        return true
+                                    end },
+                                    status = {
+                                        logical_path = "/workspace/Replaced.xml",
+                                        context_hash = "0000000000000000",
+                                    },
+                                }
+                            end,
+                        } }
+                    end,
+                    start_agent = function()
+                        error("changed target must not start an Agent")
+                    end,
+                }))
+                local changed, changed_error = mismatch:activate(preview)
+                A.falsy(changed)
+                A.equal(changed_error.code, "TargetChanged")
+                A.equal(closed, 1)
+            end,
+        },
+        {
             name = "manual compaction crosses the real production owner and publication chain",
             run = function()
                 local f = fixture({ compaction_lifecycle = true })
