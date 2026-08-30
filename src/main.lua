@@ -1280,6 +1280,7 @@ local AGENT_RELEASE_OPTIONS = {
         },
         initial_sequence = 2,
         initial_context_generation = 1,
+        automatic_compaction = true,
         maximum_identifier_bytes = 256,
         hard_cap_snapshot_id = "tp017-modern-candidate-v1",
         lanes = {
@@ -2313,6 +2314,8 @@ local function new_production_compaction(composed, catalog, loop, clock)
         end
         local admitted, admission_error = loop:begin_compaction({
             mode = mode,
+            preflight_id = mode == "automatic"
+                and prepared.status.compaction_preflight_id or false,
             expected_context_generation = prepared.observation
                 .expected_context_generation,
             expected_last_sequence = prepared.observation.expected_last_sequence,
@@ -2324,8 +2327,10 @@ local function new_production_compaction(composed, catalog, loop, clock)
         local result, begin_error = service:begin(prepared.input)
         if not result then
             local status = loop:status()
+            local release_outcome = mode == "automatic"
+                and "waiting_user" or "unknown"
             local released, release_error = loop:finish_compaction({
-                outcome = "unknown",
+                outcome = release_outcome,
                 compaction_id = false,
                 expected_context_generation = status.context_generation,
                 expected_last_sequence = status.last_durable_sequence,
@@ -2333,6 +2338,18 @@ local function new_production_compaction(composed, catalog, loop, clock)
             })
             if not released then return nil, release_error end
             active = false
+            if mode == "automatic" then
+                last_result = readonly({
+                    result = readonly({
+                        outcome = "waiting_user",
+                        reason = "automatic-compaction-preflight-failed",
+                        error_code = type(begin_error) == "table"
+                            and begin_error.code or "CompactionPreflightFailure",
+                    }, "automatic compaction preflight failure"),
+                    settlement = released,
+                }, "production compaction result")
+                return last_result
+            end
             return nil, begin_error
         end
         local terminal, settlement_error = settle(result)
@@ -4440,7 +4457,53 @@ function M.new_application_coordinator(ports, options)
 
     local function compaction_outcome(result)
         local settlement = type(result) == "table" and result.settlement or nil
-        return type(settlement) == "table" and settlement.outcome or false
+        if type(settlement) == "table" then return settlement.outcome end
+        local raw = type(result) == "table" and result.result or nil
+        if type(raw) ~= "table" then return false end
+        if type(raw.outcome) == "string" then return raw.outcome end
+        if raw.decision == "fits" then return "fits" end
+        if raw.decision == "no_op" then return "no_op" end
+        if raw.decision == "suppressed" then return "suppressed" end
+        if raw.decision == "waiting_user" then return "waiting_user" end
+        return false
+    end
+
+    local function resolve_automatic_preflight(result)
+        local status = agent.loop:status()
+        if status.compaction_preflight_state == nil
+            or status.compaction_preflight_state == "idle"
+        then
+            return true
+        end
+        local settlement = result.settlement
+        if type(settlement) == "table" and settlement.mode ~= "automatic" then
+            return true
+        end
+        local outcome = compaction_outcome(result)
+        if not outcome then
+            return nil, failure(
+                "CompactionActivityContract",
+                "automatic compaction result has no typed preflight outcome"
+            )
+        end
+        local resolved, resolution_error = coordinator_call(
+            agent.loop,
+            "resolve_compaction_preflight",
+            "CompactionActivityFailure",
+            "automatic compaction preflight resolution",
+            {
+                preflight_id = status.compaction_preflight_id,
+                outcome = outcome,
+                compaction_id = type(settlement) == "table"
+                    and settlement.compaction_id or false,
+                expected_context_generation = status.context_generation,
+                expected_last_sequence = status.last_durable_sequence,
+                expected_manifest_digest = status.active_view_manifest_ref,
+                settlement = type(settlement) == "table" and settlement or false,
+            }
+        )
+        if not resolved then return nil, resolution_error end
+        return resolved
     end
 
     local function publish_compaction_result(result)
@@ -4494,6 +4557,11 @@ function M.new_application_coordinator(ports, options)
                 )
             elseif event.kind == "terminal" then
                 projected, projection_error = publish_compaction_result(event.result)
+                if projected then
+                    projected, projection_error = resolve_automatic_preflight(
+                        event.result
+                    )
+                end
             else
                 return nil, failure(
                     "CompactionActivityContract",
@@ -4503,6 +4571,50 @@ function M.new_application_coordinator(ports, options)
             if not projected then return nil, projection_error end
         end
         return step.progressed
+    end
+
+    local function drive_automatic_preflight()
+        if not agent or type(agent.compaction) ~= "table" then return false end
+        local status = agent.loop:status()
+        if status.compaction_preflight_state ~= "pending" then return false end
+        if agent.compaction:status().active == true
+            or status.side_state ~= "idle"
+            or status.active_request_id ~= false
+            or status.active_tool_call_id ~= false
+        then
+            return false
+        end
+        local result, begin_error = coordinator_call(
+            agent.compaction,
+            "begin",
+            "CompactionActivityFailure",
+            "automatic compaction preflight",
+            "automatic"
+        )
+        if not result then return nil, begin_error end
+        if result.state == "active" then
+            local published, publish_error = publish_status(
+                "Automatic compaction started: "
+                    .. tostring(result.compaction_id)
+                    .. "; the pending Model request remains paused and cancellation is available."
+            )
+            if not published then return nil, publish_error end
+            return true
+        end
+        if type(result.result) ~= "table" then
+            return nil, failure(
+                "CompactionActivityContract",
+                "automatic compaction preflight returned neither an activity nor a result"
+            )
+        end
+        local outcome = compaction_outcome(result)
+        if outcome ~= "fits" and outcome ~= "no_op" then
+            local published, publish_error = publish_compaction_result(result)
+            if not published then return nil, publish_error end
+        end
+        local resolved, resolution_error = resolve_automatic_preflight(result)
+        if not resolved then return nil, resolution_error end
+        return true
     end
 
     local function status_lines()
@@ -4523,6 +4635,9 @@ function M.new_application_coordinator(ports, options)
             "turn: " .. tostring(status.turn_id),
             "context generation: " .. tostring(status.context_generation),
             "pending: " .. tostring(status.pending_kind),
+            "automatic preflight: "
+                .. tostring(status.compaction_preflight_state)
+                .. " " .. tostring(status.compaction_preflight_id),
             "queue: " .. tostring(status.queue_count)
                 .. "/" .. tostring(status.queue_maximum),
             "side: " .. tostring(status.side_state)
@@ -4613,7 +4728,13 @@ function M.new_application_coordinator(ports, options)
 
     local function route_agent_action(request)
         local compact_status = agent.compaction:status()
-        if compact_status.active == true
+        local runtime_status = agent.loop:status()
+        local compaction_busy = compact_status.active == true
+            or runtime_status.compaction_preflight_state == "pending"
+            or runtime_status.compaction_preflight_state == "settled"
+            or runtime_status.compaction_preflight_state == "blocked"
+            or runtime_status.pending_kind == "compaction-preflight"
+        if compaction_busy
             and request.id ~= "cancel"
             and request.id ~= "status-chat"
             and request.id ~= "help-chat"
@@ -4710,7 +4831,9 @@ function M.new_application_coordinator(ports, options)
                 if result.cancel_pending == true then
                     return publish_status("Compaction cancellation is pending.")
                 end
-                return publish_compaction_result(result)
+                local published, publish_error = publish_compaction_result(result)
+                if not published then return nil, publish_error end
+                return resolve_automatic_preflight(result)
             end
             local current = agent.loop:status()
             if side_focus_id ~= false
@@ -5199,6 +5322,12 @@ function M.new_application_coordinator(ports, options)
                 if lifecycle == "closing" then break end
             end
             if lifecycle == "running" and agent then
+                local preflight_progress, preflight_error
+                    = drive_automatic_preflight()
+                if preflight_progress == nil then
+                    return finish_run(preflight_error)
+                end
+                progressed = progressed or preflight_progress
                 local compact_progress, compact_error = drive_compaction()
                 if compact_progress == nil then return finish_run(compact_error) end
                 progressed = progressed or compact_progress

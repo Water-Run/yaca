@@ -55,6 +55,7 @@ local function options(queue_maximum)
         },
         initial_sequence = 0,
         initial_context_generation = 1,
+        automatic_compaction = false,
         maximum_identifier_bytes = 128,
         hard_cap_snapshot_id = "manifest-hard-v1",
         lanes = {

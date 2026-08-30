@@ -90,7 +90,10 @@ local PAUSED_AGENT_STATES = {
 }
 local AGENT_TRANSITIONS = {
     Idle = { Preparing = true, Closing = true },
-    Preparing = { RequestingModel = true, Finalizing = true, Closing = true },
+    Preparing = {
+        RequestingModel = true, WaitingUser = true,
+        Finalizing = true, Closing = true,
+    },
     RequestingModel = {
         Streaming = true, Preparing = true, Finalizing = true, Closing = true,
     },
@@ -549,6 +552,7 @@ local function validate_agent_options(options)
         hard_caps = true, stuck = true, initial_sequence = true,
         maximum_identifier_bytes = true, hard_cap_snapshot_id = true,
         initial_context_generation = true, lanes = true,
+        automatic_compaction = true,
     }) then
         return nil, failure("InvalidAgentOptions", "AgentLoop options are ambiguous")
     end
@@ -558,6 +562,7 @@ local function validate_agent_options(options)
         or not integer_at_least(options.initial_sequence, 0)
         or not integer_at_least(options.initial_context_generation, 1)
         or not integer_at_least(options.maximum_identifier_bytes, 16)
+        or type(options.automatic_compaction) ~= "boolean"
         or not valid_runtime_id(
             options.hard_cap_snapshot_id,
             options.maximum_identifier_bytes
@@ -604,6 +609,7 @@ local function validate_agent_options(options)
         initial_context_generation = options.initial_context_generation,
         maximum_identifier_bytes = options.maximum_identifier_bytes,
         hard_cap_snapshot_id = options.hard_cap_snapshot_id,
+        automatic_compaction = options.automatic_compaction,
         lanes = {},
     }
     for name in pairs(AGENT_HARD_CAP_FIELDS) do copy.hard_caps[name] = options.hard_caps[name] end
@@ -632,6 +638,8 @@ local function validate_agent_options(options)
     }) do
         runtime_snapshot[#runtime_snapshot + 1] = name .. "=" .. tostring(copy.lanes[name])
     end
+    runtime_snapshot[#runtime_snapshot + 1] = "automatic_compaction="
+        .. tostring(copy.automatic_compaction)
     copy.runtime_snapshot = table.concat(runtime_snapshot, ";")
     if #copy.runtime_snapshot > copy.hard_caps.message_bytes then
         return nil, failure(
@@ -898,8 +906,12 @@ function M.new_agent_loop(ports, options)
     local side
     local side_history = {}
     local compaction_gate
+    local compaction_preflight_serial = 0
+    local pending_model_preflight
     local loop = {}
     local request_model
+    local start_model_request
+    local start_review_request
     local dispatch_next
     local accept_result
     local skip_remaining
@@ -1245,6 +1257,7 @@ function M.new_agent_loop(ports, options)
         if not receipt then return nil, commit_error end
         local snapshot = final_snapshot(outcome)
         active_request, active_review, active_tool, pending = nil, nil, nil, nil
+        pending_model_preflight = nil
         pending_steer = nil
         if closing then transition("Closing") else transition("Idle") end
         last_turn = snapshot
@@ -1380,7 +1393,45 @@ function M.new_agent_loop(ports, options)
         return prepared.digest
     end
 
-    request_model = function(purpose, continuation)
+    local function defer_model_request(kind, purpose, payload)
+        if pending_model_preflight then
+            return nil, failure(
+                "CompactionPreflightBusy",
+                "one Model request already awaits automatic compaction"
+            )
+        end
+        compaction_preflight_serial = compaction_preflight_serial + 1
+        local preflight_id = turn.id .. ":compaction-preflight:"
+            .. tostring(compaction_preflight_serial)
+        local frozen_payload = freeze(payload or false, nil, "deferred Model request")
+        if frozen_payload == nil then
+            return nil, failure(
+                "InvalidCompactionPreflight",
+                "deferred Model request binding contains a cycle"
+            )
+        end
+        pending_model_preflight = {
+            id = preflight_id,
+            kind = kind,
+            purpose = purpose,
+            payload = frozen_payload,
+            settlement = false,
+        }
+        return readonly({
+            state = state,
+            request_id = false,
+            compaction_preflight_id = preflight_id,
+            automatic_compaction = true,
+        }, "automatic compaction preflight admission")
+    end
+
+    start_model_request = function(purpose, continuation)
+        if compaction_gate then
+            return nil, failure(
+                "CompactionBusy",
+                "a main Model request cannot start while compaction owns the Context lane"
+            )
+        end
         local reason = budget_reason("model")
         if reason then return finalize("budget_exhausted", reason, "AgentBudgetExhausted") end
         request_serial = request_serial + 1
@@ -1420,7 +1471,25 @@ function M.new_agent_loop(ports, options)
         return readonly({ state = state, request_id = request_id }, "model admission")
     end
 
-    local function begin_review(kind, binding)
+    request_model = function(purpose, continuation)
+        local reason = budget_reason("model")
+        if reason then return finalize("budget_exhausted", reason, "AgentBudgetExhausted") end
+        if limits.automatic_compaction then
+            if state ~= "Preparing" then transition("Preparing") end
+            return defer_model_request("main", purpose, {
+                continuation = continuation or false,
+            })
+        end
+        return start_model_request(purpose, continuation)
+    end
+
+    start_review_request = function(kind, binding)
+        if compaction_gate then
+            return nil, failure(
+                "CompactionBusy",
+                "a review Model request cannot start while compaction owns the Context lane"
+            )
+        end
         if admitted_ports.reviews == false then
             transition("WaitingUser")
             turn.reported_outcome = "waiting_user"
@@ -1471,6 +1540,30 @@ function M.new_agent_loop(ports, options)
         if not handle then return finalize("error", start_error.message, start_error.code) end
         active_review = { id = request_id, handle = handle, kind = kind, binding = binding }
         return readonly({ state = state, request_id = request_id }, "review admission")
+    end
+
+    local function begin_review(kind, binding)
+        if admitted_ports.reviews == false then
+            transition("WaitingUser")
+            turn.reported_outcome = "waiting_user"
+            pending.review_unavailable = true
+            return readonly({ state = state, outcome = "waiting_user" }, "review unavailable")
+        end
+        local reason = budget_reason("review")
+        if reason then
+            transition("WaitingUser")
+            turn.reported_outcome = "waiting_user"
+            pending.review_budget_exhausted = true
+            return readonly({ state = state, outcome = "waiting_user" }, "review budget")
+        end
+        local purpose = kind == "termination" and "termination-review" or "action-review"
+        if limits.automatic_compaction then
+            return defer_model_request("review", purpose, {
+                review_kind = kind,
+                binding = binding,
+            })
+        end
+        return start_review_request(kind, binding)
     end
 
     local function record_detector(signature, error_signature, progress_identity)
@@ -2166,11 +2259,17 @@ function M.new_agent_loop(ports, options)
         if halted then return nil, halt_error end
         if not exact_fields(command, {
             mode = true,
+            preflight_id = true,
             expected_context_generation = true,
             expected_last_sequence = true,
             expected_manifest_digest = true,
         })
             or (command.mode ~= "manual" and command.mode ~= "automatic")
+            or (command.preflight_id ~= false
+                and not valid_runtime_id(
+                    command.preflight_id,
+                    limits.maximum_identifier_bytes
+                ))
             or not integer_at_least(command.expected_context_generation, 1)
             or not integer_at_least(command.expected_last_sequence, 0)
             or not valid_runtime_text(
@@ -2184,8 +2283,15 @@ function M.new_agent_loop(ports, options)
                 "compaction admission binding is invalid"
             )
         end
+        local manual_paused = command.mode == "manual"
+            and command.preflight_id == false
+            and (state == "Idle" or state == "WaitingUser")
+        local automatic_deferred = command.mode == "automatic"
+            and pending_model_preflight ~= nil
+            and pending_model_preflight.settlement == false
+            and command.preflight_id == pending_model_preflight.id
         if compaction_gate
-            or (state ~= "Idle" and state ~= "WaitingUser")
+            or (not manual_paused and not automatic_deferred)
             or active_request ~= nil
             or active_review ~= nil
             or active_tool ~= nil
@@ -2208,6 +2314,7 @@ function M.new_agent_loop(ports, options)
         end
         compaction_gate = {
             mode = command.mode,
+            preflight_id = command.preflight_id,
             opened_state = state,
             opened_context_generation = context_generation,
             opened_sequence = sequence,
@@ -2222,6 +2329,7 @@ function M.new_agent_loop(ports, options)
         return readonly({
             state = state,
             mode = command.mode,
+            preflight_id = command.preflight_id,
             context_generation = context_generation,
             last_sequence = sequence,
             manifest_digest = command.expected_manifest_digest,
@@ -2542,16 +2650,140 @@ function M.new_agent_loop(ports, options)
             )
         end
         local mode = compaction_gate.mode
+        local preflight_id = compaction_gate.preflight_id
         compaction_gate = nil
-        return readonly({
+        local settlement = readonly({
             outcome = command.outcome,
             compaction_id = command.compaction_id,
             mode = mode,
+            preflight_id = preflight_id,
             state = state,
             context_generation = context_generation,
             last_sequence = sequence,
             manifest_digest = command.expected_manifest_digest,
         }, "Runtime compaction settlement")
+        if mode == "automatic" then
+            if not pending_model_preflight
+                or pending_model_preflight.id ~= preflight_id
+                or pending_model_preflight.settlement ~= false
+            then
+                return durability_failure("automatic-compaction-preflight-binding")
+            end
+            pending_model_preflight.settlement = settlement
+        end
+        return settlement
+    end
+
+    ---Resolves exactly one deferred main/review request after the automatic
+    -- compaction owner has either settled its Runtime lane or proved that the
+    -- configured automatic path is disabled and the existing view may proceed.
+    function loop:resolve_compaction_preflight(command)
+        if halted then return nil, halt_error end
+        if compaction_gate or not pending_model_preflight then
+            return nil, failure(
+                "CompactionPreflightMissing",
+                "no settled automatic compaction preflight awaits resolution"
+            )
+        end
+        local deferred = pending_model_preflight
+        local outcomes = {
+            completed = true, fits = true, no_op = true,
+            suppressed = true, waiting_user = true,
+            cancelled = true, unknown = true,
+        }
+        if not exact_fields(command, {
+            preflight_id = true,
+            outcome = true,
+            compaction_id = true,
+            expected_context_generation = true,
+            expected_last_sequence = true,
+            expected_manifest_digest = true,
+            settlement = true,
+        })
+            or command.preflight_id ~= deferred.id
+            or not outcomes[command.outcome]
+            or (command.compaction_id ~= false
+                and not valid_runtime_id(
+                    command.compaction_id,
+                    limits.maximum_identifier_bytes
+                ))
+            or command.expected_context_generation ~= context_generation
+            or command.expected_last_sequence ~= sequence
+            or command.expected_manifest_digest ~= current_manifest_ref()
+        then
+            return nil, failure(
+                "CompactionPreflightMismatch",
+                "automatic compaction resolution does not bind the deferred request"
+            )
+        end
+        if deferred.settlement ~= false then
+            local settled = deferred.settlement
+            if command.settlement ~= settled
+                or settled.mode ~= "automatic"
+                or settled.preflight_id ~= deferred.id
+                or settled.outcome ~= command.outcome
+                or settled.compaction_id ~= command.compaction_id
+                or settled.context_generation ~= context_generation
+                or settled.last_sequence ~= sequence
+                or settled.manifest_digest ~= current_manifest_ref()
+            then
+                return nil, failure(
+                    "CompactionPreflightMismatch",
+                    "automatic compaction settlement is stale or substituted"
+                )
+            end
+        elseif command.settlement ~= false
+            or command.outcome ~= "fits"
+            or command.compaction_id ~= false
+        then
+            return nil, failure(
+                "CompactionPreflightMismatch",
+                "only a disabled automatic path may proceed without a Runtime settlement"
+            )
+        end
+
+        pending_model_preflight = nil
+        if command.outcome == "completed"
+            or command.outcome == "fits"
+            or command.outcome == "no_op"
+        then
+            if deferred.kind == "main" then
+                return start_model_request(
+                    deferred.purpose,
+                    deferred.payload.continuation ~= false
+                        and deferred.payload.continuation or nil
+                )
+            end
+            return start_review_request(
+                deferred.payload.review_kind,
+                deferred.payload.binding
+            )
+        end
+
+        local interrupted_pending = pending
+        if state ~= "WaitingUser" then transition("WaitingUser") end
+        turn.reported_outcome = "waiting_user"
+        pending = {
+            kind = "compaction-preflight",
+            preflight_id = deferred.id,
+            request_kind = deferred.kind,
+            purpose = deferred.purpose,
+            outcome = command.outcome,
+        }
+        if deferred.kind == "review"
+            and type(interrupted_pending) == "table"
+            and interrupted_pending.call ~= nil
+        then
+            -- Cancellation must still synthesize the exactly-one result for
+            -- a Tool call whose action review never crossed Model admission.
+            pending.call = interrupted_pending.call
+        end
+        return readonly({
+            state = state,
+            outcome = "waiting_user",
+            compaction_outcome = command.outcome,
+            preflight_id = deferred.id,
+        }, "blocked automatic compaction preflight")
     end
 
     ---Accepts a new main message only after its complete turn snapshot validates.
@@ -4168,6 +4400,19 @@ function M.new_agent_loop(ports, options)
             compaction_state = compaction_gate and "active" or "idle",
             compaction_mode = compaction_gate and compaction_gate.mode or false,
             compaction_phase = compaction_gate and compaction_gate.phase or false,
+            compaction_preflight_state = pending_model_preflight
+                and (pending_model_preflight.settlement ~= false
+                    and "settled" or "pending")
+                or (pending and pending.kind == "compaction-preflight"
+                    and "blocked" or "idle"),
+            compaction_preflight_id = pending_model_preflight
+                and pending_model_preflight.id
+                or (pending and pending.kind == "compaction-preflight"
+                    and pending.preflight_id or false),
+            compaction_preflight_purpose = pending_model_preflight
+                and pending_model_preflight.purpose
+                or (pending and pending.kind == "compaction-preflight"
+                    and pending.purpose or false),
             counters = counters,
             trace = trace,
             hard_cap_snapshot_id = limits.hard_cap_snapshot_id,
@@ -4209,6 +4454,7 @@ function M.new_agent_loop(ports, options)
         side_tools = false,
         side_use_lanes = { queue = true, steer = true },
         external_compaction_receipts = true,
+        automatic_compaction_preflight = limits.automatic_compaction,
     }, nil, "AgentLoop capabilities"))
     return readonly(loop, "AgentLoop")
 end
@@ -4551,8 +4797,10 @@ function M.new_agent_activity_driver(ports, options)
             lane_progress, lane_error = model_step(output)
         elseif before.state == "ExecutingTool" then
             lane_progress, lane_error = tool_step(output)
-        elseif before.state == "EvaluatingAction"
-            or before.state == "EvaluatingTermination"
+        elseif (before.compaction_preflight_state == nil
+                or before.compaction_preflight_state == "idle")
+            and (before.state == "EvaluatingAction"
+                or before.state == "EvaluatingTermination")
         then
             lane_progress, lane_error = review_step(output)
         else

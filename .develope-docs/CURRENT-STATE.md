@@ -4,7 +4,7 @@
 
 ## yaca 仓库
 
-yaca 当前已有可执行 Lua 入口和平台无关的通用 Agent 核心；代码开发是核心常见场景，同时保留本机诊断与受控系统操作定位。C01--C31 的实现、供应链规划和现代 Linux 证明已进入 `main`，手工 `.compact` 生产链路也已接通。它仍不是可发布版本：Win32 x86/XP、Win64/Win7+、Linux x86_64/CentOS 7 的最终构建与真实目标资格尚未完成，Release Gate R 保持关闭。
+yaca 当前已有可执行 Lua 入口和平台无关的通用 Agent 核心；代码开发是核心常见场景，同时保留本机诊断与受控系统操作定位。C01--C31 的实现、供应链规划和现代 Linux 证明已进入 `main`，手工 `.compact` 与每次 main/review Model 请求前的自动压缩链路也已接通。它仍不是可发布版本：Win32 x86/XP、Win64/Win7+、Linux x86_64/CentOS 7 的最终构建与真实目标资格尚未完成，Release Gate R 保持关闭。
 
 当前已实现：
 
@@ -13,13 +13,13 @@ yaca 当前已有可执行 Lua 入口和平台无关的通用 Agent 核心；代
 - 单 XML Context schema/store/index/lock/recovery、首消息先 durable、operation intent/result、ModelView publication 和 cache-miss 重建。
 - typed AgentLoop、queue/steer/side、ask-user/yield、action/termination review、预算/stuck/cancel/finalization 和精确 Tool result 配对。
 - 八个 versioned Tool、current-process one-action Permission、direct path/identity/CAS 防护，以及明确 `opaque-uncontained` 的原生 `cmd.exe`/shell exec。
-- lossless model-view compaction：结构化摘要、atomic groups、Context journal、原子 manifest publication、Runtime receipt/lifecycle gate、公开 `.compact`、STATUS/cancel/close。
+- lossless model-view compaction：结构化摘要、atomic groups、Context journal、原子 manifest publication、Runtime receipt/lifecycle gate、公开 `.compact`，以及冻结待发 main/review 请求的自动 threshold preflight、STATUS/cancel/close。
 - 最小发行 allowlist、component/license manifest、SPDX SBOM、package planner、资源 overlay 和资源门禁测试 Harness。
-- 受 `.tools/run_with_resource_guard.sh` 保护的完整平台无关 Lua suite 当前为 `396/396`；这不是三目标资格证明。
+- 受 `.tools/run_with_resource_guard.sh` 保护的完整平台无关 Lua suite 当前为 `400/400`；这不是三目标资格证明。
 
 仍缺失或不得宣称完成：
 
-- automatic compaction 请求前置门、自动 STATUS、pending lifecycle/circuit 跨进程恢复和三目标 token/资源阈值校准。
+- compaction pending request/cancel/rejection 与 failure circuit 的跨进程恢复，以及三目标 token/资源阈值校准。
 - 注册但尚未全部接通 controller 的交互管理动作仍须逐项以 registry → dispatcher → production port → terminal result 证明；parser 可识别不等于 action 已实现。
 - 旧环境网络/HTTPS 仍须审计并加固：固定 curl/CA/TLS 闭包、XP/Win7 可用协议与证书链、代理/redirect/retry/cancel、旧 CMD carrier 和错误编码都需最终目标证据。
 - C32 的三个真实 target qualification、C33 的干净机发布旅程/零表面、C34 的最终 SHA-256/license/SBOM/build/test evidence 尚未执行。

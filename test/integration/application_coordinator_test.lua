@@ -51,6 +51,7 @@ local function status(state, overrides)
     local value = {
         state = state,
         turn_id = state == "Closing" and false or "turn-1",
+        active_request_id = state == "RequestingModel" and "turn-1:request:1" or false,
         active_tool_call_id = false,
         pending_kind = false,
         pending_tool_call_id = false,
@@ -58,6 +59,11 @@ local function status(state, overrides)
         pending_review_verdict = false,
         pending_question = false,
         context_generation = 1,
+        last_durable_sequence = 3,
+        active_view_manifest_ref = "view-1",
+        compaction_preflight_state = "idle",
+        compaction_preflight_id = false,
+        compaction_preflight_purpose = false,
         queue_count = 0,
         queue_maximum = 9,
         side_state = "idle",
@@ -180,6 +186,14 @@ local function fixture(settings)
         loop_status = status("RequestingModel")
         return { state = "RequestingModel" }
     end
+    function loop:resolve_compaction_preflight(command)
+        A.equal(command.preflight_id, "turn-1:compaction-preflight:1")
+        A.equal(command.outcome, "completed")
+        A.equal(command.settlement.mode, "automatic")
+        log[#log + 1] = "preflight-resolve:" .. command.outcome
+        loop_status = status("RequestingModel")
+        return { state = "RequestingModel", request_id = "turn-1:request:1" }
+    end
 
     local tools = {}
     function tools.prepare_approval(tool_call_id, review_verdict)
@@ -283,8 +297,11 @@ local function fixture(settings)
     local compaction = {}
     function compaction:begin(mode)
         log[#log + 1] = "compaction-begin:" .. mode
-        if settings.compaction_active then
+        if settings.compaction_active or (settings.automatic_preflight
+            and mode == "automatic")
+        then
             compaction_active = true
+            settings.automatic_terminal_pending = mode == "automatic"
             return {
                 state = "active",
                 compaction_id = "compaction-1",
@@ -298,6 +315,35 @@ local function fixture(settings)
         }
     end
     function compaction:poll()
+        if settings.automatic_terminal_pending then
+            settings.automatic_terminal_pending = false
+            compaction_active = false
+            local settlement = {
+                outcome = "completed",
+                compaction_id = "compaction-1",
+                mode = "automatic",
+                preflight_id = "turn-1:compaction-preflight:1",
+                context_generation = loop_status.context_generation,
+                last_sequence = loop_status.last_durable_sequence,
+                manifest_digest = "view-2",
+            }
+            loop_status.active_view_manifest_ref = "view-2"
+            return {
+                events = { {
+                    kind = "terminal",
+                    result = {
+                        result = {
+                            outcome = "completed",
+                            compaction_id = "compaction-1",
+                            benefit_tokens = 2048,
+                        },
+                        settlement = settlement,
+                    },
+                } },
+                progressed = true,
+                status = self:status(),
+            }
+        end
         return { events = {}, progressed = false, status = self:status() }
     end
     function compaction:cancel(reason)
@@ -332,6 +378,13 @@ local function fixture(settings)
     }
     local agent_factory = function(message, source)
         log[#log + 1] = "agent:" .. source .. ":" .. message
+        if settings.automatic_preflight then
+            loop_status = status("Preparing", {
+                compaction_preflight_state = "pending",
+                compaction_preflight_id = "turn-1:compaction-preflight:1",
+                compaction_preflight_purpose = "main",
+            })
+        end
         return constructed_agent
     end
 
@@ -516,6 +569,27 @@ return {
                 A.contains(A.render(f.blocks), "Side side-1 outcome: completed")
                 A.contains(table.concat(f.log, "|"), "stage:terminal:explain the durable facts")
                 A.contains(table.concat(f.log, "|"), "side")
+            end,
+        },
+        {
+            name = "automatic compaction visibly pauses then resumes the pending Model request",
+            run = function()
+                local f = fixture({ automatic_preflight = true, batches = {
+                    { { kind = "user_action", action = "text", text = "first" } },
+                    { { kind = "user_action", action = "submit-or-queue" } },
+                    { { kind = "user_action", action = "text", text = ".quit" } },
+                    { { kind = "user_action", action = "submit-or-queue" } },
+                } })
+                assert(f.coordinator:run())
+                local joined = table.concat(f.log, "|")
+                A.contains(joined, "compaction-begin:automatic")
+                A.contains(joined, "preflight-resolve:completed")
+                A.contains(
+                    A.render(f.blocks),
+                    "Automatic compaction started: compaction-1"
+                )
+                A.contains(A.render(f.blocks), "Compaction completed: compaction-1")
+                A.equal(blocks_of_kind(f.blocks, "assistant")[1].text, "implemented")
             end,
         },
         {

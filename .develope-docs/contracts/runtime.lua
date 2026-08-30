@@ -74,6 +74,7 @@ return {
     { from = "Idle", to = "Preparing", on = "main-input-durable" },
     { from = "Idle", to = "Closing", on = "quit" },
     { from = "Preparing", to = "RequestingModel", on = "view-ready" },
+    { from = "Preparing", to = "WaitingUser", on = "automatic-compaction-blocked" },
     { from = "Preparing", to = "Finalizing", on = "admission-error-or-cancel" },
     { from = "Preparing", to = "Closing", on = "close" },
     { from = "RequestingModel", to = "Streaming", on = "first-canonical-provider-event" },

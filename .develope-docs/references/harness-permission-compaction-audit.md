@@ -203,7 +203,7 @@ DSH 是 durable operation 和恢复方面最强参考。采用 tail-only repair�
 
 ## 4. yaca 当前实现审查
 
-### 4.1 Compaction：手工生产组合已闭合，自动与恢复仍缺失
+### 4.1 Compaction：手工与自动生产组合已闭合，跨进程恢复仍缺失
 
 已经实现且优于多数参考的部分：
 
@@ -223,16 +223,17 @@ DSH 是 durable operation 和恢复方面最强参考。采用 tail-only repair�
 - `main.lua` 已为每个冻结 generation 构造独立 no-tool compaction builder/activity/port，并由 production owner 将它与 Context journal、保守估算器和 Runtime receipt gate 组合；generation replacement 只在全部活动 idle 时发生。
 - Runtime 已保存 Idle `last_turn` 的 active manifest，并对 compaction 建立独占 lane、精确 sequence/generation/manifest receipt adoption、单一 compaction identity 和 lifecycle 相位；只有 accepted publication 可结算 `completed`。
 - `.compact` 已从公开 action registry 路由到 ApplicationCoordinator；STATUS/cancel/close 由同一 owner 收口，活动压缩期间不能穿透执行普通 main、Tool 或 session close。
+- Runtime 会在每个 main/termination-review/action-review Model admission 前冻结唯一待发请求和 preflight ID；automatic compaction 必须绑定同一 Context generation/sequence/manifest，只有未替换的精确 settlement 才能恢复原请求。
+- ApplicationCoordinator 会在 side lane 归零后启动 automatic preflight，公开开始/重试/完成/失败 STATUS；`completed/fits/no_op` 才继续，`waiting_user/suppressed/cancelled/unknown` 会阻断请求并保留旧 view。
 - durable journal 拒绝、异常、缺少 Runtime receipt、收据乱序或 publication 身份不一致均进入 `AgentDurabilityFailure`，不会因为“旧 view 尚在”就释放 lane 继续运行。
 
 仍未闭合的 P0/qualification 缺口：
 
-1. Runtime 尚未在每次 main/review Model request 前执行 automatic threshold admission；自动 compaction 的开始/结束 STATUS 也尚未接入请求前置门。
-2. failure cooldown/circuit 目前只在同一 service lifetime 内有效；重启后 pending request/cancel/rejection 的 owner 恢复和 circuit 恢复尚未实现。
-3. response wrapper 已在 Model port 与 `compact.lua` 双层验证 provider `incomplete`/finish class/tool/control，且 production owner 组合测试已跑通真实 compact service；仍需最终 OpenAI/Anthropic transport 黑盒和三目标 HTTPS 证据证明线上的 adapter 字段未在旧平台 carrier 中丢失。
-4. token 估算当前为跨旧平台安全的 `1 byte <= 1 token` 保守上界；最终阈值、延迟和内存需在 XP/Win7/CentOS 7 上校准，不能把现代 Linux 结果写成目标资格。
+1. failure cooldown/circuit 目前只在同一 service lifetime 内有效；重启后 pending request/cancel/rejection 的 owner 恢复和 circuit 恢复尚未实现。
+2. response wrapper 已在 Model port 与 `compact.lua` 双层验证 provider `incomplete`/finish class/tool/control，且 production owner 组合测试已跑通真实 compact service；仍需最终 OpenAI/Anthropic transport 黑盒和三目标 HTTPS 证据证明线上的 adapter 字段未在旧平台 carrier 中丢失。
+3. token 估算当前为跨旧平台安全的 `1 byte <= 1 token` 保守上界；最终阈值、延迟和内存需在 XP/Win7/CentOS 7 上校准，不能把现代 Linux 结果写成目标资格。
 
-2026-08-30 的受资源门禁串行 suite 为 `396/396`，其中已含 canonical manifest 伪造拒绝、失败前后 Context 字节/代不变、accepted summary + view 原子发布、cache-miss 恢复、公开 `.compact` 路由、真实 production owner 成功链和 journal ambiguity fail-stop。它证明手工平台无关链路，不证明自动触发、跨进程 pending 恢复或真实 XP/Win7/CentOS 7 网络与文件系统资格。
+2026-08-30 的受资源门禁串行 suite 为 `400/400`，其中已含 canonical manifest 伪造拒绝、失败前后 Context 字节/代不变、accepted summary + view 原子发布、cache-miss 恢复、公开 `.compact` 路由、main/review 自动 preflight 的精确暂停/恢复与失败阻断、Coordinator 可见 STATUS、真实 production owner 成功链和 journal ambiguity fail-stop。它证明平台无关手工/自动链路，不证明跨进程 pending 恢复或真实 XP/Win7/CentOS 7 网络与文件系统资格。
 
 ### 4.2 Permission：精确单动作授权是强项
 

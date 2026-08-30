@@ -107,7 +107,9 @@ end
 local function fixture(settings)
     settings = settings or {}
     local log = {}
-    local compact_source = settings.compaction_lifecycle
+    local compaction_lifecycle = settings.compaction_lifecycle
+        or settings.automatic_compaction_lifecycle
+    local compact_source = compaction_lifecycle
         and compaction_document() or false
     local published = false
     local closed = false
@@ -190,6 +192,9 @@ local function fixture(settings)
         active_view_manifest_ref = "view-1",
         turn_id = "turn-1",
         halted = false,
+        compaction_preflight_state = "idle",
+        compaction_preflight_id = false,
+        compaction_preflight_purpose = false,
     }
     local compaction_gate = false
     local loop = {}
@@ -214,9 +219,14 @@ local function fixture(settings)
         return true
     end
     function loop:begin_compaction(command)
-        if not settings.compaction_lifecycle then return true end
-        A.equal(loop_status.state, "Idle")
-        A.equal(command.mode, "manual")
+        if not compaction_lifecycle then return true end
+        local automatic = settings.automatic_compaction_lifecycle == true
+        A.equal(loop_status.state, automatic and "Preparing" or "Idle")
+        A.equal(command.mode, automatic and "automatic" or "manual")
+        A.equal(
+            command.preflight_id,
+            automatic and "turn-1:compaction-preflight:1" or false
+        )
         A.equal(command.expected_context_generation, loop_status.context_generation)
         A.equal(command.expected_last_sequence, loop_status.last_durable_sequence)
         A.equal(command.expected_manifest_digest, loop_status.active_view_manifest_ref)
@@ -232,7 +242,7 @@ local function fixture(settings)
         }
     end
     function loop:adopt_compaction_receipt(record, receipt)
-        if not settings.compaction_lifecycle then return true end
+        if not compaction_lifecycle then return true end
         A.truthy(compaction_gate)
         A.equal(receipt.previous_context_generation, loop_status.context_generation)
         A.equal(receipt.first_sequence, loop_status.last_durable_sequence + 1)
@@ -250,7 +260,7 @@ local function fixture(settings)
         }
     end
     function loop:fail_compaction_barrier(reason)
-        if not settings.compaction_lifecycle then
+        if not compaction_lifecycle then
             return nil, { code = "AgentDurabilityFailure" }
         end
         loop_status.halted = true
@@ -258,7 +268,7 @@ local function fixture(settings)
         return nil, { code = "AgentDurabilityFailure" }
     end
     function loop:finish_compaction(command)
-        if not settings.compaction_lifecycle then return true end
+        if not compaction_lifecycle then return true end
         if loop_status.halted then
             return nil, { code = "AgentDurabilityFailure" }
         end
@@ -272,15 +282,35 @@ local function fixture(settings)
         end
         compaction_gate = false
         log[#log + 1] = "runtime-compaction-finish:" .. command.outcome
-        return {
+        local settlement = {
             outcome = command.outcome,
             compaction_id = command.compaction_id,
-            mode = "manual",
+            mode = settings.automatic_compaction_lifecycle
+                and "automatic" or "manual",
+            preflight_id = settings.automatic_compaction_lifecycle
+                and "turn-1:compaction-preflight:1" or false,
             state = loop_status.state,
             context_generation = loop_status.context_generation,
             last_sequence = loop_status.last_durable_sequence,
             manifest_digest = loop_status.active_view_manifest_ref,
         }
+        if settings.automatic_compaction_lifecycle then
+            loop_status.compaction_preflight_state = "settled"
+            settings.automatic_settlement = settlement
+        end
+        return settlement
+    end
+    function loop:resolve_compaction_preflight(command)
+        A.truthy(settings.automatic_compaction_lifecycle)
+        A.equal(command.preflight_id, loop_status.compaction_preflight_id)
+        A.equal(command.settlement, settings.automatic_settlement)
+        A.equal(command.outcome, "completed")
+        log[#log + 1] = "runtime-preflight-resolve"
+        loop_status.state = "RequestingModel"
+        loop_status.compaction_preflight_state = "idle"
+        loop_status.compaction_preflight_id = false
+        loop_status.compaction_preflight_purpose = false
+        return { state = "RequestingModel", request_id = "turn-1:request:1" }
     end
 
     local operation_journal = {
@@ -347,7 +377,7 @@ local function fixture(settings)
         } }
     end
     local function commit_compaction(record, publishing)
-        A.truthy(settings.compaction_lifecycle)
+        A.truthy(compaction_lifecycle)
         A.equal(record.expected_context_generation, loop_status.context_generation)
         if settings.compaction_journal_failure == record.kind then
             log[#log + 1] = "journal-rejected:" .. record.kind
@@ -415,7 +445,7 @@ local function fixture(settings)
         end,
         compaction_journal = function()
             log[#log + 1] = "compaction-journal"
-            if settings.compaction_lifecycle then
+            if compaction_lifecycle then
                 return durable_compaction_journal
             end
             return {
@@ -427,7 +457,7 @@ local function fixture(settings)
             }
         end,
         compaction_snapshot = function(observation)
-            if not settings.compaction_lifecycle then return nil end
+            if not compaction_lifecycle then return nil end
             A.equal(observation.expected_context_generation, loop_status.context_generation)
             A.equal(observation.expected_last_sequence, loop_status.last_durable_sequence)
             A.equal(observation.expected_manifest_digest, loop_status.active_view_manifest_ref)
@@ -521,7 +551,7 @@ local function fixture(settings)
     }
     local compaction_port = {
         start = function(specification)
-            if not settings.compaction_lifecycle then return {} end
+            if not compaction_lifecycle then return {} end
             settings.compaction_specification = specification
             settings.compaction_response_pending = true
             settings.compaction_port_state = "active"
@@ -533,7 +563,7 @@ local function fixture(settings)
             return { outcome = "cancelled" }
         end,
         poll = function()
-            if not settings.compaction_lifecycle
+            if not compaction_lifecycle
                 or not settings.compaction_response_pending
             then return {} end
             settings.compaction_response_pending = false
@@ -720,6 +750,7 @@ local function fixture(settings)
             A.equal(options.hard_caps.model_requests, 64)
             A.equal(options.hard_caps.tool_calls, 256)
             A.equal(options.lanes.queue_maximum, 9)
+            A.truthy(options.automatic_compaction)
             runtime_ports = ports
             log[#log + 1] = "agent-loop"
             return loop
@@ -858,6 +889,19 @@ local function fixture(settings)
             loop_status.active_view_manifest_ref
                 = compact_source.model_view.active_manifest.digest
         end,
+        pause_for_automatic_compaction = function()
+            A.truthy(compact_source)
+            loop_status.state = "Preparing"
+            loop_status.turn_id = "turn-1"
+            loop_status.context_generation = compact_source.generation
+            loop_status.last_durable_sequence = compact_source.event_count
+            loop_status.active_view_manifest_ref
+                = compact_source.model_view.active_manifest.digest
+            loop_status.compaction_preflight_state = "pending"
+            loop_status.compaction_preflight_id
+                = "turn-1:compaction-preflight:1"
+            loop_status.compaction_preflight_purpose = "main"
+        end,
         current_generation = function() return active_generation end,
     }
 end
@@ -959,6 +1003,45 @@ return {
                     if entry == expected[cursor] then cursor = cursor + 1 end
                 end
                 A.equal(cursor, #expected + 1)
+            end,
+        },
+        {
+            name = "automatic compaction binds the deferred production request before resuming it",
+            run = function()
+                local f = fixture({ automatic_compaction_lifecycle = true })
+                local agent = assert(f.main.start_published_agent(
+                    f.composed,
+                    f.chat,
+                    "implement the project",
+                    "terminal"
+                ))
+                f.pause_for_automatic_compaction()
+                local started = assert(agent.compaction:begin("automatic"))
+                A.equal(started.state, "active")
+                A.equal(started.mode, "automatic")
+
+                local step = assert(agent.compaction:poll())
+                A.equal(#step.events, 1)
+                local terminal = step.events[1].result
+                A.equal(terminal.settlement.outcome, "completed")
+                A.equal(terminal.settlement.mode, "automatic")
+                A.equal(
+                    terminal.settlement.preflight_id,
+                    "turn-1:compaction-preflight:1"
+                )
+                local status = agent.loop:status()
+                A.equal(status.compaction_preflight_state, "settled")
+                assert(agent.loop:resolve_compaction_preflight({
+                    preflight_id = status.compaction_preflight_id,
+                    outcome = terminal.settlement.outcome,
+                    compaction_id = terminal.settlement.compaction_id,
+                    expected_context_generation = status.context_generation,
+                    expected_last_sequence = status.last_durable_sequence,
+                    expected_manifest_digest = status.active_view_manifest_ref,
+                    settlement = terminal.settlement,
+                }))
+                A.equal(agent.loop:status().state, "RequestingModel")
+                A.contains(table.concat(f.log, "|"), "runtime-preflight-resolve")
             end,
         },
         {

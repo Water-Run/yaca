@@ -42,6 +42,7 @@ local function options(overrides)
         },
         initial_sequence = 0,
         initial_context_generation = 1,
+        automatic_compaction = false,
         maximum_identifier_bytes = 128,
         hard_cap_snapshot_id = "manifest-hard-caps-v1",
         lanes = {
@@ -54,6 +55,9 @@ local function options(overrides)
     for key, value in pairs(overrides.hard_caps or {}) do result.hard_caps[key] = value end
     for key, value in pairs(overrides.stuck or {}) do result.stuck[key] = value end
     if overrides.initial_sequence ~= nil then result.initial_sequence = overrides.initial_sequence end
+    if overrides.automatic_compaction ~= nil then
+        result.automatic_compaction = overrides.automatic_compaction
+    end
     return result
 end
 
@@ -346,6 +350,95 @@ local function assert_golden(loop, id)
     if expected.reported_outcome then
         A.equal(loop:status().reported_outcome, expected.reported_outcome)
     end
+end
+
+local function settle_successful_compaction(f, opened, compaction_id, manifest_digest)
+    local request_record = {
+        kind = "compaction-request",
+        compaction_id = compaction_id,
+        request_id = compaction_id .. ":request:1",
+        attempt = 1,
+        expected_context_generation = opened.context_generation,
+        expected_manifest_digest = opened.active_view_manifest_ref,
+    }
+    local request_receipt = f.external_commit({ {
+        type = "model_request",
+        turn_id = false,
+        fields = {
+            requestId = request_record.request_id,
+            purpose = "compaction",
+            viewManifestRef = opened.active_view_manifest_ref,
+            attemptId = "1",
+        },
+    } }, compaction_id .. ":request")
+    assert(f.loop:adopt_compaction_receipt(request_record, request_receipt))
+
+    local after_request = f.loop:status()
+    local response_record = {
+        kind = "compaction-response",
+        compaction_id = compaction_id,
+        request_id = request_record.request_id,
+        attempt = 1,
+        canonical_body = "canonical-summary",
+        canonical_digest = "summary-digest",
+        expected_context_generation = after_request.context_generation,
+        expected_manifest_digest = opened.active_view_manifest_ref,
+    }
+    local response_receipt = f.external_commit({ {
+        type = "model_message",
+        turn_id = false,
+        fields = {
+            requestId = request_record.request_id,
+            status = "complete",
+            body = "canonical-summary",
+            digest = "summary-digest",
+        },
+    } }, compaction_id .. ":response")
+    assert(f.loop:adopt_compaction_receipt(response_record, response_receipt))
+
+    local after_response = f.loop:status()
+    local publication_record = {
+        kind = "compaction-publication",
+        compaction_id = compaction_id,
+        request_id = request_record.request_id,
+        summary_digest = "summary-digest",
+        expected_context_generation = after_response.context_generation,
+        expected_manifest_digest = opened.active_view_manifest_ref,
+        manifest = { digest = manifest_digest },
+    }
+    local publication_receipt = f.external_commit({
+        {
+            type = "compaction",
+            turn_id = false,
+            fields = {
+                compactionId = compaction_id,
+                status = "ok",
+                summaryDigest = "summary-digest",
+                manifestDigest = manifest_digest,
+            },
+        },
+        {
+            type = "model_view_published",
+            turn_id = false,
+            fields = {
+                compactionId = compaction_id,
+                manifestDigest = manifest_digest,
+                replacesManifestDigest = opened.active_view_manifest_ref,
+            },
+        },
+    }, compaction_id .. ":publication")
+    assert(f.loop:adopt_compaction_receipt(
+        publication_record,
+        publication_receipt
+    ))
+    local published = f.loop:status()
+    return assert(f.loop:finish_compaction({
+        outcome = "completed",
+        compaction_id = compaction_id,
+        expected_context_generation = published.context_generation,
+        expected_last_sequence = published.last_durable_sequence,
+        expected_manifest_digest = published.active_view_manifest_ref,
+    }))
 end
 
 local function review_verdict(kind, serial)
@@ -711,6 +804,220 @@ return {
             end,
         },
         {
+            name = "automatic compaction preflight pauses and exactly resumes main and review requests",
+            run = function()
+                local f = fixture({}, { automatic_compaction = true })
+                local admitted = assert(f.loop:begin_main(input(true)))
+                A.equal(admitted.request_id, false)
+                A.equal(#f.model_starts, 0)
+                A.deep_equal((function()
+                    local types = {}
+                    for _, event in ipairs(f.events) do types[#types + 1] = event.type end
+                    return types
+                end)(), { "turn_started", "user_message" })
+
+                local opened = f.loop:status()
+                A.equal(opened.state, "Preparing")
+                A.equal(opened.compaction_preflight_state, "pending")
+                A.equal(opened.compaction_preflight_purpose, "main")
+                assert(f.loop:begin_compaction({
+                    mode = "automatic",
+                    preflight_id = opened.compaction_preflight_id,
+                    expected_context_generation = opened.context_generation,
+                    expected_last_sequence = opened.last_durable_sequence,
+                    expected_manifest_digest = opened.active_view_manifest_ref,
+                }))
+                local settlement = settle_successful_compaction(
+                    f,
+                    opened,
+                    "compaction-auto-1",
+                    "view-auto-compacted"
+                )
+                local settled_status = f.loop:status()
+                A.equal(settled_status.compaction_preflight_state, "settled")
+
+                local substituted, substitution_error
+                    = f.loop:resolve_compaction_preflight({
+                        preflight_id = opened.compaction_preflight_id,
+                        outcome = "completed",
+                        compaction_id = "compaction-auto-1",
+                        expected_context_generation = settled_status.context_generation,
+                        expected_last_sequence = settled_status.last_durable_sequence,
+                        expected_manifest_digest = settled_status.active_view_manifest_ref,
+                        settlement = clone(settlement),
+                    })
+                A.falsy(substituted)
+                A.equal(substitution_error.code, "CompactionPreflightMismatch")
+                assert(f.loop:resolve_compaction_preflight({
+                    preflight_id = opened.compaction_preflight_id,
+                    outcome = "completed",
+                    compaction_id = "compaction-auto-1",
+                    expected_context_generation = settled_status.context_generation,
+                    expected_last_sequence = settled_status.last_durable_sequence,
+                    expected_manifest_digest = settled_status.active_view_manifest_ref,
+                    settlement = settlement,
+                }))
+                A.equal(f.loop:status().state, "RequestingModel")
+                A.equal(#f.model_starts, 1)
+                A.equal(f.events[#f.events].type, "model_request")
+                A.equal(
+                    f.model_starts[1].view_manifest_ref,
+                    "view-auto-compacted"
+                )
+
+                assert(f.loop:accept_model_response(finish(f.loop)))
+                local review_preflight = f.loop:status()
+                A.equal(review_preflight.state, "EvaluatingTermination")
+                A.equal(review_preflight.compaction_preflight_state, "pending")
+                A.equal(
+                    review_preflight.compaction_preflight_purpose,
+                    "termination-review"
+                )
+                A.equal(#f.review_starts, 0)
+                assert(f.loop:begin_compaction({
+                    mode = "automatic",
+                    preflight_id = review_preflight.compaction_preflight_id,
+                    expected_context_generation = review_preflight.context_generation,
+                    expected_last_sequence = review_preflight.last_durable_sequence,
+                    expected_manifest_digest = review_preflight.active_view_manifest_ref,
+                }))
+                local review_gated = f.loop:status()
+                local review_settlement = assert(f.loop:finish_compaction({
+                    outcome = "fits",
+                    compaction_id = false,
+                    expected_context_generation = review_gated.context_generation,
+                    expected_last_sequence = review_gated.last_durable_sequence,
+                    expected_manifest_digest = review_gated.active_view_manifest_ref,
+                }))
+                assert(f.loop:resolve_compaction_preflight({
+                    preflight_id = review_preflight.compaction_preflight_id,
+                    outcome = "fits",
+                    compaction_id = false,
+                    expected_context_generation = review_gated.context_generation,
+                    expected_last_sequence = review_gated.last_durable_sequence,
+                    expected_manifest_digest = review_gated.active_view_manifest_ref,
+                    settlement = review_settlement,
+                }))
+                A.equal(f.loop:status().state, "EvaluatingTermination")
+                A.equal(#f.review_starts, 1)
+                A.equal(f.review_starts[1].purpose, "termination-review")
+            end,
+        },
+        {
+            name = "automatic compaction failure blocks instead of leaking the deferred request",
+            run = function()
+                local f = fixture({}, { automatic_compaction = true })
+                assert(f.loop:begin_main(input(false)))
+                local opened = f.loop:status()
+                assert(f.loop:begin_compaction({
+                    mode = "automatic",
+                    preflight_id = opened.compaction_preflight_id,
+                    expected_context_generation = opened.context_generation,
+                    expected_last_sequence = opened.last_durable_sequence,
+                    expected_manifest_digest = opened.active_view_manifest_ref,
+                }))
+                local gated = f.loop:status()
+                local settlement = assert(f.loop:finish_compaction({
+                    outcome = "waiting_user",
+                    compaction_id = false,
+                    expected_context_generation = gated.context_generation,
+                    expected_last_sequence = gated.last_durable_sequence,
+                    expected_manifest_digest = gated.active_view_manifest_ref,
+                }))
+                local blocked = assert(f.loop:resolve_compaction_preflight({
+                    preflight_id = opened.compaction_preflight_id,
+                    outcome = "waiting_user",
+                    compaction_id = false,
+                    expected_context_generation = gated.context_generation,
+                    expected_last_sequence = gated.last_durable_sequence,
+                    expected_manifest_digest = gated.active_view_manifest_ref,
+                    settlement = settlement,
+                }))
+                A.equal(blocked.state, "WaitingUser")
+                A.equal(f.loop:status().pending_kind, "compaction-preflight")
+                A.equal(f.loop:status().compaction_preflight_state, "blocked")
+                A.equal(f.loop:status().reported_outcome, "waiting_user")
+                A.equal(#f.model_starts, 0)
+                assert(f.loop:cancel("user-cancel"))
+                A.equal(f.loop:status().last_outcome, "cancelled")
+
+                local reviewed = fixture({
+                    admit = function(call_value)
+                        return {
+                            decision = "review",
+                            capabilities = "RawExec",
+                            permission_snapshot_digest = "permission-digest",
+                            reason = "high risk",
+                            token = "token:" .. call_value.tool_call_id,
+                            after_review = "allow",
+                        }
+                    end,
+                }, { automatic_compaction = true })
+                assert(reviewed.loop:begin_main(input(true)))
+                local main_preflight = reviewed.loop:status()
+                assert(reviewed.loop:begin_compaction({
+                    mode = "automatic",
+                    preflight_id = main_preflight.compaction_preflight_id,
+                    expected_context_generation = main_preflight.context_generation,
+                    expected_last_sequence = main_preflight.last_durable_sequence,
+                    expected_manifest_digest = main_preflight.active_view_manifest_ref,
+                }))
+                local main_gated = reviewed.loop:status()
+                local main_settlement = assert(reviewed.loop:finish_compaction({
+                    outcome = "fits",
+                    compaction_id = false,
+                    expected_context_generation = main_gated.context_generation,
+                    expected_last_sequence = main_gated.last_durable_sequence,
+                    expected_manifest_digest = main_gated.active_view_manifest_ref,
+                }))
+                assert(reviewed.loop:resolve_compaction_preflight({
+                    preflight_id = main_preflight.compaction_preflight_id,
+                    outcome = "fits",
+                    compaction_id = false,
+                    expected_context_generation = main_gated.context_generation,
+                    expected_last_sequence = main_gated.last_durable_sequence,
+                    expected_manifest_digest = main_gated.active_view_manifest_ref,
+                    settlement = main_settlement,
+                }))
+                assert(reviewed.loop:accept_model_response(response(reviewed.loop, {
+                    tag = "review-preflight-failure",
+                    calls = { call("exec", 1) },
+                })))
+                local action_preflight = reviewed.loop:status()
+                A.equal(action_preflight.state, "EvaluatingAction")
+                A.equal(#reviewed.review_starts, 0)
+                assert(reviewed.loop:begin_compaction({
+                    mode = "automatic",
+                    preflight_id = action_preflight.compaction_preflight_id,
+                    expected_context_generation = action_preflight.context_generation,
+                    expected_last_sequence = action_preflight.last_durable_sequence,
+                    expected_manifest_digest = action_preflight.active_view_manifest_ref,
+                }))
+                local action_gated = reviewed.loop:status()
+                local action_settlement = assert(reviewed.loop:finish_compaction({
+                    outcome = "waiting_user",
+                    compaction_id = false,
+                    expected_context_generation = action_gated.context_generation,
+                    expected_last_sequence = action_gated.last_durable_sequence,
+                    expected_manifest_digest = action_gated.active_view_manifest_ref,
+                }))
+                assert(reviewed.loop:resolve_compaction_preflight({
+                    preflight_id = action_preflight.compaction_preflight_id,
+                    outcome = "waiting_user",
+                    compaction_id = false,
+                    expected_context_generation = action_gated.context_generation,
+                    expected_last_sequence = action_gated.last_durable_sequence,
+                    expected_manifest_digest = action_gated.active_view_manifest_ref,
+                    settlement = action_settlement,
+                }))
+                assert(reviewed.loop:cancel("review-compaction-blocked"))
+                A.equal(
+                    trace(reviewed.loop).tool_results[1].kind,
+                    "skipped-by-cancel"
+                )
+            end,
+        },
+        {
             name = "compaction owns one exact Runtime lane and publishes one bound manifest",
             run = function()
                 local f = fixture()
@@ -719,6 +1026,7 @@ return {
                 local opened = f.loop:status()
                 local admission, admission_error = f.loop:begin_compaction({
                     mode = "manual",
+                    preflight_id = false,
                     expected_context_generation = opened.context_generation,
                     expected_last_sequence = opened.last_durable_sequence,
                     expected_manifest_digest = opened.active_view_manifest_ref,
@@ -860,6 +1168,7 @@ return {
                 local opened = f.loop:status()
                 local admission, admission_error = f.loop:begin_compaction({
                     mode = "manual",
+                    preflight_id = false,
                     expected_context_generation = opened.context_generation,
                     expected_last_sequence = opened.last_durable_sequence,
                     expected_manifest_digest = opened.active_view_manifest_ref,

@@ -2,7 +2,7 @@
 
 更新日期：2026-08-30
 
-状态：**手工生产链路完成，自动链路与目标校准待闭合** — model-view/summary/atomic-group/admission、no-tool Model port、Context journal、原子 publication、accepted-view 恢复、公开 `.compact`、STATUS/cancel 和 Runtime receipt gate 已实现；自动触发、pending lifecycle 跨进程恢复和 target calibration 尚待闭合
+状态：**手工与自动生产链路完成，跨进程恢复与目标校准待闭合** — model-view/summary/atomic-group/admission、no-tool Model port、Context journal、原子 publication、accepted-view 恢复、公开 `.compact`、每次 main/review 请求前 automatic preflight、STATUS/cancel 和 Runtime receipt gate 已实现；pending lifecycle/circuit 跨进程恢复和 target calibration 尚待闭合
 
 > D-063：XML **存储** hard limit 触顶时的解脱主路径是 **新开对话 + 接盘 Prompt**，不是依赖 compact 缩小事实 XML。compact 仍只服务 model view。
 
@@ -93,9 +93,10 @@ summary 同时保存 source event range/digest、生成 Model、完整 Prompt/vi
 - cache miss/重启读取 accepted bracket 时会复核 source/summary digest、相邻 publication 和 active manifest，再重建唯一 summary prefix；后续事实作为 tail 追加，内部 compaction bracket 不进入 main Model view。
 - production owner 已把当前 generation 的 no-tool compaction Model、Context journal 与 Runtime external-receipt gate 组合起来；每次 durable record 都先由 Runtime 采纳精确 sequence/generation/manifest 水位，才能继续 lifecycle。
 - Runtime 对 compaction 使用独占 lane 和 `opened -> request -> response|retry|cancelling -> published|terminal` 相位；普通 main、普通 cancel 和 close 不能越过该 owner。只有同一 `compaction_id` 的 accepted publication 能结算 `completed`，乱序 publication 或含混 journal receipt 一律 fail-stop。
-- ApplicationCoordinator 已执行 `.compact`，在 STATUS 显示 state/circuit，活动期间只放行 status/help/cancel；退出先收口 compaction，再关闭 Agent session 和唯一 Context writer。
-- production composition 测试使用真实 `compact` service 跑通手工触发、摘要 Model response、response receipt、原子 publication 和 Runtime terminal settlement，并注入 journal rejection 证明 lane 不会被错误释放。
-- 受 `.tools/run_with_resource_guard.sh` 保护的完整 Lua suite 为 `396/396`。这只证明平台无关核心与 fake/native adapter 边界，不能替代 XP/Win7/CentOS 7 target 证据，也不证明尚未实现的自动触发或 pending lifecycle 跨进程恢复。
+- Runtime 在每个 main、action-review 与 termination-review Model admission 前冻结唯一待发请求；automatic compaction gate 绑定 preflight ID 与当时 Context 水位，只有 exact settlement 可恢复原请求，替换 settlement 或失败结果不能泄漏 Model effect。
+- ApplicationCoordinator 已执行 `.compact` 与 automatic preflight，在 STATUS 显示 state/circuit/preflight，自动压缩开始/重试/终态均可见；活动期间只放行 status/help/cancel，退出先收口 compaction，再关闭 Agent session 和唯一 Context writer。
+- production composition 测试使用真实 `compact` service 跑通手工/自动触发、摘要 Model response、response receipt、原子 publication、Runtime terminal settlement 和待发请求恢复，并注入 journal rejection 证明 lane 不会被错误释放。
+- 受 `.tools/run_with_resource_guard.sh` 保护的完整 Lua suite 为 `400/400`。这只证明平台无关核心与 fake/native adapter 边界，不能替代 XP/Win7/CentOS 7 target 证据，也不证明尚未实现的 pending lifecycle/circuit 跨进程恢复。
 
 ## 仍需技术证明
 
@@ -190,5 +191,6 @@ summary 同时保存 source event range/digest、生成 Model、完整 Prompt/vi
 - [x] Context compaction journal、accepted summary + ModelView 原子 publication
 - [x] accepted view 的 XML 校验、cache-miss 重建与后续 tail 保留
 - [x] ApplicationCoordinator `.compact`、STATUS/cancel 与 production transport composition
-- [ ] 自动阈值、pending lifecycle/circuit 跨进程恢复
+- [x] 每次 main/review Model request 前的自动阈值 preflight、可见 STATUS 与精确恢复/阻断
+- [ ] pending lifecycle/circuit 跨进程恢复
 - [ ] token 估算与三目标阈值数值（TP/C32）
