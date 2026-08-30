@@ -417,6 +417,135 @@ return {
             end,
         },
         {
+            name = "bound compaction requests expose exact crash recovery state",
+            run = function()
+                local service = new_service()
+                local candidate = minimal()
+                append(candidate, "model_request", {
+                    requestId = "compaction-41:request:1",
+                    purpose = "compaction",
+                    viewManifestRef = "view-before-compaction",
+                    attemptId = "1",
+                    compactionId = "compaction-41",
+                    compactionMode = "automatic",
+                    sourceFirstSeq = "1",
+                    sourceLastSeq = "2",
+                    sourceDigest = "source-digest-41",
+                    sourceEventCount = "2",
+                    configSnapshot = "config-snapshot-41",
+                    modelSnapshot = "model-snapshot-41",
+                    promptSnapshot = "prompt-snapshot-41",
+                    manifestSnapshot = "manifest-compaction-v1",
+                    viewContextGeneration = "1",
+                })
+                local pending = assert(service.build(candidate))
+                A.falsy(pending.recovery.auto_continue)
+                A.equal(pending.recovery.compaction_initial_serial, 41)
+                A.equal(#pending.recovery.pending_compactions, 1)
+                local recovered = pending.recovery.pending_compactions[1]
+                A.equal(recovered.compaction_id, "compaction-41")
+                A.equal(recovered.request_id, "compaction-41:request:1")
+                A.equal(recovered.mode, "automatic")
+                A.equal(recovered.source_event_count, 2)
+                A.equal(recovered.prompt_snapshot, "prompt-snapshot-41")
+                A.equal(recovered.response_status, false)
+                A.falsy(recovered.cancel_requested)
+
+                append(candidate, "cancel", {
+                    targetKind = "compaction-request",
+                    targetId = "compaction-41:request:1",
+                    reason = "process-recovery",
+                    result = "pending",
+                })
+                local cancelling = assert(service.build(candidate))
+                recovered = cancelling.recovery.pending_compactions[1]
+                A.truthy(recovered.cancel_requested)
+                A.equal(recovered.cancel_reason, "process-recovery")
+
+                local partial = minimal()
+                append(partial, "model_request", {
+                    requestId = "compaction-42:request:1",
+                    purpose = "compaction",
+                    viewManifestRef = "view-before-compaction",
+                    attemptId = "1",
+                    compactionId = "compaction-42",
+                })
+                local rejected, binding_error = service.build(partial)
+                A.falsy(rejected)
+                A.equal(binding_error.code, "ContextSchema")
+                A.equal(binding_error.reason, "required-field")
+
+                local legacy = minimal()
+                append(legacy, "model_request", {
+                    requestId = "compaction-77:request:1",
+                    purpose = "compaction",
+                    viewManifestRef = "legacy-view",
+                    attemptId = "1",
+                })
+                local legacy_pending = assert(service.build(legacy))
+                A.deep_equal(
+                    legacy_pending.recovery.legacy_pending_compaction_request_ids,
+                    { "compaction-77:request:1" }
+                )
+                A.equal(legacy_pending.recovery.compaction_initial_serial, 77)
+                A.falsy(legacy_pending.recovery.auto_continue)
+            end,
+        },
+        {
+            name = "durable compaction terminals reconstruct the automatic failure streak",
+            run = function()
+                local service = new_service()
+                local candidate = minimal()
+                local function append_failure(serial)
+                    local compaction_id = "compaction-" .. tostring(serial)
+                    local request_id = compaction_id .. ":request:1"
+                    append(candidate, "model_request", {
+                        requestId = request_id,
+                        purpose = "compaction",
+                        viewManifestRef = "view-before-compaction",
+                        attemptId = "1",
+                        compactionId = compaction_id,
+                        compactionMode = "automatic",
+                        sourceFirstSeq = "1",
+                        sourceLastSeq = "2",
+                        sourceDigest = "source-digest",
+                        sourceEventCount = "2",
+                        configSnapshot = "config-snapshot",
+                        modelSnapshot = "model-snapshot",
+                        promptSnapshot = "prompt-snapshot",
+                        manifestSnapshot = "manifest-compaction-v1",
+                        viewContextGeneration = "1",
+                    })
+                    append(candidate, "model_message", {
+                        messageId = request_id .. ":rejected",
+                        requestId = request_id,
+                        role = "assistant",
+                        status = "interrupted",
+                        body = "",
+                    })
+                    append(candidate, "compaction", {
+                        compactionId = compaction_id,
+                        sourceFirstSeq = "1",
+                        sourceLastSeq = "2",
+                        sourceDigest = "source-digest",
+                        status = "error",
+                        errorId = "CompactionRejected",
+                        requestId = request_id,
+                        attemptId = "1",
+                        compactionMode = "automatic",
+                        automaticFailure = "true",
+                    })
+                end
+                append_failure(41)
+                append_failure(42)
+                local recovered = assert(service.build(candidate)).recovery
+                A.equal(recovered.automatic_compaction_failure_count, 2)
+                A.truthy(recovered.automatic_compaction_failure_history_complete)
+                A.equal(recovered.compaction_initial_serial, 42)
+                A.equal(#recovered.pending_compactions, 0)
+            end,
+        },
+        {
             name = "queue side steer and yield continuations preserve ordered local causality",
             run = function()
                 local service = new_service()

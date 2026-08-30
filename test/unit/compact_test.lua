@@ -19,7 +19,7 @@ local function copy(values)
     return result
 end
 
-local function options(overrides)
+local function options(overrides, initial_automatic_failure_count)
     local manifest = {
         snapshot_id = "manifest-compaction-v1",
         builder_algorithm = "structured-prefix-v1",
@@ -44,6 +44,7 @@ local function options(overrides)
         manifest = manifest,
         maximum_identifier_bytes = 128,
         initial_serial = 40,
+        initial_automatic_failure_count = initial_automatic_failure_count or 0,
     }
 end
 
@@ -233,7 +234,7 @@ local function fixture(settings, manifest_overrides, source_document)
         clock = { now = function() return now end },
         model = model,
         journal = journal,
-    }, options(manifest_overrides))
+    }, options(manifest_overrides, settings.initial_automatic_failure_count))
     A.truthy(service, create_error and create_error.code)
     return {
         service = service,
@@ -441,6 +442,10 @@ return {
                 A.equal(instance.starts[1].no_tools, true)
                 A.equal(instance.starts[1].config_snapshot, "config-snapshot-1")
                 A.equal(instance.starts[1].model_snapshot.digest, "model-snapshot-1")
+                A.equal(
+                    instance.journal_records[1].binding.prompt_bundle_digest,
+                    "prompt-bundle-1"
+                )
                 A.equal(assert(compact.encode_source(
                     instance.document,
                     instance.starts[1].source_first_seq,
@@ -624,6 +629,41 @@ return {
                 A.equal(suppressed.error_code, "CompactionCircuitOpen")
                 A.equal(suppressed.retry_after_ms, 100)
                 A.equal(#instance.starts, start_count)
+
+                instance.advance(100)
+                assert(instance.service:begin(input_for(instance, {
+                    active_estimated_tokens = 450,
+                })))
+                local completed = assert(instance.service:accept_response(
+                    response_for(instance)
+                ))
+                A.equal(completed.outcome, "completed")
+                A.equal(instance.service:status().automatic_failure_count, 0)
+                A.equal(instance.service:status().automatic_circuit_state, "closed")
+            end,
+        },
+        {
+            name = "recovered automatic failures reopen a full monotonic cooldown",
+            run = function()
+                local instance = fixture({
+                    initial_automatic_failure_count = 2,
+                }, {
+                    failure_threshold = 2,
+                    failure_cooldown_ms = 100,
+                })
+                local status = instance.service:status()
+                A.equal(status.automatic_failure_count, 2)
+                A.equal(status.automatic_circuit_state, "open")
+                A.truthy(status.automatic_circuit_recovered)
+                A.equal(status.automatic_circuit_opened_at, false)
+
+                local suppressed = assert(instance.service:begin(input_for(instance, {
+                    active_estimated_tokens = 450,
+                })))
+                A.equal(suppressed.decision, "suppressed")
+                A.equal(suppressed.retry_after_ms, 100)
+                A.equal(#instance.starts, 0)
+                A.falsy(instance.service:status().automatic_circuit_recovered)
 
                 instance.advance(100)
                 assert(instance.service:begin(input_for(instance, {

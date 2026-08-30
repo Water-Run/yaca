@@ -233,6 +233,23 @@ local function fixture(settings)
         return writer
     end
 
+    function store.open_writer(target, metadata, expected_credential)
+        observations.opened = {
+            target = target,
+            metadata = metadata,
+            expected_credential = expected_credential,
+        }
+        if settings.open_error then return nil, settings.open_error end
+        local document = settings.open_document
+            or (settings.shared_store and settings.shared_store.document)
+        if not document then
+            return nil, { code = "NotFound", message = "fixture has no saved Context" }
+        end
+        local writer = { target = target, metadata = metadata, opened = true }
+        observations.writers[#observations.writers + 1] = writer
+        return writer, document
+    end
+
     function store.publish(writer, document, temporary_path)
         observations.published = {
             writer = writer,
@@ -240,6 +257,7 @@ local function fixture(settings)
             temporary_path = temporary_path,
         }
         if settings.publish_error then return nil, settings.publish_error end
+        if settings.shared_store then settings.shared_store.document = document end
         return {
             outcome = "published",
             generation = document.generation,
@@ -286,7 +304,7 @@ local function fixture(settings)
         default_tool_call_limit = 256,
         maximum_queue_items = 9,
     }))
-    return publication, observations, path_service, registry, safety_service
+    return publication, observations, path_service, registry, safety_service, schema
 end
 
 return {
@@ -700,6 +718,7 @@ return {
                     source_digest = source_digest,
                     config_snapshot = config_snapshot,
                     model_snapshot_digest = model_snapshot,
+                    prompt_bundle_digest = prompt_snapshot,
                     manifest_snapshot_id = "manifest-compaction-v1",
                 }
                 local intent_committed, intent_receipt = journal.commit_intent(intent)
@@ -707,6 +726,19 @@ return {
                 A.equal(intent_receipt.binding, intent)
                 A.equal(intent_receipt.context_generation, 3)
                 A.equal(intent_receipt.active_manifest_digest, first.view_manifest_snapshot)
+                local durable_request = observed.published.document.facts[4]
+                A.equal(durable_request.type, "model_request")
+                A.equal(durable_request.fields.compactionId, "compaction-1")
+                A.equal(durable_request.fields.compactionMode, "manual")
+                A.equal(durable_request.fields.sourceEventCount, "3")
+                A.equal(durable_request.fields.configSnapshot, config_snapshot)
+                A.equal(durable_request.fields.modelSnapshot, model_snapshot)
+                A.equal(durable_request.fields.promptSnapshot, prompt_snapshot)
+                A.equal(
+                    observed.published.document.recovery.pending_compactions[1]
+                        .request_id,
+                    "compaction-1:request:1"
+                )
 
                 local summary = compact.encode_summary({
                     schema_version = "structured-summary-v1",
@@ -938,6 +970,7 @@ return {
                     source_digest = source_digest,
                     config_snapshot = config_snapshot,
                     model_snapshot_digest = model_snapshot,
+                    prompt_bundle_digest = prompt_snapshot,
                     manifest_snapshot_id = "manifest-compaction-v1",
                 })
                 A.truthy(committed, A.render(receipt))
@@ -981,10 +1014,277 @@ return {
                 A.equal(cancelled.facts[5].type, "cancel")
                 A.equal(cancelled.facts[6].type, "compaction")
                 A.equal(cancelled.facts[6].fields.status, "cancelled")
+                A.equal(cancelled.facts[6].fields.requestId,
+                    "compaction-cancelled:request:1")
+                A.equal(cancelled.facts[6].fields.compactionMode, "manual")
+                A.equal(cancelled.facts[6].fields.automaticFailure, "false")
                 A.equal(cancelled.model_view.compaction_records[1].status, "cancelled")
                 A.equal(cancelled.model_view.active_manifest.digest, first.view_manifest_snapshot)
                 A.falsy(cancelled.model_view.active_manifest.compaction_id)
+                A.equal(#cancelled.recovery.pending_compactions, 0)
                 A.truthy(publication.resolve_view(first.view_manifest_snapshot))
+            end,
+        },
+        {
+            name = "existing Context open terminalizes every crash-left compaction bracket",
+            run = function()
+                for _, crash_state in ipairs({
+                    "request-only", "automatic-request-only", "response-only",
+                    "cancel-pending", "rejected-retry",
+                }) do
+                    local shared = {}
+                    local settings = { shared_store = shared }
+                    local publication, observed, _, _, safety_service = fixture(settings)
+                    local first = assert(publication.publish_first({
+                        generation = generation(),
+                        workspace = { path = "/work", enterable = true },
+                        settings = {
+                            model = "Primary",
+                            permission = "Std",
+                            double_check = true,
+                            double_check_override = "inherit",
+                            double_check_goal = "recover compaction",
+                            double_check_goal_override = "inherit",
+                            context_prompt = "workspace context",
+                            auto_rename_disabled = false,
+                        },
+                        message = "recover " .. crash_state,
+                        source = "main",
+                    }))
+                    local source_bytes = assert(compact.encode_source(
+                        observed.published.document,
+                        1,
+                        2,
+                        256,
+                        16 * 1024 * 1024
+                    ))
+                    local source_digest = assert(safety_service.digest(source_bytes))
+                    local config_snapshot = assert(safety_service.digest(
+                        "recovery-config-" .. crash_state
+                    ))
+                    local model_snapshot = assert(safety_service.digest(
+                        "recovery-model-" .. crash_state
+                    ))
+                    local prompt_snapshot = assert(safety_service.digest(
+                        "recovery-prompt-" .. crash_state
+                    ))
+                    local request_id = "compaction-81:request:1"
+                    local mode = crash_state == "automatic-request-only"
+                        and "automatic" or "manual"
+                    local journal = publication.compaction_journal()
+                    local committed, receipt = journal.commit_intent({
+                        kind = "compaction-request",
+                        purpose = "compaction",
+                        mode = mode,
+                        compaction_id = "compaction-81",
+                        request_id = request_id,
+                        attempt = 1,
+                        correction_reason = false,
+                        expected_context_generation = 1,
+                        expected_manifest_digest = first.view_manifest_snapshot,
+                        source_first_seq = 1,
+                        source_last_seq = 2,
+                        source_digest = source_digest,
+                        config_snapshot = config_snapshot,
+                        model_snapshot_digest = model_snapshot,
+                        prompt_bundle_digest = prompt_snapshot,
+                        manifest_snapshot_id = "manifest-compaction-v1",
+                    })
+                    A.truthy(committed, A.render(receipt))
+                    if crash_state == "response-only" then
+                        local body = "durable response before process loss"
+                        committed, receipt = journal.commit_response({
+                            kind = "compaction-response",
+                            compaction_id = "compaction-81",
+                            request_id = request_id,
+                            attempt = 1,
+                            canonical_body = body,
+                            canonical_digest = assert(safety_service.digest(body)),
+                            source_first_seq = 1,
+                            source_last_seq = 2,
+                            source_digest = source_digest,
+                            usage = {
+                                input_tokens = 10,
+                                output_tokens = 5,
+                                estimated = true,
+                            },
+                            expected_context_generation = 2,
+                            expected_manifest_digest = first.view_manifest_snapshot,
+                        })
+                        A.truthy(committed, A.render(receipt))
+                    elseif crash_state == "cancel-pending" then
+                        committed, receipt = journal.commit_rejection({
+                            kind = "compaction-cancel-request",
+                            compaction_id = "compaction-81",
+                            request_id = request_id,
+                            reason = "user-cancel-before-crash",
+                            source_first_seq = 1,
+                            source_last_seq = 2,
+                            source_digest = source_digest,
+                            canonical_facts_before = 2,
+                            expected_context_generation = 2,
+                            expected_manifest_digest = first.view_manifest_snapshot,
+                            old_view_retained = true,
+                        })
+                        A.truthy(committed, A.render(receipt))
+                    elseif crash_state == "rejected-retry" then
+                        committed, receipt = journal.commit_rejection({
+                            kind = "compaction-rejection",
+                            compaction_id = "compaction-81",
+                            request_id = request_id,
+                            attempt = 1,
+                            error_code = "CompactionNoBenefit",
+                            detail = "retry not started before process loss",
+                            response_digest = false,
+                            response_body = false,
+                            terminal = false,
+                            source_first_seq = 1,
+                            source_last_seq = 2,
+                            source_digest = source_digest,
+                            canonical_facts_before = 2,
+                            config_snapshot = config_snapshot,
+                            model_snapshot_digest = model_snapshot,
+                            prompt_bundle_digest = prompt_snapshot,
+                            expected_context_generation = 2,
+                            expected_manifest_digest = first.view_manifest_snapshot,
+                            old_view_retained = true,
+                        })
+                        A.truthy(committed, A.render(receipt))
+                    end
+                    A.truthy(publication.close())
+
+                    local reopened, reopened_observed = fixture({
+                        shared_store = shared,
+                        random_values = {
+                            string.rep("r", 8),
+                            string.rep("s", 8),
+                        },
+                    })
+                    local opened = assert(reopened.open_existing({
+                        context_path = first.context_path,
+                        logical_path = first.logical_path,
+                        expected_credential = {
+                            physical_path = first.context_path,
+                            logical_path = first.logical_path,
+                        },
+                    }))
+                    A.equal(opened.outcome, "recovered", crash_state)
+                    A.equal(opened.compaction_recovery.recovered_bound, 1)
+                    A.equal(opened.compaction_recovery.recovered_legacy, 0)
+                    A.equal(opened.compaction_recovery.outcome, "recovered-unknown")
+                    A.truthy(opened.compaction_recovery.old_view_retained)
+                    A.equal(opened.view_manifest_snapshot, first.view_manifest_snapshot)
+                    local recovered = reopened_observed.published.document
+                    A.equal(#recovered.recovery.pending_compactions, 0)
+                    A.truthy(recovered.recovery.auto_continue)
+                    A.equal(recovered.model_view.active_manifest.digest,
+                        first.view_manifest_snapshot)
+                    A.equal(recovered.model_view.compaction_records[1].status, "error")
+                    local terminal = recovered.facts[#recovered.facts]
+                    A.equal(terminal.type, "compaction")
+                    A.equal(terminal.fields.requestId, request_id)
+                    A.equal(terminal.fields.status, "error")
+                    A.equal(terminal.fields.errorId, "CompactionCancelUnknown")
+                    A.equal(
+                        terminal.fields.automaticFailure,
+                        mode == "automatic" and "true" or "false"
+                    )
+                    local pending_count, unknown_count = 0, 0
+                    for _, event in ipairs(recovered.facts) do
+                        if event.type == "cancel"
+                            and event.fields.targetId == request_id
+                        then
+                            if event.fields.result == "pending" then
+                                pending_count = pending_count + 1
+                            elseif event.fields.result == "unknown" then
+                                unknown_count = unknown_count + 1
+                            end
+                        end
+                    end
+                    A.equal(pending_count, 1)
+                    A.equal(unknown_count, 1)
+                    A.truthy(reopened.resolve_view(first.view_manifest_snapshot))
+                    local snapshot = assert(reopened.compaction_snapshot({
+                        expected_context_generation = opened.generation,
+                        expected_last_sequence = opened.event_count,
+                        expected_manifest_digest = opened.view_manifest_snapshot,
+                    }))
+                    A.equal(snapshot.initial_serial, 81)
+                    A.equal(
+                        snapshot.initial_automatic_failure_count,
+                        mode == "automatic" and 1 or 0
+                    )
+                    A.truthy(snapshot.automatic_failure_history_complete)
+                    A.equal(#snapshot.pending_compactions, 0)
+                    A.truthy(reopened.close())
+                end
+
+                local shared = {}
+                local publication, observed, _, _, _, schema = fixture({
+                    shared_store = shared,
+                })
+                local first = assert(publication.publish_first({
+                    generation = generation(),
+                    workspace = { path = "/work", enterable = true },
+                    settings = {
+                        model = "Primary",
+                        permission = "Std",
+                        double_check = true,
+                        double_check_override = "inherit",
+                        double_check_goal = "recover legacy compaction",
+                        double_check_goal_override = "inherit",
+                        context_prompt = "workspace context",
+                        auto_rename_disabled = false,
+                    },
+                    message = "recover legacy request",
+                    source = "main",
+                }))
+                shared.document = assert(schema.append_events(
+                    observed.published.document,
+                    {
+                        updated_at = "2026-08-30T12:34:57Z",
+                        events = { {
+                            seq = 3,
+                            type = "model_request",
+                            fields = {
+                                requestId = "compaction-91:request:1",
+                                purpose = "compaction",
+                                viewManifestRef = first.view_manifest_snapshot,
+                                attemptId = "1",
+                            },
+                        } },
+                    }
+                ))
+                A.truthy(publication.close())
+                local reopened, reopened_observed = fixture({
+                    shared_store = shared,
+                    random_values = { string.rep("l", 8) },
+                })
+                local opened = assert(reopened.open_existing({
+                    context_path = first.context_path,
+                    logical_path = first.logical_path,
+                    expected_credential = {
+                        physical_path = first.context_path,
+                        logical_path = first.logical_path,
+                    },
+                }))
+                A.equal(opened.compaction_recovery.recovered_bound, 0)
+                A.equal(opened.compaction_recovery.recovered_legacy, 1)
+                local recovered = reopened_observed.published.document
+                A.equal(#recovered.recovery.legacy_pending_compaction_request_ids, 0)
+                A.equal(#recovered.model_view.compaction_records, 0)
+                A.equal(recovered.facts[#recovered.facts - 1].fields.result, "pending")
+                A.equal(recovered.facts[#recovered.facts].fields.result, "unknown")
+                A.equal(recovered.model_view.active_manifest.digest,
+                    first.view_manifest_snapshot)
+                local snapshot = assert(reopened.compaction_snapshot({
+                    expected_context_generation = opened.generation,
+                    expected_last_sequence = opened.event_count,
+                    expected_manifest_digest = opened.view_manifest_snapshot,
+                }))
+                A.equal(snapshot.initial_serial, 91)
+                A.equal(#snapshot.legacy_pending_compaction_request_ids, 0)
+                A.truthy(reopened.close())
             end,
         },
         {

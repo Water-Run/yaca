@@ -16,13 +16,14 @@ yaca 当前已有可执行 Lua 入口和平台无关的通用 Agent 核心；代
 - 生产 native bridge 已接通 trusted component 的结构化 argv：Windows 以绝对 `CreateProcessW`、Linux 以 `execve` 绕过命令 shell，配置字节经有界匿名 stdin pipe 发送；现代 Linux 实际模块探针与 Win32/Win64 交叉编译已通过，但真实目标资格仍待 C32。
 - Win32/XP HTTPS 候选闭包已锁定：curl 8.21.0 与 Mbed TLS 3.6.7 的窄下游补丁绑定 archive/patch/基文件 SHA-256；全新 i686 串行复现得到 PE32/Windows 5.01、HTTP/HTTPS、blocking IPv4、CryptoAPI entropy，且最终导入审计无 BCrypt、Vista 同步原语、UCRT 和新 `_s` CRT 符号。该结果明确为 cross-build/static candidate，真实 XP TLS/proxy/CA 仍待 C32。
 - lossless model-view compaction：结构化摘要、atomic groups、Context journal、原子 manifest publication、Runtime receipt/lifecycle gate、公开 `.compact`，以及冻结待发 main/review 请求的自动 threshold preflight、STATUS/cancel/close。
+- existing Context publication core 已能在持有精确 verified target/writer 后重建 plain 或 compacted active ModelView；新格式 pending request/response/cancel/rejection bracket 会先落唯一 cancel pending/unknown 与绑定 terminal error，旧格式 pending 只落保守 unknown、不伪造新式终态，旧 active view 始终保留。compaction serial、连续 automatic failure streak 与不完整旧历史也会从 XML 恢复；自动 compaction 的进程恢复 unknown 计入失败 streak，跨进程 monotonic 时间不可继承时重新开启完整 cooldown。
 - 最小发行 allowlist、component/license manifest、SPDX SBOM、package planner、资源 overlay 和资源门禁测试 Harness。
 - 运行时 curl config 已逐请求用锁定 CLI 可解析的 standalone/no-option 语法显式固定 HTTP/1.1、TLS 1.2+、服务端/HTTPS 代理随包 CA 校验；代理 TLS 下限由 `proxy-tlsv1` 与只启用 TLS 1.2/1.3 的锁定 Mbed TLS 后端共同闭合。代理/主机 DNS 和普通握手只在无 canonical event 时有界重试，证书/CA/CRL/issuer/pin/status 错误立即终止。真实目标 TLS/代理资格仍待 C32。
-- 受 `.tools/run_with_resource_guard.sh` 保护的完整平台无关 Lua suite 当前为 `407/407`；这不是三目标资格证明。
+- 受 `.tools/run_with_resource_guard.sh` 保护的完整平台无关 Lua suite 当前为 `412/412`；这不是三目标资格证明。
 
 仍缺失或不得宣称完成：
 
-- compaction pending request/cancel/rejection 与 failure circuit 的跨进程恢复，以及三目标 token/资源阈值校准。
+- `.context`/continue 等公开 controller 仍须把用户精确选中的 verified target 接到 existing Context open/recovery core，并补齐对应交互结果；三目标 token/资源阈值仍待校准。
 - 注册但尚未全部接通 controller 的交互管理动作仍须逐项以 registry → dispatcher → production port → terminal result 证明；parser 可识别不等于 action 已实现。
 - 旧环境网络/HTTPS 的源码锁、XP compatibility patch、静态 import/CRT 黑名单和最小协议闭包已有可重复候选证据；仍须在真实 XP/Win7/CentOS 7 证明 TLS/CA、显式代理、redirect/retry/cancel、旧 CMD 路径与错误分类，不能据此开放 Release Gate R。
 - C32 的三个真实 target qualification、C33 的干净机发布旅程/零表面、C34 的最终 SHA-256/license/SBOM/build/test evidence 尚未执行。

@@ -152,6 +152,7 @@ return {
                     },
                     maximum_identifier_bytes = 128,
                     initial_serial = 0,
+                    initial_automatic_failure_count = 0,
                 }))
                 local input = {
                     mode = "automatic",

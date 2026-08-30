@@ -203,7 +203,7 @@ DSH 是 durable operation 和恢复方面最强参考。采用 tail-only repair�
 
 ## 4. yaca 当前实现审查
 
-### 4.1 Compaction：手工与自动生产组合已闭合，跨进程恢复仍缺失
+### 4.1 Compaction：手工、自动与跨进程恢复 core 已闭合
 
 已经实现且优于多数参考的部分：
 
@@ -216,7 +216,7 @@ DSH 是 durable operation 和恢复方面最强参考。采用 tail-only repair�
 - 只有新 view 有实际收益、低于阈值且 manifest 可验证时才发布；旧 view 保留到原子 publish。
 - 失败最多一次纠错重试；取消 request/result durable，pending cancel 有明确状态；summary correction 是追加事实，不回写旧摘要。
 - Model 层已有独立 no-tool compaction builder/port：冻结 config/Model/Prompt/source/manifest binding，只发送一次 quoted source，provider incomplete、非 stop、tool/control 和结构不完整输出均不能成为摘要。
-- 连续 automatic compaction 失败已有 service-lifetime cooldown/half-open；canonical summary envelope 超限会作为可 durable 拒绝的 Model 输出返回，不会把端口永久卡在 busy。
+- 连续 automatic compaction 失败已有跨进程 failure streak、cooldown/half-open；旧进程 monotonic 时间不被伪造为可比较时间，恢复后从第一个本地单调读数重新等待完整 cooldown。canonical summary envelope 超限会作为可 durable 拒绝的 Model 输出返回，不会把端口永久卡在 busy。
 - `session.lua` 已提供 production Context compaction journal：request、response、rejection、cancel request/result、publication 与 correction 都按精确 generation、旧 manifest、source range/digest 和 lifecycle 绑定。
 - accepted summary 先独立重建 structured summary、canonical source 与 manifest，再把 terminal `compaction`、`CompactionRecord` 和 `model_view_published` 在一个 Context generation 内提交；任一验证或 publication 失败时旧 XML 与旧 active manifest 保持不变。
 - accepted view 的恢复不依赖内存 cache：启动或 cache miss 时从完整 XML 重新校验 accepted bracket、source/summary digest、publication adjacency 和 active manifest，再确定性重建 summary-prefix view；后续事实只追加 tail，不会把内部 compaction request/response 重送给 main Model。
@@ -226,14 +226,15 @@ DSH 是 durable operation 和恢复方面最强参考。采用 tail-only repair�
 - Runtime 会在每个 main/termination-review/action-review Model admission 前冻结唯一待发请求和 preflight ID；automatic compaction 必须绑定同一 Context generation/sequence/manifest，只有未替换的精确 settlement 才能恢复原请求。
 - ApplicationCoordinator 会在 side lane 归零后启动 automatic preflight，公开开始/重试/完成/失败 STATUS；`completed/fits/no_op` 才继续，`waiting_user/suppressed/cancelled/unknown` 会阻断请求并保留旧 view。
 - durable journal 拒绝、异常、缺少 Runtime receipt、收据乱序或 publication 身份不一致均进入 `AgentDurabilityFailure`，不会因为“旧 view 尚在”就释放 lane 继续运行。
+- bound request/terminal 已保存完整 recovery binding；existing Context open core 会在暴露 writer 前，把 request-only、response-only、cancel-pending、nonterminal-rejection 精确收口为 cancel unknown + terminal error，旧 view不变且不重放。automatic process-recovery unknown 计入 failure streak，legacy pending 只落 unknown、不虚构缺失身份；compaction serial 不会因 crash 重用。
 
 仍未闭合的 P0/qualification 缺口：
 
-1. failure cooldown/circuit 目前只在同一 service lifetime 内有效；重启后 pending request/cancel/rejection 的 owner 恢复和 circuit 恢复尚未实现。
+1. `.context`/continue 等公开 controller 尚未把 Resolver 选中的 exact verified target 接入 existing Context open/recovery core；在这条 route 完成前，底层恢复能力不能冒充完整恢复用户旅程。
 2. response wrapper 已在 Model port 与 `compact.lua` 双层验证 provider `incomplete`/finish class/tool/control，且 production owner 组合测试已跑通真实 compact service；仍需最终 OpenAI/Anthropic transport 黑盒和三目标 HTTPS 证据证明线上的 adapter 字段未在旧平台 carrier 中丢失。
 3. token 估算当前为跨旧平台安全的 `1 byte <= 1 token` 保守上界；最终阈值、延迟和内存需在 XP/Win7/CentOS 7 上校准，不能把现代 Linux 结果写成目标资格。
 
-2026-08-30 的受资源门禁串行 suite 为 `407/407`，其中已含 canonical manifest 伪造拒绝、失败前后 Context 字节/代不变、accepted summary + view 原子发布、cache-miss 恢复、公开 `.compact` 路由、main/review 自动 preflight 的精确暂停/恢复与失败阻断、Coordinator 可见 STATUS、真实 production owner 成功链、journal ambiguity fail-stop、Win32/XP HTTPS patch/source/profile 防漂移，以及 curl standalone/no-option 配置语法、TLS 1.2/双 CA carrier 与 TLS 错误重试矩阵。它证明平台无关手工/自动链路和交叉构建静态候选，不证明跨进程 pending 恢复或真实 XP/Win7/CentOS 7 网络与文件系统资格。
+2026-08-30 的受资源门禁串行 suite 为 `412/412`，其中已含 canonical manifest 伪造拒绝、失败前后 Context 字节/代不变、accepted summary + view 原子发布、cache-miss 恢复、手工/自动五类 pending crash bracket/legacy pending 的跨实例恢复、serial/failure-circuit 重建及 production circuit suppression、公开 `.compact` 路由、main/review 自动 preflight 的精确暂停/恢复与失败阻断、Coordinator 可见 STATUS、真实 production owner 成功链、journal ambiguity fail-stop、Win32/XP HTTPS patch/source/profile 防漂移，以及 curl standalone/no-option 配置语法、TLS 1.2/双 CA carrier 与 TLS 错误重试矩阵。它证明平台无关 core 和交叉构建静态候选，不证明公开 reopen 用户旅程或真实 XP/Win7/CentOS 7 网络与文件系统资格。
 
 ### 4.2 Permission：精确单动作授权是强项
 
@@ -285,7 +286,7 @@ Release Gate R 在这些原生证据完成前保持关闭。
 - operation intent/result 被翻译成同一 Context 事件流，Runtime 必须领取外部 receipt 后才能推进自己的 sequence waterline。
 - next turn 从 durable Context override 重新加载完整 Config generation；active turn 不漂移。
 
-Compaction publication 已能构造并提交完整 generation：terminal event、`CompactionRecord` 与新 ModelView 必须同批匹配，accepted view 可从 XML 重建；error/cancel 不能偷换 active manifest。剩余恢复缺口只在**未收口** lifecycle：启动时尚未把 intent/response-only bracket 归并为明确 cancelled/unknown，跨进程 circuit 状态也尚未恢复。
+Compaction publication 已能构造并提交完整 generation：terminal event、`CompactionRecord` 与新 ModelView 必须同批匹配，accepted view 可从 XML 重建；error/cancel 不能偷换 active manifest。未收口 lifecycle 会在 existing Context writer 对外可用前归并为可审计的 cancel pending/unknown 与绑定 error terminal；legacy 请求因缺少完整 binding 只记录 unknown。XML 同时重建 compaction serial、automatic failure streak 和 history-completeness，避免 ID 重用或重启后静默关闭 circuit。剩余接缝是公开 controller 尚未调用该 open core，而非底层 lifecycle 算法缺失。
 
 ### 4.5 Test Harness 与 OOM 风险
 
@@ -311,7 +312,7 @@ Compaction publication 已能构造并提交完整 generation：terminal event�
 | 一个 active summary，原事实不删 | 采用 | 保持 `compact.lua` 的 structured prefix + durable XML facts |
 | compaction 前机械清理大/重复 tool result | 调整采用 | 只改变 provider view；保留 canonical result 与 digest；必须 call/result 成组且幂等 |
 | provider incomplete / 空摘要拒绝 | 采用 | response wrapper 增加完整性字段；七槽非空继续作为硬门 |
-| shrink/convergence 检查 | 采用 | 现有 `minimum_benefit_tokens` 继续；补跨 lifecycle circuit breaker |
+| shrink/convergence 检查 | 采用 | 现有 `minimum_benefit_tokens` 与跨 lifecycle circuit breaker 继续；补真实目标校准 |
 | 宽 persistent allow/always rule | 拒绝 | v0.1 保持 exact one-action、current-process、consume-once |
 | sandbox unsupported 后无隔离运行 | 拒绝 | 若未来声明 sandbox，unsupported 必须 fail closed；v0.1 继续明确 `os_sandbox=false` |
 | Bash AST 解析 CMD 作为授权证明 | 拒绝 | CMD command 保持 opaque；parser 最多只收紧/警告 |
@@ -331,14 +332,14 @@ Compaction publication 已能构造并提交完整 generation：terminal event�
 4. [x] ApplicationCoordinator 接通 `.compact`，只在 durable Idle/WaitingUser admission；STATUS 开始/完成/失败可见，可取消。
 5. [x] 自动 compaction 在下一 Model request 前按 manifest threshold 触发；失败仍超窗时停止，不发送 oversized request。
 6. [x] response 必须证明 `incomplete=false`、finish class 完整、无 tool/control；空或无收益摘要拒绝。
-7. [ ] 连续自动失败进入有界 circuit breaker/cooldown/half-open；手工请求仍给明确结果，不递归重试；当前仅同一 service lifetime 已实现。
-8. [ ] 恢复 incomplete compaction bracket 时保留旧 view并落 cancelled/unknown，绝不把未发布摘要当 active；accepted bracket 的恢复已实现。
+7. [x] 连续自动失败进入有界且跨进程恢复的 circuit breaker/cooldown/half-open；手工请求仍给明确结果，不递归重试。
+8. [x] existing Context open core 恢复 incomplete compaction bracket 时保留旧 view并落 pending/unknown + terminal，绝不把未发布摘要当 active；公开 controller route 仍单列。
 
 ### P0：Harness 证明
 
 1. 增加 public action registry → production dispatcher composition audit，覆盖 `.compact`。
 2. [x] 增加 compaction 的真实 builder/activity/fake-provider/journal/XML/coordinator black-box journey。
-3. 增加 crash 点：intent 后、response 后、publish 前、publish receipt 丢失、cancel pending、重启恢复。
+3. [x] 增加 request/intent 后、response 后、nonterminal rejection、cancel pending、publication/receipt fault 与跨实例恢复；每个 unknown 都不重放。
 4. 每次测试前通过 resource guard；native/PTY/target suite 单独 group 并串行。
 
 ### P1：Permission 与本机事务
@@ -361,4 +362,4 @@ Compaction publication 已能构造并提交完整 generation：terminal event�
 
 ## 7. 当前结论
 
-yaca 的 Permission exact binding、direct filesystem 复核、durable operation、compaction algorithm、Context 原子 publication、公开 `.compact`/自动 preflight 和 trusted component native bridge 已形成生产闭环。当前最大风险转为三类：未收口 compaction lifecycle 的跨进程恢复、其余公开 action 的 dispatcher/production-port 全枚举，以及旧系统 native/network/TLS 闭包的真实目标证明。后续应优先消除这些接缝，不再用只到 fake port 或交叉编译的证据外推产品能力。
+yaca 的 Permission exact binding、direct filesystem 复核、durable operation、compaction algorithm、Context 原子 publication、pending lifecycle/circuit recovery core、公开 `.compact`/自动 preflight 和 trusted component native bridge 已形成底层闭环。当前最大风险转为两类实现接缝和一类资格缺口：公开 action（尤其 `.context`/continue）的 dispatcher/production-port 全枚举、恢复用户旅程接线，以及旧系统 native/network/TLS 闭包的真实目标证明。后续应优先消除这些接缝，不再用只到 fake port 或交叉编译的证据外推产品能力。

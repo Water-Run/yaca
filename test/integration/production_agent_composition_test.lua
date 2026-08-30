@@ -319,8 +319,12 @@ local function fixture(settings)
         take_intent_receipt = function() return {} end,
         take_result_receipt = function() return {} end,
     }
+    local durable_compaction_attempt = 0
+    local durable_compaction_mode = false
     local function compaction_events(record)
         if record.kind == "compaction-request" then
+            durable_compaction_attempt = record.attempt
+            durable_compaction_mode = record.mode
             return { {
                 type = "model_request",
                 turn_id = false,
@@ -329,6 +333,18 @@ local function fixture(settings)
                     purpose = "compaction",
                     viewManifestRef = record.expected_manifest_digest,
                     attemptId = tostring(record.attempt),
+                    compactionId = record.compaction_id,
+                    compactionMode = record.mode,
+                    sourceFirstSeq = tostring(record.source_first_seq),
+                    sourceLastSeq = tostring(record.source_last_seq),
+                    sourceDigest = record.source_digest,
+                    configSnapshot = record.config_snapshot,
+                    modelSnapshot = record.model_snapshot_digest,
+                    promptSnapshot = record.prompt_bundle_digest,
+                    manifestSnapshot = record.manifest_snapshot_id,
+                    viewContextGeneration = tostring(
+                        record.expected_context_generation
+                    ),
                 },
             } }
         end
@@ -354,6 +370,10 @@ local function fixture(settings)
                         status = "ok",
                         summaryDigest = record.summary_digest,
                         manifestDigest = record.manifest.digest,
+                        requestId = record.request_id,
+                        attemptId = tostring(durable_compaction_attempt),
+                        compactionMode = durable_compaction_mode,
+                        automaticFailure = "false",
                     },
                 },
                 {
@@ -475,6 +495,10 @@ local function fixture(settings)
                 } },
                 corrections = {},
                 initial_serial = 0,
+                initial_automatic_failure_count =
+                    settings.initial_automatic_failure_count or 0,
+                automatic_failure_history_complete =
+                    settings.automatic_failure_history_complete ~= false,
                 binding = observation,
             }
         end,
@@ -1042,6 +1066,44 @@ return {
                 }))
                 A.equal(agent.loop:status().state, "RequestingModel")
                 A.contains(table.concat(f.log, "|"), "runtime-preflight-resolve")
+            end,
+        },
+        {
+            name = "recovered failure history suppresses the production automatic request",
+            run = function()
+                for _, recovered in ipairs({
+                    {
+                        initial_automatic_failure_count = 3,
+                        automatic_failure_history_complete = true,
+                    },
+                    {
+                        initial_automatic_failure_count = 0,
+                        automatic_failure_history_complete = false,
+                    },
+                }) do
+                    recovered.automatic_compaction_lifecycle = true
+                    local f = fixture(recovered)
+                    local agent = assert(f.main.start_published_agent(
+                        f.composed,
+                        f.chat,
+                        "implement the project",
+                        "terminal"
+                    ))
+                    f.pause_for_automatic_compaction()
+                    local suppressed = assert(agent.compaction:begin("automatic"))
+                    A.equal(suppressed.result.decision, "suppressed")
+                    A.equal(suppressed.result.reason, "compaction-circuit-open")
+                    A.equal(suppressed.result.retry_after_ms, 60000)
+                    A.equal(suppressed.settlement.outcome, "suppressed")
+                    local status = agent.compaction:status()
+                    A.equal(status.automatic_failure_count, 3)
+                    A.equal(status.automatic_circuit_state, "open")
+                    A.falsy(table.concat(f.log, "|"):find(
+                        "effect:compaction-model",
+                        1,
+                        true
+                    ))
+                end
             end,
         },
         {

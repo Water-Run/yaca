@@ -50,6 +50,12 @@ local function valid_text(value, maximum_bytes)
     return valid and not metadata.contains_nul
 end
 
+local function valid_digest(value)
+    return type(value) == "string"
+        and #value == 64
+        and value:match("^[0-9a-f]+$") ~= nil
+end
+
 local function validate_workspace(workspace)
     if type(workspace) ~= "table"
         or type(workspace.path) ~= "string"
@@ -520,7 +526,7 @@ local function validate_publication_ports(ports)
             "direct_inspect", "direct_reverify", "make_directory", "flush_directory",
         },
         schema = { "build", "append_events", "encode" },
-        store = { "create_writer", "publish", "close_writer" },
+        store = { "create_writer", "open_writer", "publish", "close_writer" },
         path = { "to_logical", "validate_context_name", "context_hash" },
         safety = { "binding_digest", "digest" },
         prompt = { "assemble" },
@@ -837,6 +843,41 @@ function M.new_context_publication(ports, options)
             view_generation,
             projection,
             manifest.digest
+        )
+    end
+
+    local function rebuild_active_model_view(document)
+        local manifest = document.model_view.active_manifest
+        if manifest.compaction_id then
+            return rebuild_active_compaction_view(document)
+        end
+        if manifest.first_event_seq ~= (manifest.last_event_seq == 0 and 0 or 1)
+            or manifest.last_event_seq > document.event_count
+        then
+            return nil, failure(
+                "ModelViewUnavailable",
+                "plain active Model view has an invalid durable range"
+            )
+        end
+        local facts = {}
+        for index = 1, manifest.last_event_seq do facts[index] = document.facts[index] end
+        -- Plain Model-view publications before v0.1 did not persist their
+        -- Context generation. The event cap makes this exact bounded search
+        -- preferable to trusting a wall-clock or inventing sidecar state.
+        for generation = 1, document.generation do
+            local candidate, candidate_error = cache_model_view(facts, generation)
+            if not candidate then return nil, candidate_error end
+            if candidate.digest == manifest.digest
+                and candidate.first_sequence == manifest.first_event_seq
+                and candidate.last_sequence == manifest.last_event_seq
+            then
+                return candidate
+            end
+            model_views[candidate.digest] = nil
+        end
+        return nil, failure(
+            "ModelViewUnavailable",
+            "plain active Model view cannot be rebuilt from durable facts"
         )
     end
 
@@ -1199,6 +1240,349 @@ function M.new_context_publication(ports, options)
         )
     end
 
+    local function restore_compaction_lifecycles(document)
+        compaction_lifecycles = {}
+        local recovery = document.recovery or {}
+        for _, recovered in ipairs(recovery.pending_compactions or {}) do
+            if type(recovered) ~= "table"
+                or not valid_text(
+                    recovered.compaction_id,
+                    admitted.maximum_compaction_identifier_bytes
+                )
+                or not valid_text(
+                    recovered.request_id,
+                    admitted.maximum_compaction_identifier_bytes
+                )
+                or (recovered.mode ~= "manual" and recovered.mode ~= "automatic")
+                or not valid_integer(recovered.attempt, 1)
+                or not valid_integer(recovered.source_first_seq, 1)
+                or not valid_integer(
+                    recovered.source_last_seq,
+                    recovered.source_first_seq
+                )
+                or not valid_integer(
+                    recovered.source_event_count,
+                    recovered.source_last_seq
+                )
+                or not valid_digest(recovered.source_digest)
+                or not valid_digest(recovered.config_snapshot)
+                or not valid_digest(recovered.model_snapshot)
+                or not valid_digest(recovered.prompt_snapshot)
+                or not valid_text(
+                    recovered.manifest_snapshot,
+                    admitted.maximum_compaction_identifier_bytes
+                )
+                or not valid_digest(recovered.manifest_digest)
+                or (recovered.response_status ~= false
+                    and recovered.response_status ~= "complete"
+                    and recovered.response_status ~= "interrupted")
+                or type(recovered.cancel_requested) ~= "boolean"
+                or (recovered.cancel_requested
+                    and not valid_text(
+                        recovered.cancel_reason,
+                        admitted.maximum_model_view_bytes
+                    ))
+                or recovered.manifest_digest
+                    ~= document.model_view.active_manifest.digest
+                or compaction_lifecycles[recovered.compaction_id]
+            then
+                return nil, failure(
+                    "CompactionRecoveryUnknown",
+                    "durable pending compaction recovery data is invalid"
+                )
+            end
+            compaction_lifecycles[recovered.compaction_id] = {
+                compaction_id = recovered.compaction_id,
+                mode = recovered.mode,
+                request_id = recovered.request_id,
+                attempt = recovered.attempt,
+                source_first_seq = recovered.source_first_seq,
+                source_last_seq = recovered.source_last_seq,
+                source_digest = recovered.source_digest,
+                source_event_count = recovered.source_event_count,
+                manifest_digest = recovered.manifest_digest,
+                config_snapshot = recovered.config_snapshot,
+                model_snapshot_digest = recovered.model_snapshot,
+                prompt_bundle_digest = recovered.prompt_snapshot,
+                manifest_snapshot_id = recovered.manifest_snapshot,
+                response_committed = recovered.response_status == "complete",
+                cancel_requested = recovered.cancel_requested,
+                cancel_reason = recovered.cancel_requested
+                    and recovered.cancel_reason or nil,
+                terminal = false,
+            }
+        end
+        return true
+    end
+
+    local function recover_opened_compactions()
+        local recovery = active.document.recovery or {}
+        local pending = recovery.pending_compactions or {}
+        local legacy = recovery.legacy_pending_compaction_request_ids or {}
+        local recovered_bound = 0
+        local recovered_legacy = 0
+        if #pending > 0 then
+            local journal = service.compaction_journal()
+            for _, recovered in ipairs(pending) do
+                local lifecycle = compaction_lifecycles[recovered.compaction_id]
+                local reason = lifecycle.cancel_requested
+                    and lifecycle.cancel_reason or "compaction-process-recovery"
+                if not lifecycle.cancel_requested then
+                    local committed, receipt = journal.commit_rejection({
+                        kind = "compaction-cancel-request",
+                        compaction_id = lifecycle.compaction_id,
+                        request_id = lifecycle.request_id,
+                        reason = reason,
+                        source_first_seq = lifecycle.source_first_seq,
+                        source_last_seq = lifecycle.source_last_seq,
+                        source_digest = lifecycle.source_digest,
+                        canonical_facts_before = lifecycle.source_event_count,
+                        expected_context_generation = active.document.generation,
+                        expected_manifest_digest = lifecycle.manifest_digest,
+                        old_view_retained = true,
+                    })
+                    if committed ~= true then return nil, receipt end
+                end
+                local committed, receipt = journal.commit_rejection({
+                    kind = "compaction-cancel-result",
+                    compaction_id = lifecycle.compaction_id,
+                    request_id = lifecycle.request_id,
+                    reason = reason,
+                    outcome = "unknown",
+                    source_first_seq = lifecycle.source_first_seq,
+                    source_last_seq = lifecycle.source_last_seq,
+                    source_digest = lifecycle.source_digest,
+                    canonical_facts_before = lifecycle.source_event_count,
+                    config_snapshot = lifecycle.config_snapshot,
+                    model_snapshot_digest = lifecycle.model_snapshot_digest,
+                    prompt_bundle_digest = lifecycle.prompt_bundle_digest,
+                    expected_context_generation = active.document.generation,
+                    expected_manifest_digest = lifecycle.manifest_digest,
+                    old_view_retained = true,
+                })
+                if committed ~= true then return nil, receipt end
+                recovered_bound = recovered_bound + 1
+            end
+        end
+        if #legacy > 0 then
+            local legacy_states = {}
+            for _, request_id in ipairs(legacy) do
+                legacy_states[request_id] = { cancel_requested = false }
+            end
+            for _, event in ipairs(active.document.facts) do
+                local fields = event.fields
+                local state = event.type == "cancel"
+                    and fields.targetKind == "compaction-request"
+                    and legacy_states[fields.targetId]
+                    or nil
+                if state and fields.result == "pending" then
+                    state.cancel_requested = true
+                    state.reason = fields.reason
+                end
+            end
+            for _, request_id in ipairs(legacy) do
+                local state = legacy_states[request_id]
+                local reason = state.cancel_requested and state.reason
+                    or "compaction-process-recovery"
+                local events = {}
+                if not state.cancel_requested then
+                    events[#events + 1] = {
+                        type = "cancel",
+                        fields = {
+                            targetKind = "compaction-request",
+                            targetId = request_id,
+                            reason = reason,
+                            result = "pending",
+                        },
+                    }
+                end
+                events[#events + 1] = {
+                    type = "cancel",
+                    fields = {
+                        targetKind = "compaction-request",
+                        targetId = request_id,
+                        reason = reason,
+                        result = "unknown",
+                    },
+                }
+                local first_sequence = active.document.event_count + 1
+                for index, event in ipairs(events) do
+                    event.seq = first_sequence + index - 1
+                end
+                local digest_called, digest, digest_error = pcall(
+                    safety.binding_digest,
+                    "yaca-legacy-compaction-recovery-v1",
+                    {
+                        { name = "request", value = request_id },
+                        { name = "generation", value = tostring(
+                            active.document.generation
+                        ) },
+                        { name = "sequence", value = tostring(first_sequence) },
+                    }
+                )
+                if not digest_called or not valid_digest(digest) then
+                    return nil, (digest_called and digest_error) or failure(
+                        "CompactionRecoveryUnknown",
+                        "legacy compaction recovery barrier is unavailable"
+                    )
+                end
+                local committed, receipt = service.commit({
+                    barrier_id = "legacy-compaction-recovery:" .. digest,
+                    first_sequence = first_sequence,
+                    last_sequence = first_sequence + #events - 1,
+                    event_count = #events,
+                    expected_context_generation = active.document.generation,
+                    events = events,
+                })
+                if committed ~= true then return nil, receipt end
+                recovered_legacy = recovered_legacy + 1
+            end
+        end
+        local remaining = active.document.recovery or {}
+        if #(remaining.pending_compactions or {}) > 0
+            or #(remaining.legacy_pending_compaction_request_ids or {}) > 0
+        then
+            return nil, failure(
+                "CompactionRecoveryUnknown",
+                "pending compaction recovery did not reach a terminal state"
+            )
+        end
+        return readonly({
+            outcome = recovered_bound + recovered_legacy > 0
+                and "recovered-unknown" or "clean",
+            recovered_bound = recovered_bound,
+            recovered_legacy = recovered_legacy,
+            old_view_retained = true,
+            automatic_failure_count =
+                remaining.automatic_compaction_failure_count or 0,
+            automatic_failure_history_complete =
+                remaining.automatic_compaction_failure_history_complete ~= false,
+        }, "opened Context compaction recovery")
+    end
+
+    ---Acquires a verified existing Context and resolves every crash-left
+    -- compaction bracket before exposing the writer to a new Runtime.
+    function service.open_existing(specification)
+        if closed then
+            return nil, failure(
+                "ContextPublicationClosed",
+                "existing Context publication service is closed"
+            )
+        end
+        if active then
+            return nil, failure(
+                "ContextAlreadyPublished",
+                "this process already owns a Context"
+            )
+        end
+        local allowed = {
+            context_path = true,
+            logical_path = true,
+            expected_credential = true,
+        }
+        if type(specification) ~= "table" then
+            return nil, failure(
+                "InvalidContextOpen",
+                "existing Context open input is required"
+            )
+        end
+        for key in pairs(specification) do
+            if type(key) ~= "string" or not allowed[key] then
+                return nil, failure(
+                    "InvalidContextOpen",
+                    "existing Context open input is ambiguous"
+                )
+            end
+        end
+        local credential = specification.expected_credential
+        if not valid_absolute_path(specification.context_path)
+            or type(specification.logical_path) ~= "string"
+            or type(credential) ~= "table"
+            or credential.physical_path ~= specification.context_path
+            or credential.logical_path ~= specification.logical_path
+        then
+            return nil, failure(
+                "InvalidContextOpen",
+                "existing Context requires an exact verified target"
+            )
+        end
+        local context_hash, hash_error = path.context_hash(
+            specification.logical_path
+        )
+        if not context_hash then return nil, hash_error end
+        local now, time_error = system.utc_now()
+        if type(now) ~= "string" or now == "" then
+            return nil, time_error or failure(
+                "UtcClockReadFailed",
+                "UTC clock is unavailable"
+            )
+        end
+        local pid, pid_error = system.current_process_id()
+        if not valid_integer(pid, 1) then
+            return nil, pid_error or failure(
+                "ProcessIdentityUnavailable",
+                "process ID is unavailable"
+            )
+        end
+        local writer, document_or_error = store.open_writer(
+            specification.context_path,
+            { pid = pid, started_at = now },
+            credential
+        )
+        if not writer then return nil, document_or_error end
+        local document = document_or_error
+        if type(document) ~= "table"
+            or type(document.header) ~= "table"
+            or type(document.model_view) ~= "table"
+            or type(document.recovery) ~= "table"
+        then
+            return close_writer(writer, failure(
+                "ContextOpenUnknown",
+                "existing Context store returned no canonical document"
+            ))
+        end
+        local view, view_error = rebuild_active_model_view(document)
+        if not view then return close_writer(writer, view_error) end
+        local restored, restore_error = restore_compaction_lifecycles(document)
+        if not restored then return close_writer(writer, restore_error) end
+        local receipt = readonly({
+            outcome = "opened",
+            durable = true,
+            context_path = specification.context_path,
+            logical_path = specification.logical_path,
+            context_hash = context_hash,
+            display_name = document.header.name,
+            generation = document.generation,
+            event_count = document.event_count,
+            first_sequence = 1,
+            last_sequence = document.event_count,
+            view_manifest_snapshot = document.model_view.active_manifest.digest,
+        }, "existing Context publication receipt")
+        active = { writer = writer, document = document, receipt = receipt }
+        local recovery, recovery_error = recover_opened_compactions()
+        if not recovery then
+            local released, release_error = store.close_writer(writer)
+            active = nil
+            compaction_journal = nil
+            compaction_lifecycles = {}
+            if not released then
+                return nil, failure(
+                    "ContextLeaseUnknown",
+                    "failed compaction recovery writer release is unknown",
+                    release_error and release_error.code
+                )
+            end
+            return nil, recovery_error
+        end
+        local values = {}
+        for key, value in pairs(active.receipt) do values[key] = value end
+        values.outcome = recovery.outcome == "clean" and "opened" or "recovered"
+        values.compaction_recovery = recovery
+        values.view_manifest_snapshot = active.document.model_view.active_manifest.digest
+        active.receipt = readonly(values, "existing Context publication receipt")
+        return active.receipt
+    end
+
     ---Builds a bounded quoted-data model view from the exact current durable
     -- Fact prefix. A changed view is only a candidate until AgentLoop commits
     -- the matching model_view_published event through this journal.
@@ -1239,9 +1623,9 @@ function M.new_context_publication(ports, options)
             or manifest.last_event_seq ~= document.event_count
         if not changed then
             view = model_views[manifest.digest]
-            if not view and manifest.compaction_id then
+            if not view then
                 local rebuild_error
-                view, rebuild_error = rebuild_active_compaction_view(document)
+                view, rebuild_error = rebuild_active_model_view(document)
                 if not view then return nil, rebuild_error end
             end
             if not view then
@@ -1294,9 +1678,9 @@ function M.new_context_publication(ports, options)
             return nil, failure("StaleModelView", "model view is not the active durable manifest")
         end
         local view = model_views[digest]
-        if not view and active.document.model_view.active_manifest.compaction_id then
+        if not view then
             local rebuild_error
-            view, rebuild_error = rebuild_active_compaction_view(active.document)
+            view, rebuild_error = rebuild_active_model_view(active.document)
             if not view then return nil, rebuild_error end
         end
         if not view then
@@ -1479,7 +1863,8 @@ function M.new_context_publication(ports, options)
         if not view then return nil, view_error end
 
         local accepted = {}
-        local initial_serial = 0
+        local recovery = document.recovery or {}
+        local initial_serial = recovery.compaction_initial_serial or 0
         for _, record in ipairs(document.model_view.compaction_records) do
             accepted[record.id] = record.status == "ok"
             local serial = record.id:match("^compaction%-([1-9][0-9]*)$")
@@ -1534,6 +1919,19 @@ function M.new_context_publication(ports, options)
             ),
             corrections = readonly(corrections, "durable compaction corrections"),
             initial_serial = initial_serial,
+            initial_automatic_failure_count =
+                recovery.automatic_compaction_failure_count or 0,
+            automatic_failure_history_complete =
+                recovery.automatic_compaction_failure_history_complete ~= false,
+            pending_compactions = recovery.pending_compactions or readonly(
+                {},
+                "pending durable compactions"
+            ),
+            legacy_pending_compaction_request_ids =
+                recovery.legacy_pending_compaction_request_ids or readonly(
+                    {},
+                    "legacy pending compaction requests"
+                ),
             binding = observation,
         }, "durable compaction snapshot")
     end
@@ -1821,6 +2219,7 @@ function M.new_context_publication(ports, options)
                 expected_manifest_digest = true, source_first_seq = true,
                 source_last_seq = true, source_digest = true,
                 config_snapshot = true, model_snapshot_digest = true,
+                prompt_bundle_digest = true,
                 manifest_snapshot_id = true,
             },
             ["compaction-response"] = {
@@ -2081,6 +2480,7 @@ function M.new_context_publication(ports, options)
                 or not valid_integer(record.attempt, 1)
                 or not valid_digest(record.config_snapshot)
                 or not valid_digest(record.model_snapshot_digest)
+                or not valid_digest(record.prompt_bundle_digest)
                 or not valid_id(record.manifest_snapshot_id)
                 or (record.correction_reason ~= false
                     and not valid_text(
@@ -2098,8 +2498,10 @@ function M.new_context_publication(ports, options)
             if previous then
                 if previous.terminal
                     or record.attempt ~= previous.attempt + 1
+                    or record.mode ~= previous.mode
                     or record.config_snapshot ~= previous.config_snapshot
                     or record.model_snapshot_digest ~= previous.model_snapshot_digest
+                    or record.prompt_bundle_digest ~= previous.prompt_bundle_digest
                     or record.manifest_snapshot_id ~= previous.manifest_snapshot_id
                     or record.expected_manifest_digest ~= previous.manifest_digest
                 then
@@ -2131,6 +2533,7 @@ function M.new_context_publication(ports, options)
             end
             local candidate = {
                 compaction_id = record.compaction_id,
+                mode = record.mode,
                 request_id = record.request_id,
                 attempt = record.attempt,
                 source_first_seq = record.source_first_seq,
@@ -2140,6 +2543,7 @@ function M.new_context_publication(ports, options)
                 manifest_digest = record.expected_manifest_digest,
                 config_snapshot = record.config_snapshot,
                 model_snapshot_digest = record.model_snapshot_digest,
+                prompt_bundle_digest = record.prompt_bundle_digest,
                 manifest_snapshot_id = record.manifest_snapshot_id,
                 response_committed = false,
                 cancel_requested = false,
@@ -2152,6 +2556,19 @@ function M.new_context_publication(ports, options)
                     purpose = "compaction",
                     viewManifestRef = record.expected_manifest_digest,
                     attemptId = tostring(record.attempt),
+                    compactionId = record.compaction_id,
+                    compactionMode = record.mode,
+                    sourceFirstSeq = tostring(record.source_first_seq),
+                    sourceLastSeq = tostring(record.source_last_seq),
+                    sourceDigest = record.source_digest,
+                    sourceEventCount = tostring(source_event_count),
+                    configSnapshot = record.config_snapshot,
+                    modelSnapshot = record.model_snapshot_digest,
+                    promptSnapshot = record.prompt_bundle_digest,
+                    manifestSnapshot = record.manifest_snapshot_id,
+                    viewContextGeneration = tostring(
+                        record.expected_context_generation
+                    ),
                 },
             } }, nil, false)
             if committed ~= true then return false, receipt end
@@ -2208,7 +2625,13 @@ function M.new_context_publication(ports, options)
             return true, receipt
         end
 
-        local function terminal_event(record, status, error_id)
+        local function terminal_event(
+            record,
+            lifecycle,
+            status,
+            error_id,
+            automatic_failure
+        )
             local fields = {
                 compactionId = record.compaction_id,
                 sourceFirstSeq = tostring(record.source_first_seq),
@@ -2217,6 +2640,10 @@ function M.new_context_publication(ports, options)
                 status = status,
                 sourceEventCount = tostring(record.canonical_facts_before),
                 viewContextGeneration = tostring(record.expected_context_generation),
+                requestId = record.request_id,
+                attemptId = tostring(lifecycle.attempt),
+                compactionMode = lifecycle.mode,
+                automaticFailure = automatic_failure and "true" or "false",
             }
             if error_id then fields.errorId = error_id end
             if record.model_snapshot_digest then
@@ -2306,6 +2733,8 @@ function M.new_context_publication(ports, options)
                     or record.model_snapshot_digest
                         ~= lifecycle.model_snapshot_digest
                     or not valid_digest(record.prompt_bundle_digest)
+                    or record.prompt_bundle_digest
+                        ~= lifecycle.prompt_bundle_digest
                 then
                     return false, failure(
                         "CompactionJournalContract",
@@ -2349,8 +2778,10 @@ function M.new_context_publication(ports, options)
                     local event
                     event, compaction_record = terminal_event(
                         record,
+                        lifecycle,
                         "error",
-                        record.error_code
+                        record.error_code,
+                        lifecycle.mode == "automatic"
                     )
                     events[#events + 1] = event
                 end
@@ -2383,6 +2814,8 @@ function M.new_context_publication(ports, options)
                     or record.model_snapshot_digest
                         ~= lifecycle.model_snapshot_digest
                     or not valid_digest(record.prompt_bundle_digest)
+                    or record.prompt_bundle_digest
+                        ~= lifecycle.prompt_bundle_digest
                 then
                     return false, failure(
                         "CompactionJournalContract",
@@ -2401,7 +2834,15 @@ function M.new_context_publication(ports, options)
                 local status = record.outcome == "cancelled" and "cancelled" or "error"
                 local error_id = status == "error" and "CompactionCancelUnknown" or nil
                 local event
-                event, compaction_record = terminal_event(record, status, error_id)
+                event, compaction_record = terminal_event(
+                    record,
+                    lifecycle,
+                    status,
+                    error_id,
+                    lifecycle.mode == "automatic"
+                        and (record.reason == "compaction-active-time"
+                            or record.reason == "compaction-process-recovery")
+                )
                 events[#events + 1] = event
                 terminal = true
             end
@@ -2438,6 +2879,8 @@ function M.new_context_publication(ports, options)
                 or record.canonical_facts_removed ~= 0
                 or record.atomic_groups_split ~= 0
                 or type(record.manifest) ~= "table"
+                or record.manifest.prompt_bundle_digest
+                    ~= lifecycle.prompt_bundle_digest
                 or record.manifest.context_generation
                     ~= record.expected_context_generation
                 or record.manifest.summary_id ~= record.summary_id
@@ -2579,6 +3022,10 @@ function M.new_context_publication(ports, options)
                 modelSnapshot = record.generator_model_snapshot,
                 promptSnapshot = record.manifest.prompt_bundle_digest,
                 viewContextGeneration = tostring(record.expected_context_generation),
+                requestId = record.request_id,
+                attemptId = tostring(lifecycle.attempt),
+                compactionMode = lifecycle.mode,
+                automaticFailure = "false",
             }
             local compaction_record = {
                 id = record.compaction_id,

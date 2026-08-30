@@ -2,7 +2,7 @@
 
 更新日期：2026-08-30
 
-状态：**手工与自动生产链路完成，跨进程恢复与目标校准待闭合** — model-view/summary/atomic-group/admission、no-tool Model port、Context journal、原子 publication、accepted-view 恢复、公开 `.compact`、每次 main/review 请求前 automatic preflight、STATUS/cancel 和 Runtime receipt gate 已实现；pending lifecycle/circuit 跨进程恢复和 target calibration 尚待闭合
+状态：**手工、自动与 durable recovery core 完成，公开 reopen 路由和目标校准待闭合** — model-view/summary/atomic-group/admission、no-tool Model port、Context journal、原子 publication、accepted/pending-view 恢复、公开 `.compact`、每次 main/review 请求前 automatic preflight、STATUS/cancel、Runtime receipt gate 和跨进程 failure circuit 已实现；`.context`/continue controller 接线和 target calibration 尚待闭合
 
 > D-063：XML **存储** hard limit 触顶时的解脱主路径是 **新开对话 + 接盘 Prompt**，不是依赖 compact 缩小事实 XML。compact 仍只服务 model view。
 
@@ -95,8 +95,11 @@ summary 同时保存 source event range/digest、生成 Model、完整 Prompt/vi
 - Runtime 对 compaction 使用独占 lane 和 `opened -> request -> response|retry|cancelling -> published|terminal` 相位；普通 main、普通 cancel 和 close 不能越过该 owner。只有同一 `compaction_id` 的 accepted publication 能结算 `completed`，乱序 publication 或含混 journal receipt 一律 fail-stop。
 - Runtime 在每个 main、action-review 与 termination-review Model admission 前冻结唯一待发请求；automatic compaction gate 绑定 preflight ID 与当时 Context 水位，只有 exact settlement 可恢复原请求，替换 settlement 或失败结果不能泄漏 Model effect。
 - ApplicationCoordinator 已执行 `.compact` 与 automatic preflight，在 STATUS 显示 state/circuit/preflight，自动压缩开始/重试/终态均可见；活动期间只放行 status/help/cancel，退出先收口 compaction，再关闭 Agent session 和唯一 Context writer。
+- bound `model_request` 现持久化 compaction/mode/attempt、source range/count/digest、Config/Model/Prompt/manifest snapshot 与 view generation；terminal 同时持久化 request/attempt/mode/automatic-failure，Runtime 和 Context relation scanner 都要求完整精确匹配。旧式无 binding 请求仍可读，但 partial binding 一律拒绝。
+- existing Context open core 在向新 Runtime 暴露 writer 前恢复所有未闭合 lifecycle：request-only、response-only、cancel-pending 与 nonterminal-rejection 都归并为唯一 cancel pending/unknown 和 terminal error，保留旧 view且不重放 Model 请求；旧格式 pending 只追加 cancel unknown，不伪造无法证明的 CompactionRecord。
+- compaction serial 与连续 automatic failure streak 从 canonical XML 重建；automatic process-recovery unknown 计入 streak，旧终态缺少 circuit 语义时按 history-incomplete 保守开路。进程间不能比较 monotonic timestamp，因此恢复到阈值的 circuit 从首个本地单调时钟读数重新等待完整 cooldown，再允许一次 half-open probe。
 - production composition 测试使用真实 `compact` service 跑通手工/自动触发、摘要 Model response、response receipt、原子 publication、Runtime terminal settlement 和待发请求恢复，并注入 journal rejection 证明 lane 不会被错误释放。
-- 受 `.tools/run_with_resource_guard.sh` 保护的完整 Lua suite 为 `400/400`。这只证明平台无关核心与 fake/native adapter 边界，不能替代 XP/Win7/CentOS 7 target 证据，也不证明尚未实现的 pending lifecycle/circuit 跨进程恢复。
+- 受 `.tools/run_with_resource_guard.sh` 保护的完整 Lua suite 为 `412/412`，其中包含手工/自动的五个跨实例 crash bracket、旧格式 pending、serial 不重用、process-recovery failure 传递和 recovered-circuit cooldown。它只证明平台无关 core 与 fake/native adapter 边界，不能替代公开 existing-Context controller 接线或 XP/Win7/CentOS 7 target 证据。
 
 ## 仍需技术证明
 
@@ -192,5 +195,5 @@ summary 同时保存 source event range/digest、生成 Model、完整 Prompt/vi
 - [x] accepted view 的 XML 校验、cache-miss 重建与后续 tail 保留
 - [x] ApplicationCoordinator `.compact`、STATUS/cancel 与 production transport composition
 - [x] 每次 main/review Model request 前的自动阈值 preflight、可见 STATUS 与精确恢复/阻断
-- [ ] pending lifecycle/circuit 跨进程恢复
+- [x] pending lifecycle/circuit 跨进程恢复 core（公开 `.context`/continue reopen 路由另列 controller 工作）
 - [ ] token 估算与三目标阈值数值（TP/C32）

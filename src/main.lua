@@ -1967,12 +1967,21 @@ local function compaction_prompt_upper_bound(generation, binding)
     return total
 end
 
-local function compaction_options(generation, binding, initial_serial)
+local function compaction_options(
+    generation,
+    binding,
+    initial_serial,
+    initial_automatic_failure_count,
+    automatic_failure_history_complete
+)
     local model = generation.models[binding.model_name]
     local configured_threshold = generation.agent
         and generation.agent.compact_threshold
     if type(model) ~= "table"
         or not valid_integer(model.context_length, 1)
+        or not valid_integer(initial_serial, 0)
+        or not valid_integer(initial_automatic_failure_count, 0)
+        or type(automatic_failure_history_complete) ~= "boolean"
         or (configured_threshold ~= false
             and (type(configured_threshold) ~= "number"
                 or configured_threshold <= 0
@@ -1997,12 +2006,20 @@ local function compaction_options(generation, binding, initial_serial)
     end
     local output_tokens = model.max_output_tokens or 4096
     output_tokens = math.min(output_tokens, 4096, maximum_view_tokens - 1)
+    local failure_threshold = 3
+    if not automatic_failure_history_complete then
+        initial_automatic_failure_count = math.max(
+            initial_automatic_failure_count,
+            failure_threshold
+        )
+    end
     return {
         automatic_enabled = configured_threshold ~= false,
         output_tokens = output_tokens,
         service = {
             maximum_identifier_bytes = 256,
             initial_serial = initial_serial,
+            initial_automatic_failure_count = initial_automatic_failure_count,
             manifest = {
                 snapshot_id = "compaction-release-v1",
                 builder_algorithm = "structured-prefix-v1",
@@ -2015,7 +2032,7 @@ local function compaction_options(generation, binding, initial_serial)
                 maximum_view_tokens = maximum_view_tokens,
                 maximum_attempts = 2,
                 active_time_ms = 3600000,
-                failure_threshold = 3,
+                failure_threshold = failure_threshold,
                 failure_cooldown_ms = 60000,
                 trigger_numerator = numerator,
                 trigger_denominator = 1000,
@@ -2141,7 +2158,9 @@ local function new_production_compaction(composed, catalog, loop, clock)
         local options, options_error = compaction_options(
             generation,
             binding,
-            snapshot.initial_serial
+            snapshot.initial_serial,
+            snapshot.initial_automatic_failure_count,
+            snapshot.automatic_failure_history_complete
         )
         if not options then return nil, options_error end
         local candidate, candidate_error = compact.new({

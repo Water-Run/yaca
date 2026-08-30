@@ -31,7 +31,10 @@ local EVENT_DEFINITIONS = {
         "queueItemId", "displayId", "action", "text",
     }, { "beforeQueueItemId", "sideId", "reason" }),
     event("model_request", { "requestId", "purpose", "viewManifestRef" }, {
-        "attemptId",
+        "attemptId", "compactionId", "compactionMode", "sourceFirstSeq",
+        "sourceLastSeq", "sourceDigest", "sourceEventCount", "configSnapshot",
+        "modelSnapshot", "promptSnapshot", "manifestSnapshot",
+        "viewContextGeneration",
     }),
     event("model_message", { "messageId", "requestId", "role", "status", "body" }, {
         "representation", "rawBytes", "digest",
@@ -70,7 +73,8 @@ local EVENT_DEFINITIONS = {
     }, {
         "summary", "errorId", "sourceEventCount", "summaryDigest",
         "manifestDigest", "builderAlgorithm", "modelSnapshot",
-        "promptSnapshot", "viewContextGeneration",
+        "promptSnapshot", "viewContextGeneration", "requestId", "attemptId",
+        "compactionMode", "automaticFailure",
     }),
     event("model_view_published", {
         "manifestDigest", "firstEventSeq", "lastEventSeq",
@@ -131,6 +135,7 @@ local BOOLEAN_FIELDS = {
     manual = true,
     autoRenameDisabled = true,
     adopted = true,
+    automaticFailure = true,
 }
 local DECIMAL_FIELDS = {
     rawBytes = true,
@@ -143,6 +148,7 @@ local DECIMAL_FIELDS = {
     contextDocumentGeneration = true,
     sourceEventCount = true,
     viewContextGeneration = true,
+    attemptId = true,
 }
 local IDENTIFIER_FIELDS = {
     messageId = true,
@@ -164,6 +170,7 @@ local IDENTIFIER_FIELDS = {
     sideId = true,
     continuesResponseId = true,
     supersedesResponseId = true,
+    manifestSnapshot = true,
 }
 
 local function failure(code, message, reason, path, detail)
@@ -730,6 +737,74 @@ local function normalize_event(candidate, expected_seq, admitted)
     if candidate.type == "model_request" and not MODEL_PURPOSES[fields.purpose] then
         return nil, failure("ContextSchema", "model purpose is invalid", "enum", path)
     end
+    if candidate.type == "model_request" then
+        local compaction_fields = {
+            "compactionId", "compactionMode", "sourceFirstSeq", "sourceLastSeq",
+            "sourceDigest", "sourceEventCount", "configSnapshot", "modelSnapshot",
+            "promptSnapshot", "manifestSnapshot", "viewContextGeneration",
+        }
+        local has_compaction_binding = fields.compactionId ~= nil
+        if fields.purpose == "compaction" and has_compaction_binding then
+            for _, name in ipairs(compaction_fields) do
+                if fields[name] == nil then
+                    return nil, failure(
+                        "ContextSchema",
+                        "bound compaction request omits durable recovery data",
+                        "required-field",
+                        path,
+                        name
+                    )
+                end
+            end
+            local first = tonumber(fields.sourceFirstSeq)
+            local last = tonumber(fields.sourceLastSeq)
+            local count = tonumber(fields.sourceEventCount)
+            local generation = tonumber(fields.viewContextGeneration)
+            if fields.attemptId == nil
+                or (fields.compactionMode ~= "manual"
+                    and fields.compactionMode ~= "automatic")
+                or first < 1 or first > last
+                or count < last or count >= candidate.seq
+                or generation < 1
+                or fields.sourceDigest == ""
+                or fields.configSnapshot == ""
+                or fields.modelSnapshot == ""
+                or fields.promptSnapshot == ""
+                or fields.manifestSnapshot == ""
+            then
+                return nil, failure(
+                    "ContextSchema",
+                    "bound compaction request recovery data is invalid",
+                    "compaction-request-binding",
+                    path
+                )
+            end
+        elseif fields.purpose == "compaction" then
+            for _, name in ipairs(compaction_fields) do
+                if fields[name] ~= nil then
+                    return nil, failure(
+                        "ContextSchema",
+                        "legacy compaction request has a partial recovery binding",
+                        "conditional-field",
+                        path,
+                        name
+                    )
+                end
+            end
+        else
+            for _, name in ipairs(compaction_fields) do
+                if fields[name] ~= nil then
+                    return nil, failure(
+                        "ContextSchema",
+                        "non-compaction request carries compaction recovery data",
+                        "conditional-field",
+                        path,
+                        name
+                    )
+                end
+            end
+        end
+    end
     if candidate.type == "model_control" and not MODEL_CONTROLS[fields.control] then
         return nil, failure("ContextSchema", "model control is invalid", "enum", path)
     end
@@ -767,6 +842,37 @@ local function normalize_event(candidate, expected_seq, admitted)
         ok = true, error = true, cancelled = true,
     })[fields.status] then
         return nil, failure("ContextSchema", "compaction status is invalid", "enum", path)
+    end
+    if candidate.type == "compaction" then
+        local bound_terminal = fields.requestId ~= nil
+            or fields.attemptId ~= nil
+            or fields.compactionMode ~= nil
+            or fields.automaticFailure ~= nil
+        if bound_terminal and (fields.requestId == nil
+            or fields.attemptId == nil
+            or fields.compactionMode == nil
+            or fields.automaticFailure == nil)
+        then
+            return nil, failure(
+                "ContextSchema",
+                "compaction terminal has a partial recovery binding",
+                "conditional-field",
+                path
+            )
+        end
+        if bound_terminal and ((fields.compactionMode ~= "manual"
+                and fields.compactionMode ~= "automatic")
+            or (fields.status == "ok" and fields.automaticFailure ~= "false")
+            or (fields.automaticFailure == "true"
+                and fields.compactionMode ~= "automatic"))
+        then
+            return nil, failure(
+                "ContextSchema",
+                "compaction terminal recovery data is invalid",
+                "compaction-terminal-binding",
+                path
+            )
+        end
     end
     return {
         seq = expected_seq,
@@ -811,6 +917,21 @@ local function validate_relations(events)
     local tool_results, operation_results, permission_decisions = {}, {}, {}
     local unknown_operations = {}
     local published_views = {}
+    local compaction_requests = {}
+    local compaction_lifecycles = {}
+    local legacy_compaction_requests = {}
+    local automatic_failure_count = 0
+    local automatic_failure_history_complete = true
+    local compaction_initial_serial = 0
+
+    local function observe_compaction_serial(identifier)
+        local serial = type(identifier) == "string"
+            and identifier:match("^compaction%-([1-9][0-9]*)$")
+        serial = tonumber(serial)
+        if valid_integer(serial, 1) and serial > compaction_initial_serial then
+            compaction_initial_serial = serial
+        end
+    end
 
     for _, item in ipairs(events) do
         local fields = item.fields
@@ -880,12 +1001,110 @@ local function validate_relations(events)
         elseif item.type == "model_request" then
             local ok, id_error = unique_id(requests, fields.requestId, "request", path)
             if not ok then return nil, id_error end
+            if fields.purpose == "compaction" then
+                if fields.compactionId == nil then
+                    local inferred = fields.requestId:match(
+                        "^(compaction%-[1-9][0-9]*):request:[1-9][0-9]*$"
+                    )
+                    observe_compaction_serial(inferred)
+                    local legacy = {
+                        legacy = true,
+                        request_id = fields.requestId,
+                        sequence = item.seq,
+                        response_status = false,
+                        cancel_requested = false,
+                        cancel_result = false,
+                    }
+                    legacy_compaction_requests[#legacy_compaction_requests + 1] = legacy
+                    compaction_requests[fields.requestId] = legacy
+                else
+                    observe_compaction_serial(fields.compactionId)
+                    local attempt = tonumber(fields.attemptId)
+                    local request = {
+                        compaction_id = fields.compactionId,
+                        mode = fields.compactionMode,
+                        request_id = fields.requestId,
+                        request_sequence = item.seq,
+                        attempt = attempt,
+                        source_first_seq = tonumber(fields.sourceFirstSeq),
+                        source_last_seq = tonumber(fields.sourceLastSeq),
+                        source_digest = fields.sourceDigest,
+                        source_event_count = tonumber(fields.sourceEventCount),
+                        config_snapshot = fields.configSnapshot,
+                        model_snapshot = fields.modelSnapshot,
+                        prompt_snapshot = fields.promptSnapshot,
+                        manifest_snapshot = fields.manifestSnapshot,
+                        manifest_digest = fields.viewManifestRef,
+                        view_context_generation = tonumber(
+                            fields.viewContextGeneration
+                        ),
+                        response_status = false,
+                        cancel_requested = false,
+                        cancel_result = false,
+                    }
+                    local lifecycle = compaction_lifecycles[fields.compactionId]
+                    if lifecycle then
+                        local previous = lifecycle.latest
+                        if lifecycle.terminal
+                            or previous.response_status ~= "interrupted"
+                            or attempt ~= previous.attempt + 1
+                            or request.mode ~= previous.mode
+                            or request.source_first_seq ~= previous.source_first_seq
+                            or request.source_last_seq ~= previous.source_last_seq
+                            or request.source_digest ~= previous.source_digest
+                            or request.source_event_count ~= previous.source_event_count
+                            or request.config_snapshot ~= previous.config_snapshot
+                            or request.model_snapshot ~= previous.model_snapshot
+                            or request.prompt_snapshot ~= previous.prompt_snapshot
+                            or request.manifest_snapshot ~= previous.manifest_snapshot
+                            or request.manifest_digest ~= previous.manifest_digest
+                        then
+                            return nil, failure(
+                                "ContextRelation",
+                                "compaction retry does not continue its durable lifecycle",
+                                "compaction-retry-binding",
+                                path
+                            )
+                        end
+                        lifecycle.latest = request
+                    else
+                        if attempt ~= 1 then
+                            return nil, failure(
+                                "ContextRelation",
+                                "first bound compaction request must be attempt one",
+                                "compaction-attempt",
+                                path
+                            )
+                        end
+                        lifecycle = {
+                            compaction_id = fields.compactionId,
+                            latest = request,
+                            terminal = false,
+                        }
+                        compaction_lifecycles[fields.compactionId] = lifecycle
+                    end
+                    request.lifecycle = lifecycle
+                    compaction_requests[fields.requestId] = request
+                end
+            end
         elseif item.type == "model_message" then
             if not requests[fields.requestId] then
                 return nil, reference_error("request", fields.requestId, path)
             end
             local ok, id_error = unique_id(messages, fields.messageId, "message", path)
             if not ok then return nil, id_error end
+            local compaction_request = compaction_requests[fields.requestId]
+            if compaction_request then
+                if compaction_request.response_status then
+                    return nil, failure(
+                        "ContextRelation",
+                        "compaction request has more than one durable response",
+                        "duplicate-compaction-response",
+                        path
+                    )
+                end
+                compaction_request.response_status = fields.status
+            end
         elseif item.type == "model_control" or item.type == "model_yield" then
             if not requests[fields.requestId] then
                 return nil, reference_error("request", fields.requestId, path)
@@ -995,6 +1214,47 @@ local function validate_relations(events)
                 )
             end
             ended_turns[item.turn_id] = true
+        elseif item.type == "cancel" and fields.targetKind == "compaction-request" then
+            local request = compaction_requests[fields.targetId]
+            if not request then
+                return nil, reference_error(
+                    "bound compaction request",
+                    fields.targetId,
+                    path
+                )
+            end
+            if fields.result == "pending" then
+                if request.cancel_requested or request.cancel_result then
+                    return nil, failure(
+                        "ContextRelation",
+                        "compaction cancellation request is duplicated",
+                        "duplicate-compaction-cancel",
+                        path
+                    )
+                end
+                request.cancel_requested = true
+                request.cancel_reason = fields.reason
+            elseif fields.result == "cancelled" or fields.result == "unknown" then
+                if not request.cancel_requested
+                    or request.cancel_result
+                    or request.cancel_reason ~= fields.reason
+                then
+                    return nil, failure(
+                        "ContextRelation",
+                        "compaction cancellation result has no exact pending request",
+                        "compaction-cancel-binding",
+                        path
+                    )
+                end
+                request.cancel_result = fields.result
+            else
+                return nil, failure(
+                    "ContextRelation",
+                    "compaction cancellation result is invalid",
+                    "compaction-cancel-result",
+                    path
+                )
+            end
         elseif item.type == "compaction" then
             local ok, id_error = unique_id(
                 compactions,
@@ -1004,6 +1264,7 @@ local function validate_relations(events)
             )
             if not ok then return nil, id_error end
             compactions[fields.compactionId] = fields
+            observe_compaction_serial(fields.compactionId)
             local first = tonumber(fields.sourceFirstSeq)
             local last = tonumber(fields.sourceLastSeq)
             if first < 1 or first > last or last >= item.seq then
@@ -1013,6 +1274,57 @@ local function validate_relations(events)
                     "compaction-range",
                     path
                 )
+            end
+            if fields.requestId ~= nil then
+                local request = compaction_requests[fields.requestId]
+                local lifecycle = request and request.lifecycle or nil
+                local expected_failure = request and request.mode == "automatic"
+                    and ((request.cancel_requested
+                            and (request.cancel_reason == "compaction-active-time"
+                                or request.cancel_reason
+                                    == "compaction-process-recovery"))
+                        or (not request.cancel_requested
+                            and fields.status == "error"))
+                if not request
+                    or not lifecycle
+                    or lifecycle.latest ~= request
+                    or lifecycle.terminal
+                    or fields.compactionId ~= request.compaction_id
+                    or fields.compactionMode ~= request.mode
+                    or tonumber(fields.attemptId) ~= request.attempt
+                    or first ~= request.source_first_seq
+                    or last ~= request.source_last_seq
+                    or fields.sourceDigest ~= request.source_digest
+                    or (fields.status == "ok"
+                        and request.response_status ~= "complete")
+                    or (fields.status == "cancelled"
+                        and request.cancel_result ~= "cancelled")
+                    or (fields.status == "error"
+                        and request.response_status ~= "interrupted"
+                        and request.cancel_result ~= "unknown")
+                    or (fields.automaticFailure == "true") ~= expected_failure
+                then
+                    return nil, failure(
+                        "ContextRelation",
+                        "compaction terminal does not close its exact durable request",
+                        "compaction-terminal-binding",
+                        path
+                    )
+                end
+                lifecycle.terminal = true
+                if fields.status == "ok" then
+                    automatic_failure_count = 0
+                    automatic_failure_history_complete = true
+                elseif fields.automaticFailure == "true" then
+                    automatic_failure_count = automatic_failure_count + 1
+                end
+            elseif fields.status == "ok" then
+                -- A successful legacy compaction is still an unambiguous reset.
+                automatic_failure_count = 0
+                automatic_failure_history_complete = true
+            else
+                -- Legacy terminal facts did not persist mode/circuit semantics.
+                automatic_failure_history_complete = false
             end
         elseif item.type == "model_view_published" then
             local first = tonumber(fields.firstEventSeq)
@@ -1065,12 +1377,58 @@ local function validate_relations(events)
             known_unknown[#known_unknown + 1] = item.fields.operationId
         end
     end
+    local pending_compactions = {}
+    for _, lifecycle in pairs(compaction_lifecycles) do
+        if not lifecycle.terminal then
+            local request = lifecycle.latest
+            pending_compactions[#pending_compactions + 1] = {
+                compaction_id = request.compaction_id,
+                mode = request.mode,
+                request_id = request.request_id,
+                request_sequence = request.request_sequence,
+                attempt = request.attempt,
+                source_first_seq = request.source_first_seq,
+                source_last_seq = request.source_last_seq,
+                source_digest = request.source_digest,
+                source_event_count = request.source_event_count,
+                config_snapshot = request.config_snapshot,
+                model_snapshot = request.model_snapshot,
+                prompt_snapshot = request.prompt_snapshot,
+                manifest_snapshot = request.manifest_snapshot,
+                manifest_digest = request.manifest_digest,
+                view_context_generation = request.view_context_generation,
+                response_status = request.response_status,
+                cancel_requested = request.cancel_requested,
+                cancel_reason = request.cancel_reason or false,
+            }
+        end
+    end
+    table.sort(pending_compactions, function(left, right)
+        return left.request_sequence < right.request_sequence
+    end)
+    local legacy_pending_compaction_request_ids = {}
+    for _, request in ipairs(legacy_compaction_requests) do
+        local inferred = request.request_id:match("^(.-):request:[1-9][0-9]*$")
+        if (not inferred or not compactions[inferred])
+            and request.cancel_result ~= "cancelled"
+            and request.cancel_result ~= "unknown"
+        then
+            legacy_pending_compaction_request_ids[
+                #legacy_pending_compaction_request_ids + 1
+            ] = request.request_id
+        end
+    end
     return {
         unresolved_operations = unresolved_operations,
         unresolved_tool_calls = unresolved_tool_calls,
         unknown_operations = known_unknown,
         published_views = published_views,
         compactions = compactions,
+        pending_compactions = pending_compactions,
+        legacy_pending_compaction_request_ids = legacy_pending_compaction_request_ids,
+        automatic_failure_count = automatic_failure_count,
+        automatic_failure_history_complete = automatic_failure_history_complete,
+        compaction_initial_serial = compaction_initial_serial,
     }
 end
 
@@ -1382,10 +1740,20 @@ local function normalize_document(candidate, admitted)
         unresolved_operation_ids = copy_array(relations.unresolved_operations),
         unresolved_tool_call_ids = copy_array(relations.unresolved_tool_calls),
         unknown_operation_ids = copy_array(relations.unknown_operations),
+        pending_compactions = copy_array(relations.pending_compactions),
+        legacy_pending_compaction_request_ids = copy_array(
+            relations.legacy_pending_compaction_request_ids
+        ),
+        automatic_compaction_failure_count = relations.automatic_failure_count,
+        automatic_compaction_failure_history_complete =
+            relations.automatic_failure_history_complete,
+        compaction_initial_serial = relations.compaction_initial_serial,
         auto_continue = view_current
             and #relations.unresolved_operations == 0
             and #relations.unresolved_tool_calls == 0
-            and #relations.unknown_operations == 0,
+            and #relations.unknown_operations == 0
+            and #relations.pending_compactions == 0
+            and #relations.legacy_pending_compaction_request_ids == 0,
     }
     local canonical = {
         generation = candidate.generation,

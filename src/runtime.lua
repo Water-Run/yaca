@@ -2363,6 +2363,7 @@ function M.new_agent_loop(ports, options)
         local next_phase
         if record.kind == "compaction-request" then
             if (phase ~= "opened" and phase ~= "retry")
+                or record.mode ~= compaction_gate.mode
                 or not valid_runtime_id(
                     record.request_id,
                     limits.maximum_identifier_bytes
@@ -2439,6 +2440,17 @@ function M.new_agent_loop(ports, options)
                     and fields.purpose == "compaction"
                     and fields.viewManifestRef == record.expected_manifest_digest
                     and fields.attemptId == tostring(record.attempt)
+                    and fields.compactionId == record.compaction_id
+                    and fields.compactionMode == record.mode
+                    and fields.sourceFirstSeq == tostring(record.source_first_seq)
+                    and fields.sourceLastSeq == tostring(record.source_last_seq)
+                    and fields.sourceDigest == record.source_digest
+                    and fields.configSnapshot == record.config_snapshot
+                    and fields.modelSnapshot == record.model_snapshot_digest
+                    and fields.promptSnapshot == record.prompt_bundle_digest
+                    and fields.manifestSnapshot == record.manifest_snapshot_id
+                    and fields.viewContextGeneration
+                        == tostring(record.expected_context_generation)
             end
             if record.kind == "compaction-response" then
                 return count == 1 and index == 1
@@ -2464,6 +2476,11 @@ function M.new_agent_loop(ports, options)
                     and fields.compactionId == record.compaction_id
                     and fields.status == "error"
                     and fields.sourceDigest == record.source_digest
+                    and fields.requestId == record.request_id
+                    and fields.attemptId == tostring(record.attempt)
+                    and fields.compactionMode == compaction_gate.mode
+                    and fields.automaticFailure
+                        == (compaction_gate.mode == "automatic" and "true" or "false")
             end
             if record.kind == "compaction-cancel-request" then
                 return count == 1 and index == 1 and event.type == "cancel"
@@ -2485,6 +2502,16 @@ function M.new_agent_loop(ports, options)
                     and fields.sourceDigest == record.source_digest
                     and fields.status == (record.outcome == "cancelled"
                         and "cancelled" or "error")
+                    and fields.requestId == record.request_id
+                    and fields.attemptId == tostring(compaction_gate.attempt)
+                    and fields.compactionMode == compaction_gate.mode
+                    and fields.automaticFailure == (
+                        compaction_gate.mode == "automatic"
+                            and (record.reason == "compaction-active-time"
+                                or record.reason
+                                    == "compaction-process-recovery")
+                        and "true" or "false"
+                    )
             end
             if record.kind == "compaction-publication" then
                 if index == 1 then
@@ -2493,6 +2520,10 @@ function M.new_agent_loop(ports, options)
                         and fields.status == "ok"
                         and fields.summaryDigest == record.summary_digest
                         and fields.manifestDigest == record.manifest.digest
+                        and fields.requestId == record.request_id
+                        and fields.attemptId == tostring(compaction_gate.attempt)
+                        and fields.compactionMode == compaction_gate.mode
+                        and fields.automaticFailure == "false"
                 end
                 return index == 2 and event.type == "model_view_published"
                     and fields.compactionId == record.compaction_id

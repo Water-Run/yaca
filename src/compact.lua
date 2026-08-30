@@ -436,10 +436,12 @@ local MANIFEST_FIELDS = {
 local function validate_options(options)
     if not exact_fields(options, {
         manifest = true, maximum_identifier_bytes = true, initial_serial = true,
+        initial_automatic_failure_count = true,
     })
         or not exact_fields(options.manifest, MANIFEST_FIELDS)
         or not integer_at_least(options.maximum_identifier_bytes, 16)
         or not integer_at_least(options.initial_serial, 0)
+        or not integer_at_least(options.initial_automatic_failure_count, 0)
     then
         return nil, failure("InvalidCompactionOptions", "compaction options are ambiguous")
     end
@@ -467,7 +469,9 @@ local function validate_options(options)
         return nil, failure("InvalidCompactionOptions", "compaction manifest identity is invalid")
     end
     local copied = { maximum_identifier_bytes = options.maximum_identifier_bytes,
-        initial_serial = options.initial_serial, manifest = {} }
+        initial_serial = options.initial_serial,
+        initial_automatic_failure_count = options.initial_automatic_failure_count,
+        manifest = {} }
     for name in pairs(MANIFEST_FIELDS) do copied.manifest[name] = manifest[name] end
     return copied
 end
@@ -987,7 +991,9 @@ function M.new(ports, options)
     local serial = limits.initial_serial
     local request_serial = 0
     local correction_serial = 0
-    local consecutive_automatic_failures = 0
+    local consecutive_automatic_failures = limits.initial_automatic_failure_count
+    local recovered_circuit = consecutive_automatic_failures
+        >= limits.manifest.failure_threshold
     local circuit_opened_at
     local last_clock
     local service = {}
@@ -1084,6 +1090,7 @@ function M.new(ports, options)
             source_digest = active.plan.source_digest,
             config_snapshot = active.plan.config_snapshot,
             model_snapshot_digest = active.plan.model_snapshot.digest,
+            prompt_bundle_digest = active.plan.prompt_bundle_digest,
             manifest_snapshot_id = limits.manifest.snapshot_id,
         }
         local receipt, commit_error = commit("commit_intent", intent, false)
@@ -1260,6 +1267,12 @@ function M.new(ports, options)
         end
         local now, clock_error = clock_now()
         if not now then return nil, clock_error end
+        if plan.mode == "automatic" and recovered_circuit then
+            -- Monotonic timestamps do not survive a process boundary. Reopen
+            -- for one full cooldown from the first trustworthy local reading.
+            circuit_opened_at = now
+            recovered_circuit = false
+        end
         if plan.mode == "automatic" and circuit_opened_at ~= nil then
             local elapsed = now - circuit_opened_at
             if elapsed < limits.manifest.failure_cooldown_ms then
@@ -1436,6 +1449,7 @@ function M.new(ports, options)
         state = "Idle"
         consecutive_automatic_failures = 0
         circuit_opened_at = nil
+        recovered_circuit = false
         last_result = {
             outcome = "completed",
             compaction_id = completed.id,
@@ -1692,7 +1706,8 @@ function M.new(ports, options)
     end
 
     function service:status()
-        local circuit_state = circuit_opened_at ~= nil and "open" or "closed"
+        local circuit_state = (circuit_opened_at ~= nil or recovered_circuit)
+            and "open" or "closed"
         return assert(freeze({
             state = state,
             closed = closed,
@@ -1707,6 +1722,7 @@ function M.new(ports, options)
             automatic_failure_count = consecutive_automatic_failures,
             automatic_circuit_state = circuit_state,
             automatic_circuit_opened_at = circuit_opened_at or false,
+            automatic_circuit_recovered = recovered_circuit,
             automatic_failure_threshold = limits.manifest.failure_threshold,
             automatic_failure_cooldown_ms = limits.manifest.failure_cooldown_ms,
             canonical_facts_mutable = false,
