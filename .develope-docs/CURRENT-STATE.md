@@ -39,6 +39,14 @@ yaca 当前已有可执行 Lua 入口和平台无关的通用 Agent 核心；代
 - 图像/音频、remote/headless、transcription 与 TTS 仍被 D-044 明确排除。
 - Web：**v0.1 核心** 仍零表面（D-044）；2026-08-10 的 D-058 仅为未来 **本机本地 Web** 登记设计预留，产品线为 `yaca-web`（服务端 **Java 8**）与 `yaca-ie6`（服务端 **PHP 5.4**，浏览器有意兼容 IE6）。设计正文在 `.develope-docs/web-tracks/`；仓库根 `web/` 只作说明/空预留；JRE/PHP 与 Web 实现都不得进入 v0.1 loader、help、配置或核心 zip，也不得写成已实现能力。
 
+### 下次接盘检查点（2026-08-30 暂停）
+
+- 最后一个已经实现、完整回归并推送的核心节点是 `95a0e9c11360cc97f9818c7239ac06210b3c32c7`（`feat: switch models with bound disclosure`）。该节点的受资源门禁串行 suite 为 `442/442`，coding readiness、TP-003/006/008/010 与 RP-001 均通过；`target_qualification=false`，Release Gate R 仍关闭。
+- 暂停前只进行了旧环境 HTTPS/代理/CA 的只读审查。曾开始但未闭合的 `config.lua` 局部草稿已经完整撤回；没有未测试的运行时代码、没有遗留 `lua test/run.lua` 进程，也没有把 cross-build 写成真实目标资格。
+- 下一实现节点先关闭两个已经定位的边界：其一，`.model` 目前只公开 `off|explicit-public-url|explicit-secret-slot`，尚未显示去 userinfo、隐藏 query value 的 normalized proxy route；同一次预览到 apply 之间，目标 Model Key、secret adapter option 或代理 credential 若只改变值而不改变公开 shape，也需要进程内不泄值的精确 TOCTOU binding。其二，`.tools/qualification/build_linux_x86_64.sh` 仍硬编码旧的 `329/329` suite 数量，并在 onefile 声明至少需要 5 GiB 时使用 `-j2` 与 4096 MiB 默认门槛；应改成串行构建、强制不低于实际峰值的 guard floor，并从唯一 `SUMMARY total=N passed=N failed=0` 动态记录证据。
+- 上述修改必须先补 config/production Model selection/资格脚本静态契约测试，再按“人工查看 `free -h`、`/proc/pressure/memory`、遗留 test runner → guarded targeted → guarded full suite → guarded coding readiness”的顺序串行验证。不得复用本轮内存数字；本轮曾观察到 Swap 基本耗尽，因此尤其不能跳过新鲜 preflight，也不能并行跑 proof。
+- 真实 XP SP3 x86、Win7 SP1 x64、CentOS 7 x64 仍是 C32 唯一有效证据来源。保留未来提交名不提前使用：`test: qualify all release targets`、`test: prove release journeys and zero surface`、`docs: publish qualified release evidence`。
+
 ### 本轮已冻结的产品主链
 
 - 裸 `yaca [directory]` 不扫描历史，直接进入新的未保存 chat；旧 Context 只通过 `.context`、continue 或 context-repl 显式打开。
