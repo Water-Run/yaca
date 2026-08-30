@@ -37,6 +37,7 @@ local config = load_module("config", cache)
 local main = load_module("main", cache)
 local sha256 = load_table("test/support/sha256_reference.lua")
 local fake_filesystem = load_table("test/support/fake_filesystem.lua")
+local fake_lxp = load_table("test/support/fake_lxp.lua")
 
 local CONFIG_PATH = "/release/__yaca__/config.ini"
 
@@ -555,6 +556,58 @@ return {
                 A.equal(main.run_cli({ [0] = "/release/yaca" }, ports), 1)
                 A.contains(table.concat(stderr), "InvalidWorkspace")
                 A.equal(calls.process_starts, 0)
+            end,
+        },
+        {
+            name = "production context catalog renders an empty bounded snapshot",
+            run = function()
+                cache.lxp = fake_lxp(function()
+                    return false, "empty catalog must not parse Context XML", 1, 1, 1
+                end)
+                local native, _, calls, native_path = production_native()
+                local function not_found()
+                    return false, { code = "NotFound", message = "catalog path is absent" }
+                end
+                native.fs_inspect_direct = not_found
+                native.fs_walk_direct = not_found
+                native.fs_open_read_verified = not_found
+                native.fs_create_new_verified = not_found
+                native.fs_replace_verified = not_found
+                native.fs_rename_no_replace_verified = not_found
+                native.fs_delete_direct_verified = not_found
+                local stdout, stderr = {}, {}
+                local ports = {
+                    native = native,
+                    native_path = native_path,
+                    stdout = function(bytes) stdout[#stdout + 1] = bytes return true end,
+                    stderr = function(bytes) stderr[#stderr + 1] = bytes return true end,
+                }
+                A.equal(main.run_cli({
+                    [0] = "/release/yaca", "--context-repl", "recent",
+                }, ports), 0)
+                local rendered = table.concat(stdout)
+                A.contains(rendered, "CONTEXT CATALOG view=recent total=0 shown=0")
+                A.contains(rendered, "No Contexts found.")
+                A.contains(rendered, "catalog complete=true")
+                A.deep_equal(stderr, {})
+                A.equal(calls.process_starts, 0)
+
+                stdout, stderr = {}, {}
+                A.equal(main.run_cli({
+                    [0] = "/release/yaca", "--config-repl",
+                }, ports), 0)
+                stdout, stderr = {}, {}
+                A.equal(main.run_cli({
+                    [0] = "/release/yaca",
+                    "--self-test",
+                    "--through-stage", "1",
+                    "--check", "ST1-CONTEXT-LOCK",
+                }, ports), 1)
+                rendered = table.concat(stdout)
+                A.contains(rendered, "ST1-CONTEXT-CATALOG PASSED")
+                A.contains(rendered, "ST1-CONTEXT-LOCK PASSED")
+                A.falsy(rendered:find("not yet attached", 1, true))
+                A.deep_equal(stderr, {})
             end,
         },
         {

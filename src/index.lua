@@ -720,4 +720,726 @@ function M.new(ports, options)
     return readonly(service, "Context index service")
 end
 
+local FILESYSTEM_SCANNER_METHODS = {
+    "direct_inspect",
+    "direct_reverify",
+    "direct_walk",
+}
+
+local CATALOG_STORE_METHODS = {
+    "inspect_writer",
+    "inspect_catalog_header",
+}
+
+local CATALOG_PATH_METHODS = {
+    "validate_logical",
+    "parent",
+    "context_file",
+}
+
+local function valid_absolute_path(value)
+    if not valid_text(value, false) then return false end
+    local normalized = value:gsub("\\", "/")
+    return normalized:sub(1, 1) == "/"
+        or normalized:match("^[A-Za-z]:/") ~= nil
+        or normalized:match("^//[^/]+/[^/]+") ~= nil
+end
+
+local function valid_platform_root(value, platform_kind)
+    if not valid_absolute_path(value) then return false end
+    local normalized = value:gsub("\\", "/")
+    if platform_kind == "windows" then
+        return normalized:match("^[A-Za-z]:/") ~= nil
+            or normalized:match("^//[^/]+/[^/]+") ~= nil
+    end
+    return platform_kind == "posix" and normalized:sub(1, 1) == "/"
+        and normalized:match("^[A-Za-z]:/") == nil
+end
+
+local function validate_filesystem_scanner_options(options)
+    if type(options) ~= "table" then
+        return nil, failure(
+            "InvalidCatalogOptions",
+            "Context catalog filesystem options are required"
+        )
+    end
+    local allowed = {
+        context_root = true,
+        platform_kind = true,
+        maximum_walk_depth = true,
+        maximum_walk_entries = true,
+    }
+    for key in pairs(options) do
+        if type(key) ~= "string" or not allowed[key] then
+            return nil, failure(
+                "InvalidCatalogOptions",
+                "Context catalog options contain an unknown field"
+            )
+        end
+    end
+    if not valid_platform_root(options.context_root, options.platform_kind)
+        or (options.platform_kind ~= "posix" and options.platform_kind ~= "windows")
+        or not valid_integer(options.maximum_walk_depth, 1)
+        or not valid_integer(options.maximum_walk_entries, 1)
+    then
+        return nil, failure(
+            "InvalidCatalogOptions",
+            "Context catalog filesystem options are incomplete"
+        )
+    end
+    return {
+        context_root = options.context_root,
+        platform_kind = options.platform_kind,
+        maximum_walk_depth = options.maximum_walk_depth,
+        maximum_walk_entries = options.maximum_walk_entries,
+    }
+end
+
+local function validate_filesystem_scanner_ports(ports)
+    if type(ports) ~= "table" then
+        return nil, failure(
+            "InvalidCatalogPorts",
+            "Context catalog filesystem ports are required"
+        )
+    end
+    local allowed = { filesystem = true, store = true, path = true }
+    for key in pairs(ports) do
+        if type(key) ~= "string" or not allowed[key] then
+            return nil, failure(
+                "InvalidCatalogPorts",
+                "Context catalog filesystem ports contain an unknown field"
+            )
+        end
+    end
+    local filesystem, port_error = snapshot_methods(
+        ports.filesystem,
+        FILESYSTEM_SCANNER_METHODS,
+        "InvalidCatalogFilesystem",
+        "Context catalog filesystem"
+    )
+    if not filesystem then return nil, port_error end
+    local store
+    store, port_error = snapshot_methods(
+        ports.store,
+        CATALOG_STORE_METHODS,
+        "InvalidCatalogStore",
+        "Context catalog store"
+    )
+    if not store then return nil, port_error end
+    local path
+    path, port_error = snapshot_methods(
+        ports.path,
+        CATALOG_PATH_METHODS,
+        "InvalidCatalogPath",
+        "Context catalog LogicalPath service"
+    )
+    if not path then return nil, port_error end
+    return { filesystem = filesystem, store = store, path = path }
+end
+
+local function join_catalog_path(root, relative, platform_kind)
+    if relative == "" then return root end
+    local separator = platform_kind == "windows" and "\\" or "/"
+    local suffix = platform_kind == "windows" and relative:gsub("/", "\\") or relative
+    if root:sub(-1) == "/" or root:sub(-1) == "\\" then return root .. suffix end
+    return root .. separator .. suffix
+end
+
+local function physical_key(value, platform_kind)
+    local normalized = value:gsub("\\", "/")
+    if platform_kind == "windows" then return normalized:lower() end
+    return normalized
+end
+
+local CATALOG_UNAVAILABLE_ERRORS = {
+    AccessDenied = true,
+    Busy = true,
+    ContextFilesystemContract = true,
+    ContextUnavailable = true,
+    DirectFilesystemUnavailable = true,
+    InvalidTargetType = true,
+    LockConflict = true,
+    NativeContract = true,
+    NativeFailure = true,
+    NotFound = true,
+    PermissionDenied = true,
+    Storage = true,
+    Unsupported = true,
+}
+
+local CATALOG_CHANGED_ERRORS = {
+    ContextChanged = true,
+    ContextTemporaryMismatch = true,
+    IdentityChanged = true,
+    TargetChanged = true,
+}
+
+local function catalog_error_state(error_value)
+    local code = type(error_value) == "table" and error_value.code or nil
+    if code and CATALOG_CHANGED_ERRORS[code] then return "changed" end
+    if code and CATALOG_UNAVAILABLE_ERRORS[code] then return "unavailable" end
+    return "corrupt"
+end
+
+local function call_value(port, method, ...)
+    local called, value, value_error = pcall(port[method], ...)
+    if not called then
+        return nil, failure(
+            "CatalogDependencyFailure",
+            "Context catalog dependency raised an exception",
+            method
+        )
+    end
+    return value, value_error
+end
+
+local function call_status(port, method, ...)
+    local ok, value = invoke(port, method, ...)
+    if not ok then return nil, value end
+    return value
+end
+
+local function increment(values, name, amount)
+    values[name] = values[name] + (amount or 1)
+end
+
+---Creates the no-follow, bounded production scanner and target verifier.
+-- Search rings are materialized only one at a time. Each complete ring is
+-- enumerated twice around Header inspection so directory changes fail closed.
+-- @return table|nil scanner Ephemeral ring scanner.
+-- @return table|nil verifier Exact selected-target observer.
+-- @return table|nil err Structured construction failure.
+function M.new_filesystem_scanner(ports, options)
+    local admitted_ports, ports_error = validate_filesystem_scanner_ports(ports)
+    if not admitted_ports then return nil, nil, ports_error end
+    local admitted, options_error = validate_filesystem_scanner_options(options)
+    if not admitted then return nil, nil, options_error end
+    local filesystem = admitted_ports.filesystem
+    local store = admitted_ports.store
+    local path = admitted_ports.path
+    local handles = setmetatable({}, { __mode = "k" })
+    local scanner = {}
+    local verifier = {}
+
+    local function physical_for_logical(root, logical)
+        if admitted.platform_kind == "windows" and logical:find("\\", 1, true) then
+            return nil
+        end
+        local relative = logical == "/" and "" or logical:sub(2)
+        return join_catalog_path(root, relative, admitted.platform_kind)
+    end
+
+    local function unavailable_candidate(snapshot, logical, details, rank)
+        local candidate = {
+            physical_path = snapshot.requested_path,
+            logical_path = logical,
+            display_path = "CONTEXT" .. logical,
+            display_name = details.display_name,
+            observed_stat = snapshot.identity ~= false and snapshot.identity or nil,
+            header_state = "unavailable",
+        }
+        if rank ~= nil then candidate.scope_rank = rank end
+        return candidate
+    end
+
+    local function inspect_candidate(snapshot, logical, details, rank, statistics)
+        local candidate = unavailable_candidate(snapshot, logical, details, rank)
+        if snapshot.exists ~= true
+            or type(snapshot.identity) ~= "table"
+            or snapshot.identity.kind ~= "file"
+            or snapshot.ancestry_complete ~= true
+            or type(snapshot.metadata) ~= "table"
+            or snapshot.metadata.link_target ~= false
+        then
+            increment(statistics, "unavailable")
+            return candidate
+        end
+        local writer, writer_error = call_value(store, "inspect_writer", snapshot.requested_path)
+        if not writer
+            or type(writer.busy) ~= "boolean"
+            or (writer.busy == false and writer.metadata_state ~= "absent")
+            or (writer.busy == true
+                and writer.metadata_state ~= "valid"
+                and writer.metadata_state ~= "invalid"
+                and writer.metadata_state ~= "unavailable")
+        then
+            increment(statistics, "unavailable")
+            increment(statistics, "lock_unavailable")
+            return candidate, writer_error
+        end
+        if writer.busy == true then
+            increment(statistics, "busy")
+            increment(statistics, "unavailable")
+            if writer.metadata_state == "invalid" then
+                increment(statistics, "lock_invalid")
+            elseif writer.metadata_state == "unavailable" then
+                increment(statistics, "lock_unavailable")
+            end
+            return candidate
+        end
+        local credential = {
+            physical_path = snapshot.requested_path,
+            logical_path = logical,
+            observed_stat = snapshot.identity,
+        }
+        local header, report_or_error = call_value(
+            store,
+            "inspect_catalog_header",
+            snapshot.requested_path,
+            credential
+        )
+        if not header then
+            local state = catalog_error_state(report_or_error)
+            candidate.header_state = state
+            increment(statistics, state)
+            return candidate, report_or_error
+        end
+        if type(report_or_error) ~= "table"
+            or report_or_error.body_opened ~= false
+            or not valid_integer(report_or_error.bytes_read, 0)
+            or type(header.name) ~= "string"
+            or type(header.created_at) ~= "string"
+            or type(header.updated_at) ~= "string"
+        then
+            candidate.header_state = "unavailable"
+            increment(statistics, "unavailable")
+            return candidate, failure(
+                "CatalogDependencyContract",
+                "Context catalog Header inspection returned an invalid result"
+            )
+        end
+        increment(statistics, "header_bytes", report_or_error.bytes_read)
+        local current, reverify_error = call_status(
+            filesystem,
+            "direct_reverify",
+            snapshot
+        )
+        if not current then
+            local state = catalog_error_state(reverify_error)
+            candidate.header_state = state
+            increment(statistics, state)
+            return candidate, reverify_error
+        end
+        candidate.observed_stat = current.identity
+        candidate.canonical_name = header.name
+        candidate.created_at = header.created_at
+        candidate.updated_at = header.updated_at
+        candidate.header_state = "valid"
+        increment(statistics, "valid")
+        return candidate
+    end
+
+    local function mark_partial(state, reason)
+        state.statistics.complete = false
+        state.statistics.partial_reason = reason
+    end
+
+    local function incomplete_ring(state, scope, rank, reason)
+        mark_partial(state, reason)
+        return {
+            scope = scope,
+            rank = rank,
+            complete = false,
+            reason = reason,
+            candidates = {},
+        }
+    end
+
+    local function safe_directory(snapshot)
+        return snapshot.exists == true
+            and type(snapshot.identity) == "table"
+            and snapshot.identity.kind == "directory"
+            and snapshot.ancestry_complete == true
+            and type(snapshot.metadata) == "table"
+            and snapshot.metadata.link_target == false
+    end
+
+    local function observation_reason(error_value, fallback)
+        return type(error_value) == "table" and error_value.code or fallback
+    end
+
+    local function confirm_observations(observations)
+        local logical_paths = {}
+        for logical in pairs(observations) do logical_paths[#logical_paths + 1] = logical end
+        table.sort(logical_paths)
+        for _, logical in ipairs(logical_paths) do
+            local observation = observations[logical]
+            local confirmed, confirm_error = call_status(
+                filesystem,
+                "direct_walk",
+                observation.snapshot,
+                0,
+                observation.maximum_entries
+            )
+            if not confirmed then
+                return nil, observation_reason(confirm_error, "EnumerationChanged")
+            end
+            if confirmed.complete ~= true
+                or confirmed.generation ~= observation.generation
+            then
+                return nil, "EnumerationChanged"
+            end
+        end
+        return true
+    end
+
+    local function complete_empty_ring(state, scope, rank)
+        state.statistics.rings = state.statistics.rings + 1
+        return { scope = scope, rank = rank, complete = true, candidates = {} }
+    end
+
+    local function scan_ring(state, scope, rank)
+        local prior_stable, prior_error = confirm_observations(state.observations)
+        if not prior_stable then
+            return incomplete_ring(state, scope, rank, prior_error)
+        end
+        local physical_scope = physical_for_logical(admitted.context_root, scope)
+        if not physical_scope then
+            return incomplete_ring(state, scope, rank, "invalid-origin")
+        end
+        local snapshot, inspect_error = call_status(
+            filesystem,
+            "direct_inspect",
+            physical_scope
+        )
+        if not snapshot then
+            local code = type(inspect_error) == "table" and inspect_error.code or nil
+            if code == "NotFound" then
+                return complete_empty_ring(state, scope, rank)
+            end
+            return incomplete_ring(state, scope, rank, code or "scope-unavailable")
+        end
+        if snapshot.exists == false then
+            local current, reverify_error = call_status(
+                filesystem,
+                "direct_reverify",
+                snapshot
+            )
+            if not current then
+                local reason = type(reverify_error) == "table" and reverify_error.code
+                    or "EnumerationChanged"
+                return incomplete_ring(state, scope, rank, reason)
+            end
+            return complete_empty_ring(state, scope, rank)
+        end
+        if not safe_directory(snapshot) then
+            return incomplete_ring(state, scope, rank, "scope-unavailable")
+        end
+        local recursive = rank ~= 0 or scope == "/"
+        local candidates = {}
+        local new_paths = {}
+        local current_observations = {}
+        local pending = { { logical = scope, snapshot = snapshot, depth = 0 } }
+        local ring_entries = 0
+        local ring_statistics = {
+            valid = 0,
+            corrupt = 0,
+            unavailable = 0,
+            changed = 0,
+            busy = 0,
+            lock_invalid = 0,
+            lock_unavailable = 0,
+            header_bytes = 0,
+        }
+        while #pending > 0 do
+            if ring_entries >= admitted.maximum_walk_entries then
+                return incomplete_ring(state, scope, rank, "entry-limit")
+            end
+            local directory = pending[#pending]
+            pending[#pending] = nil
+            local remaining = admitted.maximum_walk_entries - ring_entries
+            local walked, walk_error = call_status(
+                filesystem,
+                "direct_walk",
+                directory.snapshot,
+                0,
+                remaining
+            )
+            if not walked then
+                return incomplete_ring(
+                    state,
+                    scope,
+                    rank,
+                    observation_reason(walk_error, "enumeration-failed")
+                )
+            end
+            state.statistics.entries = state.statistics.entries + #walked.entries
+            ring_entries = ring_entries + #walked.entries
+            if walked.complete ~= true then
+                return incomplete_ring(
+                    state,
+                    scope,
+                    rank,
+                    type(walked.partial_reason) == "string"
+                        and walked.partial_reason or "enumeration-incomplete"
+                )
+            end
+            current_observations[directory.logical] = {
+                snapshot = directory.snapshot,
+                generation = walked.generation,
+                maximum_entries = remaining,
+            }
+            local child_directories = {}
+            for _, entry in ipairs(walked.entries) do
+                local logical = directory.logical == "/"
+                    and "/" .. entry.relative_path
+                    or directory.logical .. "/" .. entry.relative_path
+                local entry_kind = type(entry.snapshot.identity) == "table"
+                    and entry.snapshot.identity.kind or false
+                if entry_kind == "directory" then
+                    if recursive and not state.completed_subtrees[logical] then
+                        if not path.validate_logical(logical)
+                            or not safe_directory(entry.snapshot)
+                        then
+                            return incomplete_ring(
+                                state,
+                                scope,
+                                rank,
+                                "scope-unavailable"
+                            )
+                        end
+                        if directory.depth >= admitted.maximum_walk_depth then
+                            return incomplete_ring(state, scope, rank, "depth-limit")
+                        end
+                        child_directories[#child_directories + 1] = {
+                            logical = logical,
+                            snapshot = entry.snapshot,
+                            depth = directory.depth + 1,
+                        }
+                    end
+                elseif logical:sub(-4) == ".xml" and not state.seen[logical] then
+                    local details = path.context_file(logical)
+                    if not details then
+                        return incomplete_ring(state, scope, rank, "candidate-path")
+                    end
+                    if state.statistics.candidates + #candidates
+                        >= state.maximum_scan_candidates
+                    then
+                        return incomplete_ring(state, scope, rank, "scan-limit")
+                    end
+                    local candidate = inspect_candidate(
+                        entry.snapshot,
+                        logical,
+                        details,
+                        rank,
+                        ring_statistics
+                    )
+                    candidates[#candidates + 1] = candidate
+                    new_paths[#new_paths + 1] = logical
+                end
+            end
+            for index = #child_directories, 1, -1 do
+                pending[#pending + 1] = child_directories[index]
+            end
+        end
+        local combined_observations = {}
+        for logical, observation in pairs(state.observations) do
+            combined_observations[logical] = observation
+        end
+        for logical, observation in pairs(current_observations) do
+            combined_observations[logical] = observation
+        end
+        local confirmed, confirm_error = confirm_observations(combined_observations)
+        if not confirmed then
+            return incomplete_ring(state, scope, rank, confirm_error)
+        end
+        state.observations = combined_observations
+        if recursive then state.completed_subtrees[scope] = true end
+        for _, logical in ipairs(new_paths) do state.seen[logical] = true end
+        state.statistics.candidates = state.statistics.candidates + #candidates
+        for name, value in pairs(ring_statistics) do
+            state.statistics[name] = state.statistics[name] + value
+        end
+        state.statistics.rings = state.statistics.rings + 1
+        return {
+            scope = scope,
+            rank = rank,
+            complete = true,
+            candidates = candidates,
+        }
+    end
+
+    function scanner.begin(origin, limits)
+        local logical = path.validate_logical(origin)
+        if not logical
+            or type(limits) ~= "table"
+            or not valid_integer(limits.maximum_scan_candidates, 1)
+            or not valid_integer(limits.maximum_search_rings, 1)
+        then
+            return false, failure("InvalidCatalogScan", "Context catalog scan is invalid")
+        end
+        for key in pairs(limits) do
+            if key ~= "maximum_scan_candidates" and key ~= "maximum_search_rings" then
+                return false, failure(
+                    "InvalidCatalogScan",
+                    "Context catalog scan limits contain an unknown field"
+                )
+            end
+        end
+        local scopes = {}
+        local current = logical
+        for _ = 1, limits.maximum_search_rings do
+            scopes[#scopes + 1] = current
+            if current == "/" then break end
+            local parent_scope = path.parent(current)
+            if not parent_scope or parent_scope == current then
+                return false, failure(
+                    "InvalidCatalogScan",
+                    "Context catalog scope ancestry is invalid"
+                )
+            end
+            current = parent_scope
+        end
+        local handle = readonly({}, "Context catalog scan handle")
+        handles[handle] = {
+            scopes = scopes,
+            next_scope = 1,
+            maximum_scan_candidates = limits.maximum_scan_candidates,
+            seen = {},
+            observations = {},
+            completed_subtrees = {},
+            closed = false,
+            statistics = {
+                complete = true,
+                partial_reason = false,
+                rings = 0,
+                entries = 0,
+                candidates = 0,
+                valid = 0,
+                corrupt = 0,
+                unavailable = 0,
+                changed = 0,
+                busy = 0,
+                lock_invalid = 0,
+                lock_unavailable = 0,
+                header_bytes = 0,
+            },
+        }
+        return true, handle
+    end
+
+    function scanner.next_ring(handle)
+        local state = handles[handle]
+        if not state then
+            return false, failure("InvalidCatalogScan", "Context catalog handle is foreign")
+        end
+        if state.closed then
+            return false, failure("CatalogScanClosed", "Context catalog scan is closed")
+        end
+        local scope = state.scopes[state.next_scope]
+        if not scope then return true, nil end
+        local rank = state.next_scope - 1
+        state.next_scope = state.next_scope + 1
+        return true, scan_ring(state, scope, rank)
+    end
+
+    function scanner.close(handle)
+        local state = handles[handle]
+        if not state then
+            return false, failure("InvalidCatalogScan", "Context catalog handle is foreign")
+        end
+        if state.closed then
+            return false, failure("CatalogScanClosed", "Context catalog scan is closed")
+        end
+        state.closed = true
+        return true
+    end
+
+    function scanner.status(handle)
+        local state = handles[handle]
+        if not state then
+            return nil, failure("InvalidCatalogScan", "Context catalog handle is foreign")
+        end
+        local values = {}
+        for key, value in pairs(state.statistics) do values[key] = value end
+        values.closed = state.closed
+        return result(values)
+    end
+
+    function verifier.observe(request)
+        if type(request) ~= "table"
+            or type(request.physical_path) ~= "string"
+            or not path.validate_logical(request.logical_path)
+        then
+            return false, failure("InvalidTargetSnapshot", "Context target request is invalid")
+        end
+        for key in pairs(request) do
+            if key ~= "physical_path" and key ~= "logical_path" then
+                return false, failure(
+                    "InvalidTargetSnapshot",
+                    "Context target request contains an unknown field"
+                )
+            end
+        end
+        local root_snapshot, root_error = call_status(
+            filesystem,
+            "direct_inspect",
+            admitted.context_root
+        )
+        if not root_snapshot then return false, root_error end
+        if root_snapshot.exists ~= true
+            or type(root_snapshot.identity) ~= "table"
+            or root_snapshot.identity.kind ~= "directory"
+            or root_snapshot.ancestry_complete ~= true
+            or type(root_snapshot.metadata) ~= "table"
+            or root_snapshot.metadata.link_target ~= false
+        then
+            return false, failure("TargetChanged", "Context catalog root changed")
+        end
+        local expected = physical_for_logical(
+            root_snapshot.canonical_path,
+            request.logical_path
+        )
+        if not expected
+            or physical_key(expected, admitted.platform_kind)
+                ~= physical_key(request.physical_path, admitted.platform_kind)
+        then
+            return false, failure("TargetChanged", "Context target left its catalog mapping")
+        end
+        local snapshot, inspect_error = call_status(
+            filesystem,
+            "direct_inspect",
+            request.physical_path
+        )
+        if not snapshot then return false, inspect_error end
+        if snapshot.exists ~= true then
+            return false, failure("NotFound", "Context target is unavailable")
+        end
+        local details, details_error = path.context_file(request.logical_path)
+        if not details then return false, details_error end
+        local statistics = {
+            valid = 0,
+            corrupt = 0,
+            unavailable = 0,
+            changed = 0,
+            busy = 0,
+            lock_invalid = 0,
+            lock_unavailable = 0,
+            header_bytes = 0,
+        }
+        return true, inspect_candidate(
+            snapshot,
+            request.logical_path,
+            details,
+            nil,
+            statistics
+        )
+    end
+
+    scanner.capabilities = readonly({
+        no_follow = true,
+        bounded_header_only = true,
+        stable_double_enumeration = true,
+        persistent_index = false,
+        target_qualified = false,
+    }, "Context catalog scanner capabilities")
+    verifier.capabilities = readonly({
+        exact_selected_path = true,
+        catalog_boundary_rechecked = true,
+        target_qualified = false,
+    }, "Context catalog verifier capabilities")
+    return readonly(scanner, "Context catalog filesystem scanner"),
+        readonly(verifier, "Context catalog target verifier")
+end
+
 return M

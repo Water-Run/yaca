@@ -705,6 +705,12 @@ local function validate_request(request)
     then
         return nil, failure("UsageError", "chat directory must be a string")
     end
+    if request.id == "context-repl"
+        and request.view ~= "recent"
+        and request.view ~= "full"
+    then
+        return nil, failure("UsageError", "context-repl view must be recent or full")
+    end
     return request
 end
 
@@ -1155,6 +1161,21 @@ local BACKEND_OPTIONS = {
     },
     terminal = { maximum_input_bytes = 65536 },
 }
+
+local CONTEXT_INDEX_OPTIONS = {
+    maximum_scan_candidates = 10000,
+    maximum_search_rings = 256,
+    maximum_collision_candidates = 64,
+    maximum_reason_bytes = 128,
+}
+
+local CONTEXT_SCANNER_OPTIONS = {
+    maximum_walk_depth = 256,
+    maximum_walk_entries = 10000,
+}
+
+local CONTEXT_BROWSER_PAGE_LIMIT = 100
+local CONTEXT_RECENT_DEFAULT_LIMIT = 20
 
 local SELF_TEST_OPTIONS = {
     maximum_models = 8,
@@ -1986,13 +2007,14 @@ local function workspace_port(native)
     }, "workspace service")
 end
 
-local function build_context_services(native, filesystem)
+local function build_context_services(native, filesystem, data_root, platform_kind)
     local safety = require("safety")
     local xml = require("xml")
     local context = require("context")
     local path = require("path")
     local prompt = require("prompt")
     local tools = require("tools")
+    local index = require("index")
     local safety_service, safety_error = safety.new(native, {
         maximum_hash_chunk_bytes = 65536,
         minimum_scannable_secret_bytes = 8,
@@ -2057,6 +2079,24 @@ local function build_context_services(native, filesystem)
     if not prompt_service then return nil, prompt_error end
     local registry, registry_error = tools.registry_snapshot(safety_service)
     if not registry then return nil, registry_error end
+    local context_root = join_path(data_root, "CONTEXT", platform_kind)
+    local scanner, verifier, scanner_error = index.new_filesystem_scanner({
+        filesystem = filesystem,
+        store = store,
+        path = path_service,
+    }, {
+        context_root = context_root,
+        platform_kind = platform_kind == "windows" and "windows" or "posix",
+        maximum_walk_depth = CONTEXT_SCANNER_OPTIONS.maximum_walk_depth,
+        maximum_walk_entries = CONTEXT_SCANNER_OPTIONS.maximum_walk_entries,
+    })
+    if not scanner then return nil, scanner_error end
+    local catalog, catalog_error = index.new({
+        path = path_service,
+        scanner = scanner,
+        verifier = verifier,
+    }, CONTEXT_INDEX_OPTIONS)
+    if not catalog then return nil, catalog_error end
     return readonly({
         safety = safety_service,
         xml = codec,
@@ -2065,6 +2105,10 @@ local function build_context_services(native, filesystem)
         path = path_service,
         prompt = prompt_service,
         tool_registry = registry,
+        context_root = context_root,
+        catalog_scanner = scanner,
+        catalog_verifier = verifier,
+        catalog = catalog,
     }, "Context runtime services")
 end
 
@@ -2120,6 +2164,170 @@ local function check_result(outcome, summary, evidence)
     }
 end
 
+local function catalog_call(port, method, ...)
+    local called, ok, value = pcall(port[method], ...)
+    if not called then
+        return false, failure(
+            "ContextCatalogFailure",
+            "Context catalog method raised an exception",
+            method
+        )
+    end
+    if ok ~= true then
+        return false, type(value) == "table" and value or failure(
+            "ContextCatalogFailure",
+            "Context catalog method returned an invalid result",
+            method
+        )
+    end
+    return true, value
+end
+
+local function observe_context_catalog(context_services)
+    if type(context_services) ~= "table"
+        or type(context_services.catalog_scanner) ~= "table"
+        or type(context_services.catalog) ~= "table"
+    then
+        return nil, failure(
+            "ContextCatalogUnavailable",
+            "Context catalog services are unavailable"
+        )
+    end
+    local scanner = context_services.catalog_scanner
+    local began, handle_or_error = catalog_call(scanner, "begin", "/", {
+        maximum_scan_candidates = CONTEXT_INDEX_OPTIONS.maximum_scan_candidates,
+        maximum_search_rings = CONTEXT_INDEX_OPTIONS.maximum_search_rings,
+    })
+    if not began then return nil, handle_or_error end
+    local handle = handle_or_error
+    local rows = {}
+    local complete = true
+    local partial_reason = false
+    while true do
+        local next_ok, ring_or_error = catalog_call(scanner, "next_ring", handle)
+        if not next_ok then
+            complete = false
+            partial_reason = ring_or_error.code or "scanner-next"
+            break
+        end
+        local ring = ring_or_error
+        if ring == nil then break end
+        if ring.complete ~= true then
+            complete = false
+            partial_reason = ring.reason or "scan-incomplete"
+            break
+        end
+        for _, candidate in ipairs(ring.candidates) do
+            local hash, hash_error = context_services.catalog.current_hash(
+                candidate.logical_path
+            )
+            if not hash then
+                complete = false
+                partial_reason = type(hash_error) == "table" and hash_error.code
+                    or "context-hash"
+                break
+            end
+            rows[#rows + 1] = {
+                logical_path = candidate.logical_path,
+                display_path = candidate.display_path,
+                display_name = candidate.display_name,
+                canonical_name = candidate.canonical_name or false,
+                created_at = candidate.created_at or false,
+                updated_at = candidate.updated_at or false,
+                header_state = candidate.header_state,
+                hash16 = hash,
+            }
+        end
+        if not complete then break end
+    end
+    local close_ok, close_error = catalog_call(scanner, "close", handle)
+    if not close_ok then
+        complete = false
+        partial_reason = close_error.code or "scanner-close"
+    end
+    local called, statistics, status_error = pcall(scanner.status, handle)
+    if not called or not statistics then
+        return nil, type(status_error) == "table" and status_error or failure(
+            "ContextCatalogFailure",
+            "Context catalog statistics are unavailable"
+        )
+    end
+    if statistics.complete ~= true then
+        complete = false
+        if partial_reason == false then
+            partial_reason = statistics.partial_reason or "scan-incomplete"
+        end
+    end
+    return {
+        complete = complete,
+        partial_reason = partial_reason,
+        rows = rows,
+        statistics = statistics,
+        hash_count = #rows,
+    }
+end
+
+local CATALOG_STATE_ORDER = {
+    valid = 1,
+    corrupt = 2,
+    unavailable = 3,
+    changed = 4,
+}
+
+local function catalog_row_order(path_service, sort_by, direction)
+    return function(left, right)
+        local left_state = CATALOG_STATE_ORDER[left.header_state] or 9
+        local right_state = CATALOG_STATE_ORDER[right.header_state] or 9
+        if left_state ~= right_state then return left_state < right_state end
+        if left.header_state == "valid" then
+            local left_key = sort_by == "created" and left.created_at
+                or sort_by == "name" and left.canonical_name or left.updated_at
+            local right_key = sort_by == "created" and right.created_at
+                or sort_by == "name" and right.canonical_name or right.updated_at
+            if left_key ~= right_key then
+                if direction == "ascending" then return left_key < right_key end
+                return left_key > right_key
+            end
+        end
+        local order = path_service.compare_logical(
+            left.logical_path,
+            right.logical_path
+        )
+        return order < 0
+    end
+end
+
+local function context_catalog_page(context_services, observation, generation, view)
+    local sort_by = "updated"
+    local direction = "descending"
+    local recent_limit = CONTEXT_RECENT_DEFAULT_LIMIT
+    if type(generation) == "table" and type(generation.context) == "table" then
+        sort_by = generation.context.list_sort_by or sort_by
+        direction = generation.context.list_sort_direction or direction
+        recent_limit = generation.context.recent_list_limit or recent_limit
+    end
+    recent_limit = math.min(recent_limit, CONTEXT_BROWSER_PAGE_LIMIT)
+    local ordered = {}
+    for index, row in ipairs(observation.rows) do ordered[index] = row end
+    table.sort(ordered, catalog_row_order(
+        context_services.path,
+        sort_by,
+        direction
+    ))
+    local page_limit = view == "recent" and recent_limit or CONTEXT_BROWSER_PAGE_LIMIT
+    local rows = {}
+    for index = 1, math.min(#ordered, page_limit) do rows[index] = ordered[index] end
+    return {
+        rows = rows,
+        total = #ordered,
+        shown = #rows,
+        truncated = #rows < #ordered,
+        sort_by = sort_by,
+        sort_direction = direction,
+        page_limit = page_limit,
+    }
+end
+
 local function build_offline_self_test(runtime)
     local filesystem = runtime.backend.filesystem
     local layout = runtime.layout
@@ -2127,10 +2335,70 @@ local function build_offline_self_test(runtime)
     local context_error = runtime.context_error
     local native = runtime.native
     local facts = runtime.stdio_facts
+    local workspace = workspace_port(native)
+    local catalog_snapshot_id
+    local catalog_observation
+    local catalog_observation_error
 
     local function stat_file(path)
         local stated, value = filesystem.stat_identity(path)
         return stated and value.kind == "file", value
+    end
+
+    local function scan_catalog(specification)
+        catalog_snapshot_id = specification.snapshot_id
+        catalog_observation, catalog_observation_error = observe_context_catalog(
+            context_services
+        )
+        if not catalog_observation then return nil, catalog_observation_error end
+        local roots = {}
+        local invalid_roots = 0
+        for _, row in ipairs(catalog_observation.rows) do
+            local parent = context_services.path.parent(row.logical_path)
+            if not parent then
+                invalid_roots = invalid_roots + 1
+            elseif not roots[parent] then
+                roots[parent] = true
+                local platform_path = context_services.path.from_logical(
+                    parent,
+                    runtime.identity.os == "windows" and "windows" or "posix"
+                )
+                local called, observed = false, nil
+                if platform_path then
+                    called, observed = pcall(workspace.inspect, platform_path)
+                end
+                local observed_logical
+                if called and observed then
+                    observed_logical = context_services.path.to_logical(observed.path)
+                end
+                local platform_kind = runtime.identity.os == "windows"
+                    and "windows" or "posix"
+                local expected_key = observed_logical
+                    and context_services.path.comparison_key(parent, platform_kind)
+                local observed_key = observed_logical
+                    and context_services.path.comparison_key(
+                        observed_logical,
+                        platform_kind
+                    )
+                if not called or not observed or not expected_key
+                    or expected_key ~= observed_key
+                then
+                    invalid_roots = invalid_roots + 1
+                end
+            end
+        end
+        local root_count = 0
+        for _ in pairs(roots) do root_count = root_count + 1 end
+        catalog_observation.workspace_roots = root_count
+        catalog_observation.invalid_roots = invalid_roots
+        return catalog_observation
+    end
+
+    local function current_catalog(specification)
+        if catalog_snapshot_id ~= specification.snapshot_id then
+            return scan_catalog(specification)
+        end
+        return catalog_observation, catalog_observation_error
     end
 
     return function(specification)
@@ -2234,18 +2502,70 @@ local function build_offline_self_test(runtime)
             return check_result("failed", "Context schema service is unavailable")
         end
         if id == "ST1-CONTEXT-CATALOG" then
-            return check_result(
-                "unknown",
-                "Context catalog scanner is not yet attached to the runtime",
-                { "catalog=unavailable" }
-            )
+            local observed, observe_error = scan_catalog(specification)
+            if not observed then
+                return check_result("failed", "Context catalog scan could not start", {
+                    "reason=" .. safe_diagnostic(observe_error and observe_error.code, 96),
+                })
+            end
+            local statistics = observed.statistics
+            local evidence = {
+                "catalog-count=" .. tostring(#observed.rows),
+                string.format(
+                    "states=valid:%d,corrupt:%d,unavailable:%d,changed:%d",
+                    statistics.valid,
+                    statistics.corrupt,
+                    statistics.unavailable,
+                    statistics.changed
+                ),
+                "busy=" .. tostring(statistics.busy),
+                "workspace-roots=" .. tostring(observed.workspace_roots),
+                "invalid-roots=" .. tostring(observed.invalid_roots),
+                "hashes=" .. tostring(observed.hash_count),
+                "scan-cap=" .. tostring(CONTEXT_INDEX_OPTIONS.maximum_scan_candidates),
+                "header-bytes=" .. tostring(statistics.header_bytes),
+            }
+            if not observed.complete then
+                return check_result("unknown", "Context catalog scan is incomplete", evidence)
+            end
+            if statistics.corrupt > 0 then
+                return check_result("failed", "Context catalog contains corrupt Headers", evidence)
+            end
+            if statistics.changed > 0
+                or statistics.unavailable > statistics.busy
+                or observed.invalid_roots > 0
+            then
+                return check_result(
+                    "unknown",
+                    "Context catalog contains unavailable or stale bindings",
+                    evidence
+                )
+            end
+            return check_result("passed", "Context catalog is complete and bounded", evidence)
         end
         if id == "ST1-CONTEXT-LOCK" then
-            return check_result(
-                "unknown",
-                "Context lock probe requires the composed catalog",
-                { "lock-probe=not-run" }
-            )
+            local observed, observe_error = current_catalog(specification)
+            if not observed then
+                return check_result("failed", "Context lock probe could not scan", {
+                    "reason=" .. safe_diagnostic(observe_error and observe_error.code, 96),
+                })
+            end
+            local statistics = observed.statistics
+            local evidence = {
+                "busy=" .. tostring(statistics.busy),
+                "invalid-locks=" .. tostring(statistics.lock_invalid),
+                "unavailable-locks=" .. tostring(statistics.lock_unavailable),
+            }
+            if not observed.complete then
+                return check_result("unknown", "Context lock scan is incomplete", evidence)
+            end
+            if statistics.lock_invalid > 0 then
+                return check_result("failed", "Context writer metadata is invalid", evidence)
+            end
+            if statistics.lock_unavailable > 0 then
+                return check_result("unknown", "Context writer metadata is unavailable", evidence)
+            end
+            return check_result("passed", "Context writer locks were inspected safely", evidence)
         end
         if id == "ST1-TOOLS" then
             if filesystem.capabilities.verified_direct_candidate == true then
@@ -2433,7 +2753,7 @@ local function publish_repair_template(filesystem, layout)
     return readonly({ created_data_root = created_root }, "template publication result")
 end
 
-local function management_service(filesystem, layout)
+local function management_service(filesystem, layout, context_services)
     local service = { online = false }
     function service.run(context)
         if context.action == "config-repl" then
@@ -2480,11 +2800,48 @@ local function management_service(filesystem, layout)
                 config_path = layout.config_path,
             }
         end
+        if context.action == "context-repl" then
+            local observation, observation_error = observe_context_catalog(
+                context_services
+            )
+            if not observation then
+                return {
+                    outcome = "error",
+                    action = context.action,
+                    state = "scan-failed",
+                    error_code = observation_error.code,
+                    view = context.request.view,
+                }
+            end
+            local page = context_catalog_page(
+                context_services,
+                observation,
+                context.config_generation,
+                context.request.view
+            )
+            return {
+                outcome = observation.complete and "success" or "action-required",
+                action = context.action,
+                state = observation.complete and "catalog-ready" or "scan-incomplete",
+                error_code = observation.complete and false or "ScanIncomplete",
+                partial_reason = observation.partial_reason,
+                view = context.request.view,
+                rows = page.rows,
+                total = page.total,
+                shown = page.shown,
+                truncated = page.truncated,
+                sort_by = page.sort_by,
+                sort_direction = page.sort_direction,
+                page_limit = page.page_limit,
+                statistics = observation.statistics,
+                target_qualified = false,
+            }
+        end
         return {
             outcome = "error",
             action = context.action,
-            state = "catalog-unavailable",
-            error_code = "ContextCatalogUnavailable",
+            state = "unsupported-action",
+            error_code = "ManagementActionUnavailable",
         }
     end
     return service
@@ -2524,7 +2881,9 @@ function M.compose_runtime(runtime)
     if not config_service then return nil, config_error end
     local contexts, contexts_error = build_context_services(
         runtime.native,
-        backend.filesystem
+        backend.filesystem,
+        layout.data_root,
+        runtime.identity.os == "windows" and "windows" or "posix"
     )
     local model_module = require("model")
     local model_adapter, model_error = model_module.new(MODEL_ADAPTER_OPTIONS)
@@ -2602,7 +2961,7 @@ function M.compose_runtime(runtime)
         config = config_service,
         workspace = workspace_port(runtime.native),
         self_test = self_test,
-        management = management_service(backend.filesystem, layout),
+        management = management_service(backend.filesystem, layout, contexts),
     }
     if publication then application_components.publication = publication end
     local application, application_error = M.new(application_components, {
@@ -4317,7 +4676,57 @@ local function render_management(request, result)
             .. safe_diagnostic(result.config_path, 1024)
             .. "; the interactive secret editor is not yet available.\n"
     end
-    return "Context management is unavailable until the runtime catalog is composed.\n"
+    if result.action == "context-repl" then
+        if result.state == "scan-failed" then
+            return "Context catalog scan failed ("
+                .. safe_diagnostic(result.error_code, 128) .. ").\n"
+        end
+        local lines = {
+            string.format(
+                "CONTEXT CATALOG view=%s total=%d shown=%d sort=%s-%s",
+                result.view,
+                result.total,
+                result.shown,
+                result.sort_by,
+                result.sort_direction
+            ),
+        }
+        if result.shown == 0 then
+            lines[#lines + 1] = "No Contexts found."
+        else
+            for index, row in ipairs(result.rows) do
+                lines[#lines + 1] = string.format(
+                    "%3d [%-11s] %s  %s  %s",
+                    index,
+                    row.header_state:upper(),
+                    row.hash16,
+                    safe_diagnostic(row.display_name, 256),
+                    safe_diagnostic(row.logical_path, 1024)
+                )
+            end
+        end
+        if result.truncated then
+            lines[#lines + 1] = string.format(
+                "Page limited to %d rows; refresh or narrow the catalog view.",
+                result.page_limit
+            )
+        end
+        lines[#lines + 1] = string.format(
+            "catalog complete=%s busy=%d corrupt=%d unavailable=%d changed=%d",
+            tostring(result.state == "catalog-ready"),
+            result.statistics.busy,
+            result.statistics.corrupt,
+            result.statistics.unavailable,
+            result.statistics.changed
+        )
+        if result.state == "scan-incomplete" then
+            lines[#lines + 1] = "Scan incomplete: "
+                .. safe_diagnostic(result.partial_reason, 128)
+        end
+        lines[#lines + 1] = "Target qualification remains pending for release platforms."
+        return table.concat(lines, "\n") .. "\n"
+    end
+    return "The requested management action is unavailable.\n"
 end
 
 local function render_runtime_result(cli_service, request, result)

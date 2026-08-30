@@ -2071,6 +2071,257 @@ local function read_candidate(codec, safety_service, source, admitted)
     return candidate, stats
 end
 
+local function read_header_candidate(codec, source, admitted)
+    if type(source) ~= "function" then
+        return nil, failure("InvalidContextInput", "Context header stream is required")
+    end
+    local candidate = { header = {} }
+    local frames = {}
+    local semantic_error
+    local completed = false
+    local reader_finished = false
+    local header_stage = 0
+    local bytes_read = 0
+
+    local function reject(error_value)
+        semantic_error = semantic_error or error_value
+        return false, error_value.message
+    end
+
+    local function parent()
+        return frames[#frames]
+    end
+
+    local function start_element(name, attributes, path)
+        if completed then return true end
+        if semantic_error then return false, semantic_error.message end
+        local parent_frame = parent()
+        local parent_name = parent_frame and parent_frame.name or nil
+        local parsed, parsed_error
+        if not parent_name then
+            if name ~= "YacaContext" or #frames ~= 0 or candidate.schema_version ~= nil then
+                return reject(failure(
+                    "ContextSchema",
+                    "Context document must start with one YacaContext root",
+                    "root",
+                    path
+                ))
+            end
+            parsed, parsed_error = exact_attributes(
+                attributes,
+                { "schemaVersion", "generation" },
+                {},
+                path
+            )
+            if not parsed then return reject(parsed_error) end
+            candidate.schema_version = parsed.schemaVersion
+            candidate.generation, parsed_error = canonical_decimal(
+                parsed.generation,
+                1,
+                path .. "/@generation"
+            )
+            if not candidate.generation then return reject(parsed_error) end
+        elseif parent_name == "YacaContext" then
+            if name ~= "Header" then
+                return reject(failure(
+                    "ContextSchema",
+                    "Context Header must be the first root child",
+                    "child-order",
+                    path
+                ))
+            end
+            parsed, parsed_error = exact_attributes(attributes, {}, {}, path)
+            if not parsed then return reject(parsed_error) end
+        elseif parent_name == "Header" then
+            local rank = HEADER_RANK[name]
+            if not rank or rank <= header_stage
+                or (header_stage < 3 and rank ~= header_stage + 1)
+            then
+                return reject(failure(
+                    "ContextSchema",
+                    "Header children are missing, duplicated, or out of order",
+                    "child-order",
+                    path
+                ))
+            end
+            parsed, parsed_error = exact_attributes(attributes, {}, {}, path)
+            if not parsed then return reject(parsed_error) end
+            header_stage = rank
+        else
+            return reject(failure(
+                "ContextSchema",
+                "Context Header leaf elements cannot contain children",
+                "nested-element",
+                path
+            ))
+        end
+        frames[#frames + 1] = {
+            name = name,
+            text = {},
+            text_seen = false,
+        }
+        return true
+    end
+
+    local function character_data(value, path)
+        if completed then return true end
+        if semantic_error then return false, semantic_error.message end
+        local frame = parent()
+        if not frame then
+            return reject(failure(
+                "ContextSchema",
+                "Context Header text is outside the root",
+                "text",
+                path
+            ))
+        end
+        if frame.name == "YacaContext" or frame.name == "Header" then
+            if value:find("[^ \t\r\n]") then
+                return reject(failure(
+                    "ContextSchema",
+                    "Context Header containers accept only formatting whitespace",
+                    "mixed-content",
+                    path
+                ))
+            end
+            return true
+        end
+        frame.text[#frame.text + 1] = value
+        frame.text_seen = true
+        return true
+    end
+
+    local function end_element(name, path)
+        if completed then return true end
+        if semantic_error then return false, semantic_error.message end
+        local frame = frames[#frames]
+        if not frame or frame.name ~= name then
+            return reject(failure(
+                "ContextSchema",
+                "Context Header element stack is inconsistent",
+                "element-stack",
+                path
+            ))
+        end
+        local parent_frame = frames[#frames - 1]
+        local parent_name = parent_frame and parent_frame.name or nil
+        local value = table.concat(frame.text)
+        local parsed_error
+        if name == "Header" then
+            if header_stage < 3 then
+                return reject(failure(
+                    "ContextSchema",
+                    "Header omits required fields",
+                    "required-element",
+                    path
+                ))
+            end
+            frames[#frames] = nil
+            completed = true
+            return true
+        end
+        if name == "YacaContext" then
+            return reject(failure(
+                "ContextSchema",
+                "Context ended before its Header was complete",
+                "required-section",
+                path
+            ))
+        end
+        if parent_name == "Header" then
+            if name == "Name" then
+                candidate.header.name = value
+            elseif name == "CreatedAt" then
+                candidate.header.created_at = value
+            elseif name == "UpdatedAt" then
+                candidate.header.updated_at = value
+            elseif name == "AutoRenameDisabled" then
+                if value ~= "true" and value ~= "false" then
+                    return reject(failure(
+                        "ContextSchema",
+                        "AutoRenameDisabled is invalid",
+                        "boolean",
+                        path
+                    ))
+                end
+                candidate.header.auto_rename_disabled = value == "true"
+            elseif name == "NamingWaterline" or name == "AutoNameBaseline" then
+                local number
+                number, parsed_error = canonical_decimal(value, 0, path)
+                if not number then return reject(parsed_error) end
+                candidate.header[name == "NamingWaterline"
+                    and "naming_waterline" or "auto_name_baseline"] = number
+            end
+        end
+        frames[#frames] = nil
+        return true
+    end
+
+    local reader, reader_error = codec.new_reader({
+        start_element = start_element,
+        text = character_data,
+        end_element = end_element,
+    })
+    if not reader then return nil, reader_error end
+    while not completed do
+        local called, ok, chunk_or_error = pcall(source)
+        if not called then
+            reader.close()
+            return nil, failure("ContextStream", "Context header source raised an error")
+        end
+        if ok ~= true
+            or type(chunk_or_error) ~= "table"
+            or type(chunk_or_error.bytes) ~= "string"
+            or type(chunk_or_error.eof) ~= "boolean"
+        then
+            reader.close()
+            return nil, ok == false and chunk_or_error or failure(
+                "ContextStream",
+                "Context header source returned a malformed chunk"
+            )
+        end
+        if #chunk_or_error.bytes == 0 and not chunk_or_error.eof then
+            reader.close()
+            return nil, failure("ContextStream", "Context header stream made no progress")
+        end
+        bytes_read = bytes_read + #chunk_or_error.bytes
+        local accepted, feed_error = reader.feed(chunk_or_error.bytes)
+        if not accepted then return nil, semantic_error or feed_error end
+        if chunk_or_error.eof and not completed then
+            local finished, finish_error = reader.finish()
+            if not finished then return nil, semantic_error or finish_error end
+            reader_finished = true
+            if not completed then
+                return nil, semantic_error or failure(
+                    "ContextSchema",
+                    "Context ended before its Header was complete",
+                    "incomplete-header"
+                )
+            end
+        end
+    end
+    if not reader_finished then reader.close() end
+    if candidate.schema_version ~= SCHEMA_VERSION then
+        return nil, failure(
+            "UnsupportedContextSchema",
+            "Context schema version is unsupported",
+            "schema-version",
+            "/YacaContext/@schemaVersion",
+            candidate.schema_version
+        )
+    end
+    local header, header_error = normalize_header(candidate.header, admitted)
+    if not header then return nil, header_error end
+    return readonly({
+        schema_version = candidate.schema_version,
+        generation = candidate.generation,
+        header = readonly(header, "Context catalog Header"),
+    }, "Context catalog header"), readonly({
+        bytes = bytes_read,
+        header_complete = true,
+    }, "Context catalog header statistics")
+end
+
 local function markdown_code(value)
     local visible, visible_error = text.display_lossy(value, {
         ascii_only = false,
@@ -2676,6 +2927,13 @@ function M.new(options)
         local document, document_error = normalize_document(candidate, admitted)
         if not document then return nil, document_error end
         return document, stats_or_error
+    end
+
+    ---Reads only the bounded canonical Header prefix of one Context stream.
+    -- The pull source is not called again after `</Header>` is observed. Full
+    -- document validation remains the responsibility of normal Context open.
+    function service.read_header_stream(next_chunk)
+        return read_header_candidate(admitted.codec, next_chunk, admitted)
     end
 
     ---Streams deterministic internal XML for a document with a current ModelView.
@@ -3603,6 +3861,45 @@ local function stable_read(schema, filesystem, path, limits)
     return document, initial_or_error, stats_or_error
 end
 
+local function stable_header_read(schema, filesystem, path, limits)
+    local opened, handle_or_error = filesystem.open_read(path)
+    if not opened then return nil, handle_or_error end
+    local handle = handle_or_error
+    local stated, initial_or_error = filesystem.stat_identity(handle)
+    if not stated then
+        filesystem.close(handle)
+        return nil, initial_or_error
+    end
+    if initial_or_error.kind ~= "file" then
+        filesystem.close(handle)
+        return nil, failure("ContextUnavailable", "Context target is not a regular file")
+    end
+    if initial_or_error.size > limits.maximum_context_bytes then
+        filesystem.close(handle)
+        return nil, failure("ContextLimit", "Context file exceeds its byte limit")
+    end
+    local total = 0
+    local chunk_limit = math.min(filesystem.capabilities.maximum_chunk_bytes, 4096)
+    local header, stats_or_error = schema.read_header_stream(function()
+        local read, chunk_or_error = filesystem.stream_read(handle, chunk_limit)
+        if not read then return false, chunk_or_error end
+        total = total + #chunk_or_error.bytes
+        if total > limits.maximum_context_bytes then
+            return false, failure("ContextLimit", "Context stream exceeds its byte limit")
+        end
+        return true, chunk_or_error
+    end)
+    local restated, final_or_error = filesystem.stat_identity(handle)
+    local closed, close_error = filesystem.close(handle)
+    if not header then return nil, stats_or_error end
+    if not restated then return nil, final_or_error end
+    if not closed then return nil, close_error end
+    if not identity_equal(initial_or_error, final_or_error) then
+        return nil, failure("TargetChanged", "Context changed while its Header was read")
+    end
+    return header, initial_or_error, stats_or_error
+end
+
 local function write_new_document(schema, filesystem, path, document, limits)
     local created, handle_or_error = filesystem.create_new(path, limits.context_permissions)
     if not created then return nil, handle_or_error end
@@ -4329,6 +4626,63 @@ function M.new_store(schema, ports, options)
             unknown_operation_ids = document.recovery.unknown_operation_ids,
         }, "Context import inspection"))
         return document, report
+    end
+
+    ---Reads only canonical catalog metadata when no writer lease is present.
+    -- This never parses Session, Facts, or ModelView and never acquires a lock.
+    function store.inspect_catalog_header(path, expected_credential)
+        local target, target_error = validate_context_target(path)
+        if not target then return nil, target_error end
+        local credential_valid, credential_error = validate_target_credential(
+            expected_credential,
+            path
+        )
+        if not credential_valid then return nil, credential_error end
+        local lock_state, lock_identity_or_error = control_path_state(
+            filesystem,
+            path .. ".yaca-lock"
+        )
+        if not lock_state then return nil, lock_identity_or_error end
+        if lock_state == "present" then
+            return nil, failure(
+                "LockConflict",
+                "active Context writer blocks catalog Header inspection"
+            )
+        end
+        local header, identity_or_error, stats = stable_header_read(
+            schema,
+            filesystem,
+            path,
+            limits
+        )
+        if not header then return nil, identity_or_error end
+        if header.header.name ~= target.name then
+            return nil, failure(
+                "ContextNameMismatch",
+                "Context Header Name does not match its catalog basename"
+            )
+        end
+        if expected_credential ~= nil
+            and not credential_matches(
+                expected_credential,
+                path,
+                identity_or_error,
+                header
+            )
+        then
+            return nil, failure(
+                "TargetChanged",
+                "catalog Context changed during Header inspection"
+            )
+        end
+        return header.header, assert(freeze({
+            outcome = "header-validated-readonly",
+            path = path,
+            generation = header.generation,
+            schema_version = header.schema_version,
+            bytes_read = stats.bytes,
+            body_opened = false,
+        }, "Context catalog inspection"))
     end
 
     ---Acquires a long-lived writer lease before reading an existing Context body.
@@ -5265,6 +5619,7 @@ function M.new_store(schema, ports, options)
         identity_bound_lifecycle = true,
         no_replace_move = true,
         in_place_import = true,
+        bounded_header_inspection = true,
         permanent_delete = true,
         trash_restore_surface = false,
         secure_erase_claim = false,

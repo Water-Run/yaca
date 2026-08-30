@@ -411,6 +411,36 @@ return {
             end,
         },
         {
+            name = "catalog inspection stops after Header and never reads through a writer lock",
+            run = function()
+                local fixture = harness.new(modules, { [TARGET] = harness.minimal("Task") })
+                local writer = assert(fixture.store.open_writer(TARGET, fixture.metadata()))
+                local reads_before = fixture.hooks.counts.fs_read or 0
+                local locked, lock_error = fixture.store.inspect_catalog_header(TARGET)
+                A.falsy(locked)
+                A.equal(lock_error.code, "LockConflict")
+                A.equal(fixture.hooks.counts.fs_read or 0, reads_before)
+                A.truthy(fixture.store.close_writer(writer))
+
+                local header, report = fixture.store.inspect_catalog_header(TARGET)
+                A.truthy(header, report and report.code)
+                A.equal(header.name, "Task")
+                A.equal(header.created_at, "2026-08-29T00:00:00Z")
+                A.equal(header.updated_at, "2026-08-29T00:00:01Z")
+                A.equal(report.outcome, "header-validated-readonly")
+                A.equal(report.body_opened, false)
+                A.truthy(report.bytes_read > 0)
+                A.equal(fixture.store.capabilities.bounded_header_inspection, true)
+
+                local mismatched = harness.new(modules, {
+                    [TARGET] = harness.minimal("Different"),
+                })
+                local value, mismatch_error = mismatched.store.inspect_catalog_header(TARGET)
+                A.falsy(value)
+                A.equal(mismatch_error.code, "ContextNameMismatch")
+            end,
+        },
+        {
             name = "permanent delete reports all four known targets and preserves changed residue",
             run = function()
                 local temporary = TARGET .. ".yaca-tmp-deletecase"

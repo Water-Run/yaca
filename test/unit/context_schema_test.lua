@@ -39,8 +39,8 @@ local fake_lxp = load_table("test/support/fake_lxp.lua")
 local sha256 = load_table("test/support/sha256_reference.lua")
 local contract = load_table(".develope-docs/contracts/context.lua")
 
-local function new_service(overrides)
-    local lxp = fake_lxp(function()
+local function new_service(overrides, lxp_override)
+    local lxp = lxp_override or fake_lxp(function()
         return false, "schema test reader is not configured", 1, 1, 1
     end)
     local codec = assert(xml.new({
@@ -156,6 +156,50 @@ local EXPECTED_EVENTS = {
     "model_view_published", "session_override", "rename", "rebind", "auto_name",
     "config_generation_ref", "warning", "unknown_side_effect", "import_mapping",
 }
+
+local function incremental_header_lxp(observations)
+    local function emit(callbacks, name, value)
+        callbacks.StartElement(nil, name, {})
+        callbacks.CharacterData(nil, value)
+        callbacks.EndElement(nil, name)
+    end
+    local module = {
+        _VERSION = "LuaExpat 1.5.2",
+        _EXPAT_VERSION = "expat_2.8.2",
+        _EXPAT_FEATURES = { sizeof_XML_Char = 1 },
+    }
+    function module.new(callbacks)
+        local parser = { closed = false, emitted = false }
+        function parser.parse(self, chunk)
+            if chunk ~= nil and not self.emitted then
+                self.emitted = true
+                observations.feeds = observations.feeds + 1
+                callbacks.XmlDecl(nil, "1.0", "UTF-8")
+                callbacks.StartElement(nil, "YacaContext", {
+                    schemaVersion = "0.1.0",
+                    generation = "7",
+                })
+                callbacks.CharacterData(nil, "\n  ")
+                callbacks.StartElement(nil, "Header", {})
+                emit(callbacks, "Name", "Task")
+                emit(callbacks, "CreatedAt", "2026-08-29T00:00:00Z")
+                emit(callbacks, "UpdatedAt", "2026-08-29T00:00:01Z")
+                callbacks.EndElement(nil, "Header")
+                return true
+            end
+            if chunk ~= nil then observations.feeds = observations.feeds + 1 end
+            return true
+        end
+        function parser.pos() return 1, 1, 1 end
+        function parser.close(self)
+            self.closed = true
+            observations.closes = observations.closes + 1
+            return true
+        end
+        return parser
+    end
+    return module
+end
 
 return {
     name = "unit/context-schema",
@@ -475,6 +519,28 @@ return {
                 A.falsy(encoded)
                 A.equal(stale_error.code, "StaleModelView")
                 A.contains(assert(service.export(document)), "- Status: `stale`")
+            end,
+        },
+        {
+            name = "catalog Header reader stops pulling before the Context body",
+            run = function()
+                local observations = { feeds = 0, closes = 0 }
+                local service = new_service(nil, incremental_header_lxp(observations))
+                local pulls = 0
+                local header, stats = assert(service.read_header_stream(function()
+                    pulls = pulls + 1
+                    return true, { bytes = "header-prefix", eof = false }
+                end))
+                A.equal(pulls, 1)
+                A.equal(observations.feeds, 1)
+                A.equal(observations.closes, 1)
+                A.equal(header.schema_version, "0.1.0")
+                A.equal(header.generation, 7)
+                A.equal(header.header.name, "Task")
+                A.equal(header.header.created_at, "2026-08-29T00:00:00Z")
+                A.equal(header.header.updated_at, "2026-08-29T00:00:01Z")
+                A.equal(stats.bytes, #"header-prefix")
+                A.equal(stats.header_complete, true)
             end,
         },
         {

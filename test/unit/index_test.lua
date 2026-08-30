@@ -190,6 +190,173 @@ local function resolver(rings, settings)
     return service, scanner_calls, hash_calls, base
 end
 
+local function catalog_snapshot(physical_path, kind, object)
+    return {
+        requested_path = physical_path,
+        canonical_path = physical_path,
+        exists = true,
+        identity = {
+            kind = kind,
+            volume = "catalog-volume",
+            object = object or physical_path,
+            size = kind == "file" and 128 or 0,
+            modified = "1",
+        },
+        parent_identity = {
+            kind = "directory",
+            volume = "catalog-volume",
+            object = "parent:" .. physical_path,
+            size = 0,
+            modified = "1",
+        },
+        metadata = {
+            link_count = 1,
+            behavior_digest = "behavior:" .. physical_path,
+            preservation = "proven",
+            link_target = false,
+        },
+        ancestors = {
+            {
+                path = "/",
+                identity = {
+                    kind = "directory",
+                    volume = "catalog-volume",
+                    object = "root",
+                    size = 0,
+                    modified = "1",
+                },
+            },
+        },
+        ancestry_complete = true,
+    }
+end
+
+local function filesystem_catalog(settings)
+    settings = settings or {}
+    local root = "/release/__yaca__/CONTEXT"
+    local paths = {
+        root .. "/C",
+        root .. "/C/sibling",
+        root .. "/C/work",
+        root .. "/C/work/deep",
+        root .. "/D",
+        root .. "/C/work/Task.xml",
+        root .. "/C/work/Busy.xml",
+        root .. "/C/work/Broken.xml",
+        root .. "/C/work/folder.xml",
+        root .. "/C/work/Task.xml.yaca-prev",
+        root .. "/C/work/deep/Deep.xml",
+        root .. "/C/sibling/Task.xml",
+        root .. "/D/Far.xml",
+    }
+    local directories = {
+        [root] = true,
+        [root .. "/C"] = true,
+        [root .. "/C/sibling"] = true,
+        [root .. "/C/work"] = true,
+        [root .. "/C/work/deep"] = true,
+        [root .. "/D"] = true,
+        [root .. "/C/work/folder.xml"] = true,
+    }
+    local controls = {
+        root = root,
+        walks = 0,
+        header_paths = {},
+        generations = {},
+        unstable = settings.unstable,
+    }
+    local filesystem = {}
+    function filesystem.direct_inspect(physical_path)
+        if directories[physical_path] then
+            return true, catalog_snapshot(physical_path, "directory")
+        end
+        for _, candidate_path in ipairs(paths) do
+            if candidate_path == physical_path then
+                return true, catalog_snapshot(physical_path, "file")
+            end
+        end
+        return false, { code = "NotFound" }
+    end
+    function filesystem.direct_reverify(snapshot)
+        return true, snapshot
+    end
+    function filesystem.direct_walk(snapshot, depth, maximum)
+        controls.walks = controls.walks + 1
+        local entries = {}
+        local prefix = snapshot.requested_path .. "/"
+        for _, physical_path in ipairs(paths) do
+            if physical_path:sub(1, #prefix) == prefix then
+                local relative = physical_path:sub(#prefix + 1)
+                local levels = 1
+                for _ in relative:gmatch("/") do levels = levels + 1 end
+                if levels <= depth + 1 then
+                    entries[#entries + 1] = {
+                        relative_path = relative,
+                        snapshot = catalog_snapshot(
+                            physical_path,
+                            directories[physical_path] and "directory" or "file"
+                        ),
+                    }
+                end
+            end
+        end
+        table.sort(entries, function(left, right)
+            return left.relative_path < right.relative_path
+        end)
+        while #entries > maximum do entries[#entries] = nil end
+        local generation = snapshot.requested_path .. ":"
+            .. (controls.generations[snapshot.requested_path] or "stable")
+        if controls.unstable and controls.walks % 2 == 0 then
+            generation = snapshot.requested_path .. ":changed"
+        end
+        return true, {
+            generation = generation,
+            entries = entries,
+            complete = true,
+            partial_reason = false,
+        }
+    end
+    local store = {}
+    function store.inspect_writer(physical_path)
+        if physical_path:sub(-9) == "/Busy.xml" then
+            return {
+                busy = true,
+                pid = 42,
+                metadata_state = "valid",
+            }
+        end
+        return { busy = false, pid = "unknown", metadata_state = "absent" }
+    end
+    function store.inspect_catalog_header(physical_path)
+        controls.header_paths[#controls.header_paths + 1] = physical_path
+        if physical_path:sub(-11) == "/Broken.xml" then
+            return nil, { code = "ContextSchema" }
+        end
+        local name = assert(physical_path:match("/([^/]+)%.xml$"))
+        return {
+            name = name,
+            created_at = "2026-08-29T00:00:00Z",
+            updated_at = "2026-08-29T00:00:01Z",
+        }, {
+            bytes_read = 256,
+            body_opened = false,
+        }
+    end
+    local _, _, path_port = path_service()
+    local scanner_port, verifier_port, scanner_error = index.new_filesystem_scanner({
+        filesystem = filesystem,
+        store = store,
+        path = path_port,
+    }, {
+        context_root = root,
+        platform_kind = "posix",
+        maximum_walk_depth = 16,
+        maximum_walk_entries = 32,
+    })
+    A.truthy(scanner_port, scanner_error and scanner_error.code)
+    return scanner_port, verifier_port, path_port, controls
+end
+
 local function outcome_line(id, outcome)
     if outcome.tag == "Unique" then
         return table.concat({ id, outcome.tag, outcome.logical_path, outcome.hash }, "\t")
@@ -487,6 +654,124 @@ return {
                 A.equal(hashes.hashes, 1)
                 A.falsy(service.current_hash("/C/work/not-context.txt"))
                 A.equal(scan.begins, 0)
+            end,
+        },
+        {
+            name = "filesystem scanner yields stable incremental rings without reading locks",
+            run = function()
+                local scanner_port, verifier_port, path_port, controls = filesystem_catalog()
+                local began, handle = scanner_port.begin("/C/work", {
+                    maximum_scan_candidates = 32,
+                    maximum_search_rings = 8,
+                })
+                A.truthy(began)
+                local ok, near = scanner_port.next_ring(handle)
+                A.truthy(ok)
+                A.equal(near.scope, "/C/work")
+                A.equal(#near.candidates, 3)
+                A.deep_equal({
+                    near.candidates[1].display_name,
+                    near.candidates[2].display_name,
+                    near.candidates[3].display_name,
+                }, { "Broken", "Busy", "Task" })
+                A.equal(near.candidates[1].header_state, "corrupt")
+                A.equal(near.candidates[2].header_state, "unavailable")
+                A.equal(near.candidates[3].header_state, "valid")
+
+                local _, parent_ring = scanner_port.next_ring(handle)
+                A.equal(parent_ring.scope, "/C")
+                A.equal(#parent_ring.candidates, 2)
+                A.deep_equal({
+                    parent_ring.candidates[1].logical_path,
+                    parent_ring.candidates[2].logical_path,
+                }, { "/C/sibling/Task.xml", "/C/work/deep/Deep.xml" })
+
+                local _, root_ring = scanner_port.next_ring(handle)
+                A.equal(root_ring.scope, "/")
+                A.equal(#root_ring.candidates, 1)
+                A.equal(root_ring.candidates[1].logical_path, "/D/Far.xml")
+                local _, finished = scanner_port.next_ring(handle)
+                A.equal(finished, nil)
+                A.truthy(scanner_port.close(handle))
+                local status = assert(scanner_port.status(handle))
+                A.equal(status.candidates, 6)
+                A.equal(status.valid, 4)
+                A.equal(status.corrupt, 1)
+                A.equal(status.unavailable, 1)
+                A.equal(status.busy, 1)
+                A.equal(#controls.header_paths, 5)
+                for _, physical_path in ipairs(controls.header_paths) do
+                    A.falsy(physical_path:sub(-9) == "/Busy.xml")
+                    A.falsy(physical_path:find(".yaca-prev", 1, true))
+                end
+
+                local catalog = assert(index.new({
+                    path = path_port,
+                    scanner = scanner_port,
+                    verifier = verifier_port,
+                }, options()))
+                local selected = catalog.resolve("Task", "/C/work")
+                A.equal(selected.logical_path, "/C/work/Task.xml")
+                local verified = catalog.verify_target(selected, "open")
+                A.equal(verified.tag, "Verified")
+                A.equal(verified.logical_path, "/C/work/Task.xml")
+            end,
+        },
+        {
+            name = "filesystem scanner rejects a directory generation change",
+            run = function()
+                local scanner_port = filesystem_catalog({ unstable = true })
+                local _, handle = scanner_port.begin("/C/work", {
+                    maximum_scan_candidates = 32,
+                    maximum_search_rings = 8,
+                })
+                local _, ring_value = scanner_port.next_ring(handle)
+                A.falsy(ring_value.complete)
+                A.equal(ring_value.reason, "EnumerationChanged")
+                A.equal(#ring_value.candidates, 0)
+                local status = assert(scanner_port.status(handle))
+                A.falsy(status.complete)
+                A.equal(status.partial_reason, "EnumerationChanged")
+                A.truthy(scanner_port.close(handle))
+            end,
+        },
+        {
+            name = "farther ring fails when an already-scanned nearer ring changes",
+            run = function()
+                local scanner_port, _, _, controls = filesystem_catalog()
+                local _, handle = scanner_port.begin("/C/work", {
+                    maximum_scan_candidates = 32,
+                    maximum_search_rings = 8,
+                })
+                local _, near = scanner_port.next_ring(handle)
+                A.truthy(near.complete)
+                controls.generations[controls.root .. "/C/work"] = "changed"
+                local _, parent_ring = scanner_port.next_ring(handle)
+                A.falsy(parent_ring.complete)
+                A.equal(parent_ring.reason, "EnumerationChanged")
+                A.equal(#parent_ring.candidates, 0)
+                A.truthy(scanner_port.close(handle))
+            end,
+        },
+        {
+            name = "catalog-root origin covers every nested Context in one ring",
+            run = function()
+                local scanner_port = filesystem_catalog()
+                local _, handle = scanner_port.begin("/", {
+                    maximum_scan_candidates = 32,
+                    maximum_search_rings = 8,
+                })
+                local _, root_ring = scanner_port.next_ring(handle)
+                A.equal(root_ring.scope, "/")
+                A.truthy(root_ring.complete)
+                A.equal(#root_ring.candidates, 6)
+                A.deep_equal({
+                    root_ring.candidates[1].logical_path,
+                    root_ring.candidates[6].logical_path,
+                }, { "/C/sibling/Task.xml", "/D/Far.xml" })
+                local _, finished = scanner_port.next_ring(handle)
+                A.equal(finished, nil)
+                A.truthy(scanner_port.close(handle))
             end,
         },
         {
