@@ -143,7 +143,7 @@ local function fixture(settings)
         context_prompt = "workspace context",
         auto_rename_disabled = false,
         general = { system_prompt = "global" },
-        network = {},
+        network = { follow_proxy = false },
         exec = {
             max_output_kb = 64,
             timeout_ms = 5000,
@@ -168,11 +168,38 @@ local function fixture(settings)
                 system_prompt = "permission",
             },
         },
-        models = { Primary = {
-            context_length = 16000,
-            max_output_tokens = 1024,
-            system_prompt = "model",
-        } },
+        model_order = { "Primary", "Secondary" },
+        default_model = "Primary",
+        models = {
+            Primary = {
+                enabled = true,
+                description = "primary",
+                protocol = "openai-chat",
+                endpoint = "https://primary.example/v1/chat/completions",
+                remote_model = "primary-remote",
+                key_configured = true,
+                context_length = 16000,
+                max_output_tokens = 1024,
+                system_prompt = "model",
+                streaming = "try",
+                tools_enabled = true,
+                adapter_options = {},
+            },
+            Secondary = {
+                enabled = true,
+                description = "secondary",
+                protocol = "anthropic-messages",
+                endpoint = "https://secondary.example/v1/messages",
+                remote_model = "secondary-remote",
+                key_configured = true,
+                context_length = settings.small_model_window and 2048 or 64000,
+                max_output_tokens = 2048,
+                system_prompt = "secondary model",
+                streaming = "force",
+                tools_enabled = true,
+                adapter_options = {},
+            },
+        },
         scan_registered_secrets = function() return {} end,
         new_stream_scanner = function() return {} end,
     }
@@ -487,6 +514,7 @@ local function fixture(settings)
     }
     local durable_double_check_override = true
     local durable_context_prompt = "workspace context"
+    local durable_current_model = "Primary"
     local publication = {
         operation_journal = function()
             log[#log + 1] = "operation-journal"
@@ -541,7 +569,7 @@ local function fixture(settings)
             return {
                 context_generation = loop_status.context_generation,
                 overrides = {
-                    CurrentModel = "Primary",
+                    CurrentModel = durable_current_model,
                     CurrentPermission = "Std",
                     DoubleCheckOverride = durable_double_check_override,
                     DoubleCheckGoalOverride = "inherit",
@@ -572,7 +600,12 @@ local function fixture(settings)
             )
             A.falsy(specification.mode)
             local prompt_update = specification.name == "ContextPrompt"
-            if prompt_update then
+            local model_update = specification.name == "CurrentModel"
+            if model_update then
+                A.equal(specification.value, "Secondary")
+                A.equal(specification.generation.current_model, "Secondary")
+                durable_current_model = specification.value
+            elseif prompt_update then
                 A.equal(specification.value, "bounded production guidance")
                 A.equal(
                     specification.generation.context_prompt,
@@ -586,15 +619,18 @@ local function fixture(settings)
                 durable_double_check_override = specification.value
             end
             local first_sequence = loop_status.last_durable_sequence + 1
-            local manifest_digest = prompt_update
-                and "view-session-prompt" or "view-session-override"
+            local manifest_digest = model_update and "view-session-model"
+                or prompt_update and "view-session-prompt"
+                or "view-session-override"
             local record = {
                 kind = "session-override",
                 name = specification.name,
-                old_value_digest = prompt_update
-                    and "sha256:prompt-old" or "sha256:cautious-on",
-                new_value_digest = prompt_update
-                    and "sha256:prompt-new" or "sha256:cautious-off",
+                old_value_digest = model_update and "sha256:model-primary"
+                    or prompt_update and "sha256:prompt-old"
+                    or "sha256:cautious-on",
+                new_value_digest = model_update and "sha256:model-secondary"
+                    or prompt_update and "sha256:prompt-new"
+                    or "sha256:cautious-off",
                 effective_at = "next-turn",
                 replaces_manifest_digest = loop_status.active_view_manifest_ref,
                 manifest_digest = manifest_digest,
@@ -683,7 +719,15 @@ local function fixture(settings)
                 queue_limit = reopening and 5 or 4,
             }
         end,
-        resolve_view = function() return {} end,
+        resolve_view = function(digest)
+            A.equal(digest, loop_status.active_view_manifest_ref)
+            return {
+                digest = digest,
+                first_sequence = loop_status.last_durable_sequence > 1 and 1 or 0,
+                last_sequence = math.max(0, loop_status.last_durable_sequence - 1),
+                body = "<DurableFacts><Goal>implement</Goal></DurableFacts>",
+            }
+        end,
         prepare_view = function() return {} end,
         commit = function() return true end,
     }
@@ -698,7 +742,16 @@ local function fixture(settings)
     local contexts = {
         safety = safety,
         path = {},
-        prompt = {},
+        prompt = {
+            assemble = function(_, specification)
+                A.equal(specification.purpose, "main")
+                A.equal(specification.tool_mode, "registered")
+                return {
+                    digest = "prompt-preflight-digest",
+                    estimated_token_upper_bound = 512,
+                }
+            end,
+        },
         tool_registry = { digest = "registry-1", tools = {} },
     }
     local model_activities = {}
@@ -1013,10 +1066,31 @@ local function fixture(settings)
         config = {
             reload_file = function(path, overrides)
                 A.equal(path, "/release/__yaca__/config.ini")
-                A.equal(overrides.CurrentModel, "Primary")
+                A.truthy(overrides.CurrentModel == "Primary"
+                    or overrides.CurrentModel == "Secondary")
                 log[#log + 1] = "config-reload"
                 local reloaded = next_generation
-                if overrides.ContextPrompt ~= "workspace context" then
+                if overrides.CurrentModel == "Secondary" then
+                    reloaded = {}
+                    for key, value in pairs(next_generation) do
+                        reloaded[key] = value
+                    end
+                    reloaded.id = "config-generation-model-secondary"
+                    reloaded.current_model = "Secondary"
+                    if settings.model_definition_changed_on_reload then
+                        local models = {}
+                        for name, model in pairs(next_generation.models) do
+                            models[name] = model
+                        end
+                        local changed = {}
+                        for key, value in pairs(models.Secondary) do
+                            changed[key] = value
+                        end
+                        changed.endpoint = "https://changed.example/v1/messages"
+                        models.Secondary = changed
+                        reloaded.models = models
+                    end
+                elseif overrides.ContextPrompt ~= "workspace context" then
                     reloaded = {}
                     for key, value in pairs(next_generation) do
                         reloaded[key] = value
@@ -1289,6 +1363,116 @@ return {
             end,
         },
         {
+            name = "production Model selection binds disclosure then publishes exact next-turn selector",
+            run = function()
+                local f = fixture()
+                local agent = assert(f.main.start_published_agent(
+                    f.composed,
+                    f.chat,
+                    "implement the project",
+                    "terminal"
+                ))
+                A.truthy(agent.capabilities.model_selection)
+                local catalog = assert(agent.models:list())
+                A.equal(catalog.current, "Primary")
+                A.equal(catalog.total, 2)
+                A.equal(catalog.rows[1].name, "Primary")
+                A.truthy(catalog.rows[1].current)
+                A.equal(catalog.rows[2].name, "Secondary")
+
+                local preview = assert(agent.models:preview("Secondary"))
+                A.truthy(preview.confirmation_required)
+                A.equal(preview.effective_at, "next-turn")
+                A.equal(preview.from.endpoint_origin, "https://primary.example")
+                A.equal(preview.to.endpoint_origin, "https://secondary.example")
+                A.equal(preview.history.first_sequence, 1)
+                A.equal(preview.history.last_sequence, 2)
+                A.equal(preview.history.transition_last_sequence, 4)
+                A.truthy(preview.preflight.required_tokens
+                    <= preview.preflight.window_tokens)
+                local reasons = table.concat(preview.reasons, "|")
+                A.contains(reasons, "endpoint-route")
+                A.contains(reasons, "credential-policy")
+                A.contains(reasons, "protocol")
+                A.contains(reasons, "usage-source")
+                A.contains(reasons, "history-destination")
+
+                local updated = assert(agent.models:apply(preview))
+                A.equal(updated.model, "Secondary")
+                A.equal(updated.effective_at, "next-turn")
+                A.equal(updated.context_generation, 3)
+                A.equal(agent.loop:status().last_durable_sequence, 5)
+                A.equal(
+                    agent.loop:status().active_view_manifest_ref,
+                    "view-session-model"
+                )
+                A.equal(agent.current_generation().id, "config-generation-1")
+                A.equal(
+                    f.current_generation().id,
+                    "config-generation-model-secondary"
+                )
+                local after = assert(agent.settings:status())
+                A.equal(after.model, "Secondary")
+                local repeated, repeat_error = agent.models:apply(preview)
+                A.falsy(repeated)
+                A.equal(repeat_error.code, "ModelSelectionStale")
+
+                local reload_index, publish_index, adopt_index
+                for index, value in ipairs(f.log) do
+                    if value == "config-reload" then reload_index = index end
+                    if value == "publication:session-override" then
+                        publish_index = index
+                    end
+                    if value == "runtime-adopt:session-override" then
+                        adopt_index = index
+                    end
+                end
+                A.truthy(reload_index < publish_index)
+                A.truthy(publish_index < adopt_index)
+            end,
+        },
+        {
+            name = "Model definition reload race is rejected before Context publication",
+            run = function()
+                local f = fixture({ model_definition_changed_on_reload = true })
+                local agent = assert(f.main.start_published_agent(
+                    f.composed,
+                    f.chat,
+                    "implement the project",
+                    "terminal"
+                ))
+                local preview = assert(agent.models:preview("Secondary"))
+                local updated, update_error = agent.models:apply(preview)
+                A.falsy(updated)
+                A.equal(update_error.code, "ModelSelectionStale")
+                A.equal(agent.loop:status().context_generation, 2)
+                A.equal(agent.loop:status().last_durable_sequence, 3)
+                A.equal(agent.loop:status().active_view_manifest_ref, "view-1")
+                local joined = table.concat(f.log, "|")
+                A.contains(joined, "config-reload")
+                A.falsy(joined:find("publication:session-override", 1, true))
+                A.falsy(joined:find("runtime-adopt:session-override", 1, true))
+            end,
+        },
+        {
+            name = "smaller Model that cannot carry Prompt tools and view is rejected before staging",
+            run = function()
+                local f = fixture({ small_model_window = true })
+                local agent = assert(f.main.start_published_agent(
+                    f.composed,
+                    f.chat,
+                    "implement the project",
+                    "terminal"
+                ))
+                local preview, preview_error = agent.models:preview("Secondary")
+                A.falsy(preview)
+                A.equal(preview_error.code, "ModelIncompatible")
+                A.contains(preview_error.next_action, ".compact")
+                A.equal(agent.loop:status().context_generation, 2)
+                A.falsy(table.concat(f.log, "|"):find("config-reload", 1, true))
+            end,
+        },
+        {
             name = "ambiguous Session publication and adoption exceptions halt the Runtime",
             run = function()
                 for _, scenario in ipairs({
@@ -1376,6 +1560,11 @@ return {
                     settings = {
                         status = function() return {} end,
                         update = function() return {} end,
+                    },
+                    models = {
+                        list = function() return {} end,
+                        preview = function() return {} end,
+                        apply = function() return {} end,
                     },
                     tools = {},
                     compaction = {},

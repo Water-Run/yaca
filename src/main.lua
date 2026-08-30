@@ -108,6 +108,21 @@ local function copy_plain(value, visiting)
     return copy, true
 end
 
+local function plain_equal(left, right, visited)
+    if left == right then return true end
+    if type(left) ~= type(right) or type(left) ~= "table" then return false end
+    visited = visited or {}
+    if visited[left] == right then return true end
+    visited[left] = right
+    for key, value in pairs(left) do
+        if not plain_equal(value, right[key], visited) then return false end
+    end
+    for key in pairs(right) do
+        if left[key] == nil then return false end
+    end
+    return true
+end
+
 local function valid_absolute_path(value)
     if type(value) ~= "string" or value == "" or value:find("\0", 1, true) then return false end
     local normalized = value:gsub("\\", "/")
@@ -4044,6 +4059,523 @@ function M.compose_runtime(runtime)
     }, "production runtime composition")
 end
 
+local MODEL_SELECTION_LIST_LIMIT = 64
+local MODEL_SELECTION_TRANSITION_RESERVE = 4096
+
+local function normalized_endpoint_identity(endpoint)
+    if type(endpoint) ~= "string" or endpoint == ""
+        or endpoint:find("[%z\r\n]") or endpoint:find("#", 1, true)
+    then
+        return nil
+    end
+    local scheme, authority, route = endpoint:match(
+        "^([A-Za-z][A-Za-z0-9+%.%-]*)://([^/%?]+)(.*)$"
+    )
+    if not scheme or authority == "" or authority:find("@", 1, true) then
+        return nil
+    end
+    scheme = scheme:lower()
+    if scheme ~= "http" and scheme ~= "https" then return nil end
+    authority = authority:lower()
+    if (scheme == "http" and authority:match(":80$"))
+        or (scheme == "https" and authority:match(":443$"))
+    then
+        authority = authority:gsub(":%d+$", "")
+    end
+    if route == "" then route = "/"
+    elseif route:sub(1, 1) == "?" then route = "/" .. route end
+    return {
+        scheme = scheme,
+        origin = scheme .. "://" .. authority,
+        route = route,
+        identity = scheme .. "://" .. authority .. route,
+    }
+end
+
+local function conservative_public_bytes(value, state)
+    state = state or { seen = {}, nodes = 0, bytes = 0 }
+    local kind = type(value)
+    local amount
+    if kind == "string" then amount = #value + 16
+    elseif kind == "boolean" then amount = 8
+    elseif kind == "number" and value == value
+        and value ~= math.huge and value ~= -math.huge
+    then
+        amount = 32
+    elseif kind ~= "table" then
+        return nil
+    else
+        if state.seen[value] then return nil end
+        state.seen[value] = true
+        state.nodes = state.nodes + 1
+        if state.nodes > 8192 then return nil end
+        state.bytes = state.bytes + 16
+        for key, item in pairs(value) do
+            if type(key) ~= "string" and math.type(key) ~= "integer" then
+                return nil
+            end
+            if conservative_public_bytes(key, state) == nil
+                or conservative_public_bytes(item, state) == nil
+            then
+                return nil
+            end
+        end
+        state.seen[value] = nil
+        return state.bytes <= 262144 and state.bytes or nil
+    end
+    state.bytes = state.bytes + amount
+    return state.bytes <= 262144 and state.bytes or nil
+end
+
+local function model_definition_snapshot(model)
+    local copied, copied_ok = copy_plain(model)
+    if not copied_ok then return nil end
+    return copied
+end
+
+local function model_preflight_environment_snapshot(generation, permission_name)
+    if type(generation) ~= "table"
+        or type(generation.general) ~= "table"
+        or type(generation.network) ~= "table"
+        or type(generation.permissions) ~= "table"
+        or type(generation.permissions[permission_name]) ~= "table"
+    then
+        return nil
+    end
+    local copied, copied_ok = copy_plain({
+        general = generation.general,
+        network = generation.network,
+        permission_name = permission_name,
+        permission = generation.permissions[permission_name],
+    })
+    if not copied_ok then return nil end
+    return copied
+end
+
+local function proxy_policy(generation)
+    local network = type(generation.network) == "table" and generation.network or {}
+    if network.follow_proxy ~= true then return "off" end
+    if network.proxy_url_configured == true then return "explicit-secret-slot" end
+    if type(network.proxy_url) == "string" and network.proxy_url ~= "" then
+        return "explicit-public-url"
+    end
+    return "off"
+end
+
+local function model_public_summary(generation, name, model)
+    local endpoint = normalized_endpoint_identity(model.endpoint)
+    if not endpoint then return nil end
+    local protocol = model.protocol
+    local auth_mode = protocol == "openai-chat" and "bearer"
+        or protocol == "anthropic-messages" and "x-api-key" or nil
+    if not auth_mode then return nil end
+    local output_tokens = model.max_output_tokens or 4096
+    if model.enabled ~= true or model.tools_enabled ~= true
+        or type(model.remote_model) ~= "string" or model.remote_model == ""
+        or not valid_integer(model.context_length, 1)
+        or not valid_integer(output_tokens, 1)
+        or type(model.system_prompt) ~= "string"
+        or (model.streaming ~= "force"
+            and model.streaming ~= "try"
+            and model.streaming ~= "off")
+    then
+        return nil
+    end
+    return {
+        name = name,
+        protocol = protocol,
+        endpoint = model.endpoint,
+        endpoint_origin = endpoint.origin,
+        endpoint_route = endpoint.route,
+        endpoint_identity = endpoint.identity,
+        remote_model = model.remote_model,
+        credential_policy = model.key_configured == true
+            and (auth_mode .. ":Model." .. name .. ".Key")
+            or (auth_mode .. ":none"),
+        proxy_policy = proxy_policy(generation),
+        context_length = model.context_length,
+        max_output_tokens = output_tokens,
+        streaming = model.streaming,
+        tools = "native",
+        controls = "yaca-native-v1",
+        roles = protocol .. "-canonical-v1",
+    }
+end
+
+local function model_disclosure_summary(summary, flags)
+    local endpoint_path = summary.endpoint_route:match("^([^?]*)") or "/"
+    local result = {
+        name = summary.name,
+        protocol = summary.protocol,
+        endpoint_origin = summary.endpoint_origin,
+        endpoint_path = endpoint_path,
+        endpoint_query_configured = summary.endpoint_route:find("?", 1, true)
+            ~= nil,
+        remote_model = summary.remote_model,
+        credential_policy = summary.credential_policy,
+        proxy_policy = summary.proxy_policy,
+        context_length = summary.context_length,
+        max_output_tokens = summary.max_output_tokens,
+        streaming = summary.streaming,
+        tools = summary.tools,
+        controls = summary.controls,
+        roles = summary.roles,
+    }
+    if flags then
+        result.current = flags.current == true
+        result.default = flags.default == true
+    end
+    return readonly(result, "Model disclosure summary")
+end
+
+local function model_catalog(generation, current_model)
+    if type(generation) ~= "table" or type(generation.models) ~= "table"
+        or type(generation.model_order) ~= "table"
+    then
+        return nil, failure(
+            "ModelCatalogUnavailable",
+            "the enabled Model catalog is unavailable"
+        )
+    end
+    local rows = {}
+    local total = 0
+    for _, name in ipairs(generation.model_order) do
+        local model = generation.models[name]
+        if type(model) == "table" and model.enabled == true
+            and model.tools_enabled == true
+        then
+            local summary = model_public_summary(generation, name, model)
+            if summary then
+                total = total + 1
+                if #rows < MODEL_SELECTION_LIST_LIMIT then
+                    rows[#rows + 1] = model_disclosure_summary(summary, {
+                        current = name == current_model,
+                        default = name == generation.default_model,
+                    })
+                end
+            end
+        end
+    end
+    if total == 0 then
+        return nil, failure(
+            "ModelCatalogUnavailable",
+            "no enabled main Model is available"
+        )
+    end
+    return readonly({
+        current = current_model,
+        rows = readonly(rows, "bounded Model catalog rows"),
+        total = total,
+        shown = #rows,
+        truncated = total > #rows,
+    }, "bounded Model catalog")
+end
+
+local function model_switch_preview(specification)
+    local generation = specification.generation
+    local current_name = specification.current_model
+    local target_name = specification.target_model
+    if type(generation) ~= "table" or type(generation.models) ~= "table"
+        or type(generation.permissions) ~= "table"
+        or type(current_name) ~= "string" or current_name == ""
+        or type(target_name) ~= "string" or target_name == ""
+        or type(specification.permission) ~= "string"
+        or type(specification.context_prompt) ~= "string"
+        or type(specification.prompt) ~= "table"
+        or type(specification.prompt.assemble) ~= "function"
+        or type(specification.tool_registry) ~= "table"
+        or (specification.view ~= false and type(specification.view) ~= "table")
+        or (specification.effective_at ~= "first-turn"
+            and specification.effective_at ~= "next-turn")
+        or (specification.transition_sequence ~= nil
+            and not valid_integer(specification.transition_sequence, 1))
+    then
+        return nil, failure(
+            "ModelPreflightUnavailable",
+            "Model selection preflight inputs are incomplete"
+        )
+    end
+    local current = generation.models[current_name]
+    local target = generation.models[target_name]
+    if type(target) ~= "table" then
+        return nil, failure("ModelNotFound", "the exact Model selector was not found")
+    end
+    local current_summary = type(current) == "table"
+        and model_public_summary(generation, current_name, current) or nil
+    local target_summary = model_public_summary(generation, target_name, target)
+    if not target_summary then
+        return nil, failure(
+            "ModelIncompatible",
+            "the selected Model is not enabled for native tools and typed controls"
+        )
+    end
+    if current_name == target_name then
+        return readonly({
+            kind = "model-switch-preview",
+            unchanged = true,
+            confirmation_required = false,
+            effective_at = specification.effective_at,
+            from = model_disclosure_summary(target_summary),
+            to = model_disclosure_summary(target_summary),
+            reasons = readonly({}, "Model confirmation reasons"),
+        }, "unchanged Model selection preview")
+    end
+    if not current_summary then
+        return nil, failure(
+            "ModelPreflightUnavailable",
+            "the current Model definition is unavailable"
+        )
+    end
+    local permission = generation.permissions[specification.permission]
+    if type(generation.general) ~= "table"
+        or type(generation.general.system_prompt) ~= "string"
+        or type(permission) ~= "table"
+        or type(permission.system_prompt) ~= "string"
+    then
+        return nil, failure(
+            "ModelPreflightUnavailable",
+            "the current Prompt authority layers are unavailable"
+        )
+    end
+    local bundle, bundle_error = specification.prompt:assemble({
+        purpose = "main",
+        config_generation = generation.id,
+        layers = {
+            global = {
+                source = "General.SystemPrompt",
+                version = generation.id,
+                text = generation.general.system_prompt,
+            },
+            model = {
+                source = "Model." .. target_name .. ".SystemPrompt",
+                version = generation.id,
+                text = target.system_prompt,
+            },
+            permission = {
+                source = "Permission." .. specification.permission
+                    .. ".SystemPrompt",
+                version = generation.id,
+                text = permission.system_prompt,
+            },
+            context = {
+                source = "ContextPrompt",
+                version = generation.id,
+                text = specification.context_prompt,
+            },
+        },
+        input = { user_message = "" },
+        tool_mode = "registered",
+    })
+    if not bundle then return nil, bundle_error end
+    local control_schema = require("prompt").control_schema("main")
+    local tool_bytes = conservative_public_bytes(specification.tool_registry)
+    local control_bytes = conservative_public_bytes(control_schema)
+    if not tool_bytes or not control_bytes then
+        return nil, failure(
+            "ModelPreflightUnavailable",
+            "tool or control schema size cannot be bounded"
+        )
+    end
+    local view = specification.view
+    local view_bytes = 0
+    local history = {
+        first_sequence = 0,
+        last_sequence = 0,
+        manifest_digest = false,
+        body_bytes = 0,
+        transition_last_sequence = 0,
+    }
+    if view ~= false then
+        if type(view.digest) ~= "string" or view.digest == ""
+            or not valid_integer(view.first_sequence, 0)
+            or not valid_integer(view.last_sequence, view.first_sequence)
+            or type(view.body) ~= "string"
+        then
+            return nil, failure(
+                "ModelPreflightUnavailable",
+                "the active durable ModelView is unavailable"
+            )
+        end
+        view_bytes = #view.body
+        history = {
+            first_sequence = view.first_sequence,
+            last_sequence = view.last_sequence,
+            manifest_digest = view.digest,
+            body_bytes = view_bytes,
+            transition_last_sequence = specification.transition_sequence
+                or (view.last_sequence + 1),
+        }
+    end
+    local transition_reserve = view == false
+        and 0 or MODEL_SELECTION_TRANSITION_RESERVE
+    local required_tokens = view_bytes + bundle.estimated_token_upper_bound
+        + tool_bytes + control_bytes + target_summary.max_output_tokens
+        + transition_reserve
+    if required_tokens > target_summary.context_length then
+        return nil, failure(
+            "ModelIncompatible",
+            "the selected Model window cannot carry the current durable view, Prompt, tools, controls, and output reserve",
+            "run .compact or select a larger-window Model"
+        )
+    end
+
+    local reasons, reason_set = {}, {}
+    local function reason(name)
+        if not reason_set[name] then
+            reason_set[name] = true
+            reasons[#reasons + 1] = name
+        end
+    end
+    if current_summary.endpoint_identity ~= target_summary.endpoint_identity then
+        reason("endpoint-route")
+    end
+    if current_summary.credential_policy ~= target_summary.credential_policy then
+        reason("credential-policy")
+    end
+    if current_summary.protocol ~= target_summary.protocol then reason("protocol") end
+    if current_summary.remote_model ~= target_summary.remote_model then
+        reason("usage-source")
+    end
+    if current.system_prompt ~= target.system_prompt then reason("model-prompt") end
+    if not plain_equal(current.adapter_options or {}, target.adapter_options or {}) then
+        reason("adapter-policy")
+    end
+    if target_summary.context_length < current_summary.context_length then
+        reason("context-window-decrease")
+    end
+    if target_summary.max_output_tokens < current_summary.max_output_tokens then
+        reason("output-limit-decrease")
+    end
+    if target_summary.streaming ~= current_summary.streaming then
+        reason("streaming-policy")
+    end
+    if target_summary.endpoint_origin:sub(1, 7) == "http://"
+        and current_summary.endpoint_identity ~= target_summary.endpoint_identity
+    then
+        reason("plaintext-http")
+    end
+    if view ~= false and view.last_sequence > 0
+        and (reason_set["endpoint-route"]
+            or reason_set["credential-policy"]
+            or reason_set["protocol"]
+            or reason_set["usage-source"])
+    then
+        reason("history-destination")
+    end
+    local frozen_reasons = freeze(reasons, {}, "Model confirmation reasons")
+    local frozen_history = freeze(history, {}, "Model history disclosure")
+    local preflight = freeze({
+        compatible = true,
+        view_tokens = view_bytes,
+        prompt_tokens = bundle.estimated_token_upper_bound,
+        tool_schema_tokens = tool_bytes,
+        control_schema_tokens = control_bytes,
+        transition_reserve_tokens = transition_reserve,
+        maximum_output_tokens = target_summary.max_output_tokens,
+        required_tokens = required_tokens,
+        window_tokens = target_summary.context_length,
+        tools = "native-compatible",
+        controls = "typed-compatible",
+        roles = "canonical-compatible",
+    }, {}, "Model compatibility preflight")
+    if not frozen_reasons or not frozen_history or not preflight then
+        return nil, failure("ModelPreflightUnavailable", "Model preview could not be frozen")
+    end
+    return readonly({
+        kind = "model-switch-preview",
+        unchanged = false,
+        confirmation_required = #reasons > 0,
+        effective_at = specification.effective_at,
+        from = model_disclosure_summary(current_summary),
+        to = model_disclosure_summary(target_summary),
+        reasons = frozen_reasons,
+        history = frozen_history,
+        preflight = preflight,
+    }, "Model selection preview")
+end
+
+local function model_status_projection(status, effective_at)
+    local values = {}
+    for key, value in pairs(status) do values[key] = value end
+    values.effective_at = effective_at
+    return readonly(values, "Model selection status")
+end
+
+local function new_draft_model_selection(draft, contexts)
+    if type(draft) ~= "table" or type(draft.status) ~= "function"
+        or type(draft.update) ~= "function"
+        or type(draft.config_generation) ~= "function"
+        or type(contexts) ~= "table" or type(contexts.prompt) ~= "table"
+        or type(contexts.tool_registry) ~= "table"
+    then
+        return nil, failure(
+            "InvalidModelSelection",
+            "unsaved Model selection ports are incomplete"
+        )
+    end
+    local generation = draft.config_generation()
+    local bindings = setmetatable({}, { __mode = "k" })
+    local owner = {}
+
+    function owner:list()
+        local status = draft.status()
+        return model_catalog(generation, status.model)
+    end
+
+    function owner:preview(selector)
+        local status = draft.status()
+        local preview, preview_error = model_switch_preview({
+            generation = generation,
+            current_model = status.model,
+            target_model = selector,
+            permission = status.permission,
+            context_prompt = status.context_prompt or "",
+            prompt = contexts.prompt,
+            tool_registry = contexts.tool_registry,
+            view = false,
+            effective_at = "first-turn",
+        })
+        if not preview then return nil, preview_error end
+        local definition = generation.models[selector]
+        local definition_snapshot = model_definition_snapshot(definition)
+        if not definition_snapshot then
+            return nil, failure(
+                "ModelPreflightUnavailable",
+                "the selected Model definition cannot be bound"
+            )
+        end
+        bindings[preview] = {
+            from = status.model,
+            target = selector,
+            definition = definition_snapshot,
+            consumed = false,
+        }
+        return preview
+    end
+
+    function owner:apply(preview)
+        local binding = bindings[preview]
+        local status = draft.status()
+        if not binding or binding.consumed or status.model ~= binding.from
+            or not plain_equal(
+                model_definition_snapshot(generation.models[binding.target]),
+                binding.definition
+            )
+        then
+            return nil, failure(
+                "ModelSelectionStale",
+                "the unsaved Model selection preview is stale"
+            )
+        end
+        local updated, update_error = draft.update({ model = binding.target })
+        if not updated then return nil, update_error end
+        binding.consumed = true
+        return model_status_projection(updated, "first-turn")
+    end
+
+    return readonly(owner, "unsaved Model selection owner")
+end
+
 ---Composes the production Agent over either a newly published first turn or a
 -- verified, quiescent existing Context. No Model request or Tool effect is
 -- reachable before the relevant durable writer and Runtime bindings succeed.
@@ -4065,6 +4597,7 @@ function M.start_published_agent(composed, chat, message, source)
         or type(composed.publication.turn_context) ~= "function"
         or type(composed.publication.capture_turn) ~= "function"
         or type(composed.publication.update_session) ~= "function"
+        or type(composed.publication.resolve_view) ~= "function"
         or type(chat) ~= "table"
         or (chat.kind ~= "run-chat" and chat.kind ~= "continue-chat")
         or chat.outcome ~= "ready"
@@ -4376,7 +4909,13 @@ function M.start_published_agent(composed, chat, message, source)
                 "a typed Session setting change is required"
             )
         end
-        local allowed = { name = true, value = true, mode = true }
+        local allowed = {
+            name = true,
+            value = true,
+            mode = true,
+            expected_model = true,
+            expected_model_environment = true,
+        }
         for key in pairs(change) do
             if type(key) ~= "string" or not allowed[key] then
                 return nil, failure(
@@ -4391,19 +4930,40 @@ function M.start_published_agent(composed, chat, message, source)
         for key, value in pairs(turn_context.overrides) do
             next_overrides[key] = value
         end
-        if change.name == "CurrentModel"
-            or change.name == "CurrentPermission"
+        if change.name == "CurrentModel" then
+            if change.mode ~= nil
+                or type(change.value) ~= "string" or change.value == ""
+                or type(change.expected_model) ~= "table"
+                or type(change.expected_model_environment) ~= "table"
+            then
+                return nil, failure(
+                    "InvalidSessionUpdate",
+                    "CurrentModel requires one bound target definition"
+                )
+            end
+            next_overrides.CurrentModel = change.value
+        elseif change.name == "CurrentPermission"
             or change.name == "DoubleCheckOverride"
             or change.name == "ContextPrompt"
         then
-            if change.mode ~= nil then
+            if change.mode ~= nil or change.expected_model ~= nil
+                or change.expected_model_environment ~= nil
+            then
                 return nil, failure(
                     "InvalidSessionUpdate",
-                    "this Session setting does not accept a mode"
+                    "this Session setting does not accept extra binding metadata"
                 )
             end
             next_overrides[change.name] = change.value
         elseif change.name == "DoubleCheckGoalOverride" then
+            if change.expected_model ~= nil
+                or change.expected_model_environment ~= nil
+            then
+                return nil, failure(
+                    "InvalidSessionUpdate",
+                    "DoubleCheck goal does not accept Model binding metadata"
+                )
+            end
             if change.mode == "inherit" then
                 next_overrides.DoubleCheckGoalOverride = "inherit"
             elseif change.mode == "value" then
@@ -4425,6 +4985,24 @@ function M.start_published_agent(composed, chat, message, source)
             next_overrides
         )
         if not next_generation then return nil, generation_error end
+        if change.name == "CurrentModel"
+            and (not plain_equal(
+                    model_definition_snapshot(next_generation.models[change.value]),
+                    change.expected_model
+                )
+                or not plain_equal(
+                    model_preflight_environment_snapshot(
+                        next_generation,
+                        next_generation.current_permission
+                    ),
+                    change.expected_model_environment
+                ))
+        then
+            return nil, failure(
+                "ModelSelectionStale",
+                "the selected Model definition or Prompt environment changed during Config reload"
+            )
+        end
         local publish_called, record, receipt = pcall(
             composed.publication.update_session,
             {
@@ -4486,6 +5064,176 @@ function M.start_published_agent(composed, chat, message, source)
         session_settings,
         "production Session settings owner"
     )
+    local model_bindings = setmetatable({}, { __mode = "k" })
+    local model_selection = {}
+
+    local function bound_model_observation()
+        local runtime_status, turn_context = session_update_observation()
+        if not runtime_status then return nil, nil, turn_context end
+        local overrides = turn_context.overrides
+        if type(overrides) ~= "table"
+            or durable_settings_generation.current_model
+                ~= overrides.CurrentModel
+            or durable_settings_generation.current_permission
+                ~= overrides.CurrentPermission
+            or (durable_settings_generation.context_prompt or "")
+                ~= (overrides.ContextPrompt or "")
+            or type(runtime_status.active_view_manifest_ref) ~= "string"
+            or runtime_status.active_view_manifest_ref == ""
+            or not valid_integer(runtime_status.context_generation, 1)
+            or not valid_integer(runtime_status.last_durable_sequence, 0)
+        then
+            return nil, nil, failure(
+                "ModelPreflightUnavailable",
+                "the active Config, Session, and ModelView bindings disagree"
+            )
+        end
+        return runtime_status, turn_context
+    end
+
+    function model_selection:list()
+        local runtime_status, turn_context, observation_error
+            = bound_model_observation()
+        if not runtime_status then return nil, observation_error end
+        return model_catalog(
+            durable_settings_generation,
+            turn_context.overrides.CurrentModel
+        )
+    end
+
+    function model_selection:preview(selector)
+        if type(selector) ~= "string" or selector == ""
+            or selector:find("[%z\r\n]")
+        then
+            return nil, failure(
+                "ModelNotFound",
+                "an exact nonempty Model selector is required"
+            )
+        end
+        local runtime_status, turn_context, observation_error
+            = bound_model_observation()
+        if not runtime_status then return nil, observation_error end
+        if runtime_status.last_durable_sequence == math.maxinteger then
+            return nil, failure(
+                "ModelPreflightUnavailable",
+                "the Context sequence space is exhausted"
+            )
+        end
+        local view, view_error = composed.publication.resolve_view(
+            runtime_status.active_view_manifest_ref
+        )
+        if not view then return nil, view_error end
+        if type(view) ~= "table"
+            or view.digest ~= runtime_status.active_view_manifest_ref
+            or not valid_integer(view.first_sequence, 0)
+            or not valid_integer(view.last_sequence, view.first_sequence)
+            or view.last_sequence > runtime_status.last_durable_sequence
+            or type(view.body) ~= "string"
+        then
+            return nil, failure(
+                "ModelPreflightUnavailable",
+                "the resolved durable ModelView does not bind the active Runtime"
+            )
+        end
+        local generation = durable_settings_generation
+        local preview, preview_error = model_switch_preview({
+            generation = generation,
+            current_model = turn_context.overrides.CurrentModel,
+            target_model = selector,
+            permission = turn_context.overrides.CurrentPermission,
+            context_prompt = turn_context.overrides.ContextPrompt or "",
+            prompt = contexts.prompt,
+            tool_registry = contexts.tool_registry,
+            view = view,
+            transition_sequence = runtime_status.last_durable_sequence + 1,
+            effective_at = "next-turn",
+        })
+        if not preview then return nil, preview_error end
+        local definition = model_definition_snapshot(generation.models[selector])
+        local environment = model_preflight_environment_snapshot(
+            generation,
+            turn_context.overrides.CurrentPermission
+        )
+        if not definition or not environment then
+            return nil, failure(
+                "ModelPreflightUnavailable",
+                "the selected Model definition and Prompt environment cannot be bound"
+            )
+        end
+        model_bindings[preview] = {
+            generation = generation,
+            context_generation = runtime_status.context_generation,
+            last_sequence = runtime_status.last_durable_sequence,
+            manifest_digest = runtime_status.active_view_manifest_ref,
+            from = turn_context.overrides.CurrentModel,
+            permission = turn_context.overrides.CurrentPermission,
+            context_prompt = turn_context.overrides.ContextPrompt or "",
+            target = selector,
+            definition = definition,
+            environment = environment,
+            unchanged = preview.unchanged == true,
+            consumed = false,
+        }
+        return preview
+    end
+
+    function model_selection:apply(preview)
+        local binding = model_bindings[preview]
+        local runtime_status, turn_context, observation_error
+            = bound_model_observation()
+        if not runtime_status then return nil, observation_error end
+        local overrides = turn_context.overrides
+        if not binding or binding.consumed
+            or durable_settings_generation ~= binding.generation
+            or runtime_status.context_generation ~= binding.context_generation
+            or runtime_status.last_durable_sequence ~= binding.last_sequence
+            or runtime_status.active_view_manifest_ref ~= binding.manifest_digest
+            or overrides.CurrentModel ~= binding.from
+            or overrides.CurrentPermission ~= binding.permission
+            or (overrides.ContextPrompt or "") ~= binding.context_prompt
+            or not plain_equal(
+                model_definition_snapshot(
+                    durable_settings_generation.models[binding.target]
+                ),
+                binding.definition
+            )
+            or not plain_equal(
+                model_preflight_environment_snapshot(
+                    durable_settings_generation,
+                    binding.permission
+                ),
+                binding.environment
+            )
+        then
+            return nil, failure(
+                "ModelSelectionStale",
+                "the saved Model selection preview is stale"
+            )
+        end
+        if binding.unchanged then
+            binding.consumed = true
+            return settings_projection(
+                durable_settings_generation,
+                overrides,
+                runtime_status.context_generation,
+                "current"
+            )
+        end
+        local updated, update_error = session_settings:update({
+            name = "CurrentModel",
+            value = binding.target,
+            expected_model = binding.definition,
+            expected_model_environment = binding.environment,
+        })
+        if not updated then return nil, update_error end
+        binding.consumed = true
+        return model_status_projection(updated, "next-turn")
+    end
+
+    model_selection = readonly(
+        model_selection,
+        "production Model selection owner"
+    )
     local compaction_owner, compaction_error = new_production_compaction(
         composed,
         catalog,
@@ -4519,6 +5267,7 @@ function M.start_published_agent(composed, chat, message, source)
         driver = driver,
         session = agent_session,
         tools = catalog.tools,
+        models = model_selection,
         settings = session_settings,
         compaction = compaction_owner,
         draft = chat.draft,
@@ -4534,6 +5283,7 @@ function M.start_published_agent(composed, chat, message, source)
             approvals = true,
             later_turn_snapshots = true,
             side = true,
+            model_selection = true,
             session_settings = true,
             compaction = true,
             target_qualified = false,
@@ -4594,6 +5344,10 @@ local function coordinator_ports(ports)
         or type(ports.view) ~= "table"
         or type(ports.chat) ~= "table"
         or type(ports.chat.draft) ~= "table"
+        or type(ports.draft_models) ~= "table"
+        or type(ports.draft_models.list) ~= "function"
+        or type(ports.draft_models.preview) ~= "function"
+        or type(ports.draft_models.apply) ~= "function"
         or type(ports.context_switch) ~= "table"
         or type(ports.agent_factory) ~= "function"
         or type(ports.idle_wait) ~= "function"
@@ -4611,6 +5365,10 @@ local function coordinator_ports(ports)
             or type(ports.initial_agent.settings) ~= "table"
             or type(ports.initial_agent.settings.status) ~= "function"
             or type(ports.initial_agent.settings.update) ~= "function"
+            or type(ports.initial_agent.models) ~= "table"
+            or type(ports.initial_agent.models.list) ~= "function"
+            or type(ports.initial_agent.models.preview) ~= "function"
+            or type(ports.initial_agent.models.apply) ~= "function"
             or type(ports.initial_agent.tools) ~= "table"
             or type(ports.initial_agent.compaction) ~= "table"
             or type(ports.initial_agent.draft) ~= "table"
@@ -4703,6 +5461,8 @@ function M.new_application_coordinator(ports, options)
     local prompt_needed = false
     local approval = false
     local approval_serial = 0
+    local model_change = false
+    local model_change_serial = 0
     local tool_serial = 0
     local steer_serial = 0
     local tool_ids = {}
@@ -4760,11 +5520,17 @@ function M.new_application_coordinator(ports, options)
         local diagnostic_id = "error-" .. tostring(diagnostic_serial)
         local suggestion = type(value) == "table" and value.suggestion or nil
         if type(suggestion) ~= "string" or suggestion == "" then suggestion = false end
+        local next_action = type(value) == "table" and value.next_action or nil
+        if type(next_action) ~= "string" or next_action == "" then
+            next_action = false
+        end
         diagnostics_by_id[diagnostic_id] = {
             id = diagnostic_id,
             code = code,
             message = safe_diagnostic(message, 4096),
             suggestion = suggestion and safe_diagnostic(suggestion, 1024) or false,
+            next_action = next_action
+                and safe_diagnostic(next_action, 1024) or false,
         }
         diagnostic_order[#diagnostic_order + 1] = diagnostic_id
         if #diagnostic_order > 64 then
@@ -5099,6 +5865,16 @@ function M.new_application_coordinator(ports, options)
                 "Runtime did not project the exact pending Tool approval"
             )
         end
+        if model_change then
+            local expired_id = model_change.action_id
+            model_change = false
+            local expired, expired_error = publish({
+                kind = "action",
+                id = expired_id,
+                text = "not applied; a Tool approval became pending",
+            })
+            if not expired then return nil, expired_error end
+        end
         local review_verdict = status.pending_review_verdict
         if review_verdict == false then review_verdict = nil end
         local snapshot, snapshot_error = coordinator_function(
@@ -5344,13 +6120,26 @@ function M.new_application_coordinator(ports, options)
                 "context: new (not saved)",
                 "model: " .. tostring(status.model),
                 "permission: " .. tostring(status.permission),
+                "model change: "
+                    .. (model_change and tostring(model_change.action_id) or "none"),
             }
         end
         local status = agent.loop:status()
         local compact_status = agent.compaction:status()
+        local settings_called, settings_status = pcall(
+            agent.settings.status,
+            agent.settings
+        )
+        if not settings_called then settings_status = nil end
         return {
             "state: " .. tostring(status.state),
             "turn: " .. tostring(status.turn_id),
+            "model: " .. tostring(
+                type(settings_status) == "table" and settings_status.model
+                    or "unavailable"
+            ),
+            "model change: "
+                .. (model_change and tostring(model_change.action_id) or "none"),
             "context generation: " .. tostring(status.context_generation),
             "pending: " .. tostring(status.pending_kind),
             "automatic preflight: "
@@ -5395,6 +6184,13 @@ function M.new_application_coordinator(ports, options)
                 lines = approval.lines,
             })
         end
+        if model_change and diagnostic_id == model_change.action_id then
+            return publish({
+                kind = "details",
+                id = model_change.action_id,
+                lines = model_change.lines,
+            })
+        end
         local record = diagnostics_by_id[diagnostic_id]
         if not record then
             return nil, failure(
@@ -5409,6 +6205,9 @@ function M.new_application_coordinator(ports, options)
         }
         if record.suggestion then
             lines[#lines + 1] = "suggestion: " .. record.suggestion
+        end
+        if record.next_action then
+            lines[#lines + 1] = "next action: " .. record.next_action
         end
         return publish({ kind = "details", id = record.id, lines = lines })
     end
@@ -5594,6 +6393,352 @@ function M.new_application_coordinator(ports, options)
         )
     end
 
+    local function active_model_owner()
+        return agent and agent.models or admitted_ports.draft_models
+    end
+
+    local function publish_model_catalog(result)
+        if type(result) ~= "table" or type(result.rows) ~= "table"
+            or type(result.current) ~= "string"
+            or not valid_integer(result.total, 0)
+            or not valid_integer(result.shown, 0)
+            or result.shown ~= #result.rows
+            or result.total < result.shown
+            or result.shown > MODEL_SELECTION_LIST_LIMIT
+            or type(result.truncated) ~= "boolean"
+            or result.truncated ~= (result.total > result.shown)
+        then
+            return nil, failure(
+                "ModelSelectionContract",
+                "Model picker returned an invalid bounded catalog"
+            )
+        end
+        local lines = {
+            "current: " .. safe_diagnostic(result.current, 128),
+        }
+        for index, row in ipairs(result.rows) do
+            if type(row) ~= "table"
+                or type(row.name) ~= "string" or row.name == ""
+                or type(row.protocol) ~= "string"
+                or type(row.endpoint_origin) ~= "string"
+                or type(row.endpoint_path) ~= "string"
+                or type(row.endpoint_query_configured) ~= "boolean"
+                or type(row.remote_model) ~= "string"
+                or type(row.credential_policy) ~= "string"
+                or not valid_integer(row.context_length, 1)
+                or not valid_integer(row.max_output_tokens, 1)
+                or type(row.current) ~= "boolean"
+                or type(row.default) ~= "boolean"
+            then
+                return nil, failure(
+                    "ModelSelectionContract",
+                    "Model picker returned an invalid catalog row"
+                )
+            end
+            local flags = row.current and "current" or "available"
+            if row.default then flags = flags .. ",default" end
+            lines[#lines + 1] = string.format(
+                "%2d %s [%s] %s/%s %s%s window=%d output=%d streaming=%s credential=%s",
+                index,
+                safe_diagnostic(row.name, 128),
+                flags,
+                safe_diagnostic(row.protocol, 64),
+                safe_diagnostic(row.remote_model, 128),
+                safe_diagnostic(row.endpoint_origin, 256),
+                safe_diagnostic(row.endpoint_path, 256)
+                    .. (row.endpoint_query_configured and "?configured" or ""),
+                row.context_length,
+                row.max_output_tokens,
+                safe_diagnostic(tostring(row.streaming), 32),
+                safe_diagnostic(row.credential_policy, 192)
+            )
+        end
+        if result.truncated then
+            lines[#lines + 1] = "More enabled Models exist; the bounded list was truncated."
+        end
+        lines[#lines + 1] = "Use .model <exact-name> to select one Model."
+        return publish({ kind = "details", id = "models", lines = lines })
+    end
+
+    local function model_summary_lines(prefix, summary)
+        return {
+            prefix .. " name: " .. safe_diagnostic(summary.name, 128),
+            prefix .. " protocol/remote: "
+                .. safe_diagnostic(summary.protocol, 64) .. "/"
+                .. safe_diagnostic(summary.remote_model, 128),
+            prefix .. " endpoint: "
+                .. safe_diagnostic(summary.endpoint_origin, 256)
+                .. safe_diagnostic(summary.endpoint_path, 256)
+                .. (summary.endpoint_query_configured and "?configured" or ""),
+            prefix .. " credential: "
+                .. safe_diagnostic(summary.credential_policy, 192),
+            prefix .. " proxy: " .. safe_diagnostic(summary.proxy_policy, 128),
+            prefix .. " window/output: " .. tostring(summary.context_length)
+                .. "/" .. tostring(summary.max_output_tokens),
+            prefix .. " streaming/tools/controls/roles: "
+                .. safe_diagnostic(summary.streaming, 32) .. "/"
+                .. safe_diagnostic(summary.tools, 32) .. "/"
+                .. safe_diagnostic(summary.controls, 64) .. "/"
+                .. safe_diagnostic(summary.roles, 64),
+        }
+    end
+
+    local function valid_model_summary(summary)
+        return type(summary) == "table"
+            and type(summary.name) == "string" and summary.name ~= ""
+            and type(summary.protocol) == "string"
+            and type(summary.endpoint_origin) == "string"
+            and type(summary.endpoint_path) == "string"
+            and type(summary.endpoint_query_configured) == "boolean"
+            and type(summary.remote_model) == "string"
+            and type(summary.credential_policy) == "string"
+            and type(summary.proxy_policy) == "string"
+            and valid_integer(summary.context_length, 1)
+            and valid_integer(summary.max_output_tokens, 1)
+            and type(summary.streaming) == "string"
+            and type(summary.tools) == "string"
+            and type(summary.controls) == "string"
+            and type(summary.roles) == "string"
+    end
+
+    local function validate_model_preview(preview)
+        if type(preview) ~= "table"
+            or preview.kind ~= "model-switch-preview"
+            or type(preview.unchanged) ~= "boolean"
+            or type(preview.confirmation_required) ~= "boolean"
+            or (preview.effective_at ~= "first-turn"
+                and preview.effective_at ~= "next-turn")
+            or not valid_model_summary(preview.from)
+            or not valid_model_summary(preview.to)
+            or not dense_string_array(preview.reasons)
+            or (preview.unchanged and preview.confirmation_required)
+            or preview.unchanged ~= (preview.from.name == preview.to.name)
+            or preview.confirmation_required ~= (#preview.reasons > 0)
+        then
+            return nil, failure(
+                "ModelSelectionContract",
+                "Model selection preview is incomplete"
+            )
+        end
+        if not preview.unchanged then
+            local history = preview.history
+            local preflight = preview.preflight
+            if type(history) ~= "table"
+                or not valid_integer(history.first_sequence, 0)
+                or not valid_integer(history.last_sequence, history.first_sequence)
+                or not valid_integer(history.body_bytes, 0)
+                or not valid_integer(history.transition_last_sequence, 0)
+                or (preview.effective_at == "next-turn" and (
+                    type(history.manifest_digest) ~= "string"
+                    or history.manifest_digest == ""
+                    or history.transition_last_sequence <= history.last_sequence
+                ))
+                or (preview.effective_at == "first-turn" and (
+                    history.manifest_digest ~= false
+                    or history.first_sequence ~= 0
+                    or history.last_sequence ~= 0
+                    or history.body_bytes ~= 0
+                    or history.transition_last_sequence ~= 0
+                ))
+                or type(preflight) ~= "table"
+                or preflight.compatible ~= true
+                or not valid_integer(preflight.required_tokens, 0)
+                or not valid_integer(preflight.window_tokens, 1)
+                or preflight.required_tokens > preflight.window_tokens
+            then
+                return nil, failure(
+                    "ModelSelectionContract",
+                    "Model compatibility or history disclosure is incomplete"
+                )
+            end
+        end
+        return true
+    end
+
+    local function publish_model_result(updated, unchanged)
+        if type(updated) ~= "table" or type(updated.model) ~= "string"
+            or type(updated.effective_at) ~= "string"
+        then
+            return nil, failure(
+                "ModelSelectionContract",
+                "Model selection returned an invalid status"
+            )
+        end
+        if unchanged then
+            return publish_status(
+                "Model already selected: " .. safe_diagnostic(updated.model, 128) .. "."
+            )
+        end
+        local boundary = updated.effective_at == "first-turn"
+            and "the first turn" or "the next turn"
+        return publish_status(
+            "Model selected: " .. safe_diagnostic(updated.model, 128)
+                .. "; applies on " .. boundary .. "."
+        )
+    end
+
+    local function apply_model_preview(owner, preview)
+        local updated, update_error = coordinator_call(
+            owner,
+            "apply",
+            "ModelSelectionFailure",
+            "bound Model selection",
+            preview
+        )
+        if not updated then return nil, update_error end
+        return publish_model_result(updated, preview.unchanged == true)
+    end
+
+    local function model_confirmation_lines(action_id, preview)
+        local lines = {}
+        for _, line in ipairs(model_summary_lines("from", preview.from)) do
+            lines[#lines + 1] = line
+        end
+        for _, line in ipairs(model_summary_lines("to", preview.to)) do
+            lines[#lines + 1] = line
+        end
+        lines[#lines + 1] = "reasons: " .. table.concat(preview.reasons, ",")
+        lines[#lines + 1] = "history: seq "
+            .. tostring(preview.history.first_sequence) .. ".."
+            .. tostring(preview.history.last_sequence)
+            .. " body-bytes=" .. tostring(preview.history.body_bytes)
+            .. " transition-seq="
+            .. tostring(preview.history.transition_last_sequence)
+        lines[#lines + 1] = "preflight: required="
+            .. tostring(preview.preflight.required_tokens)
+            .. " window=" .. tostring(preview.preflight.window_tokens)
+            .. " tools=" .. tostring(preview.preflight.tools)
+            .. " controls=" .. tostring(preview.preflight.controls)
+            .. " roles=" .. tostring(preview.preflight.roles)
+        lines[#lines + 1] = "usage/amount: unavailable"
+        lines[#lines + 1] = "confirm " .. action_id .. " | deny "
+            .. action_id .. " | details " .. action_id
+        lines[#lines + 1] = "default: deny"
+        return lines
+    end
+
+    local function select_model(request)
+        if model_change then
+            return nil, failure(
+                "ModelSelectionPending",
+                "resolve the pending Model selection before starting another"
+            )
+        end
+        local owner = active_model_owner()
+        if request.selector == nil then
+            local result, list_error = coordinator_call(
+                owner,
+                "list",
+                "ModelSelectionFailure",
+                "bounded Model picker"
+            )
+            if not result then return nil, list_error end
+            return publish_model_catalog(result)
+        end
+        local preview, preview_error = coordinator_call(
+            owner,
+            "preview",
+            "ModelSelectionFailure",
+            "Model compatibility and disclosure preview",
+            request.selector
+        )
+        if not preview then return nil, preview_error end
+        local valid, validation_error = validate_model_preview(preview)
+        if not valid then return nil, validation_error end
+        if preview.unchanged or not preview.confirmation_required then
+            return apply_model_preview(owner, preview)
+        end
+        if approval then
+            return nil, failure(
+                "InteractiveActionUnavailable",
+                "resolve the pending Tool approval before confirming a Model change"
+            )
+        end
+        model_change_serial = model_change_serial + 1
+        local action_id = "model-change-" .. tostring(model_change_serial)
+        model_change = {
+            action_id = action_id,
+            owner = owner,
+            preview = preview,
+            lines = model_confirmation_lines(action_id, preview),
+        }
+        local published, publish_error = publish({
+            kind = "action",
+            id = action_id,
+            lines = model_change.lines,
+        })
+        if not published then
+            model_change = false
+            return nil, publish_error
+        end
+        prompt_needed = true
+        return true
+    end
+
+    local function deny_model_change(message)
+        local action_id = model_change.action_id
+        model_change = false
+        return publish({
+            kind = "action",
+            id = action_id,
+            text = message or "denied",
+        })
+    end
+
+    local function route_model_confirmation_line(source)
+        local normalized = trim_coordinator_line(source)
+        if normalized == "" then return deny_model_change("denied by default") end
+        local action_id = normalized:match("^confirm%s+(%S+)$")
+        if action_id then
+            if action_id ~= model_change.action_id then
+                return nil, failure(
+                    "ModelSelectionStale",
+                    "Model confirmation identity is stale"
+                )
+            end
+            local pending = model_change
+            model_change = false
+            local applied, apply_error = apply_model_preview(
+                pending.owner,
+                pending.preview
+            )
+            if not applied then return nil, apply_error end
+            return publish({
+                kind = "action",
+                id = pending.action_id,
+                text = "confirmed and applied at its declared turn boundary",
+            })
+        end
+        action_id = normalized:match("^deny%s+(%S+)$")
+        if action_id then
+            if action_id ~= model_change.action_id then
+                return nil, failure(
+                    "ModelSelectionStale",
+                    "Model confirmation identity is stale"
+                )
+            end
+            return deny_model_change("denied")
+        end
+        action_id = normalized:match("^details%s+(%S+)$")
+        if action_id then
+            if action_id ~= model_change.action_id then
+                return nil, failure(
+                    "ModelSelectionStale",
+                    "Model confirmation identity is stale"
+                )
+            end
+            return publish({
+                kind = "details",
+                id = model_change.action_id,
+                lines = model_change.lines,
+            })
+        end
+        return nil, failure(
+            "ModelSelectionRequired",
+            "use confirm <model-change-id>, deny <model-change-id>, or details <model-change-id>"
+        )
+    end
+
     local function stage_and_apply(method, message)
         local staged, stage_error = coordinator_call(
             agent.session,
@@ -5708,6 +6853,12 @@ function M.new_application_coordinator(ports, options)
     end
 
     local function switch_context(request)
+        if model_change then
+            return nil, failure(
+                "InteractiveActionUnavailable",
+                "resolve the pending Model confirmation before switching Context"
+            )
+        end
         if request.selector == nil then
             local result, list_error = coordinator_call(
                 admitted_ports.context_switch,
@@ -5824,6 +6975,10 @@ function M.new_application_coordinator(ports, options)
             or type(next_agent.settings) ~= "table"
             or type(next_agent.settings.status) ~= "function"
             or type(next_agent.settings.update) ~= "function"
+            or type(next_agent.models) ~= "table"
+            or type(next_agent.models.list) ~= "function"
+            or type(next_agent.models.preview) ~= "function"
+            or type(next_agent.models.apply) ~= "function"
             or type(next_agent.tools) ~= "table"
             or type(next_agent.compaction) ~= "table"
             or type(next_agent.draft) ~= "table"
@@ -6028,6 +7183,10 @@ function M.new_application_coordinator(ports, options)
             or type(constructed.settings) ~= "table"
             or type(constructed.settings.status) ~= "function"
             or type(constructed.settings.update) ~= "function"
+            or type(constructed.models) ~= "table"
+            or type(constructed.models.list) ~= "function"
+            or type(constructed.models.preview) ~= "function"
+            or type(constructed.models.apply) ~= "function"
             or type(constructed.tools) ~= "table"
             or type(constructed.compaction) ~= "table"
             or type(constructed.draft) ~= "table"
@@ -6128,6 +7287,9 @@ function M.new_application_coordinator(ports, options)
         if approval and normalized:sub(1, 1) ~= "." then
             return route_approval_line(source)
         end
+        if model_change and normalized:sub(1, 1) ~= "." then
+            return route_model_confirmation_line(source)
+        end
         if normalized == "" then return true end
         local request, parse_error = parse_chat(source)
         if not request then return nil, parse_error end
@@ -6142,6 +7304,7 @@ function M.new_application_coordinator(ports, options)
         if request.id == "details" then return show_details(request.error_id) end
         if request.id == "cautious" then return apply_cautious(request) end
         if request.id == "prompt-edit" then return apply_prompt(request) end
+        if request.id == "select-model" then return select_model(request) end
         if request.id == "select-context" then return switch_context(request) end
         if not agent then
             if request.id == "queue-add" then
@@ -6183,6 +7346,7 @@ function M.new_application_coordinator(ports, options)
             prompt_needed = true
             return publish_status("Input draft cleared.")
         end
+        if model_change then return deny_model_change("denied") end
         if approval then return record_approval("deny") end
         if not agent then return publish_status("Nothing to cancel.") end
         return route_agent_action({ id = "cancel" })
@@ -6472,7 +7636,7 @@ function M.new_application_coordinator(ports, options)
                 end
             end
             if lifecycle == "running" and prompt_needed then
-                local focus = approval and "approval" or "chat"
+                local focus = (approval or model_change) and "approval" or "chat"
                 local prompted, prompt_error = show_prompt(focus)
                 if not prompted then return finish_run(prompt_error) end
             end
@@ -6498,6 +7662,8 @@ function M.new_application_coordinator(ports, options)
             context_saved = agent ~= false,
             draft_bytes = #input_draft,
             approval_action_id = approval and approval.action_id or false,
+            model_change_action_id = model_change
+                and model_change.action_id or false,
             diagnostic_count = #diagnostic_order,
         }, "ApplicationCoordinator status")
     end
@@ -6764,6 +7930,10 @@ function M.new_context_switcher(initial_composed, runtime, dependencies)
             or type(next_agent.settings) ~= "table"
             or type(next_agent.settings.status) ~= "function"
             or type(next_agent.settings.update) ~= "function"
+            or type(next_agent.models) ~= "table"
+            or type(next_agent.models.list) ~= "function"
+            or type(next_agent.models.preview) ~= "function"
+            or type(next_agent.models.apply) ~= "function"
             or type(next_agent.tools) ~= "table"
             or type(next_agent.compaction) ~= "table"
             or type(next_agent.draft) ~= "table"
@@ -6818,7 +7988,9 @@ function M.run_interactive_chat(composed, chat, runtime, initial_agent)
             "a ready production chat and terminal runtime are required"
         )
     end
+    local terminal_port
     local function fail_before_coordinator(primary_error)
+        if terminal_port then pcall(terminal_port.close, terminal_port) end
         if initial_agent then
             pcall(initial_agent.compaction.close, initial_agent.compaction,
                 "interactive-composition-failed")
@@ -6831,10 +8003,26 @@ function M.run_interactive_chat(composed, chat, runtime, initial_agent)
                     "existing Context writer release is unknown"
                 )
             end
+        else
+            local called, closed, close_error = pcall(chat.draft.close)
+            if not called or closed == nil then
+                return nil, close_error or failure(
+                    "ContextLeaseUnknown",
+                    "unsaved chat draft release is unknown"
+                )
+            end
         end
         return nil, primary_error
     end
-    local terminal_port, terminal_error = composed.backend.new_terminal("cooked")
+    local draft_models, draft_models_error = new_draft_model_selection(
+        chat.draft,
+        composed.contexts
+    )
+    if not draft_models then
+        return fail_before_coordinator(draft_models_error)
+    end
+    local terminal_error
+    terminal_port, terminal_error = composed.backend.new_terminal("cooked")
     if not terminal_port then return fail_before_coordinator(terminal_error) end
     local view, view_error = production_chat_view(composed, runtime)
     if not view then return fail_before_coordinator(view_error) end
@@ -6848,6 +8036,7 @@ function M.run_interactive_chat(composed, chat, runtime, initial_agent)
         facts = runtime.stdio_facts,
         view = view,
         chat = chat,
+        draft_models = draft_models,
         context_switch = context_switch,
         initial_agent = initial_agent,
         agent_factory = function(message, source)

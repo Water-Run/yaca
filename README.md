@@ -54,6 +54,27 @@ new prompt applies from the next turn. `.prompt edit` fails with a typed
 unavailable result until a bounded editor transaction is attached; it never
 falls back to an ambient external editor.
 
+`.model` lists at most 64 enabled native-tool Models as plain bounded lines;
+`.model <exact-name>` submits the same typed selection without requiring ANSI,
+completion, Unicode, or an enhanced console. Before the first message, an
+accepted selection changes only the unsaved draft and applies to the first
+turn. For a saved Context, yaca binds the preview to the exact config
+generation, Context generation/event waterline, active ModelView manifest,
+Prompt authority layers, tool/control schemas, and target definition. A target
+that cannot carry all of those inputs plus its output and transition reserves
+is rejected before configuration or Context mutation; history, tools, and
+Prompt layers are never silently reduced. A change in endpoint route,
+credential slot/policy, protocol, remote usage source, Model prompt, adapter or
+streaming policy, or a capability limit opens a `model-change-N` disclosure
+whose empty answer is deny. Only `confirm model-change-N`, `deny
+model-change-N`, or `details model-change-N` resolves that instance. Safe
+same-boundary changes stage directly. Saved changes atomically publish the
+selector and refreshed ModelView for the next turn, while the active turn keeps
+its immutable snapshot; a changed waterline, manifest, Prompt environment, or
+reloaded target definition makes the preview stale. Displays identify
+credential slots but never reveal registered secret values, and configured URL
+query values are shown only as `?configured`.
+
 ## Contexts
 
 Context files live in a mirror tree such as `__yaca__/CONTEXT/C/Program Files/My Task.xml`. The current logical path, including the XML filename, produces a displayed 16-character uppercase hexadecimal hash. There is no permanent Context ID: rename or rebind changes the path and hash immediately.
@@ -64,7 +85,7 @@ Opening history is always explicit. A short name selects the first usable match 
 
 Within chat, `.context` without a selector shows a bounded recent list. `.context <selector>` first freezes the verified path and precise hash, closes the current owner only when its queue, side lane, approval, and compaction state are safe, then recomposes and reopens by that hash alone. A post-close race is fatal for that invocation; it never falls back to a replacement short-name match. This switch is also limited to the recorded workspace until explicit cross-workspace confirmation exists.
 
-Each interactive coordinator error receives a process-local `error-N` identity. `.details` shows the newest retained error and `.details error-N` selects one explicitly. The fixed ring retains at most 64 sanitized code/message/suggestion records; expired identities fail closed, and raw exception objects, Tool bodies, and transport payloads are not retained by this surface.
+Each interactive coordinator error receives a process-local `error-N` identity. `.details` shows the newest retained error and `.details error-N` selects one explicitly. The fixed ring retains at most 64 sanitized code/message/suggestion/next-action records; expired identities fail closed, and raw exception objects, Tool bodies, and transport payloads are not retained by this surface.
 
 ## Implemented command grammar
 

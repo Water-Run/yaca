@@ -90,6 +90,134 @@ local function fixture(settings)
     local cautious_default = true
     local context_prompt = ""
     local settings_serial = 0
+    local saved_model = "Primary"
+    local draft_model = "Primary"
+
+    local function model_summary(name)
+        local secondary = name == "Secondary"
+        return {
+            name = name,
+            protocol = "openai-chat",
+            endpoint_origin = secondary and "https://secondary.example"
+                or "https://primary.example",
+            endpoint_path = "/v1/chat/completions",
+            endpoint_query_configured = false,
+            remote_model = secondary and "secondary-remote" or "primary-remote",
+            credential_policy = "bearer:Model." .. name .. ".Key",
+            proxy_policy = "off",
+            context_length = secondary and 65536 or 32768,
+            max_output_tokens = 4096,
+            streaming = "try",
+            tools = "native",
+            controls = "yaca-native-v1",
+            roles = "openai-chat-canonical-v1",
+        }
+    end
+
+    local function model_owner(durable)
+        local bindings = setmetatable({}, { __mode = "k" })
+        local owner = {}
+        local function current()
+            return durable and saved_model or draft_model
+        end
+        function owner:list()
+            local current_name = current()
+            local rows = {}
+            for _, name in ipairs({ "Primary", "Secondary" }) do
+                local row = model_summary(name)
+                row.current = name == current_name
+                row.default = name == "Primary"
+                rows[#rows + 1] = row
+            end
+            return {
+                current = current_name,
+                rows = rows,
+                total = 2,
+                shown = 2,
+                truncated = false,
+            }
+        end
+        function owner:preview(selector)
+            if selector ~= "Primary" and selector ~= "Secondary" then
+                return nil, { code = "ModelNotFound", message = "not found" }
+            end
+            local current_name = current()
+            local unchanged = selector == current_name
+            local confirmation = not unchanged and settings.model_direct ~= true
+            local preview = {
+                kind = "model-switch-preview",
+                unchanged = unchanged,
+                confirmation_required = confirmation,
+                effective_at = durable and "next-turn" or "first-turn",
+                from = model_summary(current_name),
+                to = model_summary(selector),
+                reasons = confirmation and {
+                    "endpoint-route",
+                    "credential-policy",
+                    "usage-source",
+                    durable and "history-destination" or nil,
+                } or {},
+            }
+            if confirmation and not durable then
+                preview.reasons[4] = nil
+            end
+            if not unchanged then
+                preview.history = {
+                    first_sequence = durable and 1 or 0,
+                    last_sequence = durable and loop_status.last_durable_sequence or 0,
+                    manifest_digest = durable
+                        and loop_status.active_view_manifest_ref or false,
+                    body_bytes = durable and 128 or 0,
+                    transition_last_sequence = durable
+                        and (loop_status.last_durable_sequence + 1) or 0,
+                }
+                preview.preflight = {
+                    compatible = true,
+                    required_tokens = 8192,
+                    window_tokens = preview.to.context_length,
+                    tools = "native-compatible",
+                    controls = "typed-compatible",
+                    roles = "canonical-compatible",
+                }
+            end
+            bindings[preview] = current_name
+            return preview
+        end
+        function owner:apply(preview)
+            if bindings[preview] ~= current() then
+                return nil, {
+                    code = "ModelSelectionStale",
+                    message = "stale fake preview",
+                }
+            end
+            bindings[preview] = nil
+            if durable then
+                saved_model = preview.to.name
+                settings_serial = settings_serial + 1
+                loop_status.context_generation = loop_status.context_generation + 1
+                loop_status.last_durable_sequence
+                    = loop_status.last_durable_sequence + 2
+                loop_status.active_view_manifest_ref
+                    = "view-model-" .. tostring(settings_serial)
+                log[#log + 1] = "saved-model:" .. saved_model
+            else
+                draft_model = preview.to.name
+                log[#log + 1] = "draft-model:" .. draft_model
+            end
+            return {
+                context_generation = durable
+                    and loop_status.context_generation or 0,
+                config_generation = "config-model-" .. tostring(settings_serial),
+                model = current(),
+                permission = "Std",
+                effective_at = durable and "next-turn" or "first-turn",
+            }
+        end
+        return owner
+    end
+
+    local saved_models = model_owner(true)
+    local draft_models = model_owner(false)
 
     local terminal = {}
     function terminal:start(observed_now)
@@ -121,7 +249,7 @@ local function fixture(settings)
         return {
             lifecycle = "saved",
             workspace = "/workspace",
-            model = "Primary",
+            model = saved_model,
             permission = "Std",
             double_check = true,
             display_name = "first-task",
@@ -231,7 +359,7 @@ local function fixture(settings)
         return {
             context_generation = loop_status.context_generation,
             config_generation = "config-settings-" .. tostring(settings_serial),
-            model = "Primary",
+            model = saved_model,
             permission = "Std",
             double_check_default = cautious_default,
             double_check_override = cautious_override,
@@ -419,6 +547,7 @@ local function fixture(settings)
         driver = driver,
         session = session,
         settings = session_settings,
+        models = saved_models,
         tools = tools,
         compaction = compaction,
         draft = draft,
@@ -464,7 +593,7 @@ local function fixture(settings)
                 lifecycle = "saved",
                 durable = true,
                 workspace = "/workspace",
-                model = "Primary",
+                model = saved_model,
                 permission = "Std",
                 double_check = true,
                 display_name = "second-task",
@@ -481,6 +610,7 @@ local function fixture(settings)
             driver = driver,
             session = session,
             settings = session_settings,
+            models = saved_models,
             tools = tools,
             compaction = compaction,
             draft = next_draft,
@@ -489,6 +619,7 @@ local function fixture(settings)
     end
     local agent_factory = function(message, source)
         log[#log + 1] = "agent:" .. source .. ":" .. message
+        saved_model = draft_model
         if settings.automatic_preflight then
             loop_status = status("Preparing", {
                 compaction_preflight_state = "pending",
@@ -506,7 +637,7 @@ local function fixture(settings)
         return {
             lifecycle = "not-saved",
             workspace = "/workspace",
-            model = "Primary",
+            model = draft_model,
             permission = "Std",
             double_check = true,
             double_check_default = true,
@@ -572,6 +703,7 @@ local function fixture(settings)
         },
         view = view,
         chat = chat,
+        draft_models = draft_models,
         context_switch = context_switch,
         agent_factory = agent_factory,
         initial_agent = settings.initial_agent and constructed_agent or nil,
@@ -743,6 +875,152 @@ return {
                 local saved_rendered = A.render(saved.blocks)
                 A.contains(saved_rendered, "next turn prompt")
                 A.contains(saved_rendered, "applies on the next turn")
+            end,
+        },
+        {
+            name = "model picker and safe draft switch retain an old CMD line fallback",
+            run = function()
+                local f = fixture({
+                    freeze_driver = true,
+                    model_direct = true,
+                    batches = {
+                        { { kind = "user_action", action = "text", text = ".model" } },
+                        { { kind = "user_action", action = "submit-or-queue" } },
+                        {
+                            {
+                                kind = "user_action",
+                                action = "text",
+                                text = ".model Secondary",
+                            },
+                        },
+                        { { kind = "user_action", action = "submit-or-queue" } },
+                        { { kind = "user_action", action = "text", text = ".quit" } },
+                        { { kind = "user_action", action = "submit-or-queue" } },
+                    },
+                })
+                assert(f.coordinator:run())
+                local rendered = A.render(f.blocks)
+                A.contains(rendered, "Use .model <exact-name>")
+                A.contains(rendered, "Primary [current,default]")
+                A.contains(rendered, "Secondary [available]")
+                A.contains(rendered, "Model selected: Secondary; applies on the first turn")
+                A.contains(table.concat(f.log, "|"), "draft-model:Secondary")
+                A.falsy(rendered:find("api-key", 1, true))
+            end,
+        },
+        {
+            name = "saved cross-boundary model switch discloses and confirms exact next-turn change",
+            run = function()
+                local f = fixture({
+                    initial_agent = true,
+                    initial_state = "Idle",
+                    freeze_driver = true,
+                    batches = {
+                        {
+                            {
+                                kind = "user_action",
+                                action = "text",
+                                text = ".model Secondary",
+                            },
+                        },
+                        { { kind = "user_action", action = "submit-or-queue" } },
+                        {
+                            {
+                                kind = "user_action",
+                                action = "text",
+                                text = "details model-change-1",
+                            },
+                        },
+                        { { kind = "user_action", action = "submit-or-queue" } },
+                        {
+                            {
+                                kind = "user_action",
+                                action = "text",
+                                text = "confirm model-change-1",
+                            },
+                        },
+                        { { kind = "user_action", action = "submit-or-queue" } },
+                        { { kind = "user_action", action = "text", text = ".quit" } },
+                        { { kind = "user_action", action = "submit-or-queue" } },
+                    },
+                })
+                assert(f.coordinator:run())
+                local actions = blocks_of_kind(f.blocks, "action")
+                A.equal(actions[1].id, "model-change-1")
+                local disclosure = table.concat(actions[1].lines, "|")
+                A.contains(disclosure, "from endpoint: https://primary.example")
+                A.contains(disclosure, "to endpoint: https://secondary.example")
+                A.contains(disclosure, "history: seq 1..3")
+                A.contains(disclosure, "usage/amount: unavailable")
+                A.contains(disclosure, "default: deny")
+                local details = blocks_of_kind(f.blocks, "details")
+                A.equal(details[1].id, "model-change-1")
+                A.contains(table.concat(f.log, "|"), "saved-model:Secondary")
+                A.contains(A.render(f.blocks),
+                    "Model selected: Secondary; applies on the next turn")
+                A.equal(f.prompts[1], "approval")
+                A.equal(f.coordinator:status().model_change_action_id, false)
+            end,
+        },
+        {
+            name = "empty model confirmation line denies by default without mutation",
+            run = function()
+                local f = fixture({ freeze_driver = true, batches = {
+                    {
+                        {
+                            kind = "user_action",
+                            action = "text",
+                            text = ".model Secondary",
+                        },
+                    },
+                    { { kind = "user_action", action = "submit-or-queue" } },
+                    { { kind = "user_action", action = "submit-or-queue" } },
+                    { { kind = "user_action", action = "text", text = ".quit" } },
+                    { { kind = "user_action", action = "submit-or-queue" } },
+                } })
+                assert(f.coordinator:run())
+                A.falsy(table.concat(f.log, "|"):find("draft-model:", 1, true))
+                local actions = blocks_of_kind(f.blocks, "action")
+                A.equal(actions[2].text, "denied by default")
+            end,
+        },
+        {
+            name = "Tool approval supersedes an unapplied Model confirmation without two modal owners",
+            run = function()
+                local f = fixture({
+                    initial_agent = true,
+                    initial_state = "RequestingModel",
+                    approval = true,
+                    batches = {
+                        {
+                            {
+                                kind = "user_action",
+                                action = "text",
+                                text = ".model Secondary",
+                            },
+                            { kind = "user_action", action = "submit-or-queue" },
+                        },
+                        {
+                            {
+                                kind = "user_action",
+                                action = "text",
+                                text = "deny approval-1",
+                            },
+                        },
+                        { { kind = "user_action", action = "submit-or-queue" } },
+                        { { kind = "user_action", action = "text", text = ".quit" } },
+                        { { kind = "user_action", action = "submit-or-queue" } },
+                    },
+                })
+                assert(f.coordinator:run())
+                local actions = blocks_of_kind(f.blocks, "action")
+                A.equal(actions[1].id, "model-change-1")
+                A.equal(actions[2].id, "model-change-1")
+                A.contains(actions[2].text, "Tool approval became pending")
+                A.equal(actions[3].id, "approval-1")
+                A.equal(actions[4].text, "denied")
+                A.falsy(table.concat(f.log, "|"):find("saved-model:", 1, true))
+                A.equal(f.coordinator:status().model_change_action_id, false)
             end,
         },
         {
