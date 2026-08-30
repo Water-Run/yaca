@@ -5431,24 +5431,24 @@ function M.new_application_coordinator(ports, options)
         return publish_status(text)
     end
 
-    local function cautious_status()
+    local function session_settings_status()
         if agent then
             return coordinator_call(
                 agent.settings,
                 "status",
                 "SessionUpdateFailure",
-                "saved Session cautious status"
+                "saved Session settings status"
             )
         end
         return coordinator_function(
             admitted_ports.chat.draft.status,
             "SessionUpdateFailure",
-            "unsaved Session cautious status"
+            "unsaved Session settings status"
         )
     end
 
     local function apply_cautious(request)
-        local current, status_error = cautious_status()
+        local current, status_error = session_settings_status()
         if not current then return nil, status_error end
         if request.operation == "status" then
             return publish_cautious(current)
@@ -5498,6 +5498,96 @@ function M.new_application_coordinator(ports, options)
         end
         if not updated then return nil, update_error end
         return publish_cautious(
+            updated,
+            agent and "The change applies on the next turn."
+                or "The change applies when the first turn starts."
+        )
+    end
+
+    local function publish_context_prompt(values, suffix)
+        local prompt = values.context_prompt
+        if type(prompt) ~= "string" then
+            return nil, failure(
+                "SessionUpdateFailure",
+                "current ContextPrompt is unavailable"
+            )
+        end
+        local quoted = prompt == "" and "| (empty)"
+            or ("| " .. prompt:gsub("\n", "\n| "))
+        local text = "bytes: " .. tostring(#prompt)
+            .. "\neffective: " .. tostring(values.effective_at or "current")
+            .. "\n" .. quoted
+        if suffix then text = text .. "\n" .. suffix end
+        return publish({
+            kind = "details",
+            id = "context-prompt",
+            text = text,
+        })
+    end
+
+    local function apply_prompt(request)
+        local current, status_error = session_settings_status()
+        if not current then return nil, status_error end
+        if request.operation == "show" then
+            if request.text ~= nil then
+                return nil, failure(
+                    "InvalidSessionUpdate",
+                    ".prompt show does not accept text"
+                )
+            end
+            return publish_context_prompt(current)
+        end
+        if request.operation == "edit" then
+            return nil, failure(
+                "InteractiveActionUnavailable",
+                "the bounded Prompt editor is not attached; use .prompt set <text>"
+            )
+        end
+        local value
+        if request.operation == "set" then
+            if type(request.text) ~= "string" or request.text == "" then
+                return nil, failure(
+                    "InvalidSessionUpdate",
+                    ".prompt set requires nonempty text"
+                )
+            end
+            value = request.text
+        elseif request.operation == "clear" then
+            if request.text ~= nil then
+                return nil, failure(
+                    "InvalidSessionUpdate",
+                    ".prompt clear does not accept text"
+                )
+            end
+            value = ""
+        else
+            return nil, failure(
+                "InvalidSessionUpdate",
+                "unknown ContextPrompt operation"
+            )
+        end
+        if current.context_prompt == value then
+            return publish_context_prompt(current)
+        end
+        local updated, update_error
+        if agent then
+            updated, update_error = coordinator_call(
+                agent.settings,
+                "update",
+                "SessionUpdateFailure",
+                "saved ContextPrompt update",
+                { name = "ContextPrompt", value = value }
+            )
+        else
+            updated, update_error = coordinator_function(
+                admitted_ports.chat.draft.update,
+                "SessionUpdateFailure",
+                "unsaved ContextPrompt update",
+                { context_prompt = value }
+            )
+        end
+        if not updated then return nil, update_error end
+        return publish_context_prompt(
             updated,
             agent and "The change applies on the next turn."
                 or "The change applies when the first turn starts."
@@ -6051,6 +6141,7 @@ function M.new_application_coordinator(ports, options)
         if request.id == "help-chat" then return show_help(request.topic) end
         if request.id == "details" then return show_details(request.error_id) end
         if request.id == "cautious" then return apply_cautious(request) end
+        if request.id == "prompt-edit" then return apply_prompt(request) end
         if request.id == "select-context" then return switch_context(request) end
         if not agent then
             if request.id == "queue-add" then

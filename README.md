@@ -2,7 +2,9 @@
 
 [中文](./README-zh.md)
 
-yaca is the design for a simple, single-agent terminal Coding Agent, licensed under GPL v3.
+yaca is the design for a simple, single-agent, terminal-only general Agent,
+licensed under GPL v3. Software development is a first-class common workload,
+not its exclusive purpose.
 
 > **Project status (2026-08-30): platform-independent core implemented through M9; controller closure and target qualification pending.** No target archive has qualified for release. Everything below describes the implemented v0.1 contract; target-specific behavior remains unqualified until it passes independently on Win32 x86, Win64 x86_64, and Linux x86_64. Gate A/B remain passed and Release Gate R remains closed.
 
@@ -42,6 +44,15 @@ The distribution defines two Permission profiles:
 The fixed Agent tool set is `list`, `read`, `search`, `write`, `patch`, `rename`, `delete`, and `exec`. Raw `exec` is governed by the broad `Shell` capability; yaca does not claim to infer or sandbox its filesystem/network effects from command text. Permission names, descriptions, and prompts never grant capabilities.
 
 `DoubleCheck` controls optional high-risk action review and mandatory finish review when enabled. `.cautious [status|on|off|toggle|reset]` changes only the current Context override; it is not a Permission profile. Before the first message it changes only the unsaved in-memory draft. In a saved Context the override and refreshed ModelView are published atomically, the Runtime adopts their exact receipt, and the new value applies at the next turn without changing the active turn's immutable configuration snapshot.
+
+`.prompt [show|set|clear] [text]` inspects or changes the current
+`ContextPrompt` through the same turn boundary. `set` accepts bounded one-line
+text and `clear` selects the empty prompt. Before the first message the change
+stays in the unsaved draft; afterward the Context and refreshed ModelView are
+published atomically, the audit event contains only old/new digests, and the
+new prompt applies from the next turn. `.prompt edit` fails with a typed
+unavailable result until a bounded editor transaction is attached; it never
+falls back to an ambient external editor.
 
 ## Contexts
 

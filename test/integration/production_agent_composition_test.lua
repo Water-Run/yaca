@@ -486,6 +486,7 @@ local function fixture(settings)
         end,
     }
     local durable_double_check_override = true
+    local durable_context_prompt = "workspace context"
     local publication = {
         operation_journal = function()
             log[#log + 1] = "operation-journal"
@@ -544,7 +545,7 @@ local function fixture(settings)
                     CurrentPermission = "Std",
                     DoubleCheckOverride = durable_double_check_override,
                     DoubleCheckGoalOverride = "inherit",
-                    ContextPrompt = "workspace context",
+                    ContextPrompt = durable_context_prompt,
                     AutoRenameDisabled = false,
                 },
             }
@@ -569,18 +570,31 @@ local function fixture(settings)
                 specification.expected_manifest_digest,
                 loop_status.active_view_manifest_ref
             )
-            A.equal(specification.name, "DoubleCheckOverride")
-            A.equal(specification.value, false)
             A.falsy(specification.mode)
-            A.falsy(specification.generation.effective_double_check)
-            durable_double_check_override = specification.value
+            local prompt_update = specification.name == "ContextPrompt"
+            if prompt_update then
+                A.equal(specification.value, "bounded production guidance")
+                A.equal(
+                    specification.generation.context_prompt,
+                    "bounded production guidance"
+                )
+                durable_context_prompt = specification.value
+            else
+                A.equal(specification.name, "DoubleCheckOverride")
+                A.equal(specification.value, false)
+                A.falsy(specification.generation.effective_double_check)
+                durable_double_check_override = specification.value
+            end
             local first_sequence = loop_status.last_durable_sequence + 1
-            local manifest_digest = "view-session-override"
+            local manifest_digest = prompt_update
+                and "view-session-prompt" or "view-session-override"
             local record = {
                 kind = "session-override",
                 name = specification.name,
-                old_value_digest = "sha256:cautious-on",
-                new_value_digest = "sha256:cautious-off",
+                old_value_digest = prompt_update
+                    and "sha256:prompt-old" or "sha256:cautious-on",
+                new_value_digest = prompt_update
+                    and "sha256:prompt-new" or "sha256:cautious-off",
                 effective_at = "next-turn",
                 replaces_manifest_digest = loop_status.active_view_manifest_ref,
                 manifest_digest = manifest_digest,
@@ -1002,7 +1016,14 @@ local function fixture(settings)
                 A.equal(overrides.CurrentModel, "Primary")
                 log[#log + 1] = "config-reload"
                 local reloaded = next_generation
-                if overrides.DoubleCheckOverride == false then
+                if overrides.ContextPrompt ~= "workspace context" then
+                    reloaded = {}
+                    for key, value in pairs(next_generation) do
+                        reloaded[key] = value
+                    end
+                    reloaded.id = "config-generation-prompt"
+                    reloaded.context_prompt = overrides.ContextPrompt
+                elseif overrides.DoubleCheckOverride == false then
                     reloaded = {}
                     for key, value in pairs(next_generation) do
                         reloaded[key] = value
@@ -1209,6 +1230,50 @@ return {
                 local after = assert(agent.settings:status())
                 A.falsy(after.double_check_override)
                 A.falsy(after.double_check_effective)
+                local reload_index, publish_index, adopt_index
+                for index, value in ipairs(f.log) do
+                    if value == "config-reload" then reload_index = index end
+                    if value == "publication:session-override" then
+                        publish_index = index
+                    end
+                    if value == "runtime-adopt:session-override" then
+                        adopt_index = index
+                    end
+                end
+                A.truthy(reload_index < publish_index)
+                A.truthy(publish_index < adopt_index)
+            end,
+        },
+        {
+            name = "production Session settings publish and adopt ContextPrompt for the next turn",
+            run = function()
+                local f = fixture()
+                local agent = assert(f.main.start_published_agent(
+                    f.composed,
+                    f.chat,
+                    "implement the project",
+                    "terminal"
+                ))
+                local before = assert(agent.settings:status())
+                A.equal(before.context_prompt, "workspace context")
+                local updated = assert(agent.settings:update({
+                    name = "ContextPrompt",
+                    value = "bounded production guidance",
+                }))
+                A.equal(updated.context_prompt, "bounded production guidance")
+                A.equal(updated.effective_at, "next-turn")
+                A.equal(updated.context_generation, 3)
+                A.equal(agent.loop:status().last_durable_sequence, 5)
+                A.equal(
+                    agent.loop:status().active_view_manifest_ref,
+                    "view-session-prompt"
+                )
+                -- The active request retains its captured prompt bundle; only
+                -- the next complete turn may build ports from this generation.
+                A.equal(agent.current_generation().id, "config-generation-1")
+                A.equal(f.current_generation().id, "config-generation-prompt")
+                local after = assert(agent.settings:status())
+                A.equal(after.context_prompt, "bounded production guidance")
                 local reload_index, publish_index, adopt_index
                 for index, value in ipairs(f.log) do
                     if value == "config-reload" then reload_index = index end

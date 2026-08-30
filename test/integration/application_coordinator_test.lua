@@ -88,6 +88,7 @@ local function fixture(settings)
     local compaction_active = false
     local cautious_override = "inherit"
     local cautious_default = true
+    local context_prompt = ""
     local settings_serial = 0
 
     local terminal = {}
@@ -236,16 +237,23 @@ local function fixture(settings)
             double_check_override = cautious_override,
             double_check_effective = cautious_override == "inherit"
                 and cautious_default or cautious_override,
-            context_prompt = "",
+            context_prompt = context_prompt,
             effective_at = "current",
         }
     end
     function session_settings:update(change)
-        A.equal(change.name, "DoubleCheckOverride")
-        A.truthy(change.value == "inherit" or type(change.value) == "boolean")
-        cautious_override = change.value
+        if change.name == "DoubleCheckOverride" then
+            A.truthy(change.value == "inherit" or type(change.value) == "boolean")
+            cautious_override = change.value
+            log[#log + 1] = "settings-cautious:" .. tostring(change.value)
+        else
+            A.equal(change.name, "ContextPrompt")
+            A.equal(type(change.value), "string")
+            context_prompt = change.value
+            log[#log + 1] = "settings-prompt-bytes:"
+                .. tostring(#change.value)
+        end
         settings_serial = settings_serial + 1
-        log[#log + 1] = "settings-cautious:" .. tostring(change.value)
         loop_status.context_generation = loop_status.context_generation + 1
         loop_status.last_durable_sequence
             = loop_status.last_durable_sequence + 2
@@ -493,6 +501,7 @@ local function fixture(settings)
 
     local chat_draft = {}
     local draft_cautious_override = "inherit"
+    local draft_context_prompt = ""
     function chat_draft.status()
         return {
             lifecycle = "not-saved",
@@ -502,14 +511,22 @@ local function fixture(settings)
             double_check = true,
             double_check_default = true,
             double_check_override = draft_cautious_override,
+            context_prompt = draft_context_prompt,
         }
     end
     function chat_draft.update(changes)
-        A.truthy(changes.double_check_override == "inherit"
-            or type(changes.double_check_override) == "boolean")
-        draft_cautious_override = changes.double_check_override
-        log[#log + 1] = "draft-cautious:"
-            .. tostring(changes.double_check_override)
+        if changes.double_check_override ~= nil then
+            A.truthy(changes.double_check_override == "inherit"
+                or type(changes.double_check_override) == "boolean")
+            draft_cautious_override = changes.double_check_override
+            log[#log + 1] = "draft-cautious:"
+                .. tostring(changes.double_check_override)
+        else
+            A.equal(type(changes.context_prompt), "string")
+            draft_context_prompt = changes.context_prompt
+            log[#log + 1] = "draft-prompt-bytes:"
+                .. tostring(#changes.context_prompt)
+        end
         local projected = chat_draft.status()
         projected.double_check = draft_cautious_override == "inherit"
             and true or draft_cautious_override
@@ -663,6 +680,69 @@ return {
                 local rendered = A.render(f.blocks)
                 A.contains(rendered, "override=off effective=off")
                 A.contains(rendered, "applies on the next turn")
+            end,
+        },
+        {
+            name = "prompt show set and clear use draft or durable next-turn settings",
+            run = function()
+                local unsaved = fixture({ freeze_driver = true, batches = {
+                    { { kind = "user_action", action = "text", text = ".prompt set keep tests exact" } },
+                    { { kind = "user_action", action = "submit-or-queue" } },
+                    { { kind = "user_action", action = "text", text = ".prompt show" } },
+                    { { kind = "user_action", action = "submit-or-queue" } },
+                    { { kind = "user_action", action = "text", text = ".prompt clear" } },
+                    { { kind = "user_action", action = "submit-or-queue" } },
+                    { { kind = "user_action", action = "text", text = ".prompt edit" } },
+                    { { kind = "user_action", action = "submit-or-queue" } },
+                    { { kind = "user_action", action = "cancel" } },
+                    { { kind = "user_action", action = "text", text = ".details error-1" } },
+                    { { kind = "user_action", action = "submit-or-queue" } },
+                    { { kind = "user_action", action = "text", text = ".quit" } },
+                    { { kind = "user_action", action = "submit-or-queue" } },
+                } })
+                assert(unsaved.coordinator:run())
+                A.contains(
+                    table.concat(unsaved.log, "|"),
+                    "draft-prompt-bytes:16"
+                )
+                A.contains(
+                    table.concat(unsaved.log, "|"),
+                    "draft-prompt-bytes:0"
+                )
+                local unsaved_rendered = A.render(unsaved.blocks)
+                A.contains(unsaved_rendered, "keep tests exact")
+                A.contains(unsaved_rendered, "applies when the first turn starts")
+                A.contains(unsaved_rendered, "| (empty)")
+                A.contains(unsaved_rendered, "InteractiveActionUnavailable")
+                A.contains(unsaved_rendered, "bounded Prompt editor is not attached")
+                local prompt_details = blocks_of_kind(unsaved.blocks, "details")
+                A.equal(prompt_details[#prompt_details].id, "error-1")
+                A.contains(
+                    table.concat(prompt_details[#prompt_details].lines, "|"),
+                    "code: InteractiveActionUnavailable"
+                )
+
+                local saved = fixture({
+                    initial_agent = true,
+                    initial_state = "RequestingModel",
+                    freeze_driver = true,
+                    batches = {
+                        { { kind = "user_action", action = "text", text = ".prompt set next turn prompt" } },
+                        { { kind = "user_action", action = "submit-or-queue" } },
+                        { { kind = "user_action", action = "text", text = ".prompt show" } },
+                        { { kind = "user_action", action = "submit-or-queue" } },
+                        { { kind = "user_action", action = "text", text = ".quit" } },
+                        { { kind = "user_action", action = "submit-or-queue" } },
+                    },
+                })
+                assert(saved.coordinator:run())
+                A.contains(
+                    table.concat(saved.log, "|"),
+                    "settings-prompt-bytes:16"
+                )
+                local saved_rendered = A.render(saved.blocks)
+                A.contains(saved_rendered, "next turn prompt")
+                A.contains(saved_rendered, "applies on the next turn")
             end,
         },
         {

@@ -755,22 +755,65 @@ return {
                 A.equal(unchanged_error.code, "SessionOverrideUnchanged")
                 A.equal(publication.status().generation, 2)
 
-                local secret_generation = generation()
-                secret_generation.id = "config-generation-9"
-                secret_generation.effective_double_check = false
-                secret_generation.context_prompt = "registered-secret"
-                local secret, secret_error = publication.update_session({
+                local prompt_generation = generation()
+                prompt_generation.id = "config-generation-9"
+                prompt_generation.effective_double_check = false
+                prompt_generation.context_prompt = "bounded project guidance"
+                local prompt_record, prompt_receipt = publication.update_session({
                     expected_context_generation = 2,
                     expected_last_sequence = 4,
                     expected_manifest_digest = record.manifest_digest,
+                    generation = prompt_generation,
+                    name = "ContextPrompt",
+                    value = "bounded project guidance",
+                })
+                A.truthy(prompt_record)
+                A.equal(prompt_record.name, "ContextPrompt")
+                A.equal(prompt_receipt.first_sequence, 5)
+                A.equal(prompt_receipt.last_sequence, 6)
+                A.equal(prompt_receipt.context_generation, 3)
+                A.equal(publication.status().generation, 3)
+                local prompt_document = observed.published.document
+                A.equal(
+                    prompt_document.session.context_prompt,
+                    "bounded project guidance"
+                )
+                A.equal(prompt_document.facts[5].fields.name, "ContextPrompt")
+                local prompt_context = assert(publication.turn_context({
+                    expected_context_generation = 3,
+                }))
+                A.equal(
+                    prompt_context.overrides.ContextPrompt,
+                    "bounded project guidance"
+                )
+                local prompt_turn = assert(publication.capture_turn({
+                    generation = prompt_generation,
+                    text = "use the durable project guidance",
+                    source = "terminal",
+                    expected_context_generation = 3,
+                }))
+                A.falsy(prompt_turn.prompt_snapshot == turn.prompt_snapshot)
+                A.equal(
+                    prompt_turn.view_manifest_ref,
+                    prompt_record.manifest_digest
+                )
+
+                local secret_generation = generation()
+                secret_generation.id = "config-generation-10"
+                secret_generation.effective_double_check = false
+                secret_generation.context_prompt = "registered-secret"
+                local secret, secret_error = publication.update_session({
+                    expected_context_generation = 3,
+                    expected_last_sequence = 6,
+                    expected_manifest_digest = prompt_record.manifest_digest,
                     generation = secret_generation,
                     name = "ContextPrompt",
                     value = "registered-secret",
                 })
                 A.falsy(secret)
                 A.equal(secret_error.code, "RegisteredSecret")
-                A.equal(publication.status().generation, 2)
-                A.equal(observed.published.document, document)
+                A.equal(publication.status().generation, 3)
+                A.equal(observed.published.document, prompt_document)
                 A.truthy(draft.close())
             end,
         },

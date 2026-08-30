@@ -2,7 +2,8 @@
 
 [English](./README.md)
 
-yaca 是一款简单、单 Agent、terminal-only Coding Agent 的设计，以 GPL v3 许可开源。
+yaca 是一款简单、单 Agent、terminal-only 的通用 Agent 设计，以 GPL v3
+许可开源。软件开发是一级且常见的工作负载，但不是唯一用途。
 
 > **项目状态（2026-08-30）：平台无关核心已实现至 M9；controller 收口和目标资格验证待完成。** 目前还没有任何目标发行包通过资格验证。下文描述已经实现的 v0.1 契约；Win32 x86、Win64 x86_64 与 Linux x86_64 的目标相关行为仍须分别验证。Gate A/B 保持通过，Release Gate R 仍关闭。
 
@@ -42,6 +43,13 @@ Context XML 是 yaca 内部版本化存储，不是稳定第三方 API；人类�
 固定 Agent 工具集是 `list`、`read`、`search`、`write`、`patch`、`rename`、`delete`、`exec`。raw `exec` 只由宽能力 `Shell` 管理；yaca 不声称能从命令文本推断或沙箱化其文件系统/网络副作用。Permission 名称、Description 与 Prompt 都不授权。
 
 `DoubleCheck` 开启时控制可选的高风险 action review，并强制 finish review。`.cautious [status|on|off|toggle|reset]` 只修改当前 Context 的覆盖值，不是 Permission profile。第一条消息前它只修改未保存的内存草稿；Context 已保存时，覆盖值与刷新后的 ModelView 原子发布，Runtime 采纳其精确回执，新值从下一轮生效，不改变当前轮冻结的配置快照。
+
+`.prompt [show|set|clear] [text]` 通过同一个 turn 边界查看或修改当前
+`ContextPrompt`；`set` 接受有界单行文本，`clear` 选择空 Prompt。第一条消息前
+改动只留在未保存草稿中；Context 保存后，Session 与刷新后的 ModelView
+原子发布，审计事件只携带新旧值摘要，新 Prompt 从下一 turn 生效。
+`.prompt edit` 在有界 editor transaction 接通前返回 typed unavailable，绝不
+隐式调用环境中的外部编辑器。
 
 ## Context
 
