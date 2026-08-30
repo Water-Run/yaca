@@ -1,4 +1,4 @@
-# Modern-host proof evidence — 2026-08-29
+# Modern-host proof evidence — 2026-08-29 (refreshed 2026-08-30)
 
 Status: TP-003, TP-006, TP-008, and TP-010 have reproducible
 `proven-modern` evidence for the scopes below. No result in this directory is
@@ -18,6 +18,7 @@ complete run is:
 - GCC 16.2.1, curl 8.18.0, xmllint/libxml 2.12.10.
 - Repository Lua runner: Lua 5.5.0 for contract/TP-003 checks.
 - TP-010 isolated build: Lua 5.5.1, Expat 2.8.2, LuaExpat 1.5.2 from the pinned hashes in the manifest.
+- TP-010 was rerun on 2026-08-30 after its entrypoint gained the serialized resource preflight; the proof body and conclusions are unchanged.
 
 ## Result summary
 
@@ -31,8 +32,8 @@ complete run is:
 ## Normalized successful output
 
 ```text
-design-contract validation PASS: 4260 assertions across 11 contracts and 6 fixture sets
-proof-evidence validation PASS: 52 assertions across 4 modern proofs
+design-contract validation PASS: 7580 assertions across 16 contracts and 12 fixture sets
+proof-evidence validation PASS: 56 assertions across 4 modern proofs
 
 proof=TP-003
 scope=modern-host-deterministic-fake-ports

@@ -32,19 +32,47 @@ end
 
 local expected = {
   ["TP-003"] = {
-    [root .. "/.tools/proofs/tp003_event_pump.lua"] = "2133be3a0cfb4e489d5268d2c11beec875f4558c638a9672a9321ba5d914a418",
+    files = {
+      [root .. "/.tools/proofs/tp003_event_pump.lua"] = "2133be3a0cfb4e489d5268d2c11beec875f4558c638a9672a9321ba5d914a418",
+    },
+    recorded = "2133be3a0cfb4e489d5268d2c11beec875f4558c638a9672a9321ba5d914a418",
   },
   ["TP-006"] = {
-    [root .. "/.tools/proofs/tp006_curl_carrier.py"] = "8103e6e0d902526f2fc6068a8baef828a121611538d8b577ca876388109241ff",
+    files = {
+      [root .. "/.tools/proofs/tp006_curl_carrier.py"] = "8103e6e0d902526f2fc6068a8baef828a121611538d8b577ca876388109241ff",
+    },
+    recorded = "8103e6e0d902526f2fc6068a8baef828a121611538d8b577ca876388109241ff",
   },
   ["TP-008"] = {
-    [root .. "/.tools/proofs/tp008_xml_commit.py"] = "a7e4db216d3ed15625eca76dbba0b3119d51158e2ac1478aa51c2c6d9a597566",
+    files = {
+      [root .. "/.tools/proofs/tp008_xml_commit.py"] = "a7e4db216d3ed15625eca76dbba0b3119d51158e2ac1478aa51c2c6d9a597566",
+    },
+    recorded = "a7e4db216d3ed15625eca76dbba0b3119d51158e2ac1478aa51c2c6d9a597566",
   },
   ["TP-010"] = {
-    [root .. "/.tools/proofs/tp010_build.sh"] = "6ccda002fba1802349463c3d025341abd22d0cede755784974954122e4a1083c",
-    [root .. "/.tools/proofs/tp010_xml.lua"] = "11e5ad1953193fa7477401bd197a8ef807ca713ca3944323a043be9fc5f557e2",
+    files = {
+      [root .. "/.tools/proofs/tp010_build.sh"] = "7751ced36de3f6bd7a8278767d919603248fa0a8bd4f4d977213fcf4979163be",
+      [root .. "/.tools/proofs/tp010_xml.lua"] = "11e5ad1953193fa7477401bd197a8ef807ca713ca3944323a043be9fc5f557e2",
+    },
+    recorded = {
+      build = "7751ced36de3f6bd7a8278767d919603248fa0a8bd4f4d977213fcf4979163be",
+      corpus = "11e5ad1953193fa7477401bd197a8ef807ca713ca3944323a043be9fc5f557e2",
+    },
   },
 }
+
+local function same_digest_record(actual, wanted)
+  if type(wanted) == "string" then return actual == wanted end
+  if type(actual) ~= "table" or type(wanted) ~= "table" then return false end
+  local actual_count = 0
+  local wanted_count = 0
+  for key, value in pairs(actual) do
+    actual_count = actual_count + 1
+    if wanted[key] ~= value then return false end
+  end
+  for _ in pairs(wanted) do wanted_count = wanted_count + 1 end
+  return actual_count == wanted_count
+end
 
 local seen = {}
 for _, proof in ipairs(manifest.proofs or {}) do
@@ -56,11 +84,14 @@ for _, proof in ipairs(manifest.proofs or {}) do
   check(type(proof.command) == "string" and proof.command ~= "", tostring(proof.id) .. " has no reproduction command")
   check(type(proof.assertions) == "number" and proof.assertions > 0, tostring(proof.id) .. " has no assertion count")
   check(type(proof.target_pending) == "table" and #proof.target_pending > 0, tostring(proof.id) .. " must retain target qualification")
+  if expected[proof.id] then
+    check(same_digest_record(proof.source_sha256, expected[proof.id].recorded), tostring(proof.id) .. " manifest source digest drifted")
+  end
 end
 for id in pairs(expected) do check(seen[id], "proof manifest omits " .. id) end
 
-for id, files in pairs(expected) do
-  for path, digest in pairs(files) do
+for id, proof_expected in pairs(expected) do
+  for path, digest in pairs(proof_expected.files) do
     check(sha256(path) == digest, id .. " proof source digest drifted: " .. path)
   end
 end

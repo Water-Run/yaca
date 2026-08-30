@@ -1,6 +1,6 @@
 return {
-  evidence_version = "modern-2026-08-29.1",
-  observed_at = "2026-08-29",
+  evidence_version = "modern-2026-08-29.2",
+  observed_at = "2026-08-30",
   design_baseline_commit = "a169dd0",
   host = {
     os = "Fedora Linux 44 (Workstation Edition)",
@@ -63,7 +63,7 @@ return {
       command = "bash .tools/proofs/tp010_build.sh",
       assertions = 5564743,
       source_sha256 = {
-        build = "6ccda002fba1802349463c3d025341abd22d0cede755784974954122e4a1083c",
+        build = "7751ced36de3f6bd7a8278767d919603248fa0a8bd4f4d977213fcf4979163be",
         corpus = "11e5ad1953193fa7477401bd197a8ef807ca713ca3944323a043be9fc5f557e2",
       },
       target_pending = { "Win32 x86 build/load", "Win64 build/load", "CentOS 7 runtime", "target resource limits" },
