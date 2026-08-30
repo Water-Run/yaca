@@ -122,6 +122,18 @@ typedef struct yaca_process
   char signal_or_exception[32];
 } yaca_process;
 
+#if defined(_WIN32)
+typedef struct yaca_terminal_read
+{
+  HANDLE input;
+  HANDLE thread;
+  WCHAR *wide;
+  DWORD capacity;
+  volatile DWORD received;
+  volatile DWORD error_value;
+} yaca_terminal_read;
+#endif
+
 typedef struct yaca_terminal
 {
 #if defined(_WIN32)
@@ -129,6 +141,8 @@ typedef struct yaca_terminal
   DWORD original_mode;
   DWORD input_type;
   WCHAR pending_high_surrogate;
+  int cooked_mode;
+  yaca_terminal_read *cooked_read;
 #else
   int input;
   int original_flags;
@@ -8215,6 +8229,10 @@ static yaca_terminal *check_terminal(lua_State *L, int index)
   return terminal;
 }
 
+#if defined(_WIN32)
+static int cancel_windows_cooked_read(yaca_terminal *terminal);
+#endif
+
 static int restore_terminal(yaca_terminal *terminal)
 {
   if (terminal->restored)
@@ -8250,6 +8268,14 @@ static int l_terminal_gc(lua_State *L)
   terminal = (yaca_terminal *)luaL_testudata(L, 1, YACA_TERMINAL_METATABLE);
   if (terminal != NULL && !terminal->closed)
   {
+#if defined(_WIN32)
+    if (!cancel_windows_cooked_read(terminal))
+    {
+      /* The worker owns an independent heap record, so a failed emergency
+      ** cancellation may be detached without accessing collected userdata. */
+      terminal->cooked_read = NULL;
+    }
+#endif
     restore_terminal(terminal);
     terminal->closed = 1;
   }
@@ -8409,6 +8435,244 @@ static int push_windows_key_action(
   return 1;
 }
 
+static DWORD WINAPI windows_cooked_reader(LPVOID opaque)
+{
+  yaca_terminal_read *read;
+  DWORD received;
+
+  read = (yaca_terminal_read *)opaque;
+  received = 0;
+  if (ReadConsoleW(
+      read->input,
+      read->wide,
+      read->capacity,
+      &received,
+      NULL))
+  {
+    read->received = received;
+    read->error_value = ERROR_SUCCESS;
+  }
+  else
+  {
+    read->received = 0;
+    read->error_value = GetLastError();
+  }
+  return 0;
+}
+
+/*
+** Starts one real cooked ReadConsoleW operation on a dedicated thread.  This
+** preserves the host console's live XP-era echo, backspace, cursor, and IME
+** behavior without blocking the Agent event loop while a draft is unfinished.
+*/
+static int start_windows_cooked_read(yaca_terminal *terminal)
+{
+  yaca_terminal_read *read;
+  size_t capacity;
+  DWORD error_value;
+
+  if (terminal->cooked_read != NULL)
+  {
+    return 1;
+  }
+  capacity = terminal->maximum_input_bytes;
+  if (capacity > 0x7ffffffdU)
+  {
+    capacity = 0x7ffffffdU;
+  }
+  capacity += 2U;
+  if (capacity > (SIZE_MAX / sizeof(WCHAR)) - 1U)
+  {
+    SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+    return 0;
+  }
+  read = (yaca_terminal_read *)calloc(1, sizeof(yaca_terminal_read));
+  if (read == NULL)
+  {
+    SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+    return 0;
+  }
+  read->wide = (WCHAR *)malloc((capacity + 1U) * sizeof(WCHAR));
+  if (read->wide == NULL)
+  {
+    free(read);
+    SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+    return 0;
+  }
+  read->input = terminal->input;
+  read->capacity = (DWORD)capacity;
+  read->thread = CreateThread(
+    NULL,
+    0,
+    windows_cooked_reader,
+    read,
+    0,
+    NULL);
+  if (read->thread == NULL)
+  {
+    error_value = GetLastError();
+    free(read->wide);
+    free(read);
+    SetLastError(error_value);
+    return 0;
+  }
+  terminal->cooked_read = read;
+  return 1;
+}
+
+static void free_windows_cooked_read(yaca_terminal *terminal)
+{
+  yaca_terminal_read *read;
+
+  read = terminal->cooked_read;
+  if (read == NULL)
+  {
+    return;
+  }
+  if (read->thread != NULL)
+  {
+    CloseHandle(read->thread);
+  }
+  free(read->wide);
+  free(read);
+  terminal->cooked_read = NULL;
+}
+
+/*
+** XP lacks the newer per-thread synchronous-I/O cancellation API.  A synthetic
+** Enter is written only while cancelling yaca's own active line read, then the
+** worker is joined before its storage or the original console mode is released.
+*/
+static int cancel_windows_cooked_read(yaca_terminal *terminal)
+{
+  INPUT_RECORD record;
+  DWORD written;
+  DWORD wait_result;
+
+  if (terminal->cooked_read == NULL)
+  {
+    return 1;
+  }
+  wait_result = WaitForSingleObject(terminal->cooked_read->thread, 0);
+  if (wait_result == WAIT_TIMEOUT)
+  {
+    memset(&record, 0, sizeof(record));
+    record.EventType = KEY_EVENT;
+    record.Event.KeyEvent.bKeyDown = TRUE;
+    record.Event.KeyEvent.wRepeatCount = 1;
+    record.Event.KeyEvent.wVirtualKeyCode = VK_RETURN;
+    record.Event.KeyEvent.uChar.UnicodeChar = L'\r';
+    written = 0;
+    if (!WriteConsoleInputW(terminal->input, &record, 1, &written))
+    {
+      return 0;
+    }
+    if (written != 1)
+    {
+      SetLastError(ERROR_WRITE_FAULT);
+      return 0;
+    }
+    wait_result = WaitForSingleObject(terminal->cooked_read->thread, 5000);
+  }
+  if (wait_result != WAIT_OBJECT_0)
+  {
+    if (wait_result == WAIT_TIMEOUT)
+    {
+      SetLastError(ERROR_TIMEOUT);
+    }
+    return 0;
+  }
+  free_windows_cooked_read(terminal);
+  return 1;
+}
+
+/*
+** Emits one completed wide cooked line as strict UTF-8.
+*/
+static int push_windows_cooked_line(lua_State *L, yaca_terminal *terminal)
+{
+  yaca_terminal_read *read;
+  char *bytes;
+  size_t byte_length;
+  size_t index;
+
+  read = terminal->cooked_read;
+  if (read == NULL)
+  {
+    return 0;
+  }
+  if (read->received == 0)
+  {
+    strcpy(terminal->outcome, "completed");
+    push_terminal_fact(L, terminal);
+    return 2;
+  }
+  if (terminal->maximum_input_bytes == SIZE_MAX)
+  {
+    return -1;
+  }
+  bytes = (char *)malloc(terminal->maximum_input_bytes + 1U);
+  if (bytes == NULL)
+  {
+    return -1;
+  }
+  byte_length = 0;
+  index = 0;
+  while (index < (size_t)read->received)
+  {
+    unsigned long codepoint;
+    unsigned int unit;
+    char encoded[4];
+    size_t encoded_length;
+
+    unit = (unsigned int)read->wide[index++];
+    if (unit == 0U)
+    {
+      free(bytes);
+      return -2;
+    }
+    if (unit >= 0xD800U && unit <= 0xDBFFU)
+    {
+      unsigned int low;
+
+      if (index >= (size_t)read->received)
+      {
+        free(bytes);
+        return -2;
+      }
+      low = (unsigned int)read->wide[index++];
+      if (low < 0xDC00U || low > 0xDFFFU)
+      {
+        free(bytes);
+        return -2;
+      }
+      codepoint = 0x10000UL
+        + (((unsigned long)unit - 0xD800UL) << 10)
+        + ((unsigned long)low - 0xDC00UL);
+    }
+    else if (unit >= 0xDC00U && unit <= 0xDFFFU)
+    {
+      free(bytes);
+      return -2;
+    }
+    else
+    {
+      codepoint = (unsigned long)unit;
+    }
+    encoded_length = encode_utf8_codepoint(codepoint, encoded);
+    if (encoded_length > terminal->maximum_input_bytes - byte_length)
+    {
+      free(bytes);
+      return -1;
+    }
+    memcpy(bytes + byte_length, encoded, encoded_length);
+    byte_length += encoded_length;
+  }
+  push_terminal_action(L, "text", bytes, byte_length);
+  free(bytes);
+  return 1;
+}
+
 #endif
 
 static int l_terminal_start(lua_State *L)
@@ -8460,7 +8724,18 @@ static int l_terminal_start(lua_State *L)
     {
       terminal->original_mode = current_mode;
       terminal->has_original_mode = 1;
-      if (strcmp(mode, "cooked") != 0)
+      terminal->cooked_mode = strcmp(mode, "cooked") == 0;
+      if (terminal->cooked_mode)
+      {
+        next_mode = current_mode;
+        next_mode |= ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_PROCESSED_INPUT;
+        if (!SetConsoleMode(terminal->input, next_mode))
+        {
+          lua_pop(L, 1);
+          return push_windows_failure(L, GetLastError(), "cannot enter cooked terminal mode");
+        }
+      }
+      else
       {
         next_mode = current_mode;
         next_mode |= ENABLE_EXTENDED_FLAGS | ENABLE_WINDOW_INPUT;
@@ -8484,6 +8759,15 @@ static int l_terminal_start(lua_State *L)
     {
       lua_pop(L, 1);
       return push_failure(L, "TerminalCapability", "unsupported character input handle");
+    }
+    if (terminal->cooked_mode && !start_windows_cooked_read(terminal))
+    {
+      DWORD error_value;
+
+      error_value = GetLastError();
+      restore_terminal(terminal);
+      lua_pop(L, 1);
+      return push_windows_failure(L, error_value, "cannot start cooked terminal input");
     }
   }
 #else
@@ -8574,39 +8858,91 @@ static int l_terminal_poll(lua_State *L)
 #if defined(_WIN32)
   if (terminal->has_original_mode)
   {
-    DWORD available;
-
-    available = 0;
-    if (!GetNumberOfConsoleInputEvents(terminal->input, &available))
+    if (terminal->cooked_mode)
     {
-      lua_pop(L, 1);
-      return push_windows_failure(L, GetLastError(), "terminal input poll failed");
+      DWORD wait_result;
+      DWORD read_error;
+      int line_result;
+
+      if (terminal->cooked_read == NULL
+          && !start_windows_cooked_read(terminal))
+      {
+        lua_pop(L, 1);
+        return push_windows_failure(L, GetLastError(), "cooked terminal input restart failed");
+      }
+      wait_result = WaitForSingleObject(terminal->cooked_read->thread, 0);
+      if (wait_result == WAIT_TIMEOUT)
+      {
+        return return_success(L);
+      }
+      if (wait_result != WAIT_OBJECT_0)
+      {
+        lua_pop(L, 1);
+        return push_windows_failure(L, GetLastError(), "cooked terminal input wait failed");
+      }
+      read_error = terminal->cooked_read->error_value;
+      if (read_error != ERROR_SUCCESS)
+      {
+        free_windows_cooked_read(terminal);
+        lua_pop(L, 1);
+        return push_windows_failure(L, read_error, "cooked terminal line read failed");
+      }
+      line_result = push_windows_cooked_line(L, terminal);
+      free_windows_cooked_read(terminal);
+      if (line_result == 0)
+      {
+        lua_pop(L, 1);
+        return push_failure(L, "TerminalContract", "cooked terminal line is unavailable");
+      }
+      if (line_result == -2)
+      {
+        lua_pop(L, 1);
+        return push_failure(L, "InvalidEncoding", "cooked terminal emitted invalid Unicode");
+      }
+      if (line_result < 0)
+      {
+        lua_pop(L, 1);
+        return push_failure(L, "Limit", "cooked terminal line exceeds its byte limit");
+      }
+      lua_seti(L, -2, 1);
+      return return_success(L);
     }
-    while (available > 0 && count < budget)
+    else
     {
-      INPUT_RECORD record;
-      DWORD received;
-      int action_result;
+      DWORD available;
 
-      if (!ReadConsoleInputW(terminal->input, &record, 1, &received))
+      available = 0;
+      if (!GetNumberOfConsoleInputEvents(terminal->input, &available))
       {
         lua_pop(L, 1);
-        return push_windows_failure(L, GetLastError(), "terminal input read failed");
+        return push_windows_failure(L, GetLastError(), "terminal input poll failed");
       }
-      available--;
-      if (received == 0 || record.EventType != KEY_EVENT)
+      while (available > 0 && count < budget)
       {
-        continue;
-      }
-      action_result = push_windows_key_action(L, terminal, &record.Event.KeyEvent);
-      if (action_result < 0)
-      {
-        lua_pop(L, 1);
-        return push_failure(L, "InvalidEncoding", "terminal emitted an invalid Unicode scalar");
-      }
-      if (action_result > 0)
-      {
-        lua_seti(L, -2, (lua_Integer)++count);
+        INPUT_RECORD record;
+        DWORD received;
+        int action_result;
+
+        if (!ReadConsoleInputW(terminal->input, &record, 1, &received))
+        {
+          lua_pop(L, 1);
+          return push_windows_failure(L, GetLastError(), "terminal input read failed");
+        }
+        available--;
+        if (received == 0 || record.EventType != KEY_EVENT)
+        {
+          continue;
+        }
+        action_result = push_windows_key_action(L, terminal, &record.Event.KeyEvent);
+        if (action_result < 0)
+        {
+          lua_pop(L, 1);
+          return push_failure(L, "InvalidEncoding", "terminal emitted an invalid Unicode scalar");
+        }
+        if (action_result > 0)
+        {
+          lua_seti(L, -2, (lua_Integer)++count);
+        }
       }
     }
   }
@@ -8740,6 +9076,12 @@ static int l_terminal_cancel(lua_State *L)
     lua_pushboolean(L, 0);
     return return_success(L);
   }
+#if defined(_WIN32)
+  if (terminal->cooked_mode && !cancel_windows_cooked_read(terminal))
+  {
+    return push_windows_failure(L, GetLastError(), "cooked terminal cancellation failed");
+  }
+#endif
   terminal->cancelled = 1;
   lua_pushboolean(L, 1);
   return return_success(L);
@@ -8769,6 +9111,12 @@ static int l_terminal_restore(lua_State *L)
   yaca_terminal *terminal;
 
   terminal = check_terminal(L, 1);
+#if defined(_WIN32)
+  if (terminal->cooked_mode && !cancel_windows_cooked_read(terminal))
+  {
+    return push_windows_failure(L, GetLastError(), "cooked terminal restoration join failed");
+  }
+#endif
   if (!restore_terminal(terminal))
   {
 #if defined(_WIN32)
@@ -8785,6 +9133,12 @@ static int l_terminal_close(lua_State *L)
   yaca_terminal *terminal;
 
   terminal = check_terminal(L, 1);
+#if defined(_WIN32)
+  if (terminal->cooked_mode && !cancel_windows_cooked_read(terminal))
+  {
+    return push_windows_failure(L, GetLastError(), "cooked terminal close join failed");
+  }
+#endif
   if (!terminal->restored && !restore_terminal(terminal))
   {
 #if defined(_WIN32)

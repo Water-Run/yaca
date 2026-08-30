@@ -1872,7 +1872,8 @@ end
 local CONFIG_REPAIR_TEMPLATE = table.concat({
     "; yaca bootstrap repair template",
     "; This file is intentionally not Agent-ready until Model.Primary is configured",
-    "; and explicitly enabled. Run yaca --config-repl after editing to validate it.",
+    "; and explicitly enabled. Run yaca --model-repl for hidden Key input, or edit",
+    "; this file manually and run yaca --config-repl to validate it.",
     "",
     "[General]",
     "SchemaVersion = 0.1.0",
@@ -4585,6 +4586,628 @@ function M.run_interactive_chat(composed, chat, runtime)
     return coordinator:run()
 end
 
+local function hex_bytes(value)
+    local output = {}
+    for index = 1, #value do
+        output[index] = string.format("%02x", value:byte(index))
+    end
+    return table.concat(output)
+end
+
+local function model_setup_diagnostic(value, maximum_source_bytes)
+    return (safe_diagnostic(value, maximum_source_bytes):gsub(
+        "[\128-\255]",
+        function(byte) return string.format("\\x%02X", byte:byte()) end
+    ))
+end
+
+local function model_setup_sections(values)
+    local model_values = {
+        Enabled = values.enabled,
+        Protocol = values.protocol,
+        Endpoint = values.endpoint,
+        RemoteModel = values.remote_model,
+    }
+    if values.key ~= "" then model_values.Key = values.key end
+    return {
+        {
+            name = "General",
+            values = {
+                SchemaVersion = "0.1.0",
+                StartupSelfTest = "off",
+            },
+        },
+        {
+            name = "Permission.Std",
+            values = {
+                Read = "allow",
+                Write = "confirm",
+                Delete = "confirm",
+                Shell = "confirm",
+                OutsideWorkspace = "confirm",
+            },
+        },
+        {
+            name = "Model." .. values.name,
+            values = model_values,
+        },
+    }
+end
+
+local function model_setup_changes(values)
+    local section = "Model." .. values.name
+    local changes = {
+        { section = section, key = "Enabled", value = values.enabled },
+        { section = section, key = "Protocol", value = values.protocol },
+        { section = section, key = "Endpoint", value = values.endpoint },
+        { section = section, key = "RemoteModel", value = values.remote_model },
+    }
+    if values.key ~= "" then
+        changes[#changes + 1] = { section = section, key = "Key", value = values.key }
+    end
+    return changes
+end
+
+local function new_model_setup_input(composed, runtime)
+    local text = require("text")
+    local active = false
+    local active_mode = false
+    local terminal_ended = false
+    local input = {}
+
+    local function output(bytes)
+        if not write_direct(runtime.stdout, bytes) then
+            return nil, failure("BrokenStdout", "Model setup output could not be completed")
+        end
+        return true
+    end
+
+    local function now()
+        local called, value = pcall(composed.backend.clock_port.monotonic_now)
+        if not called or not valid_integer(value, 0) then
+            return nil, failure("MonotonicClockDegraded", "Model setup clock is unavailable")
+        end
+        return value
+    end
+
+    local function close_active()
+        if not active then return true end
+        local observed_now, clock_error = now()
+        if not observed_now then return nil, clock_error end
+        local primary_error
+        if not terminal_ended then
+            local cancel_called, cancelled = pcall(active.cancel, active, observed_now)
+            if not cancel_called or cancelled ~= true then
+                primary_error = failure(
+                    "TerminalFailure",
+                    "Model setup input cancellation could not be requested"
+                )
+            else
+                for _ = 1, 1024 do
+                    local poll_called, events = pcall(active.poll, active, observed_now, 128)
+                    if not poll_called or type(events) ~= "table" then
+                        primary_error = primary_error or failure(
+                            "TerminalFailure",
+                            "Model setup cancellation outcome could not be observed"
+                        )
+                        break
+                    end
+                    for _, event in ipairs(events) do
+                        if type(event) ~= "table" then
+                            primary_error = primary_error or failure(
+                                "TerminalFailure",
+                                "Model setup cancellation emitted an invalid event"
+                            )
+                            break
+                        end
+                        if event.kind == "io_terminal" then
+                            terminal_ended = true
+                            break
+                        end
+                    end
+                    if terminal_ended or primary_error then break end
+                    local next_now, next_error = now()
+                    if not next_now then
+                        primary_error = primary_error or next_error
+                        break
+                    end
+                    observed_now = next_now
+                    local slept, sleep_result = pcall(
+                        composed.backend.clock_port.sleep_ms,
+                        10
+                    )
+                    if not slept or sleep_result == false then
+                        primary_error = primary_error or failure(
+                            "IdleWaitFailure",
+                            "Model setup cancellation wait failed"
+                        )
+                        break
+                    end
+                end
+                if not terminal_ended then
+                    primary_error = primary_error or failure(
+                        "TerminalFailure",
+                        "Model setup cancellation did not reach terminal truth"
+                    )
+                end
+            end
+        end
+        local joined, join_result = pcall(
+            active.join,
+            active,
+            observed_now <= math.maxinteger - 5000 and observed_now + 5000
+                or observed_now
+        )
+        if not joined or type(join_result) ~= "table" then
+            primary_error = primary_error or failure(
+                "TerminalFailure",
+                "Model setup input could not be joined"
+            )
+        end
+        local close_called, closed = pcall(active.close, active)
+        if not close_called or closed ~= true then
+            primary_error = primary_error or failure(
+                "TerminalFailure",
+                "Model setup terminal state could not be restored"
+            )
+        end
+        active = false
+        active_mode = false
+        terminal_ended = false
+        if primary_error then return nil, primary_error end
+        return true
+    end
+
+    local function activate(mode)
+        if active_mode == mode then return true end
+        local closed, close_error = close_active()
+        if not closed then return nil, close_error end
+        local terminal, terminal_error = composed.backend.new_terminal(mode)
+        if not terminal then return nil, terminal_error end
+        local observed_now, clock_error = now()
+        if not observed_now then return nil, clock_error end
+        local called, started = pcall(terminal.start, terminal, observed_now)
+        if not called or started ~= true then
+            pcall(terminal.close, terminal)
+            return nil, failure(
+                "TerminalStartFailure",
+                "Model setup terminal input could not start"
+            )
+        end
+        active = terminal
+        active_mode = mode
+        terminal_ended = false
+        return true
+    end
+
+    local function remove_last_scalar(value)
+        if value == "" then return value end
+        local index = #value
+        while index > 1 and value:byte(index) >= 0x80
+            and value:byte(index) <= 0xBF
+        do
+            index = index - 1
+        end
+        return value:sub(1, index - 1)
+    end
+
+    local function append_raw(value, chunk, maximum_bytes)
+        local current = value
+        for index = 1, #chunk do
+            local byte = chunk:byte(index)
+            if byte == 0x08 or byte == 0x7F then
+                current = remove_last_scalar(current)
+            elseif byte < 0x20 then
+                return nil, failure(
+                    "InvalidSecretInput",
+                    "Model Key input contains an unsupported control byte"
+                )
+            else
+                if #current >= maximum_bytes then
+                    return nil, failure("InputLimit", "Model setup input exceeds its byte limit")
+                end
+                current = current .. string.char(byte)
+            end
+        end
+        return current
+    end
+
+    function input.read(prompt, secret, maximum_bytes)
+        local mode = secret and "raw" or "cooked"
+        local activated, activate_error = activate(mode)
+        if not activated then return nil, activate_error end
+        local written, write_error = output(prompt)
+        if not written then return nil, write_error end
+        local value = ""
+        while true do
+            local observed_now, clock_error = now()
+            if not observed_now then return nil, clock_error end
+            local called, events = pcall(active.poll, active, observed_now, 128)
+            if not called or type(events) ~= "table" then
+                return nil, failure(
+                    "TerminalPollFailure",
+                    "Model setup input polling failed"
+                )
+            end
+            local progressed = false
+            for _, event in ipairs(events) do
+                progressed = true
+                if event.kind == "io_terminal" then
+                    terminal_ended = true
+                    return false, { code = "ModelSetupCancelled" }
+                end
+                if event.kind ~= "user_action" then
+                    return nil, failure(
+                        "TerminalContract",
+                        "Model setup received an invalid terminal event"
+                    )
+                end
+                if event.action == "cancel" or event.action == "eof" then
+                    return false, { code = "ModelSetupCancelled" }
+                elseif event.action == "text" then
+                    if type(event.text) ~= "string" then
+                        return nil, failure(
+                            "TerminalContract",
+                            "Model setup text event is invalid"
+                        )
+                    end
+                    if secret then
+                        local appended, append_error = append_raw(
+                            value,
+                            event.text,
+                            maximum_bytes
+                        )
+                        if not appended then return nil, append_error end
+                        value = appended
+                    else
+                        if #value > maximum_bytes - #event.text then
+                            return nil, failure(
+                                "InputLimit",
+                                "Model setup input exceeds its byte limit"
+                            )
+                        end
+                        value = value .. event.text
+                    end
+                elseif event.action == "submit-or-queue" then
+                    local valid, utf8_error = text.validate_utf8(value)
+                    if not valid then
+                        return nil, utf8_error or failure(
+                            "InvalidInputEncoding",
+                            "Model setup input is not valid UTF-8"
+                        )
+                    end
+                    if secret then
+                        written, write_error = output(value == "" and "[empty]\n" or "[hidden]\n")
+                        if not written then return nil, write_error end
+                    end
+                    return value
+                elseif event.action ~= "newline" then
+                    return nil, failure(
+                        "UnsupportedInputAction",
+                        "Model setup accepts text, Enter, Esc, or EOF"
+                    )
+                end
+            end
+            if not progressed then
+                local slept, sleep_error = pcall(
+                    composed.backend.clock_port.sleep_ms,
+                    10
+                )
+                if not slept or sleep_error == false then
+                    return nil, failure(
+                        "IdleWaitFailure",
+                        "Model setup input wait failed"
+                    )
+                end
+            end
+        end
+    end
+
+    function input.write(bytes)
+        return output(bytes)
+    end
+
+    function input.close()
+        return close_active()
+    end
+
+    return input
+end
+
+local function default_model_name(generation)
+    if type(generation) ~= "table" then return "Primary" end
+    if type(generation.current_model) == "string" and generation.current_model ~= "" then
+        return generation.current_model
+    end
+    if type(generation.model_order) == "table"
+        and type(generation.model_order[1]) == "string"
+    then
+        return generation.model_order[1]
+    end
+    return "Primary"
+end
+
+local function another_enabled_model(generation, selected_name)
+    if type(generation) ~= "table" or type(generation.models) ~= "table" then
+        return false
+    end
+    for name, model in pairs(generation.models) do
+        if name ~= selected_name and type(model) == "table" and model.enabled == true then
+            return true
+        end
+    end
+    return false
+end
+
+local function model_setup_cancelled(input)
+    local written, write_error = input.write(
+        "Model configuration cancelled; no configuration was changed.\n"
+    )
+    if not written then return nil, write_error end
+    return readonly({
+        outcome = "cancelled",
+        action = "model-repl",
+        state = "cancelled",
+        online_requests = 0,
+    }, "cancelled Model setup")
+end
+
+---Runs the offline first-Model/editor transaction with a raw no-echo Key field.
+-- The flow never performs a connection test. Existing valid configurations are
+-- edited through a stale-bound draft; only the exact yaca repair template may
+-- enter the otherwise-forbidden invalid-source replacement path.
+function M.run_model_repl(composed, runtime)
+    if type(composed) ~= "table"
+        or type(composed.config) ~= "table"
+        or type(composed.config.begin_edit) ~= "function"
+        or type(composed.config.begin_new_values) ~= "function"
+        or type(composed.config.begin_exact_repair_values) ~= "function"
+        or type(composed.backend) ~= "table"
+        or type(composed.backend.new_terminal) ~= "function"
+        or type(composed.backend.system) ~= "table"
+        or type(composed.backend.system.secure_random) ~= "function"
+        or type(runtime) ~= "table"
+    then
+        return nil, failure(
+            "InvalidModelSetup",
+            "Model setup requires the composed config and terminal services"
+        )
+    end
+    local input = new_model_setup_input(composed, runtime)
+    local function fail_input(original_error)
+        local closed, close_error = input.close()
+        if not closed then return nil, close_error end
+        return nil, original_error
+    end
+    local function cancel_input()
+        local result, result_error = model_setup_cancelled(input)
+        local closed, close_error = input.close()
+        if not result then return nil, result_error end
+        if not closed then return nil, close_error end
+        return result
+    end
+    local existing_draft, edit_error = composed.config.begin_edit(
+        composed.layout.config_path
+    )
+    local mode, generation = "edit", nil
+    if existing_draft then
+        generation, edit_error = composed.config.draft_generation(existing_draft)
+        if not generation then return fail_input(edit_error) end
+    elseif type(edit_error) == "table" and edit_error.code == "NotFound" then
+        mode = "create"
+    else
+        local existing = read_file_bytes(
+            composed.backend.filesystem,
+            composed.layout.config_path,
+            #CONFIG_REPAIR_TEMPLATE
+        )
+        if existing == CONFIG_REPAIR_TEMPLATE then
+            mode = "repair-template"
+        else
+            return fail_input(failure(
+                "ConfigRepairRequired",
+                "Model setup will not replace an arbitrary invalid configuration"
+            ))
+        end
+    end
+
+    local function read_value(prompt, secret)
+        local value, value_error = input.read(prompt, secret, 16384)
+        if value == false and type(value_error) == "table"
+            and value_error.code == "ModelSetupCancelled"
+        then
+            return false
+        end
+        if value == nil then return nil, value_error end
+        return value
+    end
+
+    local wrote, write_error = input.write(table.concat({
+        "YACA MODEL SETUP\n",
+        "Offline only: this publishes configuration and performs no network request.\n",
+    }))
+    if not wrote then return fail_input(write_error) end
+    local suggested_name = default_model_name(generation)
+    local name, read_error = read_value(
+        "Model name [" .. model_setup_diagnostic(suggested_name, 128) .. "]: ",
+        false
+    )
+    if name == false then return cancel_input() end
+    if name == nil then return fail_input(read_error) end
+    if name == "" then name = suggested_name end
+    local current = generation and generation.models and generation.models[name] or nil
+
+    local default_protocol = current and current.protocol or "openai-chat"
+    local protocol
+    while true do
+        protocol, read_error = read_value(
+            "Protocol [" .. default_protocol .. "] (openai-chat|anthropic-messages): ",
+            false
+        )
+        if protocol == false then return cancel_input() end
+        if protocol == nil then return fail_input(read_error) end
+        if protocol == "" then protocol = default_protocol end
+        if protocol == "openai-chat" or protocol == "anthropic-messages" then break end
+        local shown, shown_error = input.write("Protocol must be openai-chat or anthropic-messages.\n")
+        if not shown then return fail_input(shown_error) end
+    end
+
+    local default_enabled = current and current.enabled == false and "no" or "yes"
+    local enabled
+    while true do
+        local enabled_text
+        enabled_text, read_error = read_value(
+            "Enable this Model? [" .. default_enabled .. "] (yes|no): ",
+            false
+        )
+        if enabled_text == false then return cancel_input() end
+        if enabled_text == nil then return fail_input(read_error) end
+        enabled_text = enabled_text == "" and default_enabled or enabled_text:lower()
+        if enabled_text ~= "yes" and enabled_text ~= "no" then
+            local shown, shown_error = input.write("Enable answer must be yes or no.\n")
+            if not shown then return fail_input(shown_error) end
+        elseif enabled_text == "no" and not another_enabled_model(generation, name) then
+            local shown, shown_error = input.write(
+                "At least one Model must remain enabled; answer yes for this Model.\n"
+            )
+            if not shown then return fail_input(shown_error) end
+        else
+            enabled = enabled_text == "yes"
+            break
+        end
+    end
+
+    local default_endpoint = current and current.endpoint or ""
+    local endpoint
+    while true do
+        local suffix = default_endpoint ~= "" and " [keep current]" or ""
+        endpoint, read_error = read_value("Endpoint" .. suffix .. ": ", false)
+        if endpoint == false then return cancel_input() end
+        if endpoint == nil then return fail_input(read_error) end
+        if endpoint == "" then endpoint = default_endpoint end
+        if endpoint ~= "" or not enabled then break end
+        local shown, shown_error = input.write("Endpoint is required for an enabled Model.\n")
+        if not shown then return fail_input(shown_error) end
+    end
+
+    local default_remote = current and current.remote_model or ""
+    local remote_model
+    while true do
+        local suffix = default_remote ~= "" and " [keep current]" or ""
+        remote_model, read_error = read_value("Remote model" .. suffix .. ": ", false)
+        if remote_model == false then return cancel_input() end
+        if remote_model == nil then return fail_input(read_error) end
+        if remote_model == "" then remote_model = default_remote end
+        if remote_model ~= "" or not enabled then break end
+        local shown, shown_error = input.write("Remote model is required for an enabled Model.\n")
+        if not shown then return fail_input(shown_error) end
+    end
+
+    local key_prompt = current and current.key_configured == true
+        and "Key (hidden; Enter keeps the configured value): "
+        or "Key (hidden; Enter configures no key): "
+    local key
+    key, read_error = read_value(key_prompt, true)
+    if key == false then return cancel_input() end
+    if key == nil then return fail_input(read_error) end
+
+    local summary = string.format(
+        "Publish Model.%s protocol=%s endpoint=%s remote=%s enabled=%s key=%s\n",
+        model_setup_diagnostic(name, 128),
+        protocol,
+        model_setup_diagnostic(endpoint, 1024),
+        model_setup_diagnostic(remote_model, 256),
+        tostring(enabled),
+        key ~= "" and "provided" or (current and current.key_configured and "kept" or "none")
+    )
+    wrote, write_error = input.write(summary)
+    if not wrote then return fail_input(write_error) end
+    local confirmation
+    confirmation, read_error = read_value(
+        "Type APPLY to publish, or press Enter to cancel: ",
+        false
+    )
+    if confirmation == false or confirmation == "" then
+        return cancel_input()
+    end
+    if confirmation == nil then return fail_input(read_error) end
+    if confirmation ~= "APPLY" then
+        return cancel_input()
+    end
+    local closed, close_error = input.close()
+    if not closed then return nil, close_error end
+
+    local values = {
+        name = name,
+        protocol = protocol,
+        endpoint = endpoint,
+        remote_model = remote_model,
+        key = key,
+        enabled = enabled,
+    }
+    local draft, draft_error
+    if mode == "edit" then
+        draft, draft_error = composed.config.edit_draft(
+            existing_draft,
+            model_setup_changes(values)
+        )
+    else
+        local sections = model_setup_sections(values)
+        if mode == "create" then
+            local created_root, root_error = ensure_data_root(
+                composed.backend.filesystem,
+                composed.layout.data_root,
+                composed.layout.application_root
+            )
+            if created_root == nil then return nil, root_error end
+            draft, draft_error = composed.config.begin_new_values(
+                composed.layout.config_path,
+                sections
+            )
+        else
+            draft, draft_error = composed.config.begin_exact_repair_values(
+                composed.layout.config_path,
+                CONFIG_REPAIR_TEMPLATE,
+                sections
+            )
+        end
+    end
+    key = nil
+    if not draft then return nil, draft_error end
+    local committed, commit_error
+    for _ = 1, 8 do
+        local random, random_error = composed.backend.system.secure_random(12)
+        if not random then return nil, random_error end
+        local temporary = composed.layout.config_path
+            .. ".yaca-edit-" .. hex_bytes(random) .. ".tmp"
+        committed, commit_error = composed.config.commit_draft(draft, temporary)
+        if committed then break end
+        local code = type(commit_error) == "table" and commit_error.code or nil
+        if code ~= "DestinationExists" and code ~= "AlreadyExists"
+            and code ~= "TemporaryConflict"
+        then
+            break
+        end
+    end
+    if not committed then return nil, commit_error end
+    if not write_direct(
+        runtime.stdout,
+        "Model " .. model_setup_diagnostic(name, 128)
+            .. " was published offline. No network request was made.\n"
+    ) then
+        return nil, failure("BrokenStdout", "Model setup result could not be written")
+    end
+    return readonly({
+        outcome = "success",
+        action = "model-repl",
+        state = "published",
+        config_path = composed.layout.config_path,
+        model_name = name,
+        config_generation = committed.id,
+        online_requests = 0,
+    }, "published Model setup")
+end
+
 local function render_self_test(cli_service, request, result)
     if request.machine == true then
         local records = {}
@@ -4672,9 +5295,8 @@ local function render_management(request, result)
             .. " (" .. safe_diagnostic(result.error_code or result.state, 128) .. ")\n"
     end
     if result.action == "model-repl" then
-        return "Model configuration requires an explicit edit of "
-            .. safe_diagnostic(result.config_path, 1024)
-            .. "; the interactive secret editor is not yet available.\n"
+        return "Model configuration requires the interactive offline editor for "
+            .. safe_diagnostic(result.config_path, 1024) .. ".\n"
     end
     if result.action == "context-repl" then
         if result.state == "scan-failed" then
@@ -4743,6 +5365,14 @@ default_runtime_dispatch = function(request, runtime)
     if not composed then return nil, composition_error end
     local result, dispatch_error = composed.application.dispatch(request)
     if not result then return nil, dispatch_error end
+    if request.id == "model-repl" then
+        local configured, setup_error = M.run_model_repl(composed, runtime)
+        if not configured then return nil, setup_error end
+        return {
+            output = "",
+            exit_value = configured.outcome == "success" and nil or configured,
+        }
+    end
     if request.id == "run-chat" then
         local interactive, interactive_error = M.run_interactive_chat(
             composed,

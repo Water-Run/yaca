@@ -1338,6 +1338,70 @@ function M.new(ports, options)
         return ini.token(value)
     end
 
+    local function build_values_source(sections)
+        local count = dense_count(sections)
+        if not count or count == 0 then
+            return nil, failure(
+                "InvalidConfigValues",
+                "configuration values must contain a non-empty section array"
+            )
+        end
+        local encoded, seen_sections = {}, {}
+        for index, section in ipairs(sections) do
+            if type(section) ~= "table"
+                or type(section.name) ~= "string"
+                or type(section.values) ~= "table"
+            then
+                return nil, failure(
+                    "InvalidConfigValues",
+                    "configuration value section is invalid"
+                )
+            end
+            for key in pairs(section) do
+                if key ~= "name" and key ~= "values" then
+                    return nil, failure(
+                        "InvalidConfigValues",
+                        "configuration value section contains an unknown field"
+                    )
+                end
+            end
+            if seen_sections[section.name] or not section_family(section.name) then
+                return nil, failure(
+                    "InvalidConfigValues",
+                    "configuration value section is unknown or repeated"
+                )
+            end
+            seen_sections[section.name] = true
+            local values = {}
+            for key, value in pairs(section.values) do
+                if type(key) ~= "string" or value == service.unset then
+                    return nil, failure(
+                        "InvalidConfigValues",
+                        "configuration value field is invalid"
+                    )
+                end
+                local descriptor = descriptor_for(section.name, key)
+                if not descriptor then
+                    return nil, failure(
+                        "InvalidConfigValues",
+                        "configuration value field is unknown"
+                    )
+                end
+                local wrapped, wrap_error = encode_change(descriptor, value)
+                if not wrapped then return nil, wrap_error end
+                values[key] = wrapped
+            end
+            encoded[index] = { name = section.name, values = values }
+        end
+        local document, build_error = ini_codec.build(encoded)
+        if not document then return nil, build_error end
+        local source, write_error = ini_codec.write(document, {
+            preserve_concrete = false,
+        })
+        if not source then return nil, write_error end
+        return source
+    end
+
     local function rebuild_without(document, changes)
         local removals, replacements = {}, {}
         for _, change in ipairs(changes) do
@@ -1476,6 +1540,66 @@ function M.new(ports, options)
             mode = "create",
             path = path,
             candidate_source = source,
+            document = document_or_error,
+            generation = generation,
+            context_overrides = overrides,
+            consumed = false,
+        })
+    end
+
+    ---Begins a no-replace transaction from typed semantic section values.
+    -- Secret fields remain values inside the draft and are never returned in a
+    -- public generation or diagnostic. The complete candidate must validate
+    -- before a draft handle is issued.
+    function service.begin_new_values(path, sections, context_overrides)
+        local source, source_error = build_values_source(sections)
+        if not source then return nil, source_error end
+        return service.begin_new(path, source, context_overrides)
+    end
+
+    ---Begins a replace transaction only when an invalid bootstrap source still
+    -- matches exact caller-owned bytes. This narrow path lets the offline setup
+    -- flow replace its own repair template without accepting or discarding an
+    -- arbitrary invalid user configuration.
+    function service.begin_exact_repair_values(
+        path,
+        expected_source,
+        sections,
+        context_overrides
+    )
+        if not valid_absolute_path(path)
+            or type(expected_source) ~= "string"
+            or expected_source == ""
+        then
+            return nil, failure(
+                "InvalidConfigPath",
+                "exact config repair requires an absolute path and expected source"
+            )
+        end
+        local current_source, identity_or_error = read_file(path)
+        if not current_source then return nil, identity_or_error end
+        if current_source ~= expected_source then
+            return nil, failure(
+                "ConfigRepairMismatch",
+                "configuration does not match the owned bootstrap repair template"
+            )
+        end
+        local candidate_source, source_error = build_values_source(sections)
+        if not candidate_source then return nil, source_error end
+        local generation, document_or_error, overrides = parse_generation(
+            candidate_source,
+            context_overrides,
+            generation_number + 1
+        )
+        if not generation then return nil, document_or_error end
+        local digest_value, digest_error = private_digest(current_source)
+        if not digest_value then return nil, digest_error end
+        return new_draft(owner, {
+            mode = "replace",
+            path = path,
+            base_digest = digest_value,
+            base_identity = identity_or_error,
+            candidate_source = candidate_source,
             document = document_or_error,
             generation = generation,
             context_overrides = overrides,

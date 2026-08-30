@@ -119,5 +119,22 @@ return {
                 A.falsy(source:find("CryptAcquireContext", 1, true))
             end,
         },
+        {
+            name = "Windows console paths retain the XP API floor and host line editor",
+            run = function()
+                local source = read_all("native/yaca_native.c")
+                A.contains(source, "#define _WIN32_WINNT 0x0501")
+                A.contains(source, "ReadConsoleW")
+                A.contains(source, "ReadConsoleInputW")
+                A.contains(source, "CreateThread")
+                A.contains(source, "WriteConsoleInputW")
+                A.contains(source, "WaitForSingleObject")
+                A.contains(source, "ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT")
+                A.contains(source, "terminal->cooked_mode")
+                A.falsy(source:find("CancelSynchronousIo", 1, true))
+                A.falsy(source:find("GetConsoleModeEx", 1, true))
+                A.falsy(source:find("TerminateThread", 1, true))
+            end,
+        },
     },
 }

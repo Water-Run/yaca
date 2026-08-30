@@ -137,6 +137,35 @@ end
 local CONFIG_PATH = "/data/config.ini"
 local TEMP_PATH = "/data/config.ini.yaca-tmp"
 
+local function setup_sections(key)
+    return {
+        {
+            name = "General",
+            values = { SchemaVersion = "0.1.0", StartupSelfTest = "off" },
+        },
+        {
+            name = "Permission.Std",
+            values = {
+                Read = "allow",
+                Write = "confirm",
+                Delete = "confirm",
+                Shell = "confirm",
+                OutsideWorkspace = "confirm",
+            },
+        },
+        {
+            name = "Model.Primary",
+            values = {
+                Enabled = true,
+                Protocol = "openai-chat",
+                Endpoint = "https://api.example/v1/chat",
+                RemoteModel = "remote-main",
+                Key = key,
+            },
+        },
+    }
+end
+
 return {
     name = "integration/config-generation",
     cases = {
@@ -281,6 +310,63 @@ return {
                 A.equal(unknown_error.code, "ConfigPublishUnknown")
                 A.contains(controls.bytes(second_path), "LogLevel = debug")
                 A.falsy(controls.exists(second_temp))
+            end,
+        },
+        {
+            name = "typed first setup and exact template repair publish no secret projection",
+            run = function()
+                local filesystem, controls = fake_filesystem.new()
+                local service = codec(filesystem)
+                local draft = assert(service.begin_new_values(
+                    CONFIG_PATH,
+                    setup_sections("first-secret")
+                ))
+                local preview = assert(service.draft_generation(draft))
+                A.truthy(preview.models.Primary.key_configured)
+                A.falsy(preview.models.Primary.key)
+                A.equal(assert(preview.reveal_secret(
+                    "Model.Primary.Key",
+                    "model-auth:Primary"
+                )), "first-secret")
+                assert(service.commit_draft(draft, TEMP_PATH))
+                A.contains(controls.bytes(CONFIG_PATH), "Key = \"first-secret\"")
+
+                local repair_path = "/data/repair.ini"
+                local repair_temp = "/data/repair.ini.yaca-tmp"
+                local repair_source = table.concat({
+                    "[General]",
+                    "SchemaVersion = 0.1.0",
+                    "",
+                    "[Permission.Std]",
+                    "Read = allow",
+                    "Write = confirm",
+                    "Delete = confirm",
+                    "Shell = confirm",
+                    "OutsideWorkspace = confirm",
+                    "",
+                    "[Model.Primary]",
+                    "Enabled = false",
+                    "Protocol = openai-chat",
+                    "",
+                }, "\n")
+                controls.external_replace(repair_path, repair_source)
+                local repair = assert(service.begin_exact_repair_values(
+                    repair_path,
+                    repair_source,
+                    setup_sections("repair-secret")
+                ))
+                assert(service.commit_draft(repair, repair_temp))
+                A.contains(controls.bytes(repair_path), "Key = \"repair-secret\"")
+
+                controls.external_replace(repair_path, repair_source .. "; user edit\n")
+                local mismatched, mismatch_error = service.begin_exact_repair_values(
+                    repair_path,
+                    repair_source,
+                    setup_sections("must-not-publish")
+                )
+                A.falsy(mismatched)
+                A.equal(mismatch_error.code, "ConfigRepairMismatch")
+                A.contains(controls.bytes(repair_path), "; user edit")
             end,
         },
     },

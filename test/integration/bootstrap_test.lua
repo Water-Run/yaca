@@ -140,25 +140,33 @@ local function valid_source(settings)
     }, "\n")
 end
 
-local function production_native()
-    local outer = "/release"
-    local inner = "/runtime/payload"
-    local data_root = outer .. "/__yaca__"
-    local native_path = inner .. "/.luai/native/yaca_native.so"
+local function production_native(settings)
+    settings = settings or {}
+    local windows = settings.os == "windows"
+    local separator = windows and "\\" or "/"
+    local outer = windows and "C:\\release" or "/release"
+    local inner = windows and "C:\\runtime\\payload" or "/runtime/payload"
+    local application = outer .. separator .. (windows and "yaca.exe" or "yaca")
+    local runtime = inner .. separator .. (windows and "yaca.exe" or "yaca")
+    local data_root = outer .. separator .. "__yaca__"
+    local config_path = data_root .. separator .. "config.ini"
+    local native_path = inner .. separator .. ".luai" .. separator .. "native"
+        .. separator .. (windows and "yaca_native.dll" or "yaca_native.so")
+    local components = inner .. separator .. ".luai" .. separator .. "components"
     local initial = {
-        [outer .. "/yaca"] = "outer",
-        [inner .. "/yaca"] = "runtime",
-        [inner .. "/.luai/components/curl"] = "curl",
-        [inner .. "/.luai/components/cacert.pem"] = "not-the-release-ca",
+        [application] = "outer",
+        [runtime] = "runtime",
+        [components .. separator .. (windows and "curl.exe" or "curl")] = "curl",
+        [components .. separator .. "cacert.pem"] = "not-the-release-ca",
         [native_path] = "native",
     }
     local raw, controls = fake_filesystem.new(initial, 65536)
     local directories = {
         [outer] = true,
         [inner] = true,
-        [inner .. "/.luai"] = true,
-        [inner .. "/.luai/components"] = true,
-        [inner .. "/.luai/native"] = true,
+        [inner .. separator .. ".luai"] = true,
+        [components] = true,
+        [inner .. separator .. ".luai" .. separator .. "native"] = true,
     }
     local hashes = hash_port()
     local calls = { directory_creates = 0, process_starts = 0 }
@@ -167,16 +175,21 @@ local function production_native()
     end
     local native = {}
     function native.abi_version() return "yaca-native-v0.1.0" end
-    function native.platform_identity() return { os = "linux", arch = "x86_64" } end
+    function native.platform_identity()
+        return {
+            os = windows and "windows" or "linux",
+            arch = windows and (settings.arch or "x86") or "x86_64",
+        }
+    end
     function native.stdio_facts()
         return { stdin_is_tty = true, stdout_is_tty = true, stderr_is_tty = true }
     end
     function native.executable_paths()
-        return { application = outer .. "/yaca", runtime = inner .. "/yaca" }
+        return { application = application, runtime = runtime }
     end
     function native.workspace_inspect()
         return {
-            path = "/workspace",
+            path = windows and "C:\\workspace" or "/workspace",
             enterable = true,
             identity = {
                 kind = "directory", volume = "fake-volume", object = "workspace",
@@ -252,7 +265,7 @@ local function production_native()
     function native.terminal_join() return true, { outcome = "completed" } end
     function native.terminal_close() return true, true end
     function native.terminal_restore() return true, true end
-    return native, controls, calls, native_path, data_root
+    return native, controls, calls, native_path, data_root, application, config_path
 end
 
 local function application(source)
@@ -608,6 +621,276 @@ return {
                 A.contains(rendered, "ST1-CONTEXT-LOCK PASSED")
                 A.falsy(rendered:find("not yet attached", 1, true))
                 A.deep_equal(stderr, {})
+            end,
+        },
+        {
+            name = "production model setup replaces only its template and hides the Key",
+            run = function()
+                cache.lxp = fake_lxp(function()
+                    return false, "Model setup must not parse Context XML", 1, 1, 1
+                end)
+                local native, filesystem, calls, native_path = production_native()
+                local stdout, stderr = {}, {}
+                local ports = {
+                    native = native,
+                    native_path = native_path,
+                    stdout = function(bytes) stdout[#stdout + 1] = bytes return true end,
+                    stderr = function(bytes) stderr[#stderr + 1] = bytes return true end,
+                }
+                A.equal(main.run_cli({
+                    [0] = "/release/yaca", "--config-repl",
+                }, ports), 0)
+                A.contains(assert(filesystem.bytes(CONFIG_PATH)), "Enabled = false")
+
+                local answers = {
+                    "", -- Primary
+                    "", -- openai-chat
+                    "", -- enabled=yes
+                    "https://api.example/v1/chat",
+                    "remote-main",
+                    "super-secret-key",
+                    "APPLY",
+                }
+                local answer_index = 0
+                local modes = {}
+                function native.terminal_start(request)
+                    modes[#modes + 1] = request.mode
+                    return true, { mode = request.mode }
+                end
+                function native.terminal_poll(handle)
+                    if handle.cancelled then
+                        return true, { { kind = "terminal", outcome = "cancelled" } }
+                    end
+                    answer_index = answer_index + 1
+                    local answer = answers[answer_index]
+                    if answer == nil then return true, {} end
+                    return true, {
+                        { kind = "action", intent = "text", text = answer .. "\n" },
+                    }
+                end
+                function native.terminal_cancel(handle)
+                    handle.cancelled = true
+                    return true, true
+                end
+                function native.terminal_join(handle)
+                    A.truthy(handle.cancelled)
+                    return true, { outcome = "cancelled" }
+                end
+                function native.terminal_restore() return true, true end
+                function native.terminal_close() return true, true end
+
+                stdout, stderr = {}, {}
+                A.equal(main.run_cli({
+                    [0] = "/release/yaca", "--model-repl",
+                }, ports), 0)
+                local rendered = table.concat(stdout)
+                A.contains(rendered, "YACA MODEL SETUP")
+                A.contains(rendered, "[hidden]")
+                A.contains(rendered, "was published offline")
+                A.falsy(rendered:find("super-secret-key", 1, true))
+                local published = assert(filesystem.bytes(CONFIG_PATH))
+                A.contains(published, "Enabled = true")
+                A.contains(published, "Endpoint = \"https://api.example/v1/chat\"")
+                A.contains(published, "RemoteModel = \"remote-main\"")
+                A.contains(published, "Key = \"super-secret-key\"")
+                A.deep_equal(modes, { "cooked", "raw", "cooked" })
+                A.equal(answer_index, #answers)
+                A.equal(calls.process_starts, 0)
+                A.deep_equal(stderr, {})
+            end,
+        },
+        {
+            name = "cancelled Model setup creates no data or configuration",
+            run = function()
+                cache.lxp = fake_lxp(function()
+                    return false, "cancelled setup must not parse XML", 1, 1, 1
+                end)
+                local native, filesystem, calls, native_path = production_native()
+                local polls = 0
+                function native.terminal_start(request)
+                    A.equal(request.mode, "cooked")
+                    return true, {}
+                end
+                function native.terminal_poll(handle)
+                    if handle.cancelled then
+                        return true, { { kind = "terminal", outcome = "cancelled" } }
+                    end
+                    polls = polls + 1
+                    return true, { { kind = "action", intent = "cancel" } }
+                end
+                function native.terminal_cancel(handle)
+                    handle.cancelled = true
+                    return true, true
+                end
+                function native.terminal_join(handle)
+                    A.truthy(handle.cancelled)
+                    return true, { outcome = "cancelled" }
+                end
+                function native.terminal_restore() return true, true end
+                function native.terminal_close() return true, true end
+                local stdout, stderr = {}, {}
+                local exit_code = main.run_cli({
+                    [0] = "/release/yaca", "--model-repl",
+                }, {
+                    native = native,
+                    native_path = native_path,
+                    stdout = function(bytes) stdout[#stdout + 1] = bytes return true end,
+                    stderr = function(bytes) stderr[#stderr + 1] = bytes return true end,
+                })
+                A.equal(exit_code, 7)
+                A.equal(polls, 1)
+                A.falsy(filesystem.exists(CONFIG_PATH))
+                A.equal(calls.directory_creates, 0)
+                A.equal(calls.process_starts, 0)
+                A.contains(table.concat(stdout), "no configuration was changed")
+                A.deep_equal(stderr, {})
+            end,
+        },
+        {
+            name = "synthetic WinXP CMD setup uses cooked lines and ASCII output",
+            run = function()
+                cache.lxp = fake_lxp(function()
+                    return false, "Model setup must not parse Context XML", 1, 1, 1
+                end)
+                local native, filesystem, calls, native_path, _, application_path,
+                    config_path = production_native({ os = "windows", arch = "x86" })
+                local answers = {
+                    "主要", -- UTF-8 is transported by the native wide-console path.
+                    "", -- openai-chat
+                    "no", -- rejected because a first configuration needs one enabled Model.
+                    "yes",
+                    "https://api.example/v1/chat",
+                    "remote-main",
+                    "xp-secret-key",
+                    "APPLY",
+                }
+                local answer_index = 0
+                local modes = {}
+                function native.terminal_start(request)
+                    modes[#modes + 1] = request.mode
+                    return true, { mode = request.mode }
+                end
+                function native.terminal_poll(handle)
+                    if handle.cancelled then
+                        return true, { { kind = "terminal", outcome = "cancelled" } }
+                    end
+                    answer_index = answer_index + 1
+                    local answer = answers[answer_index]
+                    if answer == nil then return true, {} end
+                    return true, {
+                        { kind = "action", intent = "text", text = answer .. "\r\n" },
+                    }
+                end
+                function native.terminal_cancel(handle)
+                    handle.cancelled = true
+                    return true, true
+                end
+                function native.terminal_join(handle)
+                    A.truthy(handle.cancelled)
+                    return true, { outcome = "cancelled" }
+                end
+                function native.terminal_restore() return true, true end
+                function native.terminal_close() return true, true end
+
+                local stdout, stderr = {}, {}
+                local exit_code = main.run_cli({
+                    [0] = application_path, "--model-repl",
+                }, {
+                    native = native,
+                    native_path = native_path,
+                    stdout = function(bytes) stdout[#stdout + 1] = bytes return true end,
+                    stderr = function(bytes) stderr[#stderr + 1] = bytes return true end,
+                })
+                A.equal(exit_code, 0)
+                local rendered = table.concat(stdout)
+                for index = 1, #rendered do
+                    local byte = rendered:byte(index)
+                    A.truthy(
+                        byte == 0x09 or byte == 0x0A or byte == 0x0D
+                            or (byte >= 0x20 and byte <= 0x7E),
+                        "non-ASCII WinXP transcript byte at " .. tostring(index)
+                    )
+                end
+                A.contains(rendered, "At least one Model must remain enabled")
+                A.contains(rendered, "Model.\\xE4\\xB8\\xBB\\xE8\\xA6\\x81")
+                A.contains(rendered, "[hidden]")
+                A.falsy(rendered:find("xp-secret-key", 1, true))
+                local published = assert(filesystem.bytes(config_path))
+                A.contains(published, "[Model.主要]")
+                A.contains(published, "Key = \"xp-secret-key\"")
+                A.deep_equal(modes, { "cooked", "raw", "cooked" })
+                A.equal(answer_index, #answers)
+                A.equal(calls.directory_creates, 1)
+                A.equal(calls.process_starts, 0)
+                A.deep_equal(stderr, {})
+            end,
+        },
+        {
+            name = "Model setup publishes nothing when terminal restoration is unknown",
+            run = function()
+                cache.lxp = fake_lxp(function()
+                    return false, "failed setup must not parse Context XML", 1, 1, 1
+                end)
+                local native, filesystem, calls, native_path = production_native()
+                local answers = {
+                    "", "", "", "https://api.example/v1/chat",
+                    "remote-main", "secret-before-restore", "APPLY",
+                }
+                local answer_index = 0
+                local restores = 0
+                function native.terminal_start(request)
+                    return true, { mode = request.mode }
+                end
+                function native.terminal_poll(handle)
+                    if handle.cancelled then
+                        return true, { { kind = "terminal", outcome = "cancelled" } }
+                    end
+                    answer_index = answer_index + 1
+                    return true, {
+                        {
+                            kind = "action",
+                            intent = "text",
+                            text = assert(answers[answer_index]) .. "\n",
+                        },
+                    }
+                end
+                function native.terminal_cancel(handle)
+                    handle.cancelled = true
+                    return true, true
+                end
+                function native.terminal_join()
+                    return true, { outcome = "cancelled" }
+                end
+                function native.terminal_restore()
+                    restores = restores + 1
+                    if restores == 3 then
+                        return false, {
+                            code = "RestoreUnknown",
+                            message = "terminal mode restoration is unknown",
+                        }
+                    end
+                    return true, true
+                end
+                function native.terminal_close() return true, true end
+
+                local stdout, stderr = {}, {}
+                local exit_code = main.run_cli({
+                    [0] = "/release/yaca", "--model-repl",
+                }, {
+                    native = native,
+                    native_path = native_path,
+                    stdout = function(bytes) stdout[#stdout + 1] = bytes return true end,
+                    stderr = function(bytes) stderr[#stderr + 1] = bytes return true end,
+                })
+                A.equal(exit_code, 1)
+                A.equal(answer_index, #answers)
+                A.equal(restores, 3)
+                A.falsy(filesystem.exists(CONFIG_PATH))
+                A.equal(calls.directory_creates, 0)
+                A.equal(calls.process_starts, 0)
+                A.falsy(table.concat(stdout):find("was published", 1, true))
+                A.falsy(table.concat(stdout):find("secret-before-restore", 1, true))
+                A.contains(table.concat(stderr), "TerminalFailure")
             end,
         },
         {
