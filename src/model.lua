@@ -2885,6 +2885,488 @@ function M.new_review_request_builder(ports, options)
     return readonly(service, "review request builder")
 end
 
+local COMPACTION_SUMMARY_SLOTS = {
+    "goals_decisions",
+    "constraints_permissions",
+    "files_touched",
+    "verification_evidence",
+    "unknown_side_effects",
+    "open_todos",
+    "prompt_model_transitions",
+}
+
+local COMPACTION_BUILDER_OPTION_FIELDS = {
+    model_name = true,
+    permission_name = true,
+    config_snapshot = true,
+    model_snapshot = true,
+    prompt_snapshot = true,
+    context_prompt = true,
+    default_connect_timeout_ms = true,
+    default_request_timeout_ms = true,
+    default_retry_base_delay_ms = true,
+    default_max_output_tokens = true,
+    maximum_source_bytes = true,
+    maximum_summary_bytes = true,
+    maximum_correction_bytes = true,
+}
+
+local COMPACTION_MODEL_START_FIELDS = {
+    request_id = true,
+    compaction_id = true,
+    purpose = true,
+    attempt = true,
+    no_tools = true,
+    config_snapshot = true,
+    model_snapshot = true,
+    prompt_bundle_digest = true,
+    expected_manifest_digest = true,
+    source_first_seq = true,
+    source_last_seq = true,
+    source_digest = true,
+    source_bytes = true,
+    summary_schema = true,
+    summary_slots = true,
+    corrections = true,
+    correction_reason = true,
+    maximum_summary_bytes = true,
+}
+
+local function valid_compaction_text(value, maximum, allow_empty)
+    if type(value) ~= "string" or #value > maximum
+        or value:find("\0", 1, true)
+        or (not allow_empty and value == "")
+    then
+        return false
+    end
+    return text.validate_utf8(value) == true
+end
+
+local function compaction_slots_equal(values)
+    if dense_count(values) ~= #COMPACTION_SUMMARY_SLOTS then return false end
+    for index, name in ipairs(COMPACTION_SUMMARY_SLOTS) do
+        if values[index] ~= name then return false end
+    end
+    return true
+end
+
+local function validate_compaction_builder(ports, options)
+    if not exact_activity_fields(ports, {
+        adapter = true,
+        prompt = true,
+        generation = true,
+        codec = true,
+        safety = true,
+    })
+        or type(ports.adapter) ~= "table"
+        or type(ports.adapter.normalize_request) ~= "function"
+        or type(ports.prompt) ~= "table"
+        or type(ports.prompt.assemble) ~= "function"
+        or type(ports.generation) ~= "table"
+        or type(ports.generation.reveal_secret) ~= "function"
+        or type(ports.codec) ~= "table"
+        or type(ports.codec.write) ~= "function"
+        or type(ports.safety) ~= "table"
+        or type(ports.safety.digest) ~= "function"
+        or type(ports.safety.binding_digest) ~= "function"
+        or not exact_activity_fields(options, COMPACTION_BUILDER_OPTION_FIELDS)
+        or not valid_token(options.model_name, 128)
+        or not valid_token(options.permission_name, 128)
+        or not valid_token(options.config_snapshot, 256)
+        or not valid_token(options.model_snapshot, 256)
+        or not valid_token(options.prompt_snapshot, 256)
+        or type(options.context_prompt) ~= "string"
+        or not valid_integer(options.default_connect_timeout_ms, 1)
+        or not valid_integer(options.default_request_timeout_ms, 1)
+        or options.default_connect_timeout_ms > options.default_request_timeout_ms
+        or not valid_integer(options.default_retry_base_delay_ms, 0)
+        or not valid_integer(options.default_max_output_tokens, 1)
+        or not valid_integer(options.maximum_source_bytes, 1)
+        or not valid_integer(options.maximum_summary_bytes, 1)
+        or not valid_integer(options.maximum_correction_bytes, 1)
+    then
+        return nil, failure(
+            "InvalidCompactionRequestBuilder",
+            "compaction request builder is incomplete"
+        )
+    end
+    local generation = ports.generation
+    local model_ref = generation.models and generation.models[options.model_name]
+    local permission_ref = generation.permissions
+        and generation.permissions[options.permission_name]
+    if not valid_token(generation.id, 256)
+        or type(generation.general) ~= "table"
+        or type(generation.network) ~= "table"
+        or type(model_ref) ~= "table"
+        or type(permission_ref) ~= "table"
+        or model_ref.enabled ~= true
+        or type(model_ref.endpoint) ~= "string"
+        or model_ref.endpoint == ""
+        or type(model_ref.remote_model) ~= "string"
+        or model_ref.remote_model == ""
+    then
+        return nil, failure(
+            "InvalidCompactionRequestBuilder",
+            "compaction Model or generation snapshot is unavailable"
+        )
+    end
+    return {
+        ports = ports,
+        options = options,
+        generation = generation,
+        model = model_ref,
+        permission = permission_ref,
+    }
+end
+
+local function validate_compaction_model_start(spec, admitted)
+    if not exact_activity_fields(spec, COMPACTION_MODEL_START_FIELDS)
+        or not valid_token(spec.request_id, 128)
+        or not valid_token(spec.compaction_id, 128)
+        or spec.purpose ~= "compaction"
+        or not valid_integer(spec.attempt, 1)
+        or spec.no_tools ~= true
+        or spec.config_snapshot ~= admitted.options.config_snapshot
+        or not exact_activity_fields(spec.model_snapshot, {
+            id = true,
+            digest = true,
+            window_tokens = true,
+            maximum_output_tokens = true,
+        })
+        or spec.model_snapshot.id ~= admitted.options.model_name
+        or spec.model_snapshot.digest ~= admitted.options.model_snapshot
+        or not valid_integer(spec.model_snapshot.window_tokens, 1)
+        or not valid_integer(spec.model_snapshot.maximum_output_tokens, 1)
+        or spec.prompt_bundle_digest ~= admitted.options.prompt_snapshot
+        or not valid_token(spec.expected_manifest_digest, 256)
+        or not valid_integer(spec.source_first_seq, 1)
+        or not valid_integer(spec.source_last_seq, spec.source_first_seq)
+        or not valid_token(spec.source_digest, 256)
+        or not valid_compaction_text(
+            spec.source_bytes,
+            admitted.options.maximum_source_bytes,
+            false
+        )
+        or not valid_token(spec.summary_schema, 128)
+        or not compaction_slots_equal(spec.summary_slots)
+        or dense_count(spec.corrections) == nil
+        or (spec.correction_reason ~= false
+            and not valid_token(spec.correction_reason, 128))
+        or spec.maximum_summary_bytes ~= admitted.options.maximum_summary_bytes
+    then
+        return nil, failure(
+            "InvalidCompactionModelRequest",
+            "compaction Model request is invalid or stale"
+        )
+    end
+    local configured_window = admitted.model.context_length
+    if type(configured_window) == "number"
+        and spec.model_snapshot.window_tokens ~= configured_window
+    then
+        return nil, failure(
+            "InvalidCompactionModelRequest",
+            "compaction Model window contradicts its generation"
+        )
+    end
+    local configured_output = admitted.model.max_output_tokens
+        or admitted.options.default_max_output_tokens
+    if spec.model_snapshot.maximum_output_tokens > configured_output then
+        return nil, failure(
+            "InvalidCompactionModelRequest",
+            "compaction output cap exceeds its Model generation"
+        )
+    end
+    local correction_bytes = 0
+    local correction_ids = {}
+    for _, correction in ipairs(spec.corrections) do
+        if not exact_activity_fields(correction, {
+            correction_id = true,
+            compaction_id = true,
+            text = true,
+        })
+            or not valid_token(correction.correction_id, 128)
+            or not valid_token(correction.compaction_id, 128)
+            or not valid_compaction_text(
+                correction.text,
+                admitted.options.maximum_correction_bytes,
+                false
+            )
+            or correction_ids[correction.correction_id]
+        then
+            return nil, failure(
+                "InvalidCompactionModelRequest",
+                "compaction correction binding is invalid"
+            )
+        end
+        correction_ids[correction.correction_id] = true
+        correction_bytes = correction_bytes + #correction.text
+        if correction_bytes > admitted.options.maximum_correction_bytes then
+            return nil, failure(
+                "CompactionCorrectionLimit",
+                "compaction corrections exceed their aggregate byte cap"
+            )
+        end
+    end
+    local copy = freeze(spec, "compaction Model specification")
+    if not copy then
+        return nil, failure(
+            "InvalidCompactionModelRequest",
+            "compaction Model request contains a cycle"
+        )
+    end
+    return copy
+end
+
+local function compaction_prompt_document(specification)
+    local correction_values = {}
+    for index, correction in ipairs(specification.corrections) do
+        correction_values[index] = json.object({
+            correction_id = correction.correction_id,
+            compaction_id = correction.compaction_id,
+            text = correction.text,
+        })
+    end
+    local slots = {}
+    for index, name in ipairs(COMPACTION_SUMMARY_SLOTS) do slots[index] = name end
+    return json.object({
+        contract = "yaca-compaction-input-v1",
+        source_first_seq = json.number(tostring(specification.source_first_seq)),
+        source_last_seq = json.number(tostring(specification.source_last_seq)),
+        source_digest = specification.source_digest,
+        summary_schema = specification.summary_schema,
+        summary_slots = json.array(slots),
+        corrections = json.array(correction_values),
+        correction_reason = specification.correction_reason,
+        output_contract = table.concat({
+            "Return only one UTF-8 JSON object with exactly schema_version, ",
+            "source_first_seq, source_last_seq, source_digest, goals_decisions, ",
+            "constraints_permissions, files_touched, verification_evidence, ",
+            "unknown_side_effects, open_todos, and prompt_model_transitions. ",
+            "All seven summary slots must be non-empty strings. Copy the source ",
+            "identity fields exactly and emit no tools, controls, fence, or prose.",
+        }),
+    })
+end
+
+---Builds one exact no-tool compaction request from compact.lua's frozen source.
+-- The source prefix is carried once as a quoted Model-view body; the purpose
+-- Prompt carries only schema, source identity, and durable corrections.
+function M.new_compaction_request_builder(ports, options)
+    local admitted, admission_error = validate_compaction_builder(ports, options)
+    if not admitted then return nil, admission_error end
+    local generation = admitted.generation
+    local model_ref = admitted.model
+    local bound = {}
+    local active_count = 0
+    local empty_digest, empty_error = admitted.ports.safety.digest(
+        "yaca-empty-tool-registry-v1\0[]"
+    )
+    if not empty_digest then return nil, empty_error end
+    local empty_registry = assert(freeze({
+        version = "yaca-empty-tool-registry-v1",
+        digest = empty_digest,
+        tools = {},
+    }, "empty compaction tool registry"))
+    local service = {}
+
+    local function proxy_snapshot()
+        local configured = generation.network
+        if configured.follow_proxy ~= true then return { mode = "off" } end
+        if configured.proxy_url_configured == true then
+            return {
+                mode = "explicit",
+                secret_id = "Network.ProxyUrl",
+                destination = "network-proxy",
+                no_proxy = configured.no_proxy or "",
+            }
+        end
+        if type(configured.proxy_url) == "string" and configured.proxy_url ~= "" then
+            return {
+                mode = "explicit",
+                url = configured.proxy_url,
+                no_proxy = configured.no_proxy or "",
+            }
+        end
+        return { mode = "off" }
+    end
+
+    function service.bind(specification)
+        if active_count ~= 0 then
+            return nil, failure(
+                "CompactionRequestBusy",
+                "a compaction Model request is already bound"
+            )
+        end
+        local admitted_spec, spec_error = validate_compaction_model_start(
+            specification,
+            admitted
+        )
+        if not admitted_spec then return nil, spec_error end
+        local source_digest, source_digest_error = admitted.ports.safety.digest(
+            admitted_spec.source_bytes
+        )
+        if not source_digest then return nil, source_digest_error end
+        if source_digest ~= admitted_spec.source_digest then
+            return nil, failure(
+                "CompactionSourceMismatch",
+                "compaction source bytes do not match their frozen digest"
+            )
+        end
+        local input_value = compaction_prompt_document(admitted_spec)
+        local input_bytes, input_error = admitted.ports.codec.write(input_value)
+        if not input_bytes then return nil, input_error end
+        local binding_digest, digest_error = admitted.ports.safety.binding_digest(
+            "yaca-compaction-request-v1",
+            {
+                { name = "request_id", value = admitted_spec.request_id },
+                { name = "compaction_id", value = admitted_spec.compaction_id },
+                { name = "attempt", value = admitted_spec.attempt },
+                { name = "config_snapshot", value = admitted_spec.config_snapshot },
+                { name = "model_snapshot", value = admitted_spec.model_snapshot.digest },
+                { name = "prompt_snapshot", value = admitted_spec.prompt_bundle_digest },
+                { name = "manifest", value = admitted_spec.expected_manifest_digest },
+                { name = "source_first", value = admitted_spec.source_first_seq },
+                { name = "source_last", value = admitted_spec.source_last_seq },
+                { name = "source_digest", value = admitted_spec.source_digest },
+                { name = "prompt_input", value = input_bytes },
+            }
+        )
+        if not binding_digest then return nil, digest_error end
+        bound[admitted_spec.request_id] = {
+            specification = admitted_spec,
+            prompt_input = input_bytes,
+            binding_digest = binding_digest,
+        }
+        active_count = 1
+        return freeze({
+            request_id = admitted_spec.request_id,
+            turn_id = admitted_spec.compaction_id,
+            purpose = "compaction",
+            continuation = false,
+            view_manifest_ref = admitted_spec.source_digest,
+            progress_identity = "compaction:" .. binding_digest,
+        }, "compaction model activity specification")
+    end
+
+    function service.prepare(specification)
+        local start, start_error = validate_activity_start(specification)
+        if not start then return nil, start_error end
+        local binding = bound[start.request_id]
+        if not binding
+            or start.purpose ~= "compaction"
+            or start.turn_id ~= binding.specification.compaction_id
+            or start.view_manifest_ref ~= binding.specification.source_digest
+        then
+            return nil, failure(
+                "StaleCompactionBinding",
+                "compaction request binding is unavailable"
+            )
+        end
+        local bundle, bundle_error = admitted.ports.prompt:assemble({
+            purpose = "compaction",
+            config_generation = generation.id,
+            layers = {
+                global = {
+                    source = "General.SystemPrompt",
+                    version = generation.id,
+                    text = generation.general.system_prompt,
+                },
+                model = {
+                    source = "Model." .. admitted.options.model_name .. ".SystemPrompt",
+                    version = generation.id,
+                    text = model_ref.system_prompt,
+                },
+                permission = {
+                    source = "Permission." .. admitted.options.permission_name
+                        .. ".SystemPrompt",
+                    version = generation.id,
+                    text = admitted.permission.system_prompt,
+                },
+                context = {
+                    source = "ContextPrompt",
+                    version = generation.id,
+                    text = admitted.options.context_prompt,
+                },
+            },
+            input = { model_view_input = binding.prompt_input },
+            tool_mode = "none",
+        })
+        if not bundle then return nil, bundle_error end
+        local public_model_ref = {
+            name = admitted.options.model_name,
+            protocol = model_ref.protocol,
+            endpoint = model_ref.endpoint,
+            remote_model = model_ref.remote_model,
+            capabilities_digest = binding.specification.model_snapshot.digest,
+            adapter_options = model_ref.adapter_options or {},
+        }
+        if model_ref.key_configured == true then
+            public_model_ref.auth_secret_id = "Model."
+                .. admitted.options.model_name .. ".Key"
+        end
+        local normalized, normalize_error = admitted.ports.adapter:normalize_request({
+            request_id = start.request_id,
+            purpose = "compaction",
+            model_ref = public_model_ref,
+            config_generation = generation.id,
+            prompt_bundle = bundle,
+            model_view_manifest = {
+                digest = binding.specification.source_digest,
+                first_sequence = binding.specification.source_first_seq,
+                last_sequence = binding.specification.source_last_seq,
+                body = binding.specification.source_bytes,
+            },
+            tool_registry = empty_registry,
+            controls_schema = bundle.controls_schema,
+            streaming = model_ref.streaming,
+            limits = {
+                max_output_tokens = binding.specification.model_snapshot
+                    .maximum_output_tokens,
+            },
+            retry_policy = {
+                count = model_ref.retry_count or 0,
+                base_delay_ms = model_ref.retry_base_delay_ms
+                    or admitted.options.default_retry_base_delay_ms,
+            },
+        })
+        if not normalized then return nil, normalize_error end
+        local connect_timeout = generation.network.connect_timeout_ms
+            or admitted.options.default_connect_timeout_ms
+        local total_timeout = model_ref.request_timeout_ms
+            or admitted.options.default_request_timeout_ms
+        if connect_timeout > total_timeout then connect_timeout = total_timeout end
+        return readonly({
+            request = normalized,
+            secret_source = generation,
+            proxy = freeze(proxy_snapshot(), "compaction proxy snapshot"),
+            ca_bundle_path = generation.network.ca_bundle_path,
+            connect_timeout_ms = connect_timeout,
+            total_timeout_ms = total_timeout,
+        }, "prepared compaction request")
+    end
+
+    function service.binding(request_id)
+        return bound[request_id] or false
+    end
+
+    function service.release(request_id)
+        if not bound[request_id] then return false end
+        bound[request_id] = nil
+        active_count = 0
+        return true
+    end
+
+    service.empty_tool_registry = empty_registry
+    service.snapshots = freeze({
+        generation = generation.id,
+        config = admitted.options.config_snapshot,
+        model = admitted.options.model_snapshot,
+        prompt = admitted.options.prompt_snapshot,
+        transmitted_tools = empty_registry.digest,
+    }, "compaction model request builder snapshots")
+    return readonly(service, "compaction request builder")
+end
+
 local function transport_category(result)
     if type(result) ~= "table"
         or type(result.response_body) ~= "string"
@@ -3793,6 +4275,330 @@ function M.new_review_port(ports, options)
         concurrent_requests = 1,
     }, "review port capabilities")
     return readonly(service, "review model port")
+end
+
+local COMPACTION_PORT_OPTION_FIELDS = {
+    maximum_poll_events = true,
+    maximum_summary_bytes = true,
+}
+
+local function validate_compaction_port(ports, options)
+    if not exact_activity_fields(ports, {
+        activity = true,
+        builder = true,
+        safety = true,
+        codec = true,
+        summary = true,
+    })
+        or type(ports.activity) ~= "table"
+        or type(ports.activity.start) ~= "function"
+        or type(ports.activity.cancel) ~= "function"
+        or type(ports.activity.poll) ~= "function"
+        or type(ports.activity.status) ~= "function"
+        or type(ports.builder) ~= "table"
+        or type(ports.builder.bind) ~= "function"
+        or type(ports.builder.binding) ~= "function"
+        or type(ports.builder.release) ~= "function"
+        or type(ports.safety) ~= "table"
+        or type(ports.safety.digest) ~= "function"
+        or type(ports.codec) ~= "table"
+        or type(ports.codec.parse) ~= "function"
+        or type(ports.summary) ~= "table"
+        or type(ports.summary.encode) ~= "function"
+        or not exact_activity_fields(options, COMPACTION_PORT_OPTION_FIELDS)
+        or not valid_integer(options.maximum_poll_events, 1)
+        or not valid_integer(options.maximum_summary_bytes, 1)
+    then
+        return nil, failure(
+            "InvalidCompactionPort",
+            "compaction Model port is incomplete"
+        )
+    end
+    return { ports = ports, options = options }
+end
+
+local function parsed_compaction_summary(document, binding, options)
+    local expected = {
+        schema_version = true,
+        source_first_seq = true,
+        source_last_seq = true,
+        source_digest = true,
+    }
+    for _, name in ipairs(COMPACTION_SUMMARY_SLOTS) do expected[name] = true end
+    if json.kind(document) ~= "object"
+        or not exact_activity_fields(document, expected)
+        or document.schema_version ~= binding.specification.summary_schema
+        or document.source_digest ~= binding.specification.source_digest
+    then
+        return nil
+    end
+    local first = nonnegative_json_integer(document.source_first_seq)
+    local last = nonnegative_json_integer(document.source_last_seq)
+    if first ~= binding.specification.source_first_seq
+        or last ~= binding.specification.source_last_seq
+    then
+        return nil
+    end
+    local summary = {
+        schema_version = document.schema_version,
+        source_first_seq = first,
+        source_last_seq = last,
+        source_digest = document.source_digest,
+    }
+    local total = 0
+    for _, name in ipairs(COMPACTION_SUMMARY_SLOTS) do
+        local value = document[name]
+        if not valid_compaction_text(
+            value,
+            options.maximum_summary_bytes,
+            false
+        ) then
+            return nil
+        end
+        total = total + #value
+        if total > options.maximum_summary_bytes then return nil end
+        summary[name] = value
+    end
+    return summary
+end
+
+---Adapts one canonical Model activity to compact.lua's response contract.
+-- Malformed, incomplete, tool-bearing, or controlled output is still returned
+-- as a bound response so compact.lua can durably reject it and apply its one
+-- correction attempt; it can never cross the publication validator as valid.
+function M.new_compaction_port(ports, options)
+    local admitted, admission_error = validate_compaction_port(ports, options)
+    if not admitted then return nil, admission_error end
+    local active
+    local service = {}
+
+    local function release()
+        if not active then return false end
+        admitted.ports.builder.release(active.specification.request_id)
+        active = nil
+        return true
+    end
+
+    local function response_from(wrapper)
+        local binding = admitted.ports.builder.binding(active.specification.request_id)
+        if type(binding) ~= "table"
+            or type(binding.specification) ~= "table"
+            or type(wrapper) ~= "table"
+            or wrapper.request_id ~= active.specification.request_id
+            or type(wrapper.canonical_body) ~= "string"
+            or not valid_token(wrapper.canonical_digest, 256)
+            or type(wrapper.normalized) ~= "table"
+        then
+            return nil, failure(
+                "InvalidCompactionModelResponse",
+                "compaction Model response is unbound"
+            )
+        end
+        local normalized = wrapper.normalized
+        local tool_count = dense_count(normalized.tool_calls)
+        if tool_count == nil then tool_count = 1 end
+        local summary
+        local parsed = admitted.ports.codec.parse(wrapper.canonical_body)
+        if parsed then
+            summary = parsed_compaction_summary(
+                parsed,
+                binding,
+                admitted.options
+            )
+        end
+        local canonical_body = wrapper.canonical_body
+        local canonical_digest = wrapper.canonical_digest
+        if summary then
+            local called, encoded, encode_error = pcall(
+                admitted.ports.summary.encode,
+                summary
+            )
+            if not called or type(encoded) ~= "string" or encoded == "" then
+                return nil, failure(
+                    "CompactionSummaryEncoding",
+                    "structured summary encoding failed",
+                    not called and encoded or encode_error
+                )
+            end
+            if #encoded > admitted.options.maximum_summary_bytes then
+                -- Preserve the bound provider response for compact.lua's
+                -- durable rejection/correction path. An oversized canonical
+                -- envelope is model output failure, not a wedged port.
+                summary = nil
+            else
+                local digest_called, digest, digest_error = pcall(
+                    admitted.ports.safety.digest,
+                    encoded
+                )
+                if not digest_called or not valid_token(digest, 256) then
+                    return nil, failure(
+                        "CompactionSummaryDigest",
+                        "structured summary digest failed",
+                        not digest_called and digest or digest_error
+                    )
+                end
+                canonical_body = encoded
+                canonical_digest = digest
+            end
+        end
+        local usage = normalized.usage
+        local input_tokens = type(usage) == "table" and usage.input or nil
+        local output_tokens = type(usage) == "table" and usage.output or nil
+        local estimated = not valid_integer(input_tokens, 0)
+            or not valid_integer(output_tokens, 0)
+        if not valid_integer(input_tokens, 0) then
+            input_tokens = #binding.specification.source_bytes
+        end
+        if not valid_integer(output_tokens, 0) then
+            output_tokens = #canonical_body
+        end
+        return freeze({
+            request_id = binding.specification.request_id,
+            canonical_body = canonical_body,
+            canonical_digest = canonical_digest,
+            source_first_seq = binding.specification.source_first_seq,
+            source_last_seq = binding.specification.source_last_seq,
+            source_digest = binding.specification.source_digest,
+            generator_model_snapshot = binding.specification.model_snapshot.digest,
+            summary = summary or false,
+            usage = {
+                input_tokens = input_tokens,
+                output_tokens = output_tokens,
+                estimated = estimated,
+            },
+            completion = {
+                incomplete = normalized.incomplete == true,
+                finish_class = type(normalized.finish_class) == "string"
+                    and normalized.finish_class or "unknown",
+                tool_call_count = tool_count,
+                control = normalized.control ~= nil,
+            },
+        }, "bound compaction response")
+    end
+
+    function service.start(specification)
+        if active then
+            return nil, failure(
+                "CompactionPortBusy",
+                "a compaction Model request is already active"
+            )
+        end
+        local activity_spec, binding_error = admitted.ports.builder.bind(specification)
+        if not activity_spec then return nil, binding_error end
+        local handle, start_error = admitted.ports.activity.start(activity_spec)
+        if not handle then
+            admitted.ports.builder.release(specification.request_id)
+            return nil, start_error
+        end
+        local binding = admitted.ports.builder.binding(specification.request_id)
+        if type(binding) ~= "table" or type(binding.specification) ~= "table" then
+            admitted.ports.builder.release(specification.request_id)
+            return nil, failure(
+                "StaleCompactionBinding",
+                "compaction binding vanished during start"
+            )
+        end
+        local public_handle = freeze({
+            request_id = binding.specification.request_id,
+            compaction_id = binding.specification.compaction_id,
+        }, "compaction activity handle")
+        active = {
+            handle = public_handle,
+            model_handle = handle,
+            specification = binding.specification,
+            cancel_pending = false,
+        }
+        return public_handle
+    end
+
+    function service.cancel(handle, reason)
+        if not active or handle ~= active.handle or not valid_token(reason, 128) then
+            return { outcome = "unknown" }
+        end
+        local called, result = pcall(
+            admitted.ports.activity.cancel,
+            active.model_handle,
+            reason
+        )
+        if not called or type(result) ~= "table"
+            or (result.outcome ~= "cancelled" and result.outcome ~= "pending"
+                and result.outcome ~= "unknown")
+        then
+            return { outcome = "unknown" }
+        end
+        if result.outcome == "cancelled" then
+            release()
+        elseif result.outcome == "pending" then
+            active.cancel_pending = true
+        end
+        return result
+    end
+
+    function service.poll(budget)
+        if not valid_integer(budget, 0)
+            or budget > admitted.options.maximum_poll_events
+        then
+            return nil, failure(
+                "InvalidCompactionPoll",
+                "compaction poll budget is invalid"
+            )
+        end
+        if not active or budget == 0 then
+            return freeze({}, "compaction poll batch")
+        end
+        local events, poll_error = admitted.ports.activity.poll(budget)
+        if not events then return nil, poll_error end
+        local output = {}
+        for _, event in ipairs(events) do
+            if event.kind == "response" then
+                if active.cancel_pending then
+                    local normalized = event.wrapper and event.wrapper.normalized
+                    output[#output + 1] = {
+                        kind = "cancel-settled",
+                        request_id = active.specification.request_id,
+                        outcome = type(normalized) == "table"
+                            and normalized.finish_class == "cancelled"
+                            and "cancelled" or "unknown",
+                    }
+                else
+                    local response, response_error = response_from(event.wrapper)
+                    if not response then
+                        release()
+                        return nil, response_error
+                    end
+                    output[#output + 1] = {
+                        kind = "response",
+                        request_id = active.specification.request_id,
+                        response = response,
+                    }
+                end
+                release()
+                break
+            end
+        end
+        return freeze(output, "compaction poll batch")
+    end
+
+    function service.status()
+        if not active then
+            return freeze({ state = "idle" }, "compaction port status")
+        end
+        return freeze({
+            state = active.cancel_pending and "cancelling" or "active",
+            request_id = active.specification.request_id,
+            compaction_id = active.specification.compaction_id,
+        }, "compaction port status")
+    end
+
+    service.capabilities = freeze({
+        purpose = "compaction",
+        tools = false,
+        controls = false,
+        runtime_bound_identity = true,
+        incomplete_response = "durable-rejection",
+        concurrent_requests = 1,
+    }, "compaction model port capabilities")
+    return readonly(service, "compaction model port")
 end
 
 return M

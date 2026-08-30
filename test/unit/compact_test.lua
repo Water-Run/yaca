@@ -32,6 +32,8 @@ local function options(overrides)
         maximum_view_tokens = 512,
         maximum_attempts = 2,
         active_time_ms = 1000,
+        failure_threshold = 3,
+        failure_cooldown_ms = 5000,
         trigger_numerator = 3,
         trigger_denominator = 4,
         reserve_tokens = 8,
@@ -271,6 +273,7 @@ local function input_for(instance, overrides)
         context_digest = "sha256:" .. sha256.hex(
             "context:" .. tostring(source.generation) .. ":" .. tostring(#source.facts)
         ),
+        config_snapshot = "config-snapshot-1",
         model_snapshot = overrides.model_snapshot or {
             id = "main-model",
             digest = "model-snapshot-1",
@@ -314,6 +317,12 @@ local function response_for(instance, index, overrides)
         generator_model_snapshot = specification.model_snapshot.digest,
         summary = summary,
         usage = { input_tokens = 100, output_tokens = 20, estimated = false },
+        completion = {
+            incomplete = false,
+            finish_class = "stop",
+            tool_call_count = 0,
+            control = false,
+        },
     }
 end
 
@@ -430,6 +439,7 @@ return {
                 A.matches(instance.log[2], "^model:start:")
                 A.equal(instance.starts[1].purpose, "compaction")
                 A.equal(instance.starts[1].no_tools, true)
+                A.equal(instance.starts[1].config_snapshot, "config-snapshot-1")
                 A.equal(instance.starts[1].model_snapshot.digest, "model-snapshot-1")
                 A.equal(instance.manifest(), "view-old")
 
@@ -547,6 +557,72 @@ return {
                 A.equal(#instance.starts, 2)
                 A.equal(#instance.publications, 0)
                 A.equal(instance.manifest(), "view-old")
+            end,
+        },
+        {
+            name = "incomplete provider responses never publish a summary",
+            run = function()
+                local instance = fixture()
+                assert(instance.service:begin(input_for(instance, {
+                    active_estimated_tokens = 450,
+                })))
+                local first = response_for(instance, 1)
+                first.completion.incomplete = true
+                local retried = assert(instance.service:accept_response(first))
+                A.equal(retried.state, "Compacting")
+                A.equal(retried.attempt, 2)
+
+                local second = response_for(instance, 2)
+                second.completion.finish_class = "length"
+                local waiting = assert(instance.service:accept_response(second))
+                A.equal(waiting.outcome, "waiting_user")
+                A.equal(waiting.error_code, "InvalidCompactionResponse")
+                A.equal(#instance.publications, 0)
+                A.equal(instance.manifest(), "view-old")
+            end,
+        },
+        {
+            name = "automatic failures open a cooldown circuit with one half-open probe",
+            run = function()
+                local instance = fixture({}, {
+                    failure_threshold = 2,
+                    failure_cooldown_ms = 100,
+                })
+                local function fail_lifecycle()
+                    assert(instance.service:begin(input_for(instance, {
+                        active_estimated_tokens = 450,
+                    })))
+                    local first = response_for(instance)
+                    first.completion.incomplete = true
+                    assert(instance.service:accept_response(first))
+                    local second = response_for(instance)
+                    second.completion.incomplete = true
+                    return assert(instance.service:accept_response(second))
+                end
+                A.equal(fail_lifecycle().outcome, "waiting_user")
+                A.equal(instance.service:status().automatic_failure_count, 1)
+                A.equal(fail_lifecycle().outcome, "waiting_user")
+                A.equal(instance.service:status().automatic_circuit_state, "open")
+
+                local start_count = #instance.starts
+                local suppressed = assert(instance.service:begin(input_for(instance, {
+                    active_estimated_tokens = 450,
+                })))
+                A.equal(suppressed.decision, "suppressed")
+                A.equal(suppressed.error_code, "CompactionCircuitOpen")
+                A.equal(suppressed.retry_after_ms, 100)
+                A.equal(#instance.starts, start_count)
+
+                instance.advance(100)
+                assert(instance.service:begin(input_for(instance, {
+                    active_estimated_tokens = 450,
+                })))
+                local completed = assert(instance.service:accept_response(
+                    response_for(instance)
+                ))
+                A.equal(completed.outcome, "completed")
+                A.equal(instance.service:status().automatic_failure_count, 0)
+                A.equal(instance.service:status().automatic_circuit_state, "closed")
             end,
         },
         {

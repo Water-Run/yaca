@@ -143,6 +143,8 @@ return {
                         maximum_view_tokens = 65536,
                         maximum_attempts = 2,
                         active_time_ms = 30000,
+                        failure_threshold = 3,
+                        failure_cooldown_ms = 60000,
                         trigger_numerator = 3,
                         trigger_denominator = 4,
                         reserve_tokens = 512,
@@ -157,6 +159,7 @@ return {
                     expected_context_generation = source.generation,
                     expected_manifest_digest = old_manifest,
                     context_digest = fast_digest("long-context-generation-700"),
+                    config_snapshot = "config-snapshot-long",
                     model_snapshot = {
                         id = "main-model-long",
                         digest = "model-snapshot-long",

@@ -270,6 +270,8 @@ local MANIFEST_FIELDS = {
     maximum_view_tokens = true,
     maximum_attempts = true,
     active_time_ms = true,
+    failure_threshold = true,
+    failure_cooldown_ms = true,
     trigger_numerator = true,
     trigger_denominator = true,
     reserve_tokens = true,
@@ -290,7 +292,8 @@ local function validate_options(options)
     for _, name in ipairs({
         "maximum_events", "maximum_groups", "maximum_input_bytes",
         "maximum_summary_bytes", "maximum_summary_tokens", "maximum_view_tokens",
-        "maximum_attempts", "active_time_ms", "trigger_numerator",
+        "maximum_attempts", "active_time_ms", "failure_threshold",
+        "failure_cooldown_ms", "trigger_numerator",
         "trigger_denominator", "reserve_tokens", "minimum_benefit_tokens",
     }) do
         local minimum = (name == "reserve_tokens" or name == "minimum_benefit_tokens")
@@ -374,7 +377,8 @@ local function validate_input(input, limits)
     if not exact_fields(input, {
         mode = true, document = true, expected_context_generation = true,
         expected_manifest_digest = true, context_digest = true,
-        model_snapshot = true, prompt_bundle_digest = true,
+        config_snapshot = true, model_snapshot = true,
+        prompt_bundle_digest = true,
         prompt_tokens = true, tool_schema_tokens = true, control_schema_tokens = true,
         main_state = true, active_view = true, corrections = true,
     })
@@ -384,6 +388,7 @@ local function validate_input(input, limits)
         or input.document.generation ~= input.expected_context_generation
         or not valid_text(input.expected_manifest_digest, 512, false)
         or not valid_text(input.context_digest, 512, false)
+        or not valid_text(input.config_snapshot, 512, false)
         or not valid_text(input.prompt_bundle_digest, 512, false)
         or not integer_at_least(input.prompt_tokens, 0)
         or not integer_at_least(input.tool_schema_tokens, 0)
@@ -768,6 +773,7 @@ local function plan_internal(input, ports, limits)
         expected_context_generation = input.expected_context_generation,
         expected_manifest_digest = input.expected_manifest_digest,
         context_digest = input.context_digest,
+        config_snapshot = input.config_snapshot,
         model_snapshot = {
             id = input.model_snapshot.id,
             digest = input.model_snapshot.digest,
@@ -820,6 +826,8 @@ function M.new(ports, options)
     local serial = limits.initial_serial
     local request_serial = 0
     local correction_serial = 0
+    local consecutive_automatic_failures = 0
+    local circuit_opened_at
     local last_clock
     local service = {}
 
@@ -871,8 +879,17 @@ function M.new(ports, options)
         return receipt, binding
     end
 
+    local function mark_automatic_failure(completed)
+        if not completed or completed.plan.mode ~= "automatic" then return end
+        consecutive_automatic_failures = consecutive_automatic_failures + 1
+        if consecutive_automatic_failures >= limits.manifest.failure_threshold then
+            circuit_opened_at = last_clock or completed.started_at
+        end
+    end
+
     local function finish_waiting(reason, error_code)
         local completed = active
+        mark_automatic_failure(completed)
         active = nil
         state = "Idle"
         last_result = {
@@ -904,6 +921,7 @@ function M.new(ports, options)
             source_first_seq = active.plan.source_first_seq,
             source_last_seq = active.plan.source_last_seq,
             source_digest = active.plan.source_digest,
+            config_snapshot = active.plan.config_snapshot,
             model_snapshot_digest = active.plan.model_snapshot.digest,
             manifest_snapshot_id = limits.manifest.snapshot_id,
         }
@@ -919,8 +937,10 @@ function M.new(ports, options)
             purpose = "compaction",
             attempt = active.attempt,
             no_tools = true,
+            config_snapshot = active.plan.config_snapshot,
             model_snapshot = active.plan.model_snapshot,
             prompt_bundle_digest = active.plan.prompt_bundle_digest,
+            expected_manifest_digest = active.plan.expected_manifest_digest,
             source_first_seq = active.plan.source_first_seq,
             source_last_seq = active.plan.source_last_seq,
             source_digest = active.plan.source_digest,
@@ -981,6 +1001,7 @@ function M.new(ports, options)
             request_id = true, canonical_body = true, canonical_digest = true,
             source_first_seq = true, source_last_seq = true, source_digest = true,
             generator_model_snapshot = true, summary = true, usage = true,
+            completion = true,
         })
             or wrapper.request_id ~= active.request_id
             or not valid_text(
@@ -1004,6 +1025,14 @@ function M.new(ports, options)
             or not exact_fields(wrapper.usage, {
                 input_tokens = true, output_tokens = true, estimated = true,
             })
+            or not exact_fields(wrapper.completion, {
+                incomplete = true, finish_class = true,
+                tool_call_count = true, control = true,
+            })
+            or wrapper.completion.incomplete ~= false
+            or wrapper.completion.finish_class ~= "stop"
+            or wrapper.completion.tool_call_count ~= 0
+            or wrapper.completion.control ~= false
             or not integer_at_least(wrapper.usage.input_tokens, 0)
             or not integer_at_least(wrapper.usage.output_tokens, 0)
             or wrapper.usage.input_tokens > active.plan.model_snapshot.window_tokens
@@ -1062,6 +1091,29 @@ function M.new(ports, options)
         end
         local now, clock_error = clock_now()
         if not now then return nil, clock_error end
+        if plan.mode == "automatic" and circuit_opened_at ~= nil then
+            local elapsed = now - circuit_opened_at
+            if elapsed < limits.manifest.failure_cooldown_ms then
+                last_result = {
+                    decision = "suppressed",
+                    reason = "compaction-circuit-open",
+                    error_code = "CompactionCircuitOpen",
+                    failures = consecutive_automatic_failures,
+                    retry_after_ms = limits.manifest.failure_cooldown_ms - elapsed,
+                    threshold_tokens = plan.threshold_tokens,
+                    window_tokens = plan.window_tokens,
+                }
+                return assert(freeze(
+                    last_result,
+                    nil,
+                    "compaction circuit outcome"
+                ))
+            end
+            -- Admit one half-open probe. One further terminal rejection opens
+            -- the circuit for a complete new cooldown; success resets it.
+            consecutive_automatic_failures = limits.manifest.failure_threshold - 1
+            circuit_opened_at = nil
+        end
         serial = serial + 1
         active = {
             id = "compaction-" .. tostring(serial),
@@ -1212,6 +1264,8 @@ function M.new(ports, options)
         local completed = active
         active = nil
         state = "Idle"
+        consecutive_automatic_failures = 0
+        circuit_opened_at = nil
         last_result = {
             outcome = "completed",
             compaction_id = completed.id,
@@ -1241,6 +1295,11 @@ function M.new(ports, options)
         local receipt, commit_error = commit("commit_rejection", terminal, false)
         if not receipt then return nil, commit_error end
         local completed = active
+        if completed.plan.mode == "automatic"
+            and completed.cancel_reason == "compaction-active-time"
+        then
+            mark_automatic_failure(completed)
+        end
         active = nil
         state = outcome == "unknown" and "Unknown" or "Idle"
         last_result = {
@@ -1452,6 +1511,7 @@ function M.new(ports, options)
     end
 
     function service:status()
+        local circuit_state = circuit_opened_at ~= nil and "open" or "closed"
         return assert(freeze({
             state = state,
             closed = closed,
@@ -1463,6 +1523,11 @@ function M.new(ports, options)
             builder_algorithm = limits.manifest.builder_algorithm,
             summary_schema = limits.manifest.summary_schema,
             maximum_attempts = limits.manifest.maximum_attempts,
+            automatic_failure_count = consecutive_automatic_failures,
+            automatic_circuit_state = circuit_state,
+            automatic_circuit_opened_at = circuit_opened_at or false,
+            automatic_failure_threshold = limits.manifest.failure_threshold,
+            automatic_failure_cooldown_ms = limits.manifest.failure_cooldown_ms,
             canonical_facts_mutable = false,
             automatic_consent_required = false,
             manual_requires_idle = true,
