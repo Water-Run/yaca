@@ -4520,6 +4520,9 @@ function M.new_application_coordinator(ports, options)
     local last_wait_key = false
     local deferred_failure = false
     local close_agent
+    local diagnostic_serial = 0
+    local diagnostic_order = {}
+    local diagnostics_by_id = {}
     local coordinator = {}
 
     local function now()
@@ -4557,10 +4560,33 @@ function M.new_application_coordinator(ports, options)
         if type(message) ~= "string" or message == "" then
             message = "An internal operation failed."
         end
+        local code = coordinator_error_id(value)
+        if diagnostic_serial == math.maxinteger then
+            return nil, failure(
+                "DiagnosticLimit",
+                "interactive diagnostic identity space is exhausted"
+            )
+        end
+        diagnostic_serial = diagnostic_serial + 1
+        local diagnostic_id = "error-" .. tostring(diagnostic_serial)
+        local suggestion = type(value) == "table" and value.suggestion or nil
+        if type(suggestion) ~= "string" or suggestion == "" then suggestion = false end
+        diagnostics_by_id[diagnostic_id] = {
+            id = diagnostic_id,
+            code = code,
+            message = safe_diagnostic(message, 4096),
+            suggestion = suggestion and safe_diagnostic(suggestion, 1024) or false,
+        }
+        diagnostic_order[#diagnostic_order + 1] = diagnostic_id
+        if #diagnostic_order > 64 then
+            local expired = table.remove(diagnostic_order, 1)
+            diagnostics_by_id[expired] = nil
+        end
         return publish({
             kind = "error",
-            id = coordinator_error_id(value),
-            text = safe_diagnostic(message, 4096),
+            id = diagnostic_id,
+            text = code .. ": " .. safe_diagnostic(message, 4096)
+                .. " (details: .details " .. diagnostic_id .. ")",
         })
     end
 
@@ -5166,6 +5192,38 @@ function M.new_application_coordinator(ports, options)
         return publish({ kind = "notice", text = rendered })
     end
 
+    local function show_details(diagnostic_id)
+        if diagnostic_id == nil then
+            diagnostic_id = diagnostic_order[#diagnostic_order]
+            if diagnostic_id == nil then
+                return publish_status("No interactive error details are available.")
+            end
+        end
+        if approval and diagnostic_id == approval.action_id then
+            return publish({
+                kind = "details",
+                id = approval.action_id,
+                lines = approval.lines,
+            })
+        end
+        local record = diagnostics_by_id[diagnostic_id]
+        if not record then
+            return nil, failure(
+                "NotFound",
+                "the requested interactive error instance is unavailable"
+            )
+        end
+        local lines = {
+            "instance: " .. record.id,
+            "code: " .. record.code,
+            "message: " .. record.message,
+        }
+        if record.suggestion then
+            lines[#lines + 1] = "suggestion: " .. record.suggestion
+        end
+        return publish({ kind = "details", id = record.id, lines = lines })
+    end
+
     local function stage_and_apply(method, message)
         local staged, stage_error = coordinator_call(
             agent.session,
@@ -5705,6 +5763,7 @@ function M.new_application_coordinator(ports, options)
             return publish({ kind = "details", id = "status", lines = status_lines() })
         end
         if request.id == "help-chat" then return show_help(request.topic) end
+        if request.id == "details" then return show_details(request.error_id) end
         if request.id == "select-context" then return switch_context(request) end
         if not agent then
             if request.id == "queue-add" then
@@ -6061,6 +6120,7 @@ function M.new_application_coordinator(ports, options)
             context_saved = agent ~= false,
             draft_bytes = #input_draft,
             approval_action_id = approval and approval.action_id or false,
+            diagnostic_count = #diagnostic_order,
         }, "ApplicationCoordinator status")
     end
 

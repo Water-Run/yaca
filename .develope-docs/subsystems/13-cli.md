@@ -1,8 +1,8 @@
 # 13 CLI
 
-更新日期：2026-08-29
+更新日期：2026-08-30
 
-状态：**计划已确认（C12）** — registry、argv/chat/REPL、`--machine`、JSON/JSONL 与 fd matrix 已冻结；真实 parser/help 由 C12 生成
+状态：**核心已实现，controller 收口与目标资格待完成** — registry、argv/chat/REPL parser、help、`--machine`、JSON/JSONL 与 fd matrix 已实现；公开 chat actions 仍逐项闭合 production controller
 
 ## 职责
 
@@ -82,6 +82,12 @@ TUI 点命令 `.cautious` 管理当前会话的 `DoubleCheck` 覆盖值。它不
 | `.cancel` | 取消当前最内层可取消活动 | `Esc` |
 
 `.immediate` 是唯一正式拼写，不保留误拼 `.immidiate`。队列的条目标识、move/edit 参数细节和多行结束 delimiter 仍由 AgentLoop/TUI grammar 冻结，但不能改变上表动作含义。点命令不是兼容模式：它们与快捷键提交相同 action ID、输入 payload 和 durable/取消规则；不能支持快捷键时，help 直接显示点命令后备。
+
+## 交互错误详情
+
+`.details [error-N]` 已由 shared chat registry、parser 和 ApplicationCoordinator 接通，在未创建第一个 Context、Agent 空闲或 Agent 繁忙时都不依赖 Agent action port。每个投影到终端的 coordinator 错误取得当前进程内单调 ID；省略参数读取最新保留项，显式参数只按完整 ID 读取，不按 code、文本或前缀猜测。
+
+诊断环固定最多 64 项，每项只保存稳定 code、控制字节已清理且分别限长的 message 和可选 suggestion；不持久化到 Context，不保存 raw exception 对象、Tool body 或 transport payload。最旧项过期后返回 typed `NotFound`，不得回退到另一个错误。这个表面用于安全、有限的本地交互诊断，不成为日志导出、remote controller 或绕过 Permission 的数据通道。
 
 ## chat 内 Model 选择
 

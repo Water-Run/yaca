@@ -53,6 +53,8 @@ Opening history is always explicit. A short name selects the first usable match 
 
 Within chat, `.context` without a selector shows a bounded recent list. `.context <selector>` first freezes the verified path and precise hash, closes the current owner only when its queue, side lane, approval, and compaction state are safe, then recomposes and reopens by that hash alone. A post-close race is fatal for that invocation; it never falls back to a replacement short-name match. This switch is also limited to the recorded workspace until explicit cross-workspace confirmation exists.
 
+Each interactive coordinator error receives a process-local `error-N` identity. `.details` shows the newest retained error and `.details error-N` selects one explicitly. The fixed ring retains at most 64 sanitized code/message/suggestion records; expired identities fail closed, and raw exception objects, Tool bodies, and transport payloads are not retained by this surface.
+
 ## Implemented command grammar
 
 These spellings are implemented in the source tree; no downloadable target-qualified executable is available yet:

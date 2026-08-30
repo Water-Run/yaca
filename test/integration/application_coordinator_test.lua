@@ -712,6 +712,14 @@ return {
                         },
                         { { kind = "user_action", action = "submit-or-queue" } },
                         { { kind = "user_action", action = "cancel" } },
+                        {
+                            {
+                                kind = "user_action",
+                                action = "text",
+                                text = ".details error-1",
+                            },
+                        },
+                        { { kind = "user_action", action = "submit-or-queue" } },
                         { { kind = "user_action", action = "text", text = ".quit" } },
                         { { kind = "user_action", action = "submit-or-queue" } },
                     },
@@ -721,6 +729,75 @@ return {
                 A.falsy(joined:find("context-preview:", 1, true))
                 A.falsy(joined:find("session-close:context-switch", 1, true))
                 A.contains(A.render(f.blocks), "requires an idle or waiting Agent")
+                local errors = blocks_of_kind(f.blocks, "error")
+                A.equal(errors[1].id, "error-1")
+                A.contains(errors[1].text, "InteractiveActionUnavailable")
+                local details = blocks_of_kind(f.blocks, "details")
+                A.equal(details[#details].id, "error-1")
+                A.contains(table.concat(details[#details].lines, "|"),
+                    "code: InteractiveActionUnavailable")
+                A.equal(f.coordinator:status().diagnostic_count, 1)
+            end,
+        },
+        {
+            name = "interactive diagnostics retain only the newest bounded error instances",
+            run = function()
+                local batches = {}
+                for _ = 1, 65 do
+                    batches[#batches + 1] = {
+                        {
+                            kind = "user_action",
+                            action = "text",
+                            text = ".context second-task",
+                        },
+                    }
+                    batches[#batches + 1] = {
+                        { kind = "user_action", action = "submit-or-queue" },
+                    }
+                    batches[#batches + 1] = {
+                        { kind = "user_action", action = "cancel" },
+                    }
+                end
+                batches[#batches + 1] = {
+                    { kind = "user_action", action = "text", text = ".details" },
+                }
+                batches[#batches + 1] = {
+                    { kind = "user_action", action = "submit-or-queue" },
+                }
+                batches[#batches + 1] = {
+                    {
+                        kind = "user_action",
+                        action = "text",
+                        text = ".details error-1",
+                    },
+                }
+                batches[#batches + 1] = {
+                    { kind = "user_action", action = "submit-or-queue" },
+                }
+                batches[#batches + 1] = {
+                    { kind = "user_action", action = "cancel" },
+                }
+                batches[#batches + 1] = {
+                    { kind = "user_action", action = "text", text = ".quit" },
+                }
+                batches[#batches + 1] = {
+                    { kind = "user_action", action = "submit-or-queue" },
+                }
+
+                local f = fixture({
+                    initial_agent = true,
+                    initial_state = "RequestingModel",
+                    freeze_driver = true,
+                    batches = batches,
+                })
+                assert(f.coordinator:run())
+                local details = blocks_of_kind(f.blocks, "details")
+                A.equal(details[#details].id, "error-65")
+                local errors = blocks_of_kind(f.blocks, "error")
+                A.equal(#errors, 66)
+                A.equal(errors[#errors].id, "error-66")
+                A.contains(errors[#errors].text, "NotFound")
+                A.equal(f.coordinator:status().diagnostic_count, 64)
             end,
         },
         {

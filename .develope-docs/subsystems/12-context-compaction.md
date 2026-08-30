@@ -101,7 +101,7 @@ summary 同时保存 source event range/digest、生成 Model、完整 Prompt/vi
 - `--continue` 只接受 exact resolved/reverified target，在同一 recorded workspace identity 下取得 writer；未完成 turn、active queue、未决 Tool/operation、unknown outcome 或 pending compaction 会阻断自动继续。quiescent Context 以 Idle Runtime 恢复 event/config/active manifest 与八类 canonical ID 水位，不自动执行或重放任何历史请求。
 - `.context` 无参数只显示 bounded recent Catalog；有 selector 时先冻结 exact verified path/hash，要求旧 Agent 为 Idle/WaitingUser 且 queue/side/approval/compaction 均安全，再关闭旧 writer，并在 fresh composition 中只按该 hash 重复完整 open/recovery。关闭后的 drift/lock/config failure 为 fatal，不退回短名称替代匹配；未保存 chat 不会因此发布空 Context。
 - production composition 测试使用真实 `compact` service 跑通手工/自动触发、摘要 Model response、response receipt、原子 publication、Runtime terminal settlement 和待发请求恢复，并注入 journal rejection 证明 lane 不会被错误释放。
-- 受 `.tools/run_with_resource_guard.sh` 保护的完整 Lua suite 为 `425/425`，其中包含手工/自动的五个跨实例 crash bracket、旧格式 pending、serial 不重用、process-recovery failure 传递、recovered-circuit cooldown、同 workspace exact reopen 和 two-phase Context switch。它只证明平台无关 core 与 fake/native adapter 边界，不能替代跨 workspace recovery controller 或 XP/Win7/CentOS 7 target 证据。
+- 受 `.tools/run_with_resource_guard.sh` 保护的完整 Lua suite 为 `426/426`，其中包含手工/自动的五个跨实例 crash bracket、旧格式 pending、serial 不重用、process-recovery failure 传递、recovered-circuit cooldown、同 workspace exact reopen 和 two-phase Context switch。它只证明平台无关 core 与 fake/native adapter 边界，不能替代跨 workspace recovery controller 或 XP/Win7/CentOS 7 target 证据。
 
 ## 仍需技术证明
 

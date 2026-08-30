@@ -53,6 +53,8 @@ Context 文件位于镜像树，例如 `__yaca__/CONTEXT/C/Program Files/我的�
 
 chat 中无 selector 的 `.context` 显示有界 recent 列表；`.context <selector>` 先冻结已复核的逻辑路径和精确 hash，只有当前 queue、side lane、approval 与 compaction 均安全时才关闭旧 owner，之后仅按该 hash 重新组合并打开。关闭后若发生竞态，本次 invocation 会致命失败，绝不退回短名称去打开替代对象。显式跨 workspace 确认实现前，该切换同样只限记录的 workspace。
 
+每个交互式 coordinator 错误都会取得当前进程内的 `error-N` 标识；`.details` 显示最新保留项，`.details error-N` 精确选择一项。固定环最多保留 64 条经清理的 code/message/suggestion；过期标识 fail-closed，且这个表面不保留原始 exception 对象、Tool body 或 transport payload。
+
 ## 已实现的命令 grammar
 
 以下拼写已在源码中实现；目前仍没有可下载且通过目标资格验证的 executable：
