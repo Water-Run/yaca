@@ -120,6 +120,23 @@ return {
             end,
         },
         {
+            name = "native component carrier bypasses both platform command shells",
+            run = function()
+                local source = read_all("native/yaca_native.c")
+                A.contains(source, "request_component_stdin")
+                A.contains(source, 'memcmp(mode, "argv", 4U)')
+                A.contains(source, "build_wide_arguments")
+                A.contains(source, "CreateProcessW(\n        application_name,")
+                A.contains(
+                    source,
+                    "execve(selected_executable, selected_arguments, environment.items)"
+                )
+                A.contains(source, "write_windows_pipe(stdin_write, stdin_bytes, stdin_length)")
+                A.contains(source, "write_posix_pipe(stdin_pipe[1], stdin_bytes, stdin_length)")
+                A.contains(source, "command_length >= 32767U")
+            end,
+        },
+        {
             name = "Windows console paths retain the XP API floor and host line editor",
             run = function()
                 local source = read_all("native/yaca_native.c")

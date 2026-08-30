@@ -13,9 +13,10 @@ yaca 当前已有可执行 Lua 入口和平台无关的通用 Agent 核心；代
 - 单 XML Context schema/store/index/lock/recovery、首消息先 durable、operation intent/result、ModelView publication 和 cache-miss 重建。
 - typed AgentLoop、queue/steer/side、ask-user/yield、action/termination review、预算/stuck/cancel/finalization 和精确 Tool result 配对。
 - 八个 versioned Tool、current-process one-action Permission、direct path/identity/CAS 防护，以及明确 `opaque-uncontained` 的原生 `cmd.exe`/shell exec。
+- 生产 native bridge 已接通 trusted component 的结构化 argv：Windows 以绝对 `CreateProcessW`、Linux 以 `execve` 绕过命令 shell，配置字节经有界匿名 stdin pipe 发送；现代 Linux 实际模块探针与 Win32/Win64 交叉编译已通过，但真实目标资格仍待 C32。
 - lossless model-view compaction：结构化摘要、atomic groups、Context journal、原子 manifest publication、Runtime receipt/lifecycle gate、公开 `.compact`，以及冻结待发 main/review 请求的自动 threshold preflight、STATUS/cancel/close。
 - 最小发行 allowlist、component/license manifest、SPDX SBOM、package planner、资源 overlay 和资源门禁测试 Harness。
-- 受 `.tools/run_with_resource_guard.sh` 保护的完整平台无关 Lua suite 当前为 `400/400`；这不是三目标资格证明。
+- 受 `.tools/run_with_resource_guard.sh` 保护的完整平台无关 Lua suite 当前为 `401/401`；这不是三目标资格证明。
 
 仍缺失或不得宣称完成：
 

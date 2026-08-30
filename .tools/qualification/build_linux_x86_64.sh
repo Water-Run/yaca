@@ -174,6 +174,20 @@ env LUA_PATH='' LUA_CPATH="$ARTIFACT_ROOT/?.so" \
   "$LUA_PREFIX/bin/lua" -e 'local n=require("yaca_native"); local p=n.platform_identity(); assert(n.abi_version()=="yaca-native-v0.1.0" and p.os=="linux" and p.arch=="x86_64"); local x=require("lxp"); assert(x._VERSION=="LuaExpat 1.5.2" and x._EXPAT_VERSION=="expat_2.8.2"); print("native-load=PASS")' \
   >"$LOG_ROOT/native-load.log"
 
+NATIVE_COMPONENT_PROBE="$ARTIFACT_ROOT/native-component-probe"
+if ! gcc -std=c99 -Wall -Wextra -Werror $COMMON_CFLAGS \
+  "$YACA_SOURCE/.tools/qualification/native_component_probe.c" \
+  $COMMON_LDFLAGS -o "$NATIVE_COMPONENT_PROBE" \
+  >"$LOG_ROOT/native-component-probe-build.log" 2>&1; then
+  tail -80 "$LOG_ROOT/native-component-probe-build.log" >&2
+  die "native component probe build failed"
+fi
+env LUA_PATH='' LUA_CPATH='' \
+  "$LUA_PREFIX/bin/lua" \
+  "$YACA_SOURCE/.tools/qualification/prove_native_component.lua" \
+  "$YACA_SOURCE" "$NATIVE_OUTPUT" "$NATIVE_COMPONENT_PROBE" \
+  >"$LOG_ROOT/native-component-proof.log"
+
 MBEDTLS_SOURCE="$WORK_ROOT/mbedtls-3.6.7"
 MBEDTLS_PREFIX="$PREFIX_ROOT/mbedtls"
 if ! make -C "$MBEDTLS_SOURCE" -j2 lib \

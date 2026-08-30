@@ -233,7 +233,7 @@ DSH 是 durable operation 和恢复方面最强参考。采用 tail-only repair�
 2. response wrapper 已在 Model port 与 `compact.lua` 双层验证 provider `incomplete`/finish class/tool/control，且 production owner 组合测试已跑通真实 compact service；仍需最终 OpenAI/Anthropic transport 黑盒和三目标 HTTPS 证据证明线上的 adapter 字段未在旧平台 carrier 中丢失。
 3. token 估算当前为跨旧平台安全的 `1 byte <= 1 token` 保守上界；最终阈值、延迟和内存需在 XP/Win7/CentOS 7 上校准，不能把现代 Linux 结果写成目标资格。
 
-2026-08-30 的受资源门禁串行 suite 为 `400/400`，其中已含 canonical manifest 伪造拒绝、失败前后 Context 字节/代不变、accepted summary + view 原子发布、cache-miss 恢复、公开 `.compact` 路由、main/review 自动 preflight 的精确暂停/恢复与失败阻断、Coordinator 可见 STATUS、真实 production owner 成功链和 journal ambiguity fail-stop。它证明平台无关手工/自动链路，不证明跨进程 pending 恢复或真实 XP/Win7/CentOS 7 网络与文件系统资格。
+2026-08-30 的受资源门禁串行 suite 为 `401/401`，其中已含 canonical manifest 伪造拒绝、失败前后 Context 字节/代不变、accepted summary + view 原子发布、cache-miss 恢复、公开 `.compact` 路由、main/review 自动 preflight 的精确暂停/恢复与失败阻断、Coordinator 可见 STATUS、真实 production owner 成功链和 journal ambiguity fail-stop。它证明平台无关手工/自动链路，不证明跨进程 pending 恢复或真实 XP/Win7/CentOS 7 网络与文件系统资格。
 
 ### 4.2 Permission：精确单动作授权是强项
 
@@ -261,12 +261,14 @@ DSH 是 durable operation 和恢复方面最强参考。采用 tail-only repair�
 - mutating direct tool 和 `exec` 均在 dispatch 前写 durable operation intent；result durable 失败会阻断后续 operation。
 - 未证明子孙进程停止、native exception、rename/delete durability 不明时收口为 `unknown`，不自动重放。
 - Windows shell 固定由 native `GetSystemDirectoryW` 得到系统 `cmd.exe`，不信任 `COMSPEC`、PATH wrapper 或用户 shell；参数固定为 `/D /S /C`。
+- trusted internal component 走另一条严格边界：Lua service 的 `mode=argv` 现已由 native bridge 实际实现，Windows 将绝对 executable 与 CRT-compatible quoted argv 交给 `CreateProcessW`，Linux 直接 `execve`；两者都以匿名 pipe 承载有界二进制 stdin，curl 配置不经过 CMD、POSIX shell、argv 或环境。
 - command 是 opaque text，不用 Bash AST 冒充 CMD 语义；stdin 关闭，环境 minimal/inherit-filtered，stdout/stderr 各自有固定 quota。
 - 输出使用稳定 head/tail 累积和精确 observed/retained/discarded accounting；registered secret 支持跨 chunk 扫描。
 - native Windows 使用 Job Object 管理进程树；取消和超时必须证明 job empty，否则结果 unknown。
 
 仍需真实目标证明：
 
+- Win32/Win64 native component probe 在对应真实系统上逐字节验证空参数、空格、引号、尾反斜杠、`&|<>^%!` 和含 NUL/CRLF 的 stdin；当前现代 Linux 实际模块探针与 MinGW `-Werror` 交叉编译不替代该证据；
 - XP SP3 x86 的 `CreateProcessW` quoting、OEM/ANSI/Unicode command behavior、`/D /S /C`、路径含空格/括号/`&|<>^%!`、关闭 stdin 和双 pipe backpressure；
 - XP 在宿主已处于 Job Object、FAT/FAT32、无硬链接/目录 flush 能力时的 fail-safe 行为；
 - synthetic Enter 取消 cooked console thread 后，旧 XP 控制台 echo/backspace/IME 与后续输入不被污染；
@@ -296,7 +298,7 @@ Compaction publication 已能构造并提交完整 generation：terminal event�
 
 审查发现的 Harness 缺口：
 
-1. 组件单测全绿不等于生产 composition 已接线；`.compact` 是现实反例。
+1. 组件单测全绿不等于生产 composition 已接线；`.compact` 曾是现实反例，本轮又发现 `process.lua` 已声明 structured component port、但 `yaca_native.c` 只实现 shell request。后者现已接通真实 native probe；其教训仍要求每个声明的 production port 都有穿过最终 adapter 的黑盒证明。
 2. 应枚举公开 action registry，要求每个 action 在对应生产 dispatcher 中有 executable route，或明确标成不可用且不出现在公开 help；不能依赖手写数量。
 3. native/PTY/target suites 需要显式 group 和串行策略，不能只依赖顶层脚本目前恰好顺序执行。
 4. full suite 的资源守卫是 shell 入口能力；直接执行 `bin/lua55 test/run.lua` 仍可绕过。发布/CI 文档和脚本必须只调用 guarded entrypoint，并由 readiness 检查该调用图。
@@ -326,8 +328,8 @@ Compaction publication 已能构造并提交完整 generation：terminal event�
 1. [x] 为 Model 增加 no-tool compaction request builder/port，冻结当前 turn 的 Model/Global prompt、view/source binding 和输出上限。
 2. [x] 为 Context publication 增加 compaction snapshot/journal；request、response/rejection/cancel/correction 和 accepted summary 均有精确 generation/manifest receipt。
 3. [x] accepted summary 与新 ModelView manifest 在一个 publication generation 中提交；旧 manifest 在成功前保持 sole active。
-4. [ ] ApplicationCoordinator 接通 `.compact`，只在 durable Idle/WaitingUser admission；STATUS 开始/完成/失败可见，可取消。
-5. [ ] 自动 compaction 在下一 Model request 前按 manifest threshold 触发；失败仍超窗时停止，不发送 oversized request。
+4. [x] ApplicationCoordinator 接通 `.compact`，只在 durable Idle/WaitingUser admission；STATUS 开始/完成/失败可见，可取消。
+5. [x] 自动 compaction 在下一 Model request 前按 manifest threshold 触发；失败仍超窗时停止，不发送 oversized request。
 6. [x] response 必须证明 `incomplete=false`、finish class 完整、无 tool/control；空或无收益摘要拒绝。
 7. [ ] 连续自动失败进入有界 circuit breaker/cooldown/half-open；手工请求仍给明确结果，不递归重试；当前仅同一 service lifetime 已实现。
 8. [ ] 恢复 incomplete compaction bracket 时保留旧 view并落 cancelled/unknown，绝不把未发布摘要当 active；accepted bracket 的恢复已实现。
@@ -335,7 +337,7 @@ Compaction publication 已能构造并提交完整 generation：terminal event�
 ### P0：Harness 证明
 
 1. 增加 public action registry → production dispatcher composition audit，覆盖 `.compact`。
-2. 增加 compaction 的真实 builder/activity/fake-provider/journal/XML/coordinator black-box journey。
+2. [x] 增加 compaction 的真实 builder/activity/fake-provider/journal/XML/coordinator black-box journey。
 3. 增加 crash 点：intent 后、response 后、publish 前、publish receipt 丢失、cancel pending、重启恢复。
 4. 每次测试前通过 resource guard；native/PTY/target suite 单独 group 并串行。
 
@@ -359,4 +361,4 @@ Compaction publication 已能构造并提交完整 generation：terminal event�
 
 ## 7. 当前结论
 
-yaca 的 Permission exact binding、direct filesystem 复核、durable operation、compaction algorithm 与 Context 原子 publication 已经具有很强的底层约束；当前最大风险不是“算法太弱”，而是 Model transport、Runtime admission、ApplicationCoordinator 与公开 action 还没有进入同一个生产 Harness。下一里程碑必须以 `.compact` 的端到端组合、未收口 lifecycle 恢复和公开 action 接线审计为核心，而不是继续增加只在单元 fixture 中成立的能力。
+yaca 的 Permission exact binding、direct filesystem 复核、durable operation、compaction algorithm、Context 原子 publication、公开 `.compact`/自动 preflight 和 trusted component native bridge 已形成生产闭环。当前最大风险转为三类：未收口 compaction lifecycle 的跨进程恢复、其余公开 action 的 dispatcher/production-port 全枚举，以及旧系统 native/network/TLS 闭包的真实目标证明。后续应优先消除这些接缝，不再用只到 fake port 或交叉编译的证据外推产品能力。

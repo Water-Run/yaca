@@ -6916,7 +6916,7 @@ static int request_string_field(
     lua_pop(L, 1);
     return 1;
   }
-  if (!lua_isstring(L, -1))
+  if (lua_type(L, -1) != LUA_TSTRING)
   {
     lua_pop(L, 1);
     return 0;
@@ -6931,7 +6931,153 @@ static int request_string_field(
   return 1;
 }
 
+static int request_process_mode(lua_State *L, int request_index, int *argv_mode)
+{
+  int request_absolute;
+  const char *mode;
+  size_t mode_length;
+
+  request_absolute = lua_absindex(L, request_index);
+  lua_getfield(L, request_absolute, "mode");
+  if (lua_isnil(L, -1))
+  {
+    *argv_mode = 0;
+    lua_pop(L, 1);
+    return 1;
+  }
+  if (lua_type(L, -1) != LUA_TSTRING)
+  {
+    lua_pop(L, 1);
+    return 0;
+  }
+  mode = lua_tolstring(L, -1, &mode_length);
+  *argv_mode = mode_length == 4U && memcmp(mode, "argv", 4U) == 0;
+  lua_pop(L, 1);
+  return *argv_mode;
+}
+
+static int request_component_stdin(
+  lua_State *L,
+  int request_index,
+  const char **bytes,
+  size_t *length)
+{
+  int request_absolute;
+  int stdin_absolute;
+  const char *kind;
+  const char *carrier;
+  size_t kind_length;
+  size_t carrier_length;
+
+  request_absolute = lua_absindex(L, request_index);
+  lua_getfield(L, request_absolute, "stdin");
+  if (!lua_istable(L, -1))
+  {
+    lua_pop(L, 1);
+    return 0;
+  }
+  stdin_absolute = lua_absindex(L, -1);
+  if (!request_string_field(
+      L,
+      stdin_absolute,
+      "kind",
+      &kind,
+      &kind_length,
+      0)
+      || kind_length != 5U
+      || memcmp(kind, "bytes", 5U) != 0
+      || !request_string_field(
+        L,
+        stdin_absolute,
+        "carrier",
+        &carrier,
+        &carrier_length,
+        0)
+      || carrier_length != 14U
+      || memcmp(carrier, "anonymous-pipe", 14U) != 0)
+  {
+    lua_pop(L, 1);
+    return 0;
+  }
+  lua_getfield(L, stdin_absolute, "bytes");
+  if (lua_type(L, -1) != LUA_TSTRING)
+  {
+    lua_pop(L, 2);
+    return 0;
+  }
+  *bytes = lua_tolstring(L, -1, length);
+  lua_pop(L, 2);
+  return 1;
+}
+
+static int request_component_argument_count(
+  lua_State *L,
+  int request_index,
+  size_t *count)
+{
+  int request_absolute;
+  int arguments_absolute;
+  lua_Unsigned raw_count;
+  size_t observed;
+
+  request_absolute = lua_absindex(L, request_index);
+  lua_getfield(L, request_absolute, "arguments");
+  if (!lua_istable(L, -1))
+  {
+    lua_pop(L, 1);
+    return 0;
+  }
+  arguments_absolute = lua_absindex(L, -1);
+  raw_count = (lua_Unsigned)lua_rawlen(L, arguments_absolute);
+  if (raw_count > (lua_Unsigned)(SIZE_MAX - 2U))
+  {
+    lua_pop(L, 1);
+    return 0;
+  }
+  observed = 0;
+  lua_pushnil(L);
+  while (lua_next(L, arguments_absolute) != 0)
+  {
+    lua_Integer key;
+    const char *value;
+    size_t value_length;
+
+    if (!lua_isinteger(L, -2) || lua_type(L, -1) != LUA_TSTRING)
+    {
+      lua_pop(L, 2);
+      lua_pop(L, 1);
+      return 0;
+    }
+    key = lua_tointeger(L, -2);
+    value = lua_tolstring(L, -1, &value_length);
+    if (key < 1
+        || (lua_Unsigned)key > raw_count
+        || memchr(value, '\0', value_length) != NULL)
+    {
+      lua_pop(L, 2);
+      lua_pop(L, 1);
+      return 0;
+    }
+    observed++;
+    lua_pop(L, 1);
+  }
+  lua_pop(L, 1);
+  if ((lua_Unsigned)observed != raw_count)
+  {
+    return 0;
+  }
+  *count = observed;
+  return 1;
+}
+
 #if defined(_WIN32)
+
+typedef struct yaca_wide_arguments
+{
+  WCHAR **items;
+  size_t count;
+  WCHAR *command_line;
+} yaca_wide_arguments;
 
 typedef struct yaca_wide_environment
 {
@@ -6939,6 +7085,246 @@ typedef struct yaca_wide_environment
   size_t count;
   WCHAR *block;
 } yaca_wide_environment;
+
+static void free_wide_arguments(yaca_wide_arguments *arguments)
+{
+  size_t index;
+
+  if (arguments->items != NULL)
+  {
+    for (index = 0; index < arguments->count; index++)
+    {
+      free(arguments->items[index]);
+    }
+  }
+  free(arguments->items);
+  free(arguments->command_line);
+  memset(arguments, 0, sizeof(*arguments));
+}
+
+static int quoted_windows_argument_length(const WCHAR *value, size_t *length)
+{
+  size_t total;
+  const WCHAR *cursor;
+
+  total = 2U;
+  cursor = value;
+  while (*cursor != L'\0')
+  {
+    size_t backslashes;
+
+    backslashes = 0;
+    while (cursor[backslashes] == L'\\')
+    {
+      backslashes++;
+    }
+    cursor += backslashes;
+    if (*cursor == L'\0')
+    {
+      if (backslashes > (SIZE_MAX - total) / 2U)
+      {
+        return 0;
+      }
+      total += backslashes * 2U;
+      break;
+    }
+    if (*cursor == L'"')
+    {
+      size_t addition;
+
+      if (backslashes > (SIZE_MAX - 2U) / 2U)
+      {
+        return 0;
+      }
+      addition = backslashes * 2U + 2U;
+      if (addition > SIZE_MAX - total)
+      {
+        return 0;
+      }
+      total += addition;
+    }
+    else
+    {
+      size_t addition;
+
+      if (backslashes == SIZE_MAX)
+      {
+        return 0;
+      }
+      addition = backslashes + 1U;
+      if (addition > SIZE_MAX - total)
+      {
+        return 0;
+      }
+      total += addition;
+    }
+    cursor++;
+  }
+  *length = total;
+  return 1;
+}
+
+static WCHAR *append_quoted_windows_argument(WCHAR *output, const WCHAR *value)
+{
+  const WCHAR *cursor;
+
+  *output++ = L'"';
+  cursor = value;
+  while (*cursor != L'\0')
+  {
+    size_t backslashes;
+    size_t copies;
+
+    backslashes = 0;
+    while (cursor[backslashes] == L'\\')
+    {
+      backslashes++;
+    }
+    cursor += backslashes;
+    copies = *cursor == L'"' || *cursor == L'\0'
+      ? backslashes * 2U
+      : backslashes;
+    while (copies-- > 0U)
+    {
+      *output++ = L'\\';
+    }
+    if (*cursor == L'\0')
+    {
+      break;
+    }
+    if (*cursor == L'"')
+    {
+      *output++ = L'\\';
+    }
+    *output++ = *cursor++;
+  }
+  *output++ = L'"';
+  return output;
+}
+
+static int build_wide_arguments(
+  lua_State *L,
+  int request_index,
+  const char *executable,
+  size_t executable_length,
+  yaca_wide_arguments *arguments)
+{
+  int request_absolute;
+  int table_absolute;
+  size_t supplied_count;
+  size_t index;
+  size_t command_length;
+  WCHAR *output;
+
+  memset(arguments, 0, sizeof(*arguments));
+  if (!request_component_argument_count(L, request_index, &supplied_count)
+      || supplied_count > SIZE_MAX / sizeof(WCHAR *) - 1U)
+  {
+    return 0;
+  }
+  arguments->count = supplied_count + 1U;
+  arguments->items = (WCHAR **)calloc(arguments->count, sizeof(WCHAR *));
+  if (arguments->items == NULL)
+  {
+    return 0;
+  }
+  arguments->items[0] = utf8_to_wide(executable, executable_length);
+  if (arguments->items[0] == NULL)
+  {
+    free_wide_arguments(arguments);
+    return 0;
+  }
+  request_absolute = lua_absindex(L, request_index);
+  lua_getfield(L, request_absolute, "arguments");
+  table_absolute = lua_absindex(L, -1);
+  for (index = 0; index < supplied_count; index++)
+  {
+    const char *value;
+    size_t value_length;
+
+    lua_rawgeti(L, table_absolute, (lua_Integer)index + 1);
+    value = lua_tolstring(L, -1, &value_length);
+    arguments->items[index + 1U] = utf8_to_wide(value, value_length);
+    lua_pop(L, 1);
+    if (arguments->items[index + 1U] == NULL)
+    {
+      lua_pop(L, 1);
+      free_wide_arguments(arguments);
+      return 0;
+    }
+  }
+  lua_pop(L, 1);
+
+  command_length = 0;
+  for (index = 0; index < arguments->count; index++)
+  {
+    size_t item_length;
+    size_t separator_length;
+
+    separator_length = index > 0U ? 1U : 0U;
+    if (!quoted_windows_argument_length(arguments->items[index], &item_length)
+        || item_length > SIZE_MAX - separator_length
+        || item_length + separator_length > SIZE_MAX - command_length)
+    {
+      free_wide_arguments(arguments);
+      return 0;
+    }
+    command_length += item_length + separator_length;
+  }
+  /* CreateProcessW, including on XP, admits at most 32767 WCHARs including
+  ** the terminating NUL.  Enforce the native ceiling before allocation. */
+  if (command_length >= 32767U)
+  {
+    free_wide_arguments(arguments);
+    return 0;
+  }
+  arguments->command_line = (WCHAR *)calloc(
+    command_length + 1U,
+    sizeof(WCHAR));
+  if (arguments->command_line == NULL)
+  {
+    free_wide_arguments(arguments);
+    return 0;
+  }
+  output = arguments->command_line;
+  for (index = 0; index < arguments->count; index++)
+  {
+    if (index > 0U)
+    {
+      *output++ = L' ';
+    }
+    output = append_quoted_windows_argument(output, arguments->items[index]);
+  }
+  *output = L'\0';
+  return 1;
+}
+
+static int write_windows_pipe(HANDLE handle, const char *bytes, size_t length)
+{
+  size_t offset;
+
+  offset = 0;
+  while (offset < length)
+  {
+    DWORD requested;
+    DWORD written;
+
+    requested = length - offset > 0x7fffffffU
+      ? 0x7fffffffUL
+      : (DWORD)(length - offset);
+    if (!WriteFile(handle, bytes + offset, requested, &written, NULL))
+    {
+      return GetLastError() == ERROR_BROKEN_PIPE ? 1 : 0;
+    }
+    if (written == 0U)
+    {
+      SetLastError(ERROR_WRITE_FAULT);
+      return 0;
+    }
+    offset += (size_t)written;
+  }
+  return 1;
+}
 
 static int compare_wide_environment(const void *left, const void *right)
 {
@@ -7261,6 +7647,104 @@ typedef struct yaca_posix_environment
   size_t count;
 } yaca_posix_environment;
 
+static char **build_posix_arguments(
+  lua_State *L,
+  int request_index,
+  const char *executable)
+{
+  int request_absolute;
+  int table_absolute;
+  size_t supplied_count;
+  size_t index;
+  char **arguments;
+
+  if (!request_component_argument_count(L, request_index, &supplied_count)
+      || supplied_count > SIZE_MAX / sizeof(char *) - 2U)
+  {
+    return NULL;
+  }
+  arguments = (char **)calloc(supplied_count + 2U, sizeof(char *));
+  if (arguments == NULL)
+  {
+    return NULL;
+  }
+  arguments[0] = (char *)executable;
+  request_absolute = lua_absindex(L, request_index);
+  lua_getfield(L, request_absolute, "arguments");
+  table_absolute = lua_absindex(L, -1);
+  for (index = 0; index < supplied_count; index++)
+  {
+    lua_rawgeti(L, table_absolute, (lua_Integer)index + 1);
+    arguments[index + 1U] = (char *)lua_tostring(L, -1);
+    lua_pop(L, 1);
+  }
+  lua_pop(L, 1);
+  arguments[supplied_count + 1U] = NULL;
+  return arguments;
+}
+
+static int write_posix_pipe(int descriptor, const char *bytes, size_t length)
+{
+  struct sigaction ignored;
+  struct sigaction previous;
+  size_t offset;
+  int result;
+  int saved_error;
+
+  memset(&ignored, 0, sizeof(ignored));
+  ignored.sa_handler = SIG_IGN;
+  sigemptyset(&ignored.sa_mask);
+  if (sigaction(SIGPIPE, &ignored, &previous) != 0)
+  {
+    return 0;
+  }
+  offset = 0;
+  result = 1;
+  saved_error = 0;
+  while (offset < length)
+  {
+    size_t maximum;
+    ssize_t written;
+
+    maximum = length - offset;
+    if (maximum > (size_t)SSIZE_MAX)
+    {
+      maximum = (size_t)SSIZE_MAX;
+    }
+    do
+    {
+      written = write(descriptor, bytes + offset, maximum);
+    }
+    while (written < 0 && errno == EINTR);
+    if (written < 0)
+    {
+      if (errno != EPIPE)
+      {
+        result = 0;
+        saved_error = errno;
+      }
+      break;
+    }
+    if (written == 0)
+    {
+      result = 0;
+      saved_error = EIO;
+      break;
+    }
+    offset += (size_t)written;
+  }
+  if (sigaction(SIGPIPE, &previous, NULL) != 0 && result)
+  {
+    result = 0;
+    saved_error = errno;
+  }
+  if (!result)
+  {
+    errno = saved_error;
+  }
+  return result;
+}
+
 static void free_posix_environment(yaca_posix_environment *environment)
 {
   size_t index;
@@ -7514,32 +7998,78 @@ static int read_posix_process_stream(
 #endif
 
 /*
-** Starts one fixed system shell with closed stdin and separate output pipes.
+** Starts either one fixed system shell or one trusted absolute component.
+** Component argv never passes through cmd.exe or /bin/sh, and its bounded
+** stdin bytes use an anonymous pipe owned by this native boundary.
 */
 static int l_process_start(lua_State *L)
 {
-  const char *command;
-  const char *cwd;
-  const char *shell_kind;
-  const char *shell_executable;
-  size_t command_length;
-  size_t cwd_length;
-  size_t shell_kind_length;
-  size_t shell_executable_length;
+  const char *command = NULL;
+  const char *cwd = NULL;
+  const char *shell_kind = NULL;
+  const char *shell_executable = NULL;
+  const char *component_executable = NULL;
+  const char *stdin_bytes = NULL;
+  size_t command_length = 0;
+  size_t cwd_length = 0;
+  size_t shell_kind_length = 0;
+  size_t shell_executable_length = 0;
+  size_t component_executable_length = 0;
+  size_t stdin_length = 0;
   lua_Integer started_at;
   yaca_process *process;
+  int argv_mode;
 
   luaL_checktype(L, 1, LUA_TTABLE);
-  if (!request_string_field(
+  if (!request_process_mode(L, 1, &argv_mode)
+      || !request_string_field(L, 1, "cwd", &cwd, &cwd_length, 1))
+  {
+    return push_failure(L, "InvalidProcessMode", "process mode or cwd is invalid");
+  }
+  if (argv_mode)
+  {
+    if (!request_string_field(
+        L,
+        1,
+        "executable",
+        &component_executable,
+        &component_executable_length,
+        0)
+        || !request_component_stdin(L, 1, &stdin_bytes, &stdin_length))
+    {
+      return push_failure(
+        L,
+        "InvalidComponent",
+        "component executable, arguments, or stdin is invalid");
+    }
+#if defined(_WIN32)
+    if (!((component_executable_length >= 3U
+          && ((component_executable[0] >= 'A' && component_executable[0] <= 'Z')
+            || (component_executable[0] >= 'a' && component_executable[0] <= 'z'))
+          && component_executable[1] == ':'
+          && (component_executable[2] == '\\' || component_executable[2] == '/'))
+        || (component_executable_length >= 5U
+          && ((component_executable[0] == '\\' && component_executable[1] == '\\')
+            || (component_executable[0] == '/' && component_executable[1] == '/')))))
+    {
+      return push_failure(L, "InvalidExecutable", "component path is not absolute");
+    }
+#else
+    if (component_executable[0] != '/')
+    {
+      return push_failure(L, "InvalidExecutable", "component path is not absolute");
+    }
+#endif
+  }
+  else if (!request_string_field(
       L,
       1,
       "command",
       &command,
       &command_length,
-      0)
-      || !request_string_field(L, 1, "cwd", &cwd, &cwd_length, 1))
+      0))
   {
-    return push_failure(L, "InvalidCommand", "process command or cwd is invalid");
+    return push_failure(L, "InvalidCommand", "process command is invalid");
   }
   lua_getfield(L, 1, "started_at");
   if (!lua_isinteger(L, -1) || lua_tointeger(L, -1) < 0)
@@ -7549,46 +8079,54 @@ static int l_process_start(lua_State *L)
   }
   started_at = lua_tointeger(L, -1);
   lua_pop(L, 1);
-  lua_getfield(L, 1, "shell");
-  if (!lua_istable(L, -1)
-      || !request_string_field(
-        L,
-        -1,
-        "kind",
-        &shell_kind,
-        &shell_kind_length,
-        0)
-      || !request_string_field(
-        L,
-        -1,
-        "executable",
-        &shell_executable,
-        &shell_executable_length,
-        0))
+  if (!argv_mode)
   {
+    lua_getfield(L, 1, "shell");
+    if (!lua_istable(L, -1)
+        || !request_string_field(
+          L,
+          -1,
+          "kind",
+          &shell_kind,
+          &shell_kind_length,
+          0)
+        || !request_string_field(
+          L,
+          -1,
+          "executable",
+          &shell_executable,
+          &shell_executable_length,
+          0))
+    {
+      lua_pop(L, 1);
+      return push_failure(L, "InvalidShell", "process shell descriptor is invalid");
+    }
     lua_pop(L, 1);
-    return push_failure(L, "InvalidShell", "process shell descriptor is invalid");
   }
-  lua_pop(L, 1);
 
 #if defined(_WIN32)
   {
     WCHAR system_directory[MAX_PATH + 1];
-    UINT system_length;
-    WCHAR *wide_command;
-    WCHAR *wide_cwd;
+    UINT system_length = 0;
+    WCHAR *wide_command = NULL;
+    WCHAR *wide_cwd = NULL;
+    WCHAR *shell_command_line = NULL;
+    WCHAR *application_name;
     WCHAR *command_line;
-    size_t command_line_length;
+    size_t command_line_length = 0;
     SECURITY_ATTRIBUTES security;
     HANDLE stdout_read;
     HANDLE stdout_write;
     HANDLE stderr_read;
     HANDLE stderr_write;
     HANDLE stdin_null;
+    HANDLE stdin_read;
+    HANDLE stdin_write;
     HANDLE job;
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION job_limits;
     STARTUPINFOW startup;
     PROCESS_INFORMATION information;
+    yaca_wide_arguments component_arguments;
     yaca_wide_environment environment;
     DWORD creation_flags;
     DWORD error_value;
@@ -7596,58 +8134,104 @@ static int l_process_start(lua_State *L)
 
     (void)shell_kind_length;
     (void)shell_executable_length;
-    if (strcmp(shell_kind, "windows") != 0
-        || strcmp(shell_executable, "native-GetSystemDirectoryW/cmd.exe") != 0)
+    memset(&component_arguments, 0, sizeof(component_arguments));
+    memset(&environment, 0, sizeof(environment));
+    if (argv_mode)
     {
-      return push_failure(L, "InvalidShell", "Windows process shell is not allowlisted");
+      if (!build_wide_arguments(
+          L,
+          1,
+          component_executable,
+          component_executable_length,
+          &component_arguments))
+      {
+        return push_failure(
+          L,
+          "InvalidArguments",
+          "component argv is invalid, non-UTF-8, or exceeds the Windows limit");
+      }
+      application_name = component_arguments.items[0];
+      command_line = component_arguments.command_line;
     }
-    system_length = GetSystemDirectoryW(system_directory, MAX_PATH);
-    if (system_length == 0 || system_length >= MAX_PATH - 8U)
+    else
     {
-      return push_windows_failure(L, GetLastError(), "cannot resolve system command shell");
+      if (strcmp(shell_kind, "windows") != 0
+          || strcmp(shell_executable, "native-GetSystemDirectoryW/cmd.exe") != 0)
+      {
+        return push_failure(L, "InvalidShell", "Windows process shell is not allowlisted");
+      }
+      system_length = GetSystemDirectoryW(system_directory, MAX_PATH);
+      if (system_length == 0 || system_length >= MAX_PATH - 8U)
+      {
+        return push_windows_failure(
+          L,
+          GetLastError(),
+          "cannot resolve system command shell");
+      }
+      if (system_directory[system_length - 1U] != YACA_PATH_SEPARATOR)
+      {
+        system_directory[system_length++] = YACA_PATH_SEPARATOR;
+      }
+      memcpy(
+        system_directory + system_length,
+        L"cmd.exe",
+        8U * sizeof(WCHAR));
+      wide_command = utf8_to_wide(command, command_length);
+      if (wide_command == NULL)
+      {
+        return push_failure(
+          L,
+          "InvalidEncoding",
+          "process command is not strict UTF-8");
+      }
+      if (wcslen(system_directory) > SIZE_MAX - wcslen(wide_command) - 32U)
+      {
+        free(wide_command);
+        return push_failure(L, "Limit", "process command line is too long");
+      }
+      command_line_length = wcslen(system_directory)
+        + wcslen(wide_command)
+        + 32U;
+      if (command_line_length > 32767U)
+      {
+        free(wide_command);
+        return push_failure(L, "Limit", "process command line is too long");
+      }
+      shell_command_line = (WCHAR *)malloc(
+        command_line_length * sizeof(WCHAR));
+      if (shell_command_line == NULL)
+      {
+        free(wide_command);
+        return push_failure(L, "Limit", "process command line allocation failed");
+      }
+      if (swprintf(
+          shell_command_line,
+          command_line_length,
+          L"\"%ls\" /d /s /c \"%ls\"",
+          system_directory,
+          wide_command) < 0)
+      {
+        free(shell_command_line);
+        free(wide_command);
+        return push_failure(L, "Limit", "process command line is too long");
+      }
+      free(wide_command);
+      wide_command = NULL;
+      application_name = system_directory;
+      command_line = shell_command_line;
     }
-    if (system_directory[system_length - 1U] != YACA_PATH_SEPARATOR)
-    {
-      system_directory[system_length++] = YACA_PATH_SEPARATOR;
-    }
-    memcpy(
-      system_directory + system_length,
-      L"cmd.exe",
-      8U * sizeof(WCHAR));
-    wide_command = utf8_to_wide(command, command_length);
     wide_cwd = cwd == NULL ? NULL : utf8_to_wide(cwd, cwd_length);
-    if (wide_command == NULL || (cwd != NULL && wide_cwd == NULL))
+    if (cwd != NULL && wide_cwd == NULL)
     {
-      free(wide_command);
+      free(shell_command_line);
+      free_wide_arguments(&component_arguments);
       free(wide_cwd);
-      return push_failure(L, "InvalidEncoding", "process command or cwd is not strict UTF-8");
+      return push_failure(L, "InvalidEncoding", "process cwd is not strict UTF-8");
     }
-    command_line_length = wcslen(system_directory)
-      + wcslen(wide_command)
-      + 32U;
-    command_line = (WCHAR *)malloc(command_line_length * sizeof(WCHAR));
-    if (command_line == NULL)
-    {
-      free(wide_command);
-      free(wide_cwd);
-      return push_failure(L, "Limit", "process command line allocation failed");
-    }
-    if (swprintf(
-        command_line,
-        command_line_length,
-        L"\"%ls\" /d /s /c \"%ls\"",
-        system_directory,
-        wide_command) < 0)
-    {
-      free(command_line);
-      free(wide_command);
-      free(wide_cwd);
-      return push_failure(L, "Limit", "process command line is too long");
-    }
-    free(wide_command);
     if (!build_wide_environment(L, 1, &environment))
     {
-      free(command_line);
+      free(shell_command_line);
+      free_wide_arguments(&component_arguments);
       free(wide_cwd);
       return push_failure(L, "InvalidEnvironment", "process environment is invalid");
     }
@@ -7659,6 +8243,8 @@ static int l_process_start(lua_State *L)
     stderr_read = INVALID_HANDLE_VALUE;
     stderr_write = INVALID_HANDLE_VALUE;
     stdin_null = INVALID_HANDLE_VALUE;
+    stdin_read = INVALID_HANDLE_VALUE;
+    stdin_write = INVALID_HANDLE_VALUE;
     job = INVALID_HANDLE_VALUE;
     memset(&information, 0, sizeof(information));
     created = 0;
@@ -7670,18 +8256,30 @@ static int l_process_start(lua_State *L)
       error_value = GetLastError();
       goto windows_start_cleanup;
     }
-    stdin_null = CreateFileW(
-      L"NUL",
-      GENERIC_READ,
-      FILE_SHARE_READ | FILE_SHARE_WRITE,
-      &security,
-      OPEN_EXISTING,
-      FILE_ATTRIBUTE_NORMAL,
-      NULL);
-    if (stdin_null == INVALID_HANDLE_VALUE)
+    if (argv_mode)
     {
-      error_value = GetLastError();
-      goto windows_start_cleanup;
+      if (!CreatePipe(&stdin_read, &stdin_write, &security, 0)
+          || !SetHandleInformation(stdin_write, HANDLE_FLAG_INHERIT, 0))
+      {
+        error_value = GetLastError();
+        goto windows_start_cleanup;
+      }
+    }
+    else
+    {
+      stdin_null = CreateFileW(
+        L"NUL",
+        GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        &security,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        NULL);
+      if (stdin_null == INVALID_HANDLE_VALUE)
+      {
+        error_value = GetLastError();
+        goto windows_start_cleanup;
+      }
     }
     job = CreateJobObjectW(NULL, NULL);
     if (job == NULL)
@@ -7704,13 +8302,13 @@ static int l_process_start(lua_State *L)
     memset(&startup, 0, sizeof(startup));
     startup.cb = sizeof(startup);
     startup.dwFlags = STARTF_USESTDHANDLES;
-    startup.hStdInput = stdin_null;
+    startup.hStdInput = argv_mode ? stdin_read : stdin_null;
     startup.hStdOutput = stdout_write;
     startup.hStdError = stderr_write;
     creation_flags = CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT
       | CREATE_NO_WINDOW;
     if (!CreateProcessW(
-        system_directory,
+        application_name,
         command_line,
         NULL,
         NULL,
@@ -7738,6 +8336,25 @@ static int l_process_start(lua_State *L)
       WaitForSingleObject(information.hProcess, INFINITE);
       goto windows_start_cleanup;
     }
+    if (stdin_read != INVALID_HANDLE_VALUE)
+    {
+      CloseHandle(stdin_read);
+      stdin_read = INVALID_HANDLE_VALUE;
+    }
+    if (stdin_write != INVALID_HANDLE_VALUE)
+    {
+      if (!write_windows_pipe(stdin_write, stdin_bytes, stdin_length))
+      {
+        error_value = GetLastError();
+        CloseHandle(stdin_write);
+        stdin_write = INVALID_HANDLE_VALUE;
+        TerminateJobObject(job, 0xE0000005UL);
+        WaitForSingleObject(information.hProcess, INFINITE);
+        goto windows_start_cleanup;
+      }
+      CloseHandle(stdin_write);
+      stdin_write = INVALID_HANDLE_VALUE;
+    }
     created = 1;
     error_value = ERROR_SUCCESS;
 
@@ -7758,7 +8375,16 @@ windows_start_cleanup:
     {
       CloseHandle(stdin_null);
     }
-    free(command_line);
+    if (stdin_read != INVALID_HANDLE_VALUE)
+    {
+      CloseHandle(stdin_read);
+    }
+    if (stdin_write != INVALID_HANDLE_VALUE)
+    {
+      CloseHandle(stdin_write);
+    }
+    free(shell_command_line);
+    free_wide_arguments(&component_arguments);
     free(wide_cwd);
     free_wide_environment(&environment);
     if (!created)
@@ -7792,24 +8418,51 @@ windows_start_cleanup:
   {
     int stdout_pipe[2];
     int stderr_pipe[2];
+    int stdin_pipe[2];
     int null_input;
     pid_t child;
     yaca_posix_environment environment;
-    char *arguments[4];
+    char *shell_arguments[4];
+    char **component_arguments;
+    char **selected_arguments;
+    const char *selected_executable;
     int error_value;
 
     (void)shell_kind_length;
     (void)shell_executable_length;
-    if (strcmp(shell_kind, "linux") != 0 || strcmp(shell_executable, "/bin/sh") != 0)
+    component_arguments = NULL;
+    if (argv_mode)
     {
-      return push_failure(L, "InvalidShell", "Linux process shell is not allowlisted");
+      component_arguments = build_posix_arguments(L, 1, component_executable);
+      if (component_arguments == NULL)
+      {
+        return push_failure(L, "InvalidArguments", "component argv is invalid");
+      }
+      selected_executable = component_executable;
+      selected_arguments = component_arguments;
+    }
+    else
+    {
+      if (strcmp(shell_kind, "linux") != 0
+          || strcmp(shell_executable, "/bin/sh") != 0)
+      {
+        return push_failure(L, "InvalidShell", "Linux process shell is not allowlisted");
+      }
+      shell_arguments[0] = (char *)"/bin/sh";
+      shell_arguments[1] = (char *)"-c";
+      shell_arguments[2] = (char *)command;
+      shell_arguments[3] = NULL;
+      selected_executable = "/bin/sh";
+      selected_arguments = shell_arguments;
     }
     if (!build_posix_environment(L, 1, &environment))
     {
+      free(component_arguments);
       return push_failure(L, "InvalidEnvironment", "process environment is invalid");
     }
     stdout_pipe[0] = stdout_pipe[1] = -1;
     stderr_pipe[0] = stderr_pipe[1] = -1;
+    stdin_pipe[0] = stdin_pipe[1] = -1;
     null_input = -1;
     if (pipe(stdout_pipe) != 0 || pipe(stderr_pipe) != 0)
     {
@@ -7824,16 +8477,25 @@ windows_start_cleanup:
       error_value = errno;
       goto posix_start_failure;
     }
-    null_input = open("/dev/null", O_RDONLY);
-    if (null_input < 0)
+    if (argv_mode)
     {
-      error_value = errno;
-      goto posix_start_failure;
+      if (pipe(stdin_pipe) != 0
+          || !set_descriptor_flags(stdin_pipe[0], F_SETFD, FD_CLOEXEC)
+          || !set_descriptor_flags(stdin_pipe[1], F_SETFD, FD_CLOEXEC))
+      {
+        error_value = errno;
+        goto posix_start_failure;
+      }
     }
-    arguments[0] = (char *)"/bin/sh";
-    arguments[1] = (char *)"-c";
-    arguments[2] = (char *)command;
-    arguments[3] = NULL;
+    else
+    {
+      null_input = open("/dev/null", O_RDONLY);
+      if (null_input < 0)
+      {
+        error_value = errno;
+        goto posix_start_failure;
+      }
+    }
     child = fork();
     if (child < 0)
     {
@@ -7844,7 +8506,7 @@ windows_start_cleanup:
     {
       if (setpgid(0, 0) != 0
           || (cwd != NULL && chdir(cwd) != 0)
-          || dup2(null_input, STDIN_FILENO) < 0
+          || dup2(argv_mode ? stdin_pipe[0] : null_input, STDIN_FILENO) < 0
           || dup2(stdout_pipe[1], STDOUT_FILENO) < 0
           || dup2(stderr_pipe[1], STDERR_FILENO) < 0)
       {
@@ -7854,16 +8516,41 @@ windows_start_cleanup:
       close(stdout_pipe[1]);
       close(stderr_pipe[0]);
       close(stderr_pipe[1]);
-      close(null_input);
-      execve("/bin/sh", arguments, environment.items);
+      if (stdin_pipe[0] >= 0) close(stdin_pipe[0]);
+      if (stdin_pipe[1] >= 0) close(stdin_pipe[1]);
+      if (null_input >= 0) close(null_input);
+      execve(selected_executable, selected_arguments, environment.items);
       _exit(127);
     }
     close(stdout_pipe[1]);
     stdout_pipe[1] = -1;
     close(stderr_pipe[1]);
     stderr_pipe[1] = -1;
-    close(null_input);
-    null_input = -1;
+    if (stdin_pipe[0] >= 0)
+    {
+      close(stdin_pipe[0]);
+      stdin_pipe[0] = -1;
+    }
+    if (stdin_pipe[1] >= 0)
+    {
+      if (!write_posix_pipe(stdin_pipe[1], stdin_bytes, stdin_length))
+      {
+        error_value = errno;
+        close(stdin_pipe[1]);
+        stdin_pipe[1] = -1;
+        kill(-child, SIGKILL);
+        kill(child, SIGKILL);
+        waitpid(child, NULL, 0);
+        goto posix_start_failure;
+      }
+      close(stdin_pipe[1]);
+      stdin_pipe[1] = -1;
+    }
+    if (null_input >= 0)
+    {
+      close(null_input);
+      null_input = -1;
+    }
     if (!set_descriptor_flags(stdout_pipe[0], F_SETFL, O_NONBLOCK)
         || !set_descriptor_flags(stderr_pipe[0], F_SETFL, O_NONBLOCK))
     {
@@ -7874,6 +8561,8 @@ windows_start_cleanup:
       goto posix_start_failure;
     }
     setpgid(child, child);
+    free(component_arguments);
+    component_arguments = NULL;
     free_posix_environment(&environment);
     process = push_process(L);
     process->process_id = child;
@@ -7904,6 +8593,15 @@ posix_start_failure:
     {
       close(null_input);
     }
+    if (stdin_pipe[0] >= 0)
+    {
+      close(stdin_pipe[0]);
+    }
+    if (stdin_pipe[1] >= 0)
+    {
+      close(stdin_pipe[1]);
+    }
+    free(component_arguments);
     free_posix_environment(&environment);
     return push_failure(L, errno_code(error_value), "Linux process start failed");
 
