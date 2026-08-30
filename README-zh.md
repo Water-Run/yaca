@@ -4,7 +4,7 @@
 
 yaca 是一款简单、单 Agent、terminal-only Coding Agent 的设计，以 GPL v3 许可开源。
 
-> **项目状态（2026-08-30）：实现已完成；目标资格验证待完成。** v0.1 产品源码及其平台无关测试已完成至 M9，但还没有任何目标发行包通过资格验证。下文描述已经实现的 v0.1 契约；Win32 x86、Win64 x86_64 与 Linux x86_64 的目标相关行为仍须分别验证。Gate A/B 保持通过，Release Gate R 仍关闭。
+> **项目状态（2026-08-30）：平台无关核心已实现至 M9；controller 收口和目标资格验证待完成。** 目前还没有任何目标发行包通过资格验证。下文描述已经实现的 v0.1 契约；Win32 x86、Win64 x86_64 与 Linux x86_64 的目标相关行为仍须分别验证。Gate A/B 保持通过，Release Gate R 仍关闭。
 
 ## 支持的发行目标
 
@@ -48,6 +48,8 @@ Context XML 是 yaca 内部版本化存储，不是稳定第三方 API；人类�
 Context 文件位于镜像树，例如 `__yaca__/CONTEXT/C/Program Files/我的任务.xml`。包含 XML 文件名的当前逻辑路径产生一个用户可见的 16 位大写十六进制 hash。没有永久 Context ID：rename 或 rebind 后路径/hash 立即改变，旧 hash 失效。
 
 历史只通过显式动作打开。短名称按既定 scope/distance 顺序选择首个可用命中；hash 是精准 selector，必须唯一。rename、rebind、永久 delete、import mapping 和 metadata 修改都会复核目标。活动 writer 会阻止第二进程读取 XML 正文或修改该 Context；绝不只按锁龄破锁。
+
+`--continue` 会解析并复核一个精确目标、取得其 writer，且当前要求从该 Context 记录的 workspace 调用。它把 durable event/config/ModelView 与各类标识符水位恢复到 Idle Agent，绝不自动重放未完成工作。若存在 unfinished turn、active queue item、未决 operation/tool、unknown terminal outcome 或 pending compaction，则必须先显式恢复。显式确认/rebind controller 实现前，跨 workspace 继续会以 typed confirmation requirement 拒绝。
 
 ## 已实现的命令 grammar
 

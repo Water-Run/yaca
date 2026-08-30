@@ -215,14 +215,15 @@ return {
                 A.equal(result_document.generation, 3)
                 A.deep_equal(result_document.recovery.unresolved_operation_ids, {})
                 A.deep_equal(result_document.recovery.unresolved_tool_call_ids, {})
-                A.truthy(result_document.recovery.auto_continue)
+                A.falsy(result_document.recovery.auto_continue)
+                A.deep_equal(result_document.recovery.unfinished_turn_ids, { "turn-1" })
                 fixture.register_document(result_document)
                 local receipt = assert(fixture.store.publish(
                     writer,
                     result_document,
                     temp("result")
                 ))
-                A.truthy(receipt.auto_continue)
+                A.falsy(receipt.auto_continue)
                 A.truthy(fixture.store.close_writer(writer))
 
                 local reopened_writer, reopened = assert(fixture.store.open_writer(

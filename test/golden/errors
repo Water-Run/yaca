@@ -6,6 +6,7 @@ ModelUnavailable|error|invalid_config|3|true|The selected Model is unavailable.|
 PermissionUnavailable|error|invalid_config|3|false|The selected Permission is unavailable.|Map the Context to a valid Permission.
 TtyRequired|error|interaction_required|5|false|This action requires an interactive terminal.|Use a complete non-interactive projection where supported.
 OnlineConsentRequired|error|interaction_required|5|false|Online self-test consent is required.|Add the explicit invocation consent or use Stage 1.
+WorkspaceConfirmationRequired|error|interaction_required|5|false|The Context belongs to another workspace.|Run continue from its recorded workspace or confirm an explicit rebind.
 NotFound|error|resolver_negative|6|true|No matching Context was found.|Refresh the Catalog or use a precise hash.
 HashCollision|error|resolver_negative|6|false|The Context hash matches multiple paths.|Choose a displayed logical path explicitly.
 MatchedUnavailable|error|resolver_negative|6|true|A matching Context is unavailable.|Inspect permissions or repair the Context.
@@ -13,6 +14,7 @@ ScanIncomplete|warning|resolver_negative|6|true|The Context scan is incomplete.|
 ScanLimit|warning|resolver_negative|6|true|The Context scan reached its hard limit.|Narrow the view or repair the Catalog layout.
 TargetChanged|error|general_error|1|true|The selected target changed after inspection.|Refresh and confirm the new target snapshot.
 OpenConflict|error|general_error|1|true|The Context cannot be opened in its observed state.|Refresh or use context-repl self-fix.
+ContextRecoveryRequired|error|general_error|1|true|The Context has unfinished or unresolved durable work.|Inspect and resolve its recovery facts before continuing.
 DestinationExists|error|general_error|1|false|The destination already exists.|Choose another name or root; no overwrite occurred.
 LockConflict|error|lock_conflict|4|true|The Context has an active writer.|Wait for the writer or use evidence-based self-fix.
 UnsupportedPath|error|general_error|1|false|The path cannot be represented losslessly.|Choose a supported real path.

@@ -403,10 +403,10 @@ local function fixture(settings)
         return true
     end
     local chat = {
-        kind = "run-chat",
+        kind = settings.initial_agent and "continue-chat" or "run-chat",
         outcome = "ready",
-        status = chat_draft.status(),
-        draft = chat_draft,
+        status = settings.initial_agent and draft.status() or chat_draft.status(),
+        draft = settings.initial_agent and draft or chat_draft,
     }
 
     local view = {}
@@ -439,6 +439,7 @@ local function fixture(settings)
         view = view,
         chat = chat,
         agent_factory = agent_factory,
+        initial_agent = settings.initial_agent and constructed_agent or nil,
     }, {
         close_poll_steps = 8,
         idle_wait_ms = 1,
@@ -485,6 +486,22 @@ return {
                 A.equal(f.log[#f.log - 1], "terminal-restore")
                 A.equal(f.log[#f.log], "terminal-close")
                 A.equal(f.coordinator:status().lifecycle, "closed")
+            end,
+        },
+        {
+            name = "reopened Context enters with its existing idle Agent already owned",
+            run = function()
+                local f = fixture({ initial_agent = true, batches = {
+                    { { kind = "user_action", action = "text", text = ".quit" } },
+                    { { kind = "user_action", action = "submit-or-queue" } },
+                } })
+                local result = assert(f.coordinator:run())
+                A.truthy(result.context_saved)
+                local joined = table.concat(f.log, "|")
+                A.falsy(joined:find("agent:terminal:", 1, true))
+                A.contains(joined, "session-close:application-close")
+                A.contains(joined, "draft-close")
+                A.falsy(joined:find("chat-draft-close", 1, true))
             end,
         },
         {

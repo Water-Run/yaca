@@ -274,6 +274,128 @@ return {
             end,
         },
         {
+            name = "recovery projects unfinished lanes and every canonical Runtime serial waterline",
+            run = function()
+                local service = new_service()
+                local unfinished = assert(service.build(minimal()))
+                A.falsy(unfinished.recovery.auto_continue)
+                A.deep_equal(unfinished.recovery.unfinished_turn_ids, { "turn-1" })
+                A.deep_equal(unfinished.recovery.active_queue_item_ids, {})
+
+                local queued_candidate = minimal()
+                append(queued_candidate, "queue_item", {
+                    queueItemId = "queue-item-3",
+                    displayId = "#2",
+                    action = "enqueue",
+                    text = "later",
+                })
+                queued_candidate.facts[#queued_candidate.facts].turn_id = nil
+                local queued = assert(service.build(queued_candidate))
+                A.deep_equal(queued.recovery.active_queue_item_ids, { "queue-item-3" })
+                A.falsy(queued.recovery.auto_continue)
+
+                local candidate = minimal()
+                candidate.facts[1].turn_id = "turn-12"
+                candidate.facts[2].turn_id = "turn-12"
+                candidate.facts[2].fields.messageId = "turn-12:message:31"
+                local function add(type_name, fields, turn_id)
+                    append(candidate, type_name, fields)
+                    candidate.facts[#candidate.facts].turn_id = turn_id
+                end
+                add("model_request", {
+                    requestId = "turn-12:request:17",
+                    purpose = "main",
+                    viewManifestRef = "sha256:view-manifest",
+                }, "turn-12")
+                add("tool_call", {
+                    toolCallId = "turn-12:tool:8",
+                    requestId = "turn-12:request:17",
+                    name = "exec",
+                    canonicalArguments = "{}",
+                }, "turn-12")
+                add("operation_intent", {
+                    operationId = "turn-12:operation:7",
+                    toolCallId = "turn-12:tool:8",
+                    kind = "exec",
+                    targetIdentity = "workspace",
+                    expectedDigest = "opaque",
+                }, "turn-12")
+                add("operation_result", {
+                    operationId = "turn-12:operation:7",
+                    status = "ok",
+                    evidence = "complete",
+                }, "turn-12")
+                add("tool_result", {
+                    toolCallId = "turn-12:tool:8",
+                    status = "ok",
+                    body = "done",
+                    truncated = "false",
+                }, "turn-12")
+                add("model_message", {
+                    messageId = "turn-12:message:32",
+                    requestId = "turn-12:request:17",
+                    role = "assistant",
+                    status = "complete",
+                    body = "done",
+                }, "turn-12")
+                add("turn_ended", { outcome = "completed", reason = "" }, "turn-12")
+                add("queue_item", {
+                    queueItemId = "queue-item-9",
+                    displayId = "#4",
+                    action = "enqueue",
+                    text = "queued",
+                }, nil)
+                add("queue_item", {
+                    queueItemId = "queue-item-9",
+                    displayId = "#4",
+                    action = "drop",
+                    text = "queued",
+                    reason = "test",
+                }, nil)
+                add("turn_started", {
+                    kind = "side",
+                    configGeneration = "sha256:config-generation",
+                    modelSnapshot = "sha256:model-snapshot",
+                    permissionSnapshot = "sha256:permission-snapshot",
+                    promptSnapshot = "sha256:prompt-snapshot",
+                    toolRegistrySnapshot = "sha256:tool-registry",
+                }, "side-6")
+                add("user_message", {
+                    messageId = "side-6:message:33",
+                    text = "inspect",
+                    source = "side",
+                }, "side-6")
+                add("model_request", {
+                    requestId = "side-6:request:18",
+                    purpose = "side",
+                    viewManifestRef = "sha256:view-manifest",
+                }, "side-6")
+                add("model_message", {
+                    messageId = "side-6:message:34",
+                    requestId = "side-6:request:18",
+                    role = "assistant",
+                    status = "complete",
+                    body = "observed",
+                }, "side-6")
+                add("turn_ended", { outcome = "completed", reason = "" }, "side-6")
+
+                local recovered = assert(service.build(candidate))
+                A.truthy(recovered.recovery.auto_continue)
+                A.deep_equal(recovered.recovery.unfinished_turn_ids, {})
+                A.deep_equal(recovered.recovery.active_queue_item_ids, {})
+                A.deep_equal(recovered.recovery.runtime_initial_serials, {
+                    turn = 12,
+                    message = 34,
+                    request = 18,
+                    tool = 8,
+                    operation = 7,
+                    queue = 9,
+                    queue_display = 4,
+                    side = 6,
+                })
+            end,
+        },
+        {
             name = "writer follows root section and event field order without forbidden authority",
             run = function()
                 local service = new_service()

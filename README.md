@@ -4,7 +4,7 @@
 
 yaca is the design for a simple, single-agent terminal Coding Agent, licensed under GPL v3.
 
-> **Project status (2026-08-30): implementation complete; target qualification pending.** The v0.1 product source and its platform-independent test suite are complete through M9, but no target archive has qualified for release. Everything below describes the implemented v0.1 contract; target-specific behavior remains unqualified until it passes independently on Win32 x86, Win64 x86_64, and Linux x86_64. Gate A/B remain passed and Release Gate R remains closed.
+> **Project status (2026-08-30): platform-independent core implemented through M9; controller closure and target qualification pending.** No target archive has qualified for release. Everything below describes the implemented v0.1 contract; target-specific behavior remains unqualified until it passes independently on Win32 x86, Win64 x86_64, and Linux x86_64. Gate A/B remain passed and Release Gate R remains closed.
 
 ## Supported release targets
 
@@ -48,6 +48,8 @@ The fixed Agent tool set is `list`, `read`, `search`, `write`, `patch`, `rename`
 Context files live in a mirror tree such as `__yaca__/CONTEXT/C/Program Files/My Task.xml`. The current logical path, including the XML filename, produces a displayed 16-character uppercase hexadecimal hash. There is no permanent Context ID: rename or rebind changes the path and hash immediately.
 
 Opening history is always explicit. A short name selects the first usable match by the specified scope/distance order; a hash is the precise selector and must be unique. Rename, rebind, permanent delete, import mapping, and metadata changes reverify the selected target. A live writer blocks another process from reading the XML body or mutating it; stale locks are never broken by age alone.
+
+`--continue` resolves and reverifies one exact target, acquires its writer, and currently requires invocation from the Context's recorded workspace. It restores the durable event/config/ModelView and identifier waterlines into an Idle Agent; it never replays unfinished work automatically. Unfinished turns, active queue items, unresolved operations or tools, unknown terminal outcomes, and pending compaction require explicit recovery instead. Cross-workspace continuation is refused with a typed confirmation requirement until an explicit confirmation/rebind controller is implemented.
 
 ## Implemented command grammar
 

@@ -273,6 +273,13 @@ local function safe_diagnostic(value, maximum_bytes)
     return value
 end
 
+local function ascii_diagnostic(value, maximum_bytes)
+    return (safe_diagnostic(value, maximum_bytes):gsub(
+        "[\128-\255]",
+        function(byte) return string.format("\\x%02X", byte:byte()) end
+    ))
+end
+
 local function write_direct(writer, bytes)
     local called, result
     if type(writer) == "function" then
@@ -291,9 +298,9 @@ local function diagnostic(writer, err)
         code = "InternalError"
     end
     local message = type(err) == "table" and err.message or nil
-    local line = "yaca: " .. code .. ": " .. safe_diagnostic(message, 1024)
+    local line = "yaca: " .. code .. ": " .. ascii_diagnostic(message, 1024)
     if type(err) == "table" and type(err.suggestion) == "string" then
-        line = line .. " (did you mean " .. safe_diagnostic(err.suggestion, 128) .. "?)"
+        line = line .. " (did you mean " .. ascii_diagnostic(err.suggestion, 128) .. "?)"
     end
     return write_direct(writer, line .. "\n")
 end
@@ -613,6 +620,27 @@ local function validate_components(components)
             "Context publication must expose publish_first and close"
         )
     end
+    if components.context_catalog ~= nil then
+        local catalog = components.context_catalog
+        if type(catalog) ~= "table"
+            or type(catalog.resolver) ~= "table"
+            or type(catalog.resolver.resolve) ~= "function"
+            or type(catalog.resolver.verify_target) ~= "function"
+            or type(catalog.path) ~= "table"
+            or type(catalog.path.to_logical) ~= "function"
+            or type(catalog.path.from_logical) ~= "function"
+            or type(catalog.path.parent) ~= "function"
+            or type(catalog.path.comparison_key) ~= "function"
+            or type(components.publication) ~= "table"
+            or type(components.publication.open_existing) ~= "function"
+            or type(components.publication.turn_context) ~= "function"
+        then
+            return nil, failure(
+                "InvalidBootstrapComponents",
+                "existing Context catalog and publication ports are incomplete"
+            )
+        end
+    end
     return components
 end
 
@@ -666,6 +694,7 @@ local function validate_request(request)
         ["config-repl"] = { id = true },
         ["model-repl"] = { id = true },
         ["context-repl"] = { id = true, view = true },
+        ["continue"] = { id = true, selector = true },
         ["run-chat"] = { id = true, directory = true },
     }
     local allowed = fields[request.id]
@@ -711,6 +740,11 @@ local function validate_request(request)
         and request.view ~= "full"
     then
         return nil, failure("UsageError", "context-repl view must be recent or full")
+    end
+    if request.id == "continue"
+        and (type(request.selector) ~= "string" or request.selector == "")
+    then
+        return nil, failure("UsageError", "continue requires one Context selector")
     end
     return request
 end
@@ -776,11 +810,20 @@ function M.new(components, options)
         return identity
     end
 
-    local function load_config()
-        local called, generation, config_error = pcall(
-            admitted_components.config.reload_file,
-            admitted.config_path
-        )
+    local function load_config(overrides)
+        local called, generation, config_error
+        if overrides == nil then
+            called, generation, config_error = pcall(
+                admitted_components.config.reload_file,
+                admitted.config_path
+            )
+        else
+            called, generation, config_error = pcall(
+                admitted_components.config.reload_file,
+                admitted.config_path,
+                overrides
+            )
+        end
         if not called then
             return nil, failure("ConfigInvalid", "configuration loading raised an exception")
         end
@@ -1088,6 +1131,314 @@ function M.new(components, options)
         }, "chat bootstrap result")
     end
 
+    local function context_call(callable, code, message, ...)
+        local called, value, value_error = pcall(callable, ...)
+        if not called then return nil, failure(code, message .. " raised an exception") end
+        if value == nil then return nil, value_error or failure(code, message .. " failed") end
+        return value, value_error
+    end
+
+    local function context_selection_error(selection)
+        local tag = type(selection) == "table" and selection.tag or nil
+        if tag == "InvalidSelector" then
+            return failure(
+                "UsageError",
+                "the Context selector is invalid",
+                "Use an exact Context name or canonical 16-hex hash."
+            )
+        end
+        local messages = {
+            NotFound = "no matching Context was found",
+            HashCollision = "the Context hash matches multiple paths",
+            MatchedUnavailable = "the matching Context is unavailable",
+            ScanIncomplete = "the Context catalog scan is incomplete",
+        }
+        if messages[tag] then return failure(tag, messages[tag]) end
+        return failure(
+            "ContextSelectionFailure",
+            "Context selection returned an invalid result"
+        )
+    end
+
+    local function workspace_identity_equal(left, right)
+        return type(left) == "table"
+            and type(right) == "table"
+            and left.kind == right.kind
+            and left.volume == right.volume
+            and left.object == right.object
+    end
+
+    local function dispatch_continue(request)
+        if active_draft then
+            return nil, failure("SessionActive", "this process already owns an active chat")
+        end
+        local identity, identity_error = check_platform()
+        if not identity then return nil, identity_error end
+        local catalog = admitted_components.context_catalog
+        if not catalog then
+            return nil, failure(
+                "ContextUnavailable",
+                "existing Context services are unavailable on this invocation"
+            )
+        end
+        local inspected, workspace, workspace_error = pcall(
+            admitted_components.workspace.inspect,
+            "."
+        )
+        if not inspected or not workspace then
+            return nil, workspace_error or failure(
+                "InvalidWorkspace",
+                "the current workspace could not be inspected"
+            )
+        end
+        local platform_kind = identity.os == "windows" and "windows" or "posix"
+        local origin_logical, origin_error = context_call(
+            catalog.path.to_logical,
+            "UnsupportedPath",
+            "current workspace path conversion",
+            workspace.path
+        )
+        if not origin_logical then return nil, origin_error end
+        local selection, selection_error = context_call(
+            catalog.resolver.resolve,
+            "ContextSelectionFailure",
+            "Context selection",
+            request.selector,
+            origin_logical
+        )
+        if not selection then return nil, selection_error end
+        if selection.tag ~= "Unique" then
+            return nil, context_selection_error(selection)
+        end
+        local verified, verify_error = context_call(
+            catalog.resolver.verify_target,
+            "ContextTargetVerificationFailure",
+            "Context target verification",
+            selection,
+            "open"
+        )
+        if not verified then return nil, verify_error end
+        if verified.tag ~= "Verified" then
+            local code = verified.tag == "TargetChanged"
+                and "TargetChanged" or "MatchedUnavailable"
+            return nil, failure(
+                code,
+                verified.tag == "TargetChanged"
+                    and "the selected Context changed before it could be opened"
+                    or "the selected Context is unavailable"
+            )
+        end
+        if type(verified.logical_path) ~= "string"
+            or type(verified.physical_hint) ~= "string"
+            or type(verified.credential) ~= "table"
+        then
+            return nil, failure(
+                "ContextTargetVerificationFailure",
+                "Context target verification returned an incomplete credential"
+            )
+        end
+        local recorded_logical, parent_error = context_call(
+            catalog.path.parent,
+            "UnsupportedPath",
+            "recorded workspace derivation",
+            verified.logical_path
+        )
+        if not recorded_logical then return nil, parent_error end
+        local recorded_path, path_error = context_call(
+            catalog.path.from_logical,
+            "UnsupportedPath",
+            "recorded workspace path conversion",
+            recorded_logical,
+            platform_kind
+        )
+        if not recorded_path then return nil, path_error end
+        local recorded_called, recorded_workspace, recorded_workspace_error = pcall(
+            admitted_components.workspace.inspect,
+            recorded_path
+        )
+        if not recorded_called or not recorded_workspace then
+            return nil, recorded_workspace_error or failure(
+                "InvalidWorkspace",
+                "the Context's recorded workspace is not enterable"
+            )
+        end
+        local observed_recorded_logical, observed_error = context_call(
+            catalog.path.to_logical,
+            "UnsupportedPath",
+            "recorded workspace verification",
+            recorded_workspace.path
+        )
+        if not observed_recorded_logical then return nil, observed_error end
+        local expected_key, expected_error = context_call(
+            catalog.path.comparison_key,
+            "UnsupportedPath",
+            "recorded workspace comparison",
+            recorded_logical,
+            platform_kind
+        )
+        if not expected_key then return nil, expected_error end
+        local observed_key, key_error = context_call(
+            catalog.path.comparison_key,
+            "UnsupportedPath",
+            "observed workspace comparison",
+            observed_recorded_logical,
+            platform_kind
+        )
+        if not observed_key then return nil, key_error end
+        if observed_key ~= expected_key then
+            return nil, failure(
+                "TargetChanged",
+                "the Context's recorded workspace changed during verification"
+            )
+        end
+        local origin_key, origin_key_error = context_call(
+            catalog.path.comparison_key,
+            "UnsupportedPath",
+            "current workspace comparison",
+            origin_logical,
+            platform_kind
+        )
+        if not origin_key then return nil, origin_key_error end
+        if origin_key ~= expected_key
+            or not workspace_identity_equal(workspace.identity, recorded_workspace.identity)
+        then
+            return nil, failure(
+                "WorkspaceConfirmationRequired",
+                "the selected Context belongs to another workspace; run continue from "
+                    .. recorded_path,
+                "Run --continue from the recorded workspace: " .. recorded_path
+            )
+        end
+
+        local receipt, open_error = context_call(
+            admitted_components.publication.open_existing,
+            "ContextOpenUnknown",
+            "existing Context open",
+            {
+                context_path = verified.physical_hint,
+                logical_path = verified.logical_path,
+                expected_credential = verified.credential,
+            }
+        )
+        if not receipt then return nil, open_error end
+        local released = false
+        local function release_opened(primary_error)
+            if released then return nil, primary_error end
+            released = true
+            local called, closed, close_error = pcall(
+                admitted_components.publication.close
+            )
+            if not called or not closed then
+                return nil, failure(
+                    "ContextLeaseUnknown",
+                    "existing Context writer release is unknown",
+                    type(close_error) == "table" and close_error.code or nil
+                )
+            end
+            return nil, primary_error
+        end
+        if type(receipt) ~= "table"
+            or receipt.durable ~= true
+            or receipt.context_path ~= verified.physical_hint
+            or receipt.logical_path ~= verified.logical_path
+            or type(receipt.context_hash) ~= "string"
+            or type(receipt.display_name) ~= "string"
+            or not valid_integer(receipt.generation, 1)
+            or not valid_integer(receipt.event_count, 0)
+            or receipt.last_sequence ~= receipt.event_count
+            or type(receipt.view_manifest_snapshot) ~= "string"
+            or receipt.view_manifest_snapshot == ""
+            or type(receipt.runtime_initial_serials) ~= "table"
+        then
+            return release_opened(failure(
+                "ContextOpenUnknown",
+                "existing Context open returned an incomplete durable receipt"
+            ))
+        end
+        if receipt.auto_continue ~= true then
+            return release_opened(failure(
+                "ContextRecoveryRequired",
+                "the selected Context has unresolved or unfinished durable work",
+                "Inspect and resolve the Context before continuing it."
+            ))
+        end
+        local turn_context, turn_error = context_call(
+            admitted_components.publication.turn_context,
+            "ContextTurnUnavailable",
+            "durable Context turn snapshot",
+            { expected_context_generation = receipt.generation }
+        )
+        if not turn_context then return release_opened(turn_error) end
+        if type(turn_context) ~= "table" or type(turn_context.overrides) ~= "table"
+            or turn_context.context_generation ~= receipt.generation
+        then
+            return release_opened(failure(
+                "ContextTurnUnavailable",
+                "durable Context turn snapshot is incomplete"
+            ))
+        end
+        local generation, config_error = load_config(turn_context.overrides)
+        if not generation then return release_opened(config_error) end
+        if generation.agent_ready ~= true then
+            return release_opened(failure(
+                "ModelUnavailable",
+                "the Context's selected Model cannot start the Agent"
+            ))
+        end
+        local self_test_ok, self_test_error = run_startup_self_test(generation)
+        if not self_test_ok then return release_opened(self_test_error) end
+
+        local status = readonly({
+            lifecycle = "saved",
+            durable = true,
+            context_path = receipt.context_path,
+            logical_path = receipt.logical_path,
+            context_hash = receipt.context_hash,
+            display_name = receipt.display_name,
+            workspace = recorded_workspace.path,
+            config_generation = generation.id,
+            model = generation.current_model,
+            permission = generation.current_permission,
+            double_check = generation.effective_double_check,
+            double_check_goal = generation.effective_double_check_goal or "",
+            context_prompt = generation.context_prompt or "",
+            auto_rename_disabled = generation.auto_rename_disabled == true,
+        }, "opened session status")
+        local close_failure
+        local draft = {}
+        function draft.status() return status end
+        function draft.config_generation() return generation end
+        function draft.open_receipt() return receipt end
+        function draft.close()
+            if released then
+                if close_failure then return nil, close_failure end
+                return false
+            end
+            released = true
+            local called, closed, close_error = pcall(
+                admitted_components.publication.close
+            )
+            if not called or not closed then
+                close_failure = close_error or failure(
+                    "ContextLeaseUnknown",
+                    "existing Context writer could not be released"
+                )
+                return nil, close_failure
+            end
+            return true
+        end
+        draft = readonly(draft, "opened session")
+        active_draft = draft
+        lifecycle = "context-ready"
+        return readonly({
+            kind = "continue-chat",
+            outcome = "ready",
+            draft = draft,
+            status = status,
+            open_receipt = receipt,
+        }, "existing chat bootstrap result")
+    end
+
     ---Dispatches one already-normalized semantic action.
     -- Parsing argv and rendering human/machine output are later adapters.
     function application.dispatch(request)
@@ -1104,7 +1455,7 @@ function M.new(components, options)
                 product = admitted.product_name,
                 bootstrap_actions = readonly({
                     "help", "version", "self-test", "config-repl", "model-repl",
-                    "context-repl", "run-chat",
+                    "context-repl", "continue", "run-chat",
                 }, "bootstrap action names"),
             }, "help bootstrap result")
         end
@@ -1119,6 +1470,7 @@ function M.new(components, options)
         end
         if request.id == "self-test" then return dispatch_self_test(request) end
         if BOOTSTRAP_ACTIONS[request.id] then return dispatch_management(request) end
+        if request.id == "continue" then return dispatch_continue(request) end
         return dispatch_chat(request)
     end
 
@@ -1280,6 +1632,17 @@ local AGENT_RELEASE_OPTIONS = {
         },
         initial_sequence = 2,
         initial_context_generation = 1,
+        initial_view_manifest_ref = false,
+        initial_serials = {
+            turn = 0,
+            message = 0,
+            request = 0,
+            tool = 0,
+            operation = 0,
+            queue = 0,
+            queue_display = 0,
+            side = 0,
+        },
         automatic_compaction = true,
         maximum_identifier_bytes = 256,
         hard_cap_snapshot_id = "tp017-modern-candidate-v1",
@@ -3620,6 +3983,12 @@ function M.compose_runtime(runtime)
         management = management_service(backend.filesystem, layout, contexts),
     }
     if publication then application_components.publication = publication end
+    if contexts and publication then
+        application_components.context_catalog = {
+            resolver = contexts.catalog,
+            path = contexts.path,
+        }
+    end
     local application, application_error = M.new(application_components, {
         product_name = "yaca",
         product_version = "0.1.0",
@@ -3648,12 +4017,13 @@ function M.compose_runtime(runtime)
     }, "production runtime composition")
 end
 
----Publishes one draft's first main message and composes the production Agent
--- owner over that exact durable generation. No Model request or Tool effect is
--- reachable before draft.begin_main and Runtime's next journal barrier both
--- succeed. Every later main turn reloads the complete Config and atomically
--- replaces its generation-bound Model/Tool/review ports while all are idle.
+---Composes the production Agent over either a newly published first turn or a
+-- verified, quiescent existing Context. No Model request or Tool effect is
+-- reachable before the relevant durable writer and Runtime bindings succeed.
+-- Every later main turn reloads the complete Config and atomically replaces
+-- its generation-bound Model/Tool/review ports while all are idle.
 function M.start_published_agent(composed, chat, message, source)
+    local continuing = type(chat) == "table" and chat.kind == "continue-chat"
     if type(composed) ~= "table"
         or type(composed.backend) ~= "table"
         or type(composed.contexts) ~= "table"
@@ -3668,10 +4038,17 @@ function M.start_published_agent(composed, chat, message, source)
         or type(composed.publication.turn_context) ~= "function"
         or type(composed.publication.capture_turn) ~= "function"
         or type(chat) ~= "table"
-        or chat.kind ~= "run-chat"
+        or (chat.kind ~= "run-chat" and chat.kind ~= "continue-chat")
         or chat.outcome ~= "ready"
         or type(chat.draft) ~= "table"
-        or type(chat.draft.begin_main) ~= "function"
+        or type(chat.draft.status) ~= "function"
+        or type(chat.draft.config_generation) ~= "function"
+        or type(chat.draft.close) ~= "function"
+        or (continuing and type(chat.draft.open_receipt) ~= "function")
+        or (not continuing and (
+            type(chat.draft.begin_main) ~= "function"
+            or type(chat.draft.agent_handoff) ~= "function"
+        ))
         or type(message) ~= "string"
         or message == ""
     then
@@ -3681,15 +4058,53 @@ function M.start_published_agent(composed, chat, message, source)
         )
     end
     source = source or "terminal"
-    local receipt, publication_error = chat.draft.begin_main(message, source)
-    if not receipt then return nil, publication_error end
-    local handoff, handoff_error = chat.draft.agent_handoff()
-    if not handoff then
-        chat.draft.close()
-        return nil, handoff_error
-    end
+    local receipt
+    local initial_snapshot
+    local handoff
     local generation = chat.draft.config_generation()
     local status = chat.draft.status()
+    if continuing then
+        receipt = chat.draft.open_receipt()
+        if type(receipt) ~= "table"
+            or receipt.durable ~= true
+            or receipt.auto_continue ~= true
+            or not valid_integer(receipt.generation, 1)
+            or not valid_integer(receipt.event_count, 0)
+            or receipt.last_sequence ~= receipt.event_count
+            or type(receipt.runtime_initial_serials) ~= "table"
+            or type(receipt.view_manifest_snapshot) ~= "string"
+            or receipt.view_manifest_snapshot == ""
+        then
+            chat.draft.close()
+            return nil, failure(
+                "InvalidAgentComposition",
+                "the existing Context receipt is not safe to continue"
+            )
+        end
+        local snapshot_error
+        initial_snapshot, snapshot_error = composed.publication.capture_turn({
+            generation = generation,
+            kind = "main",
+            text = message,
+            source = source,
+            expected_context_generation = receipt.generation,
+        })
+        if not initial_snapshot then
+            chat.draft.close()
+            return nil, snapshot_error
+        end
+    else
+        local publication_error
+        receipt, publication_error = chat.draft.begin_main(message, source)
+        if not receipt then return nil, publication_error end
+        local handoff_error
+        handoff, handoff_error = chat.draft.agent_handoff()
+        if not handoff then
+            chat.draft.close()
+            return nil, handoff_error
+        end
+        initial_snapshot = handoff.input
+    end
 
     local contexts = composed.contexts
     local operation_journal = composed.publication.operation_journal()
@@ -3717,12 +4132,12 @@ function M.start_published_agent(composed, chat, message, source)
         permission = status.permission,
         double_check = status.double_check,
         context_prompt = status.context_prompt,
-        initial_message = handoff.input.text,
-        config_snapshot = handoff.input.config_generation,
-        model_snapshot = handoff.input.model_snapshot,
-        permission_snapshot = handoff.input.permission_snapshot,
-        prompt_snapshot = handoff.input.prompt_snapshot,
-        tool_registry_snapshot = handoff.input.tool_registry_snapshot,
+        initial_message = initial_snapshot.text,
+        config_snapshot = initial_snapshot.config_generation,
+        model_snapshot = initial_snapshot.model_snapshot,
+        permission_snapshot = initial_snapshot.permission_snapshot,
+        prompt_snapshot = initial_snapshot.prompt_snapshot,
+        tool_registry_snapshot = initial_snapshot.tool_registry_snapshot,
     })
     if not first_ports then chat.draft.close(); return nil, first_ports_error end
     local catalog = new_turn_catalog(first_ports)
@@ -3822,6 +4237,23 @@ function M.start_published_agent(composed, chat, message, source)
         chat.draft.close()
         return nil, failure("InvalidAgentOptions", "production Agent caps could not be copied")
     end
+    if continuing then
+        local restored_serials, restored_ok = copy_plain(
+            receipt.runtime_initial_serials,
+            {}
+        )
+        if not restored_ok then
+            chat.draft.close()
+            return nil, failure(
+                "InvalidAgentOptions",
+                "existing Context Runtime serials could not be restored"
+            )
+        end
+        loop_options.initial_sequence = receipt.event_count
+        loop_options.initial_context_generation = receipt.generation
+        loop_options.initial_view_manifest_ref = receipt.view_manifest_snapshot
+        loop_options.initial_serials = restored_serials
+    end
     local loop, loop_error = runtime_module.new_agent_loop({
         clock = clock,
         journal = composed.publication,
@@ -3850,8 +4282,12 @@ function M.start_published_agent(composed, chat, message, source)
         clock
     )
     if not compaction_owner then return fail_after_loop(compaction_error) end
-    local admission, admission_error = loop:resume_published_main(handoff)
-    if not admission then return fail_after_loop(admission_error) end
+    local admission = false
+    if not continuing then
+        local admission_error
+        admission, admission_error = loop:resume_published_main(handoff)
+        if not admission then return fail_after_loop(admission_error) end
+    end
     local driver, driver_error = runtime_module.new_agent_activity_driver({
         loop = loop,
         model = catalog.model,
@@ -3878,7 +4314,8 @@ function M.start_published_agent(composed, chat, message, source)
         current_generation = catalog.generation,
         current_side_generation = side_catalog.generation,
         capabilities = readonly({
-            published_first_turn = true,
+            published_first_turn = not continuing,
+            reopened_existing_context = continuing,
             model = true,
             tools = true,
             reviews = true,
@@ -3952,6 +4389,15 @@ local function coordinator_ports(ports)
         or type(ports.view.startup) ~= "function"
         or type(ports.view.publish) ~= "function"
         or type(ports.view.prompt) ~= "function"
+        or (ports.initial_agent ~= nil and (
+            type(ports.initial_agent) ~= "table"
+            or type(ports.initial_agent.loop) ~= "table"
+            or type(ports.initial_agent.driver) ~= "table"
+            or type(ports.initial_agent.session) ~= "table"
+            or type(ports.initial_agent.tools) ~= "table"
+            or type(ports.initial_agent.compaction) ~= "table"
+            or type(ports.initial_agent.draft) ~= "table"
+        ))
     then
         return nil, failure(
             "InvalidCoordinatorPorts",
@@ -4022,7 +4468,7 @@ function M.new_application_coordinator(ports, options)
     local terminal_started = false
     local terminal_ended = false
     local terminal_outcome = false
-    local agent = false
+    local agent = admitted_ports.initial_agent or false
     local input_draft = ""
     local assistant_draft = ""
     local side_draft = ""
@@ -5435,12 +5881,14 @@ local function production_chat_view(composed, runtime)
 
     ---Writes the independent ASCII-first startup fields before input starts.
     function view:startup(status)
+        local existing = status.durable == true
         local rendered, render_error = renderer.render_startup({
             version = "0.1.0",
             work_directory = status.workspace,
             data_root = composed.layout.data_root,
             config_status = "valid",
-            context = "new (not saved)",
+            context = existing and status.display_name or "new (not saved)",
+            context_hash = existing and status.context_hash or nil,
             model = status.model,
             permission = status.permission,
             double_check = status.double_check,
@@ -5451,7 +5899,7 @@ local function production_chat_view(composed, runtime)
             data_root = true,
             config_status = true,
             context = true,
-            context_hash = false,
+            context_hash = existing,
             model = true,
             permission = true,
             double_check = true,
@@ -5484,11 +5932,12 @@ end
 -- only when the native console adapter reports their semantic events; every
 -- action retains its registry-generated text fallback.
 -- @param composed table Production runtime composition.
--- @param chat table Ready run-chat bootstrap result.
+-- @param chat table Ready run-chat or continue-chat bootstrap result.
 -- @param runtime table CLI invocation ports and exact fd facts.
+-- @param initial_agent table|nil Already composed idle Agent for continue-chat.
 -- @return table|nil result Immutable interactive outcome.
 -- @return table|nil err Structured composition, runtime, or close failure.
-function M.run_interactive_chat(composed, chat, runtime)
+function M.run_interactive_chat(composed, chat, runtime, initial_agent)
     if type(composed) ~= "table"
         or type(composed.backend) ~= "table"
         or type(composed.backend.new_terminal) ~= "function"
@@ -5499,18 +5948,35 @@ function M.run_interactive_chat(composed, chat, runtime)
         or type(runtime.cli) ~= "table"
         or type(runtime.stdio_facts) ~= "table"
         or type(chat) ~= "table"
-        or chat.kind ~= "run-chat"
+        or (chat.kind ~= "run-chat" and chat.kind ~= "continue-chat")
         or chat.outcome ~= "ready"
+        or (chat.kind == "continue-chat" and type(initial_agent) ~= "table")
     then
         return nil, failure(
             "InvalidCoordinatorPorts",
             "a ready production chat and terminal runtime are required"
         )
     end
+    local function fail_before_coordinator(primary_error)
+        if initial_agent then
+            pcall(initial_agent.compaction.close, initial_agent.compaction,
+                "interactive-composition-failed")
+            pcall(initial_agent.session.close, initial_agent.session,
+                "interactive-composition-failed")
+            local called, closed, close_error = pcall(initial_agent.draft.close)
+            if not called or closed == nil then
+                return nil, close_error or failure(
+                    "ContextLeaseUnknown",
+                    "existing Context writer release is unknown"
+                )
+            end
+        end
+        return nil, primary_error
+    end
     local terminal_port, terminal_error = composed.backend.new_terminal("cooked")
-    if not terminal_port then return nil, terminal_error end
+    if not terminal_port then return fail_before_coordinator(terminal_error) end
     local view, view_error = production_chat_view(composed, runtime)
-    if not view then return nil, view_error end
+    if not view then return fail_before_coordinator(view_error) end
     local coordinator, coordinator_error = M.new_application_coordinator({
         terminal = terminal_port,
         clock = { now = composed.backend.clock_port.monotonic_now },
@@ -5519,6 +5985,7 @@ function M.run_interactive_chat(composed, chat, runtime)
         facts = runtime.stdio_facts,
         view = view,
         chat = chat,
+        initial_agent = initial_agent,
         agent_factory = function(message, source)
             return M.start_published_agent(composed, chat, message, source)
         end,
@@ -5529,7 +5996,7 @@ function M.run_interactive_chat(composed, chat, runtime)
         maximum_draft_bytes = 16384,
         terminal_poll_events = 128,
     })
-    if not coordinator then return nil, coordinator_error end
+    if not coordinator then return fail_before_coordinator(coordinator_error) end
     return coordinator:run()
 end
 
@@ -5542,10 +6009,7 @@ local function hex_bytes(value)
 end
 
 local function model_setup_diagnostic(value, maximum_source_bytes)
-    return (safe_diagnostic(value, maximum_source_bytes):gsub(
-        "[\128-\255]",
-        function(byte) return string.format("\\x%02X", byte:byte()) end
-    ))
+    return ascii_diagnostic(value, maximum_source_bytes)
 end
 
 local function model_setup_sections(values)
@@ -6320,11 +6784,31 @@ default_runtime_dispatch = function(request, runtime)
             exit_value = configured.outcome == "success" and nil or configured,
         }
     end
-    if request.id == "run-chat" then
+    if request.id == "run-chat" or request.id == "continue" then
+        local initial_agent
+        if request.id == "continue" then
+            initial_agent, dispatch_error = M.start_published_agent(
+                composed,
+                result,
+                CONTINUATION_INSTRUCTION,
+                "context-reopen"
+            )
+            if not initial_agent then
+                local called, closed, close_error = pcall(result.draft.close)
+                if not called or closed == nil then
+                    return nil, close_error or failure(
+                        "ContextLeaseUnknown",
+                        "existing Context writer release is unknown"
+                    )
+                end
+                return nil, dispatch_error
+            end
+        end
         local interactive, interactive_error = M.run_interactive_chat(
             composed,
             result,
-            runtime
+            runtime,
+            initial_agent
         )
         if not interactive then return nil, interactive_error end
         return { output = "" }

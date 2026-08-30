@@ -268,7 +268,7 @@ local function production_native(settings)
     return native, controls, calls, native_path, data_root, application, config_path
 end
 
-local function application(source)
+local function application(source, continuation)
     local initial = source and { [CONFIG_PATH] = source } or {}
     local filesystem, filesystem_controls = fake_filesystem.new(initial, 23)
     local config_service = assert(config.new({
@@ -288,9 +288,10 @@ local function application(source)
         stage1_online_requests = 0,
     }
     local counted_config = {}
-    function counted_config.reload_file(path)
+    function counted_config.reload_file(path, overrides)
         calls.config = calls.config + 1
-        return config_service.reload_file(path)
+        calls.last_config_overrides = overrides or false
+        return config_service.reload_file(path, overrides)
     end
     setmetatable(counted_config, { __index = config_service })
 
@@ -308,10 +309,15 @@ local function application(source)
     local workspace = {}
     function workspace.inspect(requested)
         calls.workspace = calls.workspace + 1
+        local observed = requested == "." and "/workspace" or requested
         return {
-            path = requested == "." and "/workspace" or requested,
+            path = observed,
             enterable = true,
-            identity = { object = "workspace-1" },
+            identity = {
+                kind = "directory",
+                volume = "volume-1",
+                object = observed,
+            },
         }
     end
 
@@ -352,16 +358,110 @@ local function application(source)
         }
     end
 
-    local app = assert(main.new({
+    local components = {
         platform = platform,
         config = counted_config,
         workspace = workspace,
         self_test = self_test,
         management = management,
         network = { request = function() calls.network = calls.network + 1 end },
-        context_catalog = { scan = function() calls.catalog = calls.catalog + 1 end },
         agent = { start = function() calls.agent = calls.agent + 1 end },
-    }, {
+    }
+    if continuation then
+        local logical_path = continuation.logical_path or "/workspace/Task.xml"
+        local physical_path = continuation.physical_path
+            or "/data/CONTEXT/posix/workspace/Task.xml"
+        local selection = {
+            tag = "Unique",
+            logical_path = logical_path,
+            hash = "0123456789ABCDEF",
+        }
+        local credential = {
+            physical_path = physical_path,
+            logical_path = logical_path,
+        }
+        local resolver = {}
+        function resolver.resolve(selector, origin)
+            calls.catalog = calls.catalog + 1
+            calls.last_selector = selector
+            calls.last_origin = origin
+            if continuation.resolve_tag then
+                return { tag = continuation.resolve_tag }
+            end
+            return selection
+        end
+        function resolver.verify_target(observed, purpose)
+            calls.verify = (calls.verify or 0) + 1
+            calls.last_verify_purpose = purpose
+            A.equal(observed, selection)
+            if continuation.verify_tag then
+                return { tag = continuation.verify_tag }
+            end
+            return {
+                tag = "Verified",
+                logical_path = logical_path,
+                physical_hint = physical_path,
+                credential = credential,
+            }
+        end
+        local path = {}
+        function path.to_logical(value) return value:gsub("\\", "/") end
+        function path.from_logical(value) return value end
+        function path.parent(value)
+            return value:match("^(.*)/[^/]+$") or "/"
+        end
+        function path.comparison_key(value) return value end
+
+        local publication = {}
+        local publication_closed = false
+        function publication.publish_first()
+            return nil, { code = "UnexpectedPublication" }
+        end
+        function publication.open_existing(specification)
+            calls.open_existing = (calls.open_existing or 0) + 1
+            calls.last_open = specification
+            if continuation.open_error then return nil, continuation.open_error end
+            return {
+                outcome = "opened",
+                durable = true,
+                context_path = physical_path,
+                logical_path = logical_path,
+                context_hash = "0123456789ABCDEF",
+                display_name = "Task",
+                generation = 7,
+                event_count = 29,
+                first_sequence = 1,
+                last_sequence = 29,
+                view_manifest_snapshot = "sha256:restored-view",
+                auto_continue = continuation.auto_continue ~= false,
+                unresolved_operation_ids = {},
+                unresolved_tool_call_ids = {},
+                unknown_operation_ids = {},
+                unfinished_turn_ids = continuation.auto_continue == false
+                    and { "turn-4" } or {},
+                active_queue_item_ids = {},
+                runtime_initial_serials = {
+                    turn = 4, message = 8, request = 6, tool = 3,
+                    operation = 2, queue = 5, queue_display = 2, side = 1,
+                },
+            }
+        end
+        function publication.turn_context(observation)
+            calls.turn_context = (calls.turn_context or 0) + 1
+            A.equal(observation.expected_context_generation, 7)
+            return { context_generation = 7, overrides = {} }
+        end
+        function publication.close()
+            calls.publication_close = (calls.publication_close or 0) + 1
+            if publication_closed then return false end
+            publication_closed = true
+            return true
+        end
+        components.context_catalog = { resolver = resolver, path = path }
+        components.publication = publication
+    end
+
+    local app = assert(main.new(components, {
         product_name = "yaca",
         product_version = "0.1.0-dev",
         release_target = "linux-x86_64",
@@ -515,6 +615,23 @@ return {
                 stderr = {}
                 A.equal(main.run_cli({ [0] = "/opt/yaca" }, ports), 5)
                 A.contains(table.concat(stderr), "TtyRequired")
+
+                stderr = {}
+                ports.dispatch = function()
+                    return nil, {
+                        code = "WorkspaceConfirmationRequired",
+                        message = "rerun from C:\\工作区",
+                    }
+                end
+                A.equal(main.run_cli({
+                    [0] = "/opt/yaca", "--self-test",
+                }, ports), 5)
+                local diagnostic = table.concat(stderr)
+                A.contains(diagnostic, "WorkspaceConfirmationRequired")
+                A.contains(diagnostic, "\\xE5\\xB7\\xA5")
+                for index = 1, #diagnostic do
+                    A.truthy(diagnostic:byte(index) <= 0x7F)
+                end
             end,
         },
         {
@@ -999,6 +1116,90 @@ return {
                     A.equal(calls.agent, 0)
                     A.equal(calls.stage1, 0)
                 end
+            end,
+        },
+        {
+            name = "continue verifies one exact quiescent Context and retains its writer",
+            run = function()
+                local app, calls = application(valid_source(), {})
+                local result = assert(app.dispatch({
+                    id = "continue",
+                    selector = "Task",
+                }))
+                A.equal(result.kind, "continue-chat")
+                A.equal(result.outcome, "ready")
+                A.equal(result.status.lifecycle, "saved")
+                A.truthy(result.status.durable)
+                A.equal(result.status.workspace, "/workspace")
+                A.equal(result.status.context_hash, "0123456789ABCDEF")
+                A.equal(result.open_receipt.event_count, 29)
+                A.equal(result.open_receipt.runtime_initial_serials.turn, 4)
+                A.equal(calls.catalog, 1)
+                A.equal(calls.last_selector, "Task")
+                A.equal(calls.last_origin, "/workspace")
+                A.equal(calls.verify, 1)
+                A.equal(calls.last_verify_purpose, "open")
+                A.equal(calls.open_existing, 1)
+                A.equal(calls.turn_context, 1)
+                A.equal(calls.config, 1)
+                A.deep_equal(calls.last_config_overrides, {})
+                A.equal(calls.network, 0)
+                A.equal(calls.agent, 0)
+                A.equal(app.status().lifecycle, "context-ready")
+                A.truthy(app.close())
+                A.equal(calls.publication_close, 1)
+            end,
+        },
+        {
+            name = "continue fails closed for scope recovery resolver and lock uncertainty",
+            run = function()
+                local app, calls = application(valid_source(), {
+                    logical_path = "/other/Task.xml",
+                })
+                local result, result_error = app.dispatch({
+                    id = "continue",
+                    selector = "Task",
+                })
+                A.falsy(result)
+                A.equal(result_error.code, "WorkspaceConfirmationRequired")
+                A.equal(calls.open_existing or 0, 0)
+                A.equal(calls.config, 0)
+
+                app, calls = application(valid_source(), { auto_continue = false })
+                result, result_error = app.dispatch({
+                    id = "continue",
+                    selector = "Task",
+                })
+                A.falsy(result)
+                A.equal(result_error.code, "ContextRecoveryRequired")
+                A.equal(calls.open_existing, 1)
+                A.equal(calls.publication_close, 1)
+                A.equal(calls.config, 0)
+
+                app, calls = application(valid_source(), { resolve_tag = "NotFound" })
+                result, result_error = app.dispatch({
+                    id = "continue",
+                    selector = "missing",
+                })
+                A.falsy(result)
+                A.equal(result_error.code, "NotFound")
+                A.equal(calls.verify or 0, 0)
+                A.equal(calls.open_existing or 0, 0)
+
+                app, calls = application(valid_source(), {
+                    open_error = {
+                        code = "LockConflict",
+                        message = "another writer is active",
+                    },
+                })
+                result, result_error = app.dispatch({
+                    id = "continue",
+                    selector = "Task",
+                })
+                A.falsy(result)
+                A.equal(result_error.code, "LockConflict")
+                A.equal(calls.open_existing, 1)
+                A.equal(calls.publication_close or 0, 0)
             end,
         },
         {

@@ -475,6 +475,7 @@ local ERROR_EXIT_CLASS = {
     PermissionUnavailable = "invalid_config",
     TtyRequired = "interaction_required",
     OnlineConsentRequired = "interaction_required",
+    WorkspaceConfirmationRequired = "interaction_required",
     ApprovalRequired = "interaction_required",
     ApprovalStale = "interaction_required",
     NotFound = "resolver_negative",
@@ -488,7 +489,8 @@ local ERROR_EXIT_CLASS = {
 }
 
 for _, id in ipairs({
-    "TargetChanged", "OpenConflict", "DestinationExists", "UnsupportedPath",
+    "TargetChanged", "OpenConflict", "ContextRecoveryRequired",
+    "DestinationExists", "UnsupportedPath",
     "UnsupportedObject", "PathEscapesWorkspace", "PermissionDenied",
     "ToolSchemaInvalid", "ToolFailed", "ToolUnknown", "ProcessTimeout",
     "NetworkError", "ProtocolError", "StorageError", "ContextCorrupt",

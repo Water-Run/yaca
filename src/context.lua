@@ -913,6 +913,7 @@ local function validate_relations(events)
     local requests, messages, tool_calls, operations = {}, {}, {}, {}
     local approvals, reviews, compactions, turns = {}, {}, {}, {}
     local turn_kinds, ended_turns = {}, {}
+    local turn_order = {}
     local queue_items = {}
     local tool_results, operation_results, permission_decisions = {}, {}, {}
     local unknown_operations = {}
@@ -923,6 +924,60 @@ local function validate_relations(events)
     local automatic_failure_count = 0
     local automatic_failure_history_complete = true
     local compaction_initial_serial = 0
+    local runtime_initial_serials = {
+        turn = 0,
+        message = 0,
+        request = 0,
+        tool = 0,
+        operation = 0,
+        queue = 0,
+        queue_display = 0,
+        side = 0,
+    }
+
+    local function observe_runtime_serial(name, identifier, pattern)
+        local serial = type(identifier) == "string" and identifier:match(pattern)
+        serial = tonumber(serial)
+        if valid_integer(serial, 1) and serial > runtime_initial_serials[name] then
+            runtime_initial_serials[name] = serial
+        end
+    end
+
+    local function observe_runtime_identities(item, fields)
+        observe_runtime_serial("turn", item.turn_id, "^turn%-([1-9][0-9]*)$")
+        observe_runtime_serial("side", item.turn_id, "^side%-([1-9][0-9]*)$")
+        observe_runtime_serial(
+            "message",
+            fields.messageId,
+            "^[^:]+:message:([1-9][0-9]*)$"
+        )
+        observe_runtime_serial(
+            "request",
+            fields.requestId,
+            "^[^:]+:request:([1-9][0-9]*)$"
+        )
+        observe_runtime_serial(
+            "tool",
+            fields.toolCallId,
+            "^[^:]+:tool:([1-9][0-9]*)$"
+        )
+        observe_runtime_serial(
+            "operation",
+            fields.operationId,
+            "^[^:]+:operation:([1-9][0-9]*)$"
+        )
+        observe_runtime_serial(
+            "queue",
+            fields.queueItemId,
+            "^queue%-item%-([1-9][0-9]*)$"
+        )
+        observe_runtime_serial(
+            "queue_display",
+            fields.displayId,
+            "^#([1-9][0-9]*)$"
+        )
+        observe_runtime_serial("side", fields.sideId, "^side%-([1-9][0-9]*)$")
+    end
 
     local function observe_compaction_serial(identifier)
         local serial = type(identifier) == "string"
@@ -936,10 +991,12 @@ local function validate_relations(events)
     for _, item in ipairs(events) do
         local fields = item.fields
         local path = "/YacaContext/Facts/Event[" .. tostring(item.seq) .. "]"
+        observe_runtime_identities(item, fields)
         if item.type == "turn_started" and item.turn_id then
             local ok, id_error = unique_id(turns, item.turn_id, "turn", path)
             if not ok then return nil, id_error end
             turn_kinds[item.turn_id] = fields.kind
+            turn_order[#turn_order + 1] = item.turn_id
             if fields.queueItemId and not queue_items[fields.queueItemId] then
                 return nil, reference_error("queue item", fields.queueItemId, path)
             end
@@ -1377,6 +1434,19 @@ local function validate_relations(events)
             known_unknown[#known_unknown + 1] = item.fields.operationId
         end
     end
+    local unfinished_turn_ids = {}
+    for _, turn_id in ipairs(turn_order) do
+        if not ended_turns[turn_id] then
+            unfinished_turn_ids[#unfinished_turn_ids + 1] = turn_id
+        end
+    end
+    local active_queue_item_ids = {}
+    for queue_item_id, state in pairs(queue_items) do
+        if state == "active" then
+            active_queue_item_ids[#active_queue_item_ids + 1] = queue_item_id
+        end
+    end
+    table.sort(active_queue_item_ids)
     local pending_compactions = {}
     for _, lifecycle in pairs(compaction_lifecycles) do
         if not lifecycle.terminal then
@@ -1429,6 +1499,9 @@ local function validate_relations(events)
         automatic_failure_count = automatic_failure_count,
         automatic_failure_history_complete = automatic_failure_history_complete,
         compaction_initial_serial = compaction_initial_serial,
+        unfinished_turn_ids = unfinished_turn_ids,
+        active_queue_item_ids = active_queue_item_ids,
+        runtime_initial_serials = runtime_initial_serials,
     }
 end
 
@@ -1740,6 +1813,8 @@ local function normalize_document(candidate, admitted)
         unresolved_operation_ids = copy_array(relations.unresolved_operations),
         unresolved_tool_call_ids = copy_array(relations.unresolved_tool_calls),
         unknown_operation_ids = copy_array(relations.unknown_operations),
+        unfinished_turn_ids = copy_array(relations.unfinished_turn_ids),
+        active_queue_item_ids = copy_array(relations.active_queue_item_ids),
         pending_compactions = copy_array(relations.pending_compactions),
         legacy_pending_compaction_request_ids = copy_array(
             relations.legacy_pending_compaction_request_ids
@@ -1748,10 +1823,22 @@ local function normalize_document(candidate, admitted)
         automatic_compaction_failure_history_complete =
             relations.automatic_failure_history_complete,
         compaction_initial_serial = relations.compaction_initial_serial,
+        runtime_initial_serials = {
+            turn = relations.runtime_initial_serials.turn,
+            message = relations.runtime_initial_serials.message,
+            request = relations.runtime_initial_serials.request,
+            tool = relations.runtime_initial_serials.tool,
+            operation = relations.runtime_initial_serials.operation,
+            queue = relations.runtime_initial_serials.queue,
+            queue_display = relations.runtime_initial_serials.queue_display,
+            side = relations.runtime_initial_serials.side,
+        },
         auto_continue = view_current
             and #relations.unresolved_operations == 0
             and #relations.unresolved_tool_calls == 0
             and #relations.unknown_operations == 0
+            and #relations.unfinished_turn_ids == 0
+            and #relations.active_queue_item_ids == 0
             and #relations.pending_compactions == 0
             and #relations.legacy_pending_compaction_request_ids == 0,
     }
@@ -5427,6 +5514,8 @@ function M.new_store(schema, ports, options)
             unresolved_operation_ids = document.recovery.unresolved_operation_ids,
             unresolved_tool_call_ids = document.recovery.unresolved_tool_call_ids,
             unknown_operation_ids = document.recovery.unknown_operation_ids,
+            unfinished_turn_ids = document.recovery.unfinished_turn_ids,
+            active_queue_item_ids = document.recovery.active_queue_item_ids,
             target_qualified = filesystem.capabilities.target_qualified,
         }, "Context publication receipt"))
         return finish(receipt)

@@ -543,6 +543,16 @@ local LANE_FIELDS = {
     side_response_bytes = true,
     side_snapshot_id = true,
 }
+local INITIAL_SERIAL_FIELDS = {
+    turn = true,
+    message = true,
+    request = true,
+    tool = true,
+    operation = true,
+    queue = true,
+    queue_display = true,
+    side = true,
+}
 
 local function validate_agent_options(options)
     if type(options) ~= "table" then
@@ -552,23 +562,39 @@ local function validate_agent_options(options)
         hard_caps = true, stuck = true, initial_sequence = true,
         maximum_identifier_bytes = true, hard_cap_snapshot_id = true,
         initial_context_generation = true, lanes = true,
-        automatic_compaction = true,
+        automatic_compaction = true, initial_serials = true,
+        initial_view_manifest_ref = true,
     }) then
         return nil, failure("InvalidAgentOptions", "AgentLoop options are ambiguous")
     end
     if not exact_fields(options.hard_caps, AGENT_HARD_CAP_FIELDS)
         or not exact_fields(options.stuck, STUCK_FIELDS)
         or not exact_fields(options.lanes, LANE_FIELDS)
+        or not exact_fields(options.initial_serials, INITIAL_SERIAL_FIELDS)
         or not integer_at_least(options.initial_sequence, 0)
         or not integer_at_least(options.initial_context_generation, 1)
         or not integer_at_least(options.maximum_identifier_bytes, 16)
         or type(options.automatic_compaction) ~= "boolean"
+        or (options.initial_view_manifest_ref ~= false
+            and not valid_runtime_text(
+                options.initial_view_manifest_ref,
+                options.hard_caps.message_bytes,
+                false
+            ))
         or not valid_runtime_id(
             options.hard_cap_snapshot_id,
             options.maximum_identifier_bytes
         )
     then
         return nil, failure("InvalidAgentOptions", "AgentLoop option shape is invalid")
+    end
+    for name in pairs(INITIAL_SERIAL_FIELDS) do
+        if not integer_at_least(options.initial_serials[name], 0) then
+            return nil, failure(
+                "InvalidAgentOptions",
+                "AgentLoop initial serials must be nonnegative"
+            )
+        end
     end
     if not integer_at_least(options.lanes.queue_maximum, 1)
         or not integer_at_least(options.lanes.side_active_time_ms, 1)
@@ -610,11 +636,16 @@ local function validate_agent_options(options)
         maximum_identifier_bytes = options.maximum_identifier_bytes,
         hard_cap_snapshot_id = options.hard_cap_snapshot_id,
         automatic_compaction = options.automatic_compaction,
+        initial_view_manifest_ref = options.initial_view_manifest_ref,
+        initial_serials = {},
         lanes = {},
     }
     for name in pairs(AGENT_HARD_CAP_FIELDS) do copy.hard_caps[name] = options.hard_caps[name] end
     for name in pairs(STUCK_FIELDS) do copy.stuck[name] = options.stuck[name] end
     for name in pairs(LANE_FIELDS) do copy.lanes[name] = options.lanes[name] end
+    for name in pairs(INITIAL_SERIAL_FIELDS) do
+        copy.initial_serials[name] = options.initial_serials[name]
+    end
     local runtime_snapshot = {
         "yaca-runtime-snapshot-v1",
         "hard=" .. copy.hard_cap_snapshot_id,
@@ -885,11 +916,11 @@ function M.new_agent_loop(ports, options)
     local sequence = limits.initial_sequence
     local context_generation = limits.initial_context_generation
     local barrier_serial = 0
-    local turn_serial = 0
-    local message_serial = 0
-    local request_serial = 0
-    local tool_serial = 0
-    local operation_serial = 0
+    local turn_serial = limits.initial_serials.turn
+    local message_serial = limits.initial_serials.message
+    local request_serial = limits.initial_serials.request
+    local tool_serial = limits.initial_serials.tool
+    local operation_serial = limits.initial_serials.operation
     local last_clock
     local turn
     local last_turn
@@ -900,9 +931,10 @@ function M.new_agent_loop(ports, options)
     local pending_steer
     local queue_items = {}
     local current_queue_limit = limits.lanes.queue_maximum
-    local queue_serial = 0
-    local queue_display_serial = 0
-    local side_serial = 0
+    local queue_serial = limits.initial_serials.queue
+    local queue_display_serial = limits.initial_serials.queue_display
+    local side_serial = limits.initial_serials.side
+    local restored_view_manifest_ref = limits.initial_view_manifest_ref
     local side
     local side_history = {}
     local compaction_gate
@@ -925,7 +957,8 @@ function M.new_agent_loop(ports, options)
 
     local function current_manifest_ref()
         local current = turn or last_turn
-        return current and current.active_view_manifest_ref or false
+        return current and current.active_view_manifest_ref
+            or restored_view_manifest_ref
     end
 
     local function transition(next_state)
@@ -2571,6 +2604,8 @@ function M.new_agent_loop(ports, options)
                     turn.active_view_manifest_ref = fields.manifestDigest
                 elseif last_turn then
                     last_turn.active_view_manifest_ref = fields.manifestDigest
+                else
+                    restored_view_manifest_ref = fields.manifestDigest
                 end
                 prior_manifest = fields.manifestDigest
                 compaction_gate.published_compaction_id = record.compaction_id

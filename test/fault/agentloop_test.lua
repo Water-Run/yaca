@@ -42,6 +42,11 @@ local function options(overrides)
         },
         initial_sequence = 0,
         initial_context_generation = 1,
+        initial_view_manifest_ref = false,
+        initial_serials = {
+            turn = 0, message = 0, request = 0, tool = 0,
+            operation = 0, queue = 0, queue_display = 0, side = 0,
+        },
         automatic_compaction = false,
         maximum_identifier_bytes = 128,
         hard_cap_snapshot_id = "manifest-hard-caps-v1",
@@ -55,6 +60,15 @@ local function options(overrides)
     for key, value in pairs(overrides.hard_caps or {}) do result.hard_caps[key] = value end
     for key, value in pairs(overrides.stuck or {}) do result.stuck[key] = value end
     if overrides.initial_sequence ~= nil then result.initial_sequence = overrides.initial_sequence end
+    if overrides.initial_context_generation ~= nil then
+        result.initial_context_generation = overrides.initial_context_generation
+    end
+    if overrides.initial_view_manifest_ref ~= nil then
+        result.initial_view_manifest_ref = overrides.initial_view_manifest_ref
+    end
+    for key, value in pairs(overrides.initial_serials or {}) do
+        result.initial_serials[key] = value
+    end
     if overrides.automatic_compaction ~= nil then
         result.automatic_compaction = overrides.automatic_compaction
     end
@@ -82,7 +96,8 @@ local function fixture(settings, option_overrides)
     local log, durable_events, batches = {}, {}, {}
     local model_starts, tool_starts, review_starts, view_prepares = {}, {}, {}, {}
     local start_cursor = 1
-    local context_generation = 1
+    local context_generation = option_overrides
+        and option_overrides.initial_context_generation or 1
     local journal = {}
 
     function journal.commit(batch)
@@ -488,6 +503,60 @@ end
 return {
     name = "fault/agentloop",
     cases = {
+        {
+            name = "restored serial and manifest waterlines prevent reopened Context collisions",
+            run = function()
+                local f = fixture({}, {
+                    initial_sequence = 41,
+                    initial_context_generation = 9,
+                    initial_view_manifest_ref = "restored-view-manifest",
+                    initial_serials = {
+                        turn = 7,
+                        message = 11,
+                        request = 13,
+                        tool = 5,
+                        operation = 7,
+                        queue = 9,
+                        queue_display = 3,
+                        side = 4,
+                    },
+                })
+                local restored = f.loop:status()
+                A.equal(restored.state, "Idle")
+                A.equal(restored.last_durable_sequence, 41)
+                A.equal(restored.context_generation, 9)
+                A.equal(restored.active_view_manifest_ref, "restored-view-manifest")
+
+                local admitted = assert(f.loop:begin_main(input(false, 9)))
+                A.equal(admitted.turn_id, "turn-8")
+                A.equal(admitted.request_id, "turn-8:request:14")
+                A.equal(f.batches[1].first_sequence, 42)
+                A.equal(f.batches[1].events[2].fields.messageId,
+                    "turn-8:message:12")
+                assert(f.loop:accept_model_response(response(f.loop, {
+                    tag = "restored-tool",
+                    calls = { call("exec", 1) },
+                })))
+                local tool_call
+                for _, event in ipairs(f.events) do
+                    if event.type == "tool_call" then tool_call = event end
+                end
+                A.truthy(tool_call)
+                A.equal(tool_call.fields.toolCallId, "turn-8:tool:6")
+                local operation_id = f.tool_starts[1].call.operation_id
+                A.equal(operation_id, "turn-8:operation:8")
+                assert(f.loop:accept_model_response(finish(f.loop, "restored")))
+                local idle = f.loop:status()
+                local queued = assert(f.loop:enqueue({
+                    text = "next",
+                    source = "user",
+                    expected_context_generation = idle.context_generation,
+                    expected_turn_id = false,
+                }))
+                A.equal(queued.queue_item_id, "queue-item-10")
+                A.equal(queued.display_id, "#4")
+            end,
+        },
         {
             name = "precommitted first turn starts at model request without duplicate Facts",
             run = function()

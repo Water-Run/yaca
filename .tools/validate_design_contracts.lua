@@ -679,7 +679,7 @@ check(transport.curl and transport.curl.config_carrier == "anonymous-stdin-pipe"
 check(transport.curl and transport.curl.curl_builtin_retry == 0 and transport.curl.curl_automatic_redirect == false, "curl must not own retry/redirect")
 check(transport.http and transport.http.retry and transport.http.retry.owner == "Runtime-not-curl" and transport.http.retry.model_switch == false and transport.http.retry.active_config_reload == false, "Runtime retry snapshot boundary drifted")
 exact_set("retry-eligible causes", transport.http and transport.http.retry and transport.http.retry.eligible_before_canonical_event or {}, { "dns", "connect", "tls-before-body", "http-429", "http-503" })
-exact_set("retry-ineligible causes", transport.http and transport.http.retry and transport.http.retry.never_eligible or {}, { "auth-4xx", "ordinary-4xx", "protocol", "content-refusal", "cancel", "outcome-unknown" })
+exact_set("retry-ineligible causes", transport.http and transport.http.retry and transport.http.retry.never_eligible or {}, { "tls-verification", "auth-4xx", "ordinary-4xx", "protocol", "content-refusal", "cancel", "outcome-unknown" })
 check(transport.secret_scanner and transport.secret_scanner.constants_source == "release-manifest", "secret scanner constants must come from release manifest")
 exact_set("transport environment fixture ids", value_list(transport_fixture.environment_cases, "id"), { "minimal", "inherit-filtered" })
 local always_removed = as_set(transport.process and transport.process.environment and transport.process.environment.always_remove_names or {}, "always-removed environment names")
@@ -777,8 +777,8 @@ local severity_set = as_set(diagnostics.severities, "diagnostic severities")
 local error_by_id = index_by(diagnostics.errors, "id", "diagnostic errors")
 local expected_error_ids = {
   "UsageError", "ConfigMissing", "ConfigInvalid", "ConfigChanged", "ModelUnavailable", "PermissionUnavailable", "TtyRequired",
-  "OnlineConsentRequired", "NotFound", "HashCollision", "MatchedUnavailable", "ScanIncomplete", "ScanLimit", "TargetChanged",
-  "OpenConflict", "DestinationExists", "LockConflict", "UnsupportedPath", "UnsupportedObject", "PathEscapesWorkspace", "PermissionDenied",
+  "OnlineConsentRequired", "WorkspaceConfirmationRequired", "NotFound", "HashCollision", "MatchedUnavailable", "ScanIncomplete", "ScanLimit", "TargetChanged",
+  "OpenConflict", "ContextRecoveryRequired", "DestinationExists", "LockConflict", "UnsupportedPath", "UnsupportedObject", "PathEscapesWorkspace", "PermissionDenied",
   "ApprovalRequired", "ApprovalStale", "ToolSchemaInvalid", "ToolFailed", "ToolCancelled", "ToolUnknown", "ProcessTimeout", "NetworkError",
   "ProtocolError", "StorageError", "ContextCorrupt", "ContextVersionUnsupported", "ContextHardLimit", "ContextStale", "BudgetExhausted",
   "Stuck", "Cancelled", "InternalError",

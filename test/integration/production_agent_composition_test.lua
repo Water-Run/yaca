@@ -106,12 +106,13 @@ end
 
 local function fixture(settings)
     settings = settings or {}
+    local continuing = settings.continuing == true
     local log = {}
     local compaction_lifecycle = settings.compaction_lifecycle
         or settings.automatic_compaction_lifecycle
     local compact_source = compaction_lifecycle
         and compaction_document() or false
-    local published = false
+    local published = continuing
     local closed = false
     local loop_closed = false
     local handoff = {
@@ -186,11 +187,11 @@ local function fixture(settings)
     }
     local active_generation = generation
     local loop_status = {
-        state = "RequestingModel",
-        context_generation = 2,
-        last_durable_sequence = 3,
-        active_view_manifest_ref = "view-1",
-        turn_id = "turn-1",
+        state = continuing and "Idle" or "RequestingModel",
+        context_generation = continuing and 7 or 2,
+        last_durable_sequence = continuing and 29 or 3,
+        active_view_manifest_ref = continuing and "sha256:restored-view" or "view-1",
+        turn_id = continuing and false or "turn-1",
         halted = false,
         compaction_preflight_state = "idle",
         compaction_preflight_id = false,
@@ -520,30 +521,41 @@ local function fixture(settings)
         end,
         capture_turn = function(specification)
             A.truthy(specification.kind == "main" or specification.kind == "side")
-            A.equal(
-                specification.text,
-                specification.kind == "side" and "inspect durable facts" or "second turn"
-            )
-            A.equal(specification.source, "terminal")
-            A.equal(specification.expected_context_generation, 2)
+            local reopening = continuing
+                and specification.expected_context_generation == 7
+            if reopening then
+                A.contains(specification.text, "latest durable Context facts")
+                A.equal(specification.source, "context-reopen")
+                A.equal(specification.expected_context_generation, 7)
+            else
+                A.equal(
+                    specification.text,
+                    specification.kind == "side" and "inspect durable facts" or "second turn"
+                )
+                A.equal(specification.source, "terminal")
+                A.equal(specification.expected_context_generation, 2)
+            end
             log[#log + 1] = "capture-turn"
-            local prompt_snapshot = specification.kind == "side"
+            local prompt_snapshot = reopening and "prompt-snapshot-1"
+                or specification.kind == "side"
                 and "side-prompt-snapshot-2"
                 or "prompt-snapshot-2"
+            local suffix = reopening and "1" or "2"
             return {
                 text = specification.text,
                 source = specification.source,
-                config_generation = "config-snapshot-2",
-                model_snapshot = "model-snapshot-2",
-                permission_snapshot = "permission-snapshot-2",
+                config_generation = "config-snapshot-" .. suffix,
+                model_snapshot = "model-snapshot-" .. suffix,
+                permission_snapshot = "permission-snapshot-" .. suffix,
                 prompt_snapshot = prompt_snapshot,
                 tool_registry_snapshot = "registry-1",
-                view_manifest_ref = "view-1",
+                view_manifest_ref = reopening
+                    and "sha256:restored-view" or "view-1",
                 double_check = true,
-                context_generation = 2,
-                model_request_limit = 6,
-                tool_call_limit = 10,
-                queue_limit = 4,
+                context_generation = reopening and 7 or 2,
+                model_request_limit = reopening and 7 or 6,
+                tool_call_limit = reopening and 11 or 10,
+                queue_limit = reopening and 5 or 4,
             }
         end,
         resolve_view = function() return {} end,
@@ -762,6 +774,7 @@ local function fixture(settings)
             return {}
         end,
     }
+    local runtime_options_seen
     modules.runtime = {
         new_agent_loop = function(ports, options)
             A.equal(ports.journal, publication)
@@ -775,6 +788,7 @@ local function fixture(settings)
             A.equal(options.hard_caps.tool_calls, 256)
             A.equal(options.lanes.queue_maximum, 9)
             A.truthy(options.automatic_compaction)
+            runtime_options_seen = options
             runtime_ports = ports
             log[#log + 1] = "agent-loop"
             return loop
@@ -804,6 +818,7 @@ local function fixture(settings)
 
     local draft = {}
     function draft.begin_main(message, source)
+        A.falsy(continuing)
         A.equal(message, "implement the project")
         A.equal(source, "terminal")
         A.falsy(published)
@@ -816,6 +831,21 @@ local function fixture(settings)
         return handoff
     end
     function draft.config_generation() return generation end
+    function draft.open_receipt()
+        A.truthy(continuing)
+        return {
+            durable = true,
+            auto_continue = true,
+            generation = 7,
+            event_count = 29,
+            last_sequence = 29,
+            view_manifest_snapshot = "sha256:restored-view",
+            runtime_initial_serials = {
+                turn = 4, message = 8, request = 6, tool = 3,
+                operation = 2, queue = 5, queue_display = 2, side = 1,
+            },
+        }
+    end
     function draft.status()
         return {
             workspace = "/workspace",
@@ -877,7 +907,11 @@ local function fixture(settings)
             maximum_canonical_body_bytes = 65536,
         },
     }
-    local chat = { kind = "run-chat", outcome = "ready", draft = draft }
+    local chat = {
+        kind = continuing and "continue-chat" or "run-chat",
+        outcome = "ready",
+        draft = draft,
+    }
     return {
         main = load_main(modules),
         composed = composed,
@@ -927,6 +961,7 @@ local function fixture(settings)
             loop_status.compaction_preflight_purpose = "main"
         end,
         current_generation = function() return active_generation end,
+        runtime_options = function() return runtime_options_seen end,
     }
 end
 
@@ -968,6 +1003,49 @@ return {
                     "agent-loop",
                     "compaction-journal",
                     "runtime-resume",
+                    "driver",
+                    "agent-session",
+                })
+            end,
+        },
+        {
+            name = "verified existing Context composes an idle collision-free Agent owner",
+            run = function()
+                local f = fixture({ continuing = true })
+                local agent = assert(f.main.start_published_agent(
+                    f.composed,
+                    f.chat,
+                    "Continue from the latest durable Context facts.",
+                    "context-reopen"
+                ))
+                A.equal(agent.admission, false)
+                A.equal(agent.loop:status().state, "Idle")
+                A.truthy(agent.capabilities.reopened_existing_context)
+                A.falsy(agent.capabilities.published_first_turn)
+                local options = f.runtime_options()
+                A.equal(options.initial_sequence, 29)
+                A.equal(options.initial_context_generation, 7)
+                A.equal(options.initial_view_manifest_ref, "sha256:restored-view")
+                A.equal(options.initial_serials.turn, 4)
+                A.equal(options.initial_serials.message, 8)
+                A.equal(options.initial_serials.queue, 5)
+                A.deep_equal(f.log, {
+                    "capture-turn",
+                    "operation-journal",
+                    "operations",
+                    "permission-profile",
+                    "tools",
+                    "tool-port",
+                    "model-builder",
+                    "model-activity-1",
+                    "compaction-builder",
+                    "model-activity-2",
+                    "compaction-port",
+                    "review-builder",
+                    "model-activity-3",
+                    "review-port",
+                    "agent-loop",
+                    "compaction-journal",
                     "driver",
                     "agent-session",
                 })

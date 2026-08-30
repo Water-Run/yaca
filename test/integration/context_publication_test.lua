@@ -1176,7 +1176,8 @@ return {
                     A.equal(opened.view_manifest_snapshot, first.view_manifest_snapshot)
                     local recovered = reopened_observed.published.document
                     A.equal(#recovered.recovery.pending_compactions, 0)
-                    A.truthy(recovered.recovery.auto_continue)
+                    A.falsy(recovered.recovery.auto_continue)
+                    A.deep_equal(recovered.recovery.unfinished_turn_ids, { "turn-1" })
                     A.equal(recovered.model_view.active_manifest.digest,
                         first.view_manifest_snapshot)
                     A.equal(recovered.model_view.compaction_records[1].status, "error")

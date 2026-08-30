@@ -55,6 +55,11 @@ local function options(queue_maximum)
         },
         initial_sequence = 0,
         initial_context_generation = 1,
+        initial_view_manifest_ref = false,
+        initial_serials = {
+            turn = 0, message = 0, request = 0, tool = 0,
+            operation = 0, queue = 0, queue_display = 0, side = 0,
+        },
         automatic_compaction = false,
         maximum_identifier_bytes = 128,
         hard_cap_snapshot_id = "manifest-hard-v1",

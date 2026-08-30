@@ -1576,9 +1576,21 @@ function M.new_context_publication(ports, options)
         end
         local values = {}
         for key, value in pairs(active.receipt) do values[key] = value end
+        local durable_recovery = active.document.recovery
         values.outcome = recovery.outcome == "clean" and "opened" or "recovered"
         values.compaction_recovery = recovery
+        values.generation = active.document.generation
+        values.event_count = active.document.event_count
+        values.first_sequence = active.document.event_count == 0 and 0 or 1
+        values.last_sequence = active.document.event_count
         values.view_manifest_snapshot = active.document.model_view.active_manifest.digest
+        values.auto_continue = durable_recovery.auto_continue
+        values.unresolved_operation_ids = durable_recovery.unresolved_operation_ids
+        values.unresolved_tool_call_ids = durable_recovery.unresolved_tool_call_ids
+        values.unknown_operation_ids = durable_recovery.unknown_operation_ids
+        values.unfinished_turn_ids = durable_recovery.unfinished_turn_ids
+        values.active_queue_item_ids = durable_recovery.active_queue_item_ids
+        values.runtime_initial_serials = durable_recovery.runtime_initial_serials
         active.receipt = readonly(values, "existing Context publication receipt")
         return active.receipt
     end

@@ -8,7 +8,7 @@ yaca 当前已有可执行 Lua 入口和平台无关的通用 Agent 核心；代
 
 当前已实现：
 
-- bootstrap、严格 action registry/CLI parser、旧终端 TUI/line editor、typed diagnostics 和分阶段 self-test；裸 chat 在第一条消息前仍不创建 Context。
+- bootstrap、严格 action registry/CLI parser、旧终端 TUI/line editor、typed diagnostics 和分阶段 self-test；顶层诊断会把非 ASCII 字节稳定转义，避免旧 CMD 代码页损坏错误输出；裸 chat 在第一条消息前仍不创建 Context。
 - immutable config generation、OpenAI/Anthropic adapter、HTTP/SSE/retry/cancel、匿名 curl secret carrier，以及固定无工具的 side/review/compaction purpose。
 - 单 XML Context schema/store/index/lock/recovery、首消息先 durable、operation intent/result、ModelView publication 和 cache-miss 重建。
 - typed AgentLoop、queue/steer/side、ask-user/yield、action/termination review、预算/stuck/cancel/finalization 和精确 Tool result 配对。
@@ -17,13 +17,14 @@ yaca 当前已有可执行 Lua 入口和平台无关的通用 Agent 核心；代
 - Win32/XP HTTPS 候选闭包已锁定：curl 8.21.0 与 Mbed TLS 3.6.7 的窄下游补丁绑定 archive/patch/基文件 SHA-256；全新 i686 串行复现得到 PE32/Windows 5.01、HTTP/HTTPS、blocking IPv4、CryptoAPI entropy，且最终导入审计无 BCrypt、Vista 同步原语、UCRT 和新 `_s` CRT 符号。该结果明确为 cross-build/static candidate，真实 XP TLS/proxy/CA 仍待 C32。
 - lossless model-view compaction：结构化摘要、atomic groups、Context journal、原子 manifest publication、Runtime receipt/lifecycle gate、公开 `.compact`，以及冻结待发 main/review 请求的自动 threshold preflight、STATUS/cancel/close。
 - existing Context publication core 已能在持有精确 verified target/writer 后重建 plain 或 compacted active ModelView；新格式 pending request/response/cancel/rejection bracket 会先落唯一 cancel pending/unknown 与绑定 terminal error，旧格式 pending 只落保守 unknown、不伪造新式终态，旧 active view 始终保留。compaction serial、连续 automatic failure streak 与不完整旧历史也会从 XML 恢复；自动 compaction 的进程恢复 unknown 计入失败 streak，跨进程 monotonic 时间不可继承时重新开启完整 cooldown。
+- 公开 `--continue` 已接到 existing Context core：selector 必须精确解析并在加 writer 前后复核，调用 workspace 必须与 Context 镜像路径记录的 workspace 具有同一逻辑键和文件系统 identity；打开后先执行保守恢复门禁、整份配置重载与 self-test，再以 Idle Agent 恢复 event/config/ModelView 及八类 serial 水位，绝不自动重放未完成工作。跨 workspace 返回 typed confirmation requirement；存在 unfinished turn、active queue item、未决 operation/tool、unknown terminal outcome 或 pending compaction 时拒绝自动继续并释放 writer。
 - 最小发行 allowlist、component/license manifest、SPDX SBOM、package planner、资源 overlay 和资源门禁测试 Harness。
 - 运行时 curl config 已逐请求用锁定 CLI 可解析的 standalone/no-option 语法显式固定 HTTP/1.1、TLS 1.2+、服务端/HTTPS 代理随包 CA 校验；代理 TLS 下限由 `proxy-tlsv1` 与只启用 TLS 1.2/1.3 的锁定 Mbed TLS 后端共同闭合。代理/主机 DNS 和普通握手只在无 canonical event 时有界重试，证书/CA/CRL/issuer/pin/status 错误立即终止。真实目标 TLS/代理资格仍待 C32。
-- 受 `.tools/run_with_resource_guard.sh` 保护的完整平台无关 Lua suite 当前为 `412/412`；这不是三目标资格证明。
+- 受 `.tools/run_with_resource_guard.sh` 保护的完整平台无关 Lua suite 当前为 `418/418`；这不是三目标资格证明。
 
 仍缺失或不得宣称完成：
 
-- `.context`/continue 等公开 controller 仍须把用户精确选中的 verified target 接到 existing Context open/recovery core，并补齐对应交互结果；三目标 token/资源阈值仍待校准。
+- `.context`/select-context 等其余公开 controller 仍须把用户选择接到相同 verified open/recovery core，并补齐对应交互结果；`--continue` 的精确既有 Context 路径已接通，但显式跨 workspace 确认/rebind 尚未开放；三目标 token/资源阈值仍待校准。
 - 注册但尚未全部接通 controller 的交互管理动作仍须逐项以 registry → dispatcher → production port → terminal result 证明；parser 可识别不等于 action 已实现。
 - 旧环境网络/HTTPS 的源码锁、XP compatibility patch、静态 import/CRT 黑名单和最小协议闭包已有可重复候选证据；仍须在真实 XP/Win7/CentOS 7 证明 TLS/CA、显式代理、redirect/retry/cancel、旧 CMD 路径与错误分类，不能据此开放 Release Gate R。
 - C32 的三个真实 target qualification、C33 的干净机发布旅程/零表面、C34 的最终 SHA-256/license/SBOM/build/test evidence 尚未执行。
