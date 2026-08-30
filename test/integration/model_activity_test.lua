@@ -64,6 +64,7 @@ local MANIFEST = {
 
 local function activity_options()
     return {
+        identity_namespace = "context-TEST",
         maximum_poll_events = 64,
         maximum_queued_events = 512,
         maximum_header_bytes = 4096,
@@ -379,6 +380,81 @@ return {
                 local stale, stale_error = builder.prepare(spec)
                 A.falsy(stale)
                 A.equal(stale_error.code, "StaleModelView")
+
+                local side_prompt = assert(prompt_service:assemble({
+                    purpose = "side",
+                    config_generation = generation.id,
+                    layers = {
+                        global = {
+                            source = "General.SystemPrompt",
+                            version = generation.id,
+                            text = "global",
+                        },
+                        model = {
+                            source = "Model.Primary.SystemPrompt",
+                            version = generation.id,
+                            text = "model",
+                        },
+                        permission = {
+                            source = "Permission.Std.SystemPrompt",
+                            version = generation.id,
+                            text = "permission",
+                        },
+                        context = {
+                            source = "ContextPrompt",
+                            version = generation.id,
+                            text = "context",
+                        },
+                    },
+                    input = { user_message = "side question" },
+                    tool_mode = "none",
+                }))
+                local side_builder = assert(model.new_side_request_builder({
+                    adapter = adapter,
+                    prompt = prompt_service,
+                    views = views,
+                    generation = generation,
+                    tool_registry = registry,
+                    safety = { digest = sha256.hex },
+                }, {
+                    model_name = "Primary",
+                    permission_name = "Std",
+                    model_snapshot = "side-model-snapshot",
+                    permission_snapshot = "side-permission-snapshot",
+                    prompt_snapshot = side_prompt.digest,
+                    tool_registry_snapshot = registry.digest,
+                    initial_message = "side question",
+                    context_prompt = "context",
+                    default_connect_timeout_ms = 100,
+                    maximum_request_time_ms = 1200,
+                    default_retry_base_delay_ms = 5,
+                    maximum_output_tokens = 64,
+                }))
+                local side_spec = {
+                    request_id = "side-1:request:1",
+                    turn_id = "side-1",
+                    purpose = "side",
+                    continuation = false,
+                    view_manifest_ref = "view-1",
+                    progress_identity = "side:side-1",
+                }
+                local side_prepared = assert(side_builder.prepare(side_spec))
+                A.equal(side_prepared.request.purpose, "side")
+                A.equal(side_prepared.request.prompt_bundle.digest, side_prompt.digest)
+                A.equal(#side_prepared.request.tool_registry.tools, 0)
+                A.falsy(side_prepared.request.tool_registry.digest == registry.digest)
+                A.equal(#side_prepared.request.controls_schema.controls, 0)
+                A.equal(side_prepared.request.limits.max_output_tokens, 64)
+                A.equal(side_prepared.total_timeout_ms, 1200)
+                A.equal(side_builder.snapshots.tools, registry.digest)
+                A.falsy(
+                    side_builder.snapshots.transmitted_tools
+                        == side_builder.snapshots.tools
+                )
+                side_spec.purpose = "main"
+                local wrong_purpose, purpose_error = side_builder.prepare(side_spec)
+                A.falsy(wrong_purpose)
+                A.equal(purpose_error.code, "InvalidModelPurpose")
             end,
         },
         {
@@ -401,6 +477,17 @@ return {
                 local output = collect(f)
                 A.equal(#f.observed, 2)
                 A.equal(f.observed[1].body, f.observed[2].body)
+                local activity_identity = sha256.hex(
+                    "yaca-model-activity-v1\0context-TEST\0turn-1:request:1"
+                )
+                A.equal(
+                    f.observed[1].attempt_id,
+                    "model_" .. activity_identity .. "_attempt1"
+                )
+                A.equal(
+                    f.observed[2].attempt_id,
+                    "model_" .. activity_identity .. "_attempt2"
+                )
                 A.deep_equal(output_kinds(output), {
                     "canonical-event",
                     "adapter-event",

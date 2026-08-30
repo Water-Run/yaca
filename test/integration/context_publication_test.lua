@@ -471,6 +471,18 @@ return {
                 A.equal(turn_snapshot.queue_limit, 9)
                 A.falsy(turn_snapshot.config_generation == next_generation.id)
                 A.falsy(turn_snapshot.prompt_snapshot == receipt.prompt_snapshot)
+                local side_snapshot = assert(publication.capture_turn({
+                    generation = next_generation,
+                    kind = "side",
+                    text = "继续实现第二个节点",
+                    source = "terminal",
+                    expected_context_generation = 3,
+                }))
+                A.falsy(side_snapshot.prompt_snapshot == turn_snapshot.prompt_snapshot)
+                A.equal(side_snapshot.model_snapshot, turn_snapshot.model_snapshot)
+                A.equal(side_snapshot.permission_snapshot, turn_snapshot.permission_snapshot)
+                A.equal(side_snapshot.tool_registry_snapshot, turn_snapshot.tool_registry_snapshot)
+                A.equal(side_snapshot.view_manifest_ref, turn_snapshot.view_manifest_ref)
                 local stale, stale_error = publication.capture_turn({
                     generation = next_generation,
                     text = "stale",
@@ -479,6 +491,146 @@ return {
                 })
                 A.falsy(stale)
                 A.equal(stale_error.code, "InvalidTurnSnapshot")
+
+                local side_answer = "SIDE-ONLY-ANSWER"
+                local side_committed, side_commit_error = publication.commit({
+                    barrier_id = "side-1:barrier:1",
+                    first_sequence = 5,
+                    last_sequence = 9,
+                    event_count = 5,
+                    expected_context_generation = 3,
+                    events = {
+                        {
+                            seq = 5,
+                            type = "turn_started",
+                            turn_id = "side-1",
+                            fields = {
+                                kind = "side",
+                                configGeneration = side_snapshot.config_generation,
+                                modelSnapshot = side_snapshot.model_snapshot,
+                                permissionSnapshot = side_snapshot.permission_snapshot,
+                                promptSnapshot = side_snapshot.prompt_snapshot,
+                                toolRegistrySnapshot = side_snapshot.tool_registry_snapshot,
+                            },
+                        },
+                        {
+                            seq = 6,
+                            type = "user_message",
+                            turn_id = "side-1",
+                            fields = {
+                                messageId = "side-1:message:1",
+                                text = "private side question",
+                                source = "terminal",
+                            },
+                        },
+                        {
+                            seq = 7,
+                            type = "model_request",
+                            turn_id = "side-1",
+                            fields = {
+                                requestId = "side-1:request:1",
+                                purpose = "side",
+                                viewManifestRef = next_view.digest,
+                            },
+                        },
+                        {
+                            seq = 8,
+                            type = "model_message",
+                            turn_id = "side-1",
+                            fields = {
+                                messageId = "side-1:message:2",
+                                requestId = "side-1:request:1",
+                                role = "assistant",
+                                status = "complete",
+                                body = side_answer,
+                            },
+                        },
+                        {
+                            seq = 9,
+                            type = "turn_ended",
+                            turn_id = "side-1",
+                            fields = { outcome = "completed" },
+                        },
+                    },
+                })
+                A.truthy(side_committed, A.render(side_commit_error))
+                local hidden_side_view = assert(publication.prepare_view({
+                    expected_context_generation = 4,
+                    expected_last_sequence = 9,
+                    current_manifest_ref = next_view.digest,
+                }))
+                A.truthy(publication.commit({
+                    barrier_id = "turn-1:barrier:3",
+                    first_sequence = 10,
+                    last_sequence = 10,
+                    event_count = 1,
+                    expected_context_generation = 4,
+                    events = { {
+                        seq = 10,
+                        type = "model_view_published",
+                        turn_id = "turn-1",
+                        fields = {
+                            manifestDigest = hidden_side_view.digest,
+                            firstEventSeq = tostring(hidden_side_view.first_sequence),
+                            lastEventSeq = tostring(hidden_side_view.last_sequence),
+                            replacesManifestDigest = hidden_side_view.replaces_manifest_ref,
+                        },
+                    } },
+                }))
+                local hidden_body = assert(
+                    publication.resolve_view(hidden_side_view.digest)
+                ).body
+                A.falsy(hidden_body:find("private side question", 1, true))
+                A.falsy(hidden_body:find(side_answer, 1, true))
+                A.falsy(hidden_body:find('turnId="side-1"', 1, true))
+
+                A.truthy(publication.commit({
+                    barrier_id = "queue:barrier:1",
+                    first_sequence = 11,
+                    last_sequence = 11,
+                    event_count = 1,
+                    expected_context_generation = 5,
+                    events = { {
+                        seq = 11,
+                        type = "queue_item",
+                        fields = {
+                            queueItemId = "queue-1",
+                            displayId = "#1",
+                            action = "enqueue",
+                            text = side_answer,
+                            sideId = "side-1",
+                        },
+                    } },
+                }))
+                local authorized_side_view = assert(publication.prepare_view({
+                    expected_context_generation = 6,
+                    expected_last_sequence = 11,
+                    current_manifest_ref = hidden_side_view.digest,
+                }))
+                A.truthy(publication.commit({
+                    barrier_id = "turn-1:barrier:4",
+                    first_sequence = 12,
+                    last_sequence = 12,
+                    event_count = 1,
+                    expected_context_generation = 6,
+                    events = { {
+                        seq = 12,
+                        type = "model_view_published",
+                        turn_id = "turn-1",
+                        fields = {
+                            manifestDigest = authorized_side_view.digest,
+                            firstEventSeq = tostring(authorized_side_view.first_sequence),
+                            lastEventSeq = tostring(authorized_side_view.last_sequence),
+                            replacesManifestDigest = authorized_side_view.replaces_manifest_ref,
+                        },
+                    } },
+                }))
+                local authorized_body = assert(
+                    publication.resolve_view(authorized_side_view.digest)
+                ).body
+                A.contains(authorized_body, side_answer)
+                A.contains(authorized_body, "queue_item")
+                A.contains(authorized_body, "side-1")
                 A.truthy(draft.close())
                 A.equal(observed.closes, 1)
                 A.equal(draft.status().lifecycle, "closed")

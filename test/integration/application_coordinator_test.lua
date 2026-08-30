@@ -60,6 +60,8 @@ local function status(state, overrides)
         context_generation = 1,
         queue_count = 0,
         queue_maximum = 9,
+        side_state = "idle",
+        active_side_id = false,
         last_outcome = false,
     }
     for key, item in pairs(overrides or {}) do value[key] = item end
@@ -75,6 +77,8 @@ local function fixture(settings)
     local now = 0
     local loop_status = status("RequestingModel")
     local driver_steps = 0
+    local side_started = false
+    local side_emitted = false
 
     local terminal = {}
     function terminal:start(observed_now)
@@ -134,6 +138,12 @@ local function fixture(settings)
     function session:side()
         if settings.side_error then return nil, settings.side_error end
         log[#log + 1] = "side"
+        side_started = true
+        loop_status = status(loop_status.state, {
+            pending_kind = loop_status.pending_kind,
+            side_state = "active",
+            active_side_id = "side-1",
+        })
         return { side_id = "side-1" }
     end
     function session:queue_list()
@@ -151,6 +161,18 @@ local function fixture(settings)
         log[#log + 1] = "loop-cancel"
         loop_status = status("Idle", { last_outcome = "cancelled" })
         return { outcome = "cancelled" }
+    end
+    function loop:cancel_side(command)
+        A.equal(command.side_id, "side-1")
+        A.equal(command.expected_context_generation, loop_status.context_generation)
+        A.equal(command.expected_turn_id, loop_status.turn_id)
+        log[#log + 1] = "side-cancel:" .. command.reason
+        loop_status = status(loop_status.state, {
+            pending_kind = loop_status.pending_kind,
+            side_state = "idle",
+            active_side_id = false,
+        })
+        return { side_id = command.side_id, outcome = "cancelled" }
     end
     function loop:resolve_approval(envelope)
         log[#log + 1] = "resolve-approval:" .. envelope.decision
@@ -187,6 +209,36 @@ local function fixture(settings)
     local driver = {}
     function driver.step()
         driver_steps = driver_steps + 1
+        if settings.side_response and side_started and not side_emitted then
+            side_emitted = true
+            loop_status = status(loop_status.state, {
+                pending_kind = loop_status.pending_kind,
+                side_state = "idle",
+                active_side_id = false,
+            })
+            return {
+                events = {
+                    {
+                        kind = "side-model-event",
+                        side_id = "side-1",
+                        event = { kind = "text_delta", text = "bounded advice" },
+                    },
+                    {
+                        kind = "side-model-event",
+                        side_id = "side-1",
+                        event = { kind = "response_finish", finish_class = "stop" },
+                    },
+                    {
+                        kind = "runtime-transition",
+                        cause = "side-response",
+                        side_id = "side-1",
+                        result = { side_id = "side-1", outcome = "completed" },
+                    },
+                },
+                status = loop_status,
+                progressed = true,
+            }
+        end
         if driver_steps == 1 and settings.approval then
             loop_status = status("AwaitingApproval", {
                 pending_kind = "approval",
@@ -390,6 +442,61 @@ return {
                 A.contains(A.render(f.blocks), "Input draft cleared")
                 A.equal(#blocks_of_kind(f.blocks, "user"), 1)
                 A.equal(f.coordinator:status().draft_bytes, 0)
+            end,
+        },
+        {
+            name = "accepted side stream renders one separately identified advisory block",
+            run = function()
+                local f = fixture({
+                    side_response = true,
+                    batches = {
+                        { { kind = "user_action", action = "text", text = "first" } },
+                        { { kind = "user_action", action = "submit-or-queue" } },
+                        {
+                            {
+                                kind = "user_action",
+                                action = "text",
+                                text = ".side explain the durable facts",
+                            },
+                        },
+                        { { kind = "user_action", action = "submit-or-queue" } },
+                        { { kind = "user_action", action = "text", text = ".quit" } },
+                        { { kind = "user_action", action = "submit-or-queue" } },
+                    },
+                })
+                assert(f.coordinator:run())
+                local sides = blocks_of_kind(f.blocks, "side")
+                A.equal(#sides, 1)
+                A.equal(sides[1].id, "side-1")
+                A.equal(sides[1].text, "bounded advice")
+                A.contains(A.render(f.blocks), "Side side-1 outcome: completed")
+                A.contains(table.concat(f.log, "|"), "stage:terminal:explain the durable facts")
+                A.contains(table.concat(f.log, "|"), "side")
+            end,
+        },
+        {
+            name = "cancel follows active side focus without cancelling the paused main",
+            run = function()
+                local f = fixture({ batches = {
+                    { { kind = "user_action", action = "text", text = "first" } },
+                    { { kind = "user_action", action = "submit-or-queue" } },
+                    {
+                        {
+                            kind = "user_action",
+                            action = "text",
+                            text = ".side bounded question",
+                        },
+                    },
+                    { { kind = "user_action", action = "submit-or-queue" } },
+                    { { kind = "user_action", action = "text", text = ".cancel" } },
+                    { { kind = "user_action", action = "submit-or-queue" } },
+                    { { kind = "user_action", action = "text", text = ".quit" } },
+                    { { kind = "user_action", action = "submit-or-queue" } },
+                } })
+                assert(f.coordinator:run())
+                A.contains(table.concat(f.log, "|"), "side-cancel:user-cancel")
+                A.falsy(table.concat(f.log, "|"):find("loop-cancel", 1, true))
+                A.contains(A.render(f.blocks), "Side cancellation requested")
             end,
         },
     },

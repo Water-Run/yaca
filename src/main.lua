@@ -1385,6 +1385,38 @@ local function runtime_options()
     return candidate
 end
 
+local function scoped_model_activity_options(composed, context_hash, side)
+    if type(context_hash) ~= "string"
+        or context_hash == ""
+        or #context_hash > 64
+        or not context_hash:match("^[0-9A-F]+$")
+    then
+        return nil, failure(
+            "InvalidContextIdentity",
+            "Model activities require the exact durable Context hash"
+        )
+    end
+    local candidate = copy_plain(composed.model_activity_options, {})
+    if not candidate then
+        return nil, failure(
+            "InvalidModelActivity",
+            "Model activity limits could not be copied"
+        )
+    end
+    candidate.identity_namespace = "context-" .. context_hash
+    if side then
+        candidate.maximum_turn_time_ms = math.min(
+            candidate.maximum_turn_time_ms,
+            AGENT_RELEASE_OPTIONS.runtime.lanes.side_active_time_ms
+        )
+        candidate.maximum_canonical_body_bytes = math.min(
+            candidate.maximum_canonical_body_bytes,
+            AGENT_RELEASE_OPTIONS.runtime.lanes.side_response_bytes
+        )
+    end
+    return readonly(candidate, "Context-scoped Model activity options")
+end
+
 local function build_turn_ports(composed, shared, turn)
     local generation = turn.generation
     local contexts = composed.contexts
@@ -1469,6 +1501,12 @@ local function build_turn_ports(composed, shared, turn)
     if not tool_port then return nil, tool_port_error end
 
     local model_module = require("model")
+    local activity_options, activity_options_error = scoped_model_activity_options(
+        composed,
+        turn.context_hash,
+        false
+    )
+    if not activity_options then return nil, activity_options_error end
     local views = readonly({
         resolve_view = composed.publication.resolve_view,
     }, "active durable Model views")
@@ -1500,7 +1538,7 @@ local function build_turn_ports(composed, shared, turn)
         safety = contexts.safety,
         clock = composed.backend.clock_port,
         requests = request_builder,
-    }, composed.model_activity_options)
+    }, activity_options)
     if not model_activity then return nil, model_activity_error end
 
     local review_builder, review_builder_error = model_module.new_review_request_builder({
@@ -1528,7 +1566,7 @@ local function build_turn_ports(composed, shared, turn)
         safety = contexts.safety,
         clock = composed.backend.clock_port,
         requests = review_builder,
-    }, composed.model_activity_options)
+    }, activity_options)
     if not review_activity then return nil, review_activity_error end
     local review_port, review_port_error = model_module.new_review_port({
         activity = review_activity,
@@ -1548,6 +1586,186 @@ local function build_turn_ports(composed, shared, turn)
         tools = tool_port,
         reviews = review_port,
     }
+end
+
+local function build_side_activity(composed, side)
+    local model_module = require("model")
+    local views = readonly({
+        resolve_view = composed.publication.resolve_view,
+    }, "durable side Model views")
+    local request_builder, builder_error = model_module.new_side_request_builder({
+        adapter = composed.model_adapter,
+        prompt = composed.contexts.prompt,
+        views = views,
+        generation = side.generation,
+        tool_registry = composed.contexts.tool_registry,
+        safety = composed.contexts.safety,
+    }, {
+        model_name = side.model,
+        permission_name = side.permission,
+        model_snapshot = side.model_snapshot,
+        permission_snapshot = side.permission_snapshot,
+        prompt_snapshot = side.prompt_snapshot,
+        tool_registry_snapshot = side.tool_registry_snapshot,
+        initial_message = side.initial_message,
+        context_prompt = side.context_prompt,
+        default_connect_timeout_ms = 120000,
+        maximum_request_time_ms = AGENT_RELEASE_OPTIONS.runtime.lanes.side_active_time_ms,
+        default_retry_base_delay_ms = 1000,
+        maximum_output_tokens = 1024,
+    })
+    if not request_builder then return nil, builder_error end
+    local activity_options, activity_options_error = scoped_model_activity_options(
+        composed,
+        side.context_hash,
+        true
+    )
+    if not activity_options then return nil, activity_options_error end
+    local activity, activity_error = model_module.new_activity({
+        adapter = composed.model_adapter,
+        transport = composed.network,
+        safety = composed.contexts.safety,
+        clock = composed.backend.clock_port,
+        requests = request_builder,
+    }, activity_options)
+    if not activity then return nil, activity_error end
+    return {
+        generation = side.generation,
+        view_manifest_ref = side.view_manifest_ref,
+        activity = activity,
+    }
+end
+
+local SIDE_RUNTIME_REQUEST_FIELDS = {
+    side_id = true,
+    turn_id = true,
+    request_id = true,
+    purpose = true,
+    view_manifest_ref = true,
+    no_tools = true,
+    active_time_cap_ms = true,
+    response_byte_cap = true,
+    budget_snapshot_id = true,
+}
+
+local function new_side_catalog()
+    local prepared = false
+    local current = false
+    local catalog = {}
+
+    local function idle_activity(candidate)
+        if not candidate then return true end
+        local called, status = pcall(candidate.activity.status)
+        return called and type(status) == "table" and status.state == "idle"
+    end
+
+    function catalog.idle()
+        return idle_activity(prepared) and idle_activity(current)
+    end
+
+    function catalog.prepare(candidate)
+        if type(candidate) ~= "table"
+            or type(candidate.generation) ~= "table"
+            or type(candidate.view_manifest_ref) ~= "string"
+            or type(candidate.activity) ~= "table"
+            or type(candidate.activity.start) ~= "function"
+            or type(candidate.activity.cancel) ~= "function"
+            or type(candidate.activity.poll) ~= "function"
+            or type(candidate.activity.status) ~= "function"
+        then
+            return nil, failure(
+                "InvalidSideActivity",
+                "prepared side Model activity is incomplete"
+            )
+        end
+        if not catalog.idle() then
+            return nil, failure(
+                "SideActivityBusy",
+                "a side Model activity is already active"
+            )
+        end
+        prepared = candidate
+        return true
+    end
+
+    function catalog.start(specification)
+        if type(specification) ~= "table" or not prepared then
+            return nil, failure(
+                "SideActivityUnavailable",
+                "the frozen side Model activity is unavailable"
+            )
+        end
+        for key in pairs(specification) do
+            if type(key) ~= "string" or not SIDE_RUNTIME_REQUEST_FIELDS[key] then
+                return nil, failure(
+                    "InvalidSideActivity",
+                    "side Runtime request is ambiguous"
+                )
+            end
+        end
+        for key in pairs(SIDE_RUNTIME_REQUEST_FIELDS) do
+            if specification[key] == nil then
+                return nil, failure(
+                    "InvalidSideActivity",
+                    "side Runtime request is incomplete"
+                )
+            end
+        end
+        if specification.purpose ~= "side"
+            or specification.no_tools ~= true
+            or specification.side_id ~= specification.turn_id
+            or specification.view_manifest_ref ~= prepared.view_manifest_ref
+            or specification.active_time_cap_ms
+                ~= AGENT_RELEASE_OPTIONS.runtime.lanes.side_active_time_ms
+            or specification.response_byte_cap
+                ~= AGENT_RELEASE_OPTIONS.runtime.lanes.side_response_bytes
+            or specification.budget_snapshot_id
+                ~= AGENT_RELEASE_OPTIONS.runtime.lanes.side_snapshot_id
+        then
+            return nil, failure(
+                "InvalidSideActivity",
+                "side Runtime request contradicts its frozen release snapshot"
+            )
+        end
+        local handle, start_error = prepared.activity.start({
+            request_id = specification.request_id,
+            turn_id = specification.turn_id,
+            purpose = "side",
+            continuation = false,
+            view_manifest_ref = specification.view_manifest_ref,
+            progress_identity = "side:" .. specification.side_id,
+        })
+        if not handle then return nil, start_error end
+        current = prepared
+        prepared = false
+        return handle
+    end
+
+    function catalog.cancel(handle, reason)
+        if not current then return { outcome = "unknown" } end
+        return current.activity.cancel(handle, reason)
+    end
+
+    function catalog.poll(budget)
+        if not current then return {} end
+        return current.activity.poll(budget)
+    end
+
+    function catalog.status()
+        if current then return current.activity.status() end
+        if prepared then return readonly({
+            state = "prepared",
+            generation = prepared.generation.id,
+        }, "prepared side activity status") end
+        return readonly({ state = "idle" }, "side activity status")
+    end
+
+    function catalog.generation()
+        local candidate = prepared or current
+        return candidate and candidate.generation or false
+    end
+
+    return readonly(catalog, "production side activity catalog")
 end
 
 local function new_turn_catalog(initial)
@@ -2478,6 +2696,7 @@ function M.start_published_agent(composed, chat, message, source)
     }
     local first_ports, first_ports_error = build_turn_ports(composed, shared, {
         generation = generation,
+        context_hash = status.context_hash,
         workspace = status.workspace,
         model = status.model,
         permission = status.permission,
@@ -2492,53 +2711,92 @@ function M.start_published_agent(composed, chat, message, source)
     })
     if not first_ports then chat.draft.close(); return nil, first_ports_error end
     local catalog = new_turn_catalog(first_ports)
+    local side_catalog = new_side_catalog()
+
+    local function reload_turn_snapshot(specification)
+        local turn_context, context_error = composed.publication.turn_context({
+            expected_context_generation = specification.context_generation,
+        })
+        if not turn_context then return nil, nil, context_error end
+        local next_generation, generation_error = composed.config.reload_file(
+            composed.layout.config_path,
+            turn_context.overrides
+        )
+        if not next_generation then return nil, nil, generation_error end
+        local snapshot, snapshot_error = composed.publication.capture_turn({
+            generation = next_generation,
+            kind = specification.kind,
+            text = specification.text,
+            source = specification.source,
+            expected_context_generation = specification.context_generation,
+        })
+        if not snapshot then return nil, nil, snapshot_error end
+        return next_generation, snapshot
+    end
+
     local snapshots = readonly({
         capture = function(specification)
-            if type(specification) ~= "table" or specification.kind ~= "main" then
+            if type(specification) ~= "table"
+                or (specification.kind ~= "main" and specification.kind ~= "side")
+            then
                 return nil, failure(
                     "InvalidTurnSnapshot",
-                    "production snapshot catalog accepts only main turns"
+                    "production snapshot catalog accepts only main or side turns"
                 )
             end
-            if not catalog.idle() then
+            if specification.kind == "main" and not catalog.idle() then
                 return nil, failure(
                     "TurnActivitiesBusy",
                     "a later turn cannot replace active generation ports"
                 )
             end
-            local turn_context, context_error = composed.publication.turn_context({
-                expected_context_generation = specification.context_generation,
-            })
-            if not turn_context then return nil, context_error end
-            local next_generation, generation_error = composed.config.reload_file(
-                composed.layout.config_path,
-                turn_context.overrides
+            if specification.kind == "side" and not side_catalog.idle() then
+                return nil, failure(
+                    "SideActivityBusy",
+                    "a side turn cannot replace an active side generation"
+                )
+            end
+            local next_generation, snapshot, snapshot_error = reload_turn_snapshot(
+                specification
             )
-            if not next_generation then return nil, generation_error end
-            local snapshot, snapshot_error = composed.publication.capture_turn({
-                generation = next_generation,
-                text = specification.text,
-                source = specification.source,
-                expected_context_generation = specification.context_generation,
-            })
-            if not snapshot then return nil, snapshot_error end
-            local candidate, candidate_error = build_turn_ports(composed, shared, {
-                generation = next_generation,
-                workspace = status.workspace,
-                model = next_generation.current_model,
-                permission = next_generation.current_permission,
-                double_check = next_generation.effective_double_check,
-                context_prompt = next_generation.context_prompt or "",
-                initial_message = snapshot.text,
-                config_snapshot = snapshot.config_generation,
-                model_snapshot = snapshot.model_snapshot,
-                permission_snapshot = snapshot.permission_snapshot,
-                prompt_snapshot = snapshot.prompt_snapshot,
-                tool_registry_snapshot = snapshot.tool_registry_snapshot,
-            })
-            if not candidate then return nil, candidate_error end
-            local replaced, replace_error = catalog.replace(candidate)
-            if not replaced then return nil, replace_error end
+            if not next_generation then return nil, snapshot_error end
+            if specification.kind == "main" then
+                local candidate, candidate_error = build_turn_ports(composed, shared, {
+                    generation = next_generation,
+                    context_hash = status.context_hash,
+                    workspace = status.workspace,
+                    model = next_generation.current_model,
+                    permission = next_generation.current_permission,
+                    double_check = next_generation.effective_double_check,
+                    context_prompt = next_generation.context_prompt or "",
+                    initial_message = snapshot.text,
+                    config_snapshot = snapshot.config_generation,
+                    model_snapshot = snapshot.model_snapshot,
+                    permission_snapshot = snapshot.permission_snapshot,
+                    prompt_snapshot = snapshot.prompt_snapshot,
+                    tool_registry_snapshot = snapshot.tool_registry_snapshot,
+                })
+                if not candidate then return nil, candidate_error end
+                local replaced, replace_error = catalog.replace(candidate)
+                if not replaced then return nil, replace_error end
+            else
+                local candidate, candidate_error = build_side_activity(composed, {
+                    generation = next_generation,
+                    context_hash = status.context_hash,
+                    model = next_generation.current_model,
+                    permission = next_generation.current_permission,
+                    context_prompt = next_generation.context_prompt or "",
+                    initial_message = snapshot.text,
+                    model_snapshot = snapshot.model_snapshot,
+                    permission_snapshot = snapshot.permission_snapshot,
+                    prompt_snapshot = snapshot.prompt_snapshot,
+                    tool_registry_snapshot = snapshot.tool_registry_snapshot,
+                    view_manifest_ref = snapshot.view_manifest_ref,
+                })
+                if not candidate then return nil, candidate_error end
+                local prepared, prepare_error = side_catalog.prepare(candidate)
+                if not prepared then return nil, prepare_error end
+            end
             return snapshot
         end,
     }, "production turn snapshot port")
@@ -2556,7 +2814,7 @@ function M.start_published_agent(composed, chat, message, source)
         tools = catalog.tools,
         reviews = catalog.reviews,
         snapshots = snapshots,
-        side = false,
+        side = side_catalog,
         views = readonly({
             prepare = composed.publication.prepare_view,
         }, "active durable Model view publication"),
@@ -2577,6 +2835,7 @@ function M.start_published_agent(composed, chat, message, source)
         model = catalog.model,
         tools = catalog.tools,
         reviews = catalog.reviews,
+        side = side_catalog,
         clock = clock,
     }, AGENT_RELEASE_OPTIONS.driver)
     if not driver then return fail_after_loop(driver_error) end
@@ -2594,6 +2853,7 @@ function M.start_published_agent(composed, chat, message, source)
         draft = chat.draft,
         generation = generation,
         current_generation = catalog.generation,
+        current_side_generation = side_catalog.generation,
         capabilities = readonly({
             published_first_turn = true,
             model = true,
@@ -2601,7 +2861,7 @@ function M.start_published_agent(composed, chat, message, source)
             reviews = true,
             approvals = true,
             later_turn_snapshots = true,
-            side = false,
+            side = true,
             target_qualified = false,
         }, "published Agent capabilities"),
     }, "published production Agent")
@@ -2741,6 +3001,9 @@ function M.new_application_coordinator(ports, options)
     local agent = false
     local input_draft = ""
     local assistant_draft = ""
+    local side_draft = ""
+    local side_draft_id = false
+    local side_focus_id = false
     local last_now
     local prompt_needed = false
     local approval = false
@@ -2837,6 +3100,80 @@ function M.new_application_coordinator(ports, options)
         end
         assistant_draft = assistant_draft .. value
         return true
+    end
+
+    local function flush_side(side_id)
+        if side_draft == "" then
+            side_draft_id = false
+            return true
+        end
+        if type(side_id) ~= "string" or side_id == "" or side_id ~= side_draft_id then
+            return nil, failure(
+                "SideActivityContract",
+                "side transcript identity changed while streaming"
+            )
+        end
+        local value = side_draft
+        side_draft = ""
+        side_draft_id = false
+        return publish({ kind = "side", id = side_id, text = value })
+    end
+
+    local function append_side(side_id, value)
+        if type(side_id) ~= "string" or side_id == ""
+            or type(value) ~= "string"
+            or (side_draft_id ~= false and side_draft_id ~= side_id)
+            or #side_draft + #value > admitted.maximum_assistant_bytes
+        then
+            return nil, failure(
+                "CoordinatorOutputLimit",
+                "side transcript exceeds its fixed byte limit or binding"
+            )
+        end
+        side_draft_id = side_id
+        side_draft = side_draft .. value
+        return true
+    end
+
+    local function project_side_model_event(side_id, event)
+        if type(event) ~= "table" or type(event.kind) ~= "string" then
+            return nil, failure(
+                "SideActivityContract",
+                "interactive side Model event is invalid"
+            )
+        end
+        if event.kind == "response_start"
+            or event.kind == "usage_update"
+            or event.kind == "reasoning_summary_delta"
+            or event.kind == "tool_arguments_delta"
+        then
+            return true
+        end
+        if event.kind == "text_delta" then return append_side(side_id, event.text) end
+        if event.kind == "response_finish" then return flush_side(side_id) end
+        if event.kind == "tool_call_start"
+            or event.kind == "tool_call_complete"
+            or event.kind == "control"
+        then
+            local flushed, flush_error = flush_side(side_id)
+            if not flushed then return nil, flush_error end
+            return publish_error({
+                code = "InvalidSideResponse",
+                message = "The side Model attempted a Tool or control action; it was rejected.",
+            })
+        end
+        if event.kind == "protocol_error" or event.kind == "transport_error" then
+            local flushed, flush_error = flush_side(side_id)
+            if not flushed then return nil, flush_error end
+            return publish_error({
+                code = "SideModelResponseError",
+                message = "Side Model response failed: " .. tostring(event.error_id),
+            })
+        end
+        return nil, failure(
+            "SideActivityContract",
+            "interactive side Model event kind is unknown"
+        )
     end
 
     local function project_model_event(event)
@@ -2956,6 +3293,15 @@ function M.new_application_coordinator(ports, options)
         if event.cause == "termination-review" then
             return publish_status("Termination review completed.")
         end
+        if event.cause == "side-response" then
+            local flushed, flush_error = flush_side(event.side_id)
+            if not flushed then return nil, flush_error end
+            if side_focus_id == event.side_id then side_focus_id = false end
+            return publish_status(
+                "Side " .. tostring(event.side_id)
+                    .. " outcome: " .. tostring(result.outcome)
+            )
+        end
         return nil, failure(
             "AgentDriverFailure",
             "interactive Runtime transition cause is unknown"
@@ -2967,6 +3313,11 @@ function M.new_application_coordinator(ports, options)
             local projected, projection_error
             if event.kind == "model-event" then
                 projected, projection_error = project_model_event(event.event)
+            elseif event.kind == "side-model-event" then
+                projected, projection_error = project_side_model_event(
+                    event.side_id,
+                    event.event
+                )
             elseif event.kind == "tool-event" then
                 projected, projection_error = project_tool_event(
                     event.event,
@@ -3118,6 +3469,8 @@ function M.new_application_coordinator(ports, options)
             "pending: " .. tostring(status.pending_kind),
             "queue: " .. tostring(status.queue_count)
                 .. "/" .. tostring(status.queue_maximum),
+            "side: " .. tostring(status.side_state)
+                .. " " .. tostring(status.active_side_id),
             "last outcome: " .. tostring(status.last_outcome),
         }
     end
@@ -3168,7 +3521,10 @@ function M.new_application_coordinator(ports, options)
             })
         end
         if method == "side" then
-            return publish_status("Side request accepted.")
+            side_focus_id = result.side_id
+            return publish_status(
+                "Side request accepted: " .. tostring(result.side_id)
+            )
         end
         return publish_status("Input accepted.")
     end
@@ -3252,6 +3608,33 @@ function M.new_application_coordinator(ports, options)
             return publish_status("Queue cleared.")
         end
         if request.id == "cancel" then
+            local current = agent.loop:status()
+            if side_focus_id ~= false
+                and current.active_side_id == side_focus_id
+                and current.side_state == "cancelling"
+            then
+                return publish_status("Side cancellation is already pending.")
+            end
+            if side_focus_id ~= false
+                and current.active_side_id == side_focus_id
+                and current.side_state == "active"
+            then
+                local result, action_error = coordinator_call(
+                    agent.loop,
+                    "cancel_side",
+                    "CancelFailure",
+                    "side cancellation",
+                    {
+                        side_id = side_focus_id,
+                        reason = "user-cancel",
+                        expected_context_generation = current.context_generation,
+                        expected_turn_id = current.turn_id,
+                    }
+                )
+                if not result then return nil, action_error end
+                if result.cancel_pending ~= true then side_focus_id = false end
+                return publish_status("Side cancellation requested.")
+            end
             local result, action_error = coordinator_call(
                 agent.loop,
                 "cancel",

@@ -23,6 +23,8 @@ end
 
 local function fixture()
     local state = "RequestingModel"
+    local side_state = "idle"
+    local active_side_id = false
     local log = {}
     local model_batches = { {
         { kind = "canonical-event", request_id = "request-1" },
@@ -51,11 +53,17 @@ local function fixture()
             },
         },
     } }
+    local side_batches = {}
     local now = 10
     local loop = {}
 
     function loop:status()
-        return { state = state, last_outcome = state == "Idle" and "completed" or false }
+        return {
+            state = state,
+            last_outcome = state == "Idle" and "completed" or false,
+            side_state = side_state,
+            active_side_id = active_side_id,
+        }
     end
 
     function loop:tick()
@@ -93,6 +101,18 @@ local function fixture()
         return { state = state, outcome = "completed" }
     end
 
+    function loop:accept_side_event(side_id, request_id)
+        log[#log + 1] = "side-event:" .. side_id .. ":" .. request_id
+        return { side_id = side_id, canonical_event_seen = true }
+    end
+
+    function loop:accept_side_response(side_id, wrapper)
+        log[#log + 1] = "side-response:" .. side_id .. ":" .. wrapper.request_id
+        side_state = "idle"
+        active_side_id = false
+        return { side_id = side_id, outcome = "completed" }
+    end
+
     local model = {}
     function model.poll()
         return table.remove(model_batches, 1) or {}
@@ -113,11 +133,17 @@ local function fixture()
         return table.remove(review_batches, 1) or {}
     end
 
+    local side = {}
+    function side.poll()
+        return table.remove(side_batches, 1) or {}
+    end
+
     local driver = assert(runtime.new_agent_activity_driver({
         loop = loop,
         model = model,
         tools = tools,
         reviews = reviews,
+        side = side,
         clock = { now = function() now = now + 1 return now end },
     }, {
         model_poll_events = 8,
@@ -132,6 +158,11 @@ local function fixture()
         set_state = function(value) state = value end,
         model_batches = model_batches,
         review_batches = review_batches,
+        side_batches = side_batches,
+        start_side = function(side_id)
+            side_state = "active"
+            active_side_id = side_id
+        end,
     }
 end
 
@@ -199,6 +230,44 @@ return {
             end,
         },
         {
+            name = "active side Model is reduced independently while main keeps progressing",
+            run = function()
+                local f = fixture()
+                f.start_side("side-1")
+                f.side_batches[1] = {
+                    { kind = "canonical-event", request_id = "side-request-1" },
+                    {
+                        kind = "adapter-event",
+                        request_id = "side-request-1",
+                        event = { kind = "text_delta", text = "side answer" },
+                    },
+                    {
+                        kind = "response",
+                        request_id = "side-request-1",
+                        wrapper = { request_id = "side-request-1" },
+                    },
+                }
+                local stepped = assert(f.driver.step())
+                A.equal(stepped.status.state, "ExecutingTool")
+                A.equal(stepped.status.side_state, "idle")
+                A.equal(stepped.events[1].kind, "model-event")
+                A.equal(stepped.events[2].cause, "model-response")
+                A.equal(stepped.events[3].kind, "side-model-event")
+                A.equal(stepped.events[3].side_id, "side-1")
+                A.equal(stepped.events[3].event.text, "side answer")
+                A.equal(stepped.events[4].cause, "side-response")
+                A.equal(stepped.events[4].result.outcome, "completed")
+                A.contains(
+                    table.concat(f.log, "|"),
+                    "side-event:side-1:side-request-1"
+                )
+                A.contains(
+                    table.concat(f.log, "|"),
+                    "side-response:side-1:side-request-1"
+                )
+            end,
+        },
+        {
             name = "unknown activity events and missing review ports fail closed",
             run = function()
                 local f = fixture()
@@ -212,6 +281,7 @@ return {
                     model = { poll = function() return {} end },
                     tools = { poll = function() return {}, false end },
                     reviews = false,
+                    side = false,
                     clock = { now = function() return 20 end },
                 }, {
                     model_poll_events = 1,

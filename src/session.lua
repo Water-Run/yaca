@@ -259,6 +259,7 @@ local function render_model_view(safety, facts, context_generation, maximum_byte
     parts = {}
     local added, add_error = add(header)
     if not added then return nil, add_error end
+    local side_turns = {}
     for index, event in ipairs(facts) do
         if type(event) ~= "table"
             or event.seq ~= index
@@ -268,42 +269,55 @@ local function render_model_view(safety, facts, context_generation, maximum_byte
         then
             return nil, failure("InvalidModelView", "Context event cannot enter the model view")
         end
-        local turn = event.turn_id and ' turnId="'
-            .. model_view_escape(event.turn_id) .. '"' or ""
-        added, add_error = add(table.concat({
-            '  <Event seq="', tostring(event.seq), '" type="',
-            model_view_escape(event.type), '" at="', model_view_escape(event.at),
-            '"', turn, '>\n',
-        }))
-        if not added then return nil, add_error end
-        local names = {}
-        for name in pairs(event.fields) do names[#names + 1] = name end
-        table.sort(names)
-        for _, name in ipairs(names) do
-            local value = event.fields[name]
-            local metadata = event.field_metadata and event.field_metadata[name]
-            if type(name) ~= "string" or type(value) ~= "string" then
-                return nil, failure("InvalidModelView", "Context field cannot enter the model view")
-            end
-            local visible
-            if metadata and metadata.representation == "base64" then
-                visible = table.concat({
-                    "[binary omitted; rawBytes=", tostring(metadata.raw_bytes),
-                    "; sha256=", tostring(metadata.digest), "]",
-                })
-            elseif text.xml_carrier_kind(value) == "text" then
-                visible = model_view_escape(value)
-            else
-                visible = "[non-text field omitted]"
-            end
+        if event.type == "turn_started" and event.fields.kind == "side"
+            and type(event.turn_id) == "string"
+        then
+            side_turns[event.turn_id] = true
+        end
+        -- Side turns remain complete durable audit facts, but their Model input
+        -- and response are not main-turn authority. Only a later queue_item or
+        -- steer event created by explicit side-use is visible to the main view.
+        if not side_turns[event.turn_id] then
+            local turn = event.turn_id and ' turnId="'
+                .. model_view_escape(event.turn_id) .. '"' or ""
             added, add_error = add(table.concat({
-                '    <Field name="', model_view_escape(name), '" bytes="',
-                tostring(#value), '">', visible, '</Field>\n',
+                '  <Event seq="', tostring(event.seq), '" type="',
+                model_view_escape(event.type), '" at="', model_view_escape(event.at),
+                '"', turn, '>\n',
             }))
             if not added then return nil, add_error end
+            local names = {}
+            for name in pairs(event.fields) do names[#names + 1] = name end
+            table.sort(names)
+            for _, name in ipairs(names) do
+                local value = event.fields[name]
+                local metadata = event.field_metadata and event.field_metadata[name]
+                if type(name) ~= "string" or type(value) ~= "string" then
+                    return nil, failure(
+                        "InvalidModelView",
+                        "Context field cannot enter the model view"
+                    )
+                end
+                local visible
+                if metadata and metadata.representation == "base64" then
+                    visible = table.concat({
+                        "[binary omitted; rawBytes=", tostring(metadata.raw_bytes),
+                        "; sha256=", tostring(metadata.digest), "]",
+                    })
+                elseif text.xml_carrier_kind(value) == "text" then
+                    visible = model_view_escape(value)
+                else
+                    visible = "[non-text field omitted]"
+                end
+                added, add_error = add(table.concat({
+                    '    <Field name="', model_view_escape(name), '" bytes="',
+                    tostring(#value), '">', visible, '</Field>\n',
+                }))
+                if not added then return nil, add_error end
+            end
+            added, add_error = add("  </Event>\n")
+            if not added then return nil, add_error end
         end
-        added, add_error = add("  </Event>\n")
-        if not added then return nil, add_error end
     end
     added, add_error = add("</DurableFacts>")
     if not added then return nil, add_error end
@@ -579,14 +593,15 @@ function M.new_context_publication(ports, options)
         return current, logical, prepared
     end
 
-    local function prompt_bundle(generation, settings, message)
+    local function prompt_bundle(generation, settings, message, purpose)
         local model = generation.models[settings.model]
         local permission = generation.permissions[settings.permission]
         if type(model) ~= "table" or type(permission) ~= "table" then
             return nil, failure("SnapshotUnavailable", "selected Model or Permission vanished")
         end
+        purpose = purpose or "main"
         return prompt:assemble({
-            purpose = "main",
+            purpose = purpose,
             config_generation = generation.id,
             layers = {
                 global = {
@@ -611,7 +626,7 @@ function M.new_context_publication(ports, options)
                 },
             },
             input = { user_message = message },
-            tool_mode = "registered",
+            tool_mode = purpose == "side" and "none" or "registered",
         })
     end
 
@@ -646,7 +661,8 @@ function M.new_context_publication(ports, options)
         local bundle, bundle_error = prompt_bundle(
             generation,
             settings,
-            specification.message
+            specification.message,
+            specification.kind
         )
         if not bundle then return nil, bundle_error end
         local model_request_limit = generation.agent.max_turn_model_requests
@@ -1035,6 +1051,7 @@ function M.new_context_publication(ports, options)
         end
         local allowed = {
             generation = true,
+            kind = true,
             text = true,
             source = true,
             expected_context_generation = true,
@@ -1045,6 +1062,9 @@ function M.new_context_publication(ports, options)
             end
         end
         if type(specification.generation) ~= "table"
+            or (specification.kind ~= nil
+                and specification.kind ~= "main"
+                and specification.kind ~= "side")
             or not valid_text(specification.text, admitted.maximum_model_view_bytes)
             or specification.text == ""
             or not valid_text(specification.source, 256)
@@ -1074,6 +1094,7 @@ function M.new_context_publication(ports, options)
             generation = generation,
             settings = settings,
             message = specification.text,
+            kind = specification.kind or "main",
         })
         if not snapshot then return nil, snapshot_error end
         return readonly({

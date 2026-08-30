@@ -1795,6 +1795,7 @@ local function utc_epoch(value)
 end
 
 local ACTIVITY_OPTION_FIELDS = {
+    identity_namespace = true,
     maximum_poll_events = true,
     maximum_queued_events = true,
     maximum_header_bytes = true,
@@ -1818,6 +1819,7 @@ local RETRY_MANIFEST_FIELDS = {
 
 local function validate_activity_options(options)
     if not exact_activity_fields(options, ACTIVITY_OPTION_FIELDS)
+        or not valid_token(options.identity_namespace, 128)
         or not valid_integer(options.maximum_poll_events, 1)
         or not valid_integer(options.maximum_queued_events, 1)
         or options.maximum_queued_events < options.maximum_poll_events
@@ -2173,6 +2175,262 @@ function M.new_request_builder(ports, options)
         tools = admitted.options.tool_registry_snapshot,
     }, "model request builder snapshots")
     return readonly(service, "model request builder")
+end
+
+local SIDE_REQUEST_BUILDER_OPTION_FIELDS = {
+    model_name = true,
+    permission_name = true,
+    model_snapshot = true,
+    permission_snapshot = true,
+    prompt_snapshot = true,
+    tool_registry_snapshot = true,
+    initial_message = true,
+    context_prompt = true,
+    default_connect_timeout_ms = true,
+    maximum_request_time_ms = true,
+    default_retry_base_delay_ms = true,
+    maximum_output_tokens = true,
+}
+
+local function validate_side_request_builder(ports, options)
+    local port_fields = {
+        adapter = true,
+        prompt = true,
+        views = true,
+        generation = true,
+        tool_registry = true,
+        safety = true,
+    }
+    if not exact_activity_fields(ports, port_fields)
+        or type(ports.adapter) ~= "table"
+        or type(ports.adapter.normalize_request) ~= "function"
+        or type(ports.prompt) ~= "table"
+        or type(ports.prompt.assemble) ~= "function"
+        or type(ports.views) ~= "table"
+        or type(ports.views.resolve_view) ~= "function"
+        or type(ports.generation) ~= "table"
+        or type(ports.generation.reveal_secret) ~= "function"
+        or type(ports.generation.secret_descriptors) ~= "function"
+        or type(ports.generation.scan_registered_secrets) ~= "function"
+        or type(ports.tool_registry) ~= "table"
+        or type(ports.safety) ~= "table"
+        or type(ports.safety.digest) ~= "function"
+        or not exact_activity_fields(options, SIDE_REQUEST_BUILDER_OPTION_FIELDS)
+        or not valid_token(options.model_name, 128)
+        or not valid_token(options.permission_name, 128)
+        or not valid_token(options.model_snapshot, 256)
+        or not valid_token(options.permission_snapshot, 256)
+        or not valid_token(options.prompt_snapshot, 256)
+        or not valid_token(options.tool_registry_snapshot, 256)
+        or type(options.initial_message) ~= "string"
+        or options.initial_message == ""
+        or type(options.context_prompt) ~= "string"
+        or not valid_integer(options.default_connect_timeout_ms, 1)
+        or not valid_integer(options.maximum_request_time_ms, 1)
+        or not valid_integer(options.default_retry_base_delay_ms, 0)
+        or not valid_integer(options.maximum_output_tokens, 1)
+    then
+        return nil, failure(
+            "InvalidSideRequestBuilder",
+            "side request builder is incomplete"
+        )
+    end
+    local generation = ports.generation
+    local model_ref = generation.models and generation.models[options.model_name]
+    local permission_ref = generation.permissions
+        and generation.permissions[options.permission_name]
+    if not valid_token(generation.id, 256)
+        or type(generation.general) ~= "table"
+        or type(generation.network) ~= "table"
+        or type(model_ref) ~= "table"
+        or type(permission_ref) ~= "table"
+        or model_ref.enabled ~= true
+        or ports.tool_registry.digest ~= options.tool_registry_snapshot
+    then
+        return nil, failure(
+            "InvalidSideRequestBuilder",
+            "configuration, Model, Permission, or tool snapshot is unavailable"
+        )
+    end
+    return {
+        ports = ports,
+        options = options,
+        generation = generation,
+        model = model_ref,
+        permission = permission_ref,
+    }
+end
+
+---Builds one frozen, no-tool side request from its independently reloaded
+-- Config generation. The full Tool registry digest is admitted only as a
+-- snapshot binding; the provider receives a distinct canonical empty registry.
+function M.new_side_request_builder(ports, options)
+    local admitted, admission_error = validate_side_request_builder(ports, options)
+    if not admitted then return nil, admission_error end
+    local generation = admitted.generation
+    local model_ref = admitted.model
+    local permission_ref = admitted.permission
+    local empty_digest, empty_error = admitted.ports.safety.digest(
+        "yaca-empty-tool-registry-v1\0[]"
+    )
+    if not empty_digest then return nil, empty_error end
+    local empty_registry = assert(freeze({
+        version = "yaca-empty-tool-registry-v1",
+        digest = empty_digest,
+        tools = {},
+    }, "empty side tool registry"))
+    local service = {}
+
+    local function proxy_snapshot()
+        local configured = generation.network
+        if configured.follow_proxy ~= true then return { mode = "off" } end
+        if configured.proxy_url_configured == true then
+            return {
+                mode = "explicit",
+                secret_id = "Network.ProxyUrl",
+                destination = "network-proxy",
+                no_proxy = configured.no_proxy or "",
+            }
+        end
+        if type(configured.proxy_url) == "string" and configured.proxy_url ~= "" then
+            return {
+                mode = "explicit",
+                url = configured.proxy_url,
+                no_proxy = configured.no_proxy or "",
+            }
+        end
+        return { mode = "off" }
+    end
+
+    function service.prepare(spec)
+        local start, start_error = validate_activity_start(spec)
+        if not start then return nil, start_error end
+        if start.purpose ~= "side" or start.continuation ~= false then
+            return nil, failure(
+                "InvalidModelPurpose",
+                "side request builder received another purpose or a continuation"
+            )
+        end
+        local called, view, view_error = pcall(
+            admitted.ports.views.resolve_view,
+            start.view_manifest_ref
+        )
+        if not called or type(view) ~= "table"
+            or view.digest ~= start.view_manifest_ref
+            or not valid_integer(view.first_sequence, 0)
+            or not valid_integer(view.last_sequence, 0)
+            or view.first_sequence > view.last_sequence
+            or type(view.body) ~= "string"
+        then
+            return nil, called and view_error
+                or failure("ModelViewUnavailable", "durable side view could not be resolved")
+        end
+        local bundle, bundle_error = admitted.ports.prompt:assemble({
+            purpose = "side",
+            config_generation = generation.id,
+            layers = {
+                global = {
+                    source = "General.SystemPrompt",
+                    version = generation.id,
+                    text = generation.general.system_prompt,
+                },
+                model = {
+                    source = "Model." .. admitted.options.model_name .. ".SystemPrompt",
+                    version = generation.id,
+                    text = model_ref.system_prompt,
+                },
+                permission = {
+                    source = "Permission." .. admitted.options.permission_name
+                        .. ".SystemPrompt",
+                    version = generation.id,
+                    text = permission_ref.system_prompt,
+                },
+                context = {
+                    source = "ContextPrompt",
+                    version = generation.id,
+                    text = admitted.options.context_prompt,
+                },
+            },
+            input = { user_message = admitted.options.initial_message },
+            tool_mode = "none",
+        })
+        if not bundle then return nil, bundle_error end
+        if bundle.digest ~= admitted.options.prompt_snapshot then
+            return nil, failure(
+                "PromptSnapshotMismatch",
+                "side Model request does not reproduce the durable Prompt snapshot"
+            )
+        end
+        local public_model_ref = {
+            name = admitted.options.model_name,
+            protocol = model_ref.protocol,
+            endpoint = model_ref.endpoint,
+            remote_model = model_ref.remote_model,
+            capabilities_digest = admitted.options.model_snapshot,
+            adapter_options = model_ref.adapter_options or {},
+        }
+        if model_ref.key_configured == true then
+            public_model_ref.auth_secret_id = "Model."
+                .. admitted.options.model_name .. ".Key"
+        end
+        local configured_tokens = model_ref.max_output_tokens
+            or admitted.options.maximum_output_tokens
+        local retry_count = model_ref.retry_count or 0
+        local retry_base_delay = model_ref.retry_base_delay_ms
+            or admitted.options.default_retry_base_delay_ms
+        local normalized, normalize_error = admitted.ports.adapter:normalize_request({
+            request_id = start.request_id,
+            purpose = "side",
+            model_ref = public_model_ref,
+            config_generation = generation.id,
+            prompt_bundle = bundle,
+            model_view_manifest = {
+                digest = view.digest,
+                first_sequence = view.first_sequence,
+                last_sequence = view.last_sequence,
+                body = view.body,
+            },
+            tool_registry = empty_registry,
+            controls_schema = bundle.controls_schema,
+            streaming = model_ref.streaming,
+            limits = {
+                max_output_tokens = math.min(
+                    configured_tokens,
+                    admitted.options.maximum_output_tokens
+                ),
+            },
+            retry_policy = {
+                count = retry_count,
+                base_delay_ms = retry_base_delay,
+            },
+        })
+        if not normalized then return nil, normalize_error end
+        local total_timeout = math.min(
+            model_ref.request_timeout_ms or admitted.options.maximum_request_time_ms,
+            admitted.options.maximum_request_time_ms
+        )
+        local connect_timeout = generation.network.connect_timeout_ms
+            or admitted.options.default_connect_timeout_ms
+        if connect_timeout > total_timeout then connect_timeout = total_timeout end
+        return readonly({
+            request = normalized,
+            secret_source = generation,
+            proxy = freeze(proxy_snapshot(), "side model proxy snapshot"),
+            ca_bundle_path = generation.network.ca_bundle_path,
+            connect_timeout_ms = connect_timeout,
+            total_timeout_ms = total_timeout,
+        }, "prepared side model request")
+    end
+
+    service.snapshots = freeze({
+        generation = generation.id,
+        model = admitted.options.model_snapshot,
+        permission = admitted.options.permission_snapshot,
+        prompt = admitted.options.prompt_snapshot,
+        tools = admitted.options.tool_registry_snapshot,
+        transmitted_tools = empty_registry.digest,
+    }, "side model request builder snapshots")
+    return readonly(service, "side model request builder")
 end
 
 local REVIEW_BUILDER_OPTION_FIELDS = {
@@ -2823,7 +3081,7 @@ function M.new_activity(ports, options)
 
     local function start_attempt(activity, observed_now)
         activity.attempt_serial = activity.attempt_serial + 1
-        local attempt_id = "model" .. tostring(activity.serial)
+        local attempt_id = "model_" .. activity.identity
             .. "_attempt" .. tostring(activity.attempt_serial)
         local admission, admission_error = activity.retry:start_attempt(attempt_id, observed_now)
         if not admission then return nil, admission_error end
@@ -3124,6 +3382,19 @@ function M.new_activity(ports, options)
         end
         local observed_now, clock_error = now()
         if not observed_now then return nil, clock_error end
+        local activity_identity, identity_error = admitted_ports.safety.digest(
+            "yaca-model-activity-v1\0" .. admitted.identity_namespace
+                .. "\0" .. start.request_id
+        )
+        if type(activity_identity) ~= "string"
+            or #activity_identity ~= 64
+            or not activity_identity:match("^[0-9a-f]+$")
+        then
+            return nil, identity_error or failure(
+                "InvalidModelActivityIdentity",
+                "Model activity identity digest is invalid"
+            )
+        end
         local function deadline(duration)
             if duration > math.maxinteger - observed_now then return nil end
             return observed_now + duration
@@ -3153,6 +3424,7 @@ function M.new_activity(ports, options)
         }, "model activity handle")
         active = {
             serial = activity_serial,
+            identity = activity_identity,
             handle = handle,
             spec = start,
             prepared = prepared,

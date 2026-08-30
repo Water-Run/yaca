@@ -3777,6 +3777,7 @@ local function validate_agent_driver(ports, options)
         model = true,
         tools = true,
         reviews = true,
+        side = true,
         clock = true,
     })
         or type(ports.loop) ~= "table"
@@ -3787,6 +3788,10 @@ local function validate_agent_driver(ports, options)
         or type(ports.loop.accept_tool_result) ~= "function"
         or type(ports.loop.resolve_action_review) ~= "function"
         or type(ports.loop.resolve_termination_review) ~= "function"
+        or (ports.side ~= false and (
+            type(ports.loop.accept_side_event) ~= "function"
+            or type(ports.loop.accept_side_response) ~= "function"
+        ))
         or type(ports.model) ~= "table"
         or type(ports.model.poll) ~= "function"
         or type(ports.tools) ~= "table"
@@ -3794,6 +3799,10 @@ local function validate_agent_driver(ports, options)
         or (ports.reviews ~= false and (
             type(ports.reviews) ~= "table"
             or type(ports.reviews.poll) ~= "function"
+        ))
+        or (ports.side ~= false and (
+            type(ports.side) ~= "table"
+            or type(ports.side.poll) ~= "function"
         ))
         or type(ports.clock) ~= "table"
         or type(ports.clock.now) ~= "function"
@@ -3803,12 +3812,11 @@ local function validate_agent_driver(ports, options)
         or not integer_at_least(options.tool_poll_events, 1)
         or not integer_at_least(options.review_poll_events, 1)
         or not integer_at_least(options.maximum_output_events, 1)
-        or options.maximum_output_events
-            < math.max(
-                options.model_poll_events,
-                options.tool_poll_events,
-                options.review_poll_events
-            ) + 1
+        or options.maximum_output_events < math.max(
+            options.model_poll_events,
+            options.tool_poll_events + 1,
+            options.review_poll_events
+        ) + (ports.side == false and 0 or options.model_poll_events)
     then
         return nil, failure(
             "InvalidAgentDriver",
@@ -3837,7 +3845,8 @@ local function driver_call(target, method, ...)
     return result
 end
 
----Drives canonical Model, Tool, and review activities into one AgentLoop owner.
+---Drives canonical main Model, side Model, Tool, and review activities into one
+-- AgentLoop owner.
 -- The driver never interprets Model text or operation effects; it only maps
 -- already-normalized activity facts to the corresponding typed Runtime method.
 function M.new_agent_activity_driver(ports, options)
@@ -3920,6 +3929,64 @@ function M.new_agent_activity_driver(ports, options)
                 return nil, failure(
                     "ModelActivityContract",
                     "Model activity returned an unknown event"
+                )
+            end
+        end
+        return #batch > 0
+    end
+
+    local function side_step(output, observed)
+        local batch, poll_error = admitted.ports.side.poll(
+            admitted.options.model_poll_events
+        )
+        if dense_count(batch) == nil then
+            return nil, poll_error or failure(
+                "SideActivityContract",
+                "side Model activity returned an invalid batch"
+            )
+        end
+        for _, event in ipairs(batch) do
+            if type(event) ~= "table" or type(event.kind) ~= "string" then
+                return nil, failure(
+                    "SideActivityContract",
+                    "side Model activity event is invalid"
+                )
+            elseif event.kind == "canonical-event" then
+                local reduced, reduce_error = driver_call(
+                    admitted.ports.loop,
+                    "accept_side_event",
+                    observed.active_side_id,
+                    event.request_id
+                )
+                if not reduced then return nil, reduce_error end
+            elseif event.kind == "adapter-event" then
+                local appended, append_error = append(output, {
+                    kind = "side-model-event",
+                    side_id = observed.active_side_id,
+                    request_id = event.request_id,
+                    event = event.event,
+                })
+                if not appended then return nil, append_error end
+            elseif event.kind == "response" then
+                local reduced, reduce_error = driver_call(
+                    admitted.ports.loop,
+                    "accept_side_response",
+                    observed.active_side_id,
+                    event.wrapper
+                )
+                if not reduced then return nil, reduce_error end
+                local appended, append_error = append(output, {
+                    kind = "runtime-transition",
+                    cause = "side-response",
+                    side_id = observed.active_side_id,
+                    request_id = event.request_id,
+                    result = reduced,
+                })
+                if not appended then return nil, append_error end
+            else
+                return nil, failure(
+                    "SideActivityContract",
+                    "side Model activity returned an unknown event"
                 )
             end
         end
@@ -4044,6 +4111,13 @@ function M.new_agent_activity_driver(ports, options)
         end
         if lane_progress == nil then return nil, lane_error end
         progressed = lane_progress
+        if admitted.ports.side ~= false
+            and (before.side_state == "active" or before.side_state == "cancelling")
+        then
+            local side_progress, side_error = side_step(output, before)
+            if side_progress == nil then return nil, side_error end
+            progressed = progressed or side_progress
+        end
         steps = steps + 1
         local after = admitted.ports.loop:status()
         return assert(freeze({

@@ -159,17 +159,24 @@ local function fixture(settings)
             }
         end,
         capture_turn = function(specification)
-            A.equal(specification.text, "second turn")
+            A.truthy(specification.kind == "main" or specification.kind == "side")
+            A.equal(
+                specification.text,
+                specification.kind == "side" and "inspect durable facts" or "second turn"
+            )
             A.equal(specification.source, "terminal")
             A.equal(specification.expected_context_generation, 2)
             log[#log + 1] = "capture-turn"
+            local prompt_snapshot = specification.kind == "side"
+                and "side-prompt-snapshot-2"
+                or "prompt-snapshot-2"
             return {
                 text = specification.text,
                 source = specification.source,
                 config_generation = "config-snapshot-2",
                 model_snapshot = "model-snapshot-2",
                 permission_snapshot = "permission-snapshot-2",
-                prompt_snapshot = "prompt-snapshot-2",
+                prompt_snapshot = prompt_snapshot,
                 tool_registry_snapshot = "registry-1",
                 view_manifest_ref = "view-1",
                 double_check = true,
@@ -270,6 +277,17 @@ local function fixture(settings)
             log[#log + 1] = "model-builder"
             return {}
         end,
+        new_side_request_builder = function(ports, options)
+            A.equal(ports.generation.id, "config-generation-2")
+            A.equal(options.model_name, "Primary")
+            A.equal(options.permission_name, "Std")
+            A.equal(options.prompt_snapshot, "side-prompt-snapshot-2")
+            A.equal(options.tool_registry_snapshot, "registry-1")
+            A.equal(options.maximum_request_time_ms, 120000)
+            A.equal(options.maximum_output_tokens, 1024)
+            log[#log + 1] = "side-model-builder"
+            return {}
+        end,
         new_review_request_builder = function(_, options)
             A.equal(options.main_model_name, "Primary")
             A.equal(
@@ -280,7 +298,8 @@ local function fixture(settings)
             log[#log + 1] = "review-builder"
             return {}
         end,
-        new_activity = function()
+        new_activity = function(_, options)
+            A.equal(options.identity_namespace, "context-0123456789ABCDEF")
             local serial = #model_activities + 1
             local activity = {
                 start = function()
@@ -313,7 +332,8 @@ local function fixture(settings)
             A.truthy(ports.tools ~= tool_port)
             A.truthy(ports.reviews ~= review_port)
             A.equal(type(ports.snapshots.capture), "function")
-            A.equal(ports.side, false)
+            A.equal(type(ports.side.start), "function")
+            A.equal(type(ports.side.poll), "function")
             A.equal(options.hard_caps.model_requests, 64)
             A.equal(options.hard_caps.tool_calls, 256)
             A.equal(options.lanes.queue_maximum, 9)
@@ -326,6 +346,7 @@ local function fixture(settings)
             A.equal(ports.model, runtime_ports.model)
             A.equal(ports.tools, runtime_ports.tools)
             A.equal(ports.reviews, runtime_ports.reviews)
+            A.equal(ports.side, runtime_ports.side)
             A.equal(options.maximum_output_events, 512)
             log[#log + 1] = "driver"
             return { step = function() return {} end }
@@ -364,6 +385,7 @@ local function fixture(settings)
             model = "Primary",
             double_check = true,
             context_prompt = "workspace context",
+            context_hash = "0123456789ABCDEF",
         }
     end
     function draft.close()
@@ -413,6 +435,8 @@ local function fixture(settings)
         },
         model_activity_options = {
             maximum_poll_events = 128,
+            maximum_turn_time_ms = 3600000,
+            maximum_canonical_body_bytes = 65536,
         },
     }
     local chat = { kind = "run-chat", outcome = "ready", draft = draft }
@@ -428,6 +452,19 @@ local function fixture(settings)
         end,
         start_current_model = function()
             return runtime_ports.model.start({ request_id = "turn-2:request:1" })
+        end,
+        start_side_model = function()
+            return runtime_ports.side.start({
+                side_id = "side-1",
+                turn_id = "side-1",
+                request_id = "side-1:request:1",
+                purpose = "side",
+                view_manifest_ref = "view-1",
+                no_tools = true,
+                active_time_cap_ms = 120000,
+                response_byte_cap = 65536,
+                budget_snapshot_id = "tp022-modern-candidate-v1",
+            })
         end,
         current_generation = function() return active_generation end,
     }
@@ -450,6 +487,7 @@ return {
                 A.equal(agent.loop:status().state, "RequestingModel")
                 A.truthy(agent.capabilities.published_first_turn)
                 A.truthy(agent.capabilities.later_turn_snapshots)
+                A.truthy(agent.capabilities.side)
                 A.falsy(f.closed())
                 A.deep_equal(f.log, {
                     "publish-first",
@@ -468,6 +506,41 @@ return {
                     "driver",
                     "agent-session",
                 })
+            end,
+        },
+        {
+            name = "side snapshot reloads independently and exposes no Tool activity",
+            run = function()
+                local f = fixture()
+                local agent = assert(f.main.start_published_agent(
+                    f.composed,
+                    f.chat,
+                    "implement the project",
+                    "terminal"
+                ))
+                local snapshot = assert(f.capture({
+                    kind = "side",
+                    text = "inspect durable facts",
+                    source = "terminal",
+                    context_generation = 2,
+                    active_turn_id = "turn-1",
+                    cause = { kind = "side" },
+                }))
+                A.equal(snapshot.prompt_snapshot, "side-prompt-snapshot-2")
+                A.equal(agent.current_generation().id, "config-generation-1")
+                A.equal(agent.current_side_generation().id, "config-generation-2")
+                A.truthy(f.start_side_model())
+                A.equal(f.log[#f.log], "effect:model-activity-3")
+
+                local tool_builds = 0
+                local side_builder_index, side_activity_index
+                for index, value in ipairs(f.log) do
+                    if value == "tools" then tool_builds = tool_builds + 1 end
+                    if value == "side-model-builder" then side_builder_index = index end
+                    if value == "model-activity-3" then side_activity_index = index end
+                end
+                A.equal(tool_builds, 1)
+                A.truthy(side_builder_index < side_activity_index)
             end,
         },
         {
