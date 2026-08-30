@@ -141,6 +141,48 @@ local function canonical_event(item, maximum_identifier_bytes, maximum_input_byt
     return encoded
 end
 
+local function encode_source(
+    document,
+    first_sequence,
+    last_sequence,
+    maximum_identifier_bytes,
+    maximum_bytes
+)
+    if type(document) ~= "table"
+        or dense_count(document.facts) == nil
+        or document.event_count ~= #document.facts
+        or not integer_at_least(first_sequence, 1)
+        or not integer_at_least(last_sequence, first_sequence)
+        or last_sequence > document.event_count
+        or not integer_at_least(maximum_identifier_bytes, 16)
+        or not integer_at_least(maximum_bytes, 1)
+    then
+        return nil, failure(
+            "InvalidCompactionSource",
+            "compaction source range or byte cap is invalid"
+        )
+    end
+    local parts = {}
+    local total = 0
+    for sequence = first_sequence, last_sequence do
+        local encoded, encode_error = canonical_event(
+            document.facts[sequence],
+            maximum_identifier_bytes,
+            maximum_bytes
+        )
+        if not encoded then return nil, encode_error end
+        total = total + #encoded
+        if total > maximum_bytes then
+            return nil, failure(
+                "CompactionInputLimit",
+                "canonical compaction source exceeds its byte cap"
+            )
+        end
+        parts[#parts + 1] = encoded
+    end
+    return table.concat(parts)
+end
+
 local function encode_summary(summary)
     local pieces = { "yaca-structured-summary-v1" }
     pieces[#pieces + 1] = tagged("schema", summary.schema_version)
@@ -256,6 +298,119 @@ local function canonical_manifest(manifest)
         tagged("corrections", table.concat(manifest.correction_ids, ",")),
     }
     return table.concat(pieces, "\n") .. "\n"
+end
+
+local MODEL_VIEW_MANIFEST_FIELDS = {
+    schema_version = true,
+    context_generation = true,
+    context_digest = true,
+    model_id = true,
+    model_snapshot_digest = true,
+    window_tokens = true,
+    prompt_bundle_digest = true,
+    summary_id = true,
+    summary_source_range = true,
+    included_event_ranges = true,
+    excluded_prefix_reason = true,
+    builder_algorithm = true,
+    estimated_tokens = true,
+    correction_ids = true,
+}
+
+local MODEL_VIEW_MANIFEST_ALLOWED_FIELDS = {}
+for name in pairs(MODEL_VIEW_MANIFEST_FIELDS) do
+    MODEL_VIEW_MANIFEST_ALLOWED_FIELDS[name] = true
+end
+MODEL_VIEW_MANIFEST_ALLOWED_FIELDS.digest = true
+MODEL_VIEW_MANIFEST_ALLOWED_FIELDS.canonical_bytes = true
+
+local function encode_manifest(manifest, maximum_identifier_bytes, maximum_bytes)
+    if not exact_fields(manifest, MODEL_VIEW_MANIFEST_ALLOWED_FIELDS)
+        or not integer_at_least(maximum_identifier_bytes, 16)
+        or not integer_at_least(maximum_bytes, 1)
+    then
+        return nil, failure(
+            "InvalidCompactionManifest",
+            "compacted ModelView manifest is ambiguous"
+        )
+    end
+    for name in pairs(MODEL_VIEW_MANIFEST_FIELDS) do
+        if manifest[name] == nil then
+            return nil, failure(
+                "InvalidCompactionManifest",
+                "compacted ModelView manifest omits a field",
+                name
+            )
+        end
+    end
+    local source_first, source_last
+    if type(manifest.summary_source_range) == "string" then
+        source_first, source_last = manifest.summary_source_range:match(
+            "^([1-9][0-9]*)%-([1-9][0-9]*)$"
+        )
+    end
+    source_first, source_last = tonumber(source_first), tonumber(source_last)
+    if not integer_at_least(manifest.schema_version, 1)
+        or not integer_at_least(manifest.context_generation, 1)
+        or not valid_text(manifest.context_digest, 512, false)
+        or not valid_id(manifest.model_id, maximum_identifier_bytes)
+        or not valid_text(manifest.model_snapshot_digest, 512, false)
+        or not integer_at_least(manifest.window_tokens, 1)
+        or not valid_text(manifest.prompt_bundle_digest, 512, false)
+        or not valid_id(manifest.summary_id, maximum_identifier_bytes)
+        or not integer_at_least(source_first, 1)
+        or not integer_at_least(source_last, source_first)
+        or manifest.summary_source_range
+            ~= tostring(source_first) .. "-" .. tostring(source_last)
+        or dense_count(manifest.included_event_ranges) == nil
+        or manifest.excluded_prefix_reason ~= "summarized"
+        or not valid_id(manifest.builder_algorithm, maximum_identifier_bytes)
+        or not integer_at_least(manifest.estimated_tokens, 0)
+        or dense_count(manifest.correction_ids) == nil
+        or (manifest.digest ~= nil
+            and not valid_text(manifest.digest, 512, false))
+        or (manifest.canonical_bytes ~= nil
+            and not valid_text(manifest.canonical_bytes, maximum_bytes, false))
+    then
+        return nil, failure(
+            "InvalidCompactionManifest",
+            "compacted ModelView manifest fields are invalid"
+        )
+    end
+    local previous_last = 0
+    for _, range in ipairs(manifest.included_event_ranges) do
+        if not exact_fields(range, { first = true, last = true })
+            or not integer_at_least(range.first, 1)
+            or not integer_at_least(range.last, range.first)
+            or range.first <= previous_last
+        then
+            return nil, failure(
+                "InvalidCompactionManifest",
+                "compacted ModelView included ranges are invalid"
+            )
+        end
+        previous_last = range.last
+    end
+    local correction_ids = {}
+    for _, correction_id in ipairs(manifest.correction_ids) do
+        if not valid_id(correction_id, maximum_identifier_bytes)
+            or correction_ids[correction_id]
+        then
+            return nil, failure(
+                "InvalidCompactionManifest",
+                "compacted ModelView correction identities are invalid"
+            )
+        end
+        correction_ids[correction_id] = true
+    end
+    local bytes = canonical_manifest(manifest)
+    if #bytes > maximum_bytes then
+        return nil, failure(
+            "CompactionManifestLimit",
+            "compacted ModelView manifest exceeds its byte cap"
+        )
+    end
+    return bytes
 end
 
 local MANIFEST_FIELDS = {
@@ -982,6 +1137,14 @@ function M.new(ports, options)
             detail = tostring(detail or ""),
             response_digest = response_facts and response_facts.canonical_digest or false,
             response_body = response_facts and response_facts.canonical_body or false,
+            terminal = active.attempt >= limits.manifest.maximum_attempts,
+            source_first_seq = active.plan.source_first_seq,
+            source_last_seq = active.plan.source_last_seq,
+            source_digest = active.plan.source_digest,
+            canonical_facts_before = active.plan.event_count,
+            config_snapshot = active.plan.config_snapshot,
+            model_snapshot_digest = active.plan.model_snapshot.digest,
+            prompt_bundle_digest = active.plan.prompt_bundle_digest,
             expected_context_generation = active.context_generation,
             expected_manifest_digest = active.plan.expected_manifest_digest,
             old_view_retained = true,
@@ -1248,6 +1411,7 @@ function M.new(ports, options)
             source_first_seq = active.plan.source_first_seq,
             source_last_seq = active.plan.source_last_seq,
             source_digest = active.plan.source_digest,
+            config_snapshot = active.plan.config_snapshot,
             summary = wrapper.canonical_body,
             summary_digest = wrapper.canonical_digest,
             summary_schema = limits.manifest.summary_schema,
@@ -1288,6 +1452,13 @@ function M.new(ports, options)
             request_id = active.request_id,
             reason = active.cancel_reason,
             outcome = outcome,
+            source_first_seq = active.plan.source_first_seq,
+            source_last_seq = active.plan.source_last_seq,
+            source_digest = active.plan.source_digest,
+            canonical_facts_before = active.plan.event_count,
+            config_snapshot = active.plan.config_snapshot,
+            model_snapshot_digest = active.plan.model_snapshot.digest,
+            prompt_bundle_digest = active.plan.prompt_bundle_digest,
             expected_context_generation = active.context_generation,
             expected_manifest_digest = active.plan.expected_manifest_digest,
             old_view_retained = true,
@@ -1323,6 +1494,10 @@ function M.new(ports, options)
             compaction_id = active.id,
             request_id = active.request_id,
             reason = reason,
+            source_first_seq = active.plan.source_first_seq,
+            source_last_seq = active.plan.source_last_seq,
+            source_digest = active.plan.source_digest,
+            canonical_facts_before = active.plan.event_count,
             expected_context_generation = active.context_generation,
             expected_manifest_digest = active.plan.expected_manifest_digest,
             old_view_retained = true,
@@ -1543,5 +1718,8 @@ function M.new(ports, options)
 end
 
 M.encode_summary = encode_summary
+M.decode_summary = decode_summary
+M.encode_source = encode_source
+M.encode_manifest = encode_manifest
 
 return M

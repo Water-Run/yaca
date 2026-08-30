@@ -1,8 +1,8 @@
 # 12 上下文压缩
 
-更新日期：2026-08-10
+更新日期：2026-08-30
 
-状态：**计划已确认（C28）** — model-view/summary/atomic-group/admission 已冻结；token 估算与长会话阈值由实现 benchmark 校准
+状态：**核心实现完成，生产入口接线中** — model-view/summary/atomic-group/admission、no-tool Model port、Context journal、原子 publication 与 accepted-view 恢复已实现；公开 `.compact`、自动触发、pending lifecycle 恢复和 target calibration 尚待闭合
 
 > D-063：XML **存储** hard limit 触顶时的解脱主路径是 **新开对话 + 接盘 Prompt**，不是依赖 compact 缩小事实 XML。compact 仍只服务 model view。
 
@@ -84,6 +84,14 @@ summary 同时保存 source event range/digest、生成 Model、完整 Prompt/vi
 4. 恢复时只有来源范围完整、digest 一致、schema/算法兼容的 summary 才可复用；否则从完整 XML 重建。
 5. 压缩 request、provider retry、主 turn 和进程预算分别计数并共同受硬上限约束。
 6. TUI 的预览截断不能回流成 summary 输入或 XML canonical 内容。
+
+### 2026-08-30 实现证据
+
+- Context journal 已覆盖 request、response、rejection、cancel request/result、accepted publication 与 correction；每条记录都绑定当前 Context generation、旧 manifest、source range/digest 和 compaction lifecycle。
+- canonical source、structured summary 和 manifest 由 publication 端独立重建并校验，不能信任上游自报的 `canonical_bytes`/digest。
+- accepted terminal event、`CompactionRecord` 与 `model_view_published` 必须在同一 replacement generation 内匹配；错误、取消、伪造 manifest 或发布故障均保留原 XML 与 sole active manifest。
+- cache miss/重启读取 accepted bracket 时会复核 source/summary digest、相邻 publication 和 active manifest，再重建唯一 summary prefix；后续事实作为 tail 追加，内部 compaction bracket 不进入 main Model view。
+- 受 `.tools/run_with_resource_guard.sh` 保护的完整 Lua suite 为 `391/391`。这只证明平台无关核心与 fake/native adapter 边界，不能替代 XP/Win7/CentOS 7 target 证据，也不能证明尚未接线的公开 `.compact`。
 
 ## 仍需技术证明
 
@@ -174,4 +182,9 @@ summary 同时保存 source event range/digest、生成 Model、完整 Prompt/vi
 ### 完成度（W3-D compact）
 
 - [x] Manifest / Summary / atomic group / admission 表  
-- [ ] token 估算与阈值数值（TP）  
+- [x] no-tool Model compaction builder/port 与完整性拒绝
+- [x] Context compaction journal、accepted summary + ModelView 原子 publication
+- [x] accepted view 的 XML 校验、cache-miss 重建与后续 tail 保留
+- [ ] ApplicationCoordinator `.compact`、STATUS/cancel 与 production transport composition
+- [ ] 自动阈值、pending lifecycle/circuit 跨进程恢复
+- [ ] token 估算与三目标阈值数值（TP/C32）

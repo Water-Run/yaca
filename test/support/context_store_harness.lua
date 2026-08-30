@@ -96,6 +96,7 @@ local function emit_candidate(callbacks, candidate, schema, xml, sha256)
         digest = manifest.digest,
         firstEventSeq = tostring(manifest.first_event_seq),
         lastEventSeq = tostring(manifest.last_event_seq),
+        compactionId = manifest.compaction_id,
     })
     for _, record in ipairs(candidate.model_view.compaction_records) do
         emit_leaf(callbacks, "CompactionRecord", record.summary, {

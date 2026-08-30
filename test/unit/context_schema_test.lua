@@ -522,6 +522,75 @@ return {
             end,
         },
         {
+            name = "accepted compaction record and ModelView publish atomically",
+            run = function()
+                local service = new_service()
+                local original = assert(service.build(minimal()))
+                local summary = "structured durable summary"
+                local record = {
+                    id = "compaction-1",
+                    source_first_seq = 1,
+                    source_last_seq = 2,
+                    source_digest = "source-digest",
+                    status = "ok",
+                    summary = summary,
+                }
+                local mutation = {
+                    updated_at = "2026-08-29T00:00:02Z",
+                    events = {
+                        {
+                            seq = 3,
+                            type = "compaction",
+                            fields = {
+                                compactionId = "compaction-1",
+                                sourceFirstSeq = "1",
+                                sourceLastSeq = "2",
+                                sourceDigest = "source-digest",
+                                status = "ok",
+                                summary = summary,
+                                sourceEventCount = "2",
+                                summaryDigest = "summary-digest",
+                                manifestDigest = "compacted-manifest",
+                                builderAlgorithm = "structured-prefix-v1",
+                                modelSnapshot = "model-snapshot",
+                                promptSnapshot = "prompt-snapshot",
+                                viewContextGeneration = "1",
+                            },
+                        },
+                        {
+                            seq = 4,
+                            type = "model_view_published",
+                            fields = {
+                                manifestDigest = "compacted-manifest",
+                                firstEventSeq = "1",
+                                lastEventSeq = "4",
+                                replacesManifestDigest = "sha256:view-manifest",
+                                compactionId = "compaction-1",
+                                viewContextGeneration = "1",
+                            },
+                        },
+                    },
+                    compaction_record = record,
+                }
+                local compacted = assert(service.append_events(original, mutation))
+                A.equal(compacted.generation, 2)
+                A.equal(compacted.event_count, 4)
+                A.equal(compacted.model_view.active_manifest.digest, "compacted-manifest")
+                A.equal(compacted.model_view.active_manifest.compaction_id, "compaction-1")
+                A.equal(compacted.model_view.compaction_records[1].summary, summary)
+                local encoded = assert(service.encode(compacted))
+                A.contains(encoded, 'compactionId="compaction-1"')
+
+                local mismatched = copy(mutation)
+                mismatched.compaction_record.source_digest = "forged-source"
+                local rejected, mutation_error = service.append_events(original, mismatched)
+                A.falsy(rejected)
+                A.equal(mutation_error.code, "InvalidEventMutation")
+                A.equal(original.generation, 1)
+                A.equal(#original.model_view.compaction_records, 0)
+            end,
+        },
+        {
             name = "catalog Header reader stops pulling before the Context body",
             run = function()
                 local observations = { feeds = 0, closes = 0 }

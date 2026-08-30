@@ -1302,6 +1302,8 @@ function M.new_agent_loop(ports, options)
             last_sequence = true,
             changed = true,
             replaces_manifest_ref = true,
+            compaction_id = true,
+            view_context_generation = true,
             binding = true,
         })
             or not valid_runtime_text(
@@ -1315,6 +1317,17 @@ function M.new_agent_loop(ports, options)
             or (prepared.first_sequence == 0 and prepared.last_sequence ~= 0)
             or type(prepared.changed) ~= "boolean"
             or prepared.replaces_manifest_ref ~= turn.active_view_manifest_ref
+            or (prepared.compaction_id ~= nil
+                and prepared.compaction_id ~= false
+                and not valid_runtime_id(
+                    prepared.compaction_id,
+                    limits.maximum_identifier_bytes
+                ))
+            or (prepared.view_context_generation ~= nil
+                and not integer_at_least(prepared.view_context_generation, 1))
+            or (prepared.compaction_id ~= nil
+                and prepared.compaction_id ~= false
+                and prepared.view_context_generation == nil)
             or prepared.binding ~= observation
         then
             return durability_failure(
@@ -1335,14 +1348,19 @@ function M.new_agent_loop(ports, options)
         then
             return durability_failure("model-view-not-advanced")
         end
+        local fields = {
+            manifestDigest = prepared.digest,
+            firstEventSeq = tostring(prepared.first_sequence),
+            lastEventSeq = tostring(prepared.last_sequence),
+            replacesManifestDigest = prepared.replaces_manifest_ref,
+        }
+        if prepared.compaction_id ~= nil and prepared.compaction_id ~= false then
+            fields.compactionId = prepared.compaction_id
+            fields.viewContextGeneration = tostring(prepared.view_context_generation)
+        end
         local receipt, commit_error = commit_events({ {
             type = "model_view_published",
-            fields = {
-                manifestDigest = prepared.digest,
-                firstEventSeq = tostring(prepared.first_sequence),
-                lastEventSeq = tostring(prepared.last_sequence),
-                replacesManifestDigest = prepared.replaces_manifest_ref,
-            },
+            fields = fields,
         } })
         if not receipt then return nil, commit_error end
         turn.active_view_manifest_ref = prepared.digest

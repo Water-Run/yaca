@@ -2911,6 +2911,8 @@ function M.compose_runtime(runtime)
             platform_kind = runtime.identity.os == "windows" and "windows" or "posix",
             maximum_create_attempts = 16,
             maximum_model_view_bytes = 262144,
+            maximum_compaction_source_bytes = 16 * 1024 * 1024,
+            maximum_compaction_identifier_bytes = 256,
             default_model_request_limit = AGENT_RELEASE_OPTIONS.runtime.hard_caps.model_requests,
             default_tool_call_limit = AGENT_RELEASE_OPTIONS.runtime.hard_caps.tool_calls,
             maximum_queue_items = AGENT_RELEASE_OPTIONS.runtime.lanes.queue_maximum,

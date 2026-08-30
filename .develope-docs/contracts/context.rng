@@ -115,6 +115,7 @@
         <attribute name="digest"><text/></attribute>
         <attribute name="firstEventSeq"><data type="nonNegativeInteger"/></attribute>
         <attribute name="lastEventSeq"><data type="nonNegativeInteger"/></attribute>
+        <optional><attribute name="compactionId"><text/></attribute></optional>
         <empty/>
       </element>
       <zeroOrMore>

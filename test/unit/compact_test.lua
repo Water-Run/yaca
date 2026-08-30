@@ -441,6 +441,13 @@ return {
                 A.equal(instance.starts[1].no_tools, true)
                 A.equal(instance.starts[1].config_snapshot, "config-snapshot-1")
                 A.equal(instance.starts[1].model_snapshot.digest, "model-snapshot-1")
+                A.equal(assert(compact.encode_source(
+                    instance.document,
+                    instance.starts[1].source_first_seq,
+                    instance.starts[1].source_last_seq,
+                    128,
+                    1024 * 1024
+                )), instance.starts[1].source_bytes)
                 A.equal(instance.manifest(), "view-old")
 
                 local wrapper = response_for(instance)
@@ -453,6 +460,11 @@ return {
                 A.equal(instance.old_manifest_at_publish(), "view-old")
                 A.equal(instance.manifest(), completed.manifest_digest)
                 A.equal(#instance.publications, 1)
+                A.equal(assert(compact.encode_manifest(
+                    instance.publications[1].manifest,
+                    128,
+                    1024 * 1024
+                )), instance.publications[1].manifest.canonical_bytes)
                 A.equal(instance.publications[1].canonical_facts_removed, 0)
                 A.equal(instance.publications[1].atomic_groups_split, 0)
                 A.equal(instance.publications[1].old_view_retained_until_publish, true)

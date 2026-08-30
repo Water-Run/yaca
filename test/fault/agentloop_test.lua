@@ -419,6 +419,8 @@ return {
                         last_sequence = observation.expected_last_sequence,
                         changed = true,
                         replaces_manifest_ref = observation.current_manifest_ref,
+                        compaction_id = "compaction-1",
+                        view_context_generation = observation.expected_context_generation,
                         binding = observation,
                     }
                 end
@@ -433,6 +435,11 @@ return {
                 A.equal(f.events[5].type, "model_view_published")
                 A.equal(f.events[5].fields.manifestDigest, "view-manifest-2")
                 A.equal(f.events[5].fields.lastEventSeq, "6")
+                A.equal(f.events[5].fields.compactionId, "compaction-1")
+                A.equal(
+                    f.events[5].fields.viewContextGeneration,
+                    tostring(f.view_prepares[2].expected_context_generation)
+                )
                 A.equal(f.events[6].type, "model_request")
                 A.equal(f.events[6].fields.viewManifestRef, "view-manifest-2")
                 A.equal(f.model_starts[2].view_manifest_ref, "view-manifest-2")

@@ -5,6 +5,7 @@ Author: WaterRun
 Description: Owns the bounded chat draft and first durable Context publication.
 ]]
 
+local compact = require("compact")
 local text = require("text")
 
 local M = {}
@@ -230,19 +231,33 @@ local function model_view_escape(value)
         :gsub('"', "&quot;")
 end
 
-local function render_model_view(safety, facts, context_generation, maximum_bytes)
+local function render_model_view(
+    safety,
+    facts,
+    context_generation,
+    maximum_bytes,
+    projection
+)
     local count = dense_count(facts)
     if count == nil then
         return nil, failure("InvalidModelView", "Context Facts are not a dense array")
     end
-    local first_sequence = count == 0 and 0 or 1
+    local fact_limit = projection and projection.fact_limit or count
+    local last_sequence = projection and projection.waterline or count
+    if not valid_integer(fact_limit, 0)
+        or fact_limit > count
+        or not valid_integer(last_sequence, fact_limit)
+    then
+        return nil, failure("InvalidModelView", "model view waterline is invalid")
+    end
+    local first_sequence = last_sequence == 0 and 0 or 1
     local parts = {
         '<DurableFacts schemaVersion="1" contextGeneration="',
         tostring(context_generation),
         '" firstSequence="',
         tostring(first_sequence),
         '" lastSequence="',
-        tostring(count),
+        tostring(last_sequence),
         '">\n',
     }
     local size = 0
@@ -259,8 +274,51 @@ local function render_model_view(safety, facts, context_generation, maximum_byte
     parts = {}
     local added, add_error = add(header)
     if not added then return nil, add_error end
+    if projection then
+        if not valid_text(projection.compaction_id, 256)
+            or projection.compaction_id == ""
+            or not valid_integer(projection.source_first_seq, 1)
+            or not valid_integer(
+                projection.source_last_seq,
+                projection.source_first_seq
+            )
+            or not valid_integer(
+                projection.source_event_count,
+                projection.source_last_seq
+            )
+            or not valid_integer(
+                projection.internal_last_sequence,
+                projection.source_event_count
+            )
+            or projection.internal_last_sequence > last_sequence
+            or not valid_text(projection.source_digest, 512)
+            or projection.source_digest == ""
+            or not valid_text(projection.summary_digest, 512)
+            or projection.summary_digest == ""
+            or not valid_text(projection.summary, maximum_bytes)
+            or projection.summary == ""
+            or text.xml_carrier_kind(projection.summary) ~= "text"
+        then
+            return nil, failure(
+                "InvalidModelView",
+                "structured compaction projection is invalid"
+            )
+        end
+        added, add_error = add(table.concat({
+            '  <StructuredSummary compactionId="',
+            model_view_escape(projection.compaction_id),
+            '" sourceFirstSeq="', tostring(projection.source_first_seq),
+            '" sourceLastSeq="', tostring(projection.source_last_seq),
+            '" sourceDigest="', model_view_escape(projection.source_digest),
+            '" summaryDigest="', model_view_escape(projection.summary_digest),
+            '">', model_view_escape(projection.summary),
+            '</StructuredSummary>\n',
+        }))
+        if not added then return nil, add_error end
+    end
     local side_turns = {}
-    for index, event in ipairs(facts) do
+    for index = 1, fact_limit do
+        local event = facts[index]
         if type(event) ~= "table"
             or event.seq ~= index
             or type(event.type) ~= "string"
@@ -277,7 +335,11 @@ local function render_model_view(safety, facts, context_generation, maximum_byte
         -- Side turns remain complete durable audit facts, but their Model input
         -- and response are not main-turn authority. Only a later queue_item or
         -- steer event created by explicit side-use is visible to the main view.
-        if not side_turns[event.turn_id] then
+        local included = not projection
+            or (index > projection.source_last_seq
+                and (index <= projection.source_event_count
+                    or index > projection.internal_last_sequence))
+        if included and not side_turns[event.turn_id] then
             local turn = event.turn_id and ' turnId="'
                 .. model_view_escape(event.turn_id) .. '"' or ""
             added, add_error = add(table.concat({
@@ -329,7 +391,8 @@ local function render_model_view(safety, facts, context_generation, maximum_byte
             schema_version = 1,
             context_generation = context_generation,
             first_sequence = first_sequence,
-            last_sequence = count,
+            last_sequence = last_sequence,
+            compaction_id = projection and projection.compaction_id or false,
             body = body,
         }
     )
@@ -337,7 +400,9 @@ local function render_model_view(safety, facts, context_generation, maximum_byte
     return {
         digest = digest,
         first_sequence = first_sequence,
-        last_sequence = count,
+        last_sequence = last_sequence,
+        context_generation = context_generation,
+        compaction_id = projection and projection.compaction_id or false,
         body = body,
     }
 end
@@ -457,7 +522,7 @@ local function validate_publication_ports(ports)
         schema = { "build", "append_events" },
         store = { "create_writer", "publish", "close_writer" },
         path = { "to_logical", "validate_context_name", "context_hash" },
-        safety = { "binding_digest" },
+        safety = { "binding_digest", "digest" },
         prompt = { "assemble" },
         system = { "secure_random", "current_process_id", "utc_now" },
     }
@@ -498,6 +563,8 @@ local function validate_publication_options(options)
         platform_kind = true,
         maximum_create_attempts = true,
         maximum_model_view_bytes = true,
+        maximum_compaction_source_bytes = true,
+        maximum_compaction_identifier_bytes = true,
         default_model_request_limit = true,
         default_tool_call_limit = true,
         maximum_queue_items = true,
@@ -515,6 +582,8 @@ local function validate_publication_options(options)
         or not valid_integer(options.maximum_create_attempts, 1)
         or options.maximum_create_attempts > 256
         or not valid_integer(options.maximum_model_view_bytes, 1)
+        or not valid_integer(options.maximum_compaction_source_bytes, 1)
+        or not valid_integer(options.maximum_compaction_identifier_bytes, 16)
         or not valid_integer(options.default_model_request_limit, 1)
         or not valid_integer(options.default_tool_call_limit, 1)
         or not valid_integer(options.maximum_queue_items, 1)
@@ -550,20 +619,225 @@ function M.new_context_publication(ports, options)
     local service = {}
     local model_views = {}
     local operation_journal
+    local compaction_journal
+    local compaction_lifecycles = {}
     local operation_intent_receipts = {}
     local operation_result_receipts = {}
 
-    local function cache_model_view(facts, context_generation)
+    local function cache_model_view(
+        facts,
+        context_generation,
+        projection,
+        forced_digest
+    )
         local candidate, view_error = render_model_view(
             safety,
             facts,
             context_generation,
-            admitted.maximum_model_view_bytes
+            admitted.maximum_model_view_bytes,
+            projection
         )
         if not candidate then return nil, view_error end
+        if forced_digest ~= nil then
+            if not valid_text(forced_digest, 512) or forced_digest == "" then
+                return nil, failure(
+                    "InvalidModelView",
+                    "forced compaction manifest digest is invalid"
+                )
+            end
+            candidate.digest = forced_digest
+        end
         local frozen = readonly(candidate, "durable model view")
         model_views[candidate.digest] = frozen
         return frozen
+    end
+
+    local function verified_compaction_projection(document, values)
+        if type(document) ~= "table"
+            or type(values) ~= "table"
+            or not valid_text(values.compaction_id, 256)
+            or values.compaction_id == ""
+            or not valid_integer(values.source_first_seq, 1)
+            or values.source_first_seq ~= 1
+            or not valid_integer(
+                values.source_last_seq,
+                values.source_first_seq
+            )
+            or not valid_integer(
+                values.source_event_count,
+                values.source_last_seq
+            )
+            or values.source_event_count > document.event_count
+            or not valid_integer(
+                values.internal_last_sequence,
+                values.source_event_count
+            )
+            or not valid_integer(values.fact_limit, values.source_event_count)
+            or values.fact_limit > document.event_count
+            or not valid_integer(values.waterline, values.fact_limit)
+            or not valid_text(values.source_digest, 512)
+            or values.source_digest == ""
+            or not valid_text(values.summary_digest, 512)
+            or values.summary_digest == ""
+            or not valid_text(values.summary, admitted.maximum_model_view_bytes)
+            or values.summary == ""
+        then
+            return nil, failure(
+                "InvalidCompactionProjection",
+                "durable compaction projection is incomplete"
+            )
+        end
+        local called, source_bytes, source_error = pcall(
+            compact.encode_source,
+            document,
+            values.source_first_seq,
+            values.source_last_seq,
+            admitted.maximum_compaction_identifier_bytes,
+            admitted.maximum_compaction_source_bytes
+        )
+        if not called or not source_bytes then
+            return nil, called and source_error or failure(
+                "InvalidCompactionProjection",
+                "canonical compaction source could not be rebuilt"
+            )
+        end
+        local digest_called, source_digest, digest_error = pcall(
+            safety.digest,
+            source_bytes
+        )
+        if not digest_called or source_digest ~= values.source_digest then
+            return nil, failure(
+                "CompactionSourceMismatch",
+                digest_called and "durable compaction source digest disagrees"
+                    or "durable compaction source digest failed",
+                digest_called and (digest_error or source_digest)
+                    or "digest-exception"
+            )
+        end
+        digest_called, source_digest, digest_error = pcall(
+            safety.digest,
+            values.summary
+        )
+        if not digest_called or source_digest ~= values.summary_digest then
+            return nil, failure(
+                "CompactionSummaryMismatch",
+                digest_called and "durable compaction summary digest disagrees"
+                    or "durable compaction summary digest failed",
+                digest_called and (digest_error or source_digest)
+                    or "digest-exception"
+            )
+        end
+        return {
+            compaction_id = values.compaction_id,
+            source_first_seq = values.source_first_seq,
+            source_last_seq = values.source_last_seq,
+            source_event_count = values.source_event_count,
+            internal_last_sequence = values.internal_last_sequence,
+            source_digest = values.source_digest,
+            summary_digest = values.summary_digest,
+            summary = values.summary,
+            fact_limit = values.fact_limit,
+            waterline = values.waterline,
+        }
+    end
+
+    local function durable_compaction_projection(document, manifest)
+        local compaction_id = manifest.compaction_id
+        if not compaction_id then
+            return nil, failure(
+                "InvalidCompactionProjection",
+                "active manifest has no compaction identity"
+            )
+        end
+        local record
+        for _, candidate in ipairs(document.model_view.compaction_records) do
+            if candidate.id == compaction_id then record = candidate end
+        end
+        if not record or record.status ~= "ok" or type(record.summary) ~= "string" then
+            return nil, failure(
+                "CompactionRecordUnavailable",
+                "active compaction record is missing or not accepted"
+            )
+        end
+        local terminal
+        local initial_publication
+        local active_publication
+        for _, event in ipairs(document.facts) do
+            if event.type == "compaction"
+                and event.fields.compactionId == compaction_id
+            then
+                terminal = event
+            elseif event.type == "model_view_published"
+                and event.fields.compactionId == compaction_id
+            then
+                if event.fields.manifestDigest == manifest.digest then
+                    active_publication = event
+                end
+                if terminal and not initial_publication then
+                    initial_publication = event
+                end
+            end
+        end
+        local fields = terminal and terminal.fields or nil
+        local source_event_count = fields and tonumber(fields.sourceEventCount)
+        local view_generation = active_publication
+            and tonumber(active_publication.fields.viewContextGeneration)
+        local initial_view_generation = initial_publication
+            and tonumber(initial_publication.fields.viewContextGeneration)
+        if not fields
+            or fields.status ~= "ok"
+            or fields.summary ~= record.summary
+            or fields.manifestDigest == nil
+            or not initial_publication
+            or initial_publication.seq ~= terminal.seq + 1
+            or initial_publication.fields.firstEventSeq ~= "1"
+            or initial_publication.fields.lastEventSeq
+                ~= tostring(initial_publication.seq)
+            or initial_publication.fields.manifestDigest ~= fields.manifestDigest
+            or not valid_integer(source_event_count, record.source_last_seq)
+            or source_event_count >= terminal.seq
+            or not valid_integer(initial_view_generation, 1)
+            or tonumber(fields.viewContextGeneration) ~= initial_view_generation
+            or not active_publication
+            or not valid_integer(view_generation, 1)
+        then
+            return nil, failure(
+                "CompactionRecordUnavailable",
+                "accepted compaction bracket is incomplete"
+            )
+        end
+        local projection, projection_error = verified_compaction_projection(
+            document,
+            {
+                compaction_id = compaction_id,
+                source_first_seq = record.source_first_seq,
+                source_last_seq = record.source_last_seq,
+                source_event_count = source_event_count,
+                internal_last_sequence = initial_publication.seq,
+                source_digest = record.source_digest,
+                summary_digest = fields.summaryDigest,
+                summary = record.summary,
+                fact_limit = manifest.last_event_seq,
+                waterline = manifest.last_event_seq,
+            }
+        )
+        if not projection then return nil, projection_error end
+        return projection, view_generation
+    end
+
+    local function rebuild_active_compaction_view(document)
+        local manifest = document.model_view.active_manifest
+        local projection, view_generation = durable_compaction_projection(
+            document,
+            manifest
+        )
+        if not projection then return nil, view_generation end
+        return cache_model_view(
+            document.facts,
+            view_generation,
+            projection,
+            manifest.digest
+        )
     end
 
     local function prepare_mirror(workspace_path)
@@ -965,6 +1239,11 @@ function M.new_context_publication(ports, options)
             or manifest.last_event_seq ~= document.event_count
         if not changed then
             view = model_views[manifest.digest]
+            if not view and manifest.compaction_id then
+                local rebuild_error
+                view, rebuild_error = rebuild_active_compaction_view(document)
+                if not view then return nil, rebuild_error end
+            end
             if not view then
                 return nil, failure(
                     "ModelViewUnavailable",
@@ -973,7 +1252,20 @@ function M.new_context_publication(ports, options)
             end
         else
             local view_error
-            view, view_error = cache_model_view(document.facts, document.generation)
+            if manifest.compaction_id then
+                local projection
+                projection, view_error = durable_compaction_projection(document, manifest)
+                if not projection then return nil, view_error end
+                projection.fact_limit = document.event_count
+                projection.waterline = document.event_count
+                view, view_error = cache_model_view(
+                    document.facts,
+                    document.generation,
+                    projection
+                )
+            else
+                view, view_error = cache_model_view(document.facts, document.generation)
+            end
             if not view then return nil, view_error end
             changed = view.digest ~= manifest.digest
                 or view.first_sequence ~= manifest.first_event_seq
@@ -985,6 +1277,8 @@ function M.new_context_publication(ports, options)
             last_sequence = view.last_sequence,
             changed = changed,
             replaces_manifest_ref = manifest.digest,
+            compaction_id = view.compaction_id,
+            view_context_generation = view.context_generation,
             binding = specification,
         }, "prepared durable model view")
     end
@@ -1000,6 +1294,11 @@ function M.new_context_publication(ports, options)
             return nil, failure("StaleModelView", "model view is not the active durable manifest")
         end
         local view = model_views[digest]
+        if not view and active.document.model_view.active_manifest.compaction_id then
+            local rebuild_error
+            view, rebuild_error = rebuild_active_compaction_view(active.document)
+            if not view then return nil, rebuild_error end
+        end
         if not view then
             return nil, failure("ModelViewUnavailable", "durable model view body is unavailable")
         end
@@ -1131,6 +1430,7 @@ function M.new_context_publication(ports, options)
             event_count = true,
             expected_context_generation = true,
             events = true,
+            compaction_record = true,
         }
         if type(batch) ~= "table" then
             return nil, failure("InvalidContextBatch", "Context journal batch is required")
@@ -1169,6 +1469,12 @@ function M.new_context_publication(ports, options)
                     or fields.firstEventSeq ~= tostring(prepared.first_sequence)
                     or fields.lastEventSeq ~= tostring(prepared.last_sequence)
                     or fields.replacesManifestDigest ~= current.digest
+                    or (fields.compactionId or false) ~= prepared.compaction_id
+                    or (prepared.compaction_id ~= false and
+                        fields.viewContextGeneration
+                            ~= tostring(prepared.context_generation))
+                    or (prepared.compaction_id == false
+                        and fields.viewContextGeneration ~= nil)
                 then
                     return nil, failure(
                         "InvalidModelView",
@@ -1187,6 +1493,7 @@ function M.new_context_publication(ports, options)
         local document, document_error = schema.append_events(active.document, {
             updated_at = updated_at,
             events = batch.events,
+            compaction_record = batch.compaction_record,
         })
         if not document then return nil, document_error end
 
@@ -1371,6 +1678,867 @@ function M.new_context_publication(ports, options)
 
         operation_journal = readonly(journal, "Context operation journal")
         return operation_journal
+    end
+
+    ---Returns the durable journal used by compact.new. Every non-publication
+    -- record advances Context while retaining the active manifest. An accepted
+    -- summary, its terminal CompactionRecord, and its prepared Model view are
+    -- published in one replacement generation or not at all.
+    function service.compaction_journal()
+        if compaction_journal then return compaction_journal end
+        local journal = {}
+
+        local RECORD_FIELDS = {
+            ["compaction-request"] = {
+                kind = true, purpose = true, mode = true, compaction_id = true,
+                request_id = true, attempt = true, correction_reason = true,
+                expected_context_generation = true,
+                expected_manifest_digest = true, source_first_seq = true,
+                source_last_seq = true, source_digest = true,
+                config_snapshot = true, model_snapshot_digest = true,
+                manifest_snapshot_id = true,
+            },
+            ["compaction-response"] = {
+                kind = true, compaction_id = true, request_id = true,
+                attempt = true, canonical_body = true, canonical_digest = true,
+                source_first_seq = true, source_last_seq = true,
+                source_digest = true, usage = true,
+                expected_context_generation = true,
+                expected_manifest_digest = true,
+            },
+            ["compaction-rejection"] = {
+                kind = true, compaction_id = true, request_id = true,
+                attempt = true, error_code = true, detail = true,
+                response_digest = true, response_body = true, terminal = true,
+                source_first_seq = true, source_last_seq = true,
+                source_digest = true, canonical_facts_before = true,
+                config_snapshot = true, model_snapshot_digest = true,
+                prompt_bundle_digest = true,
+                expected_context_generation = true,
+                expected_manifest_digest = true, old_view_retained = true,
+            },
+            ["compaction-cancel-request"] = {
+                kind = true, compaction_id = true, request_id = true,
+                reason = true, source_first_seq = true, source_last_seq = true,
+                source_digest = true, canonical_facts_before = true,
+                expected_context_generation = true,
+                expected_manifest_digest = true, old_view_retained = true,
+            },
+            ["compaction-cancel-result"] = {
+                kind = true, compaction_id = true, request_id = true,
+                reason = true, outcome = true, source_first_seq = true,
+                source_last_seq = true, source_digest = true,
+                canonical_facts_before = true, config_snapshot = true,
+                model_snapshot_digest = true, prompt_bundle_digest = true,
+                expected_context_generation = true,
+                expected_manifest_digest = true, old_view_retained = true,
+            },
+            ["compaction-publication"] = {
+                kind = true, compaction_id = true, summary_id = true,
+                request_id = true, expected_context_generation = true,
+                expected_manifest_digest = true, canonical_facts_before = true,
+                canonical_facts_removed = true, source_first_seq = true,
+                source_last_seq = true, source_digest = true,
+                config_snapshot = true, summary = true, summary_digest = true,
+                summary_schema = true, generator_model_snapshot = true,
+                usage = true, correction_ids = true, manifest = true,
+                old_view_retained_until_publish = true,
+                atomic_groups_split = true,
+            },
+            ["summary-correction"] = {
+                kind = true, correction_id = true, compaction_id = true,
+                source_first_seq = true, source_last_seq = true,
+                source_digest = true, text = true, correction_digest = true,
+                effective_at = true, expected_context_generation = true,
+                expected_manifest_digest = true,
+            },
+        }
+
+        local function valid_id(value)
+            return valid_text(value, admitted.maximum_compaction_identifier_bytes)
+                and value ~= ""
+                and value:match("^[A-Za-z0-9][A-Za-z0-9._:-]*$") ~= nil
+        end
+
+        local function valid_digest(value)
+            return type(value) == "string"
+                and #value == 64
+                and value:match("^[0-9a-f]+$") ~= nil
+        end
+
+        local function exact_record(record, kind)
+            local allowed = RECORD_FIELDS[kind]
+            if type(record) ~= "table" or record.kind ~= kind or not allowed then
+                return nil, failure(
+                    "CompactionJournalContract",
+                    "compaction journal record kind is invalid"
+                )
+            end
+            for key in pairs(record) do
+                if type(key) ~= "string" or not allowed[key] then
+                    return nil, failure(
+                        "CompactionJournalContract",
+                        "compaction journal record contains an unknown field"
+                    )
+                end
+            end
+            for key in pairs(allowed) do
+                if record[key] == nil then
+                    return nil, failure(
+                        "CompactionJournalContract",
+                        "compaction journal record omits a required field",
+                        key
+                    )
+                end
+            end
+            return true
+        end
+
+        local function current_document(record)
+            if not active or not active.document then
+                return nil, failure(
+                    "ContextNotPublished",
+                    "durable compaction journal has no active Context"
+                )
+            end
+            local document = active.document
+            local manifest = document.model_view.active_manifest
+            if not valid_id(record.compaction_id)
+                or not valid_integer(record.expected_context_generation, 1)
+                or record.expected_context_generation ~= document.generation
+                or not valid_digest(record.expected_manifest_digest)
+                or record.expected_manifest_digest ~= manifest.digest
+            then
+                return nil, failure(
+                    "StaleCompactionJournal",
+                    "compaction record does not bind the active Context generation"
+                )
+            end
+            return document, manifest
+        end
+
+        local function verify_digest(bytes, expected, code, message)
+            if not valid_digest(expected) then return nil, failure(code, message) end
+            local called, observed, digest_error = pcall(safety.digest, bytes)
+            if not called or observed ~= expected then
+                return nil, failure(
+                    code,
+                    message,
+                    called and (digest_error or observed) or "digest-exception"
+                )
+            end
+            return true
+        end
+
+        local function verify_source(document, record, lifecycle, source_event_count)
+            source_event_count = source_event_count
+                or (lifecycle and lifecycle.source_event_count)
+            if not valid_integer(record.source_first_seq, 1)
+                or record.source_first_seq ~= 1
+                or not valid_integer(record.source_last_seq, record.source_first_seq)
+                or not valid_integer(source_event_count, record.source_last_seq)
+                or source_event_count > document.event_count
+                or (lifecycle and (
+                    record.source_first_seq ~= lifecycle.source_first_seq
+                    or record.source_last_seq ~= lifecycle.source_last_seq
+                    or record.source_digest ~= lifecycle.source_digest
+                    or source_event_count ~= lifecycle.source_event_count
+                ))
+            then
+                return nil, failure(
+                    "CompactionSourceMismatch",
+                    "compaction record source range is stale or inconsistent"
+                )
+            end
+            local called, bytes, source_error = pcall(
+                compact.encode_source,
+                document,
+                record.source_first_seq,
+                record.source_last_seq,
+                admitted.maximum_compaction_identifier_bytes,
+                admitted.maximum_compaction_source_bytes
+            )
+            if not called or not bytes then
+                return nil, called and source_error or failure(
+                    "CompactionSourceMismatch",
+                    "canonical compaction source could not be rebuilt"
+                )
+            end
+            local verified, verify_error = verify_digest(
+                bytes,
+                record.source_digest,
+                "CompactionSourceMismatch",
+                "canonical compaction source digest disagrees"
+            )
+            if not verified then return nil, verify_error end
+            return source_event_count
+        end
+
+        local function lifecycle_for(record, require_response)
+            local lifecycle = compaction_lifecycles[record.compaction_id]
+            if not lifecycle or lifecycle.terminal
+                or record.request_id ~= lifecycle.request_id
+                or record.attempt ~= lifecycle.attempt
+                or record.expected_manifest_digest ~= lifecycle.manifest_digest
+                or (require_response and lifecycle.response_committed ~= true)
+            then
+                return nil, failure(
+                    "CompactionJournalContract",
+                    "compaction record does not match its active lifecycle"
+                )
+            end
+            return lifecycle
+        end
+
+        local function barrier_id(record, first_sequence)
+            local called, digest, digest_error = pcall(
+                safety.binding_digest,
+                "yaca-compaction-journal-barrier-v1",
+                {
+                    { name = "kind", value = record.kind },
+                    { name = "compaction", value = record.compaction_id },
+                    { name = "generation", value = tostring(record.expected_context_generation) },
+                    { name = "sequence", value = tostring(first_sequence) },
+                }
+            )
+            if not called or not valid_digest(digest) then
+                return nil, digest_error or failure(
+                    "CompactionJournalContract",
+                    "compaction journal barrier could not be bound"
+                )
+            end
+            return "compaction:" .. digest
+        end
+
+        local function commit_events(record, events, compaction_record, publishing)
+            local first_sequence = active.document.event_count + 1
+            local barrier, barrier_error = barrier_id(record, first_sequence)
+            if not barrier then return false, barrier_error end
+            for index, event in ipairs(events) do
+                event.seq = first_sequence + index - 1
+            end
+            local batch = {
+                barrier_id = barrier,
+                first_sequence = first_sequence,
+                last_sequence = first_sequence + #events - 1,
+                event_count = #events,
+                expected_context_generation = record.expected_context_generation,
+                events = events,
+            }
+            if compaction_record then batch.compaction_record = compaction_record end
+            local previous_manifest = active.document.model_view.active_manifest.digest
+            local committed, receipt = service.commit(batch)
+            if committed ~= true then return false, receipt end
+            local current_manifest = active.document.model_view.active_manifest.digest
+            local values = {
+                binding = record,
+                previous_context_generation = receipt.previous_context_generation,
+                context_generation = receipt.context_generation,
+            }
+            if publishing then
+                values.previous_manifest_digest = previous_manifest
+                values.published_manifest_digest = current_manifest
+            else
+                values.active_manifest_digest = current_manifest
+            end
+            return true, readonly(values, "durable compaction journal receipt")
+        end
+
+        function journal.commit_intent(record)
+            local exact, exact_error = exact_record(record, "compaction-request")
+            if not exact then return false, exact_error end
+            local document, document_error = current_document(record)
+            if not document then return false, document_error end
+            if record.purpose ~= "compaction"
+                or (record.mode ~= "manual" and record.mode ~= "automatic")
+                or not valid_id(record.request_id)
+                or not valid_integer(record.attempt, 1)
+                or not valid_digest(record.config_snapshot)
+                or not valid_digest(record.model_snapshot_digest)
+                or not valid_id(record.manifest_snapshot_id)
+                or (record.correction_reason ~= false
+                    and not valid_text(
+                        record.correction_reason,
+                        admitted.maximum_model_view_bytes
+                    ))
+            then
+                return false, failure(
+                    "CompactionJournalContract",
+                    "compaction request record is invalid"
+                )
+            end
+            local previous = compaction_lifecycles[record.compaction_id]
+            local source_event_count
+            if previous then
+                if previous.terminal
+                    or record.attempt ~= previous.attempt + 1
+                    or record.config_snapshot ~= previous.config_snapshot
+                    or record.model_snapshot_digest ~= previous.model_snapshot_digest
+                    or record.manifest_snapshot_id ~= previous.manifest_snapshot_id
+                    or record.expected_manifest_digest ~= previous.manifest_digest
+                then
+                    return false, failure(
+                        "CompactionJournalContract",
+                        "compaction retry does not continue its prior lifecycle"
+                    )
+                end
+                source_event_count, document_error = verify_source(
+                    document,
+                    record,
+                    previous
+                )
+                if not source_event_count then return false, document_error end
+            else
+                if record.attempt ~= 1 then
+                    return false, failure(
+                        "CompactionJournalContract",
+                        "first compaction request must be attempt one"
+                    )
+                end
+                source_event_count, document_error = verify_source(
+                    document,
+                    record,
+                    nil,
+                    document.event_count
+                )
+                if not source_event_count then return false, document_error end
+            end
+            local candidate = {
+                compaction_id = record.compaction_id,
+                request_id = record.request_id,
+                attempt = record.attempt,
+                source_first_seq = record.source_first_seq,
+                source_last_seq = record.source_last_seq,
+                source_digest = record.source_digest,
+                source_event_count = source_event_count,
+                manifest_digest = record.expected_manifest_digest,
+                config_snapshot = record.config_snapshot,
+                model_snapshot_digest = record.model_snapshot_digest,
+                manifest_snapshot_id = record.manifest_snapshot_id,
+                response_committed = false,
+                cancel_requested = false,
+                terminal = false,
+            }
+            local committed, receipt = commit_events(record, { {
+                type = "model_request",
+                fields = {
+                    requestId = record.request_id,
+                    purpose = "compaction",
+                    viewManifestRef = record.expected_manifest_digest,
+                    attemptId = tostring(record.attempt),
+                },
+            } }, nil, false)
+            if committed ~= true then return false, receipt end
+            compaction_lifecycles[record.compaction_id] = candidate
+            return true, receipt
+        end
+
+        function journal.commit_response(record)
+            local exact, exact_error = exact_record(record, "compaction-response")
+            if not exact then return false, exact_error end
+            local document, document_error = current_document(record)
+            if not document then return false, document_error end
+            local lifecycle, lifecycle_error = lifecycle_for(record, false)
+            if not lifecycle then return false, lifecycle_error end
+            if lifecycle.response_committed
+                or not valid_text(record.canonical_body, admitted.maximum_model_view_bytes)
+                or record.canonical_body == ""
+            then
+                return false, failure(
+                    "CompactionJournalContract",
+                    "compaction response record is invalid or duplicated"
+                )
+            end
+            local source_count, source_error = verify_source(document, record, lifecycle)
+            if not source_count then return false, source_error end
+            local verified, verify_error = verify_digest(
+                record.canonical_body,
+                record.canonical_digest,
+                "CompactionSummaryMismatch",
+                "compaction response digest disagrees"
+            )
+            if not verified then return false, verify_error end
+            local message_id = record.request_id .. ":response"
+            if not valid_id(message_id) then
+                return false, failure(
+                    "CompactionJournalContract",
+                    "compaction response message identity is too large"
+                )
+            end
+            local committed, receipt = commit_events(record, { {
+                type = "model_message",
+                fields = {
+                    messageId = message_id,
+                    requestId = record.request_id,
+                    role = "assistant",
+                    status = "complete",
+                    body = record.canonical_body,
+                    rawBytes = tostring(#record.canonical_body),
+                    digest = record.canonical_digest,
+                },
+            } }, nil, false)
+            if committed ~= true then return false, receipt end
+            lifecycle.response_committed = true
+            return true, receipt
+        end
+
+        local function terminal_event(record, status, error_id)
+            local fields = {
+                compactionId = record.compaction_id,
+                sourceFirstSeq = tostring(record.source_first_seq),
+                sourceLastSeq = tostring(record.source_last_seq),
+                sourceDigest = record.source_digest,
+                status = status,
+                sourceEventCount = tostring(record.canonical_facts_before),
+                viewContextGeneration = tostring(record.expected_context_generation),
+            }
+            if error_id then fields.errorId = error_id end
+            if record.model_snapshot_digest then
+                fields.modelSnapshot = record.model_snapshot_digest
+            end
+            if record.prompt_bundle_digest then
+                fields.promptSnapshot = record.prompt_bundle_digest
+            end
+            return {
+                type = "compaction",
+                fields = fields,
+            }, {
+                id = record.compaction_id,
+                source_first_seq = record.source_first_seq,
+                source_last_seq = record.source_last_seq,
+                source_digest = record.source_digest,
+                status = status,
+            }
+        end
+
+        function journal.commit_rejection(record)
+            if type(record) ~= "table" or not RECORD_FIELDS[record.kind] then
+                return false, failure(
+                    "CompactionJournalContract",
+                    "compaction rejection kind is invalid"
+                )
+            end
+            local exact, exact_error = exact_record(record, record.kind)
+            if not exact then return false, exact_error end
+            if record.kind ~= "compaction-rejection"
+                and record.kind ~= "compaction-cancel-request"
+                and record.kind ~= "compaction-cancel-result"
+            then
+                return false, failure(
+                    "CompactionJournalContract",
+                    "record is not a compaction rejection or cancellation"
+                )
+            end
+            local document, document_error = current_document(record)
+            if not document then return false, document_error end
+            local lifecycle, lifecycle_error
+            if record.kind == "compaction-rejection" then
+                lifecycle, lifecycle_error = lifecycle_for(record, false)
+            else
+                lifecycle = compaction_lifecycles[record.compaction_id]
+                if not lifecycle or lifecycle.terminal
+                    or record.request_id ~= lifecycle.request_id
+                    or record.expected_manifest_digest ~= lifecycle.manifest_digest
+                then
+                    lifecycle_error = failure(
+                        "CompactionJournalContract",
+                        "cancellation does not match its active lifecycle"
+                    )
+                    lifecycle = nil
+                end
+            end
+            if not lifecycle then return false, lifecycle_error end
+            if record.canonical_facts_before ~= lifecycle.source_event_count
+                or record.old_view_retained ~= true
+            then
+                return false, failure(
+                    "CompactionJournalContract",
+                    "rejection does not retain the bound source and Model view"
+                )
+            end
+            local source_count, source_error = verify_source(document, record, lifecycle)
+            if not source_count then return false, source_error end
+
+            local events = {}
+            local compaction_record
+            local terminal = false
+            if record.kind == "compaction-rejection" then
+                if type(record.terminal) ~= "boolean"
+                    or not valid_id(record.error_code)
+                    or not valid_text(record.detail, admitted.maximum_model_view_bytes)
+                    or (record.response_body ~= false
+                        and not valid_text(
+                            record.response_body,
+                            admitted.maximum_model_view_bytes
+                        ))
+                    or (record.response_digest ~= false
+                        and record.response_digest ~= ""
+                        and not valid_digest(record.response_digest))
+                    or not valid_digest(record.config_snapshot)
+                    or record.config_snapshot ~= lifecycle.config_snapshot
+                    or not valid_digest(record.model_snapshot_digest)
+                    or record.model_snapshot_digest
+                        ~= lifecycle.model_snapshot_digest
+                    or not valid_digest(record.prompt_bundle_digest)
+                then
+                    return false, failure(
+                        "CompactionJournalContract",
+                        "compaction rejection record is invalid"
+                    )
+                end
+                local body = record.response_body == false and "" or record.response_body
+                local message_id = record.request_id .. ":rejected"
+                if not valid_id(message_id) then
+                    return false, failure(
+                        "CompactionJournalContract",
+                        "compaction rejection message identity is too large"
+                    )
+                end
+                local message_fields = {
+                    messageId = message_id,
+                    requestId = record.request_id,
+                    role = "assistant",
+                    status = "interrupted",
+                    body = body,
+                    rawBytes = tostring(#body),
+                }
+                if record.response_digest ~= false and record.response_digest ~= "" then
+                    message_fields.digest = record.response_digest
+                end
+                events[#events + 1] = {
+                    type = "model_message",
+                    fields = message_fields,
+                }
+                events[#events + 1] = {
+                    type = "warning",
+                    fields = {
+                        errorId = record.error_code,
+                        summary = record.detail ~= "" and record.detail
+                            or "compaction response rejected",
+                        causeId = record.compaction_id,
+                    },
+                }
+                terminal = record.terminal
+                if terminal then
+                    local event
+                    event, compaction_record = terminal_event(
+                        record,
+                        "error",
+                        record.error_code
+                    )
+                    events[#events + 1] = event
+                end
+            elseif record.kind == "compaction-cancel-request" then
+                if lifecycle.cancel_requested
+                    or not valid_text(record.reason, admitted.maximum_model_view_bytes)
+                    or record.reason == ""
+                then
+                    return false, failure(
+                        "CompactionJournalContract",
+                        "compaction cancel request is invalid or duplicated"
+                    )
+                end
+                events[1] = {
+                    type = "cancel",
+                    fields = {
+                        targetKind = "compaction-request",
+                        targetId = record.request_id,
+                        reason = record.reason,
+                        result = "pending",
+                    },
+                }
+            else
+                if not lifecycle.cancel_requested
+                    or (record.outcome ~= "cancelled" and record.outcome ~= "unknown")
+                    or record.reason ~= lifecycle.cancel_reason
+                    or not valid_digest(record.config_snapshot)
+                    or record.config_snapshot ~= lifecycle.config_snapshot
+                    or not valid_digest(record.model_snapshot_digest)
+                    or record.model_snapshot_digest
+                        ~= lifecycle.model_snapshot_digest
+                    or not valid_digest(record.prompt_bundle_digest)
+                then
+                    return false, failure(
+                        "CompactionJournalContract",
+                        "compaction cancel result is invalid"
+                    )
+                end
+                events[1] = {
+                    type = "cancel",
+                    fields = {
+                        targetKind = "compaction-request",
+                        targetId = record.request_id,
+                        reason = record.reason,
+                        result = record.outcome,
+                    },
+                }
+                local status = record.outcome == "cancelled" and "cancelled" or "error"
+                local error_id = status == "error" and "CompactionCancelUnknown" or nil
+                local event
+                event, compaction_record = terminal_event(record, status, error_id)
+                events[#events + 1] = event
+                terminal = true
+            end
+            local committed, receipt = commit_events(
+                record,
+                events,
+                compaction_record,
+                false
+            )
+            if committed ~= true then return false, receipt end
+            if record.kind == "compaction-cancel-request" then
+                lifecycle.cancel_requested = true
+                lifecycle.cancel_reason = record.reason
+            elseif terminal then
+                lifecycle.terminal = true
+                lifecycle.outcome = compaction_record.status
+            end
+            return true, receipt
+        end
+
+        function journal.publish(record)
+            local exact, exact_error = exact_record(record, "compaction-publication")
+            if not exact then return false, exact_error end
+            local document, manifest_or_error = current_document(record)
+            if not document then return false, manifest_or_error end
+            local lifecycle = compaction_lifecycles[record.compaction_id]
+            if not lifecycle or lifecycle.terminal
+                or lifecycle.response_committed ~= true
+                or record.request_id ~= lifecycle.request_id
+                or record.canonical_facts_before ~= lifecycle.source_event_count
+                or record.config_snapshot ~= lifecycle.config_snapshot
+                or record.generator_model_snapshot ~= lifecycle.model_snapshot_digest
+                or record.old_view_retained_until_publish ~= true
+                or record.canonical_facts_removed ~= 0
+                or record.atomic_groups_split ~= 0
+                or type(record.manifest) ~= "table"
+                or record.manifest.context_generation
+                    ~= record.expected_context_generation
+                or record.manifest.summary_id ~= record.summary_id
+                or record.manifest.model_snapshot_digest
+                    ~= record.generator_model_snapshot
+                or record.manifest.digest == record.expected_manifest_digest
+                or not valid_digest(record.manifest.digest)
+                or not valid_text(
+                    record.manifest.canonical_bytes,
+                    admitted.maximum_compaction_source_bytes
+                )
+                or record.manifest.canonical_bytes == ""
+                or not valid_id(record.manifest.builder_algorithm)
+                or not valid_digest(record.manifest.prompt_bundle_digest)
+                or record.manifest.summary_source_range
+                    ~= tostring(record.source_first_seq)
+                        .. "-" .. tostring(record.source_last_seq)
+                or not valid_text(record.summary, admitted.maximum_model_view_bytes)
+                or record.summary == ""
+                or text.xml_carrier_kind(record.summary) ~= "text"
+            then
+                return false, failure(
+                    "CompactionJournalContract",
+                    "compaction publication does not match its durable lifecycle"
+                )
+            end
+            local decoded_called, decoded, decode_error = pcall(
+                compact.decode_summary,
+                record.summary,
+                admitted.maximum_model_view_bytes
+            )
+            if not decoded_called or not decoded
+                or decoded.schema_version ~= record.summary_schema
+                or decoded.source_first_seq ~= record.source_first_seq
+                or decoded.source_last_seq ~= record.source_last_seq
+                or decoded.source_digest ~= record.source_digest
+            then
+                return false, decoded_called and (decode_error or failure(
+                    "CompactionSummaryMismatch",
+                    "accepted structured summary source binding disagrees"
+                )) or failure(
+                    "CompactionSummaryMismatch",
+                    "accepted structured summary could not be decoded"
+                )
+            end
+            local correction_count = dense_count(record.correction_ids)
+            local manifest_correction_count = dense_count(
+                record.manifest.correction_ids
+            )
+            if correction_count == nil
+                or manifest_correction_count ~= correction_count
+            then
+                return false, failure(
+                    "CompactionManifestMismatch",
+                    "compaction manifest correction set disagrees"
+                )
+            end
+            for index = 1, correction_count do
+                if record.correction_ids[index]
+                    ~= record.manifest.correction_ids[index]
+                then
+                    return false, failure(
+                        "CompactionManifestMismatch",
+                        "compaction manifest correction order disagrees"
+                    )
+                end
+            end
+            local manifest_called, rebuilt_manifest, manifest_error = pcall(
+                compact.encode_manifest,
+                record.manifest,
+                admitted.maximum_compaction_identifier_bytes,
+                admitted.maximum_compaction_source_bytes
+            )
+            if not manifest_called
+                or rebuilt_manifest ~= record.manifest.canonical_bytes
+            then
+                return false, manifest_called and (manifest_error or failure(
+                    "CompactionManifestMismatch",
+                    "accepted compaction manifest bytes are not canonical"
+                )) or failure(
+                    "CompactionManifestMismatch",
+                    "accepted compaction manifest could not be rebuilt"
+                )
+            end
+            local source_count, source_error = verify_source(document, record, lifecycle)
+            if not source_count then return false, source_error end
+            local verified, verify_error = verify_digest(
+                record.summary,
+                record.summary_digest,
+                "CompactionSummaryMismatch",
+                "accepted compaction summary digest disagrees"
+            )
+            if not verified then return false, verify_error end
+            verified, verify_error = verify_digest(
+                record.manifest.canonical_bytes,
+                record.manifest.digest,
+                "CompactionManifestMismatch",
+                "accepted compaction manifest digest disagrees"
+            )
+            if not verified then return false, verify_error end
+
+            local terminal_sequence = document.event_count + 1
+            local publication_sequence = terminal_sequence + 1
+            local projection, projection_error = verified_compaction_projection(
+                document,
+                {
+                    compaction_id = record.compaction_id,
+                    source_first_seq = record.source_first_seq,
+                    source_last_seq = record.source_last_seq,
+                    source_event_count = record.canonical_facts_before,
+                    internal_last_sequence = publication_sequence,
+                    source_digest = record.source_digest,
+                    summary_digest = record.summary_digest,
+                    summary = record.summary,
+                    fact_limit = record.canonical_facts_before,
+                    waterline = publication_sequence,
+                }
+            )
+            if not projection then return false, projection_error end
+            local previous_cached = model_views[record.manifest.digest]
+            local prepared, prepare_error = cache_model_view(
+                document.facts,
+                record.expected_context_generation,
+                projection,
+                record.manifest.digest
+            )
+            if not prepared then return false, prepare_error end
+            local compaction_fields = {
+                compactionId = record.compaction_id,
+                sourceFirstSeq = tostring(record.source_first_seq),
+                sourceLastSeq = tostring(record.source_last_seq),
+                sourceDigest = record.source_digest,
+                status = "ok",
+                summary = record.summary,
+                sourceEventCount = tostring(record.canonical_facts_before),
+                summaryDigest = record.summary_digest,
+                manifestDigest = record.manifest.digest,
+                builderAlgorithm = record.manifest.builder_algorithm,
+                modelSnapshot = record.generator_model_snapshot,
+                promptSnapshot = record.manifest.prompt_bundle_digest,
+                viewContextGeneration = tostring(record.expected_context_generation),
+            }
+            local compaction_record = {
+                id = record.compaction_id,
+                source_first_seq = record.source_first_seq,
+                source_last_seq = record.source_last_seq,
+                source_digest = record.source_digest,
+                status = "ok",
+                summary = record.summary,
+            }
+            local committed, receipt = commit_events(record, {
+                { type = "compaction", fields = compaction_fields },
+                {
+                    type = "model_view_published",
+                    fields = {
+                        manifestDigest = record.manifest.digest,
+                        firstEventSeq = "1",
+                        lastEventSeq = tostring(publication_sequence),
+                        replacesManifestDigest = record.expected_manifest_digest,
+                        compactionId = record.compaction_id,
+                        viewContextGeneration = tostring(
+                            record.expected_context_generation
+                        ),
+                    },
+                },
+            }, compaction_record, true)
+            if committed ~= true then
+                model_views[record.manifest.digest] = previous_cached
+                return false, receipt
+            end
+            lifecycle.terminal = true
+            lifecycle.outcome = "ok"
+            lifecycle.manifest_digest = record.manifest.digest
+            return true, receipt
+        end
+
+        function journal.commit_correction(record)
+            local exact, exact_error = exact_record(record, "summary-correction")
+            if not exact then return false, exact_error end
+            local document, document_error = current_document(record)
+            if not document then return false, document_error end
+            if not valid_id(record.correction_id)
+                or record.effective_at ~= "next-model-view-publication"
+                or not valid_text(record.text, admitted.maximum_model_view_bytes)
+                or record.text == ""
+            then
+                return false, failure(
+                    "CompactionJournalContract",
+                    "summary correction record is invalid"
+                )
+            end
+            local accepted
+            for _, candidate in ipairs(document.model_view.compaction_records) do
+                if candidate.id == record.compaction_id and candidate.status == "ok"
+                    and candidate.source_first_seq == record.source_first_seq
+                    and candidate.source_last_seq == record.source_last_seq
+                    and candidate.source_digest == record.source_digest
+                then
+                    accepted = true
+                    break
+                end
+            end
+            if not accepted then
+                return false, failure(
+                    "CompactionJournalContract",
+                    "summary correction has no accepted compaction source"
+                )
+            end
+            local verified, verify_error = verify_digest(
+                record.text,
+                record.correction_digest,
+                "CompactionCorrectionMismatch",
+                "summary correction digest disagrees"
+            )
+            if not verified then return false, verify_error end
+            return commit_events(record, { {
+                type = "warning",
+                fields = {
+                    errorId = record.correction_id,
+                    summary = record.text,
+                    causeId = record.compaction_id,
+                },
+            } }, nil, false)
+        end
+
+        compaction_journal = readonly(journal, "Context compaction journal")
+        return compaction_journal
     end
 
     function service.status()

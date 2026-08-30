@@ -33,6 +33,7 @@ local function load_table(relative_path)
 end
 
 local cache = {}
+local compact = load_module("compact", cache)
 local context = load_module("context", cache)
 local path = load_module("path", cache)
 local prompt = load_module("prompt", cache)
@@ -279,6 +280,8 @@ local function fixture(settings)
         platform_kind = settings.platform_kind or "posix",
         maximum_create_attempts = 4,
         maximum_model_view_bytes = 262144,
+        maximum_compaction_source_bytes = 16 * 1024 * 1024,
+        maximum_compaction_identifier_bytes = 256,
         default_model_request_limit = 64,
         default_tool_call_limit = 256,
         maximum_queue_items = 9,
@@ -634,6 +637,354 @@ return {
                 A.truthy(draft.close())
                 A.equal(observed.closes, 1)
                 A.equal(draft.status().lifecycle, "closed")
+            end,
+        },
+        {
+            name = "compaction journal publishes summary and ModelView in one generation",
+            run = function()
+                local publication, observed, _, _, safety_service = fixture()
+                local first = assert(publication.publish_first({
+                    generation = generation(),
+                    workspace = { path = "/work", enterable = true },
+                    settings = {
+                        model = "Primary",
+                        permission = "Std",
+                        double_check = true,
+                        double_check_override = "inherit",
+                        double_check_goal = "verify compaction",
+                        double_check_goal_override = "inherit",
+                        context_prompt = "workspace context",
+                        auto_rename_disabled = false,
+                    },
+                    message = "compact this prefix",
+                    source = "main",
+                }))
+                A.truthy(publication.commit({
+                    barrier_id = "compaction-tail",
+                    first_sequence = 3,
+                    last_sequence = 3,
+                    event_count = 1,
+                    expected_context_generation = 1,
+                    events = { {
+                        seq = 3,
+                        type = "warning",
+                        fields = { errorId = "TailMarker", summary = "TAIL-KEEP" },
+                    } },
+                }))
+
+                local source_document = observed.published.document
+                local source_bytes = assert(compact.encode_source(
+                    source_document,
+                    1,
+                    2,
+                    256,
+                    16 * 1024 * 1024
+                ))
+                local source_digest = assert(safety_service.digest(source_bytes))
+                local config_snapshot = assert(safety_service.digest("config-snapshot"))
+                local model_snapshot = assert(safety_service.digest("model-snapshot"))
+                local prompt_snapshot = assert(safety_service.digest("prompt-snapshot"))
+                local journal = publication.compaction_journal()
+                local intent = {
+                    kind = "compaction-request",
+                    purpose = "compaction",
+                    mode = "manual",
+                    compaction_id = "compaction-1",
+                    request_id = "compaction-1:request:1",
+                    attempt = 1,
+                    correction_reason = false,
+                    expected_context_generation = 2,
+                    expected_manifest_digest = first.view_manifest_snapshot,
+                    source_first_seq = 1,
+                    source_last_seq = 2,
+                    source_digest = source_digest,
+                    config_snapshot = config_snapshot,
+                    model_snapshot_digest = model_snapshot,
+                    manifest_snapshot_id = "manifest-compaction-v1",
+                }
+                local intent_committed, intent_receipt = journal.commit_intent(intent)
+                A.truthy(intent_committed, A.render(intent_receipt))
+                A.equal(intent_receipt.binding, intent)
+                A.equal(intent_receipt.context_generation, 3)
+                A.equal(intent_receipt.active_manifest_digest, first.view_manifest_snapshot)
+
+                local summary = compact.encode_summary({
+                    schema_version = "structured-summary-v1",
+                    source_first_seq = 1,
+                    source_last_seq = 2,
+                    source_digest = source_digest,
+                    goals_decisions = "GOALS-PRESERVED",
+                    constraints_permissions = "permission facts preserved",
+                    files_touched = "no files",
+                    verification_evidence = "durable journal integration",
+                    unknown_side_effects = "none",
+                    open_todos = "continue from tail",
+                    prompt_model_transitions = "same model snapshot",
+                })
+                local summary_digest = assert(safety_service.digest(summary))
+                local usage = { input_tokens = 32, output_tokens = 16, estimated = true }
+                local response = {
+                    kind = "compaction-response",
+                    compaction_id = "compaction-1",
+                    request_id = "compaction-1:request:1",
+                    attempt = 1,
+                    canonical_body = summary,
+                    canonical_digest = summary_digest,
+                    source_first_seq = 1,
+                    source_last_seq = 2,
+                    source_digest = source_digest,
+                    usage = usage,
+                    expected_context_generation = 3,
+                    expected_manifest_digest = first.view_manifest_snapshot,
+                }
+                local response_committed, response_receipt = journal.commit_response(response)
+                A.truthy(response_committed, A.render(response_receipt))
+                A.equal(response_receipt.context_generation, 4)
+                A.equal(publication.status().event_count, 5)
+
+                local manifest = {
+                    schema_version = 1,
+                    context_generation = 4,
+                    context_digest = assert(safety_service.digest("context")),
+                    model_id = "Primary",
+                    model_snapshot_digest = model_snapshot,
+                    window_tokens = 4096,
+                    prompt_bundle_digest = prompt_snapshot,
+                    summary_id = "compaction-1:summary",
+                    summary_source_range = "1-2",
+                    included_event_ranges = { { first = 3, last = 3 } },
+                    excluded_prefix_reason = "summarized",
+                    builder_algorithm = "structured-prefix-v1",
+                    estimated_tokens = 128,
+                    correction_ids = {},
+                }
+                local manifest_bytes = assert(compact.encode_manifest(
+                    manifest,
+                    256,
+                    16 * 1024 * 1024
+                ))
+                local manifest_digest = assert(safety_service.digest(manifest_bytes))
+                manifest.digest = manifest_digest
+                manifest.canonical_bytes = manifest_bytes
+                local publication_record = {
+                    kind = "compaction-publication",
+                    compaction_id = "compaction-1",
+                    summary_id = "compaction-1:summary",
+                    request_id = "compaction-1:request:1",
+                    expected_context_generation = 4,
+                    expected_manifest_digest = first.view_manifest_snapshot,
+                    canonical_facts_before = 3,
+                    canonical_facts_removed = 0,
+                    source_first_seq = 1,
+                    source_last_seq = 2,
+                    source_digest = source_digest,
+                    config_snapshot = config_snapshot,
+                    summary = summary,
+                    summary_digest = summary_digest,
+                    summary_schema = "structured-summary-v1",
+                    generator_model_snapshot = model_snapshot,
+                    usage = usage,
+                    correction_ids = {},
+                    manifest = manifest,
+                    old_view_retained_until_publish = true,
+                    atomic_groups_split = 0,
+                }
+                local malformed = {}
+                for key, value in pairs(publication_record) do malformed[key] = value end
+                malformed.summary_digest = string.rep("0", 64)
+                local rejected, reject_error = journal.publish(malformed)
+                A.falsy(rejected)
+                A.equal(reject_error.code, "CompactionSummaryMismatch")
+                A.equal(publication.status().generation, 4)
+                A.equal(publication.status().event_count, 5)
+                A.equal(
+                    observed.published.document.model_view.active_manifest.digest,
+                    first.view_manifest_snapshot
+                )
+
+                local malformed_manifest = {}
+                for key, value in pairs(publication_record) do
+                    malformed_manifest[key] = value
+                end
+                local forged_manifest = {}
+                for key, value in pairs(manifest) do forged_manifest[key] = value end
+                forged_manifest.canonical_bytes = manifest.canonical_bytes .. "forged"
+                malformed_manifest.manifest = forged_manifest
+                rejected, reject_error = journal.publish(malformed_manifest)
+                A.falsy(rejected)
+                A.equal(reject_error.code, "CompactionManifestMismatch")
+                A.equal(publication.status().generation, 4)
+                A.equal(publication.status().event_count, 5)
+
+                local published, publish_receipt = journal.publish(publication_record)
+                A.truthy(published, A.render(publish_receipt))
+                A.equal(publish_receipt.binding, publication_record)
+                A.equal(publish_receipt.previous_manifest_digest, first.view_manifest_snapshot)
+                A.equal(publish_receipt.published_manifest_digest, manifest_digest)
+                A.equal(publication.status().generation, 5)
+                A.equal(publication.status().event_count, 7)
+                local document = observed.published.document
+                A.equal(document.facts[6].type, "compaction")
+                A.equal(document.facts[7].type, "model_view_published")
+                A.equal(document.model_view.active_manifest.compaction_id, "compaction-1")
+                A.equal(document.model_view.compaction_records[1].summary, summary)
+                local body = assert(publication.resolve_view(manifest_digest)).body
+                A.contains(body, "<StructuredSummary")
+                A.contains(body, "GOALS-PRESERVED")
+                A.contains(body, "TAIL-KEEP")
+                A.falsy(body:find("compact this prefix", 1, true))
+                A.falsy(body:find('type="model_request"', 1, true))
+                local _, summary_count = body:gsub("<StructuredSummary", "")
+                A.equal(summary_count, 1)
+
+                A.truthy(publication.commit({
+                    barrier_id = "after-compaction",
+                    first_sequence = 8,
+                    last_sequence = 8,
+                    event_count = 1,
+                    expected_context_generation = 5,
+                    events = { {
+                        seq = 8,
+                        type = "warning",
+                        fields = {
+                            errorId = "AfterCompaction",
+                            summary = "AFTER-COMPACT",
+                        },
+                    } },
+                }))
+                local next_view = assert(publication.prepare_view({
+                    expected_context_generation = 6,
+                    expected_last_sequence = 8,
+                    current_manifest_ref = manifest_digest,
+                }))
+                A.equal(next_view.compaction_id, "compaction-1")
+                A.equal(next_view.view_context_generation, 6)
+                A.truthy(next_view.changed)
+                A.truthy(publication.commit({
+                    barrier_id = "publish-after-compaction",
+                    first_sequence = 9,
+                    last_sequence = 9,
+                    event_count = 1,
+                    expected_context_generation = 6,
+                    events = { {
+                        seq = 9,
+                        type = "model_view_published",
+                        fields = {
+                            manifestDigest = next_view.digest,
+                            firstEventSeq = tostring(next_view.first_sequence),
+                            lastEventSeq = tostring(next_view.last_sequence),
+                            replacesManifestDigest = next_view.replaces_manifest_ref,
+                            compactionId = next_view.compaction_id,
+                            viewContextGeneration = tostring(
+                                next_view.view_context_generation
+                            ),
+                        },
+                    } },
+                }))
+                local next_body = assert(publication.resolve_view(next_view.digest)).body
+                A.contains(next_body, "GOALS-PRESERVED")
+                A.contains(next_body, "TAIL-KEEP")
+                A.contains(next_body, "AFTER-COMPACT")
+                A.falsy(next_body:find("compact this prefix", 1, true))
+                _, summary_count = next_body:gsub("<StructuredSummary", "")
+                A.equal(summary_count, 1)
+            end,
+        },
+        {
+            name = "compaction cancellation records terminal truth without replacing the view",
+            run = function()
+                local publication, observed, _, _, safety_service = fixture()
+                local first = assert(publication.publish_first({
+                    generation = generation(),
+                    workspace = { path = "/work", enterable = true },
+                    settings = {
+                        model = "Primary",
+                        permission = "Std",
+                        double_check = true,
+                        double_check_override = "inherit",
+                        double_check_goal = "verify cancellation",
+                        double_check_goal_override = "inherit",
+                        context_prompt = "workspace context",
+                        auto_rename_disabled = false,
+                    },
+                    message = "cancel compaction safely",
+                    source = "main",
+                }))
+                local document = observed.published.document
+                local source_bytes = assert(compact.encode_source(
+                    document,
+                    1,
+                    2,
+                    256,
+                    16 * 1024 * 1024
+                ))
+                local source_digest = assert(safety_service.digest(source_bytes))
+                local config_snapshot = assert(safety_service.digest("cancel-config"))
+                local model_snapshot = assert(safety_service.digest("cancel-model"))
+                local prompt_snapshot = assert(safety_service.digest("cancel-prompt"))
+                local journal = publication.compaction_journal()
+                local committed, receipt = journal.commit_intent({
+                    kind = "compaction-request",
+                    purpose = "compaction",
+                    mode = "manual",
+                    compaction_id = "compaction-cancelled",
+                    request_id = "compaction-cancelled:request:1",
+                    attempt = 1,
+                    correction_reason = false,
+                    expected_context_generation = 1,
+                    expected_manifest_digest = first.view_manifest_snapshot,
+                    source_first_seq = 1,
+                    source_last_seq = 2,
+                    source_digest = source_digest,
+                    config_snapshot = config_snapshot,
+                    model_snapshot_digest = model_snapshot,
+                    manifest_snapshot_id = "manifest-compaction-v1",
+                })
+                A.truthy(committed, A.render(receipt))
+                committed, receipt = journal.commit_rejection({
+                    kind = "compaction-cancel-request",
+                    compaction_id = "compaction-cancelled",
+                    request_id = "compaction-cancelled:request:1",
+                    reason = "user-cancel",
+                    source_first_seq = 1,
+                    source_last_seq = 2,
+                    source_digest = source_digest,
+                    canonical_facts_before = 2,
+                    expected_context_generation = 2,
+                    expected_manifest_digest = first.view_manifest_snapshot,
+                    old_view_retained = true,
+                })
+                A.truthy(committed, A.render(receipt))
+                committed, receipt = journal.commit_rejection({
+                    kind = "compaction-cancel-result",
+                    compaction_id = "compaction-cancelled",
+                    request_id = "compaction-cancelled:request:1",
+                    reason = "user-cancel",
+                    outcome = "cancelled",
+                    source_first_seq = 1,
+                    source_last_seq = 2,
+                    source_digest = source_digest,
+                    canonical_facts_before = 2,
+                    config_snapshot = config_snapshot,
+                    model_snapshot_digest = model_snapshot,
+                    prompt_bundle_digest = prompt_snapshot,
+                    expected_context_generation = 3,
+                    expected_manifest_digest = first.view_manifest_snapshot,
+                    old_view_retained = true,
+                })
+                A.truthy(committed, A.render(receipt))
+                A.equal(receipt.context_generation, 4)
+                A.equal(receipt.active_manifest_digest, first.view_manifest_snapshot)
+                A.equal(publication.status().event_count, 6)
+                local cancelled = observed.published.document
+                A.equal(cancelled.facts[4].type, "cancel")
+                A.equal(cancelled.facts[5].type, "cancel")
+                A.equal(cancelled.facts[6].type, "compaction")
+                A.equal(cancelled.facts[6].fields.status, "cancelled")
+                A.equal(cancelled.model_view.compaction_records[1].status, "cancelled")
+                A.equal(cancelled.model_view.active_manifest.digest, first.view_manifest_snapshot)
+                A.falsy(cancelled.model_view.active_manifest.compaction_id)
+                A.truthy(publication.resolve_view(first.view_manifest_snapshot))
             end,
         },
         {

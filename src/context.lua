@@ -67,10 +67,14 @@ local EVENT_DEFINITIONS = {
     event("steer", { "messageId", "targetTurnId", "summary" }, { "sideId" }),
     event("compaction", {
         "compactionId", "sourceFirstSeq", "sourceLastSeq", "sourceDigest", "status",
-    }, { "summary", "errorId" }),
+    }, {
+        "summary", "errorId", "sourceEventCount", "summaryDigest",
+        "manifestDigest", "builderAlgorithm", "modelSnapshot",
+        "promptSnapshot", "viewContextGeneration",
+    }),
     event("model_view_published", {
         "manifestDigest", "firstEventSeq", "lastEventSeq",
-    }, { "replacesManifestDigest" }),
+    }, { "replacesManifestDigest", "compactionId", "viewContextGeneration" }),
     event("session_override", { "name", "oldValueDigest", "newValueDigest" }, {
         "effectiveAt",
     }),
@@ -137,6 +141,8 @@ local DECIMAL_FIELDS = {
     waterline = true,
     baseline = true,
     contextDocumentGeneration = true,
+    sourceEventCount = true,
+    viewContextGeneration = true,
 }
 local IDENTIFIER_FIELDS = {
     messageId = true,
@@ -997,6 +1003,7 @@ local function validate_relations(events)
                 path
             )
             if not ok then return nil, id_error end
+            compactions[fields.compactionId] = fields
             local first = tonumber(fields.sourceFirstSeq)
             local last = tonumber(fields.sourceLastSeq)
             if first < 1 or first > last or last >= item.seq then
@@ -1025,6 +1032,7 @@ local function validate_relations(events)
                 digest = fields.manifestDigest,
                 first_event_seq = first,
                 last_event_seq = last,
+                compaction_id = fields.compactionId,
             }
         elseif item.type == "auto_name" then
             if not requests[fields.requestId] then
@@ -1062,6 +1070,7 @@ local function validate_relations(events)
         unresolved_tool_calls = unresolved_tool_calls,
         unknown_operations = known_unknown,
         published_views = published_views,
+        compactions = compactions,
     }
 end
 
@@ -1069,6 +1078,7 @@ local function normalize_manifest(candidate, admitted, event_count)
     local path = "/YacaContext/ModelView/ActiveManifest"
     local valid, valid_error = check_keys(candidate, {
         digest = true, first_event_seq = true, last_event_seq = true,
+        compaction_id = true,
     }, path)
     if not valid then return nil, valid_error end
     local digest, digest_error = attribute_text(
@@ -1089,12 +1099,23 @@ local function normalize_manifest(candidate, admitted, event_count)
         )
     end
     local first, last = candidate.first_event_seq, candidate.last_event_seq
+    local compaction_id
+    if candidate.compaction_id ~= nil then
+        compaction_id, digest_error = attribute_text(
+            candidate.compaction_id,
+            admitted.maximum_identifier_bytes,
+            path .. "/@compactionId",
+            false
+        )
+        if not compaction_id then return nil, digest_error end
+    end
     local current = (event_count == 0 and first == 0 and last == 0)
         or (event_count > 0 and first >= 1 and first <= last and last <= event_count)
     return {
         digest = digest,
         first_event_seq = first,
         last_event_seq = last,
+        compaction_id = compaction_id,
     }, current
 end
 
@@ -1203,12 +1224,47 @@ local function normalize_model_view(candidate, admitted, events, relations)
             summary = summary,
         }
     end
+    for _, record in ipairs(records) do
+        local terminal = relations.compactions[record.id]
+        if type(terminal) ~= "table"
+            or terminal.sourceFirstSeq ~= tostring(record.source_first_seq)
+            or terminal.sourceLastSeq ~= tostring(record.source_last_seq)
+            or terminal.sourceDigest ~= record.source_digest
+            or terminal.status ~= record.status
+            or terminal.summary ~= record.summary
+        then
+            return nil, failure(
+                "ContextRelation",
+                "CompactionRecord has no exact terminal compaction fact",
+                "missing-compaction-terminal",
+                "/YacaContext/ModelView"
+            )
+        end
+    end
     local latest = relations.published_views[#relations.published_views]
-    local published_current = latest == nil or (
+    local published_current = (latest == nil and manifest.compaction_id == nil) or (
         latest.digest == manifest.digest
         and latest.first_event_seq == manifest.first_event_seq
         and latest.last_event_seq == manifest.last_event_seq
+        and latest.compaction_id == manifest.compaction_id
     )
+    if manifest.compaction_id ~= nil then
+        local accepted
+        for _, record in ipairs(records) do
+            if record.id == manifest.compaction_id and record.status == "ok" then
+                accepted = true
+                break
+            end
+        end
+        if not accepted then
+            return nil, failure(
+                "ContextRelation",
+                "active compacted manifest has no accepted CompactionRecord",
+                "missing-active-compaction",
+                "/YacaContext/ModelView/ActiveManifest"
+            )
+        end
+    end
     return {
         active_manifest = manifest,
         compaction_records = records,
@@ -1484,11 +1540,23 @@ local function write_document(codec, canonical, sink)
     accepted, writer_error = writer_call(writer, "start_element", "ModelView")
     if not accepted then return nil, writer_error end
     local manifest = canonical.model_view.active_manifest
-    accepted, writer_error = writer_call(writer, "empty_element", "ActiveManifest", {
+    local manifest_attributes = {
         attr("digest", manifest.digest),
         attr("firstEventSeq", tostring(manifest.first_event_seq)),
         attr("lastEventSeq", tostring(manifest.last_event_seq)),
-    })
+    }
+    if manifest.compaction_id then
+        manifest_attributes[#manifest_attributes + 1] = attr(
+            "compactionId",
+            manifest.compaction_id
+        )
+    end
+    accepted, writer_error = writer_call(
+        writer,
+        "empty_element",
+        "ActiveManifest",
+        manifest_attributes
+    )
     if not accepted then return nil, writer_error end
     for _, record in ipairs(canonical.model_view.compaction_records) do
         local attributes = {
@@ -1753,7 +1821,7 @@ local function read_candidate(codec, safety_service, source, admitted)
             if name == "ActiveManifest" and model_stage == 0 then
                 parsed, parsed_error = exact_attributes(attributes, {
                     "digest", "firstEventSeq", "lastEventSeq",
-                }, {}, path)
+                }, { "compactionId" }, path)
                 model_stage = 1
             elseif name == "CompactionRecord" and model_stage >= 1 then
                 parsed, parsed_error = exact_attributes(attributes, {
@@ -2003,6 +2071,7 @@ local function read_candidate(codec, safety_service, source, admitted)
                 digest = frame.attributes.digest,
                 first_event_seq = first,
                 last_event_seq = last,
+                compaction_id = frame.attributes.compactionId,
             }
         elseif name == "CompactionRecord" and parent_name == "ModelView" then
             local first, last
@@ -2553,7 +2622,11 @@ local function build_event_document(document, mutation, admitted)
     if type(mutation) ~= "table" then
         return nil, failure("InvalidEventMutation", "Context event mutation is required")
     end
-    local allowed = { updated_at = true, events = true }
+    local allowed = {
+        updated_at = true,
+        events = true,
+        compaction_record = true,
+    }
     for key in pairs(mutation) do
         if type(key) ~= "string" or not allowed[key] then
             return nil, failure(
@@ -2588,7 +2661,8 @@ local function build_event_document(document, mutation, admitted)
     end
     candidate.generation = canonical.generation + 1
     candidate.header.updated_at = updated_at
-    local published_view = false
+    local published_view
+    local terminal_compaction
     for index, event_candidate in ipairs(mutation.events) do
         if type(event_candidate) ~= "table" then
             return nil, failure("InvalidEventMutation", "Context event must be a table")
@@ -2619,7 +2693,15 @@ local function build_event_document(document, mutation, admitted)
             turn_id = event_candidate.turn_id ~= false and event_candidate.turn_id or nil,
             fields = event_candidate.fields,
         }
-        if event_candidate.type == "model_view_published" then
+        if event_candidate.type == "compaction" then
+            if terminal_compaction then
+                return nil, failure(
+                    "InvalidEventMutation",
+                    "one Context generation cannot terminate two compactions"
+                )
+            end
+            terminal_compaction = event_candidate
+        elseif event_candidate.type == "model_view_published" then
             local fields = event_candidate.fields
             local first = canonical_decimal(
                 fields.firstEventSeq,
@@ -2645,13 +2727,47 @@ local function build_event_document(document, mutation, admitted)
                     "Context model-view publication is invalid"
                 )
             end
-            published_view = true
+            published_view = event_candidate
             candidate.model_view.active_manifest = {
                 digest = fields.manifestDigest,
                 first_event_seq = first,
                 last_event_seq = last,
+                compaction_id = fields.compactionId,
             }
         end
+    end
+    local record = mutation.compaction_record
+    if terminal_compaction and type(record) ~= "table" then
+        return nil, failure(
+            "InvalidEventMutation",
+            "terminal compaction facts require one matching CompactionRecord"
+        )
+    end
+    if record ~= nil then
+        local fields = terminal_compaction and terminal_compaction.fields or nil
+        if type(record) ~= "table"
+            or type(fields) ~= "table"
+            or fields.compactionId ~= record.id
+            or fields.sourceFirstSeq ~= tostring(record.source_first_seq)
+            or fields.sourceLastSeq ~= tostring(record.source_last_seq)
+            or fields.sourceDigest ~= record.source_digest
+            or fields.status ~= record.status
+            or fields.summary ~= record.summary
+            or (record.status == "ok" and (
+                not published_view
+                or published_view.fields.compactionId ~= record.id
+                or published_view.fields.manifestDigest ~= fields.manifestDigest
+            ))
+            or (record.status ~= "ok" and published_view ~= nil)
+        then
+            return nil, failure(
+                "InvalidEventMutation",
+                "CompactionRecord does not match its terminal facts"
+            )
+        end
+        candidate.model_view.compaction_records[
+            #candidate.model_view.compaction_records + 1
+        ] = record
     end
     return normalize_document(candidate, admitted)
 end

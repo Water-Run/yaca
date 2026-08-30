@@ -203,7 +203,7 @@ DSH 是 durable operation 和恢复方面最强参考。采用 tail-only repair�
 
 ## 4. yaca 当前实现审查
 
-### 4.1 `src/compact.lua`：组件契约强，生产组合缺失
+### 4.1 Compaction：算法与 Context journal 已闭合，公开生产组合仍缺失
 
 已经实现且优于多数参考的部分：
 
@@ -217,17 +217,19 @@ DSH 是 durable operation 和恢复方面最强参考。采用 tail-only repair�
 - 失败最多一次纠错重试；取消 request/result durable，pending cancel 有明确状态；summary correction 是追加事实，不回写旧摘要。
 - Model 层已有独立 no-tool compaction builder/port：冻结 config/Model/Prompt/source/manifest binding，只发送一次 quoted source，provider incomplete、非 stop、tool/control 和结构不完整输出均不能成为摘要。
 - 连续 automatic compaction 失败已有 service-lifetime cooldown/half-open；canonical summary envelope 超限会作为可 durable 拒绝的 Model 输出返回，不会把端口永久卡在 busy。
+- `session.lua` 已提供 production Context compaction journal：request、response、rejection、cancel request/result、publication 与 correction 都按精确 generation、旧 manifest、source range/digest 和 lifecycle 绑定。
+- accepted summary 先独立重建 structured summary、canonical source 与 manifest，再把 terminal `compaction`、`CompactionRecord` 和 `model_view_published` 在一个 Context generation 内提交；任一验证或 publication 失败时旧 XML 与旧 active manifest 保持不变。
+- accepted view 的恢复不依赖内存 cache：启动或 cache miss 时从完整 XML 重新校验 accepted bracket、source/summary digest、publication adjacency 和 active manifest，再确定性重建 summary-prefix view；后续事实只追加 tail，不会把内部 compaction request/response 重送给 main Model。
 
 已确认的 P0 缺口：
 
-1. `main.lua`/`session.lua` 没有 `require("compact")` 或生产 compaction composition。
+1. `main.lua` 尚未实例化 `compact.new`、Model compaction port 与 Context journal 的完整生产 lifecycle。
 2. CLI 注册 `.compact`，但 ApplicationCoordinator 没有该 action 分支，当前会返回 `InteractiveActionUnavailable`。
-3. Model compaction builder/port 尚未由 `main.lua` 实例化，也没有经过 endpoint-disclosure admission 与真实 transport composition；当前只完成了底层 no-tool/frozen-binding 边界。
-4. Context publication 没有 production compaction journal，也没有将 accepted summary 与新 ModelView manifest 一次 durable 发布的 mutation。
-5. Runtime 没有 automatic threshold admission、跨进程恢复的 failure cooldown，或恢复 pending compaction marker 的 owner；现有 circuit 状态只覆盖同一 service lifetime。
-6. response wrapper 已在 Model port 与 `compact.lua` 双层验证 provider `incomplete`/finish class/tool/control，但仍需 production adapter 黑盒测试证明这些字段没有在组合层丢失。
+3. Model compaction builder/port 尚未经过 `main.lua` 的 endpoint-disclosure admission 与真实 transport composition；当前已完成 no-tool/frozen-binding 边界和 isolated adapter 测试。
+4. Runtime 没有 automatic threshold admission、跨进程恢复的 failure cooldown，或恢复 pending compaction marker 的 owner；现有 circuit 状态只覆盖同一 service lifetime。
+5. response wrapper 已在 Model port 与 `compact.lua` 双层验证 provider `incomplete`/finish class/tool/control，但仍需 production adapter 黑盒测试证明这些字段没有在组合层丢失。
 
-因此，现有 `compact_test.lua` 的绿色结果只证明 isolated service，不能证明公开 `.compact` 可用。README 的“implementation complete”只有在上述生产组合闭合后才成立。
+2026-08-30 的受资源门禁串行 suite 为 `391/391`，其中已含 canonical manifest 伪造拒绝、失败前后 Context 字节/代不变、accepted summary + view 原子发布、cache-miss 恢复和取消 terminal truth；这些证据关闭 Context publication 缺口，但仍不能证明公开 `.compact` 可用。README 的“implementation complete”只有在剩余生产组合闭合后才成立。
 
 ### 4.2 Permission：精确单动作授权是强项
 
@@ -277,7 +279,7 @@ Release Gate R 在这些原生证据完成前保持关闭。
 - operation intent/result 被翻译成同一 Context 事件流，Runtime 必须领取外部 receipt 后才能推进自己的 sequence waterline。
 - next turn 从 durable Context override 重新加载完整 Config generation；active turn 不漂移。
 
-缺口集中在 compaction：schema 已能读取 `compaction` event 和 `CompactionRecord`，但 publication service 尚不能构造/提交生产 compaction generation；也没有从启动时的 incomplete compaction bracket 生成明确 cancelled/unknown 恢复记录。
+Compaction publication 已能构造并提交完整 generation：terminal event、`CompactionRecord` 与新 ModelView 必须同批匹配，accepted view 可从 XML 重建；error/cancel 不能偷换 active manifest。剩余恢复缺口只在**未收口** lifecycle：启动时尚未把 intent/response-only bracket 归并为明确 cancelled/unknown，跨进程 circuit 状态也尚未恢复。
 
 ### 4.5 Test Harness 与 OOM 风险
 
@@ -317,14 +319,14 @@ Release Gate R 在这些原生证据完成前保持关闭。
 
 ### P0：生产闭环
 
-1. 为 Model 增加 no-tool compaction request builder/port，冻结当前 turn 的 Model/Global prompt、view/source binding 和输出上限。
-2. 为 Context publication 增加 compaction snapshot/journal；request、response/rejection/cancel/correction 和 accepted summary 均有精确 generation/manifest receipt。
-3. accepted summary 与新 ModelView manifest 在一个 publication generation 中提交；旧 manifest 在成功前保持 sole active。
-4. ApplicationCoordinator 接通 `.compact`，只在 durable Idle/WaitingUser admission；STATUS 开始/完成/失败可见，可取消。
-5. 自动 compaction 在下一 Model request 前按 manifest threshold 触发；失败仍超窗时停止，不发送 oversized request。
-6. response 必须证明 `incomplete=false`、finish class 完整、无 tool/control；空或无收益摘要拒绝。
-7. 连续自动失败进入有界 circuit breaker/cooldown/half-open；手工请求仍给明确结果，不递归重试。
-8. 恢复 incomplete compaction bracket 时保留旧 view并落 cancelled/unknown，绝不把未发布摘要当 active。
+1. [x] 为 Model 增加 no-tool compaction request builder/port，冻结当前 turn 的 Model/Global prompt、view/source binding 和输出上限。
+2. [x] 为 Context publication 增加 compaction snapshot/journal；request、response/rejection/cancel/correction 和 accepted summary 均有精确 generation/manifest receipt。
+3. [x] accepted summary 与新 ModelView manifest 在一个 publication generation 中提交；旧 manifest 在成功前保持 sole active。
+4. [ ] ApplicationCoordinator 接通 `.compact`，只在 durable Idle/WaitingUser admission；STATUS 开始/完成/失败可见，可取消。
+5. [ ] 自动 compaction 在下一 Model request 前按 manifest threshold 触发；失败仍超窗时停止，不发送 oversized request。
+6. [x] response 必须证明 `incomplete=false`、finish class 完整、无 tool/control；空或无收益摘要拒绝。
+7. [ ] 连续自动失败进入有界 circuit breaker/cooldown/half-open；手工请求仍给明确结果，不递归重试；当前仅同一 service lifetime 已实现。
+8. [ ] 恢复 incomplete compaction bracket 时保留旧 view并落 cancelled/unknown，绝不把未发布摘要当 active；accepted bracket 的恢复已实现。
 
 ### P0：Harness 证明
 
@@ -353,4 +355,4 @@ Release Gate R 在这些原生证据完成前保持关闭。
 
 ## 7. 当前结论
 
-yaca 的 Permission exact binding、direct filesystem 复核、durable operation 和 isolated compaction algorithm 已经具有很强的底层约束；当前最大风险不是“算法太弱”，而是这些组件尚未全部进入同一个生产 Harness。下一里程碑必须以 `.compact` 的端到端组合和公开 action 接线审计为核心，而不是继续增加只在单元 fixture 中成立的能力。
+yaca 的 Permission exact binding、direct filesystem 复核、durable operation、compaction algorithm 与 Context 原子 publication 已经具有很强的底层约束；当前最大风险不是“算法太弱”，而是 Model transport、Runtime admission、ApplicationCoordinator 与公开 action 还没有进入同一个生产 Harness。下一里程碑必须以 `.compact` 的端到端组合、未收口 lifecycle 恢复和公开 action 接线审计为核心，而不是继续增加只在单元 fixture 中成立的能力。
