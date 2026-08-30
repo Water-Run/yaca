@@ -3367,6 +3367,17 @@ function M.new_compaction_request_builder(ports, options)
     return readonly(service, "compaction request builder")
 end
 
+local TLS_VERIFICATION_EXIT_CODES = {
+    [58] = true, -- local client certificate
+    [59] = true, -- configured cipher suite
+    [60] = true, -- peer certificate or host verification
+    [77] = true, -- CA certificate file
+    [82] = true, -- certificate revocation list
+    [83] = true, -- issuer certificate
+    [90] = true, -- pinned public key
+    [91] = true, -- certificate status
+}
+
 local function transport_category(result)
     if type(result) ~= "table"
         or type(result.response_body) ~= "string"
@@ -3391,11 +3402,16 @@ local function transport_category(result)
     if result.response_body ~= "" or result.response_headers ~= "" then
         return "body-outcome-unknown"
     end
-    if result.exit_kind == "exit-code" and result.exit_code == 6 then return "dns" end
-    if result.exit_kind == "exit-code" and result.exit_code == 7 then return "connect" end
     if result.exit_kind == "exit-code"
-        and (result.exit_code == 35 or result.exit_code == 60)
+        and (result.exit_code == 5 or result.exit_code == 6)
     then
+        return "dns"
+    end
+    if result.exit_kind == "exit-code" and result.exit_code == 7 then return "connect" end
+    if result.exit_kind == "exit-code" and TLS_VERIFICATION_EXIT_CODES[result.exit_code] then
+        return "tls-verification"
+    end
+    if result.exit_kind == "exit-code" and result.exit_code == 35 then
         return "tls-before-body"
     end
     return "outcome-unknown"

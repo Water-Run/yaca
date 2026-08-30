@@ -299,6 +299,7 @@ return {
                     ["http-503-before-event"] = "http-503",
                     ["event-observed"] = "connect",
                     auth = "auth-4xx",
+                    ["tls-verification"] = "tls-verification",
                     protocol = "protocol",
                     cancel = "cancel",
                     unknown = "outcome-unknown",
@@ -391,6 +392,7 @@ return {
                 local expected = {
                     ["body-outcome-unknown"] = "unknown",
                     ["outcome-unknown"] = "unknown",
+                    ["tls-verification"] = "failed",
                     ["auth-4xx"] = "failed",
                     ["ordinary-4xx"] = "failed",
                     protocol = "failed",

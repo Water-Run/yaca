@@ -86,7 +86,7 @@ return {
       count_meaning = "automatic-attempts-after-first",
       snapshot = { "route", "count", "base_delay_ms", "exponent", "max_delay_ms", "jitter", "manifest_id" },
       eligible_before_canonical_event = { "dns", "connect", "tls-before-body", "http-429", "http-503" },
-      never_eligible = { "auth-4xx", "ordinary-4xx", "protocol", "content-refusal", "cancel", "outcome-unknown" },
+      never_eligible = { "tls-verification", "auth-4xx", "ordinary-4xx", "protocol", "content-refusal", "cancel", "outcome-unknown" },
       retry_after = "minimum-wait-then-fail-if-any-budget-or-runtime-cap-would-be-exceeded",
       model_switch = false,
       active_config_reload = false,

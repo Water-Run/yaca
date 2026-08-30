@@ -151,7 +151,8 @@ end
 
 local function option_line(name, value)
     if type(value) == "boolean" then
-        return name .. " = " .. (value and "true" or "false")
+        -- curl config stand-alone options reject a trailing true/false argument.
+        return value and name or "no-" .. name
     end
     return name .. " = " .. config_quote(value)
 end
@@ -696,6 +697,13 @@ local function build_config(attempt, body_path, header_path, by_reference)
     lines[#lines + 1] = option_line("max-redirs", "0")
     lines[#lines + 1] = option_line("proto", "=http,https")
     lines[#lines + 1] = option_line("proto-redir", "=http,https")
+    lines[#lines + 1] = option_line("http1.1", true)
+    lines[#lines + 1] = option_line("tlsv1.2", true)
+    -- The curl tool exposes proxy-tlsv1 rather than per-minor proxy switches.
+    -- The locked Mbed TLS backend supports only TLS 1.2 and TLS 1.3.
+    lines[#lines + 1] = option_line("proxy-tlsv1", true)
+    lines[#lines + 1] = option_line("insecure", false)
+    lines[#lines + 1] = option_line("proxy-insecure", false)
     lines[#lines + 1] = option_line("compressed", false)
     lines[#lines + 1] = option_line("netrc", false)
     local proxy_url = attempt.proxy.url
@@ -707,6 +715,7 @@ local function build_config(attempt, body_path, header_path, by_reference)
     lines[#lines + 1] = option_line("proxy", proxy_url or "")
     lines[#lines + 1] = option_line("noproxy", attempt.proxy.no_proxy)
     lines[#lines + 1] = option_line("cacert", attempt.ca_bundle_path)
+    lines[#lines + 1] = option_line("proxy-cacert", attempt.ca_bundle_path)
     return table.concat(lines, "\n") .. "\n"
 end
 
@@ -1458,6 +1467,7 @@ local RETRYABLE_CATEGORIES = {
 local NEVER_RETRY_CATEGORIES = {
     ["body-outcome-unknown"] = "unknown",
     ["outcome-unknown"] = "unknown",
+    ["tls-verification"] = "failed",
     ["auth-4xx"] = "failed",
     ["ordinary-4xx"] = "failed",
     protocol = "failed",
@@ -2292,12 +2302,16 @@ function M.new(ports, options)
         curl_retry = 0,
         automatic_redirect = false,
         protocols = "http,https",
+        http_version = "HTTP/1.1",
+        minimum_tls = "TLSv1.2-or-newer",
+        certificate_verification = "bundled-ca-required",
+        proxy_certificate_verification = "bundled-ca-required",
         content_encoding = "identity",
         sse = "bounded-exact-lf-crlf-cr",
         redirects = "runtime-controlled-307-308-same-origin-only",
         retry = "runtime-controlled-bounded-no-replay-after-canonical-event",
         target_qualified = false,
-        qualification = "modern-carrier-candidate;target-curl-tls-proxy-ca-pending",
+        qualification = "runtime-tls-ca-policy-closed;target-curl-tls-proxy-ca-pending",
     }, "network capabilities")
 
     return readonly(service, "network service")

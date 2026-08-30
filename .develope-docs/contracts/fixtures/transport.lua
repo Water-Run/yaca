@@ -10,6 +10,7 @@ return {
     { id = "http-429-before-event", cause = "http-429", canonical_events = 0, automatic = true, maximum_attempts = 3 },
     { id = "http-503-before-event", cause = "http-503", canonical_events = 0, automatic = true, maximum_attempts = 3 },
     { id = "event-observed", cause = "connect", canonical_events = 1, automatic = false, maximum_attempts = 1 },
+    { id = "tls-verification", cause = "tls-verification", canonical_events = 0, automatic = false, maximum_attempts = 1 },
     { id = "auth", cause = "auth-4xx", canonical_events = 0, automatic = false, maximum_attempts = 1 },
     { id = "protocol", cause = "protocol", canonical_events = 0, automatic = false, maximum_attempts = 1 },
     { id = "cancel", cause = "cancel", canonical_events = 0, automatic = false, maximum_attempts = 1 },

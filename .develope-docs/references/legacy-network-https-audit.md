@@ -45,6 +45,8 @@
 - 发行 curl 只开放 HTTP/HTTPS，禁用 ambient curl config、netrc、自动 redirect、curl 自身 retry、系统/搜索 CA、压缩与持久网络状态。
 - HTTPS 和 HTTPS proxy 都必须验证证书，使用同一随包 CA bundle；不存在 `insecure` 或 native CA fallback。
 - TLS 最低为 1.2，语义为 TLS 1.2 或更新版本；XP 系统 TLS 能力不参与握手。
+- Runtime 写入 curl 匿名 stdin config 时使用 curl 原生 standalone 语法显式固定 `http1.1`、`tlsv1.2`、`proxy-tlsv1`、`no-insecure`、`no-proxy-insecure`、`cacert` 与 `proxy-cacert`；不得把布尔开关序列化成会被 curl 拒绝的 `option=true/false`。curl CLI 的 proxy 开关只表达 TLS 1.x，实际 TLS 1.2+ 下限由只启用 TLS 1.2/1.3 的锁定 Mbed TLS 3.6.7 后端闭合。发行 profile 的 TLS/CA 声明因此已有平台无关执行路径和 carrier 语法测试，而真实目标握手资格仍未取得。
+- curl 的代理/主机 DNS（exit 5/6）、连接（7）与无响应体普通握手（35）才可在 canonical event 前进入有界重试；client cert/cipher/peer verify/CA file/CRL/issuer/pin/cert-status（58/59/60/77/82/83/90/91）统一归为 `tls-verification` 并立即终止，避免错误 CA 或证书配置触发无意义重放。其他未识别 transport 结果继续 fail closed 为 outcome unknown。
 - secret config 只经 trusted component 的匿名 stdin pipe 进入 curl；request body 和 response header 使用 owner-only、create-new、identity-checked 临时文件。该内部进程不经过 XP `cmd.exe`、POSIX shell、argv secret 或 ambient proxy 环境。
 - HTTP endpoint 是既有显式产品能力，绝不由 HTTPS 失败自动降级；其明文风险由 Model 配置负责展示。
 
@@ -53,10 +55,11 @@
 `.tools/qualification/build_win32_xp_https_candidate.sh` 从锁定压缩包重新开始，顺序执行：
 
 1. 资源门检查且全程 `-j1`；
-2. 校验两个 archive、两个 patch 和 11 个基文件的 SHA-256；
+2. 校验两个 archive、两个 patch 和 14 个基文件的 SHA-256；
 3. `patch --fuzz=0` 应用补丁；
-4. 用 i686 MinGW、`_WIN32_WINNT=0x0501`、PE subsystem 5.01 静态构建 Mbed TLS 与 curl；
-5. 对最终 `curl.exe` 执行 object format、subsystem、DLL closure、required import 与 banned import 审计。
+4. 对锁定的 curl option table/no-option parser、Mbed TLS 1.2/1.3 protocol floor，以及 curl→Mbed TLS minimum-version mapping 做源码哈希和语法审计；
+5. 用 i686 MinGW、`_WIN32_WINNT=0x0501`、PE subsystem 5.01 静态构建 Mbed TLS 与 curl；
+6. 对最终 `curl.exe` 执行 object format、subsystem、DLL closure、required import 与 banned import 审计。
 
 本次全新复现结果：
 
@@ -66,6 +69,9 @@ target=win32-x86
 minimum-image-subsystem=Windows-5.01
 evidence=cross-build-and-static-import-audit
 protocols=http,https
+curl_config_grammar=standalone-no-option
+minimum_tls=TLSv1.2-or-newer
+proxy_tls_floor=TLSv1.2-or-newer-via-mbedtls
 resolver=blocking
 ipv6=false
 entropy=CryptoAPI-CryptGenRandom
@@ -75,6 +81,8 @@ release_authorized=false
 ```
 
 最终候选只显式依赖 `ADVAPI32.dll`、`KERNEL32.dll`、`WS2_32.dll` 和 `msvcrt.dll`。已自动拒绝 BCrypt/bcrypt DLL、SRW/condition API、`InitializeCriticalSectionEx`、`if_nametoindex`、UCRT/API-set、六个新 `_s` CRT 导入以及一组常见 Vista+ 文件/取消 API。
+
+加入 curl config grammar/TLS floor 审计后又从原始归档完成一次全新 `-j1` 构建；前后两个独立输出的 `curl.exe` SHA-256 均为 `f69882e74ce56a03c059c4f4e537a9f4c4ec6ecccaf391bb4a7fcd374337ec08`。这证明审计增强没有改变候选字节，仍不替代真实 XP 运行证据。
 
 这仍是**候选证据**。没有把当前开发机/Wine 行为写成 XP 运行证据，也没有把 PE 5.01 头写成完整 API 兼容证明。
 

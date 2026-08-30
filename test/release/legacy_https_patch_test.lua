@@ -64,6 +64,9 @@ local curl_record = lock.components.curl.downstream_patches[1]
 local mbedtls_record = lock.components.mbedtls.downstream_patches[1]
 local curl_patch = read_bytes(curl_record.path)
 local mbedtls_patch = read_bytes(mbedtls_record.path)
+local candidate_build = read_bytes(
+    ".tools/qualification/build_win32_xp_https_candidate.sh"
+)
 
 return {
     name = "release/legacy-https-patch",
@@ -160,6 +163,14 @@ return {
                 A.equal(xp.resolver, "blocking")
                 A.falsy(xp.ipv6)
                 A.deep_equal(xp.downstream_patch_components, { "curl", "mbedtls" })
+                for _, marker in ipairs({
+                    "curl_config_grammar=standalone-no-option",
+                    "proxy_tls_floor=TLSv1.2-or-newer-via-mbedtls",
+                    "locked curl no-option parser branch is missing",
+                    "Mbed TLS protocol floor is not exactly TLS 1.2 and TLS 1.3",
+                }) do
+                    A.contains(candidate_build, marker)
+                end
                 A.falsy(lock.release_authorized)
                 A.falsy(lock.target_artifacts_qualified)
             end,

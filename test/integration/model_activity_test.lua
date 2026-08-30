@@ -504,6 +504,49 @@ return {
             end,
         },
         {
+            name = "curl transport codes separate retryable DNS and handshake from TLS trust",
+            run = function()
+                local success = result({
+                    headers = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n",
+                    body = '{"id":"response-transport","choices":[{"message":' ..
+                        '{"role":"assistant","content":"transport recovered"},' ..
+                        '"finish_reason":"stop"}]}',
+                })
+
+                local proxy_dns = fixture("openai-chat", "off", 1, {
+                    { result = result({ exit_code = 5 }) },
+                    { result = success },
+                })
+                local dns_output = collect(proxy_dns)
+                A.equal(#proxy_dns.observed, 2)
+                A.equal(dns_output[#dns_output].wrapper.canonical_body, "transport recovered")
+
+                for _, exit_code in ipairs({ 58, 59, 60, 77, 82, 83, 90, 91 }) do
+                    local certificate = fixture("openai-chat", "off", 2, {
+                        { result = result({ exit_code = exit_code }) },
+                        { result = success },
+                        { result = success },
+                    })
+                    local certificate_output = collect(certificate)
+                    A.equal(#certificate.observed, 1, "curl exit " .. tostring(exit_code))
+                    local wrapper = certificate_output[#certificate_output].wrapper
+                    A.equal(wrapper.normalized.finish_class, "incomplete")
+                    A.equal(wrapper.normalized.incomplete_reason, "tls-verification")
+                end
+
+                local handshake = fixture("openai-chat", "off", 1, {
+                    { result = result({ exit_code = 35 }) },
+                    { result = success },
+                })
+                local handshake_output = collect(handshake)
+                A.equal(#handshake.observed, 2)
+                A.equal(
+                    handshake_output[#handshake_output].wrapper.canonical_body,
+                    "transport recovered"
+                )
+            end,
+        },
+        {
             name = "try streaming falls back once only before a canonical event",
             run = function()
                 local malformed = result({

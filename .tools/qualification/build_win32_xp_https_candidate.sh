@@ -94,15 +94,54 @@ verify_sha256 "$CURL_SOURCE/lib/curlx/timeval.c" \
   c72e3fa44b771af5f9f5f13343d5a28e9183203e783395d1d76289ac3a51504e
 verify_sha256 "$CURL_SOURCE/lib/curlx/fopen.c" \
   ac1ee4422a0e278a41c46173cbd8c0508ec7e382374e968abbf99bf59028116b
+verify_sha256 "$CURL_SOURCE/src/tool_getparam.c" \
+  b75e73968cf0efe09b1678f35da529196c61558607740390e98f5bc12102b440
+verify_sha256 "$CURL_SOURCE/lib/vtls/mbedtls.c" \
+  23a7a0ea35e91890c49fac46c8c529393e46f66c26d304356d0e226f5bdf158b
 verify_sha256 "$MBEDTLS_SOURCE/library/entropy_poll.c" \
   472e1ba8dfcd751cac88da649987c1422d0e263ffb57ad406bc6652282d48bc4
 verify_sha256 "$MBEDTLS_SOURCE/library/platform.c" \
   69f5e0c95478d792ac5654af56817c8272a68c322010e342afacc90e6d57524d
+verify_sha256 "$MBEDTLS_SOURCE/include/mbedtls/mbedtls_config.h" \
+  004edfaa0f9877a9f3baa7911ab708fd9d7c615f836f6b6674434e337145b7be
 
 patch --batch --forward --fuzz=0 -d "$CURL_SOURCE" -p1 -i "$CURL_PATCH" \
   >"$LOG_ROOT/curl-patch.log" 2>&1
 patch --batch --forward --fuzz=0 -d "$MBEDTLS_SOURCE" -p1 -i "$MBEDTLS_PATCH" \
   >"$LOG_ROOT/mbedtls-patch.log" 2>&1
+
+require_source_pattern() {
+  local path=$1
+  local pattern=$2
+  local description=$3
+  grep -Eq "$pattern" "$path" \
+    || die "locked curl config grammar is missing: $description"
+}
+
+require_source_pattern "$CURL_SOURCE/src/tool_getparam.c" \
+  '\{"http1[.]1",[[:space:]]+ARG_NONE,' "http1.1 standalone option"
+require_source_pattern "$CURL_SOURCE/src/tool_getparam.c" \
+  '\{"tlsv1[.]2",[[:space:]]+ARG_NONE[|]ARG_TLS,' "tlsv1.2 standalone option"
+require_source_pattern "$CURL_SOURCE/src/tool_getparam.c" \
+  '\{"proxy-tlsv1",[[:space:]]+ARG_NONE[|]ARG_TLS,' "proxy-tlsv1 standalone option"
+for boolean_option in compressed insecure location netrc proxy-insecure retry-all-errors; do
+  require_source_pattern "$CURL_SOURCE/src/tool_getparam.c" \
+    "\\{\"${boolean_option}\",[[:space:]]+ARG_BOOL" \
+    "$boolean_option no-option grammar"
+done
+grep -Fq 'if(!strncmp(word, "no-", 3))' "$CURL_SOURCE/src/tool_getparam.c" \
+  || die "locked curl no-option parser branch is missing"
+
+TLS_PROTOCOLS=$(grep -E '^#define MBEDTLS_SSL_PROTO_TLS' \
+  "$MBEDTLS_SOURCE/include/mbedtls/mbedtls_config.h" | awk '{print $2}' | sort)
+EXPECTED_TLS_PROTOCOLS=$(printf '%s\n' \
+  MBEDTLS_SSL_PROTO_TLS1_2 MBEDTLS_SSL_PROTO_TLS1_3 | sort)
+[[ "$TLS_PROTOCOLS" == "$EXPECTED_TLS_PROTOCOLS" ]] \
+  || die "Mbed TLS protocol floor is not exactly TLS 1.2 and TLS 1.3"
+grep -q 'case CURL_SSLVERSION_TLSv1:' "$CURL_SOURCE/lib/vtls/mbedtls.c" \
+  || die "curl Mbed TLS proxy version mapping is missing"
+grep -q 'ver_min = MBEDTLS_SSL_VERSION_TLS1_2;' "$CURL_SOURCE/lib/vtls/mbedtls.c" \
+  || die "curl Mbed TLS minimum does not map to TLS 1.2"
 
 export SOURCE_DATE_EPOCH=1787990400
 export LC_ALL=C
@@ -206,6 +245,9 @@ grep -q '^TLSv1\.2 or greater$' "$OUTPUT_ROOT/curl-strings.txt" \
   echo "mbedtls=3.6.7"
   echo "mbedtls_patch_sha256=500c30ccad77f5e33d95c2241b97b6f879dcc1525de6c58b0456fbdd9c6dd4f2"
   echo "protocols=http,https"
+  echo "curl_config_grammar=standalone-no-option"
+  echo "minimum_tls=TLSv1.2-or-newer"
+  echo "proxy_tls_floor=TLSv1.2-or-newer-via-mbedtls"
   echo "resolver=blocking"
   echo "ipv6=false"
   echo "entropy=CryptoAPI-CryptGenRandom"
