@@ -2,6 +2,12 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd -P)
+
+if [[ ${YACA_TEST_RESOURCE_GUARD_HELD:-0} != 1 ]]; then
+  export YACA_TEST_MIN_AVAILABLE_MIB=${YACA_TEST_MIN_AVAILABLE_MIB:-4096}
+  exec "$REPO_ROOT/.tools/run_with_resource_guard.sh" bash "$0" "$@"
+fi
 
 usage() {
   echo "usage: $0 SOURCE_CACHE YACA_ARCHIVE YACA_REVISION YACA_ARCHIVE_SHA256 OUTPUT" >&2

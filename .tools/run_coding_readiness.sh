@@ -4,6 +4,10 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 
+if [[ ${YACA_TEST_RESOURCE_GUARD_HELD:-0} != 1 ]]; then
+  exec "$SCRIPT_DIR/run_with_resource_guard.sh" bash "$0" "$@"
+fi
+
 cd "$REPO_ROOT"
 
 bin/lua55 .tools/validate_design_contracts.lua

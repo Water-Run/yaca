@@ -3,6 +3,11 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
+
+if [[ ${YACA_TEST_RESOURCE_GUARD_HELD:-0} != 1 ]]; then
+  exec "$REPO_ROOT/.tools/run_with_resource_guard.sh" bash "$0" "$@"
+fi
+
 WORK_DIR=$(mktemp -d -t yaca-rp001-XXXXXX)
 BUILD_LOG="$WORK_DIR/build.log"
 

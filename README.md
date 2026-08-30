@@ -83,3 +83,12 @@ Start with the [current state](.develope-docs/CURRENT-STATE.md), [Gate A/B/R aud
 ```sh
 bash .tools/run_coding_readiness.sh
 ```
+
+The readiness and heavyweight proof entrypoints acquire one per-user yaca test
+lock and fail with exit 75 before starting when effective host/cgroup memory,
+load, or Linux memory pressure is unsafe. Run an isolated full Lua suite through
+the same guard instead of invoking it unguarded:
+
+```sh
+bash .tools/run_with_resource_guard.sh bin/lua55 test/run.lua
+```
