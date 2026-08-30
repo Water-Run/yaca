@@ -162,6 +162,20 @@ return {
                     A.equal(plan.status, "candidate-unqualified")
                     A.falsy(plan.release_authorized)
                     A.falsy(plan.target_qualification_complete)
+                    if target_id == "win32-x86" then
+                        A.deep_equal(
+                            plan.dependency_patches.curl,
+                            lock.components.curl.downstream_patches
+                        )
+                        A.deep_equal(
+                            plan.dependency_patches.mbedtls,
+                            lock.components.mbedtls.downstream_patches
+                        )
+                    else
+                        A.deep_equal(plan.dependency_patches, {
+                            curl = {}, mbedtls = {},
+                        })
+                    end
                 end
             end,
         },
@@ -226,6 +240,10 @@ return {
                     planner.policy.builder_patches,
                     lock.components.luainstaller.downstream_patches
                 )
+                A.deep_equal(planner.policy.dependency_patches, {
+                    curl = lock.components.curl.downstream_patches,
+                    mbedtls = lock.components.mbedtls.downstream_patches,
+                })
             end,
         },
         {

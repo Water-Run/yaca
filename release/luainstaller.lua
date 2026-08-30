@@ -64,11 +64,50 @@ local LUAINSTALLER_PATCH = {
     },
 }
 
+local CURL_PATCH = {
+    path = "release/patches/curl-8.21.0-winxp.patch",
+    sha256 = "8dd8c9d31dca0a5611a88f662bcda56a3531caebd638d63f78ff9ae1ed9c594f",
+    purpose = "restore-win32-xp-static-http-https-compatibility",
+    applies_to_source_sha256 = "aa1b66a70eace83dc624508745646c08ae561de512ab403adffb93ac87fc72e6",
+    target_ids = { "win32-x86" },
+    base_file_sha256 = {
+        ["configure"] = "236bffd8111d66cb9a17a2e64978718a1ee182fce8f25ef8fc99f56393aa3348",
+        ["configure.ac"] = "44ab8614c3e824b5bbe0e1d0694211dd8fb9c7ac62c47b3f1e8987dea9ed98a8",
+        ["lib/curl_setup.h"] = "8b8233cb31aa58d40965b4d53c428b0e5fc742c041148acbd88bcce5f7ec17cc",
+        ["lib/easy_lock.h"] = "1b3abe3b6ff8d78228e6dffbcf954c38fe05283427a8e7bddaaa37d9caa172af",
+        ["lib/curl_threads.h"] = "6b23757a99b103e600cd9f8f894dfb2d0cb146f24274f77cad692f7f84a613c0",
+        ["lib/curl_threads.c"] = "5233500c2dab55f9a78ca8fab8b134963ff80d8b254f1d3c76bbff2a45927fbc",
+        ["lib/rand.c"] = "d13469813cad22319eb68375d464757e01bb162a9775bce29c2407e6da14a661",
+        ["lib/curlx/timeval.c"] = "c72e3fa44b771af5f9f5f13343d5a28e9183203e783395d1d76289ac3a51504e",
+        ["lib/curlx/fopen.c"] = "ac1ee4422a0e278a41c46173cbd8c0508ec7e382374e968abbf99bf59028116b",
+    },
+}
+
+local MBEDTLS_PATCH = {
+    path = "release/patches/mbedtls-3.6.7-winxp.patch",
+    sha256 = "500c30ccad77f5e33d95c2241b97b6f879dcc1525de6c58b0456fbdd9c6dd4f2",
+    purpose = "restore-win32-xp-entropy-and-crt-compatibility",
+    applies_to_source_sha256 = "a7e8bcbec0e6f761b4af24f25677626b35f762f68eef79c08677a363212d11f6",
+    target_ids = { "win32-x86" },
+    base_file_sha256 = {
+        ["library/entropy_poll.c"] = "472e1ba8dfcd751cac88da649987c1422d0e263ffb57ad406bc6652282d48bc4",
+        ["library/platform.c"] = "69f5e0c95478d792ac5654af56817c8272a68c322010e342afacc90e6d57524d",
+    },
+}
+
+local PINNED_PATCHES = {
+    luainstaller = { LUAINSTALLER_PATCH },
+    curl = { CURL_PATCH },
+    mbedtls = { MBEDTLS_PATCH },
+}
+
 local PATCH_FIELDS = {
     path = true,
     sha256 = true,
     purpose = true,
     applies_to_revision = true,
+    applies_to_source_sha256 = true,
+    target_ids = true,
     base_file_sha256 = true,
 }
 
@@ -182,69 +221,99 @@ local function unique_array(values, label)
     return seen
 end
 
-local function validate_luainstaller_patches(patches, revision)
-    if dense_count(patches) ~= 1 then
-        return nil, "luainstaller must have exactly one pinned downstream patch"
+local function same_string_map(left, right)
+    if type(left) ~= "table" or type(right) ~= "table" then return false end
+    for key, value in pairs(left) do
+        if right[key] ~= value then return false end
     end
-    local patch = patches[1]
-    local fields_ok, fields_error = known_fields(
-        patch,
-        PATCH_FIELDS,
-        "luainstaller downstream patch"
-    )
-    if not fields_ok then return nil, fields_error end
-    if patch.path ~= LUAINSTALLER_PATCH.path
-        or patch.sha256 ~= LUAINSTALLER_PATCH.sha256
-        or patch.purpose ~= LUAINSTALLER_PATCH.purpose
-        or patch.applies_to_revision ~= revision
-        or patch.applies_to_revision ~= LUAINSTALLER_PATCH.applies_to_revision
-        or not safe_path(patch.path, false)
-        or not is_sha256(patch.sha256)
-    then
-        return nil, "luainstaller downstream patch is not exactly pinned"
-    end
-    if type(patch.base_file_sha256) ~= "table" then
-        return nil, "luainstaller patch base file hashes are missing"
-    end
-    local base_count = 0
-    for path, digest in pairs(patch.base_file_sha256) do
-        base_count = base_count + 1
-        if LUAINSTALLER_PATCH.base_file_sha256[path] ~= digest
-            or not safe_path(path, false)
-            or not is_sha256(digest)
-        then
-            return nil, "luainstaller patch base file hash changed"
-        end
-    end
-    local expected_count = 0
-    for path, digest in pairs(LUAINSTALLER_PATCH.base_file_sha256) do
-        expected_count = expected_count + 1
-        if patch.base_file_sha256[path] ~= digest then
-            return nil, "luainstaller patch omits a pinned base file"
-        end
-    end
-    if base_count ~= expected_count then
-        return nil, "luainstaller patch base file set changed"
+    for key, value in pairs(right) do
+        if left[key] ~= value then return false end
     end
     return true
 end
 
-local function same_luainstaller_patches(left, right)
-    if dense_count(left) ~= 1 or dense_count(right) ~= 1 then return false end
-    local left_patch, right_patch = left[1], right[1]
-    if type(left_patch) ~= "table" or type(right_patch) ~= "table" then return false end
-    for field in pairs(PATCH_FIELDS) do
-        if field ~= "base_file_sha256" and left_patch[field] ~= right_patch[field] then
-            return false
+local function validate_pinned_patches(name, patches, binding_field, binding_value)
+    local expected_patches = PINNED_PATCHES[name]
+    if dense_count(patches) ~= #expected_patches then
+        return nil, name .. " downstream patch count changed"
+    end
+    for index, expected in ipairs(expected_patches) do
+        local patch = patches[index]
+        local fields_ok, fields_error = known_fields(
+            patch,
+            PATCH_FIELDS,
+            name .. " downstream patch"
+        )
+        if not fields_ok then return nil, fields_error end
+        for field in pairs(PATCH_FIELDS) do
+            if field ~= "base_file_sha256" and field ~= "target_ids"
+                and patch[field] ~= expected[field]
+            then
+                return nil, name .. " downstream patch is not exactly pinned"
+            end
+        end
+        if patch[binding_field] ~= binding_value
+            or not safe_path(patch.path, false)
+            or not is_sha256(patch.sha256)
+        then
+            return nil, name .. " downstream patch source binding changed"
+        end
+        if expected.target_ids then
+            local target_set, target_error = unique_array(
+                patch.target_ids,
+                name .. " patch target ids"
+            )
+            if not target_set or not same_array(patch.target_ids, expected.target_ids) then
+                return nil, target_error or name .. " patch target ids changed"
+            end
+            for target_id in pairs(target_set) do
+                local known = false
+                for _, candidate in ipairs(TARGET_ORDER) do
+                    if candidate == target_id then known = true break end
+                end
+                if not known then return nil, name .. " patch has an unknown target" end
+            end
+        elseif patch.target_ids ~= nil then
+            return nil, name .. " patch unexpectedly has target ids"
+        end
+        if not same_string_map(patch.base_file_sha256, expected.base_file_sha256) then
+            return nil, name .. " patch base file set changed"
+        end
+        for path, digest in pairs(patch.base_file_sha256) do
+            if not safe_path(path, false) or not is_sha256(digest) then
+                return nil, name .. " patch base file hash is invalid"
+            end
         end
     end
-    local left_base, right_base = left_patch.base_file_sha256, right_patch.base_file_sha256
-    if type(left_base) ~= "table" or type(right_base) ~= "table" then return false end
-    for path, digest in pairs(left_base) do
-        if right_base[path] ~= digest then return false end
-    end
-    for path, digest in pairs(right_base) do
-        if left_base[path] ~= digest then return false end
+    return true
+end
+
+local function same_patches(left, right)
+    local left_count, right_count = dense_count(left), dense_count(right)
+    if not left_count or left_count ~= right_count then return false end
+    for index = 1, left_count do
+        local left_patch, right_patch = left[index], right[index]
+        if not known_fields(left_patch, PATCH_FIELDS, "left downstream patch")
+            or not known_fields(right_patch, PATCH_FIELDS, "right downstream patch")
+        then
+            return false
+        end
+        for field in pairs(PATCH_FIELDS) do
+            if field ~= "base_file_sha256" and field ~= "target_ids"
+                and left_patch[field] ~= right_patch[field]
+            then
+                return false
+            end
+        end
+        if left_patch.target_ids ~= nil or right_patch.target_ids ~= nil then
+            if not same_array(left_patch.target_ids, right_patch.target_ids) then return false end
+        end
+        if not same_string_map(
+            left_patch.base_file_sha256,
+            right_patch.base_file_sha256
+        ) then
+            return false
+        end
     end
     return true
 end
@@ -285,18 +354,27 @@ local function validate_lock(lock)
             if name == "luainstaller" and not is_revision(component.revision) then
                 return nil, "luainstaller revision is not fully pinned"
             end
-            if name == "luainstaller" then
-                local patches_ok, patches_error = validate_luainstaller_patches(
-                    component.downstream_patches,
-                    component.revision
-                )
-                if not patches_ok then return nil, patches_error end
-            end
             if name == "yaca" and component.revision_policy ~= "exact-build-commit" then
                 return nil, "yaca source revision policy is not exact"
             end
         else
             return nil, "unsupported dependency source type: " .. tostring(name)
+        end
+        local expected_patches = PINNED_PATCHES[name]
+        if expected_patches then
+            local binding_field = component.source_type == "git"
+                and "applies_to_revision" or "applies_to_source_sha256"
+            local binding_value = component.source_type == "git"
+                and component.revision or component.sha256
+            local patches_ok, patches_error = validate_pinned_patches(
+                name,
+                component.downstream_patches,
+                binding_field,
+                binding_value
+            )
+            if not patches_ok then return nil, patches_error end
+        elseif component.downstream_patches ~= nil then
+            return nil, "unexpected downstream patches for " .. tostring(name)
         end
     end
     if type(lock.historical_bin_policy) ~= "table"
@@ -309,12 +387,31 @@ local function validate_lock(lock)
         or not same_array(lock.curl_profile.protocols, { "http", "https" })
         or lock.curl_profile.tls_component ~= "mbedtls"
         or lock.curl_profile.ca_component ~= "ca-bundle"
+        or lock.curl_profile.minimum_tls ~= "TLSv1.2-or-newer"
+        or lock.curl_profile.certificate_verification ~= "bundled-ca-required"
+        or lock.curl_profile.proxy_certificate_verification ~= "bundled-ca-required"
         or lock.curl_profile.upx ~= false
         or not is_empty_array(lock.curl_profile.allowed_non_system_runtime_dependencies)
         or type(lock.curl_profile.target_compatibility) ~= "table"
         or lock.curl_profile.target_compatibility.qualification ~= "pending"
     then
         return nil, "curl profile is not the minimal unqualified static profile"
+    end
+    local xp_profile = lock.curl_profile.target_build_overrides
+        and lock.curl_profile.target_build_overrides["win32-x86"]
+    if type(xp_profile) ~= "table"
+        or xp_profile.win32_winnt ~= "0x0501"
+        or xp_profile.subsystem_version ~= "5.01"
+        or xp_profile.resolver ~= "blocking"
+        or xp_profile.ipv6 ~= false
+        or xp_profile.entropy ~= "CryptoAPI-CryptGenRandom"
+        or xp_profile.system_crt ~= "XP-msvcrt-import-surface"
+        or not same_array(
+            xp_profile.downstream_patch_components,
+            { "curl", "mbedtls" }
+        )
+    then
+        return nil, "win32 XP curl profile is incomplete"
     end
     for _, target_id in ipairs(TARGET_ORDER) do
         local target = lock.target_policy and lock.target_policy[target_id]
@@ -353,12 +450,24 @@ local function validate_manifest(manifest, lock)
         ~= lock.components.luainstaller.revision
         or manifest.dependencies.luainstaller.status
             ~= "source-and-patch-pinned-target-artifact-pending"
-        or not same_luainstaller_patches(
+        or not same_patches(
             manifest.dependencies.luainstaller.downstream_patches,
             lock.components.luainstaller.downstream_patches
         )
         or manifest.dependencies.curl.sha256 ~= lock.components.curl.sha256
+        or manifest.dependencies.curl.status
+            ~= "source-and-patch-pinned-target-artifact-pending"
+        or not same_patches(
+            manifest.dependencies.curl.downstream_patches,
+            lock.components.curl.downstream_patches
+        )
         or manifest.dependencies.mbedtls.sha256 ~= lock.components.mbedtls.sha256
+        or manifest.dependencies.mbedtls.status
+            ~= "source-and-patch-pinned-target-artifact-pending"
+        or not same_patches(
+            manifest.dependencies.mbedtls.downstream_patches,
+            lock.components.mbedtls.downstream_patches
+        )
         or manifest.dependencies.ca_bundle.sha256 ~= lock.components["ca-bundle"].sha256
     then
         return nil, "release manifest and dependency lock disagree"
@@ -539,8 +648,7 @@ local function spdx_package(name, component, source_revision)
             },
         }
     end
-    if name == "luainstaller" then
-        local patch = component.downstream_patches[1]
+    for _, patch in ipairs(component.downstream_patches or {}) do
         package.comment = package.comment .. "; downstream patch " .. patch.path
             .. " SHA256=" .. patch.sha256
     end
@@ -670,6 +778,19 @@ function M.new(manifest, lock)
         local root_entries = copy(
             admitted_manifest.packaging.required_root_entries[target.os]
         )
+        local dependency_patches = {}
+        for _, name in ipairs({ "curl", "mbedtls" }) do
+            dependency_patches[name] = {}
+            for _, patch in ipairs(admitted_lock.components[name].downstream_patches or {}) do
+                local applies = patch.target_ids == nil
+                for _, patch_target_id in ipairs(patch.target_ids or {}) do
+                    if patch_target_id == target_id then applies = true break end
+                end
+                if applies then
+                    dependency_patches[name][#dependency_patches[name] + 1] = copy(patch)
+                end
+            end
+        end
         local plan = {
             schema_version = "yaca-package-plan-v1",
             policy_id = "yaca-minimal-package-v0.1.0",
@@ -688,6 +809,7 @@ function M.new(manifest, lock)
             package_files = package_files,
             outer_runtime_components = {},
             inner_payload = inner_payload,
+            dependency_patches = dependency_patches,
             luainstaller = {
                 version = admitted_lock.components.luainstaller.version,
                 tag = admitted_lock.components.luainstaller.tag,
@@ -856,6 +978,10 @@ function M.new(manifest, lock)
         builder_version = admitted_lock.components.luainstaller.version,
         builder_commit = admitted_lock.components.luainstaller.revision,
         builder_patches = copy(admitted_lock.components.luainstaller.downstream_patches),
+        dependency_patches = {
+            curl = copy(admitted_lock.components.curl.downstream_patches),
+            mbedtls = copy(admitted_lock.components.mbedtls.downstream_patches),
+        },
     }
     return service
 end

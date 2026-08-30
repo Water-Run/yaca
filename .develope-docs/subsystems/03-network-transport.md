@@ -1,8 +1,8 @@
 # 03 网络传输
 
-更新日期：2026-08-29
+更新日期：2026-08-30
 
-状态：**计划已确认（C19/C20）** — [`transport.lua`](../contracts/transport.lua) 与 fixtures 已冻结 curl carrier、retry/redirect/ambient 规则；TP-006 modern 通过，target curl/TLS/proxy/CA 仍是 M6 hard gate
+状态：**C19/C20 已实现；Win32/XP HTTPS 静态候选通过，target qualification 待执行** — [`transport.lua`](../contracts/transport.lua) 与 fixtures 已冻结 curl carrier、retry/redirect/ambient 规则；TP-006 modern 通过，真实 XP/Win7/CentOS 7 TLS/proxy/CA 仍是 M6 hard gate
 
 ## 职责
 
@@ -17,6 +17,7 @@
 - stunnel 只是用户可以在 yaca 之外安装和配置的兼容方案，不随包、不自动安装，也没有 `UseStunnel` 特殊模式。只有当前实际选择的随包 curl/CA TLS 路线不可用或无法连接目标 endpoint 时，self-test 才可以建议安装/配置 stunnel；不能只因运行于 XP 等旧系统、或系统 TLS 本身较旧就提示。用户随后把 Model endpoint 显式指向本机 stunnel 监听地址即可。
 - 全局代理继续只服务 yaca 自己的 Model HTTP。redirect 只自动跟随 same-origin；cross-origin 必须通过修改 Model 配置建立新的显式 endpoint，不能在一次请求中携带凭据悄然跳转。
 - v0.1 不提供 direct Web/HTTP/network tool。模型获准使用 raw shell 后启动 curl 等外部程序，属于宽 `Shell` 动作，不复用本系统的 Model 凭据、代理或传输授权。
+- 2026-08-30 已锁定 curl 8.21.0、Mbed TLS 3.6.7 与 CA 2026-08-13；Win32 x86 使用仅限该目标的 XP compatibility patches、blocking IPv4 resolver、CryptoAPI entropy 和 PE subsystem 5.01。全新交叉构建/导入审计通过但 `runtime_qualified=false`；完整审查见 [`legacy-network-https-audit.md`](../references/legacy-network-https-audit.md)。
 
 ## 流式配置
 
@@ -52,7 +53,7 @@ connect、first-event、idle 和 total deadline 分开计算。单个 Model 的 
 
 ## 秘密与资源上限
 
-curl 的 stdin 不能同时无歧义承载 secret config 和 request body，因此 Key/body 的具体传递路线必须由 Win32 x86、Win64 x64 与 Linux x86_64 原型证明后冻结。候选可以是私有短寿命临时输入、窄 libcurl bridge 或等价方案；无论选择哪条，都必须证明最小文件权限、取消、崩溃残留回收和错误脱敏，且不得把 Key 放进 argv。
+carrier 已冻结为：secret config 经 trusted component 的匿名 stdin pipe 发送，request body/response header 使用 owner-only create-new 临时文件；native Windows 直接 `CreateProcessW`、Linux 直接 `execve`，不经过 CMD/shell，Key 不进入 argv/environment/Context。现代 Linux actual-module probe 与 Win32/Win64 cross-build 已通过；最小 ACL、取消、崩溃残留和错误脱敏仍须在三个真实目标重复证明。
 
 header、压缩体、解压后 body、单个流式 event、tool arguments、总响应和待消费缓冲分别有不可关闭硬上限。达到上限返回 typed limit error，不能先无限装入 Lua table 再由 TUI 截断。
 
@@ -137,4 +138,5 @@ start_attempt
 
 - [x] AsyncPort 与 attempt 状态  
 - [x] Key 不进 argv / ambient 隔离  
-- [ ] carrier bake-off 与旧机 TLS 证据（TP-006/007）  
+- [x] carrier 路线、locked XP HTTPS source patch 与静态 import candidate
+- [ ] 真实旧机 TLS/proxy/CA/cancel 证据（TP-006/007）

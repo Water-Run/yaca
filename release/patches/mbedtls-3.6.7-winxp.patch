@@ -1,0 +1,66 @@
+--- a/library/entropy_poll.c
++++ b/library/entropy_poll.c
+@@ -39,33 +39,42 @@
+ #if defined(_WIN32) && !defined(EFIX64) && !defined(EFI32)
+ 
+ #include <windows.h>
+-#include <bcrypt.h>
++#include <wincrypt.h>
+ #include <intsafe.h>
+ 
+ int mbedtls_platform_entropy_poll(void *data, unsigned char *output, size_t len,
+                                   size_t *olen)
+ {
++    HCRYPTPROV provider = 0;
++
+     ((void) data);
+     *olen = 0;
+ 
++    if (!CryptAcquireContextW(&provider, NULL, NULL, PROV_RSA_FULL,
++                              CRYPT_VERIFYCONTEXT | CRYPT_SILENT)) {
++        return MBEDTLS_ERR_ENTROPY_SOURCE_FAILED;
++    }
++
+     /*
+-     * BCryptGenRandom takes ULONG for size, which is smaller than size_t on
++     * CryptGenRandom takes DWORD for size, which is smaller than size_t on
+      * 64-bit Windows platforms. Extract entropy in chunks of len (dependent
+-     * on ULONG_MAX) size.
++     * on UINT_MAX) size. CryptoAPI is available on Windows XP while the
++     * upstream BCrypt provider starts at Windows Vista.
+      */
+     while (len != 0) {
+-        unsigned long ulong_bytes =
+-            (len > ULONG_MAX) ? ULONG_MAX : (unsigned long) len;
++        DWORD chunk = (len > UINT_MAX) ? UINT_MAX : (DWORD) len;
+ 
+-        if (!BCRYPT_SUCCESS(BCryptGenRandom(NULL, output, ulong_bytes,
+-                                            BCRYPT_USE_SYSTEM_PREFERRED_RNG))) {
++        if (!CryptGenRandom(provider, chunk, output)) {
++            CryptReleaseContext(provider, 0UL);
+             return MBEDTLS_ERR_ENTROPY_SOURCE_FAILED;
+         }
+ 
+-        *olen += ulong_bytes;
+-        len -= ulong_bytes;
++        output += chunk;
++        *olen += chunk;
++        len -= chunk;
+     }
+ 
++    CryptReleaseContext(provider, 0UL);
+     return 0;
+ }
+ #else /* _WIN32 && !EFIX64 && !EFI32 */
+--- a/library/platform.c
++++ b/library/platform.c
+@@ -121,7 +121,8 @@
+         return -1;
+     }
+ 
+-#if defined(_TRUNCATE)
++#if defined(_TRUNCATE) && \
++    (!defined(_WIN32_WINNT) || _WIN32_WINNT >= 0x0600)
+     ret = vsnprintf_s(s, n, _TRUNCATE, fmt, arg);
+ #else
+     ret = vsnprintf(s, n, fmt, arg);

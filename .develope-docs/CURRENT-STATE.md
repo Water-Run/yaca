@@ -14,15 +14,16 @@ yaca 当前已有可执行 Lua 入口和平台无关的通用 Agent 核心；代
 - typed AgentLoop、queue/steer/side、ask-user/yield、action/termination review、预算/stuck/cancel/finalization 和精确 Tool result 配对。
 - 八个 versioned Tool、current-process one-action Permission、direct path/identity/CAS 防护，以及明确 `opaque-uncontained` 的原生 `cmd.exe`/shell exec。
 - 生产 native bridge 已接通 trusted component 的结构化 argv：Windows 以绝对 `CreateProcessW`、Linux 以 `execve` 绕过命令 shell，配置字节经有界匿名 stdin pipe 发送；现代 Linux 实际模块探针与 Win32/Win64 交叉编译已通过，但真实目标资格仍待 C32。
+- Win32/XP HTTPS 候选闭包已锁定：curl 8.21.0 与 Mbed TLS 3.6.7 的窄下游补丁绑定 archive/patch/基文件 SHA-256；全新 i686 串行复现得到 PE32/Windows 5.01、HTTP/HTTPS、blocking IPv4、CryptoAPI entropy，且最终导入审计无 BCrypt、Vista 同步原语、UCRT 和新 `_s` CRT 符号。该结果明确为 cross-build/static candidate，真实 XP TLS/proxy/CA 仍待 C32。
 - lossless model-view compaction：结构化摘要、atomic groups、Context journal、原子 manifest publication、Runtime receipt/lifecycle gate、公开 `.compact`，以及冻结待发 main/review 请求的自动 threshold preflight、STATUS/cancel/close。
 - 最小发行 allowlist、component/license manifest、SPDX SBOM、package planner、资源 overlay 和资源门禁测试 Harness。
-- 受 `.tools/run_with_resource_guard.sh` 保护的完整平台无关 Lua suite 当前为 `401/401`；这不是三目标资格证明。
+- 受 `.tools/run_with_resource_guard.sh` 保护的完整平台无关 Lua suite 当前为 `406/406`；这不是三目标资格证明。
 
 仍缺失或不得宣称完成：
 
 - compaction pending request/cancel/rejection 与 failure circuit 的跨进程恢复，以及三目标 token/资源阈值校准。
 - 注册但尚未全部接通 controller 的交互管理动作仍须逐项以 registry → dispatcher → production port → terminal result 证明；parser 可识别不等于 action 已实现。
-- 旧环境网络/HTTPS 仍须审计并加固：固定 curl/CA/TLS 闭包、XP/Win7 可用协议与证书链、代理/redirect/retry/cancel、旧 CMD carrier 和错误编码都需最终目标证据。
+- 旧环境网络/HTTPS 的源码锁、XP compatibility patch、静态 import/CRT 黑名单和最小协议闭包已有可重复候选证据；仍须在真实 XP/Win7/CentOS 7 证明 TLS/CA、显式代理、redirect/retry/cancel、旧 CMD 路径与错误分类，不能据此开放 Release Gate R。
 - C32 的三个真实 target qualification、C33 的干净机发布旅程/零表面、C34 的最终 SHA-256/license/SBOM/build/test evidence 尚未执行。
 - README 中任何能力声明仍必须受实现和 target evidence 约束；现代 Linux fake/native 边界通过不能外推为 XP、Win7 或 CentOS 7 支持。
 - `_CONFIG_.ini`、`_CONTEXT_.xml` 和历史 `bin/` 仍是 non-normative/候选输入，不能覆盖当前 contracts、生成配置/Context 或最小发行 allowlist。

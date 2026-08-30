@@ -233,7 +233,7 @@ DSH 是 durable operation 和恢复方面最强参考。采用 tail-only repair�
 2. response wrapper 已在 Model port 与 `compact.lua` 双层验证 provider `incomplete`/finish class/tool/control，且 production owner 组合测试已跑通真实 compact service；仍需最终 OpenAI/Anthropic transport 黑盒和三目标 HTTPS 证据证明线上的 adapter 字段未在旧平台 carrier 中丢失。
 3. token 估算当前为跨旧平台安全的 `1 byte <= 1 token` 保守上界；最终阈值、延迟和内存需在 XP/Win7/CentOS 7 上校准，不能把现代 Linux 结果写成目标资格。
 
-2026-08-30 的受资源门禁串行 suite 为 `401/401`，其中已含 canonical manifest 伪造拒绝、失败前后 Context 字节/代不变、accepted summary + view 原子发布、cache-miss 恢复、公开 `.compact` 路由、main/review 自动 preflight 的精确暂停/恢复与失败阻断、Coordinator 可见 STATUS、真实 production owner 成功链和 journal ambiguity fail-stop。它证明平台无关手工/自动链路，不证明跨进程 pending 恢复或真实 XP/Win7/CentOS 7 网络与文件系统资格。
+2026-08-30 的受资源门禁串行 suite 为 `406/406`，其中已含 canonical manifest 伪造拒绝、失败前后 Context 字节/代不变、accepted summary + view 原子发布、cache-miss 恢复、公开 `.compact` 路由、main/review 自动 preflight 的精确暂停/恢复与失败阻断、Coordinator 可见 STATUS、真实 production owner 成功链、journal ambiguity fail-stop，以及 Win32/XP HTTPS patch/source/profile 防漂移。它证明平台无关手工/自动链路和交叉构建静态候选，不证明跨进程 pending 恢复或真实 XP/Win7/CentOS 7 网络与文件系统资格。
 
 ### 4.2 Permission：精确单动作授权是强项
 

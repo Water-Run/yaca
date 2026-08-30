@@ -1,6 +1,6 @@
 # 16 打包、安装与发布
 
-更新日期：2026-08-29
+更新日期：2026-08-30
 
 状态：**计划已确认（C31--C34），Release Gate R 关闭**；pins/allowlist/zip/evidence contract 已冻结，三目标 qualification 待执行
 
@@ -100,6 +100,8 @@ Windows XP SP3 x86
 ```
 
 现在已有可执行 qualification 路线，但尚未由 yaca 候选兑现。项目必须固定 luainstaller 版本，先生成匹配 Lua 5.5 与拟用 native 模块形状的最小 onedir，随后以最终依赖闭包构建三个候选；静态 XP surface 证据只能提前发现问题，不能替代真实 XP、Win7 和 CentOS 7 完整运行。只有证据要求时才对兄弟仓库做最小修改，不在 yaca 中暗建第二套打包器。
+
+网络依赖闭包现已前进一步：release lock/manifest/planner 同时固定 curl 8.21.0 与 Mbed TLS 3.6.7 的 Win32 XP 下游补丁、目标 scope、补丁 hash 和所有上游基文件 hash。`.tools/qualification/build_win32_xp_https_candidate.sh` 已从干净锁定压缩包串行复现 PE32/Windows 5.01 候选并通过 DLL/import 黑名单；该证据仍标记 `runtime_qualified=false`，不替代最终 yaca.exe、Lua/lxp/native/CA 的同包 XP journey。
 
 即使解除架构拒绝，编译器、CRT、最低 Win32 API、Lua DLL、PowerShell 构建依赖和 launcher 仍需逐项验证。XP x86 原生模块候选应使用可生成 XP 程序的工具链；微软文档给出的最后一代官方 XP 工具集是 VS2017 `v141_xp`，并要求 XP SP3，见 [Configuring programs for Windows XP](https://learn.microsoft.com/en-us/cpp/build/configuring-programs-for-windows-xp?view=msvc-170)。
 

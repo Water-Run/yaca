@@ -115,10 +115,15 @@ return {
                 A.equal(manifest.dependencies.curl.version, "8.21.0")
                 A.equal(manifest.dependencies.mbedtls.version, "3.6.7")
                 A.equal(manifest.dependencies.ca_bundle.version, "2026-08-13")
+                local expected_status = {
+                    curl = "source-and-patch-pinned-target-artifact-pending",
+                    mbedtls = "source-and-patch-pinned-target-artifact-pending",
+                    ca_bundle = "source-pinned-target-artifact-pending",
+                }
                 for _, dependency in ipairs({ "curl", "mbedtls", "ca_bundle" }) do
                     A.equal(
                         manifest.dependencies[dependency].status,
-                        "source-pinned-target-artifact-pending"
+                        expected_status[dependency]
                     )
                     A.matches(manifest.dependencies[dependency].sha256, "^[0-9a-f]+$")
                     A.equal(#manifest.dependencies[dependency].sha256, 64)
