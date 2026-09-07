@@ -92,7 +92,12 @@ yaca --status                       (-stt，Windows /stt)
 复核当前 writer 的 Context，显示最新 hash 与有效 Session 参数；文件变化后显示
 stale 和原因并停止执行。
 
-controller 仍有缺口：production dispatcher 当前拒绝 `--export`。
+`--export <selector>` 只读输出经复核的 Markdown，不申请 writer、不恢复或重放
+历史、不调用 Model；配置缺失或无效也可执行。新进程省略 selector 会报告未打开
+Context。有效配置中已登记的秘密值，包括二进制字段解码后的内容，均在输出前
+扫描并拒绝。既有 TTY 要求保持不变。
+
+管理交互仍有 controller 缺口。
 `--config-repl` 当前执行配置校验或创建缺文件时的修复模板，`--context-repl`
 当前显示 Catalog，完整管理交互待接通。在线 self-test Stage 2/3 的调度和同意
 门禁已有实现，但 production adapter 当前返回未接通的失败结果，不发起 Model

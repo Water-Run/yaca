@@ -562,6 +562,41 @@ return {
                 A.contains(exported, "sha256=" .. sha256.hex(binary))
                 A.contains(exported, "AP8NYnl0ZXM=")
                 A.falsy(exported:find("WorkspaceRoot", 1, true))
+                local chunks = {}
+                local scanner = function(value)
+                    if value:find(binary, 1, true) then return { { id = "binary-secret" } } end
+                    return {}
+                end
+                local rejected, reject_error = service.export(document, function(bytes)
+                    chunks[#chunks + 1] = bytes
+                    return true
+                end, scanner)
+                A.falsy(rejected)
+                A.equal(reject_error.code, "RegisteredSecret")
+                A.deep_equal(chunks, {})
+            end,
+        },
+        {
+            name = "export checks registered secrets before and after Markdown escaping",
+            run = function()
+                local service = new_service()
+                local candidate = minimal()
+                candidate.session.context_prompt = "private `prompt` value"
+                local document = assert(service.build(candidate))
+                for _, secret in ipairs({ "private `prompt`", "# yaca Context export v1" }) do
+                    local rejected, reject_error = service.export(document, nil, function(value)
+                        if value:find(secret, 1, true) then return { { id = "registered" } } end
+                        return {}
+                    end)
+                    A.falsy(rejected)
+                    A.equal(reject_error.code, "RegisteredSecret")
+                end
+                local rejected, reject_error = service.export(document, nil, function()
+                    error("private scanner exception")
+                end)
+                A.falsy(rejected)
+                A.equal(reject_error.code, "ContextExportSecretScan")
+                A.falsy(A.render(reject_error):find("private scanner exception", 1, true))
             end,
         },
         {

@@ -351,6 +351,7 @@ function M.new(modules, initial_candidates)
     }))
     return {
         schema = schema,
+        lxp = lxp,
         store = store,
         filesystem = filesystem,
         raw = raw,

@@ -525,7 +525,7 @@ local function validate_publication_ports(ports)
         filesystem = {
             "direct_inspect", "direct_reverify", "make_directory", "flush_directory",
         },
-        schema = { "build", "append_events", "session_document", "encode" },
+        schema = { "build", "append_events", "session_document", "encode", "export" },
         store = { "create_writer", "open_writer", "publish", "close_writer", "verify_writer" },
         path = { "to_logical", "validate_context_name", "context_hash" },
         safety = { "binding_digest", "digest" },
@@ -3574,6 +3574,20 @@ function M.new_context_publication(ports, options)
         for key, value in pairs(active.receipt) do values[key] = value end
         values.context_hash = hash
         return readonly(values, "verified active Context status")
+    end
+
+    ---Exports only this owner's verified current document without mutation.
+    -- @param secret_scan function|nil Current ConfigGeneration secret scanner.
+    -- @return string|nil markdown Complete bounded public Markdown view.
+    -- @return table|nil receipt Verified identity, or a typed failure.
+    function service.export_active(secret_scan)
+        local inspected, inspection_error = service.inspect_active()
+        if not inspected then return nil, inspection_error end
+        local markdown, export_error = schema.export(active.document, nil, secret_scan)
+        if not markdown then return nil, export_error end
+        local verified, verify_error = service.inspect_active()
+        if not verified then return nil, verify_error end
+        return markdown, verified
     end
 
     function service.close()

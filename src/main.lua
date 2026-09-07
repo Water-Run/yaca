@@ -736,6 +736,7 @@ local function validate_request(request)
         ["model-repl"] = { id = true },
         ["context-repl"] = { id = true, view = true },
         status = { id = true },
+        ["export-context"] = { id = true, selector = true },
         ["continue"] = { id = true, selector = true },
         ["run-chat"] = { id = true, directory = true },
     }
@@ -787,6 +788,11 @@ local function validate_request(request)
         and (type(request.selector) ~= "string" or request.selector == "")
     then
         return nil, failure("UsageError", "continue requires one Context selector")
+    end
+    if request.id == "export-context" and request.selector ~= nil
+        and (type(request.selector) ~= "string" or request.selector == "")
+    then
+        return nil, failure("UsageError", "export requires a valid Context selector")
     end
     return request
 end
@@ -1249,6 +1255,105 @@ function M.new(components, options)
         )
     end
 
+    local function dispatch_export(request)
+        local identity, identity_error = check_platform()
+        if not identity then return nil, identity_error end
+        if request.selector == nil and (not active_draft or not active_draft.status().durable) then
+            return nil, failure(
+                "NoActiveContext",
+                "no Context is open in this process; provide an exact name or hash"
+            )
+        end
+        local generation = load_config()
+        if not generation and active_draft then generation = active_draft.config_generation() end
+        local scan = generation and generation.scan_registered_secrets or nil
+        local markdown, receipt
+        if request.selector == nil then
+            local publication = admitted_components.publication
+            if not publication or type(publication.export_active) ~= "function" then
+                return nil, failure("ContextUnavailable", "active Context export is unavailable")
+            end
+            markdown, receipt = context_call(
+                publication.export_active, "ContextExportFailure", "active Context export", scan
+            )
+            if not markdown then return nil, receipt end
+        else
+            local catalog = admitted_components.context_catalog
+            if not catalog or type(catalog.store) ~= "table"
+                or type(catalog.store.inspect_import) ~= "function"
+                or type(catalog.schema) ~= "table" or type(catalog.schema.export) ~= "function"
+            then
+                return nil, failure("ContextUnavailable", "read-only Context export is unavailable")
+            end
+            local workspace, workspace_error = context_call(
+                admitted_components.workspace.inspect,
+                "InvalidWorkspace", "current workspace inspection", "."
+            )
+            if not workspace then return nil, workspace_error end
+            local origin, origin_error = context_call(
+                catalog.path.to_logical, "UnsupportedPath", "current workspace conversion", workspace.path
+            )
+            if not origin then return nil, origin_error end
+            local selection, selection_error = context_call(
+                catalog.resolver.resolve, "ContextSelectionFailure", "Context selection",
+                request.selector, origin
+            )
+            if not selection then return nil, selection_error end
+            if selection.tag ~= "Unique" then return nil, context_selection_error(selection) end
+            local verified, verify_error = context_call(
+                catalog.resolver.verify_target, "ContextTargetVerificationFailure",
+                "Context export target verification", selection, "open"
+            )
+            if not verified then return nil, verify_error end
+            if verified.tag ~= "Verified" then
+                return nil, failure(
+                    verified.tag == "TargetChanged" and "TargetChanged" or "MatchedUnavailable",
+                    "the selected Context is unavailable for export"
+                )
+            end
+            if type(verified.logical_path) ~= "string"
+                or type(verified.physical_hint) ~= "string"
+                or type(verified.hash) ~= "string" or #verified.hash ~= 16
+                or verified.hash:find("[^0-9A-F]")
+                or type(verified.credential) ~= "table"
+            then
+                return nil, failure("ContextTargetVerificationFailure", "Context export target is incomplete")
+            end
+            local document, read_error = context_call(
+                catalog.store.inspect_import, "ContextExportFailure", "read-only Context validation",
+                verified.physical_hint, verified.credential
+            )
+            if not document then return nil, read_error end
+            markdown, read_error = context_call(
+                catalog.schema.export, "ContextExportFailure", "Context Markdown export", document, nil, scan
+            )
+            if not markdown then return nil, read_error end
+            local current, current_error = context_call(
+                catalog.resolver.verify_target, "ContextTargetVerificationFailure",
+                "Context export final verification", selection, "open"
+            )
+            if not current then return nil, current_error end
+            if current.tag ~= "Verified" or current.logical_path ~= verified.logical_path
+                or current.hash ~= verified.hash or current.physical_hint ~= verified.physical_hint
+                or not plain_equal(current.credential, verified.credential)
+            then
+                return nil, failure("TargetChanged", "the selected Context changed before export completed")
+            end
+            receipt = {
+                context_hash = verified.hash, logical_path = verified.logical_path,
+                generation = document.generation,
+            }
+        end
+        if type(markdown) ~= "string" or type(receipt) ~= "table" then
+            return nil, failure("ContextExportFailure", "Context export returned an invalid result")
+        end
+        return readonly({
+            kind = "context-export", outcome = "success", format = "markdown",
+            markdown = markdown, context_hash = receipt.context_hash,
+            logical_path = receipt.logical_path, generation = receipt.generation,
+        }, "read-only Context export result")
+    end
+
     local function workspace_identity_equal(left, right)
         return type(left) == "table"
             and type(right) == "table"
@@ -1586,6 +1691,7 @@ function M.new(components, options)
         end
         if request.id == "self-test" then return dispatch_self_test(request) end
         if request.id == "status" then return dispatch_status() end
+        if request.id == "export-context" then return dispatch_export(request) end
         if BOOTSTRAP_ACTIONS[request.id] then return dispatch_management(request) end
         if request.id == "continue" then return dispatch_continue(request) end
         return dispatch_chat(request)
@@ -4104,6 +4210,8 @@ function M.compose_runtime(runtime)
         application_components.context_catalog = {
             resolver = contexts.catalog,
             path = contexts.path,
+            store = contexts.store,
+            schema = contexts.schema,
         }
     end
     local application, application_error = M.new(application_components, {
@@ -8964,6 +9072,7 @@ end
 
 local function render_runtime_result(cli_service, request, result)
     if request.id == "self-test" then return render_self_test(cli_service, request, result) end
+    if request.id == "export-context" then return result.markdown end
     if request.id == "status" then
         local lines = {
             "yaca " .. ascii_diagnostic(result.version, 64)

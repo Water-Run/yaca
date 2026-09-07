@@ -145,6 +145,27 @@ return {
     name = "fault/context-management",
     cases = {
         {
+            name = "read-only inspection rejects a replaced path or late writer before returning data",
+            run = function()
+                for _, mutation in ipairs({ "replace", "lock" }) do
+                    local fixture = harness.new(modules, { [TARGET] = harness.minimal("Task") })
+                    local before = fixture.controls.bytes(TARGET)
+                    fixture.hooks.after.fs_close = function()
+                        if mutation == "replace" then
+                            fixture.controls.external_replace(TARGET, before)
+                        else
+                            fixture.controls.external_replace(LOCK, "a writer is present")
+                        end
+                    end
+                    local document, document_error = fixture.store.inspect_import(TARGET)
+                    A.falsy(document)
+                    A.equal(document_error.code, mutation == "replace" and "TargetChanged" or "LockConflict")
+                    A.equal(fixture.controls.bytes(TARGET), before)
+                    A.falsy(fixture.controls.exists(PREVIOUS))
+                end
+            end,
+        },
+        {
             name = "target verifier binds the selected row and never resolves a substitute",
             run = function()
                 local fixture = harness.new(modules, { [TARGET] = harness.minimal("Task") })

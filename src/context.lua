@@ -2859,6 +2859,28 @@ local function markdown_code(value)
     return "`" .. visible .. "`"
 end
 
+-- Checks decoded values before escaping or Base64 can hide a registered secret.
+-- Canonical documents are bounded, acyclic tables produced by schema validation.
+local function scan_export_value(value, scan)
+    if type(value) == "table" then
+        for key, item in pairs(value) do
+            local accepted, scan_error = scan_export_value(key, scan)
+            if not accepted then return nil, scan_error end
+            accepted, scan_error = scan_export_value(item, scan)
+            if not accepted then return nil, scan_error end
+        end
+    elseif type(value) == "string" then
+        local called, hits = pcall(scan, value)
+        if not called or type(hits) ~= "table" then
+            return nil, failure("ContextExportSecretScan", "Context export secret scan failed")
+        end
+        for _ in pairs(hits) do
+            return nil, failure("RegisteredSecret", "Context export contains a registered secret")
+        end
+    end
+    return true
+end
+
 local function export_document(canonical, admitted, sink)
     if sink ~= nil and type(sink) ~= "function" then
         return nil, failure("InvalidContextExport", "Context export sink must be a function")
@@ -3767,8 +3789,15 @@ function M.new(options)
         return table.concat(parts), stats
     end
 
-    ---Projects a non-API Markdown transfer view from canonical Facts.
-    function service.export(document, sink)
+    ---Projects a bounded Markdown transfer view from canonical Facts.
+    -- An optional secret scanner checks decoded data before any sink output.
+    -- Without a sink, the complete rendered bytes are checked before return too.
+    -- @param document table Validated immutable Context document.
+    -- @param sink function|nil Optional streaming output; failures may be partial.
+    -- @param secret_scan function|nil Current ConfigGeneration secret scanner.
+    -- @return string|table|nil Markdown bytes, sink statistics, or nil on failure.
+    -- @return table|nil err Structured validation, secret, limit, or sink failure.
+    function service.export(document, sink, secret_scan)
         local canonical = document_states[document]
         if not canonical then
             return nil, failure(
@@ -3776,7 +3805,20 @@ function M.new(options)
                 "Context export requires a document from this module"
             )
         end
-        return export_document(canonical, admitted, sink)
+        if secret_scan ~= nil then
+            if type(secret_scan) ~= "function" then
+                return nil, failure("ContextExportSecretScan", "Context export secret scanner is invalid")
+            end
+            local safe, scan_error = scan_export_value(canonical, secret_scan)
+            if not safe then return nil, scan_error end
+        end
+        local rendered, export_error = export_document(canonical, admitted, sink)
+        if not rendered then return nil, export_error end
+        if secret_scan and type(rendered) == "string" then
+            local safe, scan_error = scan_export_value(rendered, secret_scan)
+            if not safe then return nil, scan_error end
+        end
+        return rendered
     end
 
     ---Returns the fixed required/optional payload names for one event type.
@@ -5412,6 +5454,15 @@ function M.new_store(schema, ports, options)
                 "TargetChanged",
                 "in-place imported Context changed during read-only validation"
             )
+        end
+        local restated, current_identity = filesystem.stat_identity(path)
+        if not restated or not identity_equal(identity_or_error, current_identity) then
+            return nil, failure("TargetChanged", "Context path changed during read-only validation")
+        end
+        lock_state, lock_identity_or_error = control_path_state(filesystem, path .. ".yaca-lock")
+        if not lock_state then return nil, lock_identity_or_error end
+        if lock_state == "present" then
+            return nil, failure("LockConflict", "a Context writer started during read-only validation")
         end
         local report = assert(freeze({
             outcome = "validated-readonly",

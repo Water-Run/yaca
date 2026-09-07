@@ -397,6 +397,9 @@ local function application(source, continuation)
             if continuation.verify_tag then
                 return { tag = continuation.verify_tag }
             end
+            if continuation.change_after_read and (calls.export_read or 0) > 0 then
+                return { tag = "TargetChanged" }
+            end
             return {
                 tag = "Verified",
                 logical_path = logical_path,
@@ -458,7 +461,24 @@ local function application(source, continuation)
             publication_closed = true
             return true
         end
-        components.context_catalog = { resolver = resolver, path = path }
+        local export_document = { generation = 7 }
+        components.context_catalog = {
+            resolver = resolver, path = path,
+            store = { inspect_import = function(target, expected)
+                calls.export_read = (calls.export_read or 0) + 1
+                A.equal(target, physical_path)
+                A.equal(expected, credential)
+                if continuation.export_error then return nil, continuation.export_error end
+                return export_document
+            end },
+            schema = { export = function(document, sink, scan)
+                A.equal(document, export_document)
+                A.equal(sink, nil)
+                calls.export_format = (calls.export_format or 0) + 1
+                calls.export_secret_scan = type(scan) == "function"
+                return "# yaca Context export v1\n\nselected Context\n"
+            end },
+        }
         components.publication = publication
     end
 
@@ -475,6 +495,117 @@ end
 return {
     name = "integration/bootstrap",
     cases = {
+        {
+            name = "production export returns only verified Markdown and suppresses registered secrets",
+            run = function()
+                local store_harness = load_table("test/support/context_store_harness.lua")
+                local direct_harness = load_table("test/support/direct_filesystem_harness.lua")
+                for _, secret in ipairs({ false, true }) do
+                    local candidate = store_harness.minimal("Task")
+                    candidate.session.context_prompt = secret and "bootstrap-secret" or "public context"
+                    local fixture = store_harness.new({
+                        context = load_module("context", cache),
+                        xml = load_module("xml", cache),
+                        fs = load_module("fs", cache),
+                        fake_lxp = fake_lxp, sha256 = sha256, fake_filesystem = fake_filesystem,
+                    })
+                    local _, xml_bytes = fixture.document(candidate)
+                    cache.lxp = fixture.lxp
+                    local native, _, calls, native_path, data_root = production_native()
+                    local target = data_root .. "/CONTEXT/workspace/Task.xml"
+                    local direct, files = direct_harness.new({
+                        [target] = xml_bytes,
+                        [CONFIG_PATH] = valid_source(),
+                        ["/workspace"] = { kind = "directory" },
+                        ["/release/yaca"] = "outer",
+                        ["/runtime/payload/yaca"] = "runtime",
+                        [native_path] = "native",
+                        ["/runtime/payload/.luai/components/curl"] = "curl",
+                        ["/runtime/payload/.luai/components/cacert.pem"] = "ca",
+                    })
+                    for name, method in pairs(direct) do native[name] = method end
+                    local stdout, stderr = {}, {}
+                    local ports = {
+                        native = native, native_path = native_path,
+                        stdout = function(bytes) stdout[#stdout + 1] = bytes return true end,
+                        stderr = function(bytes) stderr[#stderr + 1] = bytes return true end,
+                    }
+                    local code = main.run_cli({ [0] = "/release/yaca", "--export", "Task" }, ports)
+                    if secret then
+                        A.truthy(code ~= 0)
+                        A.deep_equal(stdout, {})
+                        A.contains(table.concat(stderr), "RegisteredSecret")
+                        A.falsy(table.concat(stderr):find("bootstrap-secret", 1, true))
+                    else
+                        A.equal(code, 0)
+                        local markdown = table.concat(stdout)
+                        local heading = "# yaca Context export v1\n"
+                        A.equal(markdown:sub(1, #heading), heading)
+                        A.contains(markdown, "public context")
+                        A.contains(markdown, "## Facts")
+                        A.deep_equal(stderr, {})
+                    end
+                    A.equal(files.bytes(target), xml_bytes)
+                    A.falsy(files.exists(target .. ".yaca-lock"))
+                    A.falsy(files.exists(target .. ".yaca-prev"))
+                    A.equal(calls.directory_creates, 0)
+                    A.equal(calls.process_starts, 0)
+                    stdout, stderr = {}, {}
+                    native.stdio_facts = function()
+                        return { stdin_is_tty = false, stdout_is_tty = false, stderr_is_tty = false }
+                    end
+                    A.equal(main.run_cli({ [0] = "/release/yaca", "--export", "Task" }, ports), 5)
+                    A.deep_equal(stdout, {})
+                end
+            end,
+        },
+        {
+            name = "selected export is read-only and keeps invalid config and history independent",
+            run = function()
+                for _, source in ipairs({ false, "invalid INI", valid_source() }) do
+                    local app, calls = application(source, {})
+                    local result = assert(app.dispatch({ id = "export-context", selector = "Task" }))
+                    A.equal(result.kind, "context-export")
+                    A.contains(result.markdown, "# yaca Context export v1")
+                    A.equal(result.context_hash, "0123456789ABCDEF")
+                    A.equal(result.generation, 7)
+                    A.equal(calls.catalog, 1)
+                    A.equal(calls.verify, 2)
+                    A.equal(calls.export_read, 1)
+                    A.equal(calls.export_secret_scan, source == valid_source())
+                    A.equal(calls.open_existing, nil)
+                    A.equal(calls.network, 0)
+                    A.equal(calls.agent, 0)
+                    A.equal(calls.stage1, 0)
+                    A.falsy(app.status().active_draft)
+                end
+            end,
+        },
+        {
+            name = "export refuses missing current Context locks incomplete scans and changed targets",
+            run = function()
+                local app, calls = application(false, {})
+                local rejected, reject_error = app.dispatch({ id = "export-context" })
+                A.falsy(rejected)
+                A.equal(reject_error.code, "NoActiveContext")
+                A.equal(calls.catalog, 0)
+                A.equal(calls.config, 0)
+                for _, setting in ipairs({
+                    { resolve_tag = "ScanIncomplete", expected = "ScanIncomplete" },
+                    { export_error = { code = "LockConflict" }, expected = "LockConflict" },
+                    { export_error = { code = "ContextIntegrity" }, expected = "ContextIntegrity" },
+                    { change_after_read = true, expected = "TargetChanged" },
+                }) do
+                    local selected, observed = application(valid_source(), setting)
+                    rejected, reject_error = selected.dispatch({ id = "export-context", selector = "Task" })
+                    A.falsy(rejected)
+                    A.equal(reject_error.code, setting.expected)
+                    A.equal(observed.catalog, 1)
+                    A.equal(observed.open_existing, nil)
+                    A.equal(observed.network, 0)
+                end
+            end,
+        },
         {
             name = "packaged layout separates outer durable data from inner runtime resources",
             run = function()

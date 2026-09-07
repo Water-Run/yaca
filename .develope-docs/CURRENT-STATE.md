@@ -25,13 +25,13 @@ yaca 当前已有可执行 Lua 入口和平台无关的通用 Agent 核心；代
 - chat `.model` 已接到 draft/production 双 owner：无参数最多投影 64 个 enabled/native-tool 候选的普通文本行，精确 selector 不依赖 ANSI、补全或新式终端。预检保守按 `1 byte <= 1 token` 绑定当前 config、Context generation/sequence、活动 ModelView、四层 Prompt、tool/control schema、输出与 transition reserve；目标放不下时在任何配置/XML 变更前返回 `ModelIncompatible`，不缩水历史、Prompt 或工具。endpoint route、credential slot/policy、Protocol、RemoteModel/usage、Model Prompt、adapter/streaming 或能力边界变化进入默认 deny 的 `model-change-N` 确认；只显示 origin/path、`?configured` 和非秘密 credential identity。确认绑定的 waterline/manifest/Prompt 环境/目标定义任一变化即 stale；保存态经完整配置重载、目标定义复核、Context `session_override + model_view_published` 原子提交和 Runtime receipt adoption 后只在下一 turn 生效，active turn 不热换，也不建立失败 fallback Model。
 - 最小发行 allowlist、component/license manifest、SPDX SBOM、package planner、资源 overlay 和资源门禁测试 Harness。
 - 运行时 curl config 已逐请求用锁定 CLI 可解析的 standalone/no-option 语法显式固定 HTTP/1.1、TLS 1.2+、服务端/HTTPS 代理随包 CA 校验；代理 TLS 下限由 `proxy-tlsv1` 与只启用 TLS 1.2/1.3 的锁定 Mbed TLS 后端共同闭合。代理/主机 DNS 和普通握手只在无 canonical event 时有界重试，证书/CA/CRL/issuer/pin/status 错误立即终止。真实目标 TLS/代理资格仍待 C32。
-- 受 `.tools/run_with_resource_guard.sh` 保护的完整平台无关 Lua suite 当前为 `457/457`（此前已推送基线为 `449/449`）；本轮验证记录见下节。这不是三目标资格证明。
+- 受 `.tools/run_with_resource_guard.sh` 保护的完整平台无关 Lua suite 当前为 `462/462`（此前已推送状态节点为 `457/457`）；本轮验证记录见下节。这不是三目标资格证明。
 
 仍缺失或不得宣称完成：
 
 - `--continue` 与同 workspace `.context` 已接通，但显式跨 workspace 确认/rebind 尚未开放；三目标 token/资源阈值仍待校准。
 - `.cautious`、`.prompt show|set|clear` 与 `.model` 已接通 registry → dispatcher → production port → terminal result；`.prompt edit` 仍明确 unavailable，待有界 editor transaction 实现，不能调用 ambient editor。
-- 本轮核对 `main.lua` 确认：在线 self-test Stage 2/3 production adapter 仍返回 failed 占位结果；`--export` 只被 parser 识别，production request whitelist 仍拒绝。`config-repl` 当前只提供校验/缺文件修复模板，`context-repl` 只提供 Catalog 列表，完整管理交互尚待接通。这些是实现缺口，不能只归入目标资格待办。
+- 本轮核对 `main.lua` 确认：在线 self-test Stage 2/3 production adapter 仍返回 failed 占位结果；`config-repl` 当前只提供校验/缺文件修复模板，`context-repl` 只提供 Catalog 列表，完整管理交互尚待接通。这些是实现缺口，不能只归入目标资格待办。
 - 旧环境网络/HTTPS 的源码锁、XP compatibility patch、静态 import/CRT 黑名单和最小协议闭包已有可重复候选证据；仍须在真实 XP/Win7/CentOS 7 证明 TLS/CA、显式代理、redirect/retry/cancel、旧 CMD 路径与错误分类，不能据此开放 Release Gate R。
 - C32 的三个真实 target qualification、C33 的干净机发布旅程/零表面、C34 的最终 SHA-256/license/SBOM/build/test evidence 尚未执行。
 - README 中任何能力声明仍必须受实现和 target evidence 约束；现代 Linux fake/native 边界通过不能外推为 XP、Win7 或 CentOS 7 支持。
@@ -44,10 +44,12 @@ yaca 当前已有可执行 Lua 入口和平台无关的通用 Agent 核心；代
 
 - `--status` 已接通只读 production controller：报告当前进程没有活动 Context、workspace 与有效/无效/缺失配置；不扫描历史，不启动自检/Model，不创建数据，保留既有 TTY gate。chat `.status` 投影当前 writer 的最新 hash 和有效 Session 参数；`store.verify_writer` 只读取并复核当前路径的文件身份和规范文档，外部替换/写入/删除/读后换路径会使 writer 永久 faulted、Session publication 与 Runtime admission fail-stop，并在状态块显示 stale 和原因后关闭会话。DoubleCheck 的显式 false 不再被默认 true 覆盖。
 - 状态节点完整 suite `457/457`，coding readiness 入口与 TP-003/006/008/010、RP-001 全部通过；TP-010/RP-001 沿用逐次 SHA-256 复核的锁定本地源码缓存，真实三目标资格仍未完成。日志为 `status-full-suite.log` 与 `status-readiness.log`。
+- `--export <selector>` 已接通 Resolver → exact credential → `inspect_import` 只读 schema 校验 → Markdown formatter → 同一目标最终复核 → stdout；不改变 workspace，不申请 writer，不恢复或重放历史，缺失/无效配置不阻止只读导出。无 selector 且当前进程未打开 Context 返回 `NoActiveContext`，不自动查找最近历史；已持有 Context 的 publication owner 也提供前后复核的 current export 核心。有效 ConfigGeneration 的 registered secrets 在解码后的规范值和最终 Markdown 上扫描，含二进制/转义载体时也在任何输出前拒绝；读后换路径和中途 writer 锁的竞态均拒绝。TTY gate 保持不变，Context REPL 的交互投影仍待管理 controller 收口。
+- 导出节点完整 suite `462/462`，coding readiness 入口、TP-003/006/008/010 与 RP-001 全部通过；锁定源码缓存逐次验 SHA-256，日志为 `export-full-suite.log` 与 `export-readiness.log`，仍不是目标系统资格。
 - 已实现暂停记录中的 Model selection 补强：config owner 生成去 userinfo、隐藏 query 值的 normalized proxy route，picker 和确认详情均显示该 route。保存态 apply 重载后在同一 config service 内精确比较目标 Model Key、secret adapter options 与代理凭据；仅秘密值变化也返回 `ModelSelectionStale`，发生在 Context publication 前。比较只返回 equality，不把秘密值或可复用 secret digest 放进公开 snapshot、disclosure 或 XML。
 - Linux qualification builder 已改成串行 make、至少 `5120 MiB` 的可用内存门槛，并在调用者已持有普通 suite guard 时重新检查更高门槛。测试数量由唯一的 `SUMMARY total=N passed=N failed=0` 动态采集，要求 N 为正且 passed=total；重复、缺失、畸形和失败摘要均拒绝。构建摘要继续明确 `release_authorized=false` 与 `target_qualification_complete=false`。
 - config/production Model selection/coordinator/build-script 的定向 suite 已 `54/54`、完整 suite 已 `449/449` 通过；design-contract/proof-evidence/coding-readiness 校验分别为 7612/56/553 条断言。TP-003/006/008/010 与 RP-001 全部通过；TP-010 初次源码下载遇 TLS EOF，后两项证明使用 SHA-256 与锁一致的本地源码缓存完成真实重建（TP-010 5,564,743 条断言）。低内存时由 guard 拒绝执行，恢复后才启动测试。四组不启动构建的模拟 admission 验证确认低门槛不能覆盖 builder 的 5 GiB floor，用户提高门槛仍有效。
-- `TRACKING.md` 已替换过期的“源码 0%、首任务 C01”口径，实施计划与开发入口已同步。下一实现顺序集中在 export/管理 REPL/在线自检、`.prompt edit`、跨 workspace 确认/rebind，然后收集 C32 三目标真实证据；C33/C34 与 Gate R 继续等待。本轮可丢弃日志位于 `out/development-2026-09-07-sTXXIy/`。
+- `TRACKING.md` 已替换过期的“源码 0%、首任务 C01”口径，实施计划与开发入口已同步。下一实现顺序集中在管理 REPL/在线自检、`.prompt edit`、跨 workspace 确认/rebind，然后收集 C32 三目标真实证据；C33/C34 与 Gate R 继续等待。本轮可丢弃日志位于 `out/development-2026-09-07-sTXXIy/`。
 
 ### 历史暂停检查点（2026-08-30，待办已在上节推进）
 

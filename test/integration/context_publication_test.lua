@@ -330,10 +330,15 @@ return {
                 local inspected = assert(publication.inspect_active())
                 A.equal(inspected.context_path, receipt.context_path)
                 A.equal(inspected.context_hash, assert(path_service.context_hash(receipt.logical_path)))
+                local exported, export_receipt = assert(publication.export_active())
+                A.contains(exported, "# yaca Context export v1")
+                A.contains(exported, "inspect owned Context")
+                A.equal(export_receipt.context_hash, inspected.context_hash)
                 settings.inspect_error = { code = "TargetChanged", message = "changed" }
                 local rejected, reject_error = publication.inspect_active()
                 A.falsy(rejected)
                 A.equal(reject_error.code, "ContextStale")
+                A.falsy(publication.export_active())
                 settings.inspect_error = nil
                 rejected, reject_error = publication.turn_context({ expected_context_generation = 1 })
                 A.falsy(rejected)

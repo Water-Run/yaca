@@ -113,7 +113,13 @@ yaca --status                       (-stt, Windows /stt)
 or creating data. Chat `.status` checks the owned Context and stops execution if
 its file has changed; it also shows the current hash and effective Session settings.
 
-Controller gaps remain: production dispatch currently rejects `--export`.
+`--export <selector>` returns verified Markdown without opening a writer,
+recovering history, or calling a Model. Missing or invalid configuration does not
+block this read-only action. A fresh invocation with no selector reports that no
+Context is open. Registered secrets from a valid configuration are rejected before
+output, including secrets in decoded binary fields. The TTY requirement remains.
+
+Controller gaps remain in management interactions.
 `--config-repl` validates configuration or creates a missing-file
 repair template; `--context-repl` displays the catalog. Their full management
 interactions are pending. Online self-test Stage 2/3 scheduling and consent are
