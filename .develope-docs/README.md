@@ -7,7 +7,7 @@
 - 本目录是项目正式的设计与开发追踪资料，纳入 Git 版本控制。
 - 设计资料直接在 `main` 分支维护并按完整批次提交；D-071 已授权本轮核心节点推送 `main`。
 - 这里可以持续修订；项目源码和公开用户文档只有在相关设计确认后才修改。
-- Gate A/B 已在 2026-08-29 通过；当前可按 `IMPLEMENTATION-PLAN.md` 从 C01 串行实现。未完成的 target qualification 继续阻止 Gate R/发布，proof 不能伪装成产品实现。
+- Gate A/B 已在 2026-08-29 通过；当前核心已实现至 M9，主线是 controller 收口与 C32--C34。未完成的 target qualification 继续阻止 Gate R/发布，现代机 proof 不能替代目标证据。
 
 ## 工作方式
 
@@ -39,7 +39,7 @@
 - `ACTION-REGISTRY.md`：W2-A semantic action 注册表。
 - `contracts/`：2026-08-29 编码就绪机读真源；16 份 contract 冻结 product/config/runtime/action/tool/model/context/TUI/platform/diagnostics/formats/transport/Prompt/release/readiness/zero-surface 与 12 组 synthetic fixtures。
 - `.tools/validate_design_contracts.lua`：从仓库根用 `bin/lua55` 执行的跨契约校验器；当前覆盖 7,000+ 条集合、映射、状态、fixture、task graph 与零表面断言。
-- `.tools/validate_coding_readiness.lua`：校验 Gate A/B passed、Gate R closed、28 项 gate 路由、C01--C34 计划、公开状态与编码前空 skeleton。
+- `.tools/validate_coding_readiness.lua`：校验 Gate A/B passed、Gate R closed、28 项 gate 路由、C01--C34 计划，以及当前 implementation phase 对应的源码与公开状态。
 - `PROOF-PLANS-P0.md`：TP-003/006/008 证明提纲。
 - `READINESS-GAP.md`：主线就绪差距与 Wave 工作包（从“决定已收口”到“可开发”的运营清单）。
 - `SPEC-FREEZE-QUEUE.md`：规格冻结问答（主队列已完成 → D-059..D-069）；再有缺口另开题，不默认续 SQ。
@@ -75,11 +75,12 @@
 - `讨论中`：正在和项目负责人逐项确认。
 - `设计已确认`：目标、接口、错误、兼容性和验收标准已经确认。
 - `计划已确认`：实施顺序和任务拆分已经确认，但尚未编码。
-- `实现中`、`已验证`：仅供未来开发阶段使用。
+- `实现中`：已有代码但对应退出条件尚未全部完成。
+- `已验证`：须注明验证范围；平台无关 suite、现代机证明与真实目标资格分别记录。
 
 ## 当前阅读入口
 
-当前先读 [`CURRENT-STATE.md`](CURRENT-STATE.md)、[`GATE-AUDIT-2026-08-29.md`](GATE-AUDIT-2026-08-29.md)、[`IMPLEMENTATION-PLAN.md`](IMPLEMENTATION-PLAN.md) 与 [`contracts/README.md`](contracts/README.md)；历史选择恢复再读 `DECISION-REGISTER.md`/`DECISIONS.md`。`OWNER-QUESTIONS-01.md` 的 29 题已经全部答复，现行 `decision-inventory-v9` 为 `unanswered=0`；270 组、384 个 checklist ID、`AQ-001..AQ-437`、`CV-001..CV-076` 和 49 个旧批次继续保留为审计证据。Gate A/B 已通过，可从 C01 填写产品实现；目标平台证明仍只在对应 milestone/Gate R 通过后成立。
+当前先读 [`TRACKING.md`](TRACKING.md)、[`CURRENT-STATE.md`](CURRENT-STATE.md)、[`IMPLEMENTATION-PLAN.md`](IMPLEMENTATION-PLAN.md) 与 [`contracts/README.md`](contracts/README.md)；阶段门见 [`GATE-AUDIT-2026-08-29.md`](GATE-AUDIT-2026-08-29.md)，历史选择恢复再读 `DECISION-REGISTER.md`/`DECISIONS.md`。`OWNER-QUESTIONS-01.md` 的 29 题已经全部答复，现行 `decision-inventory-v9` 为 `unanswered=0`；270 组、384 个 checklist ID、`AQ-001..AQ-437`、`CV-001..CV-076` 和 49 个旧批次继续保留为审计证据。核心实现已推进至 M9，目标平台证明仍只在对应 milestone/Gate R 通过后成立。
 
 本轮新增拆分把 composer 输入召回、配置秘密文件权限、raw shell 继承环境、完整 model-yield 后续接、direct 文件属性、ignore/隐藏项、`exec` cwd、输出解码与 canonical 保留、active XML 外改恢复等交给独立 owner。M05-57..59、AL06-50/51 与 TS-40 等原子组也已随 Batch 06 收口；旧 packet 中的推荐仍只是收到回复前的历史候选，现行选择只看登记表和 D-049 至 D-057。
 

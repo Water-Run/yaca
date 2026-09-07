@@ -1,6 +1,6 @@
 # 当前状态分析
 
-更新日期：2026-08-30
+更新日期：2026-09-07
 
 ## yaca 仓库
 
@@ -25,12 +25,13 @@ yaca 当前已有可执行 Lua 入口和平台无关的通用 Agent 核心；代
 - chat `.model` 已接到 draft/production 双 owner：无参数最多投影 64 个 enabled/native-tool 候选的普通文本行，精确 selector 不依赖 ANSI、补全或新式终端。预检保守按 `1 byte <= 1 token` 绑定当前 config、Context generation/sequence、活动 ModelView、四层 Prompt、tool/control schema、输出与 transition reserve；目标放不下时在任何配置/XML 变更前返回 `ModelIncompatible`，不缩水历史、Prompt 或工具。endpoint route、credential slot/policy、Protocol、RemoteModel/usage、Model Prompt、adapter/streaming 或能力边界变化进入默认 deny 的 `model-change-N` 确认；只显示 origin/path、`?configured` 和非秘密 credential identity。确认绑定的 waterline/manifest/Prompt 环境/目标定义任一变化即 stale；保存态经完整配置重载、目标定义复核、Context `session_override + model_view_published` 原子提交和 Runtime receipt adoption 后只在下一 turn 生效，active turn 不热换，也不建立失败 fallback Model。
 - 最小发行 allowlist、component/license manifest、SPDX SBOM、package planner、资源 overlay 和资源门禁测试 Harness。
 - 运行时 curl config 已逐请求用锁定 CLI 可解析的 standalone/no-option 语法显式固定 HTTP/1.1、TLS 1.2+、服务端/HTTPS 代理随包 CA 校验；代理 TLS 下限由 `proxy-tlsv1` 与只启用 TLS 1.2/1.3 的锁定 Mbed TLS 后端共同闭合。代理/主机 DNS 和普通握手只在无 canonical event 时有界重试，证书/CA/CRL/issuer/pin/status 错误立即终止。真实目标 TLS/代理资格仍待 C32。
-- 受 `.tools/run_with_resource_guard.sh` 保护的完整平台无关 Lua suite 当前为 `442/442`；这不是三目标资格证明。
+- 受 `.tools/run_with_resource_guard.sh` 保护的完整平台无关 Lua suite 当前为 `449/449`（此前已推送基线为 `442/442`）；本轮验证记录见下节。这不是三目标资格证明。
 
 仍缺失或不得宣称完成：
 
 - `--continue` 与同 workspace `.context` 已接通，但显式跨 workspace 确认/rebind 尚未开放；三目标 token/资源阈值仍待校准。
 - `.cautious`、`.prompt show|set|clear` 与 `.model` 已接通 registry → dispatcher → production port → terminal result；`.prompt edit` 仍明确 unavailable，待有界 editor transaction 实现，不能调用 ambient editor。
+- 本轮核对 `main.lua` 确认：在线 self-test Stage 2/3 production adapter 仍返回 failed 占位结果；`--export`、`--status` 只被 parser 识别，production request whitelist 仍拒绝。`config-repl` 当前只提供校验/缺文件修复模板，`context-repl` 只提供 Catalog 列表，完整管理交互尚待接通。这些是实现缺口，不能只归入目标资格待办。
 - 旧环境网络/HTTPS 的源码锁、XP compatibility patch、静态 import/CRT 黑名单和最小协议闭包已有可重复候选证据；仍须在真实 XP/Win7/CentOS 7 证明 TLS/CA、显式代理、redirect/retry/cancel、旧 CMD 路径与错误分类，不能据此开放 Release Gate R。
 - C32 的三个真实 target qualification、C33 的干净机发布旅程/零表面、C34 的最终 SHA-256/license/SBOM/build/test evidence 尚未执行。
 - README 中任何能力声明仍必须受实现和 target evidence 约束；现代 Linux fake/native 边界通过不能外推为 XP、Win7 或 CentOS 7 支持。
@@ -39,11 +40,18 @@ yaca 当前已有可执行 Lua 入口和平台无关的通用 Agent 核心；代
 - 图像/音频、remote/headless、transcription 与 TTS 仍被 D-044 明确排除。
 - Web：**v0.1 核心** 仍零表面（D-044）；2026-08-10 的 D-058 仅为未来 **本机本地 Web** 登记设计预留，产品线为 `yaca-web`（服务端 **Java 8**）与 `yaca-ie6`（服务端 **PHP 5.4**，浏览器有意兼容 IE6）。设计正文在 `.develope-docs/web-tracks/`；仓库根 `web/` 只作说明/空预留；JRE/PHP 与 Web 实现都不得进入 v0.1 loader、help、配置或核心 zip，也不得写成已实现能力。
 
-### 下次接盘检查点（2026-08-30 暂停）
+### 本轮推进与接续点（2026-09-07）
+
+- 已实现暂停记录中的 Model selection 补强：config owner 生成去 userinfo、隐藏 query 值的 normalized proxy route，picker 和确认详情均显示该 route。保存态 apply 重载后在同一 config service 内精确比较目标 Model Key、secret adapter options 与代理凭据；仅秘密值变化也返回 `ModelSelectionStale`，发生在 Context publication 前。比较只返回 equality，不把秘密值或可复用 secret digest 放进公开 snapshot、disclosure 或 XML。
+- Linux qualification builder 已改成串行 make、至少 `5120 MiB` 的可用内存门槛，并在调用者已持有普通 suite guard 时重新检查更高门槛。测试数量由唯一的 `SUMMARY total=N passed=N failed=0` 动态采集，要求 N 为正且 passed=total；重复、缺失、畸形和失败摘要均拒绝。构建摘要继续明确 `release_authorized=false` 与 `target_qualification_complete=false`。
+- config/production Model selection/coordinator/build-script 的定向 suite 已 `54/54`、完整 suite 已 `449/449` 通过；design-contract/proof-evidence/coding-readiness 校验分别为 7612/56/553 条断言。TP-003/006/008/010 与 RP-001 全部通过；TP-010 初次源码下载遇 TLS EOF，后两项证明使用 SHA-256 与锁一致的本地源码缓存完成真实重建（TP-010 5,564,743 条断言）。低内存时由 guard 拒绝执行，恢复后才启动测试。四组不启动构建的模拟 admission 验证确认低门槛不能覆盖 builder 的 5 GiB floor，用户提高门槛仍有效。
+- `TRACKING.md` 已替换过期的“源码 0%、首任务 C01”口径，实施计划与开发入口已同步。下一实现顺序集中在 status/export/管理 REPL/在线自检、`.prompt edit`、跨 workspace 确认/rebind，然后收集 C32 三目标真实证据；C33/C34 与 Gate R 继续等待。本轮可丢弃日志位于 `out/development-2026-09-07-sTXXIy/`。
+
+### 历史暂停检查点（2026-08-30，待办已在上节推进）
 
 - 最后一个已经实现、完整回归并推送的核心节点是 `95a0e9c11360cc97f9818c7239ac06210b3c32c7`（`feat: switch models with bound disclosure`）。该节点的受资源门禁串行 suite 为 `442/442`，coding readiness、TP-003/006/008/010 与 RP-001 均通过；`target_qualification=false`，Release Gate R 仍关闭。
 - 暂停前只进行了旧环境 HTTPS/代理/CA 的只读审查。曾开始但未闭合的 `config.lua` 局部草稿已经完整撤回；没有未测试的运行时代码、没有遗留 `lua test/run.lua` 进程，也没有把 cross-build 写成真实目标资格。
-- 下一实现节点先关闭两个已经定位的边界：其一，`.model` 目前只公开 `off|explicit-public-url|explicit-secret-slot`，尚未显示去 userinfo、隐藏 query value 的 normalized proxy route；同一次预览到 apply 之间，目标 Model Key、secret adapter option 或代理 credential 若只改变值而不改变公开 shape，也需要进程内不泄值的精确 TOCTOU binding。其二，`.tools/qualification/build_linux_x86_64.sh` 仍硬编码旧的 `329/329` suite 数量，并在 onefile 声明至少需要 5 GiB 时使用 `-j2` 与 4096 MiB 默认门槛；应改成串行构建、强制不低于实际峰值的 guard floor，并从唯一 `SUMMARY total=N passed=N failed=0` 动态记录证据。
+- 当时定位的两个边界为 `.model` 的代理 route/秘密值 TOCTOU binding，以及 Linux builder 的 `329/329` 固定数量、`-j2` 和低于 onefile 声明峰值的 guard floor；2026-09-07 已完成对应代码改动，验证记录以上节为准。
 - 上述修改必须先补 config/production Model selection/资格脚本静态契约测试，再按“人工查看 `free -h`、`/proc/pressure/memory`、遗留 test runner → guarded targeted → guarded full suite → guarded coding readiness”的顺序串行验证。不得复用本轮内存数字；本轮曾观察到 Swap 基本耗尽，因此尤其不能跳过新鲜 preflight，也不能并行跑 proof。
 - 真实 XP SP3 x86、Win7 SP1 x64、CentOS 7 x64 仍是 C32 唯一有效证据来源。保留未来提交名不提前使用：`test: qualify all release targets`、`test: prove release journeys and zero surface`、`docs: publish qualified release evidence`。
 

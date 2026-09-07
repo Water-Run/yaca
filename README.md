@@ -6,7 +6,7 @@ yaca is the design for a simple, single-agent, terminal-only general Agent,
 licensed under GPL v3. Software development is a first-class common workload,
 not its exclusive purpose.
 
-> **Project status (2026-08-30): platform-independent core implemented through M9; controller closure and target qualification pending.** No target archive has qualified for release. Everything below describes the implemented v0.1 contract; target-specific behavior remains unqualified until it passes independently on Win32 x86, Win64 x86_64, and Linux x86_64. Gate A/B remain passed and Release Gate R remains closed.
+> **Project status (2026-09-07): platform-independent core implemented through M9; controller closure and target qualification pending.** No target archive has qualified for release. The sections below distinguish connected behavior from parser-only command grammar. Target-specific behavior remains unqualified until it passes independently on Win32 x86, Win64 x86_64, and Linux x86_64. Gate A/B remain passed and Release Gate R remains closed.
 
 ## Supported release targets
 
@@ -73,7 +73,12 @@ selector and refreshed ModelView for the next turn, while the active turn keeps
 its immutable snapshot; a changed waterline, manifest, Prompt environment, or
 reloaded target definition makes the preview stale. Displays identify
 credential slots but never reveal registered secret values, and configured URL
-query values are shown only as `?configured`.
+query values are shown only as `?configured`. The picker and confirmation also
+show the normalized proxy origin/path with userinfo removed. After a saved
+selection reloads configuration, yaca compares the selected Model Key, secret
+adapter options, and proxy credentials privately against the preview's
+generation. A value-only change makes that preview stale before Context
+publication; no secret value or reusable secret digest enters the disclosure.
 
 ## Contexts
 
@@ -89,7 +94,7 @@ Each interactive coordinator error receives a process-local `error-N` identity. 
 
 ## Implemented command grammar
 
-These spellings are implemented in the source tree; no downloadable target-qualified executable is available yet:
+The parser recognizes these spellings; no downloadable target-qualified executable is available yet:
 
 ```text
 yaca [directory]
@@ -103,6 +108,13 @@ yaca --continue <selector>          (-c, Windows /c)
 yaca --export [selector]            (-ex, Windows /ex)
 yaca --status                       (-stt, Windows /stt)
 ```
+
+Controller gaps remain: production dispatch currently rejects `--export` and
+`--status`. `--config-repl` validates configuration or creates a missing-file
+repair template; `--context-repl` displays the catalog. Their full management
+interactions are pending. Online self-test Stage 2/3 scheduling and consent are
+implemented, but their production adapters currently report an unavailable
+implementation rather than issuing Model requests.
 
 Bare `yaca` is exactly `yaca .`. `--` ends option parsing, so a directory beginning with `-` remains expressible. Linux never treats `/...` as an option. Non-TTY self-test Stage 2 or 3 requires the explicit current-invocation flag `--i-accept-online-self-test`; otherwise it performs zero Model requests and fails closed.
 

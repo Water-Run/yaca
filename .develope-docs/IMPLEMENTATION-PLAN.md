@@ -1,8 +1,20 @@
 # yaca v0.1 全程序实施计划
 
-版本：2026-08-29.1
-状态：**计划已确认 / Gate B passed / 产品实现已完成 / 资格验证待完成**
-首个编码任务：**C01 — 建立测试 harness 与 release manifest**
+版本：2026-09-07.1
+状态：**计划已确认 / Gate B passed / 平台无关核心已实现至 M9 / controller 收口和资格验证待完成**
+当前主线：**收口现有 controller 与构建证据，再执行 C32--C34**
+
+## 当前实施位置
+
+C01--C31 的平台无关核心、测试与发行规划已落地；下文保留各 task 的原始
+退出条件与提交边界，不能把这些清单视为全部目标 hard gate 已通过。
+最新进度和验证记录集中在 [TRACKING.md](TRACKING.md)。
+
+2026-09-07 推进暂停交接中已定位的两项修复：模型切换的规范代理展示与秘密值
+TOCTOU 复核，以及 Linux builder 的串行/5 GiB guard floor/动态 suite 摘要。
+随后仍需 status/export/管理 REPL controller、在线 self-test Stage 2/3 adapter、
+有界 `.prompt edit`、跨 workspace 确认/rebind，以及真实三目标资格。
+机读 phase 保持 `implemented-unqualified`，Release Gate R 保持关闭。
 
 ## 1. 计划边界
 
@@ -186,9 +198,9 @@ M8 完成才得到最小端到端 Agent；在此之前 README 仍必须写“未
 
 C32/C33/C34 全通过后才能把 Release Gate R 从 `closed` 改为 `passed`。修改状态本身必须是独立、可审计的发布提交。
 
-## 15. 首轮编码执行单
+## 15. 首轮编码执行单（历史，C01--C03 已实现）
 
-开始编码时严格执行：
+以下保留初始实现顺序，不再作为当前待办：
 
 1. **C01**：先写 harness/manifest 和负向 loader 测试；不填任何业务 skeleton。
 2. 运行 `bin/lua55 .tools/validate_design_contracts.lua`、`bin/lua55 .tools/validate_coding_readiness.lua`、`bin/lua55 test/run.lua`。

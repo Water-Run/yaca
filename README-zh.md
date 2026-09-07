@@ -5,7 +5,7 @@
 yaca 是一款简单、单 Agent、terminal-only 的通用 Agent 设计，以 GPL v3
 许可开源。软件开发是一级且常见的工作负载，但不是唯一用途。
 
-> **项目状态（2026-08-30）：平台无关核心已实现至 M9；controller 收口和目标资格验证待完成。** 目前还没有任何目标发行包通过资格验证。下文描述已经实现的 v0.1 契约；Win32 x86、Win64 x86_64 与 Linux x86_64 的目标相关行为仍须分别验证。Gate A/B 保持通过，Release Gate R 仍关闭。
+> **项目状态（2026-09-07）：平台无关核心已实现至 M9；controller 收口和目标资格验证待完成。** 目前还没有任何目标发行包通过资格验证。下文分别说明已接通能力和命令 grammar；Win32 x86、Win64 x86_64 与 Linux x86_64 的目标相关行为仍须分别验证。Gate A/B 保持通过，Release Gate R 仍关闭。
 
 ## 支持的发行目标
 
@@ -51,6 +51,14 @@ Context XML 是 yaca 内部版本化存储，不是稳定第三方 API；人类�
 `.prompt edit` 在有界 editor transaction 接通前返回 typed unavailable，绝不
 隐式调用环境中的外部编辑器。
 
+`.model` 最多列出 64 个 enabled/native-tool 候选，`.model <精确名称>` 选择
+目标。预览会核对当前历史、Prompt、工具/control schema 与输出预留是否能放入
+目标窗口；跨 endpoint、credential、协议或能力边界时需显式确认，空回答默认
+拒绝。列表和确认显示去 userinfo、隐藏 query 值的规范代理地址。保存态 apply
+重载配置后还会在进程内精确比较目标 Key、secret adapter option 与代理凭据；
+仅秘密值变化也使旧预览失效，且在 Context 写入前拒绝。未保存选择从第一 turn
+生效，保存态从下一 turn 生效；公开信息不携带秘密值或可复用的秘密摘要。
+
 ## Context
 
 Context 文件位于镜像树，例如 `__yaca__/CONTEXT/C/Program Files/我的任务.xml`。包含 XML 文件名的当前逻辑路径产生一个用户可见的 16 位大写十六进制 hash。没有永久 Context ID：rename 或 rebind 后路径/hash 立即改变，旧 hash 失效。
@@ -65,7 +73,7 @@ chat 中无 selector 的 `.context` 显示有界 recent 列表；`.context <sele
 
 ## 已实现的命令 grammar
 
-以下拼写已在源码中实现；目前仍没有可下载且通过目标资格验证的 executable：
+解析器已识别以下拼写；目前仍没有可下载且通过目标资格验证的 executable：
 
 ```text
 yaca [directory]
@@ -79,6 +87,12 @@ yaca --continue <selector>          (-c，Windows /c)
 yaca --export [selector]            (-ex，Windows /ex)
 yaca --status                       (-stt，Windows /stt)
 ```
+
+controller 仍有缺口：production dispatcher 当前拒绝 `--export` 和 `--status`。
+`--config-repl` 当前执行配置校验或创建缺文件时的修复模板，`--context-repl`
+当前显示 Catalog，完整管理交互待接通。在线 self-test Stage 2/3 的调度和同意
+门禁已有实现，但 production adapter 当前返回未接通的失败结果，不发起 Model
+请求。
 
 裸 `yaca` 与 `yaca .` 完全等价。`--` 结束选项解析，因此以 `-` 开头的目录仍可表达。Linux 永远不把 `/...` 当选项。非 TTY 执行 self-test Stage 2/3 时，必须显式带本次 invocation 的 `--i-accept-online-self-test`；否则零 Model 请求并 fail-closed。
 
