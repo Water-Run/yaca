@@ -326,6 +326,11 @@ local function fixture(settings)
         log[#log + 1] = "runtime-session-fail:" .. reason
         return nil, { code = "AgentDurabilityFailure" }
     end
+    function loop:fail_context_observation()
+        loop_status.halted = true
+        log[#log + 1] = "runtime-context-stale"
+        return nil, { code = "AgentDurabilityFailure" }
+    end
     function loop:fail_compaction_barrier(reason)
         if not compaction_lifecycle then
             return nil, { code = "AgentDurabilityFailure" }
@@ -529,6 +534,13 @@ local function fixture(settings)
     local durable_context_prompt = "workspace context"
     local durable_current_model = "Primary"
     local publication = {
+        inspect_active = function()
+            if settings.context_inspection_throws then error("private diagnostic") end
+            if settings.context_inspection_error then
+                return nil, settings.context_inspection_error
+            end
+            return { context_hash = "ABCDABCD12341234", display_name = "current-task" }
+        end,
         operation_journal = function()
             log[#log + 1] = "operation-journal"
             return operation_journal
@@ -1196,6 +1208,27 @@ end
 return {
     name = "integration/production-agent-composition",
     cases = {
+        {
+            name = "production status uses publication ownership and halts on inspection failure",
+            run = function()
+                for _, throws in ipairs({ false, true }) do
+                    local settings = {}
+                    local f = fixture(settings)
+                    local agent = assert(f.main.start_published_agent(
+                        f.composed, f.chat, "implement the project", "terminal"
+                    ))
+                    A.equal(assert(agent.context_status()).context_hash, "ABCDABCD12341234")
+                    settings.context_inspection_throws = throws
+                    settings.context_inspection_error = { code = "TargetChanged" }
+                    local result, result_error = agent.context_status()
+                    A.falsy(result)
+                    A.equal(result_error.code, "ContextStale")
+                    A.falsy(A.render(result_error):find("private diagnostic", 1, true))
+                    A.truthy(agent.loop:status().halted)
+                    A.contains(table.concat(f.log, "|"), "runtime-context-stale")
+                end
+            end,
+        },
         {
             name = "durable first turn precedes every production Agent activity",
             run = function()

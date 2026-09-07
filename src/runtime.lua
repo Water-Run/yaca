@@ -2418,6 +2418,13 @@ function M.new_agent_loop(ports, options)
         }, "adopted Session override receipt")
     end
 
+    ---Stops admission after the owned Context file fails revalidation.
+    -- This never records a new event against the stale file or changes paths.
+    function loop:fail_context_observation()
+        if halted then return nil, halt_error end
+        return durability_failure("active-context-stale")
+    end
+
     ---Halts the Runtime when the Session writer returned an ambiguous outcome
     -- or receipt adoption raised after publication may have crossed storage.
     function loop:fail_session_override_barrier(reason)

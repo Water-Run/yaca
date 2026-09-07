@@ -1721,6 +1721,29 @@ return {
             end,
         },
         {
+            name = "stale Context observation stops every later admission without another event",
+            run = function()
+                for _, started in ipairs({ false, true }) do
+                    local f = fixture()
+                    if started then assert(f.loop:begin_main(input(false))) end
+                    local before = f.loop:status().last_durable_sequence
+                    local rejected, reject_error = f.loop:fail_context_observation()
+                    A.falsy(rejected)
+                    A.equal(reject_error.code, "AgentDurabilityFailure")
+                    A.truthy(f.loop:status().halted)
+                    A.falsy(f.loop:status().reportable)
+                    A.equal(f.loop:status().last_durable_sequence, before)
+                    local later, same_error = f.loop:begin_main(input(false))
+                    A.falsy(later)
+                    A.equal(same_error, reject_error)
+                    A.equal(#f.model_starts, started and 1 or 0)
+                    A.equal(#f.tool_starts, 0)
+                    assert(f.loop:close("stale-context"))
+                    A.equal(f.loop:status().state, "Closing")
+                end
+            end,
+        },
+        {
             name = "result durability loss is fail-stop and suppresses every later effect and report",
             run = function()
                 local f = fixture({ fail_event = "tool_result" })

@@ -88,7 +88,11 @@ yaca --export [selector]            (-ex，Windows /ex)
 yaca --status                       (-stt，Windows /stt)
 ```
 
-controller 仍有缺口：production dispatcher 当前拒绝 `--export` 和 `--status`。
+`--status` 只读报告当前进程与配置状态，不扫描历史、不创建数据。chat `.status`
+复核当前 writer 的 Context，显示最新 hash 与有效 Session 参数；文件变化后显示
+stale 和原因并停止执行。
+
+controller 仍有缺口：production dispatcher 当前拒绝 `--export`。
 `--config-repl` 当前执行配置校验或创建缺文件时的修复模板，`--context-repl`
 当前显示 Catalog，完整管理交互待接通。在线 self-test Stage 2/3 的调度和同意
 门禁已有实现，但 production adapter 当前返回未接通的失败结果，不发起 Model

@@ -73,6 +73,43 @@ return {
     name = "fault/context-commit",
     cases = {
         {
+            name = "active writer inspection is read-only and stops after external changes",
+            run = function()
+                for _, mutation in ipairs({ "replace", "write", "delete", "during-read" }) do
+                    local fixture, writer = replacement_fixture()
+                    local before = fixture.controls.bytes(TARGET)
+                    local current = assert(fixture.store.verify_writer(writer))
+                    A.equal(current.path, TARGET)
+                    A.equal(current.generation, 1)
+                    A.equal(fixture.controls.bytes(TARGET), before)
+                    local operations = table.concat(fixture.controls.operations, "|")
+                    A.falsy(operations:find("create:", 1, true))
+                    A.falsy(operations:find("rename", 1, true))
+                    A.falsy(operations:find("flush", 1, true))
+                    if mutation == "replace" then
+                        fixture.controls.external_replace(TARGET, before)
+                    elseif mutation == "write" then
+                        fixture.controls.external_write(TARGET, before)
+                    elseif mutation == "delete" then
+                        fixture.controls.external_delete(TARGET)
+                    else
+                        fixture.hooks.after.fs_close = function()
+                            fixture.controls.external_replace(TARGET, before)
+                        end
+                    end
+                    local rejected, reject_error = fixture.store.verify_writer(writer)
+                    A.falsy(rejected)
+                    A.equal(reject_error.code, "TargetChanged")
+                    A.equal(fixture.store.writer_status(writer).status, "faulted")
+                    fixture.hooks.after.fs_close = nil
+                    fixture.controls.external_replace(TARGET, before)
+                    A.falsy(fixture.store.verify_writer(writer))
+                    A.truthy(fixture.store.close_writer(writer))
+                    A.falsy(fixture.controls.exists(LOCK))
+                end
+            end,
+        },
+        {
             name = "new Context publishes no-replace only after exact validation",
             run = function()
                 local fixture = harness.new(modules)

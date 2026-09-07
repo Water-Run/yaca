@@ -295,6 +295,32 @@ local function ascii_diagnostic(value, maximum_bytes)
     ))
 end
 
+-- Shares the public Session fields between the one-shot CLI status and chat.
+-- No selector lookup or storage scan belongs to this projection.
+local function session_status_lines(status, render)
+    render = render or safe_diagnostic
+    local hash = status.context_hash
+    if type(hash) ~= "string" or #hash ~= 16 or hash:find("[^0-9A-F]") then
+        hash = "none"
+    end
+    if status.stale then hash = "stale" end
+    local config_state = status.config_generation or "unavailable"
+    if status.config_error then config_state = "unavailable (" .. status.config_error .. ")" end
+    local double_check = "unavailable"
+    if type(status.double_check) == "boolean" then
+        double_check = tostring(status.double_check)
+    end
+    return {
+        "workspace: " .. render(status.workspace or "unavailable", 1024),
+        "context: " .. render(status.display_name or "new (not saved)", 256),
+        "context hash: " .. hash,
+        "config: " .. render(config_state, 192),
+        "model: " .. render(status.model or "unavailable", 128),
+        "permission: " .. render(status.permission or "unavailable", 128),
+        "double-check: " .. double_check,
+    }
+end
+
 local function write_direct(writer, bytes)
     local called, result
     if type(writer) == "function" then
@@ -709,6 +735,7 @@ local function validate_request(request)
         ["config-repl"] = { id = true },
         ["model-repl"] = { id = true },
         ["context-repl"] = { id = true, view = true },
+        status = { id = true },
         ["continue"] = { id = true, selector = true },
         ["run-chat"] = { id = true, directory = true },
     }
@@ -1070,6 +1097,53 @@ function M.new(components, options)
             return nil, failure("ManagementFailed", "management result contains a cycle")
         end
         return frozen
+    end
+
+    local function dispatch_status()
+        local identity, identity_error = check_platform()
+        if not identity then return nil, identity_error end
+        local generation, config_error
+        local current
+        if active_draft then
+            current = active_draft.status()
+            generation = active_draft.config_generation()
+        else
+            generation, config_error = load_config()
+            local called, workspace = pcall(admitted_components.workspace.inspect, ".")
+            current = {
+                workspace = called and type(workspace) == "table"
+                    and workspace.path or false,
+                durable = false,
+                display_name = "none",
+                context_hash = false,
+            }
+        end
+        local double_check
+        if active_draft then
+            double_check = current.double_check
+        elseif generation then
+            double_check = generation.effective_double_check
+        end
+        return readonly({
+            kind = "status",
+            outcome = "success",
+            product = admitted.product_name,
+            version = admitted.product_version,
+            release_target = admitted.release_target,
+            state = active_draft and current.lifecycle or "no-active-context",
+            workspace = current.workspace,
+            durable = current.durable == true,
+            display_name = current.display_name or "not saved",
+            context_hash = current.context_hash or false,
+            config_available = generation ~= nil,
+            config_generation = generation and generation.id or false,
+            config_error = config_error and config_error.code or false,
+            model = current.model or (generation and generation.current_model) or false,
+            permission = current.permission
+                or (generation and generation.current_permission) or false,
+            double_check = double_check,
+            agent_ready = generation and generation.agent_ready == true or false,
+        }, "read-only invocation status")
     end
 
     local function run_startup_self_test(generation)
@@ -1511,6 +1585,7 @@ function M.new(components, options)
             }, "version bootstrap result")
         end
         if request.id == "self-test" then return dispatch_self_test(request) end
+        if request.id == "status" then return dispatch_status() end
         if BOOTSTRAP_ACTIONS[request.id] then return dispatch_management(request) end
         if request.id == "continue" then return dispatch_continue(request) end
         return dispatch_chat(request)
@@ -5292,6 +5367,18 @@ function M.start_published_agent(composed, chat, message, source)
         settings = session_settings,
         compaction = compaction_owner,
         draft = chat.draft,
+        context_status = function()
+            local called, result, inspection_error = pcall(composed.publication.inspect_active)
+            if not called or not result then
+                loop:fail_context_observation()
+                return nil, failure(
+                    "ContextStale",
+                    "the active Context is stale; execution has stopped",
+                    called and inspection_error and inspection_error.code or "inspection-failed"
+                )
+            end
+            return result
+        end,
         generation = generation,
         current_generation = catalog.generation,
         current_side_generation = side_catalog.generation,
@@ -6135,15 +6222,13 @@ function M.new_application_coordinator(ports, options)
     local function status_lines()
         if not agent then
             local status = admitted_ports.chat.draft.status()
-            return {
-                "state: draft-ready",
-                "workspace: " .. tostring(status.workspace),
-                "context: new (not saved)",
-                "model: " .. tostring(status.model),
-                "permission: " .. tostring(status.permission),
-                "model change: "
-                    .. (model_change and tostring(model_change.action_id) or "none"),
-            }
+            local lines = { "state: draft-ready" }
+            for _, line in ipairs(session_status_lines(status)) do
+                lines[#lines + 1] = line
+            end
+            lines[#lines + 1] = "model change: "
+                .. (model_change and tostring(model_change.action_id) or "none")
+            return lines
         end
         local status = agent.loop:status()
         local compact_status = agent.compaction:status()
@@ -6152,13 +6237,9 @@ function M.new_application_coordinator(ports, options)
             agent.settings
         )
         if not settings_called then settings_status = nil end
-        return {
+        local lines = {
             "state: " .. tostring(status.state),
             "turn: " .. tostring(status.turn_id),
-            "model: " .. tostring(
-                type(settings_status) == "table" and settings_status.model
-                    or "unavailable"
-            ),
             "model change: "
                 .. (model_change and tostring(model_change.action_id) or "none"),
             "context generation: " .. tostring(status.context_generation),
@@ -6178,6 +6259,42 @@ function M.new_application_coordinator(ports, options)
                 .. " failures="
                 .. tostring(compact_status.automatic_failure_count),
         }
+        local current = agent.draft.status()
+        local context_error
+        if type(agent.context_status) == "function" then
+            local verified
+            verified, context_error = coordinator_function(
+                agent.context_status,
+                "ContextStale",
+                "active Context inspection"
+            )
+            if verified then
+                current = {
+                    workspace = current.workspace,
+                    display_name = verified.display_name,
+                    context_hash = verified.context_hash,
+                }
+            else
+                deferred_failure = context_error
+                lifecycle = "closing"
+                lines[#lines + 1] = "fail-stop: " .. coordinator_error_id(context_error)
+                    .. ": " .. safe_diagnostic(context_error.message, 512)
+            end
+        end
+        local settings = type(settings_status) == "table" and settings_status or {}
+        for _, line in ipairs(session_status_lines({
+            workspace = current.workspace,
+            display_name = current.display_name,
+            context_hash = current.context_hash,
+            stale = status.halted == true or context_error ~= nil,
+            config_generation = settings.config_generation,
+            model = settings.model,
+            permission = settings.permission,
+            double_check = settings.double_check_effective,
+        })) do
+            lines[#lines + 1] = line
+        end
+        return lines
     end
 
     local function show_help(topic)
@@ -8847,6 +8964,18 @@ end
 
 local function render_runtime_result(cli_service, request, result)
     if request.id == "self-test" then return render_self_test(cli_service, request, result) end
+    if request.id == "status" then
+        local lines = {
+            "yaca " .. ascii_diagnostic(result.version, 64)
+                .. " (" .. ascii_diagnostic(result.release_target, 64) .. ")",
+            "state: " .. ascii_diagnostic(result.state, 64),
+        }
+        for _, line in ipairs(session_status_lines(result, ascii_diagnostic)) do
+            lines[#lines + 1] = line
+        end
+        lines[#lines + 1] = "agent ready: " .. tostring(result.agent_ready)
+        return table.concat(lines, "\n") .. "\n"
+    end
     if BOOTSTRAP_ACTIONS[request.id] then return render_management(request, result) end
     return nil, failure(
         "InteractiveDispatchRequired",

@@ -1035,6 +1035,65 @@ return {
             end,
         },
         {
+            name = "status is read-only and reports missing invalid and valid configuration",
+            run = function()
+                for _, source in ipairs({ false, "invalid INI", valid_source() }) do
+                    local app, calls = application(source)
+                    local result = assert(app.dispatch({ id = "status" }))
+                    A.equal(result.kind, "status")
+                    A.equal(result.state, "no-active-context")
+                    A.equal(result.workspace, "/workspace")
+                    A.falsy(result.durable)
+                    A.falsy(result.context_hash)
+                    A.equal(result.config_available, source == valid_source())
+                    if result.config_available then
+                        A.equal(result.model, "Primary")
+                        A.equal(result.permission, "Std")
+                    end
+                    A.falsy(A.render(result):find("bootstrap-secret", 1, true))
+                    A.equal(calls.catalog, 0)
+                    A.equal(calls.network, 0)
+                    A.equal(calls.agent, 0)
+                    A.equal(calls.management, 0)
+                    A.equal(calls.stage1, 0)
+                    A.falsy(app.status().active_draft)
+                    A.raises(function() result.state = "changed" end, "cannot be modified")
+                end
+            end,
+        },
+        {
+            name = "production status preserves the TTY gate and does not create data",
+            run = function()
+                local native, filesystem, calls, native_path, data_root = production_native()
+                local stdout, stderr = {}, {}
+                local ports = {
+                    native = native,
+                    native_path = native_path,
+                    stdout = function(bytes) stdout[#stdout + 1] = bytes return true end,
+                    stderr = function(bytes) stderr[#stderr + 1] = bytes return true end,
+                }
+                A.equal(main.run_cli({ [0] = "/release/yaca", "--status" }, ports), 0)
+                local rendered = table.concat(stdout)
+                A.contains(rendered, "state: no-active-context")
+                A.contains(rendered, "context: none")
+                A.contains(rendered, "config: unavailable (ConfigMissing)")
+                A.equal(calls.directory_creates, 0)
+                A.equal(calls.process_starts, 0)
+                A.falsy(filesystem.bytes(data_root .. "/config.ini"))
+                A.deep_equal(stderr, {})
+                native.stdio_facts = function()
+                    return {
+                        stdin_is_tty = false, stdout_is_tty = false,
+                        stderr_is_tty = false,
+                    }
+                end
+                stdout, stderr = {}, {}
+                A.equal(main.run_cli({ [0] = "/release/yaca", "--status" }, ports), 5)
+                A.deep_equal(stdout, {})
+                A.equal(calls.directory_creates, 0)
+            end,
+        },
+        {
             name = "all management routes remain available with missing or invalid config",
             run = function()
                 local app, calls = application(nil)
@@ -1249,6 +1308,11 @@ return {
                 }))
                 A.equal(updated.double_check, false)
                 A.equal(updated.context_prompt, "draft-only preference")
+                local inspected = assert(app.dispatch({ id = "status" }))
+                A.equal(inspected.double_check, false)
+                A.equal(inspected.state, "not-saved")
+                A.falsy(inspected.context_hash)
+                A.equal(calls.catalog, 0)
                 local rejected, reject_error = result.draft.update({
                     context_prompt = "bootstrap-secret",
                 })

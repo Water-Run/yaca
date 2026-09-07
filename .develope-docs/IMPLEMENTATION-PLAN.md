@@ -12,7 +12,8 @@ C01--C31 的平台无关核心、测试与发行规划已落地；下文保留�
 
 2026-09-07 推进暂停交接中已定位的两项修复：模型切换的规范代理展示与秘密值
 TOCTOU 复核，以及 Linux builder 的串行/5 GiB guard floor/动态 suite 摘要。
-随后仍需 status/export/管理 REPL controller、在线 self-test Stage 2/3 adapter、
+只读 status controller 与活动 Context 失效后的 fail-stop 已接通。
+随后仍需 export/管理 REPL controller、在线 self-test Stage 2/3 adapter、
 有界 `.prompt edit`、跨 workspace 确认/rebind，以及真实三目标资格。
 机读 phase 保持 `implemented-unqualified`，Release Gate R 保持关闭。
 

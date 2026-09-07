@@ -6308,6 +6308,42 @@ function M.new_store(schema, ports, options)
         }, "Context writer status"))
     end
 
+    ---Revalidates the owned official file without scanning, recovery, or writes.
+    -- A changed identity or canonical document permanently faults this writer;
+    -- the caller must stop admission and close it, never follow another path.
+    -- @param writer table Opaque writer issued by this store.
+    -- @return table|nil status Current path and generation when still exact.
+    -- @return table|nil err Stale writer, active publication, or target failure.
+    function store.verify_writer(writer)
+        local state = writer_states[writer]
+        if not state or state.owner ~= owner or state.status ~= "active"
+            or not state.base_document
+        then
+            return nil, failure("InvalidContextWriter", "Context writer is stale or foreign")
+        end
+        if state.commit_active then
+            return nil, failure("ContextCommitConflict", "Context publication is active")
+        end
+        local current, identity_or_error = stable_read(schema, filesystem, state.path, limits)
+        if not current or not identity_equal(state.base_identity, identity_or_error)
+            or not deep_equal(document_states[current], document_states[state.base_document])
+        then
+            state.status = "faulted"
+            return nil, failure(
+                "TargetChanged",
+                "the active Context file changed; close and select it again",
+                current and "identity-or-document" or identity_or_error.code
+            )
+        end
+        -- The reader handle can still refer to an unlinked or replaced file.
+        local stated, path_identity = filesystem.stat_identity(state.path)
+        if not stated or not identity_equal(state.base_identity, path_identity) then
+            state.status = "faulted"
+            return nil, failure("TargetChanged", "the active Context path changed during inspection")
+        end
+        return store.writer_status(writer)
+    end
+
     ---Inspects only bounded public lease metadata and never opens Context XML.
     -- A malformed or unreadable lease remains busy with an unknown PID; this
     -- method never treats age, hostname, or parse failure as stale evidence.

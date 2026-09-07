@@ -526,7 +526,7 @@ local function validate_publication_ports(ports)
             "direct_inspect", "direct_reverify", "make_directory", "flush_directory",
         },
         schema = { "build", "append_events", "session_document", "encode" },
-        store = { "create_writer", "open_writer", "publish", "close_writer" },
+        store = { "create_writer", "open_writer", "publish", "close_writer", "verify_writer" },
         path = { "to_logical", "validate_context_name", "context_hash" },
         safety = { "binding_digest", "digest" },
         prompt = { "assemble" },
@@ -3535,9 +3535,45 @@ function M.new_context_publication(ports, options)
         return compaction_journal
     end
 
+    ---Returns the latest publication receipt without filesystem access.
     function service.status()
         if active then return active.receipt end
         return readonly({ durable = false, closed = closed }, "Context publication status")
+    end
+
+    ---Checks the active writer and derives its current public path hash.
+    -- A failed observation is sticky and closes all later publication barriers.
+    -- This reads only the owned file and never discovers or follows a replacement.
+    function service.inspect_active()
+        if closed then
+            return nil, failure("ContextPublicationClosed", "Context inspection is closed")
+        end
+        if journal_failure then return nil, journal_failure end
+        if not active or not active.writer then
+            return nil, failure("ContextNotPublished", "Context inspection has no durable owner")
+        end
+        local checked, check_error = store.verify_writer(active.writer)
+        if not checked or checked.path ~= active.receipt.context_path
+            or checked.generation ~= active.document.generation
+        then
+            journal_failure = failure(
+                "ContextStale",
+                "the active Context is stale; execution has stopped",
+                check_error and check_error.code or "writer-receipt-mismatch"
+            )
+            return nil, journal_failure
+        end
+        local hash, hash_error = path.context_hash(active.receipt.logical_path)
+        if not hash then
+            journal_failure = failure(
+                "ContextStale", "the active Context hash is unavailable", hash_error and hash_error.code
+            )
+            return nil, journal_failure
+        end
+        local values = {}
+        for key, value in pairs(active.receipt) do values[key] = value end
+        values.context_hash = hash
+        return readonly(values, "verified active Context status")
     end
 
     function service.close()

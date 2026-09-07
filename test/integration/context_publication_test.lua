@@ -257,12 +257,20 @@ local function fixture(settings)
             temporary_path = temporary_path,
         }
         if settings.publish_error then return nil, settings.publish_error end
+        writer.document = document
         if settings.shared_store then settings.shared_store.document = document end
         return {
             outcome = "published",
             generation = document.generation,
             event_count = document.event_count,
         }
+    end
+
+    function store.verify_writer(writer)
+        if settings.inspect_error then return nil, settings.inspect_error end
+        local document = writer.document or settings.open_document
+            or (settings.shared_store and settings.shared_store.document)
+        return { path = writer.target, generation = document.generation }
     end
 
     function store.close_writer(writer)
@@ -310,6 +318,31 @@ end
 return {
     name = "integration/context-publication",
     cases = {
+        {
+            name = "active inspection derives the current hash and stale failure stays closed",
+            run = function()
+                local settings = {}
+                local publication, observed, path_service = fixture(settings)
+                local draft = assert(session.new_draft(generation(), {
+                    path = "/work/项目", enterable = true, identity = { object = "workspace-1" },
+                }, { maximum_draft_bytes = 16384 }, publication))
+                local receipt = assert(draft.begin_main("inspect owned Context", "terminal"))
+                local inspected = assert(publication.inspect_active())
+                A.equal(inspected.context_path, receipt.context_path)
+                A.equal(inspected.context_hash, assert(path_service.context_hash(receipt.logical_path)))
+                settings.inspect_error = { code = "TargetChanged", message = "changed" }
+                local rejected, reject_error = publication.inspect_active()
+                A.falsy(rejected)
+                A.equal(reject_error.code, "ContextStale")
+                settings.inspect_error = nil
+                rejected, reject_error = publication.turn_context({ expected_context_generation = 1 })
+                A.falsy(rejected)
+                A.equal(reject_error.code, "ContextStale")
+                A.falsy(publication.inspect_active())
+                A.truthy(publication.close())
+                A.equal(observed.closes, 1)
+            end,
+        },
         {
             name = "first main message publishes generation one before becoming durable",
             run = function()

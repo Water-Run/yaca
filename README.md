@@ -109,8 +109,12 @@ yaca --export [selector]            (-ex, Windows /ex)
 yaca --status                       (-stt, Windows /stt)
 ```
 
-Controller gaps remain: production dispatch currently rejects `--export` and
-`--status`. `--config-repl` validates configuration or creates a missing-file
+`--status` reports the current invocation and configuration without scanning history
+or creating data. Chat `.status` checks the owned Context and stops execution if
+its file has changed; it also shows the current hash and effective Session settings.
+
+Controller gaps remain: production dispatch currently rejects `--export`.
+`--config-repl` validates configuration or creates a missing-file
 repair template; `--context-repl` displays the catalog. Their full management
 interactions are pending. Online self-test Stage 2/3 scheduling and consent are
 implemented, but their production adapters currently report an unavailable

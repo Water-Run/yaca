@@ -32,10 +32,10 @@ C01--C31 已有核心实现、测试 harness、最小发行规划和现代 Linux
 | C34 | 文档与 evidence 布局规划 | 最终 SHA-256/license/SBOM/build/test evidence，公开声明复核 |
 
 已接通的近期 controller 包括 `--continue`、同 workspace `.context`、
-`.details`、`.cautious`、`.prompt show|set|clear`、`.model`。
+`.details`、`.cautious`、`.prompt show|set|clear`、`.model`、`--status` 和 chat `.status`。
 `.prompt edit` 仍返回 typed unavailable；显式跨 workspace 确认/rebind 尚未开放。
 
-本轮直接核对 `main.lua` 后补记入口缺口：`--export`、`--status` 已被 parser
+本轮直接核对 `main.lua` 后补记入口缺口：`--export` 已被 parser
 识别，但 production request whitelist 仍拒绝；`config-repl` 当前提供配置校验与
 缺文件时的修复模板，`context-repl` 当前提供 Catalog 列表，尚无完整管理交互。
 在线 self-test Stage 2/3 的 production adapter 仍返回 failed 占位结果。
@@ -53,6 +53,8 @@ C01--C31 已有核心实现、测试 harness、最小发行规划和现代 Linux
 | Linux 构建资源 | 所有 make 串行；至少 5120 MiB 可用内存；已有较低级别 guard 也重新检查 builder 门槛 | 语法/静态契约及 4 组模拟 admission 边界通过 |
 | 构建测试证据 | 从唯一、正数、全通过的 SUMMARY 动态取数；拒绝重复/缺失/畸形/失败摘要 | 完整 suite 与摘要正负用例通过 |
 | 进度整理 | TRACKING、CURRENT-STATE、实施计划、开发入口和中英文 README 统一状态 | 补记 production 入口缺口，Gate R 仍关闭 |
+| 只读状态入口 | `--status` 显示当前进程、workspace 和配置状态；不查历史、不建目录/XML，缺失或无效配置也可查看 | production/TTY/零副作用测试通过 |
+| chat 状态准确性 | 显示最新 writer 的 Context hash 和有效 Model/Permission/DoubleCheck；只复核当前 XML 的身份与规范文档，失效后关闭 admission 与 publication | 外部替换/写入/删除/读后换路径、sticky fail-stop 和同批后续输入阻断测试通过 |
 
 验证：design-contract **7612**、proof-evidence **56**、coding-readiness **553**
 条断言通过；TP-003/006/008/010 与 RP-001 全部通过。readiness 首次运行在
@@ -61,9 +63,13 @@ TP-010 下载 Lua 源码时遭遇 TLS EOF，随后 TP-010/RP-001 使用 SHA-256 
 本轮日志在 `out/development-2026-09-07-sTXXIy/`，属于本机可丢弃证据，
 不作为三目标资格或发布授权。
 
+状态 controller 节点：完整 suite **457/457**，coding readiness 入口及上述五项
+modern proofs 全部通过；构建证明沿用每次复核 SHA-256 的锁定源码缓存。
+日志为同目录的 `status-full-suite.log` 与 `status-readiness.log`。
+
 ## 下一步顺序
 
-1. 接通 `--status`、`--export` 的 production controller；补齐管理 REPL 操作与
+1. 接通 `--export` 的 production controller；补齐管理 REPL 操作与
    在线 self-test Stage 2/3 的真实 adapter，保留逐次联网同意和零副作用检查。
 2. 收口 `.prompt edit` 的有界 editor transaction；复用现有 Session publication
    与 turn boundary，不能调用 ambient editor。

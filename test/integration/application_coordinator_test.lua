@@ -552,6 +552,13 @@ local function fixture(settings)
         tools = tools,
         compaction = compaction,
         draft = draft,
+        context_status = function()
+            log[#log + 1] = "context-inspect"
+            if settings.context_inspection_error then
+                return nil, settings.context_inspection_error
+            end
+            return { display_name = "current-task", context_hash = "ABCDABCD12341234" }
+        end,
     }
     local context_switch = {}
     function context_switch:list()
@@ -734,6 +741,56 @@ end
 return {
     name = "integration/application-coordinator",
     cases = {
+        {
+            name = "status shows current owned Context and effective Session settings",
+            run = function()
+                local f = fixture({ initial_agent = true, freeze_driver = true, batches = {
+                    { { kind = "user_action", action = "text", text = ".cautious off" } },
+                    { { kind = "user_action", action = "submit-or-queue" } },
+                    { { kind = "user_action", action = "text", text = ".status" } },
+                    { { kind = "user_action", action = "submit-or-queue" } },
+                    { { kind = "user_action", action = "text", text = ".quit" } },
+                    { { kind = "user_action", action = "submit-or-queue" } },
+                } })
+                assert(f.coordinator:run())
+                local rendered = A.render(blocks_of_kind(f.blocks, "details"))
+                A.contains(rendered, "context: current-task")
+                A.contains(rendered, "context hash: ABCDABCD12341234")
+                A.falsy(rendered:find("0123456789ABCDEF", 1, true))
+                A.contains(rendered, "workspace: /workspace")
+                A.contains(rendered, "permission: Std")
+                A.contains(rendered, "double-check: false")
+                A.contains(rendered, "config: config-settings-1")
+                A.falsy(table.concat(f.log, "|"):find("context-list", 1, true))
+            end,
+        },
+        {
+            name = "status renders stale and closes before accepting another action",
+            run = function()
+                local f = fixture({ initial_agent = true, freeze_driver = true,
+                    context_inspection_error = {
+                        code = "ContextStale", message = "active file changed",
+                    }, batches = {
+                        { { kind = "user_action", action = "text", text = ".status" } },
+                        {
+                            { kind = "user_action", action = "submit-or-queue" },
+                            { kind = "user_action", action = "text", text = "must not run" },
+                            { kind = "user_action", action = "submit-or-queue" },
+                        },
+                    },
+                })
+                local result, result_error = f.coordinator:run()
+                A.falsy(result)
+                A.equal(result_error.code, "ContextStale")
+                local rendered = A.render(blocks_of_kind(f.blocks, "details"))
+                A.contains(rendered, "context hash: stale")
+                A.contains(rendered, "fail-stop: ContextStale: active file changed")
+                A.falsy(rendered:find("0123456789ABCDEF", 1, true))
+                A.falsy(table.concat(f.log, "|"):find("must not run", 1, true))
+                A.equal(f.coordinator:status().lifecycle, "closed")
+                A.contains(table.concat(f.log, "|"), "draft-close")
+            end,
+        },
         {
             name = "first input drives the published Agent and typed close path",
             run = function()
