@@ -257,6 +257,31 @@ local function url_parts(value)
     return scheme, authority
 end
 
+-- Projects only a normalized origin/path. The config owner alone sees the
+-- credential-bearing URL; query names and values never reach this disclosure.
+local function proxy_route(value)
+    if value == "" then return "" end
+    local scheme, authority = url_parts(value)
+    if not scheme then return nil end
+    authority = authority:gsub("^.*@", ""):lower()
+    local host, port = authority:match("^(.-):(%d+)$")
+    if port then
+        local number = tonumber(port)
+        if (scheme == "https" and number == 443)
+            or (scheme == "http" and number == 80)
+        then
+            authority = host
+        else
+            authority = host .. ":" .. tostring(number)
+        end
+    end
+    local route = value:match("^https?://[^/%?]+(.*)$")
+    local path = route:match("^([^?]*)")
+    if path == "" then path = "/" end
+    return scheme .. "://" .. authority .. path
+        .. (route:find("?", 1, true) and "?configured" or "")
+end
+
 local function valid_host_patterns(value)
     if value == "" then return true end
     for item in (value .. ","):gmatch("([^,]*),") do
@@ -842,6 +867,7 @@ function M.new(ports, options)
     local generation_number = 0
     local current_generation
     local current_binding
+    local generation_secrets = setmetatable({}, { __mode = "k" })
     local service = {}
 
     local function freeze(value, label)
@@ -892,6 +918,7 @@ function M.new(ports, options)
 
         local secret_entries = {}
         local secret_lookup = {}
+        local secret_values = {}
         local warnings = {}
         local public = {
             permissions = {},
@@ -908,6 +935,7 @@ function M.new(ports, options)
                 destinations = destinations,
             }
             secret_lookup[id] = true
+            secret_values[id] = value
         end
 
         for _, group_name in ipairs({ "General", "TUI", "Agent", "Network", "Exec", "Context" }) do
@@ -929,6 +957,7 @@ function M.new(ports, options)
         end
 
         local proxy_url = exact.Network.ProxyUrl
+        public.network.proxy_route = proxy_route(proxy_url)
         local proxy_authority
         if proxy_url ~= "" then
             local ignored
@@ -1139,6 +1168,37 @@ function M.new(ports, options)
             return registry.descriptors()
         end
 
+        ---Compares a selected Model's private credentials across generations.
+        -- Only generations from this config service are admitted. Values and
+        -- reusable secret digests stay private; callers receive equality only.
+        -- Public definition and network policy checks remain the caller's duty.
+        -- @param previous table Earlier immutable generation from this service.
+        -- @param name string Exact selected Model name.
+        -- @return boolean|nil matched Whether all scoped secrets still match.
+        -- @return table|nil err Unknown generation or Model selector failure.
+        function facade.matches_model_secrets(previous, name)
+            local prior = generation_secrets[previous]
+            if not prior or type(name) ~= "string" or not public.models[name]
+                or not previous.models[name]
+            then
+                return nil, failure(
+                    "InvalidConfigSelector",
+                    "Model secret comparison requires same-service generations and a Model"
+                )
+            end
+            local prefix = "Model." .. name .. "."
+            local function scoped(id)
+                return id == "Network.ProxyUrl" or id:sub(1, #prefix) == prefix
+            end
+            for id, value in pairs(secret_values) do
+                if scoped(id) and prior[id] ~= value then return false end
+            end
+            for id, value in pairs(prior) do
+                if scoped(id) and secret_values[id] ~= value then return false end
+            end
+            return true
+        end
+
         ---Scans ordinary bytes against release-eligible registered values.
         function facade.scan_registered_secrets(bytes)
             return registry.scan(bytes)
@@ -1151,7 +1211,9 @@ function M.new(ports, options)
             return registry.new_stream_scanner()
         end
 
-        return readonly(facade, "configuration generation"), document, overrides
+        local result = readonly(facade, "configuration generation")
+        generation_secrets[result] = secret_values
+        return result, document, overrides
     end
 
     local function read_file(path)

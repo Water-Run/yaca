@@ -104,7 +104,8 @@ local function fixture(settings)
             endpoint_query_configured = false,
             remote_model = secondary and "secondary-remote" or "primary-remote",
             credential_policy = "bearer:Model." .. name .. ".Key",
-            proxy_policy = "off",
+            proxy_policy = settings.proxy_route and "explicit-secret-slot" or "off",
+            proxy_route = settings.proxy_route or "",
             context_length = secondary and 65536 or 32768,
             max_output_tokens = 4096,
             streaming = "try",
@@ -912,6 +913,7 @@ return {
             name = "saved cross-boundary model switch discloses and confirms exact next-turn change",
             run = function()
                 local f = fixture({
+                    proxy_route = "https://proxy.example/tunnel?configured",
                     initial_agent = true,
                     initial_state = "Idle",
                     freeze_driver = true,
@@ -950,6 +952,8 @@ return {
                 local disclosure = table.concat(actions[1].lines, "|")
                 A.contains(disclosure, "from endpoint: https://primary.example")
                 A.contains(disclosure, "to endpoint: https://secondary.example")
+                A.contains(disclosure,
+                    "to proxy: explicit-secret-slot https://proxy.example/tunnel?configured")
                 A.contains(disclosure, "history: seq 1..3")
                 A.contains(disclosure, "usage/amount: unavailable")
                 A.contains(disclosure, "default: deny")

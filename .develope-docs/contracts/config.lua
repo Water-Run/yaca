@@ -29,6 +29,14 @@ return {
   duplicate_key = "error",
   invalid_generation = "block-new-main-or-side",
 
+  model_selection = {
+    proxy_disclosure = "normalized-origin-path-without-userinfo-query-values",
+    secret_revalidation = "same-service-generation-private-exact-value-comparison",
+    secret_scope = { "selected-model-key", "selected-model-adapter-secrets", "proxy-credentials" },
+    secret_binding_projection = false,
+    changed_secret = "ModelSelectionStale-before-context-publication",
+  },
+
   ini_grammar = {
     encoding = "strict-utf8",
     optional_bom = "one-leading-utf8-bom",

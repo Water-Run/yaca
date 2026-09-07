@@ -203,9 +203,22 @@ local function fixture(settings)
         scan_registered_secrets = function() return {} end,
         new_stream_scanner = function() return {} end,
     }
+    if settings.proxy_route then
+        generation.network = {
+            follow_proxy = true,
+            proxy_url_configured = true,
+            proxy_route = settings.proxy_route,
+        }
+    end
     local next_generation = {}
     for key, value in pairs(generation) do next_generation[key] = value end
     next_generation.id = "config-generation-2"
+    function next_generation.matches_model_secrets(previous, name)
+        A.equal(previous, generation)
+        A.equal(name, "Secondary")
+        log[#log + 1] = "model-secret-reverify"
+        return not settings.model_secret_changed_on_reload
+    end
     next_generation.agent = {
         double_check = true,
         action_review_enabled = true,
@@ -1429,6 +1442,42 @@ return {
                 end
                 A.truthy(reload_index < publish_index)
                 A.truthy(publish_index < adopt_index)
+            end,
+        },
+        {
+            name = "production Model previews disclose the sanitized proxy route",
+            run = function()
+                local route = "https://proxy.example/tunnel?configured"
+                local f = fixture({ proxy_route = route })
+                local agent = assert(f.main.start_published_agent(
+                    f.composed, f.chat, "implement the project", "terminal"
+                ))
+                local catalog = assert(agent.models:list())
+                A.equal(catalog.rows[1].proxy_route, route)
+                local preview = assert(agent.models:preview("Secondary"))
+                A.equal(preview.from.proxy_route, route)
+                A.equal(preview.to.proxy_route, route)
+                A.equal(preview.to.proxy_policy, "explicit-secret-slot")
+            end,
+        },
+        {
+            name = "secret-only Model reload race is rejected before Context publication",
+            run = function()
+                local f = fixture({ model_secret_changed_on_reload = true })
+                local agent = assert(f.main.start_published_agent(
+                    f.composed, f.chat, "implement the project", "terminal"
+                ))
+                local preview = assert(agent.models:preview("Secondary"))
+                local updated, update_error = agent.models:apply(preview)
+                A.falsy(updated)
+                A.equal(update_error.code, "ModelSelectionStale")
+                A.equal(agent.loop:status().context_generation, 2)
+                A.equal(agent.loop:status().last_durable_sequence, 3)
+                A.equal(agent.loop:status().active_view_manifest_ref, "view-1")
+                local joined = table.concat(f.log, "|")
+                A.contains(joined, "model-secret-reverify")
+                A.falsy(joined:find("publication:session-override", 1, true))
+                A.falsy(joined:find("runtime-adopt:session-override", 1, true))
             end,
         },
         {

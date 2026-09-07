@@ -283,6 +283,64 @@ return {
             end,
         },
         {
+            name = "proxy disclosure normalizes the route without userinfo or query values",
+            run = function()
+                for _, vector in ipairs(fixtures.proxy_disclosure_vectors) do
+                    local candidate = source() .. '\n[Network]\nProxyUrl = "'
+                        .. vector.url .. '"\n'
+                    local generation = assert(codec().parse(candidate))
+                    A.equal(generation.network.proxy_route, vector.route)
+                    A.falsy(generation.network.proxy_route:find("user:pass", 1, true))
+                    A.falsy(generation.network.proxy_route:find("hidden", 1, true))
+                end
+            end,
+        },
+        {
+            name = "Model secret comparison detects value changes without exposing bindings",
+            run = function()
+                local service = codec()
+                local candidate = source({
+                    model_extra = 'AdapterOptions = "{\\"SecretHeader\\":'
+                        .. '\\"adapter-secret\\"}"',
+                }) .. '\n[Network]\nProxyUrl = "https://user:pass@proxy.example"\n'
+                local first = assert(service.parse(candidate))
+                local same = assert(service.parse(candidate, { ContextPrompt = "new rule" }))
+                A.truthy(same.matches_model_secrets(first, "Primary"))
+                local mutations = {
+                    { "canary%-secret", "changed-key-value" },
+                    { "adapter%-secret", "changed-adapter-value" },
+                    { "user:pass@", "user:changed-password@" },
+                    { "canary%-secret", "" },
+                }
+                for _, mutation in ipairs(mutations) do
+                    local changed_source = candidate:gsub(mutation[1], mutation[2], 1)
+                    local changed, changed_error = service.parse(changed_source)
+                    A.truthy(changed, A.render(changed_error))
+                    A.falsy(changed.matches_model_secrets(first, "Primary"))
+                    A.falsy(first.matches_model_secrets(changed, "Primary"))
+                    if mutation[2] ~= "" then
+                        A.deep_equal(changed.models.Primary, first.models.Primary)
+                        A.deep_equal(changed.network, first.network)
+                    end
+                    local public = A.render(changed)
+                    A.falsy(public:find("changed-key-value", 1, true))
+                    A.falsy(public:find("changed-adapter-value", 1, true))
+                    A.falsy(public:find("changed-password", 1, true))
+                end
+                local unrelated_source = candidate:gsub(
+                    "%[Model.Disabled%]", '[Model.Disabled]\nKey = "unrelated-key"', 1
+                )
+                local unrelated = assert(service.parse(unrelated_source))
+                A.truthy(unrelated.matches_model_secrets(first, "Primary"))
+                local foreign = assert(codec().parse(candidate))
+                local matched, match_error = first.matches_model_secrets(foreign, "Primary")
+                A.falsy(matched)
+                A.equal(match_error.code, "InvalidConfigSelector")
+                A.falsy(first.matches_model_secrets({}, "Primary"))
+                A.falsy(first.matches_model_secrets(first, "Missing"))
+            end,
+        },
+        {
             name = "context whitelist creates a new immutable effective snapshot",
             run = function()
                 local service = codec()

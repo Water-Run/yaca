@@ -18,6 +18,13 @@ return {
     { id = "literal-newline", encoded = "\"bad\nline\"", valid = false },
     { id = "triple-quote", encoded = "\"\"\"block\"\"\"", valid = false },
   },
+  proxy_disclosure_vectors = {
+    { url = "", route = "" },
+    { url = "https://user:pass@PROXY.example:443/tunnel?token=hidden", route = "https://proxy.example/tunnel?configured" },
+    { url = "http://PROXY.example:80?token=hidden", route = "http://proxy.example/?configured" },
+    { url = "https://user:pass@[2001:DB8::1]:8443", route = "https://[2001:db8::1]:8443/" },
+    { url = "https://proxy.example:00443", route = "https://proxy.example/" },
+  },
   migration_cases = {
     { id = "custom-prompt", source = "Model.*.CustomPrompt", expected_action = "copy-exact-then-validate-before-delete" },
     { id = "profile-doublecheck", source = "Permission.*.DoubleCheck", expected_action = "diagnostic-explicit-Agent.DoubleCheck-choice-required" },

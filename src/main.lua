@@ -4170,6 +4170,14 @@ local function model_public_summary(generation, name, model)
         or protocol == "anthropic-messages" and "x-api-key" or nil
     if not auth_mode then return nil end
     local output_tokens = model.max_output_tokens or 4096
+    local selected_proxy_policy = proxy_policy(generation)
+    local selected_proxy_route = ""
+    if selected_proxy_policy ~= "off" then
+        selected_proxy_route = generation.network.proxy_route
+        if type(selected_proxy_route) ~= "string" or selected_proxy_route == "" then
+            return nil
+        end
+    end
     if model.enabled ~= true or model.tools_enabled ~= true
         or type(model.remote_model) ~= "string" or model.remote_model == ""
         or not valid_integer(model.context_length, 1)
@@ -4192,7 +4200,8 @@ local function model_public_summary(generation, name, model)
         credential_policy = model.key_configured == true
             and (auth_mode .. ":Model." .. name .. ".Key")
             or (auth_mode .. ":none"),
-        proxy_policy = proxy_policy(generation),
+        proxy_policy = selected_proxy_policy,
+        proxy_route = selected_proxy_route,
         context_length = model.context_length,
         max_output_tokens = output_tokens,
         streaming = model.streaming,
@@ -4214,6 +4223,7 @@ local function model_disclosure_summary(summary, flags)
         remote_model = summary.remote_model,
         credential_policy = summary.credential_policy,
         proxy_policy = summary.proxy_policy,
+        proxy_route = summary.proxy_route,
         context_length = summary.context_length,
         max_output_tokens = summary.max_output_tokens,
         streaming = summary.streaming,
@@ -4915,6 +4925,7 @@ function M.start_published_agent(composed, chat, message, source)
             mode = true,
             expected_model = true,
             expected_model_environment = true,
+            expected_model_generation = true,
         }
         for key in pairs(change) do
             if type(key) ~= "string" or not allowed[key] then
@@ -4935,6 +4946,7 @@ function M.start_published_agent(composed, chat, message, source)
                 or type(change.value) ~= "string" or change.value == ""
                 or type(change.expected_model) ~= "table"
                 or type(change.expected_model_environment) ~= "table"
+                or type(change.expected_model_generation) ~= "table"
             then
                 return nil, failure(
                     "InvalidSessionUpdate",
@@ -4948,6 +4960,7 @@ function M.start_published_agent(composed, chat, message, source)
         then
             if change.mode ~= nil or change.expected_model ~= nil
                 or change.expected_model_environment ~= nil
+                or change.expected_model_generation ~= nil
             then
                 return nil, failure(
                     "InvalidSessionUpdate",
@@ -4958,6 +4971,7 @@ function M.start_published_agent(composed, chat, message, source)
         elseif change.name == "DoubleCheckGoalOverride" then
             if change.expected_model ~= nil
                 or change.expected_model_environment ~= nil
+                or change.expected_model_generation ~= nil
             then
                 return nil, failure(
                     "InvalidSessionUpdate",
@@ -4996,11 +5010,17 @@ function M.start_published_agent(composed, chat, message, source)
                         next_generation.current_permission
                     ),
                     change.expected_model_environment
-                ))
+                )
+                or type(next_generation.matches_model_secrets) ~= "function"
+                or next_generation.matches_model_secrets(
+                    change.expected_model_generation,
+                    change.value
+                ) ~= true)
         then
             return nil, failure(
                 "ModelSelectionStale",
-                "the selected Model definition or Prompt environment changed during Config reload"
+                "the selected Model definition, credentials, or Prompt environment "
+                    .. "changed during Config reload"
             )
         end
         local publish_called, record, receipt = pcall(
@@ -5224,6 +5244,7 @@ function M.start_published_agent(composed, chat, message, source)
             value = binding.target,
             expected_model = binding.definition,
             expected_model_environment = binding.environment,
+            expected_model_generation = binding.generation,
         })
         if not updated then return nil, update_error end
         binding.consumed = true
@@ -6423,6 +6444,8 @@ function M.new_application_coordinator(ports, options)
                 or type(row.endpoint_origin) ~= "string"
                 or type(row.endpoint_path) ~= "string"
                 or type(row.endpoint_query_configured) ~= "boolean"
+                or type(row.proxy_policy) ~= "string"
+                or type(row.proxy_route) ~= "string"
                 or type(row.remote_model) ~= "string"
                 or type(row.credential_policy) ~= "string"
                 or not valid_integer(row.context_length, 1)
@@ -6452,6 +6475,10 @@ function M.new_application_coordinator(ports, options)
                 safe_diagnostic(tostring(row.streaming), 32),
                 safe_diagnostic(row.credential_policy, 192)
             )
+            lines[#lines + 1] = "   proxy: "
+                .. safe_diagnostic(row.proxy_policy, 128)
+                .. (row.proxy_route ~= "" and " "
+                    .. safe_diagnostic(row.proxy_route, 512) or "")
         end
         if result.truncated then
             lines[#lines + 1] = "More enabled Models exist; the bounded list was truncated."
@@ -6472,7 +6499,9 @@ function M.new_application_coordinator(ports, options)
                 .. (summary.endpoint_query_configured and "?configured" or ""),
             prefix .. " credential: "
                 .. safe_diagnostic(summary.credential_policy, 192),
-            prefix .. " proxy: " .. safe_diagnostic(summary.proxy_policy, 128),
+            prefix .. " proxy: " .. safe_diagnostic(summary.proxy_policy, 128)
+                .. (summary.proxy_route ~= "" and " "
+                    .. safe_diagnostic(summary.proxy_route, 512) or ""),
             prefix .. " window/output: " .. tostring(summary.context_length)
                 .. "/" .. tostring(summary.max_output_tokens),
             prefix .. " streaming/tools/controls/roles: "
@@ -6493,6 +6522,7 @@ function M.new_application_coordinator(ports, options)
             and type(summary.remote_model) == "string"
             and type(summary.credential_policy) == "string"
             and type(summary.proxy_policy) == "string"
+            and type(summary.proxy_route) == "string"
             and valid_integer(summary.context_length, 1)
             and valid_integer(summary.max_output_tokens, 1)
             and type(summary.streaming) == "string"
