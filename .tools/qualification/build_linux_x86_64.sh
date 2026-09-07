@@ -4,9 +4,24 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd -P)
 
-if [[ ${YACA_TEST_RESOURCE_GUARD_HELD:-0} != 1 ]]; then
-  export YACA_TEST_MIN_AVAILABLE_MIB=${YACA_TEST_MIN_AVAILABLE_MIB:-4096}
-  exec "$REPO_ROOT/.tools/run_with_resource_guard.sh" bash "$0" "$@"
+BUILD_MINIMUM_AVAILABLE_MIB=5120
+YACA_TEST_MIN_AVAILABLE_MIB=${YACA_TEST_MIN_AVAILABLE_MIB:-$BUILD_MINIMUM_AVAILABLE_MIB}
+[[ "$YACA_TEST_MIN_AVAILABLE_MIB" =~ ^[1-9][0-9]*$ \
+  && ${#YACA_TEST_MIN_AVAILABLE_MIB} -le 7 \
+  && "$YACA_TEST_MIN_AVAILABLE_MIB" -le 1048576 ]] || {
+  echo "linux qualification build: invalid memory floor" >&2
+  exit 75
+}
+if (( YACA_TEST_MIN_AVAILABLE_MIB < BUILD_MINIMUM_AVAILABLE_MIB )); then
+  YACA_TEST_MIN_AVAILABLE_MIB=$BUILD_MINIMUM_AVAILABLE_MIB
+fi
+export YACA_TEST_MIN_AVAILABLE_MIB
+
+# A caller may already hold the suite's smaller guard. Recheck this builder's
+# floor and current pressure under that same lock before any build work.
+if [[ ${YACA_LINUX_BUILD_RESOURCE_GUARD_HELD:-0} != 1 ]]; then
+  exec "$REPO_ROOT/.tools/run_with_resource_guard.sh" \
+    env YACA_LINUX_BUILD_RESOURCE_GUARD_HELD=1 bash "$0" "$@"
 fi
 
 usage() {
@@ -119,16 +134,18 @@ COMMON_LDFLAGS="-Wl,-z,relro,-z,now -Wl,--build-id=none"
 export SOURCE_DATE_EPOCH=1787990400
 export LC_ALL=C
 export TZ=UTC
+export MAKEFLAGS=-j1
+export MFLAGS=-j1
 
 LUA_SOURCE="$WORK_ROOT/lua-5.5.1"
 LUA_PREFIX="$PREFIX_ROOT/lua"
-if ! make -C "$LUA_SOURCE/src" -j2 linux \
+if ! make -C "$LUA_SOURCE/src" -j1 linux \
   MYCFLAGS="$COMMON_CFLAGS" MYLDFLAGS="$COMMON_LDFLAGS" \
   >"$LOG_ROOT/lua-build.log" 2>&1; then
   tail -80 "$LOG_ROOT/lua-build.log" >&2
   die "Lua build failed"
 fi
-make -C "$LUA_SOURCE" install INSTALL_TOP="$LUA_PREFIX" \
+make -C "$LUA_SOURCE" -j1 install INSTALL_TOP="$LUA_PREFIX" \
   >>"$LOG_ROOT/lua-build.log" 2>&1
 "$LUA_PREFIX/bin/lua" -e 'assert(_VERSION == "Lua 5.5"); print(_VERSION)' \
   >"$LOG_ROOT/lua-runtime.log"
@@ -143,8 +160,8 @@ if ! (
     "$EXPAT_SOURCE/configure" \
       --prefix="$EXPAT_PREFIX" --disable-shared --enable-static \
       --without-xmlwf --without-examples --without-tests --without-docbook
-  make -j2
-  make install
+  make -j1
+  make -j1 install
 ) >"$LOG_ROOT/expat-build.log" 2>&1; then
   tail -80 "$LOG_ROOT/expat-build.log" >&2
   die "Expat build failed"
@@ -190,7 +207,7 @@ env LUA_PATH='' LUA_CPATH='' \
 
 MBEDTLS_SOURCE="$WORK_ROOT/mbedtls-3.6.7"
 MBEDTLS_PREFIX="$PREFIX_ROOT/mbedtls"
-if ! make -C "$MBEDTLS_SOURCE" -j2 lib \
+if ! make -C "$MBEDTLS_SOURCE" -j1 lib \
   CFLAGS="-std=c99 $COMMON_CFLAGS" ARFLAGS=rcD \
   >"$LOG_ROOT/mbedtls-build.log" 2>&1; then
   tail -80 "$LOG_ROOT/mbedtls-build.log" >&2
@@ -229,7 +246,7 @@ if ! (
       --without-openssl --without-gnutls --without-wolfssl \
       --without-rustls --without-schannel --without-amissl \
       --with-mbedtls="$MBEDTLS_PREFIX"
-  make -j2
+  make -j1
 ) >"$LOG_ROOT/curl-build.log" 2>&1; then
   tail -120 "$LOG_ROOT/curl-build.log" >&2
   die "curl build failed"
@@ -256,8 +273,8 @@ if ! (
   tail -120 "$LOG_ROOT/full-test.log" >&2
   die "full target test suite failed"
 fi
-grep -q '^SUMMARY total=329 passed=329 failed=0$' "$LOG_ROOT/full-test.log" \
-  || die "full target test summary changed"
+FULL_TEST_COUNTS=$("$LUA_PREFIX/bin/lua" "$SCRIPT_DIR/test_summary.lua" \
+  "$LOG_ROOT/full-test.log") || die "full target test evidence is incomplete"
 
 if ! (
   cd "$LUAINSTALLER_SOURCE"
@@ -339,6 +356,8 @@ ldd "$NATIVE_OUTPUT" "$LXP_OUTPUT" "$ARTIFACT_ROOT/curl" \
   echo "libc=$(getconf GNU_LIBC_VERSION)"
   echo "compiler=$(gcc --version | head -1)"
   echo "build_memory_kib=$MEMORY_KIB"
+  echo "build_min_available_mib=$YACA_TEST_MIN_AVAILABLE_MIB"
+  echo "build_jobs=1"
   echo "yaca_revision=$YACA_REVISION"
   echo "yaca_archive_sha256=$YACA_ARCHIVE_SHA256"
   echo "luainstaller_revision=97192d100077b31b61dc8f94427e14df1c68a9eb"
@@ -348,7 +367,7 @@ ldd "$NATIVE_OUTPUT" "$LXP_OUTPUT" "$ARTIFACT_ROOT/curl" \
   echo "luaexpat=1.5.2"
   echo "curl=8.21.0"
   echo "mbedtls=3.6.7"
-  echo "full_tests=329/329"
+  echo "full_tests=$FULL_TEST_COUNTS"
   echo "release_authorized=false"
   echo "target_qualification_complete=false"
 } >"$OUTPUT_ROOT/build-summary.txt"
