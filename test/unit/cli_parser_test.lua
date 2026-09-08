@@ -101,6 +101,35 @@ return {
     name = "unit/cli-parser",
     cases = {
         {
+            name = "Prompt editor controls require exact identity and preserve literal submissions",
+            run = function()
+                local service = new_service()
+                local id = "prompt-edit-1"
+                local help = assert(service.render_help("prompt-edit"))
+                A.contains(help, ".save <editor-id>")
+                A.contains(help, "No external editor")
+                A.equal(assert(service.parse_prompt_editor(".save " .. id, id)).operation, "save")
+                for _, operation in ipairs({ "cancel", "show", "clear", "reset" }) do
+                    A.equal(assert(service.parse_prompt_editor("." .. operation, id)).operation, operation)
+                end
+                for _, value in ipairs({ "", "  preserve spaces  ", ".model Secondary", "a\n.save " .. id }) do
+                    local result = assert(service.parse_prompt_editor(value, id))
+                    A.equal(result.operation, "append")
+                    A.equal(result.text, value)
+                end
+                A.equal(assert(service.parse_prompt_editor("..save " .. id, id)).text, ".save " .. id)
+                for _, command in ipairs({ ".quit", ".status", ".help input", ".details error-1" }) do
+                    A.equal(assert(service.parse_prompt_editor(command, id)).operation, "chat")
+                end
+                local rejected, reject_error = service.parse_prompt_editor(".save prompt-edit-2", id)
+                A.falsy(rejected)
+                A.equal(reject_error.code, "PromptEditorStale")
+                A.falsy(service.parse_prompt_editor("\0", id))
+                A.falsy(service.parse_prompt_editor("\255", id))
+                A.falsy(service.parse_prompt_editor(".save " .. id, "foreign"))
+            end,
+        },
+        {
             name = "runtime registry is an exact enriched projection of all 39 actions",
             run = function()
                 local registry = cli.registry()

@@ -1,6 +1,6 @@
 # yaca v0.1 全程序实施计划
 
-版本：2026-09-07.1
+版本：2026-09-08.1
 状态：**计划已确认 / Gate B passed / 平台无关核心已实现至 M9 / controller 收口和资格验证待完成**
 当前主线：**收口现有 controller 与构建证据，再执行 C32--C34**
 
@@ -13,8 +13,10 @@ C01--C31 的平台无关核心、测试与发行规划已落地；下文保留�
 2026-09-07 推进暂停交接中已定位的两项修复：模型切换的规范代理展示与秘密值
 TOCTOU 复核，以及 Linux builder 的串行/5 GiB guard floor/动态 suite 摘要。
 只读 status/export controller 与活动 Context 失效后的 fail-stop 已接通。
+2026-09-08 接通内置有界 `.prompt edit`，精确实例保存并复用既有 Session
+publication 与 turn boundary；取消/退出不保存，错误保留安全草稿。
 随后仍需完整管理 REPL controller、在线 self-test Stage 2/3 adapter、
-有界 `.prompt edit`、跨 workspace 确认/rebind，以及真实三目标资格。
+跨 workspace 确认/rebind，以及真实三目标资格。
 机读 phase 保持 `implemented-unqualified`，Release Gate R 保持关闭。
 
 ## 1. 计划边界

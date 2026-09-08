@@ -49,6 +49,18 @@
 
 `.immediate` 是正式拼写，不保留 `.immidiate`。队列条目标识、move/edit 参数和多行结束 delimiter 仍由各自 grammar 冻结；renderer 不得用这些未决细节创造另一组动作。
 
+## 已接通的 Prompt 编辑器
+
+`.prompt edit` 使用现有 ASCII ACTION/STATUS 块和 `>>` 输入提示符，显示当前
+`prompt-edit-N` 与字节上限；不要求光标移动、ANSI、方向键或外部编辑器。
+`.show|clear|reset` 管理内存草稿，精确 `.save prompt-edit-N` 保存，`.cancel`
+与 Esc 取消全部未保存编辑。状态查询显示实例与未保存字节数；草稿正文只在
+显式 `.show` 且 secret scan 通过后引用显示。语法与保存边界以
+[13-cli.md](13-cli.md#contextprompt-内置编辑事务) 为准。
+
+本事务属于 `prompt-edit`，不替一般 chat `.multiline` 冻结其结束语法。
+synthetic Linux/旧 CMD composition 已验证相同语义；真实旧终端资格仍待 C32。
+
 ## 当前设计缺口
 
 现有规则已经是一份较完整的旧终端兼容基线，但还不是 TUI 体验设计。至少还缺少：

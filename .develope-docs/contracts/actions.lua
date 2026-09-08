@@ -32,6 +32,11 @@ return {
     legacy_aliases = {},
     global_modifiers = { "--machine" },
     machine_modifier_consumes_primary_action = false,
+    prompt_editor = {
+      save = ".save <editor-id>", cancel = ".cancel", show = ".show",
+      clear = ".clear", reset = ".reset", literal_dot_prefix = "..",
+      multiline_payload = "literal", line_join = "LF", external_editor = false,
+    },
   },
   exit_classes = {
     success = 0,

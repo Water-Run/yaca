@@ -1,6 +1,6 @@
 # 开发追踪
 
-更新日期：2026-09-07
+更新日期：2026-09-08
 
 ## 当前阶段
 
@@ -32,9 +32,9 @@ C01--C31 已有核心实现、测试 harness、最小发行规划和现代 Linux
 | C34 | 文档与 evidence 布局规划 | 最终 SHA-256/license/SBOM/build/test evidence，公开声明复核 |
 
 已接通的近期 controller 包括 `--continue`、同 workspace `.context`、
-`.details`、`.cautious`、`.prompt show|set|clear`、`.model`、`--status`、chat `.status`
+`.details`、`.cautious`、`.prompt show|set|clear|edit`、`.model`、`--status`、chat `.status`
 和 `--export <selector>`。
-`.prompt edit` 仍返回 typed unavailable；显式跨 workspace 确认/rebind 尚未开放。
+显式跨 workspace 确认/rebind 尚未开放。
 
 本轮直接核对 `main.lua` 后补记管理缺口：`config-repl` 当前提供配置校验与
 缺文件时的修复模板，`context-repl` 当前提供 Catalog 列表，尚无完整管理交互。
@@ -72,15 +72,27 @@ modern proofs 全部通过；构建证明沿用每次复核 SHA-256 的锁定源
 modern proofs 全部通过；日志为 `export-full-suite.log` 与 `export-readiness.log`。
 同样使用校验后的锁定源码缓存，不代表 XP/Win7/CentOS 7 已通过资格验证。
 
+## Prompt 编辑器节点（2026-09-08）
+
+`.prompt edit` 已接入内置有界多行事务：以当前 Prompt 初始化，追加文本保留
+空白，`.show|clear|reset` 操作草稿，`.save prompt-edit-N` 绑定本次编辑实例。
+保存前复核原 Session owner、Prompt 与 ConfigGeneration，并复用原有完整配置
+重载、secret scan、Context/ModelView 原子发布及下一 turn 生效边界。错误保留
+安全草稿供显式重试；取消、Esc、EOF、退出与新 Tool approval 均丢弃未保存编辑。
+不新增域动作、不调用外部编辑器、不在首条消息前创建 Context。
+
+定向 suite **62/62**、bootstrap suite **27/27**、完整 suite **471/471** 通过。
+完整 coding readiness 入口与 TP-003/006/008/010、RP-001 全部通过，三项 validator
+仍为 **7612/56/553** 条断言。构建证明使用逐次 SHA-256 校验的锁定源码缓存；
+日志仍位于上述可丢弃目录，前缀为 `prompt-editor-`，不作为三目标资格。
+
 ## 下一步顺序
 
 1. 补齐管理 REPL 操作与
    在线 self-test Stage 2/3 的真实 adapter，保留逐次联网同意和零副作用检查。
-2. 收口 `.prompt edit` 的有界 editor transaction；复用现有 Session publication
-   与 turn boundary，不能调用 ambient editor。
-3. 实现显式跨 workspace 确认/rebind controller，保留精确目标与 writer 复核。
-4. 在真实目标环境执行 C32；只有完整目标证据通过后才推进 C33/C34 和 Gate R。
-5. Web 继续只维护预留文档，核心 v0.1 不增加 Web 实现。
+2. 实现显式跨 workspace 确认/rebind controller，保留精确目标与 writer 复核。
+3. 在真实目标环境执行 C32；只有完整目标证据通过后才推进 C33/C34 和 Gate R。
+4. Web 继续只维护预留文档，核心 v0.1 不增加 Web 实现。
 
 ## 持续约束
 

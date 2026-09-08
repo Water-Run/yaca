@@ -221,11 +221,14 @@ local function fixture(settings)
     local draft_models = model_owner(false)
 
     local terminal = {}
+    local poll_count = 0
     function terminal:start(observed_now)
         log[#log + 1] = "terminal-start:" .. tostring(observed_now)
         return true
     end
     function terminal:poll()
+        poll_count = poll_count + 1
+        if settings.on_poll then settings.on_poll(poll_count) end
         return table.remove(batches, 1) or {}
     end
     function terminal:cancel()
@@ -366,11 +369,14 @@ local function fixture(settings)
             double_check_override = cautious_override,
             double_check_effective = cautious_override == "inherit"
                 and cautious_default or cautious_override,
-            context_prompt = context_prompt,
+            context_prompt = settings.changed_prompt or context_prompt,
             effective_at = "current",
         }
     end
     function session_settings:update(change)
+        if settings.prompt_save_error and change.name == "ContextPrompt" then
+            return nil, settings.prompt_save_error
+        end
         if change.name == "DoubleCheckOverride" then
             A.truthy(change.value == "inherit" or type(change.value) == "boolean")
             cautious_override = change.value
@@ -391,6 +397,11 @@ local function fixture(settings)
         local projected = self:status()
         projected.effective_at = "next-turn"
         return projected
+    end
+    function session_settings.scan_registered_secrets(bytes)
+        if settings.prompt_scan_error then return nil, settings.prompt_scan_error end
+        if bytes:find("fixture-secret", 1, true) then return { { id = "test-secret" } } end
+        return {}
     end
 
     local driver = {}
@@ -641,6 +652,9 @@ local function fixture(settings)
     local chat_draft = {}
     local draft_cautious_override = "inherit"
     local draft_context_prompt = ""
+    function chat_draft.config_generation()
+        return { scan_registered_secrets = session_settings.scan_registered_secrets }
+    end
     function chat_draft.status()
         return {
             lifecycle = "not-saved",
@@ -727,7 +741,22 @@ local function fixture(settings)
         log = log,
         blocks = blocks,
         prompts = prompts,
+        current_prompt = function()
+            if settings.initial_agent then return context_prompt end
+            return draft_context_prompt
+        end,
     }
+end
+
+local function input_lines(lines)
+    local batches = {}
+    for _, line in ipairs(lines) do
+        batches[#batches + 1] = {
+            { kind = "user_action", action = "text", text = line },
+            { kind = "user_action", action = "submit-or-queue" },
+        }
+    end
+    return batches
 end
 
 local function blocks_of_kind(blocks, kind)
@@ -741,6 +770,158 @@ end
 return {
     name = "integration/application-coordinator",
     cases = {
+        {
+            name = "Prompt edit publication failure retains its draft for explicit retry",
+            run = function()
+                local f
+                local settings = { initial_agent = true, freeze_driver = true,
+                    prompt_save_error = { code = "ConfigInvalid", message = "configuration needs repair" },
+                    batches = input_lines({
+                        ".prompt edit", "retry safely", ".save prompt-edit-1", ".show",
+                        ".save prompt-edit-1", ".quit",
+                    }),
+                }
+                settings.on_poll = function(count)
+                    if count == 4 then
+                        A.equal(f.current_prompt(), "")
+                        settings.prompt_save_error = nil
+                    end
+                end
+                f = fixture(settings)
+                assert(f.coordinator:run())
+                A.equal(f.current_prompt(), "retry safely")
+                A.contains(A.render(f.blocks), "ConfigInvalid")
+                A.contains(A.render(f.blocks), "effective: not saved")
+            end,
+        },
+        {
+            name = "Tool approval preempts a Prompt draft without applying it",
+            run = function()
+                local batches = input_lines({ "deny approval-1", ".quit" })
+                table.insert(batches, 1, {
+                    { kind = "user_action", action = "text", text = ".prompt edit" },
+                    { kind = "user_action", action = "submit-or-queue" },
+                    { kind = "user_action", action = "text", text = "pending draft" },
+                    { kind = "user_action", action = "submit-or-queue" },
+                })
+                local f = fixture({ initial_agent = true, approval = true, batches = batches })
+                assert(f.coordinator:run())
+                local actions = blocks_of_kind(f.blocks, "action")
+                A.equal(actions[1].id, "prompt-edit-1")
+                A.equal(actions[2].id, "prompt-edit-1")
+                A.contains(actions[2].text, "not saved; a Tool approval became pending")
+                A.equal(actions[3].id, "approval-1")
+                A.equal(actions[4].text, "denied")
+                A.equal(f.current_prompt(), "")
+                A.falsy(f.coordinator:status().prompt_editor_id)
+            end,
+        },
+        {
+            name = "Prompt editing rejects side input and clear reset keep save explicit",
+            run = function()
+                local batches = input_lines({ ".prompt set initial", ".prompt edit", ".clear", ".reset", ".status" })
+                batches[#batches + 1] = {
+                    { kind = "user_action", action = "text", text = "not a side question" },
+                    { kind = "user_action", action = "side" },
+                }
+                batches[#batches + 1] = { { kind = "user_action", action = "cancel" } }
+                batches[#batches + 1] = input_lines({ ".quit" })[1]
+                local f = fixture({ initial_agent = true, freeze_driver = true, batches = batches })
+                assert(f.coordinator:run())
+                A.equal(f.current_prompt(), "initial")
+                A.contains(A.render(f.blocks), "prompt editor: prompt-edit-1 (7 bytes; not saved)")
+                A.contains(A.render(f.blocks), "PromptEditorBusy")
+                A.falsy(table.concat(f.log, "|"):find("side:", 1, true))
+            end,
+        },
+        {
+            name = "Prompt editor saves a bounded literal multiline draft only on exact save",
+            run = function()
+                for _, saved in ipairs({ false, true }) do
+                    local f
+                    local settings = { initial_agent = saved, freeze_driver = true,
+                        batches = input_lines({
+                            ".prompt set original", ".prompt edit", ".clear", " first ", "",
+                            "second line", "..save prompt-edit-1", ".show", ".save prompt-edit-1",
+                            ".prompt show", ".quit",
+                        }),
+                        on_poll = function(count)
+                            if count >= 3 and count <= 9 then A.equal(f.current_prompt(), "original") end
+                        end,
+                    }
+                    f = fixture(settings)
+                    assert(f.coordinator:run())
+                    A.equal(f.current_prompt(), " first \n\nsecond line\n.save prompt-edit-1")
+                    local rendered = A.render(f.blocks)
+                    A.contains(rendered, "Editing ContextPrompt in memory")
+                    A.contains(rendered, "effective: not saved")
+                    A.contains(rendered, "saved")
+                    A.equal(f.coordinator:status().prompt_editor_bytes, 0)
+                    A.falsy(f.coordinator:status().prompt_editor_id)
+                    A.falsy(table.concat(f.log, "|"):find("agent:terminal:", 1, true))
+                    A.equal(#blocks_of_kind(f.blocks, "user"), 0)
+                end
+            end,
+        },
+        {
+            name = "Prompt editor cancel quit and terminal end discard staged text",
+            run = function()
+                for _, ending in ipairs({ ".cancel", ".quit", "escape", "eof" }) do
+                    local batches = input_lines({ ".prompt edit", "discard this" })
+                    if ending == "escape" or ending == "eof" then
+                        batches[#batches + 1] = { {
+                            kind = "user_action", action = ending == "escape" and "cancel" or "eof",
+                        } }
+                    else
+                        batches[#batches + 1] = input_lines({ ending })[1]
+                    end
+                    if ending ~= ".quit" and ending ~= "eof" then
+                        batches[#batches + 1] = input_lines({ ".quit" })[1]
+                    end
+                    local f = fixture({ freeze_driver = true, batches = batches })
+                    assert(f.coordinator:run())
+                    A.equal(f.current_prompt(), "")
+                    A.falsy(table.concat(f.log, "|"):find("draft-prompt-bytes:", 1, true))
+                    A.falsy(table.concat(f.log, "|"):find("agent:terminal:", 1, true))
+                    A.equal(f.coordinator:status().prompt_editor_bytes, 0)
+                end
+            end,
+        },
+        {
+            name = "Prompt editor rejects secret overflow and stale save while retaining safe draft",
+            run = function()
+                local f = fixture({ initial_agent = true, freeze_driver = true,
+                    batches = input_lines({
+                        ".prompt edit", "safe", "fixture-secret", string.rep("x", 1020),
+                        ".save prompt-edit-9", ".show", ".save prompt-edit-1", ".quit",
+                    }),
+                })
+                assert(f.coordinator:run())
+                A.equal(f.current_prompt(), "safe")
+                local rendered = A.render(f.blocks)
+                A.contains(rendered, "RegisteredSecret")
+                A.contains(rendered, "DraftLimit")
+                A.contains(rendered, "PromptEditorStale")
+                A.falsy(rendered:find("fixture-secret", 1, true))
+                A.falsy(rendered:find(string.rep("x", 1020), 1, true))
+            end,
+        },
+        {
+            name = "Prompt editor notices changed Session and never overwrites it",
+            run = function()
+                local settings = { initial_agent = true, freeze_driver = true,
+                    batches = input_lines({ ".prompt edit", "draft", ".save prompt-edit-1", ".cancel", ".quit" }),
+                }
+                settings.on_poll = function(count)
+                    if count == 3 then settings.changed_prompt = "changed elsewhere" end
+                end
+                local f = fixture(settings)
+                assert(f.coordinator:run())
+                A.equal(f.current_prompt(), "")
+                A.contains(A.render(f.blocks), "Session settings changed")
+                A.falsy(table.concat(f.log, "|"):find("settings-prompt-bytes:", 1, true))
+            end,
+        },
         {
             name = "status shows current owned Context and effective Session settings",
             run = function()
@@ -885,8 +1066,6 @@ return {
                     { { kind = "user_action", action = "text", text = ".prompt edit" } },
                     { { kind = "user_action", action = "submit-or-queue" } },
                     { { kind = "user_action", action = "cancel" } },
-                    { { kind = "user_action", action = "text", text = ".details error-1" } },
-                    { { kind = "user_action", action = "submit-or-queue" } },
                     { { kind = "user_action", action = "text", text = ".quit" } },
                     { { kind = "user_action", action = "submit-or-queue" } },
                 } })
@@ -903,14 +1082,8 @@ return {
                 A.contains(unsaved_rendered, "keep tests exact")
                 A.contains(unsaved_rendered, "applies when the first turn starts")
                 A.contains(unsaved_rendered, "| (empty)")
-                A.contains(unsaved_rendered, "InteractiveActionUnavailable")
-                A.contains(unsaved_rendered, "bounded Prompt editor is not attached")
-                local prompt_details = blocks_of_kind(unsaved.blocks, "details")
-                A.equal(prompt_details[#prompt_details].id, "error-1")
-                A.contains(
-                    table.concat(prompt_details[#prompt_details].lines, "|"),
-                    "code: InteractiveActionUnavailable"
-                )
+                A.contains(unsaved_rendered, "Editing ContextPrompt in memory")
+                A.contains(unsaved_rendered, "not saved; cancelled")
 
                 local saved = fixture({
                     initial_agent = true,

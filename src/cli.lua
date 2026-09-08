@@ -388,6 +388,11 @@ local REGISTRY = {
         legacy_aliases = {},
         global_modifiers = { "--machine" },
         machine_modifier_consumes_primary_action = false,
+        prompt_editor = {
+            save = ".save <editor-id>", cancel = ".cancel", show = ".show",
+            clear = ".clear", reset = ".reset", literal_dot_prefix = "..",
+            multiline_payload = "literal", line_join = "LF", external_editor = false,
+        },
     },
     exit_classes = {
         success = 0,
@@ -1313,6 +1318,14 @@ local function render_action_help(descriptor)
             )
         end
     end
+    if descriptor.id == "prompt-edit" then
+        local editor = REGISTRY.parser.prompt_editor
+        lines[#lines + 1] = "Editor: other input appends a literal line to the current Prompt draft."
+        lines[#lines + 1] = "  " .. editor.show .. " | " .. editor.clear .. " | " .. editor.reset
+        lines[#lines + 1] = "  " .. editor.save .. " commits; " .. editor.cancel .. " or Esc discards."
+        lines[#lines + 1] = "  Prefix literal dot commands with " .. editor.literal_dot_prefix .. "."
+        lines[#lines + 1] = "  No external editor; saved changes apply on the next turn."
+    end
     lines[#lines + 1] = "Results: " .. table.concat(descriptor.results, ", ")
     if MACHINE_SUPPORTED[descriptor.id] then
         local constraint = descriptor.id == "self-test" and " (offline Stage 1 only)" or ""
@@ -1631,6 +1644,42 @@ function M.new(options)
             end
         end
         return parse_projected_line("chat-line", source, facts)
+    end
+
+    ---Parses directives inside the already-admitted Prompt edit action.
+    -- They do not create a top-level or headless action surface.
+    -- @param source string Complete UTF-8 input submission, with literal whitespace.
+    -- @param editor_id string Exact current prompt-edit-N transaction identity.
+    -- @return table|nil command Editor directive or literal append payload.
+    -- @return table|nil err Invalid text or stale save identity.
+    function service.parse_prompt_editor(source, editor_id)
+        if not valid_utf8_string(source) then
+            return nil, failure("InvalidPromptDraft", "Prompt input must be NUL-free UTF-8")
+        end
+        if type(editor_id) ~= "string" or #editor_id > 64
+            or not editor_id:match("^prompt%-edit%-[1-9][0-9]*$")
+        then
+            return nil, failure("PromptEditorStale", "Prompt editor identity is invalid")
+        end
+        if source:find("[\r\n]") then return { operation = "append", text = source } end
+        if source:sub(1, 2) == ".." then
+            return { operation = "append", text = source:sub(2) }
+        end
+        if source == ".save " .. editor_id then return { operation = "save" } end
+        if source == ".save" or source:match("^%.save[ \t]") then
+            return nil, failure("PromptEditorStale", "save requires the current Prompt editor identity")
+        end
+        local directives = {
+            [".cancel"] = "cancel", [".show"] = "show",
+            [".clear"] = "clear", [".reset"] = "reset",
+        }
+        if directives[source] then return { operation = directives[source] } end
+        if source == ".quit" or source == ".status" or source == ".help"
+            or source:match("^%.help ") or source == ".details" or source:match("^%.details ")
+        then
+            return { operation = "chat", text = source }
+        end
+        return { operation = "append", text = source }
     end
 
     ---Parses one Context REPL command line into a semantic request.

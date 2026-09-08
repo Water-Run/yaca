@@ -5,7 +5,7 @@
 yaca 是一款简单、单 Agent、terminal-only 的通用 Agent 设计，以 GPL v3
 许可开源。软件开发是一级且常见的工作负载，但不是唯一用途。
 
-> **项目状态（2026-09-07）：平台无关核心已实现至 M9；controller 收口和目标资格验证待完成。** 目前还没有任何目标发行包通过资格验证。下文分别说明已接通能力和命令 grammar；Win32 x86、Win64 x86_64 与 Linux x86_64 的目标相关行为仍须分别验证。Gate A/B 保持通过，Release Gate R 仍关闭。
+> **项目状态（2026-09-08）：平台无关核心已实现至 M9；controller 收口和目标资格验证待完成。** 目前还没有任何目标发行包通过资格验证。下文分别说明已接通能力和命令 grammar；Win32 x86、Win64 x86_64 与 Linux x86_64 的目标相关行为仍须分别验证。Gate A/B 保持通过，Release Gate R 仍关闭。
 
 ## 支持的发行目标
 
@@ -48,8 +48,13 @@ Context XML 是 yaca 内部版本化存储，不是稳定第三方 API；人类�
 `ContextPrompt`；`set` 接受有界单行文本，`clear` 选择空 Prompt。第一条消息前
 改动只留在未保存草稿中；Context 保存后，Session 与刷新后的 ModelView
 原子发布，审计事件只携带新旧值摘要，新 Prompt 从下一 turn 生效。
-`.prompt edit` 在有界 editor transaction 接通前返回 typed unavailable，绝不
-隐式调用环境中的外部编辑器。
+
+`.prompt edit` 打开内置的有界多行编辑器，初始内容为当前 Prompt。逐行输入会
+追加文本，`.clear` 清空，`.reset` 恢复打开时的内容，`.show` 查看草稿。
+使用界面显示的 `.save prompt-edit-N` 保存；`.cancel`、Esc 或退出会丢弃
+未保存编辑。以 `..` 开头可输入字面量前导点，空行和空格均保留。保存时重新
+核对原 Session 与配置，再沿用上述下一轮生效边界；秘密值、超限或保存失败
+不会覆盖最后一份安全草稿，可修改后重试。编辑器不启动外部程序。
 
 `.model` 最多列出 64 个 enabled/native-tool 候选，`.model <精确名称>` 选择
 目标。预览会核对当前历史、Prompt、工具/control schema 与输出预留是否能放入

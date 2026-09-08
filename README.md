@@ -6,7 +6,7 @@ yaca is the design for a simple, single-agent, terminal-only general Agent,
 licensed under GPL v3. Software development is a first-class common workload,
 not its exclusive purpose.
 
-> **Project status (2026-09-07): platform-independent core implemented through M9; controller closure and target qualification pending.** No target archive has qualified for release. The sections below distinguish connected behavior from parser-only command grammar. Target-specific behavior remains unqualified until it passes independently on Win32 x86, Win64 x86_64, and Linux x86_64. Gate A/B remain passed and Release Gate R remains closed.
+> **Project status (2026-09-08): platform-independent core implemented through M9; controller closure and target qualification pending.** No target archive has qualified for release. The sections below distinguish connected behavior from parser-only command grammar. Target-specific behavior remains unqualified until it passes independently on Win32 x86, Win64 x86_64, and Linux x86_64. Gate A/B remain passed and Release Gate R remains closed.
 
 ## Supported release targets
 
@@ -50,9 +50,16 @@ The fixed Agent tool set is `list`, `read`, `search`, `write`, `patch`, `rename`
 text and `clear` selects the empty prompt. Before the first message the change
 stays in the unsaved draft; afterward the Context and refreshed ModelView are
 published atomically, the audit event contains only old/new digests, and the
-new prompt applies from the next turn. `.prompt edit` fails with a typed
-unavailable result until a bounded editor transaction is attached; it never
-falls back to an ambient external editor.
+new prompt applies from the next turn.
+
+`.prompt edit` opens the built-in bounded multiline editor with the current
+prompt. Enter lines to append text, `.clear` to start over, `.reset` to restore
+the opening value, or `.show` to inspect the draft. Save with the displayed
+`.save prompt-edit-N` command. `.cancel`, Esc, or exit discards unsaved edits;
+lines beginning with `..` insert a literal leading dot. Blank lines and spaces
+are preserved. Saving checks the original Session and configuration again and
+uses the same next-turn publication boundary. Secret, size, or save errors
+retain the last safe draft for correction or retry. No external editor starts.
 
 `.model` lists at most 64 enabled native-tool Models as plain bounded lines;
 `.model <exact-name>` submits the same typed selection without requiring ANSI,

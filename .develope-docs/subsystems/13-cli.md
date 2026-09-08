@@ -83,6 +83,33 @@ TUI 点命令 `.cautious` 管理当前会话的 `DoubleCheck` 覆盖值。它不
 
 `.immediate` 是唯一正式拼写，不保留误拼 `.immidiate`。队列的条目标识、move/edit 参数细节和多行结束 delimiter 仍由 AgentLoop/TUI grammar 冻结，但不能改变上表动作含义。点命令不是兼容模式：它们与快捷键提交相同 action ID、输入 payload 和 durable/取消规则；不能支持快捷键时，help 直接显示点命令后备。
 
+## ContextPrompt 内置编辑事务
+
+`.prompt edit` 复用 `prompt-edit` 域动作，在当前 coordinator 内打开有界草稿；
+不派生进程、不创建 Context，也不向 Model 提交用户消息。共享 registry 的
+`parser.prompt_editor` 冻结本事务的行语法：
+
+| 输入 | 效果 |
+| --- | --- |
+| `.save prompt-edit-N` | 只保存界面显示的精确编辑实例 |
+| `.cancel` 或 Esc | 丢弃全部未保存编辑 |
+| `.show` | secret scan 后用显式引用样式显示草稿 |
+| `.clear` / `.reset` | 清空草稿 / 恢复打开时的 Prompt |
+| `..text` | 追加字面量 `.text` |
+| 其他单行输入 | 原样追加，以 LF 连接，保留空白与空行 |
+
+含 CR/LF 的一次输入整体作为字面量追加，不能把 payload 中的 `.save` 当成
+结束命令。仅 `.quit`、`.status`、`.help [topic]` 和 `.details [error-N]`
+继续路由到 chat；其余点命令是 Prompt 数据。当前编辑期间不接纳 side/steer
+提交。开始编辑时若已有 approval/Model confirmation 则拒绝；新 Tool approval
+会取消未保存编辑。EOF、终端失败与退出同样丢弃草稿，不自动保存。
+
+编辑上限复用 coordinator 输入上限，production 为 16384 字节；追加前检查
+累计长度和 registered secrets，不以截断满足上限。保存再次检查同一 Session
+owner、原 Prompt 和 ConfigGeneration，随后复用 `set|clear` 的完整配置重载、
+secret scan、单 XML publication 与 Runtime receipt adoption。保存失败保留
+安全草稿供显式重试；保存成功只从下一 turn 生效，未保存 chat 则从首 turn 生效。
+
 ## 交互错误详情
 
 `.details [error-N]` 已由 shared chat registry、parser 和 ApplicationCoordinator 接通，在未创建第一个 Context、Agent 空闲或 Agent 繁忙时都不依赖 Agent action port。每个投影到终端的 coordinator 错误取得当前进程内单调 ID；省略参数读取最新保留项，显式参数只按完整 ID 读取，不按 code、文本或前缀猜测。

@@ -496,6 +496,68 @@ return {
     name = "integration/bootstrap",
     cases = {
         {
+            name = "production Prompt editor changes only the unsaved draft on Linux and old CMD",
+            run = function()
+                for _, os_name in ipairs({ "linux", "windows" }) do
+                    cache.lxp = fake_lxp(function()
+                        return false, "unsaved Prompt editing must not parse Context XML", 1, 1, 1
+                    end)
+                    local native, files, calls, native_path, _, application_path, config_path
+                        = production_native({ os = os_name })
+                    files.external_replace(config_path, valid_source())
+                    local function unavailable()
+                        return false, { code = "NotFound", message = "Context path is absent" }
+                    end
+                    for _, name in ipairs({
+                        "fs_inspect_direct", "fs_walk_direct", "fs_open_read_verified",
+                        "fs_create_new_verified", "fs_replace_verified",
+                        "fs_rename_no_replace_verified", "fs_delete_direct_verified",
+                    }) do native[name] = unavailable end
+                    local lines = {
+                        ".prompt edit", ".clear", "draft guidance", "bootstrap-secret",
+                        ".save prompt-edit-1", ".prompt show", ".quit",
+                    }
+                    function native.terminal_start(request)
+                        A.equal(request.mode, "cooked")
+                        return true, {}
+                    end
+                    function native.terminal_poll(handle)
+                        if handle.cancelled then
+                            return true, { { kind = "terminal", outcome = "cancelled" } }
+                        end
+                        local line = table.remove(lines, 1)
+                        if line == nil then
+                            return true, { { kind = "terminal", outcome = "completed" } }
+                        end
+                        return true, {
+                            { kind = "action", intent = "text", text = line },
+                            { kind = "action", intent = "submit-or-queue" },
+                        }
+                    end
+                    function native.terminal_cancel(handle)
+                        handle.cancelled = true
+                        return true, true
+                    end
+                    function native.terminal_join() return true, { outcome = "cancelled" } end
+                    local stdout, stderr = {}, {}
+                    A.equal(main.run_cli({ [0] = application_path }, {
+                        native = native, native_path = native_path,
+                        stdout = function(bytes) stdout[#stdout + 1] = bytes return true end,
+                        stderr = function(bytes) stderr[#stderr + 1] = bytes return true end,
+                    }), 0)
+                    local rendered = table.concat(stdout)
+                    A.contains(rendered, "Editing ContextPrompt in memory")
+                    A.contains(rendered, "draft guidance")
+                    A.contains(rendered, "RegisteredSecret")
+                    A.falsy(rendered:find("bootstrap-secret", 1, true))
+                    A.deep_equal(stderr, {})
+                    A.equal(files.bytes(config_path), valid_source())
+                    A.equal(calls.directory_creates, 0)
+                    A.equal(calls.process_starts, 0)
+                end
+            end,
+        },
+        {
             name = "production export returns only verified Markdown and suppresses registered secrets",
             run = function()
                 local store_harness = load_table("test/support/context_store_harness.lua")

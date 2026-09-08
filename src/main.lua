@@ -5095,6 +5095,12 @@ function M.start_published_agent(composed, chat, message, source)
         )
     end
 
+    ---Checks editor bytes against the current durable settings' private registry.
+    -- Only non-secret hit descriptors leave the ConfigGeneration owner.
+    function session_settings.scan_registered_secrets(bytes)
+        return durable_settings_generation.scan_registered_secrets(bytes)
+    end
+
     function session_settings:update(change)
         if type(change) ~= "table" then
             return nil, failure(
@@ -5679,6 +5685,8 @@ function M.new_application_coordinator(ports, options)
     local approval_serial = 0
     local model_change = false
     local model_change_serial = 0
+    local prompt_edit = false
+    local prompt_edit_serial = 0
     local tool_serial = 0
     local steer_serial = 0
     local tool_ids = {}
@@ -5763,6 +5771,15 @@ function M.new_application_coordinator(ports, options)
 
     local function publish_status(message)
         return publish({ kind = "status", text = message })
+    end
+
+    local function cancel_prompt_edit(reason)
+        if not prompt_edit then return true end
+        local id = prompt_edit.id
+        prompt_edit = false
+        input_draft = ""
+        prompt_needed = true
+        return publish({ kind = "action", id = id, text = "not saved; " .. reason })
     end
 
     local function show_prompt(focus)
@@ -6091,6 +6108,10 @@ function M.new_application_coordinator(ports, options)
             })
             if not expired then return nil, expired_error end
         end
+        if prompt_edit then
+            local cancelled, cancel_error = cancel_prompt_edit("a Tool approval became pending")
+            if not cancelled then return nil, cancel_error end
+        end
         local review_verdict = status.pending_review_verdict
         if review_verdict == false then review_verdict = nil end
         local snapshot, snapshot_error = coordinator_function(
@@ -6328,9 +6349,11 @@ function M.new_application_coordinator(ports, options)
     end
 
     local function status_lines()
+        local editing = prompt_edit and (prompt_edit.id .. " ("
+            .. tostring(#prompt_edit.draft) .. " bytes; not saved)") or "none"
         if not agent then
             local status = admitted_ports.chat.draft.status()
-            local lines = { "state: draft-ready" }
+            local lines = { "state: draft-ready", "prompt editor: " .. editing }
             for _, line in ipairs(session_status_lines(status)) do
                 lines[#lines + 1] = line
             end
@@ -6347,6 +6370,7 @@ function M.new_application_coordinator(ports, options)
         if not settings_called then settings_status = nil end
         local lines = {
             "state: " .. tostring(status.state),
+            "prompt editor: " .. editing,
             "turn: " .. tostring(status.turn_id),
             "model change: "
                 .. (model_change and tostring(model_change.action_id) or "none"),
@@ -6583,10 +6607,52 @@ function M.new_application_coordinator(ports, options)
             return publish_context_prompt(current)
         end
         if request.operation == "edit" then
-            return nil, failure(
-                "InteractiveActionUnavailable",
-                "the bounded Prompt editor is not attached; use .prompt set <text>"
-            )
+            if request.text ~= nil then
+                return nil, failure("InvalidSessionUpdate", ".prompt edit does not accept text")
+            end
+            if approval or model_change or prompt_edit then
+                return nil, failure("PromptEditorBusy", "finish the pending interaction before editing Prompt")
+            end
+            local scan
+            if agent then
+                scan = agent.settings.scan_registered_secrets
+            elseif type(admitted_ports.chat.draft.config_generation) == "function" then
+                local generation = admitted_ports.chat.draft.config_generation()
+                scan = generation and generation.scan_registered_secrets
+            end
+            if type(scan) ~= "function"
+                or type(admitted_ports.cli.parse_prompt_editor) ~= "function"
+            then
+                return nil, failure("PromptEditorUnavailable", "Prompt editor validation is unavailable")
+            end
+            if type(current.context_prompt) ~= "string"
+                or #current.context_prompt > admitted.maximum_draft_bytes
+            then
+                return nil, failure("DraftLimit", "current Prompt exceeds the editor byte limit")
+            end
+            if prompt_edit_serial == math.maxinteger then
+                return nil, failure("PromptEditorLimit", "Prompt editor identity space is exhausted")
+            end
+            prompt_edit_serial = prompt_edit_serial + 1
+            prompt_edit = {
+                id = "prompt-edit-" .. tostring(prompt_edit_serial),
+                original = current.context_prompt,
+                draft = current.context_prompt,
+                config_generation = current.config_generation,
+                owner = agent or admitted_ports.chat.draft,
+                scan = scan,
+                has_lines = current.context_prompt ~= "",
+            }
+            return publish({
+                kind = "action", id = prompt_edit.id,
+                lines = {
+                    "Editing ContextPrompt in memory; other text appends a line.",
+                    "bytes: " .. tostring(#prompt_edit.draft) .. "/" .. tostring(admitted.maximum_draft_bytes),
+                    ".show | .clear | .reset | .cancel | .save " .. prompt_edit.id,
+                    "Use .. to start literal text with a dot; Esc cancels without saving.",
+                    "The saved Prompt applies on the next turn.",
+                },
+            })
         end
         local value
         if request.operation == "set" then
@@ -6637,6 +6703,78 @@ function M.new_application_coordinator(ports, options)
             agent and "The change applies on the next turn."
                 or "The change applies when the first turn starts."
         )
+    end
+
+    local function prompt_draft_safe(value)
+        local hits, scan_error = coordinator_function(
+            prompt_edit.scan, "PromptSecretScanFailure", "Prompt draft secret scan", value
+        )
+        if not hits then return nil, scan_error end
+        if type(hits) ~= "table" then
+            return nil, failure("PromptSecretScanFailure", "Prompt draft secret scan failed")
+        end
+        for _ in pairs(hits) do
+            return nil, failure("RegisteredSecret", "Prompt draft contains a registered secret")
+        end
+        return true
+    end
+
+    -- Owns one bounded multi-line edit until exact save, cancel, or preemption.
+    -- Draft content is never submitted to a main/side/steer lane or persisted
+    -- before save; publication continues to use the existing Session owner.
+    local function route_prompt_editor(source)
+        local command, command_error = coordinator_function(
+            admitted_ports.cli.parse_prompt_editor, "PromptEditorInput", "Prompt editor parsing",
+            source, prompt_edit.id
+        )
+        if not command then return nil, command_error end
+        if command.operation == "chat" then return false, nil, command.text end
+        if command.operation == "cancel" then return cancel_prompt_edit("cancelled") end
+        if command.operation == "save" then
+            local current, status_error = session_settings_status()
+            if not current then return nil, status_error end
+            if prompt_edit.owner ~= (agent or admitted_ports.chat.draft)
+                or current.context_prompt ~= prompt_edit.original
+                or current.config_generation ~= prompt_edit.config_generation
+            then
+                return nil, failure("PromptEditorStale", "Session settings changed; cancel and reopen the editor")
+            end
+            local safe, scan_error = prompt_draft_safe(prompt_edit.draft)
+            if not safe then return nil, scan_error end
+            local request = { operation = "clear" }
+            if prompt_edit.draft ~= "" then
+                request = { operation = "set", text = prompt_edit.draft }
+            end
+            local saved, save_error = apply_prompt(request)
+            if not saved then return nil, save_error end
+            local id = prompt_edit.id
+            prompt_edit = false
+            return publish({ kind = "action", id = id, text = "saved" })
+        end
+        if command.operation == "show" then
+            local safe, scan_error = prompt_draft_safe(prompt_edit.draft)
+            if not safe then return nil, scan_error end
+            return publish_context_prompt({ context_prompt = prompt_edit.draft, effective_at = "not saved" })
+        end
+        local value, has_lines
+        if command.operation == "clear" then
+            value, has_lines = "", false
+        elseif command.operation == "reset" then
+            value, has_lines = prompt_edit.original, prompt_edit.original ~= ""
+        elseif command.operation == "append" then
+            local separator = prompt_edit.has_lines and "\n" or ""
+            if #prompt_edit.draft + #separator + #command.text > admitted.maximum_draft_bytes then
+                return nil, failure("DraftLimit", "Prompt draft exceeds its byte limit; clear or cancel it")
+            end
+            value, has_lines = prompt_edit.draft .. separator .. command.text, true
+        else
+            return nil, failure("PromptEditorInput", "unknown Prompt editor operation")
+        end
+        local safe, scan_error = prompt_draft_safe(value)
+        if not safe then return nil, scan_error end
+        prompt_edit.draft, prompt_edit.has_lines = value, has_lines
+        return publish_status("Prompt draft " .. prompt_edit.id .. ": " .. tostring(#value)
+            .. "/" .. tostring(admitted.maximum_draft_bytes) .. " bytes; not saved.")
     end
 
     local function active_model_owner()
@@ -7538,6 +7676,11 @@ function M.new_application_coordinator(ports, options)
     end
 
     local function route_line(source)
+        if prompt_edit then
+            local handled, editor_error, chat_source = route_prompt_editor(source)
+            if not chat_source then return handled, editor_error end
+            source = chat_source
+        end
         local normalized = trim_coordinator_line(source)
         if approval and normalized:sub(1, 1) ~= "." then
             return route_approval_line(source)
@@ -7549,6 +7692,8 @@ function M.new_application_coordinator(ports, options)
         local request, parse_error = parse_chat(source)
         if not request then return nil, parse_error end
         if request.id == "quit" then
+            local cancelled, cancel_error = cancel_prompt_edit("session is closing")
+            if not cancelled then return nil, cancel_error end
             lifecycle = "closing"
             return publish_status("Closing the current session.")
         end
@@ -7574,6 +7719,9 @@ function M.new_application_coordinator(ports, options)
     end
 
     local function handle_submission(intent)
+        if prompt_edit and intent ~= "submit-or-queue" then
+            return nil, failure("PromptEditorBusy", "save or cancel the Prompt editor before using another input lane")
+        end
         if input_draft == "" and intent ~= "submit-or-queue" then
             return nil, failure("DraftEmpty", "the selected input lane has no draft")
         end
@@ -7590,12 +7738,13 @@ function M.new_application_coordinator(ports, options)
         else
             result, action_error = stage_and_apply("side", input_draft)
         end
-        if result then input_draft = "" end
+        if result or prompt_edit then input_draft = "" end
         prompt_needed = lifecycle ~= "closing"
         return result, action_error
     end
 
     local function handle_cancel()
+        if prompt_edit then return cancel_prompt_edit("cancelled") end
         if input_draft ~= "" then
             input_draft = ""
             prompt_needed = true
@@ -7795,6 +7944,7 @@ function M.new_application_coordinator(ports, options)
     end
 
     local function finish_run(primary_error)
+        prompt_edit = false
         local closed_agent, agent_error = close_agent("application-close")
         local closed_terminal, terminal_error = close_terminal()
         lifecycle = "closed"
@@ -7920,6 +8070,8 @@ function M.new_application_coordinator(ports, options)
             model_change_action_id = model_change
                 and model_change.action_id or false,
             diagnostic_count = #diagnostic_order,
+            prompt_editor_id = prompt_edit and prompt_edit.id or false,
+            prompt_editor_bytes = prompt_edit and #prompt_edit.draft or 0,
         }, "ApplicationCoordinator status")
     end
 
