@@ -393,6 +393,14 @@ local REGISTRY = {
             clear = ".clear", reset = ".reset", literal_dot_prefix = "..",
             multiline_payload = "literal", line_join = "LF", external_editor = false,
         },
+        config_editor = {
+            commands = {
+                "help", "list [page]", "show <section>", "set <section> <key>",
+                "unset <section> <key>", "preview", "save <editor-id>", "reset", "reload", "cancel", "quit",
+            },
+            value_input = "separate-schema-typed-ini-value",
+            secret_input = "raw-no-echo", online = false,
+        },
     },
     exit_classes = {
         success = 0,
@@ -1326,6 +1334,14 @@ local function render_action_help(descriptor)
         lines[#lines + 1] = "  Prefix literal dot commands with " .. editor.literal_dot_prefix .. "."
         lines[#lines + 1] = "  No external editor; saved changes apply on the next turn."
     end
+    if descriptor.id == "config-repl" then
+        lines[#lines + 1] = "Editor commands:"
+        for _, command in ipairs(REGISTRY.parser.config_editor.commands) do
+            lines[#lines + 1] = "  " .. command
+        end
+        lines[#lines + 1] = "Values use INI syntax in a separate prompt; secret-capable fields use hidden input."
+        lines[#lines + 1] = "Preview validates the complete draft; save uses the displayed config-edit-N identity."
+    end
     lines[#lines + 1] = "Results: " .. table.concat(descriptor.results, ", ")
     if MACHINE_SUPPORTED[descriptor.id] then
         local constraint = descriptor.id == "self-test" and " (offline Stage 1 only)" or ""
@@ -1680,6 +1696,56 @@ function M.new(options)
             return { operation = "chat", text = source }
         end
         return { operation = "append", text = source }
+    end
+
+    ---Parses directives inside the already-admitted offline config editor.
+    -- Values are never accepted on the command line; a separate typed input
+    -- handles secrets without echo. Quoted selectors reuse the shared tokenizer.
+    -- @param source string Complete NUL-free UTF-8 command line.
+    -- @param editor_id string Exact current config-edit-N draft revision.
+    -- @return table|nil command Directive with exact section/key or page fields.
+    -- @return table|nil err Invalid grammar or stale save identity.
+    function service.parse_config_editor(source, editor_id)
+        if not valid_utf8_string(source) or #source > 16384 or source:find("[\r\n]") then
+            return nil, failure("ConfigEditorInput", "enter one bounded UTF-8 command line")
+        end
+        if type(editor_id) ~= "string" or #editor_id > 64
+            or not editor_id:match("^config%-edit%-[1-9][0-9]*$")
+        then
+            return nil, failure("ConfigEditorStale", "config editor identity is invalid")
+        end
+        local tokens, cursor = {}, 1
+        while skip_space(source, cursor) <= #source do
+            local token, following, token_error = read_token(source, cursor)
+            if token_error or #tokens >= 3 or token == ""
+                or (following <= #source and skip_space(source, following) == following)
+            then
+                return nil, failure("ConfigEditorInput", "invalid config editor command")
+            end
+            tokens[#tokens + 1], cursor = token, following
+        end
+        local operation = tokens[1]
+        if operation == "save" then
+            if #tokens ~= 2 or tokens[2] ~= editor_id then
+                return nil, failure("ConfigEditorStale", "save requires the current config editor identity")
+            end
+        elseif operation == "list" then
+            if #tokens == 1 then return { operation = "list", page = 1 } end
+            local page = #tokens == 2 and tokens[2]:match("^[1-9][0-9]*$") and tonumber(tokens[2])
+            if not page or math.type(page) ~= "integer" or page > 1000000 then
+                return nil, failure("ConfigEditorInput", "list page must be a bounded positive integer")
+            end
+            return { operation = "list", page = page }
+        elseif operation == "show" and #tokens == 2 then
+            return { operation = operation, section = tokens[2] }
+        elseif (operation == "set" or operation == "unset") and #tokens == 3 then
+            return { operation = operation, section = tokens[2], key = tokens[3] }
+        elseif #tokens ~= 1 or not ({
+            help = true, preview = true, reset = true, reload = true, cancel = true, quit = true,
+        })[operation] then
+            return nil, failure("ConfigEditorInput", "unknown command or invalid arguments; enter help")
+        end
+        return { operation = operation }
     end
 
     ---Parses one Context REPL command line into a semantic request.

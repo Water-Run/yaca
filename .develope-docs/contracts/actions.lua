@@ -37,6 +37,14 @@ return {
       clear = ".clear", reset = ".reset", literal_dot_prefix = "..",
       multiline_payload = "literal", line_join = "LF", external_editor = false,
     },
+    config_editor = {
+      commands = {
+        "help", "list [page]", "show <section>", "set <section> <key>",
+        "unset <section> <key>", "preview", "save <editor-id>", "reset", "reload", "cancel", "quit",
+      },
+      value_input = "separate-schema-typed-ini-value",
+      secret_input = "raw-no-echo", online = false,
+    },
   },
   exit_classes = {
     success = 0,

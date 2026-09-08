@@ -56,6 +56,19 @@ return {
     preserve_unmodified_concrete_syntax = true,
   },
 
+  field_editor = {
+    scope = "valid-main-ini-catalog-fields",
+    source_repair = "no-arbitrary-invalid-source-replacement",
+    value_grammar = "same-schema-typed-ini-codec",
+    hidden_input_fields = { "Model.*.Key", "Network.ProxyUrl", "Model.*.AdapterOptions" },
+    save_identity = "exact-current-config-edit-N",
+    maximum_changed_fields = 256,
+    section_page_size = 32,
+    cancel_persists = false,
+    online_requests = false,
+    external_change = "stale-until-explicit-reload",
+  },
+
   fields = {
     field("General.SchemaVersion", "General", "SchemaVersion", "schema-version", "release-value", { required = true }),
     field("Global.SystemPrompt", "General", "SystemPrompt", "bounded-utf8-text", ""),

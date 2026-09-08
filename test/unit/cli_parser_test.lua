@@ -101,6 +101,32 @@ return {
     name = "unit/cli-parser",
     cases = {
         {
+            name = "config editor parses exact revisions and keeps values off command lines",
+            run = function()
+                local service = new_service()
+                local id = "config-edit-3"
+                A.deep_equal(assert(service.parse_config_editor('set "Permission.团队 A" Write', id)),
+                    { operation = "set", section = "Permission.团队 A", key = "Write" })
+                A.deep_equal(assert(service.parse_config_editor("list", id)), { operation = "list", page = 1 })
+                A.deep_equal(assert(service.parse_config_editor(" list 2 ", id)), { operation = "list", page = 2 })
+                A.deep_equal(assert(service.parse_config_editor("save " .. id, id)), { operation = "save" })
+                for _, line in ipairs({ "help", "preview", "reset", "reload", "cancel", "quit" }) do
+                    A.equal(assert(service.parse_config_editor(line, id)).operation, line)
+                end
+                for _, line in ipairs({
+                    "save", "save config-edit-2", "set Model.Primary Key secret", 'show "General"suffix',
+                    "show", "list 0", "list 99999999999999999999999", "quit extra", "", "help\nquit",
+                    "show General\0", 'show "unterminated',
+                }) do
+                    local parsed, parse_error = service.parse_config_editor(line, id)
+                    A.falsy(parsed, line)
+                    A.truthy(parse_error.code == "ConfigEditorInput" or parse_error.code == "ConfigEditorStale")
+                end
+                A.falsy(service.parse_config_editor("quit", "config-edit-0"))
+                A.contains(assert(service.render_help("config-repl")), "secret-capable fields use hidden input")
+            end,
+        },
+        {
             name = "Prompt editor controls require exact identity and preserve literal submissions",
             run = function()
                 local service = new_service()

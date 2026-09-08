@@ -33,6 +33,15 @@ Context XML 是 yaca 内部版本化存储，不是稳定第三方 API；人类�
 
 主 INI 每次作为一个完整 typed generation 校验。每个新顶层 main/side turn 都观察整份文件；候选无效、不可读或半写时阻断新 turn，不静默回退。一个 turn 及其 retry、工具、review 和 compaction 始终使用 admission 时冻结的 immutable generation。
 
+`yaca --config-repl` 对有效 INI 打开离线字段编辑器。`list [页码]` 列出区域，
+`show General` 查看字段；例如输入 `set General LogLevel`，再在值提示符处
+输入 `debug`。文本值沿用 INI 双引号及 `\n` 转义，Key、ProxyUrl 和
+AdapterOptions 使用隐藏输入。`unset <区域> <字段>` 恢复可选字段的默认值。
+`preview` 查看改动，`save config-edit-N` 保存界面显示的版本并退出。
+`reset` 恢复打开时的草稿，`reload` 丢弃编辑并重新读取文件；`quit`、`cancel`、
+Esc 或 EOF 丢弃未保存编辑。外部并发修改会阻止保存，需显式 reload。
+新增或移除字段会保留其他字段、注释、区域顺序、BOM 与换行格式。
+
 发行模板包含两个 Permission profile：
 
 | Profile | Read | Write | Delete | Shell | OutsideWorkspace |
@@ -103,8 +112,10 @@ Context。有效配置中已登记的秘密值，包括二进制字段解码后�
 扫描并拒绝。既有 TTY 要求保持不变。
 
 管理交互仍有 controller 缺口。
-`--config-repl` 当前执行配置校验或创建缺文件时的修复模板，`--context-repl`
-当前显示 Catalog，完整管理交互待接通。在线 self-test Stage 2/3 的调度和同意
+`--config-repl` 已支持有效配置的 catalog 字段编辑，缺文件时仍创建修复模板；
+任意无效源的交互修复及 Model/Permission 区域管理尚待完成，`--model-repl`
+已提供既有的离线 Model 创建/编辑流程。`--context-repl` 当前显示 Catalog，
+完整管理交互待接通。在线 self-test Stage 2/3 的调度和同意
 门禁已有实现，但 production adapter 当前返回未接通的失败结果，不发起 Model
 请求。
 

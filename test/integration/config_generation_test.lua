@@ -170,6 +170,54 @@ return {
     name = "integration/config-generation",
     cases = {
         {
+            name = "config editor field projection hides secret-capable values and validates literal inputs",
+            run = function()
+                local original = source():gsub("%[Agent%]",
+                    '[Network]\nProxyUrl = "https://user:proxy-secret@proxy.example"\n[Agent]', 1)
+                local filesystem, controls = fake_filesystem.new({ [CONFIG_PATH] = original })
+                local service = codec(filesystem)
+                local base = assert(service.begin_edit(CONFIG_PATH))
+                local sections = assert(service.draft_sections(base))
+                A.equal(sections[1], "General")
+                A.equal(sections[#sections], "Model.Primary")
+                local function row(draft, section, key)
+                    for _, field in ipairs(assert(service.draft_fields(draft, section))) do
+                        if field.key == key then return field end
+                    end
+                    error("field is missing")
+                end
+                for _, item in ipairs({ { "Model.Primary", "Key" }, { "Model.Primary", "AdapterOptions" }, { "Network", "ProxyUrl" } }) do
+                    local field = row(base, item[1], item[2])
+                    A.truthy(field.hidden)
+                    A.falsy(field.has_value)
+                    A.falsy(field.value)
+                end
+                local all = A.render(service.draft_fields(base, "Network")) .. A.render(service.draft_fields(base, "Model.Primary"))
+                A.falsy(all:find("original-secret", 1, true))
+                A.falsy(all:find("proxy-secret", 1, true))
+                A.raises(function() sections[1] = "Changed" end, "cannot be modified")
+                local draft = assert(service.edit_draft_value(base, "General", "SystemPrompt", '"line\\nnext \\\"quote\\\""'))
+                A.equal(row(draft, "General", "SystemPrompt").value, 'line\nnext "quote"')
+                draft = assert(service.edit_draft_value(draft, "TUI", "StartupShowVersion", "false"))
+                A.equal(row(draft, "TUI", "StartupShowVersion").value, false)
+                draft = assert(service.edit_draft_value(draft, "Agent", "QueueMaxItems", "4"))
+                A.equal(row(draft, "Agent", "QueueMaxItems").value, 4)
+                for _, value in ipairs({ '"raw\nphysical"', '"original-secret"', '"bad\\escape"', '"ok"\nLogLevel = trace', '"bad\0"' }) do
+                    A.falsy(service.edit_draft_value(draft, "General", "SystemPrompt", value))
+                end
+                A.falsy(service.edit_draft_value(draft, "Agent", "QueueMaxItems", "999999"))
+                A.falsy(service.edit_draft_value(draft, "TUI", "StartupShowVersion", '"false"'))
+                A.falsy(service.draft_fields(draft, "Model.Missing"))
+                A.falsy(service.edit_draft_value(draft, "General", "Unknown", "1"))
+                A.equal(controls.bytes(CONFIG_PATH), original)
+                assert(service.commit_draft(draft, TEMP_PATH))
+                A.contains(controls.bytes(CONFIG_PATH), "; preserve this comment")
+                A.contains(controls.bytes(CONFIG_PATH), "[TUI]")
+                A.equal(assert(service.current()).agent.queue_max_items, 4)
+                A.falsy(service.draft_fields(draft, "General"))
+            end,
+        },
+        {
             name = "existing edits recheck base write validate replace and flush directory",
             run = function()
                 local filesystem, controls = fake_filesystem.new({
@@ -261,7 +309,7 @@ return {
             end,
         },
         {
-            name = "structural unset uses canonical fallback and remains fully validated",
+            name = "structural unset preserves comments and remains fully validated",
             run = function()
                 local filesystem, controls = fake_filesystem.new({
                     [CONFIG_PATH] = source("info", "MaxTurnToolCalls = 8"),
@@ -281,7 +329,7 @@ return {
                 A.falsy(preview.agent.max_turn_tool_calls)
                 assert(service.commit_draft(edited, TEMP_PATH))
                 A.falsy(controls.bytes(CONFIG_PATH):find("MaxTurnToolCalls", 1, true))
-                A.falsy(controls.bytes(CONFIG_PATH):find("preserve this comment", 1, true))
+                A.contains(controls.bytes(CONFIG_PATH), "preserve this comment")
             end,
         },
         {

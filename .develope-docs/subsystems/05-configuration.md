@@ -1,6 +1,6 @@
 # 05 配置与模型注册表
 
-更新日期：2026-08-29
+更新日期：2026-09-08
 
 状态：**计划已确认（C10/C11）** — 下文 catalog 与 [`contracts/config.lua`](../contracts/config.lua) 是权威字段集合；Runtime 数值从 release manifest 注入，原子写仍是 M3 target hard gate。`src/_CONFIG_.ini` 与候选文档不是现行契约。
 
@@ -29,6 +29,46 @@ CLI 可以产生本次 invocation 的显式动作参数，但不形成第四份�
 主 INI 可以手工编辑；`config-repl`/`model-repl` 使用同一 schema 做事务式草稿、预览、完整校验和原子发布。unknown、重复、类型错误、越界、无效引用或条件字段不成立都会使候选 generation 无效，不能静默忽略或保留成 hidden advanced option。
 
 Model 与 Permission 的物理 section 顺序决定各自默认选择；发行模板把 `Std` 放在 Permission 第一项，并包含 `Readonly`。`Std` 的 Read=allow，其余四项为 confirm；`Readonly` 的 Read=allow，其余四项为 deny。名称只用于选择/显示，真实 Model 能力和 Permission 行为始终看字段；用户修改后不再根据名称套回发行值。
+
+## 已接通的离线字段 REPL
+
+有效主 INI 的 `--config-repl` 使用同一个 config service 打开 stale-bound 草稿。
+所有 singleton 区域（包括尚未物理写出的默认区域）与已有 Model/Permission
+区域都从 schema 和原 physical family 顺序生成。缺文件时沿用修复模板入口；
+任意无效源的交互修复与区域增删/重排不由本字段编辑器猜测。
+
+| 命令 | 行为 |
+| --- | --- |
+| `help` | shared CLI registry 生成完整编辑命令说明 |
+| `list [page]` | 每页最多 32 个精确区域名，显示下一页入口 |
+| `show <section>` | catalog 顺序的类型、有效值和显式配置/默认标记 |
+| `set <section> <key>` | 单独输入一个 schema 类型的 INI 值，再完整验证候选 |
+| `unset <section> <key>` | 移除可选字段，重新验证默认与引用；required 字段拒绝 |
+| `preview` | 原值/候选值差异、配置 warning 和精确保存版本 |
+| `save config-edit-N` | 只接纳当前版本，投影预览后原子保存并退出 |
+| `reset` / `reload` | 丢弃编辑并恢复打开时草稿 / 重新读取并验证当前 INI |
+| `cancel` / `quit` | 丢弃未保存编辑，以 cancelled / success 退出 |
+
+含空格的 section selector 使用 shared line tokenizer 的引号语法。值不放在
+命令行上；text/path/URL/adapter-map 沿用 INI 双引号与固定转义，token 字段沿用
+各自 bool/number/enum 类型。Key、ProxyUrl 与 AdapterOptions 始终使用 raw
+no-echo 输入且不投影值，包括空值和当前尚未注册秘密的 adapter options。
+旧/新 generation 的 scanner 都复核显示值，避免轮换后在 before/after 中泄露秘密。
+
+每次成功编辑、reset 或 reload 都递增当前 invocation 内的 `config-edit-N`；
+最多暂存 256 个不同字段的变更，输入与候选还受已有 INI/text 资源上限约束。
+校验失败保留原安全草稿。Esc、EOF 与退出丢弃未保存编辑；同批 cooked 输入
+按顺序保留，但进入隐藏输入时拒绝已有缓冲文本，不能把已 echo 的值当成隐藏输入。
+终端在终态调用原生恢复，时钟接口失效时也直接恢复并关闭，不把 join 成功作为
+恢复回显的前提；原生恢复失败仍明确报错。不启动 Model、Tool、外部编辑器或 Context writer。
+
+保存复用原 private source digest、完整 bytes 和文件 identity 的 stale gate、
+同目录临时文件重读验证及原子发布。已知写入失败可显式重试；外部修改要求
+reload 后重新编辑；replace 后目录 flush 失败返回 `ConfigPublishUnknown` 并停止。
+添加字段插入该 section 头后并遵守 schema 顺序；新 section 追加，不重排已有
+Model/Permission。移除赋值行保留其行尾注释，其余 physical records、BOM、
+换行格式及字节/行数上限保持。synthetic Linux/旧 CMD 已覆盖 production
+composition，真实目标原子写和终端资格仍待 C32。
 
 ## 配置 generation 与逐 turn 生效
 

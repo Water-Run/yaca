@@ -9,7 +9,7 @@ yaca 当前已有可执行 Lua 入口和平台无关的通用 Agent 核心；代
 当前已实现：
 
 - bootstrap、严格 action registry/CLI parser、旧终端 TUI/line editor、typed diagnostics 和分阶段 self-test；顶层诊断会把非 ASCII 字节稳定转义，避免旧 CMD 代码页损坏错误输出；裸 chat 在第一条消息前仍不创建 Context。
-- immutable config generation、OpenAI/Anthropic adapter、HTTP/SSE/retry/cancel、匿名 curl secret carrier，以及固定无工具的 side/review/compaction purpose。
+- immutable config generation、有效配置的离线字段 REPL、OpenAI/Anthropic adapter、HTTP/SSE/retry/cancel、匿名 curl secret carrier，以及固定无工具的 side/review/compaction purpose。
 - 单 XML Context schema/store/index/lock/recovery、首消息先 durable、operation intent/result、ModelView publication 和 cache-miss 重建。
 - typed AgentLoop、queue/steer/side、ask-user/yield、action/termination review、预算/stuck/cancel/finalization 和精确 Tool result 配对。
 - 八个 versioned Tool、current-process one-action Permission、direct path/identity/CAS 防护，以及明确 `opaque-uncontained` 的原生 `cmd.exe`/shell exec。
@@ -25,12 +25,12 @@ yaca 当前已有可执行 Lua 入口和平台无关的通用 Agent 核心；代
 - chat `.model` 已接到 draft/production 双 owner：无参数最多投影 64 个 enabled/native-tool 候选的普通文本行，精确 selector 不依赖 ANSI、补全或新式终端。预检保守按 `1 byte <= 1 token` 绑定当前 config、Context generation/sequence、活动 ModelView、四层 Prompt、tool/control schema、输出与 transition reserve；目标放不下时在任何配置/XML 变更前返回 `ModelIncompatible`，不缩水历史、Prompt 或工具。endpoint route、credential slot/policy、Protocol、RemoteModel/usage、Model Prompt、adapter/streaming 或能力边界变化进入默认 deny 的 `model-change-N` 确认；只显示 origin/path、`?configured` 和非秘密 credential identity。确认绑定的 waterline/manifest/Prompt 环境/目标定义任一变化即 stale；保存态经完整配置重载、目标定义复核、Context `session_override + model_view_published` 原子提交和 Runtime receipt adoption 后只在下一 turn 生效，active turn 不热换，也不建立失败 fallback Model。
 - 最小发行 allowlist、component/license manifest、SPDX SBOM、package planner、资源 overlay 和资源门禁测试 Harness。
 - 运行时 curl config 已逐请求用锁定 CLI 可解析的 standalone/no-option 语法显式固定 HTTP/1.1、TLS 1.2+、服务端/HTTPS 代理随包 CA 校验；代理 TLS 下限由 `proxy-tlsv1` 与只启用 TLS 1.2/1.3 的锁定 Mbed TLS 后端共同闭合。代理/主机 DNS 和普通握手只在无 canonical event 时有界重试，证书/CA/CRL/issuer/pin/status 错误立即终止。真实目标 TLS/代理资格仍待 C32。
-- 受 `.tools/run_with_resource_guard.sh` 保护的完整平台无关 Lua suite 当前为 `471/471`（此前导出节点为 `462/462`）；本轮验证记录见下节。这不是三目标资格证明。
+- 受 `.tools/run_with_resource_guard.sh` 保护的完整平台无关 Lua suite 当前为 `481/481`（此前 Prompt 编辑器节点为 `471/471`）；本轮验证记录见下节。这不是三目标资格证明。
 
 仍缺失或不得宣称完成：
 
 - `--continue` 与同 workspace `.context` 已接通，但显式跨 workspace 确认/rebind 尚未开放；三目标 token/资源阈值仍待校准。
-- 本轮核对 `main.lua` 确认：在线 self-test Stage 2/3 production adapter 仍返回 failed 占位结果；`config-repl` 当前只提供校验/缺文件修复模板，`context-repl` 只提供 Catalog 列表，完整管理交互尚待接通。这些是实现缺口，不能只归入目标资格待办。
+- 在线 self-test Stage 2/3 production adapter 仍返回 failed 占位结果；有效配置的 `config-repl` 字段编辑已接通，但任意无效源的交互修复及 Model/Permission 区域管理尚待完成，`context-repl` 只提供 Catalog 列表。这些是实现缺口，不能只归入目标资格待办。
 - 旧环境网络/HTTPS 的源码锁、XP compatibility patch、静态 import/CRT 黑名单和最小协议闭包已有可重复候选证据；仍须在真实 XP/Win7/CentOS 7 证明 TLS/CA、显式代理、redirect/retry/cancel、旧 CMD 路径与错误分类，不能据此开放 Release Gate R。
 - C32 的三个真实 target qualification、C33 的干净机发布旅程/零表面、C34 的最终 SHA-256/license/SBOM/build/test evidence 尚未执行。
 - README 中任何能力声明仍必须受实现和 target evidence 约束；现代 Linux fake/native 边界通过不能外推为 XP、Win7 或 CentOS 7 支持。
@@ -41,6 +41,7 @@ yaca 当前已有可执行 Lua 入口和平台无关的通用 Agent 核心；代
 
 ### 本轮推进与接续点（2026-09-07 至 2026-09-08）
 
+- 配置编辑器已接通 catalog → section/field 投影 → 独立有类型值输入 → 完整草稿验证 → 预览 → 精确 `config-edit-N` 保存。Key、ProxyUrl、AdapterOptions 一律隐藏，所有显示值复核旧/新 registered secrets；set/unset 错误保留草稿，reset/reload 明确丢弃编辑，外部修改使保存 stale。提交复用既有源 bytes/identity 和临时文件双重校验；已知失败可重试，目录持久性 unknown 立即停止。INI 新增/移除字段保持其他行、注释、BOM/CRLF 和物理 family 顺序；共享输入保留同批普通命令，隐藏输入模式切换拒绝已有缓冲，时钟失效后仍恢复并关闭终端。定向 `75/75`、完整 `481/481` 通过；coding readiness 与 TP-003/006/008/010、RP-001 全部通过，validators 为 `7612/56/553`，锁定源码缓存逐次验 SHA-256，日志前缀 `config-editor-`。这仍不是三目标资格。
 - Prompt 编辑器已接通：共享 CLI registry 冻结 `.save <editor-id>`、`.cancel|show|clear|reset` 与 `..` 字面量转义；多行 payload 不解析为结束命令，普通空白保留。累计长度及 registered-secret 扫描在更新草稿前执行；Session/配置变化使保存 stale，保存失败可显式重试。side/steer 输入不进入 Agent；新 Tool approval 抢占并取消编辑。定向 `62/62`、bootstrap `27/27`、完整 `471/471` 通过，覆盖 synthetic Linux/旧 CMD 端口的真实 CLI composition；coding readiness 与 TP-003/006/008/010、RP-001 全部通过，validators 为 `7612/56/553`，源码缓存逐次验 SHA-256。日志前缀 `prompt-editor-`，不外推目标资格。
 - `--status` 已接通只读 production controller：报告当前进程没有活动 Context、workspace 与有效/无效/缺失配置；不扫描历史，不启动自检/Model，不创建数据，保留既有 TTY gate。chat `.status` 投影当前 writer 的最新 hash 和有效 Session 参数；`store.verify_writer` 只读取并复核当前路径的文件身份和规范文档，外部替换/写入/删除/读后换路径会使 writer 永久 faulted、Session publication 与 Runtime admission fail-stop，并在状态块显示 stale 和原因后关闭会话。DoubleCheck 的显式 false 不再被默认 true 覆盖。
 - 状态节点完整 suite `457/457`，coding readiness 入口与 TP-003/006/008/010、RP-001 全部通过；TP-010/RP-001 沿用逐次 SHA-256 复核的锁定本地源码缓存，真实三目标资格仍未完成。日志为 `status-full-suite.log` 与 `status-readiness.log`。

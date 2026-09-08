@@ -268,6 +268,53 @@ local function production_native(settings)
     return native, controls, calls, native_path, data_root, application, config_path
 end
 
+local function config_editor_fixture(answers, settings)
+    settings = settings or {}
+    cache.lxp = fake_lxp(function()
+        return false, "configuration editing must not parse Context XML", 1, 1, 1
+    end)
+    local native, filesystem, calls, native_path, _, application_path, config_path = production_native(settings)
+    local original = settings.source or ("; retained config comment\n" .. valid_source())
+    filesystem.external_replace(config_path, original)
+    local output, errors, modes = {}, {}, {}
+    local polls, restores = 0, 0
+    function native.monotonic_now()
+        if settings.clock_failed then return nil end
+        return 1
+    end
+    function native.terminal_start(request)
+        modes[#modes + 1] = request.mode
+        return true, { mode = request.mode }
+    end
+    function native.terminal_poll(handle)
+        if handle.cancelled then return true, { { kind = "terminal", outcome = "cancelled" } } end
+        polls = polls + 1
+        if settings.before_poll then settings.before_poll(polls, filesystem, config_path) end
+        local answer = answers[polls]
+        if type(answer) == "table" and answer.batch then return true, answer.batch end
+        if type(answer) == "table" then return true, { answer } end
+        if answer == nil then return true, { { kind = "action", intent = "eof" } } end
+        return true, { { kind = "action", intent = "text", text = answer .. "\n" } }
+    end
+    function native.terminal_cancel(handle) handle.cancelled = true return true, true end
+    function native.terminal_join(handle)
+        A.truthy(handle.cancelled)
+        return true, { outcome = "cancelled" }
+    end
+    function native.terminal_restore() restores = restores + 1 return true, true end
+    function native.terminal_close() return true, true end
+    local code = main.run_cli({ [0] = application_path, "--config-repl" }, {
+        native = native, native_path = native_path,
+        stdout = function(bytes) output[#output + 1] = bytes return true end,
+        stderr = function(bytes) errors[#errors + 1] = bytes return true end,
+    })
+    return {
+        code = code, output = table.concat(output), stderr = table.concat(errors),
+        filesystem = filesystem, calls = calls, path = config_path, original = original,
+        modes = modes, restores = restores, polls = polls,
+    }
+end
+
 local function application(source, continuation)
     local initial = source and { [CONFIG_PATH] = source } or {}
     local filesystem, filesystem_controls = fake_filesystem.new(initial, 23)
@@ -495,6 +542,157 @@ end
 return {
     name = "integration/bootstrap",
     cases = {
+        {
+            name = "configuration secret input restores the terminal even after its clock fails",
+            run = function()
+                local settings = {}
+                settings.before_poll = function(index)
+                    if index == 2 then settings.clock_failed = true end
+                end
+                local observed = config_editor_fixture({ "set Model.Primary Key", '"never-published-key"' }, settings)
+                A.equal(observed.code, 1)
+                A.contains(observed.stderr, "MonotonicClockDegraded")
+                A.deep_equal(observed.modes, { "cooked", "raw" })
+                A.equal(observed.restores, 2)
+                A.equal(observed.filesystem.bytes(observed.path), observed.original)
+                A.falsy(observed.output:find("never-published-key", 1, true))
+            end,
+        },
+        {
+            name = "configuration input retains cooked batches and rejects buffered values across a hidden boundary",
+            run = function()
+                local batch = { batch = { { kind = "action", intent = "text",
+                    text = "set General LogLevel\ndebug\npreview\nsave config-edit-2\n" } } }
+                local observed = config_editor_fixture({ batch })
+                A.equal(observed.code, 0, observed.stderr .. observed.output)
+                A.equal(observed.polls, 1)
+                A.contains(observed.filesystem.bytes(observed.path), "LogLevel = debug")
+                local rejected = config_editor_fixture({ { batch = { { kind = "action", intent = "text",
+                    text = 'set Model.Primary Key\n"untrusted-buffered-key"\nsave config-edit-2\n' } } }, "quit" })
+                A.equal(rejected.code, 0, rejected.stderr .. rejected.output)
+                A.contains(rejected.output, "InputModeBoundary")
+                A.falsy(rejected.output:find("untrusted-buffered-key", 1, true))
+                A.equal(rejected.filesystem.bytes(rejected.path), rejected.original)
+                A.deep_equal(rejected.modes, { "cooked" })
+            end,
+        },
+        {
+            name = "production config REPL previews and publishes typed fields with hidden credentials on both ports",
+            run = function()
+                for _, settings in ipairs({ {}, { os = "windows", arch = "x86" } }) do
+                    local observed = config_editor_fixture({
+                        "help", "list", "show Model.Primary", "set General LogLevel", "debug",
+                        "set TUI StartupShowVersion", "false", "set Model.Primary Key", '"new-hidden-key"',
+                        "set Network ProxyUrl", '"https://user:proxy-hidden-key@proxy.example"',
+                        "preview", "save config-edit-5",
+                    }, settings)
+                    A.equal(observed.code, 0, observed.stderr .. observed.output)
+                    A.contains(observed.output, "YACA CONFIGURATION EDITOR")
+                    A.contains(observed.output, "CONFIG SECTIONS")
+                    A.contains(observed.output, "General.LogLevel: \"info\" (default) -> \"debug\"")
+                    A.contains(observed.output, "TUI.StartupShowVersion: true (default) -> false")
+                    A.contains(observed.output, "Configuration published offline")
+                    for _, secret in ipairs({ "bootstrap-secret", "new-hidden-key", "proxy-hidden-key" }) do
+                        A.falsy(observed.output:find(secret, 1, true))
+                        A.falsy(observed.stderr:find(secret, 1, true))
+                    end
+                    local bytes = observed.filesystem.bytes(observed.path)
+                    A.contains(bytes, "; retained config comment")
+                    A.contains(bytes, "LogLevel = debug")
+                    A.contains(bytes, "StartupShowVersion = false")
+                    A.contains(bytes, 'Key = "new-hidden-key"')
+                    A.contains(bytes, 'ProxyUrl = "https://user:proxy-hidden-key@proxy.example"')
+                    A.equal(observed.calls.process_starts, 0)
+                    A.equal(observed.calls.directory_creates, 0)
+                    A.equal(observed.stderr, "")
+                    A.deep_equal(observed.modes, { "cooked", "raw", "cooked", "raw", "cooked" })
+                    A.equal(observed.restores, #observed.modes)
+                    for index = 1, #observed.output do A.truthy(observed.output:byte(index) <= 0x7F) end
+                end
+            end,
+        },
+        {
+            name = "config REPL quit cancel Esc and EOF discard only its unsaved draft",
+            run = function()
+                for _, ending in ipairs({ "quit", "cancel", { kind = "action", intent = "cancel" }, false }) do
+                    local answers = { "set General SystemPrompt", '"unsaved guidance"', "preview" }
+                    if ending then answers[#answers + 1] = ending end
+                    local observed = config_editor_fixture(answers)
+                    A.equal(observed.code, ending == "quit" and 0 or 7, observed.stderr)
+                    A.equal(observed.filesystem.bytes(observed.path), observed.original)
+                    A.falsy(table.concat(observed.filesystem.operations, "|"):find("create:", 1, true))
+                    A.equal(observed.calls.process_starts, 0)
+                    A.equal(observed.restores, #observed.modes)
+                end
+            end,
+        },
+        {
+            name = "config REPL rejects invalid fields secrets bounds and stale save ids without losing the draft",
+            run = function()
+                local observed = config_editor_fixture({
+                    "set Agent QueueMaxItems", "0", "set General SystemPrompt", '"bootstrap-secret"',
+                    "unset General SchemaVersion", "set General Unknown", "list 2",
+                    "set General LogLevel", "debug", "save config-edit-1", "show General",
+                    "preview", "save config-edit-2",
+                })
+                A.equal(observed.code, 0, observed.stderr .. observed.output)
+                A.contains(observed.output, "registered-secret-cross-field")
+                A.contains(observed.output, "UnknownConfigField")
+                A.contains(observed.output, "ConfigEditorPage")
+                A.contains(observed.output, "ConfigEditorStale")
+                A.falsy(observed.output:find("bootstrap-secret", 1, true))
+                A.contains(observed.filesystem.bytes(observed.path), "LogLevel = debug")
+                A.falsy(observed.filesystem.bytes(observed.path):find("SystemPrompt", 1, true))
+                A.equal(observed.stderr, "")
+            end,
+        },
+        {
+            name = "config REPL refuses concurrent replacement until explicit reload rebases the draft",
+            run = function()
+                local external = "; external change retained\n" .. valid_source():gsub(
+                    "SchemaVersion = 0.1.0", "SchemaVersion = 0.1.0\nLogLevel = warn", 1)
+                local observed = config_editor_fixture({
+                    "set General LogLevel", "debug", "preview", "save config-edit-2",
+                    "reload", "set General LogLevel", "trace", "preview", "save config-edit-4",
+                }, { before_poll = function(index, filesystem, path)
+                    if index == 4 then filesystem.external_replace(path, external) end
+                    if index == 5 then
+                        A.equal(filesystem.bytes(path), external)
+                        A.falsy(table.concat(filesystem.operations, "|"):find("create:", 1, true))
+                    end
+                end })
+                A.equal(observed.code, 0, observed.stderr .. observed.output)
+                A.contains(observed.output, "ConfigStale")
+                A.contains(observed.filesystem.bytes(observed.path), "; external change retained")
+                A.contains(observed.filesystem.bytes(observed.path), "LogLevel = trace")
+                A.equal(observed.calls.process_starts, 0)
+            end,
+        },
+        {
+            name = "config REPL retains a safe draft after known publication failure and stops on unknown durability",
+            run = function()
+                local observed = config_editor_fixture({
+                    "set General LogLevel", "debug", "save config-edit-2", "show General", "save config-edit-2",
+                }, { before_poll = function(index, filesystem)
+                    if index == 3 then filesystem.faults.replace = true end
+                    if index == 5 then filesystem.faults.replace = false end
+                end })
+                A.equal(observed.code, 0, observed.stderr .. observed.output)
+                A.contains(observed.output, "InjectedReplace")
+                A.contains(observed.filesystem.bytes(observed.path), "LogLevel = debug")
+                local unknown = config_editor_fixture({ "set General LogLevel", "debug", "save config-edit-2" }, {
+                    before_poll = function(index, filesystem)
+                        if index == 3 then filesystem.faults.flush_directory = true end
+                    end,
+                })
+                A.equal(unknown.code, 1)
+                A.contains(unknown.stderr, "ConfigPublishUnknown")
+                A.contains(unknown.filesystem.bytes(unknown.path), "LogLevel = debug")
+                A.falsy(unknown.output:find("Configuration published", 1, true))
+                A.equal(unknown.polls, 3)
+                A.equal(unknown.restores, #unknown.modes)
+            end,
+        },
         {
             name = "production Prompt editor changes only the unsaved draft on Linux and old CMD",
             run = function()

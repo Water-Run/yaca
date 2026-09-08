@@ -8519,16 +8519,19 @@ local function model_setup_changes(values)
     return changes
 end
 
-local function new_model_setup_input(composed, runtime)
+local function new_model_setup_input(composed, runtime, label)
+    label = label or "Model setup"
+    local cancel_code = label == "Configuration" and "ConfigEditorCancelled" or "ModelSetupCancelled"
     local text = require("text")
     local active = false
     local active_mode = false
     local terminal_ended = false
+    local pending_events, pending_index = {}, 1
     local input = {}
 
     local function output(bytes)
         if not write_direct(runtime.stdout, bytes) then
-            return nil, failure("BrokenStdout", "Model setup output could not be completed")
+            return nil, failure("BrokenStdout", label .. " output could not be completed")
         end
         return true
     end
@@ -8536,7 +8539,7 @@ local function new_model_setup_input(composed, runtime)
     local function now()
         local called, value = pcall(composed.backend.clock_port.monotonic_now)
         if not called or not valid_integer(value, 0) then
-            return nil, failure("MonotonicClockDegraded", "Model setup clock is unavailable")
+            return nil, failure("MonotonicClockDegraded", label .. " clock is unavailable")
         end
         return value
     end
@@ -8544,14 +8547,24 @@ local function new_model_setup_input(composed, runtime)
     local function close_active()
         if not active then return true end
         local observed_now, clock_error = now()
-        if not observed_now then return nil, clock_error end
+        if not observed_now then
+            -- Restoration does not require a clock or a successful join. Never
+            -- leave a raw secret field active after a degraded timing port.
+            local close_called, closed = pcall(active.close, active)
+            active, active_mode, terminal_ended = false, false, false
+            pending_events, pending_index = {}, 1
+            if not close_called or closed ~= true then
+                return nil, failure("TerminalFailure", label .. " terminal state could not be restored")
+            end
+            return nil, clock_error
+        end
         local primary_error
         if not terminal_ended then
             local cancel_called, cancelled = pcall(active.cancel, active, observed_now)
             if not cancel_called or cancelled ~= true then
                 primary_error = failure(
                     "TerminalFailure",
-                    "Model setup input cancellation could not be requested"
+                    label .. " input cancellation could not be requested"
                 )
             else
                 for _ = 1, 1024 do
@@ -8559,7 +8572,7 @@ local function new_model_setup_input(composed, runtime)
                     if not poll_called or type(events) ~= "table" then
                         primary_error = primary_error or failure(
                             "TerminalFailure",
-                            "Model setup cancellation outcome could not be observed"
+                            label .. " cancellation outcome could not be observed"
                         )
                         break
                     end
@@ -8567,7 +8580,7 @@ local function new_model_setup_input(composed, runtime)
                         if type(event) ~= "table" then
                             primary_error = primary_error or failure(
                                 "TerminalFailure",
-                                "Model setup cancellation emitted an invalid event"
+                                label .. " cancellation emitted an invalid event"
                             )
                             break
                         end
@@ -8590,7 +8603,7 @@ local function new_model_setup_input(composed, runtime)
                     if not slept or sleep_result == false then
                         primary_error = primary_error or failure(
                             "IdleWaitFailure",
-                            "Model setup cancellation wait failed"
+                            label .. " cancellation wait failed"
                         )
                         break
                     end
@@ -8598,7 +8611,7 @@ local function new_model_setup_input(composed, runtime)
                 if not terminal_ended then
                     primary_error = primary_error or failure(
                         "TerminalFailure",
-                        "Model setup cancellation did not reach terminal truth"
+                        label .. " cancellation did not reach terminal truth"
                     )
                 end
             end
@@ -8612,25 +8625,30 @@ local function new_model_setup_input(composed, runtime)
         if not joined or type(join_result) ~= "table" then
             primary_error = primary_error or failure(
                 "TerminalFailure",
-                "Model setup input could not be joined"
+                label .. " input could not be joined"
             )
         end
         local close_called, closed = pcall(active.close, active)
         if not close_called or closed ~= true then
             primary_error = primary_error or failure(
                 "TerminalFailure",
-                "Model setup terminal state could not be restored"
+                label .. " terminal state could not be restored"
             )
         end
         active = false
         active_mode = false
         terminal_ended = false
+        pending_events, pending_index = {}, 1
         if primary_error then return nil, primary_error end
         return true
     end
 
     local function activate(mode)
         if active_mode == mode then return true end
+        if pending_index <= #pending_events then
+            pending_events, pending_index = {}, 1
+            return nil, failure("InputModeBoundary", "enter hidden values only after their separate input prompt")
+        end
         local closed, close_error = close_active()
         if not closed then return nil, close_error end
         local terminal, terminal_error = composed.backend.new_terminal(mode)
@@ -8642,7 +8660,7 @@ local function new_model_setup_input(composed, runtime)
             pcall(terminal.close, terminal)
             return nil, failure(
                 "TerminalStartFailure",
-                "Model setup terminal input could not start"
+                label .. " terminal input could not start"
             )
         end
         active = terminal
@@ -8671,11 +8689,11 @@ local function new_model_setup_input(composed, runtime)
             elseif byte < 0x20 then
                 return nil, failure(
                     "InvalidSecretInput",
-                    "Model Key input contains an unsupported control byte"
+                    label .. " hidden input contains an unsupported control byte"
                 )
             else
                 if #current >= maximum_bytes then
-                    return nil, failure("InputLimit", "Model setup input exceeds its byte limit")
+                    return nil, failure("InputLimit", label .. " input exceeds its byte limit")
                 end
                 current = current .. string.char(byte)
             end
@@ -8693,33 +8711,38 @@ local function new_model_setup_input(composed, runtime)
         while true do
             local observed_now, clock_error = now()
             if not observed_now then return nil, clock_error end
-            local called, events = pcall(active.poll, active, observed_now, 128)
-            if not called or type(events) ~= "table" then
-                return nil, failure(
-                    "TerminalPollFailure",
-                    "Model setup input polling failed"
-                )
+            if pending_index > #pending_events then
+                local called, events = pcall(active.poll, active, observed_now, 128)
+                if not called or type(events) ~= "table" then
+                    return nil, failure(
+                        "TerminalPollFailure",
+                        label .. " input polling failed"
+                    )
+                end
+                pending_events, pending_index = events, 1
             end
             local progressed = false
-            for _, event in ipairs(events) do
+            while pending_index <= #pending_events do
+                local event = pending_events[pending_index]
+                pending_index = pending_index + 1
                 progressed = true
                 if event.kind == "io_terminal" then
                     terminal_ended = true
-                    return false, { code = "ModelSetupCancelled" }
+                    return false, { code = cancel_code }
                 end
                 if event.kind ~= "user_action" then
                     return nil, failure(
                         "TerminalContract",
-                        "Model setup received an invalid terminal event"
+                        label .. " received an invalid terminal event"
                     )
                 end
                 if event.action == "cancel" or event.action == "eof" then
-                    return false, { code = "ModelSetupCancelled" }
+                    return false, { code = cancel_code }
                 elseif event.action == "text" then
                     if type(event.text) ~= "string" then
                         return nil, failure(
                             "TerminalContract",
-                            "Model setup text event is invalid"
+                            label .. " text event is invalid"
                         )
                     end
                     if secret then
@@ -8734,7 +8757,7 @@ local function new_model_setup_input(composed, runtime)
                         if #value > maximum_bytes - #event.text then
                             return nil, failure(
                                 "InputLimit",
-                                "Model setup input exceeds its byte limit"
+                                label .. " input exceeds its byte limit"
                             )
                         end
                         value = value .. event.text
@@ -8744,7 +8767,7 @@ local function new_model_setup_input(composed, runtime)
                     if not valid then
                         return nil, utf8_error or failure(
                             "InvalidInputEncoding",
-                            "Model setup input is not valid UTF-8"
+                            label .. " input is not valid UTF-8"
                         )
                     end
                     if secret then
@@ -8755,7 +8778,7 @@ local function new_model_setup_input(composed, runtime)
                 elseif event.action ~= "newline" then
                     return nil, failure(
                         "UnsupportedInputAction",
-                        "Model setup accepts text, Enter, Esc, or EOF"
+                        label .. " accepts text, Enter, Esc, or EOF"
                     )
                 end
             end
@@ -8767,7 +8790,7 @@ local function new_model_setup_input(composed, runtime)
                 if not slept or sleep_error == false then
                     return nil, failure(
                         "IdleWaitFailure",
-                        "Model setup input wait failed"
+                        label .. " input wait failed"
                     )
                 end
             end
@@ -9079,6 +9102,254 @@ function M.run_model_repl(composed, runtime)
     }, "published Model setup")
 end
 
+---Runs one offline configuration edit with catalog-derived fields and previews.
+-- Plain ASCII lines work without ANSI or cursor movement. Secret-capable INI
+-- fields use the existing native raw/no-echo input and restore terminal state
+-- on every outcome. Saves retain the config service's exact stale/atomic gates.
+-- @param composed table Runtime with config, layout, terminal, clock, and random ports.
+-- @param runtime table Admitted TTY invocation with shared CLI and stdout.
+-- @return table|nil result Saved, unchanged, discarded, or cancelled outcome.
+-- @return table|nil err Typed input, output, validation, or publication failure.
+function M.run_config_repl(composed, runtime)
+    if type(composed) ~= "table" or type(composed.config) ~= "table"
+        or type(composed.layout) ~= "table" or type(composed.layout.config_path) ~= "string"
+        or type(composed.backend) ~= "table" or type(composed.backend.new_terminal) ~= "function"
+        or type(composed.backend.clock_port) ~= "table"
+        or type(composed.backend.clock_port.monotonic_now) ~= "function"
+        or type(composed.backend.clock_port.sleep_ms) ~= "function"
+        or type(composed.backend.system) ~= "table"
+        or type(composed.backend.system.secure_random) ~= "function"
+        or type(runtime) ~= "table" or type(runtime.cli) ~= "table"
+        or type(runtime.cli.parse_config_editor) ~= "function"
+        or type(runtime.cli.render_help) ~= "function"
+    then
+        return nil, failure("InvalidConfigEditor", "configuration editor ports are incomplete")
+    end
+    local config = composed.config
+    for _, method in ipairs({
+        "begin_edit", "draft_generation", "draft_sections", "draft_fields",
+        "edit_draft", "edit_draft_value", "commit_draft",
+    }) do
+        if type(config[method]) ~= "function" then
+            return nil, failure("InvalidConfigEditor", "configuration editor service is incomplete")
+        end
+    end
+    local base, begin_error = config.begin_edit(composed.layout.config_path)
+    if not base then return nil, begin_error end
+    local draft, revision = base, 1
+    local changes, changed = {}, {}
+    local input = new_model_setup_input(composed, runtime, "Configuration")
+    local function editor_id() return "config-edit-" .. tostring(revision) end
+    local function result(outcome, state, generation)
+        return readonly({
+            action = "config-repl", outcome = outcome, state = state,
+            config_path = composed.layout.config_path,
+            config_generation = generation and generation.id or false,
+            online_requests = 0,
+        }, "configuration editor result")
+    end
+    local function display(value)
+        local source = tostring(value)
+        for _, candidate in ipairs({ base, draft }) do
+            local generation = assert(config.draft_generation(candidate))
+            local hits = assert(generation.scan_registered_secrets(source))
+            for _ in pairs(hits) do return "[hidden]" end
+        end
+        return ascii_diagnostic(source, 16384)
+    end
+    local function field_value(row)
+        if row.hidden then return row.configured and "[hidden; configured]" or "[hidden; default]" end
+        if not row.has_value then return "(unset)" end
+        local value = display(row.value)
+        if type(row.value) == "string" then
+            value = '"' .. value:gsub('"', '\\"') .. '"'
+        end
+        return value .. (row.configured and "" or " (default)")
+    end
+    local function selected_field(candidate, section, key)
+        local fields, fields_error = config.draft_fields(candidate, section)
+        if not fields then return nil, fields_error end
+        for _, row in ipairs(fields) do
+            if row.key == key then return row end
+        end
+        return nil, failure("UnknownConfigField", "config field is unknown")
+    end
+    local function show_error(err)
+        return input.write("ERROR " .. safe_diagnostic(err and err.code or "ConfigEditorFailure", 128)
+            .. ": " .. safe_diagnostic(err and err.message or "configuration action failed", 512)
+            .. (err and type(err.reason) == "string" and " (" .. safe_diagnostic(err.reason, 128) .. ")" or "")
+            .. "\n")
+    end
+    local function preview()
+        local lines = { "CONFIG PREVIEW " .. editor_id() .. " changes=" .. tostring(#changes) }
+        for _, item in ipairs(changes) do
+            local before = assert(selected_field(base, item.section, item.key))
+            local after = assert(selected_field(draft, item.section, item.key))
+            lines[#lines + 1] = display(item.section) .. "." .. item.key
+                .. ": " .. field_value(before) .. " -> " .. field_value(after)
+        end
+        local generation = assert(config.draft_generation(draft))
+        lines[#lines + 1] = "Complete configuration: valid."
+        for _, warning in ipairs(generation.warnings) do
+            lines[#lines + 1] = "WARNING " .. safe_diagnostic(warning.code, 128)
+        end
+        lines[#lines + 1] = "Save: save " .. editor_id() .. "; reset/reload/cancel/quit discard unsaved edits."
+        return input.write(table.concat(lines, "\n") .. "\n")
+    end
+    local function advance_revision()
+        if revision == math.maxinteger then
+            return nil, failure("ConfigEditorLimit", "config editor identity space is exhausted")
+        end
+        revision = revision + 1
+        return true
+    end
+    local function apply_change(command)
+        local row, row_error = selected_field(draft, command.section, command.key)
+        if not row then return nil, row_error end
+        local key = command.section .. "\0" .. command.key
+        if not changed[key] and #changes >= 256 then
+            return nil, failure("ConfigEditorLimit", "save or discard the current 256 changed fields first")
+        end
+        local next_draft, edit_error
+        if command.operation == "unset" then
+            next_draft, edit_error = config.edit_draft(draft, {
+                { section = command.section, key = command.key, value = config.unset },
+            })
+        else
+            local hint = row.form == "text" and 'quoted INI text, e.g. "text\\nnext line"'
+                or (#row.values > 0 and table.concat(row.values, "|") or row.type)
+            local shown, show_error_value = input.write("Value type: " .. hint
+                .. (row.hidden and "; hidden input" or "") .. ". Esc cancels the editor.\n")
+            if not shown then return nil, show_error_value end
+            local value, read_error = input.read("value> ", row.hidden, 16384)
+            if value == false then return false, read_error end
+            if value == nil then return nil, read_error end
+            next_draft, edit_error = config.edit_draft_value(draft, command.section, command.key, value)
+            value = nil
+        end
+        if not next_draft then return nil, edit_error end
+        local advanced, revision_error = advance_revision()
+        if not advanced then return nil, revision_error end
+        draft = next_draft
+        if not changed[key] then
+            changed[key] = true
+            changes[#changes + 1] = { section = command.section, key = command.key }
+        end
+        return input.write("Draft " .. editor_id() .. " validated; " .. tostring(#changes)
+            .. " changed field(s). Use preview before save.\n")
+    end
+    local function run_editor()
+        local written, write_error = input.write("YACA CONFIGURATION EDITOR\n"
+            .. "Configuration is valid. Edits stay in memory until an exact save command.\n"
+            .. "Offline only. Enter help for commands, list for sections, or quit to leave.\n")
+        if not written then return nil, write_error end
+        while true do
+            local source, read_error = input.read(editor_id() .. "> ", false, 16384)
+            if source == false then
+                written, write_error = input.write("Unsaved configuration edits discarded.\n")
+                if not written then return nil, write_error end
+                return result("cancelled", "cancelled")
+            end
+            if source == nil then return nil, read_error end
+            local command, action_error = runtime.cli.parse_config_editor(source, editor_id())
+            local handled = true
+            if command then
+                if command.operation == "quit" or command.operation == "cancel" then
+                    written, write_error = input.write("Unsaved configuration edits discarded.\n")
+                    if not written then return nil, write_error end
+                    return result(command.operation == "quit" and "success" or "cancelled",
+                        #changes == 0 and "unchanged" or "discarded")
+                elseif command.operation == "help" then
+                    handled, action_error = input.write(assert(runtime.cli.render_help("config-repl")))
+                elseif command.operation == "list" then
+                    local sections = assert(config.draft_sections(draft))
+                    local first = (command.page - 1) * 32 + 1
+                    if first > #sections then
+                        handled, action_error = nil, failure("ConfigEditorPage", "section page is out of range")
+                    else
+                        local lines = { "CONFIG SECTIONS page=" .. tostring(command.page) .. " total=" .. tostring(#sections) }
+                        for index = first, math.min(first + 31, #sections) do
+                            lines[#lines + 1] = display(sections[index])
+                        end
+                        if first + 31 < #sections then lines[#lines + 1] = "Next: list " .. tostring(command.page + 1) end
+                        handled, action_error = input.write(table.concat(lines, "\n") .. "\n")
+                    end
+                elseif command.operation == "show" then
+                    local fields
+                    fields, action_error = config.draft_fields(draft, command.section)
+                    handled = fields ~= nil
+                    if fields then
+                        local lines = { "[" .. display(command.section) .. "]" }
+                        for _, row in ipairs(fields) do
+                            lines[#lines + 1] = row.key .. " = " .. field_value(row) .. " [" .. row.type .. "]"
+                        end
+                        handled, action_error = input.write(table.concat(lines, "\n") .. "\n")
+                    end
+                elseif command.operation == "preview" then
+                    handled, action_error = preview()
+                elseif command.operation == "reset" or command.operation == "reload" then
+                    local replacement = base
+                    if command.operation == "reload" then
+                        replacement, action_error = config.begin_edit(composed.layout.config_path)
+                    end
+                    if replacement then
+                        handled, action_error = advance_revision()
+                        if handled then
+                            base, draft, changes, changed = replacement, replacement, {}, {}
+                            handled, action_error = input.write("Unsaved edits discarded. Current draft: " .. editor_id() .. "\n")
+                        end
+                    else
+                        handled = nil
+                    end
+                elseif command.operation == "save" then
+                    handled, action_error = preview()
+                    if handled and #changes == 0 then return result("success", "unchanged") end
+                    if handled then
+                        handled, action_error = input.close()
+                        if not handled then return nil, action_error end
+                        local committed, commit_error
+                        for _ = 1, 8 do
+                            local random, random_error = composed.backend.system.secure_random(12)
+                            if not random then return nil, random_error end
+                            committed, commit_error = config.commit_draft(draft,
+                                composed.layout.config_path .. ".yaca-edit-" .. hex_bytes(random) .. ".tmp")
+                            if committed then break end
+                            local code = commit_error and commit_error.code
+                            if code ~= "DestinationExists" and code ~= "AlreadyExists" and code ~= "TemporaryConflict" then break end
+                        end
+                        if committed then
+                            written, write_error = input.write("Configuration published offline. No network request was made.\n")
+                            if not written then return nil, write_error end
+                            return result("success", "published", committed)
+                        end
+                        if commit_error and commit_error.code == "ConfigPublishUnknown" then return nil, commit_error end
+                        handled, action_error = nil, commit_error
+                    end
+                else
+                    handled, action_error = apply_change(command)
+                    if handled == false then
+                        written, write_error = input.write("Unsaved configuration edits discarded.\n")
+                        if not written then return nil, write_error end
+                        return result("cancelled", "cancelled")
+                    end
+                end
+            else
+                handled = nil
+            end
+            if not handled then
+                if action_error and action_error.code == "BrokenStdout" then return nil, action_error end
+                written, write_error = show_error(action_error)
+                if not written then return nil, write_error end
+            end
+        end
+    end
+    local called, outcome, run_error = pcall(run_editor)
+    local closed, close_error = input.close()
+    if not closed then return nil, close_error end
+    if not called then return nil, failure("ConfigEditorFailure", "configuration editor failed") end
+    return outcome, run_error
+end
+
 local function render_self_test(cli_service, request, result)
     if request.machine == true then
         local records = {}
@@ -9256,6 +9527,11 @@ default_runtime_dispatch = function(request, runtime)
             output = "",
             exit_value = configured.outcome == "success" and nil or configured,
         }
+    end
+    if request.id == "config-repl" and result.state == "valid" then
+        local configured, editor_error = M.run_config_repl(composed, runtime)
+        if not configured then return nil, editor_error end
+        return { output = "", exit_value = configured.outcome == "success" and nil or configured }
     end
     if request.id == "run-chat" or request.id == "continue" then
         local initial_agent

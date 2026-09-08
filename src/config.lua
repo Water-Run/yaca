@@ -1464,51 +1464,6 @@ function M.new(ports, options)
         return source
     end
 
-    local function rebuild_without(document, changes)
-        local removals, replacements = {}, {}
-        for _, change in ipairs(changes) do
-            local identity = change.section .. "\0" .. change.key
-            if change.value == service.unset then
-                removals[identity] = true
-            else
-                replacements[identity] = assert(encode_change(
-                    assert(descriptor_for(change.section, change.key)),
-                    change.value
-                ))
-            end
-        end
-        local sections, present = {}, {}
-        for _, name in ipairs(assert(ini_codec.sections(document))) do
-            present[name] = true
-            local family = assert(section_family(name))
-            local values = {}
-            for _, descriptor in ipairs(DESCRIPTORS[family].ordered) do
-                local identity = name .. "\0" .. descriptor.key
-                if replacements[identity] then
-                    values[descriptor.key] = replacements[identity]
-                elseif not removals[identity] then
-                    values[descriptor.key] = ini_codec.get(document, name, descriptor.key)
-                end
-            end
-            sections[#sections + 1] = { name = name, values = values }
-        end
-        for _, change in ipairs(changes) do
-            if not present[change.section] and change.value ~= service.unset then
-                present[change.section] = true
-                local family = assert(section_family(change.section))
-                local values = {}
-                for _, descriptor in ipairs(DESCRIPTORS[family].ordered) do
-                    local identity = change.section .. "\0" .. descriptor.key
-                    if replacements[identity] then
-                        values[descriptor.key] = replacements[identity]
-                    end
-                end
-                sections[#sections + 1] = { name = change.section, values = values }
-            end
-        end
-        return ini_codec.build(sections)
-    end
-
     ---Parses a complete candidate without changing the service's current generation.
     function service.parse(source, context_overrides)
         local generation, generation_or_error = parse_generation(
@@ -1679,7 +1634,7 @@ function M.new(ports, options)
         if not count or count == 0 then
             return nil, failure("InvalidConfigEdit", "config changes must be a non-empty array")
         end
-        local encoded, seen, has_removal = {}, {}, false
+        local encoded, seen = {}, {}
         for index, change in ipairs(changes) do
             if type(change) ~= "table" or type(change.section) ~= "string"
                 or type(change.key) ~= "string"
@@ -1707,7 +1662,7 @@ function M.new(ports, options)
                         "required config field cannot be unset"
                     )
                 end
-                has_removal = true
+                encoded[index] = { section = change.section, key = change.key, value = ini.unset }
             else
                 local wrapped, encode_error = encode_change(descriptor, change.value)
                 if not wrapped then return nil, encode_error end
@@ -1718,12 +1673,7 @@ function M.new(ports, options)
                 }
             end
         end
-        local document, edit_error
-        if has_removal then
-            document, edit_error = rebuild_without(state.document, changes)
-        else
-            document, edit_error = ini_codec.edit(state.document, encoded)
-        end
+        local document, edit_error = ini_codec.edit(state.document, encoded)
         if not document then return nil, edit_error end
         local source, write_error = ini_codec.write(document, { preserve_concrete = true })
         if not source then return nil, write_error end
@@ -1749,6 +1699,101 @@ function M.new(ports, options)
             return nil, failure("InvalidConfigDraft", "configuration draft is stale or foreign")
         end
         return state.generation
+    end
+
+    ---Lists editable sections from the schema and the draft's physical families.
+    -- Singleton sections are included even when all their values use defaults.
+    -- This reads only the owned draft; it performs no filesystem or network I/O.
+    -- @param draft table Live draft handle issued by this service.
+    -- @return table|nil sections Immutable exact section names in schema/family order.
+    -- @return table|nil err Stale or foreign draft failure.
+    function service.draft_sections(draft)
+        local generation, draft_error = service.draft_generation(draft)
+        if not generation then return nil, draft_error end
+        local sections = { "General", "TUI", "Agent", "Network", "Exec", "Context" }
+        for _, name in ipairs(generation.permission_order) do
+            sections[#sections + 1] = "Permission." .. name
+        end
+        for _, name in ipairs(generation.model_order) do
+            sections[#sections + 1] = "Model." .. name
+        end
+        return freeze(sections, "editable configuration sections")
+    end
+
+    ---Projects one section's field types and effective values without secrets.
+    -- Key, ProxyUrl, and AdapterOptions always use hidden input and projection,
+    -- including empty values and options that might later register a secret.
+    -- No source bytes, secret values, or reusable source digests are returned.
+    -- @param draft table Live draft handle issued by this service.
+    -- @param section string Exact existing family or schema singleton section.
+    -- @return table|nil fields Immutable catalog-ordered field records.
+    -- @return table|nil err Invalid draft or unknown section failure.
+    function service.draft_fields(draft, section)
+        local generation, draft_error = service.draft_generation(draft)
+        if not generation then return nil, draft_error end
+        local family = type(section) == "string" and section_family(section) or nil
+        if not family or (family == "Permission." and not generation.permissions[section:sub(12)])
+            or (family == "Model." and not generation.models[section:sub(7)])
+        then
+            return nil, failure("UnknownConfigSection", "config section is unknown")
+        end
+        local fields = {}
+        local state = draft_states[draft]
+        for _, descriptor in ipairs(DESCRIPTORS[family].ordered) do
+            local hidden = descriptor.secret == true or descriptor.conditional_secret == true
+                or descriptor.type == "adapter-map"
+            local value, value_error
+            if not hidden then
+                value, value_error = generation.get(section, descriptor.key)
+                if value_error then return nil, value_error end
+            end
+            local row = {
+                section = section, key = descriptor.key, type = descriptor.type,
+                form = descriptor.form, required = descriptor.required == true,
+                hidden = hidden, configured = ini_codec.get(state.document, section, descriptor.key) ~= nil,
+                values = descriptor.values or {}, has_value = not hidden and value ~= nil,
+            }
+            if row.has_value then row.value = value end
+            fields[#fields + 1] = row
+        end
+        return freeze(fields, "editable configuration fields")
+    end
+
+    ---Edits one existing field from the same INI value grammar as the main file.
+    -- Quoted text supports the codec's exact escapes; token fields retain their
+    -- schema types. Physical newlines cannot introduce additional assignments.
+    -- The complete candidate is validated before issuing a replacement draft.
+    -- @param draft table Live draft handle; unchanged if the candidate fails.
+    -- @param section string Exact schema singleton or existing family section.
+    -- @param key string Exact catalog key.
+    -- @param source string One bounded INI value, excluding physical line endings.
+    -- @return table|nil edited New private draft handle; no file is written.
+    -- @return table|nil err Typed selector, syntax, schema, or full validation failure.
+    function service.edit_draft_value(draft, section, key, source)
+        local fields, fields_error = service.draft_fields(draft, section)
+        if not fields then return nil, fields_error end
+        local descriptor = type(key) == "string" and descriptor_for(section, key) or nil
+        if not descriptor then
+            return nil, failure("UnknownConfigField", "config field is unknown")
+        end
+        if type(source) ~= "string" or #source > admitted.ini_limits.maximum_line_bytes
+            or source:find("[\r\n%z]")
+        then
+            return nil, failure("InvalidConfigValue", "enter one bounded INI value")
+        end
+        local document = ini_codec.parse("[" .. section .. "]\n" .. key .. " = " .. source .. "\n")
+        if not document then
+            return nil, failure("InvalidConfigValue", "value does not match the INI field grammar")
+        end
+        local wrapped = ini_codec.get(document, section, key)
+        local value, value_error
+        if descriptor.form == "text" then
+            value, value_error = ini.value(wrapped)
+        else
+            value, value_error = decode_field(wrapped, descriptor, section, admitted, json_codec)
+        end
+        if value_error then return nil, value_error end
+        return service.edit_draft(draft, { { section = section, key = key, value = value } })
     end
 
     ---Publishes a same-directory temporary after revalidation and stale checks.

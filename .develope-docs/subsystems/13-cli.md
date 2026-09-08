@@ -147,6 +147,16 @@ Resolver 的 `HashCollision`、`MatchedUnavailable`、`ScanIncomplete`、`NotFou
 
 `continue`、context rename/delete 和 context-select actions 的帮助文本必须一致说明：**短名 = 便捷首个命中；精准指定用 hash（整条逻辑路径摘要）**（D-061），不能让不同入口看起来采用不同优先级。所有 help 拼写从同一 registry 生成；已冻结的 continue/context-repl 根使用上表规范名称，其他 context actions 不得私设别名。
 
+## 已接通的 `config-repl` 字段交互
+
+有效配置进入独立离线 editor，共享 registry 的 `parser.config_editor` 冻结
+`help`、`list [page]`、`show <section>`、`set|unset <section> <key>`、`preview`、
+`save <editor-id>`、`reset`、`reload`、`cancel` 与 `quit`。`set` 的值始终由
+单独输入读取，不能通过 command/argv 携带；隐藏字段走 native no-echo 输入。
+精确 revision 保存、schema 类型、分页与原子提交见
+[05-configuration.md](05-configuration.md#已接通的离线字段-repl)。它不增加第 40 个
+域动作，不绕过既有 stdin/stdout TTY gate；任意坏源修复和结构管理仍待接通。
+
 ## `context-repl` action 的适配边界
 
 `context-repl(view)` 以已确认的 `recent|full` typed 参数启动交互式上下文浏览器。`recent` 是快速最近列表入口；`full` 是完整目录树/全部 Context 入口。二者复用同一个 controller、Resolver、查看、搜索、选择连接、重命名、rebind、查看/添加/取消 `AutoRenameDisabled`、永久删除、刷新和取消动作，不维护两份数据或 mutation 规则。取消命名标记从当前 durable 水位建立新 baseline，不立即或追补 Model 请求；添加标记会使在途命名结果失效。

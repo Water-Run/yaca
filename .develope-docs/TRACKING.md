@@ -36,8 +36,9 @@ C01--C31 已有核心实现、测试 harness、最小发行规划和现代 Linux
 和 `--export <selector>`。
 显式跨 workspace 确认/rebind 尚未开放。
 
-本轮直接核对 `main.lua` 后补记管理缺口：`config-repl` 当前提供配置校验与
-缺文件时的修复模板，`context-repl` 当前提供 Catalog 列表，尚无完整管理交互。
+`config-repl` 已接通有效 INI 的 catalog 字段编辑、预览、精确版本保存和重载；
+缺文件时仍提供修复模板。任意无效源的交互修复、Model/Permission 区域管理
+以及 `context-repl` 的完整交互仍有缺口，后者当前只提供 Catalog 列表。
 在线 self-test Stage 2/3 的 production adapter 仍返回 failed 占位结果。
 这些属于实现待办，不能归入“仅差目标资格”。
 
@@ -86,9 +87,29 @@ modern proofs 全部通过；日志为 `export-full-suite.log` 与 `export-readi
 仍为 **7612/56/553** 条断言。构建证明使用逐次 SHA-256 校验的锁定源码缓存；
 日志仍位于上述可丢弃目录，前缀为 `prompt-editor-`，不作为三目标资格。
 
+## 配置编辑器节点（2026-09-08）
+
+有效 INI 的 `--config-repl` 已接入同一 schema/catalog：分页 section 列表、
+字段查看、单独 INI value 输入、set/unset、变更预览、`save config-edit-N`、
+reset/reload/cancel/quit。每次编辑先完整验证候选，失败不替换安全草稿；
+Key/ProxyUrl/AdapterOptions 一律隐藏输入和投影，旧/新 generation 都扫描显示值。
+save 复用 private source digest/identity 复核、同目录临时文件验证和原子发布；
+已知失败保留草稿，`ConfigPublishUnknown` 立即停止。未保存编辑不创建目录/XML，
+整个入口零 Model/Tool 请求。
+
+INI structural edit 改为保留未修改 physical records；插入字段按 schema 顺序，
+新 section 追加且不改变原 Model/Permission 默认顺序，移除字段保留其行尾注释，
+BOM/CRLF 与字节/行数上限持续生效。共享终端输入保留同批 cooked 命令，在切换
+到隐藏输入时拒绝已有缓冲文本，时钟失效后仍执行原生终端恢复与关闭。
+
+定向 **75/75**、完整 **481/481** 通过；覆盖 synthetic Linux/旧 CMD production
+composition、外部替换/reload、保存失败重试和未知持久性停止。完整 coding readiness
+与 TP-003/006/008/010、RP-001 全部通过，validators 为 **7612/56/553** 条断言；
+源码缓存逐次验 SHA-256。可丢弃日志前缀 `config-editor-`，不作为三目标资格。
+
 ## 下一步顺序
 
-1. 补齐管理 REPL 操作与
+1. 补齐 Context/Model/Permission 管理、无效配置交互修复与
    在线 self-test Stage 2/3 的真实 adapter，保留逐次联网同意和零副作用检查。
 2. 实现显式跨 workspace 确认/rebind controller，保留精确目标与 writer 复核。
 3. 在真实目标环境执行 C32；只有完整目标证据通过后才推进 C33/C34 和 Gate R。

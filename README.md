@@ -34,6 +34,17 @@ The internal Context XML is versioned yaca storage, not a stable third-party API
 
 The complete INI is validated as one typed generation. Every new top-level main or side turn observes the whole file; an invalid, unreadable, or half-written candidate blocks the new turn instead of falling back silently. A turn and all of its retries, tools, reviews, and compaction work keep the immutable generation admitted with that turn.
 
+`yaca --config-repl` opens the offline field editor for an existing valid INI.
+Use `list [page]` for sections, `show General` for fields, and `set General
+LogLevel` followed by `debug` at the value prompt. Text fields use quoted INI
+values, including `\n` escapes; Key, ProxyUrl, and AdapterOptions use hidden
+input. `unset <section> <key>` restores an optional field's default. `preview`
+shows the changes; `save config-edit-N` saves the displayed revision and exits.
+`reset` returns to the opening draft, `reload` discards it and reads the file
+again, and `quit`, `cancel`, Esc, or EOF discards unsaved edits. Concurrent file
+changes prevent saving until an explicit reload. Additions and removals retain
+other fields, comments, section order, BOM, and line endings.
+
 The distribution defines two Permission profiles:
 
 | Profile | Read | Write | Delete | Shell | OutsideWorkspace |
@@ -127,9 +138,11 @@ Context is open. Registered secrets from a valid configuration are rejected befo
 output, including secrets in decoded binary fields. The TTY requirement remains.
 
 Controller gaps remain in management interactions.
-`--config-repl` validates configuration or creates a missing-file
-repair template; `--context-repl` displays the catalog. Their full management
-interactions are pending. Online self-test Stage 2/3 scheduling and consent are
+`--config-repl` edits catalog fields in valid configurations and still creates
+a repair template when the file is missing. Arbitrary invalid-source repair and
+Model/Permission section management are pending; `--model-repl` provides the
+existing offline Model creation/edit flow. `--context-repl` currently displays
+the catalog, with its full management interaction pending. Online self-test Stage 2/3 scheduling and consent are
 implemented, but their production adapters currently report an unavailable
 implementation rather than issuing Model requests.
 

@@ -35,6 +35,10 @@ local function readonly(values, label)
     })
 end
 
+---Explicit removal sentinel for schema-known fields in an edit transaction.
+-- It is never a semantic INI value and cannot be serialized as a scalar.
+M.unset = readonly({}, "INI unset sentinel")
+
 local function valid_integer(value, minimum)
     return math.type(value) == "integer" and value >= minimum
 end
@@ -675,10 +679,13 @@ local function edit_document(document, changes, admitted)
         if not field then
             return nil, failure("InvalidIniEdit", "change targets an unknown field")
         end
-        local valid, value_error = validate_wrapper(field, change.value, admitted.limits)
-        if not valid then return nil, value_error end
+        local removing = change.value == M.unset
+        if not removing then
+            local valid, value_error = validate_wrapper(field, change.value, admitted.limits)
+            if not valid then return nil, value_error end
+        end
         local section = result.section_by_name[change.section]
-        if not section then
+        if not section and not removing then
             section = {
                 name = change.section,
                 declaration = declaration,
@@ -687,15 +694,14 @@ local function edit_document(document, changes, admitted)
             }
             result.sections[#result.sections + 1] = section
             result.section_by_name[section.name] = section
-            result.concrete_safe = false
-        elseif section.values[change.key] == nil then
-            result.concrete_safe = false
         end
-        local old = section.values[change.key] and semantic_values[section.values[change.key]]
-        local replacement = semantic_values[change.value]
-        section.values[change.key] = change.value
-        if not old or old.kind ~= replacement.kind or old.value ~= replacement.value then
-            result.dirty[identity] = true
+        if section then
+            local old = section.values[change.key] and semantic_values[section.values[change.key]]
+            local replacement = not removing and semantic_values[change.value] or nil
+            section.values[change.key] = not removing and change.value or nil
+            if not old or not replacement or old.kind ~= replacement.kind or old.value ~= replacement.value then
+                result.dirty[identity] = true
+            end
         end
     end
     return new_document(result)
@@ -805,23 +811,71 @@ local function write_concrete(state, admitted)
         local ok, append_error = append_bounded(writer, UTF8_BOM, admitted.limits)
         if not ok then return false, append_error end
     end
+    local existing, emitted_sections = {}, {}
+    local newline = "\n"
+    for _, record in ipairs(state.physical) do
+        if record.ending ~= "" then newline = record.ending break end
+    end
+    for _, record in ipairs(state.physical) do
+        if record.kind == "assignment" then
+            existing[record.section .. "\0" .. record.key] = true
+        end
+    end
+    local line_count, previous_ended = 0, true
+    local function append_line(content, ending)
+        if #content > admitted.limits.maximum_line_bytes then return nil, limit_failure("line-bytes") end
+        if line_count >= admitted.limits.maximum_lines then return nil, limit_failure("lines") end
+        if not previous_ended then
+            local appended, append_error = append_bounded(writer, newline, admitted.limits)
+            if not appended then return nil, append_error end
+        end
+        local appended, append_error = append_bounded(writer, content .. ending, admitted.limits)
+        if not appended then return nil, append_error end
+        line_count, previous_ended = line_count + 1, ending ~= ""
+        return true
+    end
+    local function append_new_fields(section)
+        for _, field in ipairs(section.declaration.fields) do
+            local wrapped = section.values[field.key]
+            if wrapped and not existing[section.name .. "\0" .. field.key] then
+                local appended, append_error = append_line(field.key .. " = " .. encode_value(wrapped), newline)
+                if not appended then return nil, append_error end
+            end
+        end
+        return true
+    end
     for _, record in ipairs(state.physical) do
         local content = record.content
         if record.kind == "assignment"
             and state.dirty[record.section .. "\0" .. record.key]
         then
             local section = assert(state.section_by_name[record.section])
-            content = record.prefix .. encode_value(section.values[record.key]) .. record.suffix
+            local wrapped = section.values[record.key]
+            if wrapped then
+                content = record.prefix .. encode_value(wrapped) .. record.suffix
+            else
+                -- Keep an inline comment as a standalone comment, with no old
+                -- value bytes. All other physical records remain untouched.
+                content = record.suffix:find("[;#]") and record.suffix or nil
+            end
         end
-        if #content > admitted.limits.maximum_line_bytes then
-            return false, limit_failure("line-bytes", record.line, 1)
+        if content then
+            local ok, append_error = append_line(content, record.ending)
+            if not ok then return false, append_error end
         end
-        local ok, append_error = append_bounded(
-            writer,
-            content .. record.ending,
-            admitted.limits
-        )
-        if not ok then return false, append_error end
+        if record.kind == "section" and not emitted_sections[record.section] then
+            emitted_sections[record.section] = true
+            local appended, append_error = append_new_fields(state.section_by_name[record.section])
+            if not appended then return false, append_error end
+        end
+    end
+    for _, section in ipairs(state.sections) do
+        if not emitted_sections[section.name] then
+            local appended, append_error = append_line("[" .. section.name .. "]", newline)
+            if not appended then return false, append_error end
+            appended, append_error = append_new_fields(section)
+            if not appended then return false, append_error end
+        end
     end
     return table.concat(writer.parts), readonly({
         mode = "concrete-preserved",
@@ -889,8 +943,8 @@ function M.new(options)
     end
 
     ---Returns a new document with a validated set of semantic field changes.
-    -- Existing-field edits retain enough source structure for concrete writing.
-    -- Structural additions are valid but deliberately force canonical output.
+    -- Concrete writing retains existing records across additions and removals;
+    -- use ini.unset as the explicit value when removing a schema-known field.
     -- @param document table Source document.
     -- @param changes table Dense section/key/value change records.
     -- @return table|nil edited New immutable document handle.

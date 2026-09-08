@@ -90,6 +90,40 @@ return {
     name = "unit/ini",
     cases = {
         {
+            name = "additions and removals retain CRLF comments physical family order and EOF boundaries",
+            run = function()
+                local service = codec()
+                local source = '\239\187\191; keep\r\n[Model.Z]\r\nEnabled=true ; last choice\r\n'
+                    .. '[Model.A]\r\nEnabled=false\r\n[General]\r\nLogLevel = debug # retained\r\nSystemPrompt = "remove-me"'
+                local document = assert(service.parse(source))
+                local edited = assert(service.edit(document, {
+                    { section = "General", key = "SystemPrompt", value = ini.unset },
+                    { section = "General", key = "LogLevel", value = ini.unset },
+                    { section = "Model.A", key = "RemoteModel", value = assert(ini.text("added")) },
+                    { section = "Permission.New", key = "Read", value = assert(ini.token("allow")) },
+                }))
+                local output, metadata = service.write(edited, { preserve_concrete = true })
+                A.equal(metadata.mode, "concrete-preserved")
+                A.contains(output, '\239\187\191; keep\r\n[Model.Z]\r\nEnabled=true ; last choice\r\n')
+                A.contains(output, '[Model.A]\r\nRemoteModel = "added"\r\nEnabled=false\r\n')
+                A.contains(output, '[General]\r\n # retained\r\n[Permission.New]\r\nRead = allow\r\n')
+                A.falsy(output:find("remove-me", 1, true))
+                A.deep_equal(assert(service.sections(assert(service.parse(output)))),
+                    { "Model.Z", "Model.A", "General", "Permission.New" })
+                local eof = assert(service.edit(assert(service.parse("[General]")), {
+                    { section = "General", key = "LogLevel", value = assert(ini.token("info")) },
+                }))
+                A.equal(assert(service.write(eof, { preserve_concrete = true })), "[General]\nLogLevel = info\n")
+                local bounded = codec({ maximum_lines = 1 })
+                local over = assert(bounded.edit(assert(bounded.parse("[General]")), {
+                    { section = "General", key = "LogLevel", value = assert(ini.token("info")) },
+                }))
+                local rejected, limit_error = bounded.write(over, { preserve_concrete = true })
+                A.falsy(rejected)
+                A.equal(limit_error.reason, "lines")
+            end,
+        },
+        {
             name = "config string fixtures have one exact quoted grammar",
             run = function()
                 local service = codec()
@@ -277,7 +311,7 @@ return {
             end,
         },
         {
-            name = "structural edits deliberately fall back to canonical output",
+            name = "structural additions preserve existing concrete records",
             run = function()
                 local service = codec()
                 local document = assert(service.parse("[General]\nLogLevel = info\n"))
@@ -289,7 +323,7 @@ return {
                     },
                 }))
                 local output, metadata = service.write(edited, { preserve_concrete = true })
-                A.equal(metadata.mode, "canonical")
+                A.equal(metadata.mode, "concrete-preserved")
                 A.contains(output, "SystemPrompt = \"added\"")
                 A.contains(output, "LogLevel = info")
             end,

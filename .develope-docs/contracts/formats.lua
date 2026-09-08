@@ -95,5 +95,7 @@ return {
     unknown_key = "error",
     semantic_writer = "canonical-section-and-field-order-from-config.lua",
     concrete_preservation = "preserve-unmodified-lines-comments-and-line-ending-when-safe",
+    concrete_structural_edits = "insert-schema-ordered-fields-append-new-sections-preserve-existing-records",
+    field_removal = "omit-assignment-retain-inline-comment",
   },
 }
