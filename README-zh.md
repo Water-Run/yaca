@@ -79,7 +79,7 @@ Context 文件位于镜像树，例如 `__yaca__/CONTEXT/C/Program Files/我的�
 
 历史只通过显式动作打开。短名称按既定 scope/distance 顺序选择首个可用命中；hash 是精准 selector，必须唯一。rename、rebind、永久 delete、import mapping 和 metadata 修改都会复核目标。活动 writer 会阻止第二进程读取 XML 正文或修改该 Context；绝不只按锁龄破锁。
 
-`--continue` 会解析并复核一个精确目标、取得其 writer，且当前要求从该 Context 记录的 workspace 调用。它把 durable event/config/ModelView 与各类标识符水位恢复到 Idle Agent，绝不自动重放未完成工作。若存在 unfinished turn、active queue item、未决 operation/tool、unknown terminal outcome 或 pending compaction，则必须先显式恢复。显式确认/rebind controller 实现前，跨 workspace 继续会以 typed confirmation requirement 拒绝。
+`--continue` 会解析并复核一个精确目标、取得其 writer，且当前要求从该 Context 记录的 workspace 调用。它把 durable event/config/ModelView 与各类标识符水位恢复到 Idle Agent，绝不自动重放未完成工作。若存在 unfinished turn、active queue item、未决 operation/tool、unknown terminal outcome 或 pending compaction，则必须先显式恢复。跨 workspace 继续仍需从记录的目录调用；可通过 Context 管理器的显式 rebind 改变绑定。
 
 chat 中无 selector 的 `.context` 显示有界 recent 列表；`.context <selector>` 先冻结已复核的逻辑路径和精确 hash，只有当前 queue、side lane、approval 与 compaction 均安全时才关闭旧 owner，之后仅按该 hash 重新组合并打开。关闭后若发生竞态，本次 invocation 会致命失败，绝不退回短名称去打开替代对象。显式跨 workspace 确认实现前，该切换同样只限记录的 workspace。
 
@@ -121,7 +121,9 @@ Context。有效配置中已登记的秘密值，包括二进制字段解码后�
 现已支持 `rename <selector> <new-name>`、`set-auto-rename-disabled <selector> <true|false>`
 和 `delete <selector> [--yes]`。重命名不覆盖目标，保留可重建的模型历史；删除需精确 hash
 确认，确认后再次复核同一文件，损坏 XML 也可显式删除。busy/替换对象拒绝，unknown 或
-部分清理立即停止管理。导入、rebind、修复及管理器内的导出/继续仍待后续节点。在线 self-test Stage 2/3 的调度和同意
+部分清理立即停止管理。`rebind <selector> <target-root>` 先预览已存在的目标工作目录、
+新路径/hash，输入 `REBIND <旧hash>` 后重新核对 XML 和目录身份，以不覆盖方式迁移。
+成功后从新目录使用新 hash 继续。导入、修复及管理器内的导出/继续仍待后续节点。在线 self-test Stage 2/3 的调度和同意
 门禁已有实现，但 production adapter 当前返回未接通的失败结果，不发起 Model
 请求。
 

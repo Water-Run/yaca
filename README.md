@@ -104,7 +104,7 @@ Context files live in a mirror tree such as `__yaca__/CONTEXT/C/Program Files/My
 
 Opening history is always explicit. A short name selects the first usable match by the specified scope/distance order; a hash is the precise selector and must be unique. Rename, rebind, permanent delete, import mapping, and metadata changes reverify the selected target. A live writer blocks another process from reading the XML body or mutating it; stale locks are never broken by age alone.
 
-`--continue` resolves and reverifies one exact target, acquires its writer, and currently requires invocation from the Context's recorded workspace. It restores the durable event/config/ModelView and identifier waterlines into an Idle Agent; it never replays unfinished work automatically. Unfinished turns, active queue items, unresolved operations or tools, unknown terminal outcomes, and pending compaction require explicit recovery instead. Cross-workspace continuation is refused with a typed confirmation requirement until an explicit confirmation/rebind controller is implemented.
+`--continue` resolves and reverifies one exact target, acquires its writer, and currently requires invocation from the Context's recorded workspace. It restores the durable event/config/ModelView and identifier waterlines into an Idle Agent; it never replays unfinished work automatically. Unfinished turns, active queue items, unresolved operations or tools, unknown terminal outcomes, and pending compaction require explicit recovery instead. Cross-workspace continuation requires invoking from the recorded workspace; use the Context manager’s explicit rebind to change that binding.
 
 Within chat, `.context` without a selector shows a bounded recent list. `.context <selector>` first freezes the verified path and precise hash, closes the current owner only when its queue, side lane, approval, and compaction state are safe, then recomposes and reopens by that hash alone. A post-close race is fatal for that invocation; it never falls back to a replacement short-name match. This switch is also limited to the recorded workspace until explicit cross-workspace confirmation exists.
 
@@ -153,7 +153,10 @@ history and never replaces an existing destination. `set-auto-rename-disabled
 <selector> <true|false>` updates the dedicated metadata. `delete <selector> [--yes]`
 requires exact hash confirmation, reverifies the same target, and can explicitly
 delete corrupt XML. Busy or replaced targets are refused; uncertain publication
-or partial cleanup stops management. Import, rebind, repair, export and continuation
+or partial cleanup stops management. `rebind <selector> <target-root>` previews an
+existing workspace and the new Context path/hash, requires `REBIND <old-hash>`,
+and reverifies both the selected XML and workspace before moving without replacement.
+Continue from the new workspace using the new hash. Import, repair, export and continuation
 from this manager remain pending. Online self-test Stage 2/3 scheduling and consent are
 implemented, but their production adapters currently report an unavailable
 implementation rather than issuing Model requests.

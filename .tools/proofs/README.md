@@ -8,6 +8,14 @@ Run the complete local set from the repository root:
 
     bash .tools/run_coding_readiness.sh
 
+TP-010 and RP-001 can reuse previously downloaded archives with
+`YACA_PROOF_SOURCE_CACHE=/absolute/path/to/sources`. The cache uses the filenames
+`lua-5.5.1.tar.gz`, `expat-2.8.2.tar.gz`, and `luaexpat-1.5.2.tar.gz`.
+Every archive is still checked against its pinned SHA-256 before extraction and
+rebuilt in a fresh temporary directory. A missing or mismatched cache file fails
+the proof; it does not silently download a replacement. RP-001 still requires
+its exact pinned luainstaller checkout.
+
 The individual proofs are:
 
 | Proof | Command | Modern-host claim |

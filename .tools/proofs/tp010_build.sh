@@ -32,7 +32,13 @@ download_and_verify() {
   local url=$1
   local destination=$2
   local expected=$3
-  curl --disable --fail --location --silent --show-error --output "$destination" "$url"
+  local cache_name=$4
+  if [[ -n ${YACA_PROOF_SOURCE_CACHE:-} ]]; then
+    cp -- "$YACA_PROOF_SOURCE_CACHE/$cache_name" "$destination"
+    echo "source_cache=$cache_name"
+  else
+    curl --disable --fail --location --silent --show-error --output "$destination" "$url"
+  fi
   local actual
   actual=$(sha256sum "$destination" | awk '{print $1}')
   if [[ "$actual" != "$expected" ]]; then
@@ -51,9 +57,9 @@ run_logged() {
 }
 
 mkdir -p "$WORK_DIR/downloads" "$WORK_DIR/modules"
-download_and_verify "$LUA_URL" "$WORK_DIR/downloads/lua.tar.gz" "$LUA_SHA256"
-download_and_verify "$EXPAT_URL" "$WORK_DIR/downloads/expat.tar.gz" "$EXPAT_SHA256"
-download_and_verify "$LUAEXPAT_URL" "$WORK_DIR/downloads/luaexpat.tar.gz" "$LUAEXPAT_SHA256"
+download_and_verify "$LUA_URL" "$WORK_DIR/downloads/lua.tar.gz" "$LUA_SHA256" "lua-$LUA_VERSION.tar.gz"
+download_and_verify "$EXPAT_URL" "$WORK_DIR/downloads/expat.tar.gz" "$EXPAT_SHA256" "expat-$EXPAT_VERSION.tar.gz"
+download_and_verify "$LUAEXPAT_URL" "$WORK_DIR/downloads/luaexpat.tar.gz" "$LUAEXPAT_SHA256" "luaexpat-$LUAEXPAT_VERSION.tar.gz"
 
 tar -xzf "$WORK_DIR/downloads/lua.tar.gz" -C "$WORK_DIR"
 tar -xzf "$WORK_DIR/downloads/expat.tar.gz" -C "$WORK_DIR"

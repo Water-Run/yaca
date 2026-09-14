@@ -76,8 +76,13 @@ verify_sha256 \
 verify_sha256 "$PATCH_PATH" "$PATCH_SHA256"
 run_logged patch --batch --forward --fuzz=0 -d "$WORK_DIR/upstream" -p1 -i "$PATCH_PATH"
 
-curl --disable --fail --location --silent --show-error \
-  --output "$WORK_DIR/lua.tar.gz" "$LUA_URL"
+if [[ -n ${YACA_PROOF_SOURCE_CACHE:-} ]]; then
+  cp -- "$YACA_PROOF_SOURCE_CACHE/lua-$LUA_VERSION.tar.gz" "$WORK_DIR/lua.tar.gz"
+  echo "source_cache=lua-$LUA_VERSION.tar.gz"
+else
+  curl --disable --fail --location --silent --show-error \
+    --output "$WORK_DIR/lua.tar.gz" "$LUA_URL"
+fi
 verify_sha256 "$WORK_DIR/lua.tar.gz" "$LUA_SHA256"
 tar -xzf "$WORK_DIR/lua.tar.gz" -C "$WORK_DIR"
 LUA_SOURCE="$WORK_DIR/lua-$LUA_VERSION"

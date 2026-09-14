@@ -57,7 +57,9 @@ Stage 1 中的 `ST1-ATOMIC-WRITE` 目前固定报告 `unknown`（旧系统资格
 可用 `.help` 查看聊天命令，`--help` 查看命令行说明。在线 self-test Stage 2/3
 尚未接通，首次网络验证使用上面的真实聊天。Context 管理器提供列表、检查、搜索，以及 `rename <selector> <new-name>`、
 `set-auto-rename-disabled <selector> <true|false>`、`delete <selector> [--yes]`。
-删除需要精确 hash 确认，且没有撤销。跨工作目录继续、导入、rebind 和修复仍待完成。
+删除需要精确 hash 确认，且没有撤销。`rebind <selector> <target-root>` 可迁移到已存在的
+工作目录；核对新目录、路径与 hash 后输入 `REBIND <旧hash>`。成功后从新工作目录
+用新 hash 运行 `--continue`。导入、修复和直接跨工作目录继续仍待完成。
 
 ## 数据、升级和退出
 

@@ -1123,6 +1123,129 @@ function M.new_context_publication(ports, options)
         return nil, original_error
     end
 
+    local rebind_plans = {}
+
+    local function bound_management_path(specification, allow_corrupt)
+        local credential = specification.expected_credential
+        if type(credential) ~= "table"
+            or credential.physical_path ~= specification.context_path
+            or credential.logical_path ~= specification.logical_path
+            or type(credential.observed_stat) ~= "table"
+            or (credential.header_state ~= "valid"
+                and not (allow_corrupt and credential.header_state == "corrupt"))
+        then
+            return nil, failure("InvalidContextMutation", "an exact verified Context credential is required")
+        end
+        local hash, hash_error = path.context_hash(specification.logical_path)
+        if not hash then return nil, hash_error end
+        local physical = context_root
+        for segment in specification.logical_path:gmatch("[^/]+") do
+            physical = join_native(physical, segment, admitted.platform_kind)
+        end
+        if physical ~= specification.context_path then
+            return nil, failure("InvalidContextMutation", "Context path is outside its logical mirror binding")
+        end
+        return physical, hash
+    end
+
+    local function root_identity_digest(logical, identity)
+        if type(identity) ~= "table" or identity.kind ~= "directory"
+            or type(identity.volume) ~= "string" or type(identity.object) ~= "string"
+        then
+            return nil, failure("InvalidWorkspace", "workspace object identity is unavailable")
+        end
+        return snapshot_digest(safety, "yaca-rebind-root-v1", {
+            logical_path = logical, kind = identity.kind,
+            volume = identity.volume, object = identity.object,
+        })
+    end
+
+    local function verify_rebind_root(plan)
+        local current, current_error = filesystem.direct_reverify(plan.root_snapshot)
+        if not current then
+            return nil, failure("ContextWorkspaceChanged", "rebind workspace changed after inspection",
+                current_error and current_error.code)
+        end
+        local workspace, workspace_error = admitted_ports.workspace.inspect(plan.root_path)
+        if not workspace then return nil, workspace_error end
+        local digest, digest_error = root_identity_digest(plan.root_logical, workspace.identity)
+        if not digest then return nil, digest_error end
+        if workspace.path ~= plan.root_path or workspace.enterable ~= true
+            or digest ~= plan.new_root_identity
+        then
+            return nil, failure("ContextWorkspaceChanged", "rebind workspace identity changed")
+        end
+        return true
+    end
+
+    ---Builds a read-only rebind proposal. Only this owner's latest proposal can
+    -- be consumed, once, by manage_context after the controller confirms it.
+    function service.plan_rebind(specification)
+        rebind_plans = {}
+        if closed or journal_failure or active then
+            return nil, failure("ContextActionUnavailable", "Context management owner is unavailable")
+        end
+        if type(specification) ~= "table" then
+            return nil, failure("InvalidContextMutation", "a bound rebind request is required")
+        end
+        if type(admitted_ports.workspace) ~= "table"
+            or type(admitted_ports.workspace.inspect) ~= "function"
+            or type(path.context_file) ~= "function" or type(path.from_logical) ~= "function"
+        then
+            return nil, failure("ContextActionUnavailable", "workspace inspection is unavailable")
+        end
+        local physical, hash = bound_management_path(specification)
+        if not physical then return nil, hash end
+        local workspace, workspace_error = admitted_ports.workspace.inspect(specification.target_root)
+        if not workspace then return nil, workspace_error end
+        if workspace.enterable ~= true then
+            return nil, failure("InvalidWorkspace", "rebind requires an enterable workspace")
+        end
+        local logical, logical_error = path.to_logical(workspace.path)
+        if not logical then return nil, logical_error end
+        local root_snapshot, root_error = inspect_directory(filesystem, workspace.path)
+        if not root_snapshot then return nil, root_error end
+        if not root_snapshot.exists then
+            return nil, failure("InvalidWorkspace", "rebind requires an existing workspace")
+        end
+        local new_identity, identity_error = root_identity_digest(logical, root_snapshot.identity)
+        if not new_identity then return nil, identity_error end
+        local details, details_error = path.context_file(specification.logical_path)
+        if not details then return nil, details_error end
+        if logical == details.parent then
+            return nil, failure("InvalidLifecycleMove", "Context is already bound to this workspace")
+        end
+        local old_identity = "unavailable"
+        local old_root = path.from_logical(details.parent, admitted.platform_kind)
+        if old_root then
+            local old_snapshot = inspect_directory(filesystem, old_root)
+            if old_snapshot and old_snapshot.exists then
+                old_identity = root_identity_digest(details.parent, old_snapshot.identity) or "unavailable"
+            end
+        end
+        local next_logical = (logical == "/" and "" or logical) .. "/" .. details.leaf
+        local next_hash, hash_error = path.context_hash(next_logical)
+        if not next_hash then return nil, hash_error end
+        local credential_digest, credential_error = snapshot_digest(safety,
+            "yaca-rebind-selection-v1", specification.expected_credential)
+        if not credential_digest then return nil, credential_error end
+        local plan = {
+            root_snapshot = root_snapshot, root_path = workspace.path, root_logical = logical,
+            old_root_identity = old_identity, new_root_identity = new_identity,
+            context_path = physical, logical_path = specification.logical_path,
+            credential_digest = credential_digest, next_logical = next_logical,
+        }
+        local valid, valid_error = verify_rebind_root(plan)
+        if not valid then return nil, valid_error end
+        local proposal = readonly({
+            action = "rebind", context_hash = hash, logical_path = specification.logical_path,
+            target_root = workspace.path, target_logical_path = next_logical,
+            target_hash = next_hash, old_root_identity = old_identity, new_root_identity = new_identity,
+        }, "Context rebind proposal")
+        rebind_plans[proposal] = plan
+        return proposal
+    end
+
     ---Performs one offline management transaction against an exact selection.
     -- This uses a separate short-lived writer, never opens a Runtime, and never
     -- recovers or replays pending work. Every path releases its writer before
@@ -1136,7 +1259,7 @@ function M.new_context_publication(ports, options)
         end
         local allowed = {
             action = true, context_path = true, logical_path = true,
-            expected_credential = true, new_name = true, value = true,
+            expected_credential = true, new_name = true, value = true, rebind_plan = true,
         }
         if type(specification) ~= "table" then
             return nil, failure("InvalidContextMutation", "a bound Context action is required")
@@ -1147,31 +1270,40 @@ function M.new_context_publication(ports, options)
             end
         end
         local action = specification.action
-        if action ~= "rename" and action ~= "set_auto_rename_disabled" and action ~= "delete" then
+        if action ~= "rename" and action ~= "set_auto_rename_disabled"
+            and action ~= "delete" and action ~= "rebind"
+        then
             return nil, failure("InvalidContextMutation", "Context management action is unavailable")
         end
         local credential = specification.expected_credential
-        if type(credential) ~= "table"
-            or credential.physical_path ~= specification.context_path
-            or credential.logical_path ~= specification.logical_path
-            or type(credential.observed_stat) ~= "table"
-            or (credential.header_state ~= "valid"
-                and not (action == "delete" and credential.header_state == "corrupt"))
-        then
-            return nil, failure("InvalidContextMutation", "an exact verified Context credential is required")
-        end
-        local context_hash, hash_error = path.context_hash(specification.logical_path)
-        if not context_hash then return nil, hash_error end
-        local physical = context_root
-        for segment in specification.logical_path:gmatch("[^/]+") do
-            physical = join_native(physical, segment, admitted.platform_kind)
-        end
-        if physical ~= specification.context_path then
-            return nil, failure("InvalidContextMutation", "Context path is outside its logical mirror binding")
+        local physical, context_hash = bound_management_path(specification, action == "delete")
+        if not physical then return nil, context_hash end
+        local rebind
+        if action == "rebind" then
+            rebind = rebind_plans[specification.rebind_plan]
+            rebind_plans = {}
+            local credential_digest = snapshot_digest(safety, "yaca-rebind-selection-v1", credential)
+            if not rebind or rebind.context_path ~= physical
+                or rebind.logical_path ~= specification.logical_path
+                or rebind.credential_digest ~= credential_digest
+                or specification.new_name ~= nil or specification.value ~= nil
+            then
+                return nil, failure("InvalidContextMutation", "an exact current rebind proposal is required")
+            end
+            local valid, valid_error = verify_rebind_root(rebind)
+            if not valid then return nil, valid_error end
+        elseif specification.rebind_plan ~= nil then
+            return nil, failure("InvalidContextMutation", "only rebind accepts a workspace proposal")
         end
         local destination = physical
         local next_logical = specification.logical_path
-        if action == "rename" then
+        if rebind then
+            next_logical = rebind.next_logical
+            destination = context_root
+            for segment in next_logical:gmatch("[^/]+") do
+                destination = join_native(destination, segment, admitted.platform_kind)
+            end
+        elseif action == "rename" then
             if specification.value ~= nil then
                 return nil, failure("InvalidContextMutation", "rename does not accept a metadata value")
             end
@@ -1202,7 +1334,7 @@ function M.new_context_publication(ports, options)
         local next_hash, next_hash_error = path.context_hash(next_logical)
         if not next_hash then return nil, next_hash_error end
         local required = action == "delete" and { "open_delete_writer", "delete" }
-            or (action == "rename" and { "move" } or {})
+            or ((action == "rename" or rebind) and { "move" } or {})
         for _, method in ipairs(required) do
             if type(store[method]) ~= "function" then
                 return nil, failure("ContextActionUnavailable", "Context store omits " .. method)
@@ -1221,7 +1353,14 @@ function M.new_context_publication(ports, options)
         end
         local opener = action == "delete" and store.open_delete_writer or store.open_writer
         local writer, document = opener(physical, { pid = pid, started_at = now }, credential)
-        if not writer then return nil, document end
+        if not writer then
+            local code = type(document) == "table" and document.code or ""
+            if code:find("Unknown", 1, true) or code == "ContextCleanupRequired" then
+                closed = true
+                return nil, failure("ContextMutationUnknown", "Context writer acquisition is uncertain", code)
+            end
+            return nil, document
+        end
         local function transact()
             if action == "delete" then return store.delete(writer) end
             if type(document) ~= "table" or type(document.header) ~= "table"
@@ -1247,7 +1386,12 @@ function M.new_context_publication(ports, options)
                 view_compaction_id = manifest.compaction_id,
                 view_context_generation = manifest.compaction_id and document.generation + 1 or nil,
             }
-            if action == "rename" then
+            if rebind then
+                mutation.old_logical_path = specification.logical_path
+                mutation.new_logical_path = next_logical
+                mutation.old_root_identity = rebind.old_root_identity
+                mutation.new_root_identity = rebind.new_root_identity
+            elseif action == "rename" then
                 mutation.new_name = specification.new_name
                 mutation.manual = true
                 mutation.old_logical_path = specification.logical_path
@@ -1309,12 +1453,29 @@ function M.new_context_publication(ports, options)
             end
             local temporary_path = destination .. ".yaca-tmp-" .. hex(random)
             local published, publish_error
-            if action == "rename" then
-                published, publish_error = store.move(writer, candidate, destination, temporary_path, "rename")
+            if rebind then
+                local valid, valid_error = verify_rebind_root(rebind)
+                if not valid then return nil, valid_error end
+                local mirror, mirror_error, mirror_snapshot = prepare_mirror(rebind.root_path)
+                if not mirror then return nil, mirror_error end
+                local current, current_error = filesystem.direct_reverify(mirror_snapshot)
+                if not current then return nil, current_error end
+                valid, valid_error = verify_rebind_root(rebind)
+                if not valid then return nil, valid_error end
+            end
+            if action == "rename" or rebind then
+                published, publish_error = store.move(writer, candidate, destination, temporary_path, action)
             else
                 published, publish_error = store.publish(writer, candidate, temporary_path)
             end
             if not published then return nil, publish_error end
+            if rebind then
+                local valid, valid_error = verify_rebind_root(rebind)
+                if not valid then
+                    return nil, failure("ContextMutationUnknown", "workspace changed during Context migration",
+                        valid_error and valid_error.code)
+                end
+            end
             return readonly({
                 outcome = "success", durable = true, context_path = destination,
                 logical_path = next_logical, context_hash = next_hash,

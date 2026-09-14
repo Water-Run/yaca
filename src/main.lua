@@ -4138,6 +4138,7 @@ function M.compose_runtime(runtime)
     if contexts then
         publication, contexts_error = session.new_context_publication({
             filesystem = backend.filesystem,
+            workspace = workspace_port(runtime.native),
             schema = contexts.schema,
             store = contexts.store,
             path = contexts.path,
@@ -9593,7 +9594,7 @@ function M.run_context_repl(composed, runtime, request)
     end
 
     ---Binds one management action to the Resolver's private target snapshot.
-    -- Delete confirmation precedes a second verification of that same snapshot;
+    -- Destructive confirmation precedes a second verification of that snapshot;
     -- it never selects a replacement after the operator has seen the target.
     local function mutate(action)
         if type(composed.config) == "table" and type(composed.config.reload_file) == "function"
@@ -9608,6 +9609,7 @@ function M.run_context_repl(composed, runtime, request)
             return nil, failure("ContextActionUnavailable", "Context mutation service is unavailable", action.id)
         end
         local deleting = action.id == "context-delete"
+        local rebinding = action.id == "context-rebind"
         local resolve = deleting and contexts.catalog.resolve_for_delete or contexts.catalog.resolve
         if type(resolve) ~= "function" then
             return nil, failure("ContextActionUnavailable", "Context deletion resolver is unavailable")
@@ -9629,6 +9631,34 @@ function M.run_context_repl(composed, runtime, request)
         end
         local target, target_error = verify()
         if not target then return nil, target_error end
+        local rebind_plan
+        if rebinding then
+            if type(publication.plan_rebind) ~= "function" then
+                return nil, failure("ContextActionUnavailable", "Context rebind planning is unavailable")
+            end
+            rebind_plan, target_error = publication.plan_rebind({
+                context_path = target.physical_hint, logical_path = target.logical_path,
+                expected_credential = target.credential, target_root = action.target_root,
+            })
+            if not rebind_plan then return nil, target_error end
+            local written, write_error = input.write("REBIND " .. target.hash
+                .. " " .. safe_diagnostic(target.logical_path, 512)
+                .. "\nNew workspace: " .. safe_diagnostic(rebind_plan.target_root, 512)
+                .. "\nNew Context: " .. safe_diagnostic(rebind_plan.target_hash, 16)
+                .. " " .. safe_diagnostic(rebind_plan.target_logical_path, 512)
+                .. "\nMoves the Context XML. Future tools use the new workspace.\n")
+            if not written then return nil, write_error end
+            local answer, answer_error = input.read("Type REBIND " .. target.hash .. " to confirm: ", false, 128)
+            if answer == false then
+                return nil, failure("ContextReplCancelled", "Context rebind was cancelled")
+            end
+            if answer == nil then return nil, answer_error end
+            if answer ~= "REBIND " .. target.hash then
+                return input.write("Context rebind cancelled; no files were changed.\n")
+            end
+            target, target_error = verify()
+            if not target then return nil, target_error end
+        end
         if deleting then
             local written, write_error = input.write("PERMANENT DELETE "
                 .. safe_diagnostic(target.hash, 16) .. " " .. safe_diagnostic(target.logical_path, 512)
@@ -9659,13 +9689,14 @@ function M.run_context_repl(composed, runtime, request)
             end
         end
         local receipt, mutation_error = publication.manage_context({
-            action = deleting and "delete" or (action.id == "context-rename"
+            action = deleting and "delete" or (rebinding and "rebind") or (action.id == "context-rename"
                 and "rename" or "set_auto_rename_disabled"),
             context_path = target.physical_hint,
             logical_path = target.logical_path,
             expected_credential = target.credential,
             new_name = action.new_name,
             value = action.value,
+            rebind_plan = rebind_plan,
         })
         if not receipt then return nil, mutation_error end
         local lines = {}
@@ -9692,7 +9723,6 @@ function M.run_context_repl(composed, runtime, request)
     end
 
     local UNCONNECTED = {
-        ["context-rebind"] = true,
         ["context-import"] = true, ["context-repair"] = true,
         ["export-context"] = true, ["select-context"] = true,
     }
@@ -9703,7 +9733,7 @@ function M.run_context_repl(composed, runtime, request)
             return nil, scan_error
         end
         local written, write_error = input.write("YACA CONTEXT MANAGER\n"
-            .. "Offline: list, inspect, search, refresh, rename, delete, set-auto-rename-disabled.\n"
+            .. "Offline: list, inspect, search, refresh, rename, rebind, delete, set-auto-rename-disabled.\n"
             .. "Every inspect reverifies its exact target; busy Contexts show metadata only.\n"
             .. "Enter help for commands or quit to leave.\n")
         if not written then return nil, write_error end
@@ -9741,7 +9771,7 @@ function M.run_context_repl(composed, runtime, request)
                                 .. (observation.complete and "." or "; scan incomplete.") .. "\n")
                         end
                     elseif request.id == "context-rename" or request.id == "context-delete"
-                        or request.id == "context-set-auto-rename-disabled"
+                        or request.id == "context-set-auto-rename-disabled" or request.id == "context-rebind"
                     then
                         handled, action_error = mutate(request)
                     elseif UNCONNECTED[request.id] then

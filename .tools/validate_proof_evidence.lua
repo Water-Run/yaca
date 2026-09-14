@@ -51,7 +51,7 @@ local expected = {
   },
   ["TP-010"] = {
     files = {
-      [root .. "/.tools/proofs/tp010_build.sh"] = "7751ced36de3f6bd7a8278767d919603248fa0a8bd4f4d977213fcf4979163be",
+      [root .. "/.tools/proofs/tp010_build.sh"] = "e88df094009b11f073ec077d402ae848502413d56cadedb4677982fef1fa56f3",
       [root .. "/.tools/proofs/tp010_xml.lua"] = "11e5ad1953193fa7477401bd197a8ef807ca713ca3944323a043be9fc5f557e2",
     },
     recorded = {

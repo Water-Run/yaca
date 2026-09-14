@@ -272,6 +272,14 @@ local function context_harness(commands, settings)
             end
             return { outcome = "success", context_hash = "0123456789ABCDEF",
                 logical_path = "/Managed.xml", auto_rename_disabled = specification.action == "rename" }
+        end, plan_rebind = function(specification)
+            calls.plans = (calls.plans or 0) + 1
+            A.equal(specification.context_path, specification.expected_credential.physical_path)
+            if settings.plan_error then return nil, settings.plan_error end
+            local plan = { target_root = specification.target_root,
+                target_logical_path = "/new-work/Task001.xml", target_hash = "FEDCBA9876543210" }
+            calls.proposal = plan
+            return plan
         end }
     end
     if settings.stdout_failure then
@@ -287,6 +295,48 @@ local function context_harness(commands, settings)
 end
 
 local context_cases = {
+    {
+        name = "Context rebind confirms the inspected destination and reverifies the original selection",
+        run = function()
+            local path = assert(load_module("path").new(hash_port(), {
+                maximum_path_bytes = 2048, maximum_segments = 128,
+                maximum_segment_bytes = 255, maximum_hash_chunk_bytes = 64,
+            }))
+            local hash = assert(path.context_hash("/Task001.xml"))
+            local commands = { "rebind Task001 /new-work", "REBIND " .. hash, "quit" }
+            local result, err, output, calls = context_harness(commands, { manage = true })
+            A.truthy(result, A.render(err))
+            A.contains(output, "New workspace: /new-work")
+            A.contains(output, "FEDCBA9876543210 /new-work/Task001.xml")
+            A.equal(calls.verifies, 2)
+            A.equal(#calls.mutations, 1)
+            A.equal(calls.mutations[1].action, "rebind")
+            A.equal(calls.mutations[1].rebind_plan, calls.proposal)
+            result, err, output, calls = context_harness(commands,
+                { manage = true, changed_after_confirm = true })
+            A.truthy(result, A.render(err))
+            A.contains(output, "ContextTargetChanged")
+            A.equal(#calls.mutations, 0)
+        end,
+    },
+    {
+        name = "Context rebind cancellation and planning failures make no mutations",
+        run = function()
+            local result, err, output, calls = context_harness({
+                "rebind Task001 /new-work", "no", "quit",
+            }, { manage = true })
+            A.truthy(result, A.render(err))
+            A.contains(output, "Context rebind cancelled")
+            A.equal(calls.verifies, 1)
+            A.equal(#calls.mutations, 0)
+            result, err, output, calls = context_harness({ "rebind Task001 /missing", "quit" },
+                { manage = true, plan_error = { code = "InvalidWorkspace" } })
+            A.truthy(result, A.render(err))
+            A.contains(output, "InvalidWorkspace")
+            A.equal(#calls.mutations, 0)
+            A.falsy(output:find("Type REBIND", 1, true))
+        end,
+    },
     {
         name = "Context read-only loop lists searches verifies refreshes and closes without body access",
         run = function()

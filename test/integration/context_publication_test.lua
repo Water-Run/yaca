@@ -168,6 +168,7 @@ local function fixture(settings)
     }))
     local registry = assert(tools.registry_snapshot(safety_service))
     local directories = { [settings.initial_root or "/release"] = true }
+    for _, target in ipairs(settings.workspace_roots or {}) do directories[target] = true end
     local observations = {
         creates = {},
         flushes = {},
@@ -184,7 +185,7 @@ local function fixture(settings)
             requested_path = target,
             canonical_path = canonical,
             exists = exists,
-            identity = exists and { kind = "directory" } or false,
+            identity = exists and { kind = "directory", volume = "disk", object = target } or false,
             parent_identity = { kind = "directory" },
             metadata = exists and { link_target = false } or false,
             ancestors = { { path = settings.initial_root or "/release", identity = {
@@ -199,6 +200,9 @@ local function fixture(settings)
     end
 
     function filesystem.direct_reverify(snapshot)
+        if settings.changed_root == snapshot.requested_path then
+            return false, { code = "TargetChanged" }
+        end
         return true, direct_snapshot(snapshot.requested_path)
     end
 
@@ -240,6 +244,7 @@ local function fixture(settings)
             expected_credential = expected_credential,
         }
         if settings.open_error then return nil, settings.open_error end
+        if settings.change_root_on_open then settings.changed_root = settings.change_root_on_open end
         local document = settings.open_document
             or (settings.shared_store and settings.shared_store.document)
         if not document then
@@ -270,6 +275,7 @@ local function fixture(settings)
     function store.move(writer, document, destination, temporary_path, action)
         observations.moved = { destination = destination, action = action, temporary_path = temporary_path }
         if settings.move_error then return nil, settings.move_error end
+        if settings.change_root_on_move then settings.changed_root = settings.change_root_on_move end
         writer.target = destination
         return store.publish(writer, document, temporary_path)
     end
@@ -315,6 +321,13 @@ local function fixture(settings)
 
     local publication = assert(session.new_context_publication({
         filesystem = filesystem,
+        workspace = { inspect = function(target)
+            if not directories[target] or settings.unenterable == target then
+                return nil, { code = "InvalidWorkspace" }
+            end
+            return { path = target, enterable = true,
+                identity = { kind = "directory", volume = "disk", object = target } }
+        end },
         schema = schema,
         store = store,
         path = path_service,
@@ -906,6 +919,120 @@ return {
             end,
         },
         {
+            name = "rebind plans are read-only and publish a reconstructable move with both root identities",
+            run = function()
+                local first, document = management_seed()
+                local manager, observed = fixture({ open_document = document,
+                    workspace_roots = { "/work", "/new-work" } })
+                local request = management_spec(first, document, "rebind")
+                request.target_root = "/new-work"
+                local proposal = assert(manager.plan_rebind(request))
+                A.equal(#observed.creates, 0)
+                A.equal(#observed.writers, 0)
+                A.falsy(observed.published)
+                A.equal(proposal.target_logical_path, "/new-work/" .. document.header.name .. ".xml")
+                A.truthy(proposal.old_root_identity ~= "unavailable")
+                request.target_root = nil
+                request.rebind_plan = proposal
+                local moved = assert(manager.manage_context(request))
+                A.equal(observed.moved.action, "rebind")
+                A.equal(observed.closes, 1)
+                A.equal(moved.context_hash, proposal.target_hash)
+                A.truthy(moved.context_hash ~= first.context_hash)
+                local changed = observed.published.document
+                A.equal(changed.header.created_at, document.header.created_at)
+                A.truthy(changed.header.updated_at > document.header.updated_at)
+                A.equal(changed.header.name, document.header.name)
+                A.equal(changed.header.auto_rename_disabled, document.header.auto_rename_disabled)
+                A.equal(changed.facts[4].type, "rebind")
+                A.equal(changed.facts[4].fields.oldRootIdentity, proposal.old_root_identity)
+                A.equal(changed.facts[4].fields.newRootIdentity, proposal.new_root_identity)
+                local reopened = fixture({ open_document = changed })
+                local open_request = management_spec(moved, changed, "rebind")
+                open_request.action = nil
+                local opened = assert(reopened.open_existing(open_request))
+                local view = assert(reopened.resolve_view(opened.view_manifest_snapshot))
+                A.contains(view.body, "preserve this history")
+                A.contains(view.body, "/new-work/")
+                assert(reopened.close())
+                local repeated, repeated_error = manager.manage_context(request)
+                A.falsy(repeated)
+                A.equal(repeated_error.code, "InvalidContextMutation")
+                A.equal(observed.closes, 1)
+            end,
+        },
+        {
+            name = "rebind refuses stale roots before and during publication and closes failed writers",
+            run = function()
+                local first, document = management_seed()
+                for _, stage in ipairs({ "before", "open", "move", "collision", "busy", "credential", "unknown" }) do
+                    local settings = { open_document = document, workspace_roots = { "/new-work" } }
+                    local manager, observed = fixture(settings)
+                    local request = management_spec(first, document, "rebind")
+                    request.target_root = "/new-work"
+                    local proposal = assert(manager.plan_rebind(request))
+                    A.equal(proposal.old_root_identity, "unavailable")
+                    request.target_root = nil
+                    request.rebind_plan = proposal
+                    if stage == "before" then settings.changed_root = "/new-work"
+                    elseif stage == "open" then settings.change_root_on_open = "/new-work"
+                    elseif stage == "move" then settings.change_root_on_move = "/new-work"
+                    elseif stage == "collision" then settings.move_error = { code = "DestinationExists" }
+                    elseif stage == "busy" then settings.open_error = { code = "LockConflict" }
+                    elseif stage == "unknown" then settings.open_error = { code = "ContextRecoveryUnknown" }
+                    else request.expected_credential.observed_stat.object = "replacement" end
+                    local result, err = manager.manage_context(request)
+                    A.falsy(result)
+                    local expected = { before = "ContextWorkspaceChanged", open = "ContextWorkspaceChanged",
+                        move = "ContextMutationUnknown", collision = "DestinationExists",
+                        busy = "LockConflict", credential = "InvalidContextMutation", unknown = "ContextMutationUnknown" }
+                    A.equal(err.code, expected[stage])
+                    A.equal(observed.closes, (stage == "before" or stage == "busy"
+                        or stage == "credential" or stage == "unknown")
+                        and 0 or 1)
+                    if stage ~= "move" then A.falsy(observed.published) end
+                    if stage == "move" or stage == "unknown" then
+                        local next_result, next_error = manager.manage_context(
+                            management_spec(first, document, "rename", { new_name = "Later" }))
+                        A.falsy(next_result)
+                        A.equal(next_error.code, "ContextMutationUnknown")
+                    end
+                end
+            end,
+        },
+        {
+            name = "rebind requires an existing enterable plain directory and the latest private proposal",
+            run = function()
+                local first, document = management_seed()
+                for _, invalid in ipairs({ "missing", "unenterable", "alias", "same" }) do
+                    local settings = { open_document = document, workspace_roots = { "/work", "/new-work" } }
+                    if invalid == "unenterable" then settings.unenterable = "/new-work"
+                    elseif invalid == "alias" then settings.alias_path = "/new-work" end
+                    local manager, observed = fixture(settings)
+                    local request = management_spec(first, document, "rebind", {
+                        target_root = invalid == "same" and "/work"
+                            or (invalid == "missing" and "/missing" or "/new-work"),
+                    })
+                    A.falsy(manager.plan_rebind(request))
+                    A.equal(#observed.creates, 0)
+                    A.equal(#observed.writers, 0)
+                end
+                local manager, observed = fixture({ open_document = document,
+                    workspace_roots = { "/new-work" } })
+                local request = management_spec(first, document, "rebind", { target_root = "/new-work" })
+                local stale = assert(manager.plan_rebind(request))
+                assert(manager.plan_rebind(request))
+                request.target_root = nil
+                request.rebind_plan = stale
+                local result, err = manager.manage_context(request)
+                A.falsy(result)
+                A.equal(err.code, "InvalidContextMutation")
+                request.rebind_plan = { target_root = "/new-work" }
+                A.falsy(manager.manage_context(request))
+                A.equal(#observed.writers, 0)
+            end,
+        },
+        {
             name = "offline rename and naming switch publish reconstructable views and release every writer",
             run = function()
                 local first, document = management_seed()
@@ -1310,6 +1437,16 @@ return {
                 A.truthy(renamed, A.render(rename_error))
                 local managed = managed_observed.published.document
                 A.equal(managed.model_view.active_manifest.compaction_id, "compaction-1")
+                local rebinder, rebound_observed = fixture({ open_document = managed,
+                    workspace_roots = { "/compacted-work" } })
+                local move_request = management_spec(renamed, managed, "rebind", {
+                    target_root = "/compacted-work",
+                })
+                move_request.rebind_plan = assert(rebinder.plan_rebind(move_request))
+                move_request.target_root = nil
+                renamed = assert(rebinder.manage_context(move_request))
+                managed = rebound_observed.published.document
+                A.equal(managed.model_view.active_manifest.compaction_id, "compaction-1")
                 local reopened = fixture({ open_document = managed })
                 local specification = management_spec(renamed, managed, "rename")
                 specification.action = nil
@@ -1318,6 +1455,7 @@ return {
                 A.contains(restored, "GOALS-PRESERVED")
                 A.contains(restored, "AFTER-COMPACT")
                 A.contains(restored, "Still Compacted")
+                A.contains(restored, "/compacted-work/")
                 A.falsy(restored:find("compact this prefix", 1, true))
                 local _, restored_count = restored:gsub("<StructuredSummary", "")
                 A.equal(restored_count, 1)
