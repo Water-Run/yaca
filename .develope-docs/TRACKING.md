@@ -155,21 +155,28 @@ composition、外部替换/reload、保存失败重试和未知持久性停止�
 | --- | --- |
 | 入口现状复核 | `--context-repl` 只做一次目录快照；`default_runtime_dispatch` 无该分支，`parse_context_repl` 无生产调用方 |
 | 注册表 | 10 个 `context-repl` 面动作已声明；`export-context`/`select-context` 共用同一行类，合计 12 个投影 |
-| 已修复 | `new_model_setup_input` 的 `cancel_code` 改为显式标签映射并 fail closed（`7a34715`） |
+| 已修复 | `new_model_setup_input` 的 `cancel_code` 改为显式标签映射并 fail closed（`7a34715`），由 `6bee8da` 直接覆盖 |
+| 测试夹具 | `test/integration/repl_input_surface_test.lua` 首次以端口替身驱动 main.lua 交互回路，N1 可直接复用 |
 | 计划 | [Context 管理交互实现计划](CONTEXT-REPL-PLAN.md)，切分为 N1 只读 / N2 就地写 / N3 跨界写 |
 
-验证：完整 suite **481/481**；design-contract **7611**、proof-evidence **56**、
-coding-readiness **553** 条断言 PASS。
+验证：完整 suite **482/482**；design-contract **7612**、proof-evidence **56**、
+coding-readiness **553** 条断言 PASS；TP-003/006/008 PASS。
 
 两处须如实记录：
 
-- 上文记录的 design-contract **7612** 已过时。本树在打补丁前后都报 **7611**，
-  与本轮改动无关，后续以 7611 为准。
-- 本机缺少 `xmllint`，TP-008 无法运行，本轮**未**重新证明该 proof。
-  这是环境缺口而非回归，恢复资格前须在具备 `xmllint` 的环境重跑。
+- **design-contract 计数依赖 `xmllint` 是否在 PATH 上**：缺失时为 **7611**，
+  存在时为 **7612**。原记录的 7612 正确；本轮一度误判其"过时"，已更正。
+  报数时须同时说明 `xmllint` 状态，否则数字无法比对。
+- 本机原本缺 `xmllint`，已用官方 Ubuntu 源的 `libxml2-utils`
+  （2.9.14+dfsg-1.3ubuntu3.8，与系统 `libxml2.so.2.9.14` 同版）
+  `apt-get download` + `dpkg-deb -x` 到 scratch 目录并加入 PATH，未装进系统。
+  TP-008 随即 **PASS**（321 条断言）。
+- **TP-010 / RP-001 本机无法运行**：需要 `gcc` 与 `cmake`，本机两者都没有，
+  且无 passwordless sudo；TP-010 的下载步骤另有 `curl (35) Recv failure`。
+  这是环境限制而非回归。
 
-遗留缺口：`test/` 下没有任何 suite 加载 `src/main.lua`，
-因此本次 `cancel_code` 修复没有直接单元测试，仅由完整 suite 证明无回归。
+`cancel_code` 修复已由 `test/integration/repl_input_surface_test.lua`
+直接覆盖（见下方端口替身说明）。
 
 但实测澄清了缺口范围：`src/main.lua:9590` 的 `YACA_TEST_ROOT` 守卫使
 main.lua 本就可按普通模块加载，导出含 `run_config_repl` / `run_model_repl`
