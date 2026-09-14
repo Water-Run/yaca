@@ -251,6 +251,7 @@ local function fixture(settings)
     end
 
     function store.publish(writer, document, temporary_path)
+        if settings.publish_exception then error("synthetic storage failure") end
         observations.published = {
             writer = writer,
             document = document,
@@ -266,6 +267,24 @@ local function fixture(settings)
         }
     end
 
+    function store.move(writer, document, destination, temporary_path, action)
+        observations.moved = { destination = destination, action = action, temporary_path = temporary_path }
+        if settings.move_error then return nil, settings.move_error end
+        writer.target = destination
+        return store.publish(writer, document, temporary_path)
+    end
+
+    function store.open_delete_writer(target, metadata, credential)
+        observations.delete_opened = { target = target, credential = credential }
+        if settings.open_error then return nil, settings.open_error end
+        return { target = target, metadata = metadata }
+    end
+
+    function store.delete(writer)
+        observations.deleted = writer.target
+        return { outcome = settings.partial_delete and "partial" or "deleted", targets = {} }
+    end
+
     function store.verify_writer(writer)
         if settings.inspect_error then return nil, settings.inspect_error end
         local document = writer.document or settings.open_document
@@ -276,6 +295,7 @@ local function fixture(settings)
     function store.close_writer(writer)
         observations.closes = observations.closes + 1
         observations.last_closed = writer
+        if settings.close_error then return nil, settings.close_error end
         return true
     end
 
@@ -286,6 +306,7 @@ local function fixture(settings)
     function system.secure_random(length)
         observations.random_calls = observations.random_calls + 1
         local value = random_values[observations.random_calls] or string.rep("z", length)
+        if not settings.random_values and length == 8 then value = value:sub(1, length) end
         A.equal(#value, length)
         return value
     end
@@ -313,6 +334,35 @@ local function fixture(settings)
         maximum_queue_items = 9,
     }))
     return publication, observations, path_service, registry, safety_service, schema
+end
+
+local function management_spec(receipt, document, action, extra)
+    local value = {
+        action = action, context_path = receipt.context_path, logical_path = receipt.logical_path,
+        expected_credential = {
+            physical_path = receipt.context_path, logical_path = receipt.logical_path,
+            observed_stat = { kind = "file", object = "same-file", volume = "disk", size = 1024 },
+            canonical_name = document.header.name, created_at = document.header.created_at,
+            updated_at = document.header.updated_at, header_state = "valid",
+        },
+    }
+    for key, item in pairs(extra or {}) do value[key] = item end
+    return value
+end
+
+local function management_seed()
+    local publication, observed = fixture()
+    local draft = assert(session.new_draft(generation(), {
+        path = "/work", enterable = true,
+    }, { maximum_draft_bytes = 16384 }, publication))
+    local receipt = assert(draft.begin_main("preserve this history", "terminal"))
+    assert(publication.commit({
+        barrier_id = "finish-first", first_sequence = 3, last_sequence = 3, event_count = 1,
+        expected_context_generation = 1,
+        events = { { seq = 3, type = "turn_ended", turn_id = "turn-1", fields = { outcome = "completed" } } },
+    }))
+    assert(draft.close())
+    return receipt, observed.published.document
 end
 
 return {
@@ -856,6 +906,140 @@ return {
             end,
         },
         {
+            name = "offline rename and naming switch publish reconstructable views and release every writer",
+            run = function()
+                local first, document = management_seed()
+                local manager, observed = fixture({ open_document = document })
+                local renamed = assert(manager.manage_context(management_spec(first, document, "rename", {
+                    new_name = "Managed Context",
+                })))
+                A.equal(observed.closes, 1)
+                A.equal(renamed.logical_path, "/work/Managed Context.xml")
+                A.truthy(renamed.context_hash ~= first.context_hash)
+                A.truthy(renamed.auto_rename_disabled)
+                A.equal(observed.moved.action, "rename")
+                local changed = observed.published.document
+                A.equal(changed.facts[3].fields.outcome, "completed")
+                A.equal(changed.facts[4].type, "rename")
+                A.equal(changed.model_view.active_manifest.last_event_seq, 4)
+                local switch, switched = fixture({ open_document = changed })
+                local enabled = assert(switch.manage_context(management_spec(renamed, changed,
+                    "set_auto_rename_disabled", { value = false })))
+                A.equal(switched.closes, 1)
+                A.falsy(enabled.auto_rename_disabled)
+                local enabled_document = switched.published.document
+                A.equal(enabled_document.header.naming_waterline, 1)
+                A.equal(enabled_document.header.auto_name_baseline, 1)
+                local reopened = fixture({ open_document = enabled_document })
+                local specification = management_spec(enabled, enabled_document, "rename")
+                specification.action = nil
+                local opened = assert(reopened.open_existing(specification))
+                A.truthy(opened.auto_continue)
+                local view = assert(reopened.resolve_view(opened.view_manifest_snapshot))
+                A.contains(view.body, "preserve this history")
+                A.contains(view.body, "Managed Context")
+                A.contains(view.body, "AutoRenameDisabled")
+                A.equal(view.digest, enabled.view_manifest_snapshot)
+                A.truthy(reopened.close())
+            end,
+        },
+        {
+            name = "offline management rejects stale bindings and known failures without changing the document",
+            run = function()
+                local first, document = management_seed()
+                local manager, observed = fixture({ open_document = document })
+                local unchanged = assert(manager.manage_context(management_spec(first, document,
+                    "set_auto_rename_disabled", { value = false })))
+                A.equal(unchanged.outcome, "unchanged")
+                A.equal(observed.closes, 1)
+                A.falsy(observed.published)
+                local wrong = management_spec(first, document, "rename", { new_name = "Elsewhere" })
+                wrong.context_path = "/outside/Task.xml"
+                wrong.expected_credential.physical_path = wrong.context_path
+                local rejected, reject_error = manager.manage_context(wrong)
+                A.falsy(rejected)
+                A.equal(reject_error.code, "InvalidContextMutation")
+                A.equal(observed.closes, 1)
+                for _, code in ipairs({ "DestinationExists", "TargetChanged", "LockConflict" }) do
+                    local failed, failed_observed = fixture({ open_document = document,
+                        move_error = { code = code, message = "known failure" } })
+                    rejected, reject_error = failed.manage_context(management_spec(first, document,
+                        "rename", { new_name = "Other" }))
+                    A.falsy(rejected)
+                    A.equal(reject_error.code, code)
+                    A.equal(failed_observed.closes, 1)
+                    A.falsy(failed_observed.published)
+                end
+            end,
+        },
+        {
+            name = "management exceptions publication uncertainty and failed release stop subsequent mutation",
+            run = function()
+                local first, document = management_seed()
+                for _, setting in ipairs({
+                    { publish_exception = true },
+                    { publish_error = { code = "ContextPublishUnknown" } },
+                    { move_error = { code = "ContextCleanupRequired" } },
+                    { close_error = { code = "LeaseUnknown" } },
+                }) do
+                    setting.open_document = document
+                    local manager, observed = fixture(setting)
+                    local request = management_spec(first, document, "rename", { new_name = "Changed" })
+                    local result, err = manager.manage_context(request)
+                    A.falsy(result)
+                    A.equal(err.code, "ContextMutationUnknown")
+                    A.equal(observed.closes, 1)
+                    result, err = manager.manage_context(request)
+                    A.falsy(result)
+                    A.equal(err.code, "ContextMutationUnknown")
+                    A.equal(observed.closes, 1)
+                end
+            end,
+        },
+        {
+            name = "Windows management rejects device alternate-stream and ambiguous names before opening a writer",
+            run = function()
+                local _, document = management_seed()
+                local manager, observed = fixture({ platform_kind = "windows",
+                    data_root = "C:\\release\\__yaca__", initial_root = "C:\\release", open_document = document })
+                local receipt = {
+                    context_path = "C:\\release\\__yaca__\\CONTEXT\\C\\work\\Task.xml",
+                    logical_path = "/C/work/Task.xml",
+                }
+                for _, name in ipairs({ "CON", "nul.txt", "COM1", "LPT9", "CONIN$",
+                    "Task:stream", "Task?", "trailing.", "trailing " }) do
+                    local result, err = manager.manage_context(management_spec(receipt, document,
+                        "rename", { new_name = name }))
+                    A.falsy(result)
+                    A.equal(err.code, "InvalidContextName")
+                end
+                A.falsy(observed.opened)
+                A.equal(observed.closes, 0)
+            end,
+        },
+        {
+            name = "corrupt deletion uses a body-free writer and partial results close management",
+            run = function()
+                local first, document = management_seed()
+                for _, partial in ipairs({ false, true }) do
+                    local manager, observed = fixture({ partial_delete = partial })
+                    local request = management_spec(first, document, "delete")
+                    request.expected_credential.header_state = "corrupt"
+                    local deleted = assert(manager.manage_context(request))
+                    A.equal(deleted.outcome, partial and "partial" or "deleted")
+                    A.equal(observed.deleted, first.context_path)
+                    A.falsy(observed.opened)
+                    A.equal(observed.closes, 1)
+                    if partial then
+                        local again, err = manager.manage_context(request)
+                        A.falsy(again)
+                        A.equal(err.code, "ContextMutationUnknown")
+                        A.equal(observed.closes, 1)
+                    end
+                end
+            end,
+        },
+        {
             name = "compaction journal publishes summary and ModelView in one generation",
             run = function()
                 local publication, observed, _, _, safety_service = fixture()
@@ -1118,6 +1302,26 @@ return {
                 A.falsy(next_body:find("compact this prefix", 1, true))
                 _, summary_count = next_body:gsub("<StructuredSummary", "")
                 A.equal(summary_count, 1)
+                local compacted_document = observed.published.document
+                A.truthy(publication.close())
+                local manager, managed_observed = fixture({ open_document = compacted_document })
+                local renamed, rename_error = manager.manage_context(management_spec(first, compacted_document,
+                    "rename", { new_name = "Still Compacted" }))
+                A.truthy(renamed, A.render(rename_error))
+                local managed = managed_observed.published.document
+                A.equal(managed.model_view.active_manifest.compaction_id, "compaction-1")
+                local reopened = fixture({ open_document = managed })
+                local specification = management_spec(renamed, managed, "rename")
+                specification.action = nil
+                local opened = assert(reopened.open_existing(specification))
+                local restored = assert(reopened.resolve_view(opened.view_manifest_snapshot)).body
+                A.contains(restored, "GOALS-PRESERVED")
+                A.contains(restored, "AFTER-COMPACT")
+                A.contains(restored, "Still Compacted")
+                A.falsy(restored:find("compact this prefix", 1, true))
+                local _, restored_count = restored:gsub("<StructuredSummary", "")
+                A.equal(restored_count, 1)
+                A.truthy(reopened.close())
             end,
         },
         {

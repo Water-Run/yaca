@@ -561,6 +561,23 @@ return {
             end,
         },
         {
+            name = "delete resolver includes corrupt targets in collision checks without granting open authority",
+            run = function()
+                local collision = "CCCCCCCCCCCCCCCC"
+                local service = resolver({ ring("/C/work", {
+                    candidate("/C/work/Good.xml"), candidate("/C/work/Bad.xml", "corrupt"),
+                }) }, { hash_override = function() return collision end })
+                A.equal(service.resolve(collision, "/C/work").tag, "Unique")
+                A.equal(service.resolve_for_delete(collision, "/C/work").tag, "HashCollision")
+                A.equal(service.resolve("Bad", "/C/work").tag, "MatchedUnavailable")
+                local selected = service.resolve_for_delete("Bad", "/C/work")
+                A.equal(selected.tag, "Unique")
+                A.equal(selected.logical_path, "/C/work/Bad.xml")
+                local blocked = resolver({ ring("/C/work", { candidate("/C/work/Busy.xml", "unavailable") }) })
+                A.equal(blocked.resolve_for_delete("Busy", "/C/work").tag, "MatchedUnavailable")
+            end,
+        },
+        {
             name = "hash unavailable mixtures follow usable-count rules",
             run = function()
                 local target_hash = "BBBBBBBBBBBBBBBB"

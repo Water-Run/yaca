@@ -55,8 +55,9 @@ Stage 1 中的 `ST1-ATOMIC-WRITE` 目前固定报告 `unknown`（旧系统资格
 本机验收依据。`.details` 可以查看当前进程最近的清理后诊断。
 
 可用 `.help` 查看聊天命令，`--help` 查看命令行说明。在线 self-test Stage 2/3
-尚未接通，首次网络验证使用上面的真实聊天。当前 Context 管理器主要提供只读列表、
-检查和搜索；跨工作目录继续、导入、修复及管理写操作仍有缺口。
+尚未接通，首次网络验证使用上面的真实聊天。Context 管理器提供列表、检查、搜索，以及 `rename <selector> <new-name>`、
+`set-auto-rename-disabled <selector> <true|false>`、`delete <selector> [--yes]`。
+删除需要精确 hash 确认，且没有撤销。跨工作目录继续、导入、rebind 和修复仍待完成。
 
 ## 数据、升级和退出
 

@@ -209,7 +209,7 @@ local function context_harness(commands, settings)
         maximum_path_bytes = 2048, maximum_segments = 128,
         maximum_segment_bytes = 255, maximum_hash_chunk_bytes = 64,
     }))
-    local rows, calls = {}, { scans = 0, closes = 0, verifies = 0 }
+    local rows, calls = {}, { scans = 0, closes = 0, verifies = 0, mutations = {} }
     for i = 1, settings.count or 2 do
         local name = string.format("Task%03d", i)
         local logical = "/" .. name .. ".xml"
@@ -220,6 +220,7 @@ local function context_harness(commands, settings)
             observed_stat = { object = logical, size = 100 }, header_state = "valid",
         }
     end
+    if settings.corrupt then rows[1].header_state = "corrupt" end
     if settings.busy then
         rows[1].header_state = "unavailable"
         rows[1].canonical_name, rows[1].created_at, rows[1].updated_at = nil, nil, nil
@@ -247,7 +248,9 @@ local function context_harness(commands, settings)
             for _, row in ipairs(rows) do
                 if row.logical_path == target.logical_path then
                     local copy = {}; for key, value in pairs(row) do copy[key] = value end
-                    if settings.changed then copy.observed_stat = { object = "replacement", size = 100 } end
+                    if settings.changed or (settings.changed_after_confirm and calls.verifies > 1) then
+                        copy.observed_stat = { object = "replacement", size = 100 }
+                    end
                     return true, copy
                 end
             end
@@ -257,6 +260,20 @@ local function context_harness(commands, settings)
         maximum_collision_candidates = 4, maximum_reason_bytes = 64 }))
     composed.contexts = { catalog = catalog, catalog_scanner = scanner, path = path }
     composed.config_generation = { context = { recent_list_limit = 1 } }
+    if settings.manage then
+        composed.publication = { manage_context = function(specification)
+            calls.mutations[#calls.mutations + 1] = specification
+            A.equal(specification.context_path, specification.expected_credential.physical_path)
+            A.equal(specification.logical_path, specification.expected_credential.logical_path)
+            if settings.mutation_error then return nil, settings.mutation_error end
+            if specification.action == "delete" then
+                return { outcome = settings.partial_delete and "partial" or "deleted",
+                    targets = { { role = "official", outcome = "deleted", path = specification.context_path } } }
+            end
+            return { outcome = "success", context_hash = "0123456789ABCDEF",
+                logical_path = "/Managed.xml", auto_rename_disabled = specification.action == "rename" }
+        end }
+    end
     if settings.stdout_failure then
         runtime.stdout = function(bytes)
             written[#written + 1] = bytes
@@ -303,6 +320,85 @@ local context_cases = {
             local result, err, output = context_harness({ "rename Task001 NewName", "nonsense", "list", "quit" })
             A.truthy(result, A.render(err)); A.contains(output, "ContextActionUnavailable")
             A.contains(output, "context-rename"); A.contains(output, "CONTEXT CATALOG")
+        end,
+    },
+    {
+        name = "Context mutations use exact credentials and explicit permanent delete consent",
+        run = function()
+            local result, err, output, calls = context_harness({
+                "rename Task001 Managed", "set-auto-rename-disabled Task001 false",
+                "delete Task001", "not-confirmed", "delete Task001 --yes", "quit",
+            }, { manage = true })
+            A.truthy(result, A.render(err))
+            A.equal(#calls.mutations, 3)
+            A.equal(calls.mutations[1].action, "rename")
+            A.equal(calls.mutations[1].new_name, "Managed")
+            A.equal(calls.mutations[2].action, "set_auto_rename_disabled")
+            A.equal(calls.mutations[2].value, false)
+            A.equal(calls.mutations[3].action, "delete")
+            A.contains(output, "Context deletion cancelled")
+            A.contains(output, "Context deletion: deleted")
+            A.equal(calls.verifies, 5)
+        end,
+    },
+    {
+        name = "Context delete confirms an exact hash and reverifies before mutation",
+        run = function()
+            local path = assert(load_module("path").new(hash_port(), {
+                maximum_path_bytes = 2048, maximum_segments = 128,
+                maximum_segment_bytes = 255, maximum_hash_chunk_bytes = 64,
+            }))
+            local confirm = "DELETE " .. assert(path.context_hash("/Task001.xml"))
+            local result, err, output, calls = context_harness({ "delete Task001", confirm, "quit" },
+                { manage = true })
+            A.truthy(result, A.render(err))
+            A.equal(#calls.mutations, 1)
+            A.equal(calls.verifies, 2)
+            A.contains(output, "PERMANENT DELETE")
+            result, err, output, calls = context_harness({ "delete Task001", confirm, "quit" },
+                { manage = true, changed_after_confirm = true })
+            A.truthy(result, A.render(err))
+            A.equal(#calls.mutations, 0)
+            A.contains(output, "ContextTargetChanged")
+        end,
+    },
+    {
+        name = "Context delete cancellation and uncertain mutation restore and stop the manager",
+        run = function()
+            local result, err, output, calls = context_harness({ "delete Task001",
+                { kind = "user_action", action = "cancel" } }, { manage = true })
+            A.truthy(result, A.render(err))
+            A.equal(result.outcome, "cancelled")
+            A.equal(#calls.mutations, 0)
+            for _, settings in ipairs({
+                { manage = true, mutation_error = { code = "ContextMutationUnknown" } },
+                { manage = true, partial_delete = true },
+            }) do
+                result, err, output, calls = context_harness({ "delete Task001 --yes",
+                    "rename Task002 NotAllowed", "quit" }, settings)
+                A.falsy(result)
+                A.equal(err.code, "ContextMutationUnknown")
+                A.equal(#calls.mutations, 1)
+            end
+        end,
+    },
+    {
+        name = "Context deletion admits corrupt headers but rejects busy targets and names containing secrets",
+        run = function()
+            local result, err, output, calls = context_harness({ "delete Task001 --yes", "quit" },
+                { manage = true, corrupt = true })
+            A.truthy(result, A.render(err))
+            A.equal(#calls.mutations, 1)
+            A.equal(calls.mutations[1].expected_credential.header_state, "corrupt")
+            result, err, output, calls = context_harness({ "delete Task001 --yes", "quit" },
+                { manage = true, busy = true })
+            A.truthy(result, A.render(err))
+            A.equal(#calls.mutations, 0)
+            result, err, output, calls = context_harness({ "rename Task001 example-secret-value", "quit" },
+                { manage = true })
+            A.truthy(result, A.render(err))
+            A.equal(#calls.mutations, 0)
+            A.contains(output, "RegisteredSecret")
         end,
     },
     {

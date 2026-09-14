@@ -9432,12 +9432,12 @@ function M.run_config_repl(composed, runtime)
     return outcome, run_error
 end
 
----Runs the bounded read-only Context management REPL.
+---Runs the bounded offline Context management REPL.
 -- Every action resolves through the Resolver and reverifies the precise
 -- TargetSnapshot before reading; catalog display rows are never used to
 -- rebuild a target. Contexts held by an active writer report bounded
--- metadata only and never open the Context body. Mutating actions are
--- registered but not yet connected and are refused explicitly.
+-- metadata only and never open the Context body. Connected mutations use a
+-- short-lived exact writer; uncertain publication stops the management loop.
 -- @param composed table Composed runtime carrying Context services.
 -- @param runtime table Admitted TTY invocation with shared CLI and stdout.
 -- @return table|nil result Bounded catalog outcome or cancellation.
@@ -9592,9 +9592,107 @@ function M.run_context_repl(composed, runtime, request)
         return input.write(table.concat(lines, "\n") .. "\n")
     end
 
+    ---Binds one management action to the Resolver's private target snapshot.
+    -- Delete confirmation precedes a second verification of that same snapshot;
+    -- it never selects a replacement after the operator has seen the target.
+    local function mutate(action)
+        if type(composed.config) == "table" and type(composed.config.reload_file) == "function"
+            and type(composed.layout) == "table" and type(composed.layout.config_path) == "string"
+        then
+            -- Offline metadata management also works with missing/invalid INI.
+            -- When valid, use its current secret scanner before storing a name.
+            generation = composed.config.reload_file(composed.layout.config_path) or false
+        end
+        local publication = composed.publication
+        if type(publication) ~= "table" or type(publication.manage_context) ~= "function" then
+            return nil, failure("ContextActionUnavailable", "Context mutation service is unavailable", action.id)
+        end
+        local deleting = action.id == "context-delete"
+        local resolve = deleting and contexts.catalog.resolve_for_delete or contexts.catalog.resolve
+        if type(resolve) ~= "function" then
+            return nil, failure("ContextActionUnavailable", "Context deletion resolver is unavailable")
+        end
+        local selection = resolve(action.selector, "/")
+        if type(selection) ~= "table" or selection.tag ~= "Unique" then
+            return nil, failure("ContextSelectorUnresolved", "selector did not resolve to one manageable Context",
+                type(selection) == "table" and selection.tag or "resolver-contract")
+        end
+        local purpose = deleting and "delete" or "mutation"
+        local function verify()
+            local target = contexts.catalog.verify_target(selection, purpose)
+            if type(target) ~= "table" or target.tag ~= "Verified" then
+                return nil, failure(type(target) == "table" and target.tag == "TargetChanged"
+                    and "ContextTargetChanged" or "ContextTargetUnavailable",
+                    "the selected Context changed or is unavailable")
+            end
+            return target
+        end
+        local target, target_error = verify()
+        if not target then return nil, target_error end
+        if deleting then
+            local written, write_error = input.write("PERMANENT DELETE "
+                .. safe_diagnostic(target.hash, 16) .. " " .. safe_diagnostic(target.logical_path, 512)
+                .. "\nDeletes the Context XML and its known transaction files. No undo or secure erase.\n")
+            if not written then return nil, write_error end
+            if not action.yes then
+                local answer, answer_error = input.read("Type DELETE " .. target.hash .. " to confirm: ", false, 128)
+                if answer == false then
+                    return nil, failure("ContextReplCancelled", "Context deletion was cancelled")
+                end
+                if answer == nil then return nil, answer_error end
+                if answer ~= "DELETE " .. target.hash then
+                    return input.write("Context deletion cancelled; no files were changed.\n")
+                end
+            end
+            target, target_error = verify()
+            if not target then return nil, target_error end
+        end
+        if action.id == "context-rename" and generation
+            and type(generation.scan_registered_secrets) == "function"
+        then
+            local called, matches = pcall(generation.scan_registered_secrets, action.new_name)
+            if not called or type(matches) ~= "table" then
+                return nil, failure("SecretScanUnavailable", "Context name could not be checked")
+            end
+            if #matches > 0 then
+                return nil, failure("RegisteredSecret", "Context name contains registered secret material")
+            end
+        end
+        local receipt, mutation_error = publication.manage_context({
+            action = deleting and "delete" or (action.id == "context-rename"
+                and "rename" or "set_auto_rename_disabled"),
+            context_path = target.physical_hint,
+            logical_path = target.logical_path,
+            expected_credential = target.credential,
+            new_name = action.new_name,
+            value = action.value,
+        })
+        if not receipt then return nil, mutation_error end
+        local lines = {}
+        if deleting then
+            lines[#lines + 1] = "Context deletion: " .. safe_diagnostic(receipt.outcome, 32)
+            for _, item in ipairs(receipt.targets or {}) do
+                lines[#lines + 1] = safe_diagnostic(item.role, 32) .. ": "
+                    .. safe_diagnostic(item.outcome, 64) .. " " .. safe_diagnostic(item.path, 512)
+            end
+        else
+            lines[#lines + 1] = "Context " .. safe_diagnostic(receipt.outcome, 32)
+                .. ": " .. safe_diagnostic(receipt.context_hash, 16)
+                .. " " .. safe_diagnostic(receipt.logical_path, 512)
+            if receipt.auto_rename_disabled ~= nil then
+                lines[#lines + 1] = "AutoRenameDisabled=" .. tostring(receipt.auto_rename_disabled)
+            end
+        end
+        local written, write_error = input.write(table.concat(lines, "\n") .. "\n")
+        if not written then return nil, write_error end
+        if deleting and receipt.outcome ~= "deleted" then
+            return nil, failure("ContextMutationUnknown", "partial deletion requires inspection before more changes")
+        end
+        return rescan()
+    end
+
     local UNCONNECTED = {
-        ["context-rename"] = true, ["context-rebind"] = true,
-        ["context-delete"] = true, ["context-set-auto-rename-disabled"] = true,
+        ["context-rebind"] = true,
         ["context-import"] = true, ["context-repair"] = true,
         ["export-context"] = true, ["select-context"] = true,
     }
@@ -9605,7 +9703,7 @@ function M.run_context_repl(composed, runtime, request)
             return nil, scan_error
         end
         local written, write_error = input.write("YACA CONTEXT MANAGER\n"
-            .. "Read-only in this build: list, inspect, search, refresh.\n"
+            .. "Offline: list, inspect, search, refresh, rename, delete, set-auto-rename-disabled.\n"
             .. "Every inspect reverifies its exact target; busy Contexts show metadata only.\n"
             .. "Enter help for commands or quit to leave.\n")
         if not written then return nil, write_error end
@@ -9642,6 +9740,10 @@ function M.run_context_repl(composed, runtime, request)
                                 .. tostring(#observation.rows) .. " Context(s)"
                                 .. (observation.complete and "." or "; scan incomplete.") .. "\n")
                         end
+                    elseif request.id == "context-rename" or request.id == "context-delete"
+                        or request.id == "context-set-auto-rename-disabled"
+                    then
+                        handled, action_error = mutate(request)
                     elseif UNCONNECTED[request.id] then
                         handled, action_error = nil, failure(
                             "ContextActionUnavailable",
@@ -9660,7 +9762,14 @@ function M.run_context_repl(composed, runtime, request)
                 end
             end
             if not handled then
-                if action_error and action_error.code == "BrokenStdout" then return nil, action_error end
+                if action_error and action_error.code == "ContextReplCancelled" then
+                    return result("cancelled", "cancelled")
+                end
+                if action_error and (action_error.code == "BrokenStdout"
+                    or action_error.code == "ContextMutationUnknown")
+                then
+                    return nil, action_error
+                end
                 written, write_error = show_error(action_error)
                 if not written then return nil, write_error end
             end

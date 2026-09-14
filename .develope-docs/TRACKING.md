@@ -2,12 +2,10 @@
 
 更新日期：2026-09-14
 
-负责人已要求恢复开发、拉回 WSL 变更并推送检查点。WSL 的九个提交及未提交草稿
-已回收；本次完成 **N1 Context 只读管理交互**。完整 suite **489/489**；
-design-contract **7612**（xmllint 可用）、proof-evidence **56**、
-coding-readiness **553** 条断言通过，TP-003/006/008/010 与 RP-001 全部 PASS。
-下一节点为 N2 元数据写入，见 [本次检查点](CHECKPOINT-2026-09-14.md)
-及 [Context 管理计划](CONTEXT-REPL-PLAN.md)。Release Gate R 继续关闭。
+Windows x86 首个可用预览已形成检查点 `f369b35`，随后完成 **N2 Context 元数据管理**。
+完整 suite **501/501**；validators **7612/56/553**，全部 coding-readiness proofs PASS。
+实际 Windows 远端验证了重命名、开关、重开与受控删除；详见
+[N2 检查点](CONTEXT-N2-2026-09-14.md)。下一节点 N3，Release Gate R 保持关闭。
 
 ## 当前阶段
 
@@ -45,7 +43,7 @@ C01--C31 已有核心实现、测试 harness、最小发行规划和现代 Linux
 
 `config-repl` 已接通有效 INI 的 catalog 字段编辑、预览、精确版本保存和重载；
 缺文件时仍提供修复模板。任意无效源的交互修复、Model/Permission 区域管理
-以及 `context-repl` 的完整交互仍有缺口，后者已完成 N1 只读交互，N2/N3 写事务仍待实现。
+以及 `context-repl` 的完整交互仍有缺口，后者已完成 N1/N2 交互，N3 跨界写事务仍待实现。
 在线 self-test Stage 2/3 的 production adapter 仍返回 failed 占位结果。
 这些属于实现待办，不能归入“仅差目标资格”。
 

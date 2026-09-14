@@ -1123,6 +1123,231 @@ function M.new_context_publication(ports, options)
         return nil, original_error
     end
 
+    ---Performs one offline management transaction against an exact selection.
+    -- This uses a separate short-lived writer, never opens a Runtime, and never
+    -- recovers or replays pending work. Every path releases its writer before
+    -- returning; uncertain publication stops this management owner.
+    function service.manage_context(specification)
+        if closed or journal_failure then
+            return nil, failure("ContextMutationUnknown", "Context management owner is closed")
+        end
+        if active then
+            return nil, failure("ContextAlreadyPublished", "close the active Context before management")
+        end
+        local allowed = {
+            action = true, context_path = true, logical_path = true,
+            expected_credential = true, new_name = true, value = true,
+        }
+        if type(specification) ~= "table" then
+            return nil, failure("InvalidContextMutation", "a bound Context action is required")
+        end
+        for key in pairs(specification) do
+            if not allowed[key] then
+                return nil, failure("InvalidContextMutation", "Context action contains an unknown field")
+            end
+        end
+        local action = specification.action
+        if action ~= "rename" and action ~= "set_auto_rename_disabled" and action ~= "delete" then
+            return nil, failure("InvalidContextMutation", "Context management action is unavailable")
+        end
+        local credential = specification.expected_credential
+        if type(credential) ~= "table"
+            or credential.physical_path ~= specification.context_path
+            or credential.logical_path ~= specification.logical_path
+            or type(credential.observed_stat) ~= "table"
+            or (credential.header_state ~= "valid"
+                and not (action == "delete" and credential.header_state == "corrupt"))
+        then
+            return nil, failure("InvalidContextMutation", "an exact verified Context credential is required")
+        end
+        local context_hash, hash_error = path.context_hash(specification.logical_path)
+        if not context_hash then return nil, hash_error end
+        local physical = context_root
+        for segment in specification.logical_path:gmatch("[^/]+") do
+            physical = join_native(physical, segment, admitted.platform_kind)
+        end
+        if physical ~= specification.context_path then
+            return nil, failure("InvalidContextMutation", "Context path is outside its logical mirror binding")
+        end
+        local destination = physical
+        local next_logical = specification.logical_path
+        if action == "rename" then
+            if specification.value ~= nil then
+                return nil, failure("InvalidContextMutation", "rename does not accept a metadata value")
+            end
+            local name, name_error = path.validate_context_name(specification.new_name)
+            if not name then return nil, name_error end
+            if admitted.platform_kind == "windows" then
+                local base = (name:match("^[^.]+") or ""):upper()
+                local reserved = {
+                    CON = true, PRN = true, AUX = true, NUL = true,
+                    ["CLOCK$"] = true, ["CONIN$"] = true, ["CONOUT$"] = true,
+                }
+                if name:find('[<>:"|?*]') or name:find("[. ]$")
+                    or reserved[base] or base:match("^COM[1-9]$") or base:match("^LPT[1-9]$")
+                then
+                    return nil, failure("InvalidContextName", "Context name is not an ordinary Windows filename")
+                end
+            end
+            destination = join_native(assert(directory_of(physical, admitted.platform_kind)),
+                name .. ".xml", admitted.platform_kind)
+            next_logical = assert(specification.logical_path:match("^(.*)/[^/]+$"))
+                .. "/" .. name .. ".xml"
+        elseif specification.new_name ~= nil
+            or (action == "delete" and specification.value ~= nil)
+            or (action == "set_auto_rename_disabled" and type(specification.value) ~= "boolean")
+        then
+            return nil, failure("InvalidContextMutation", "Context metadata arguments are invalid")
+        end
+        local next_hash, next_hash_error = path.context_hash(next_logical)
+        if not next_hash then return nil, next_hash_error end
+        local required = action == "delete" and { "open_delete_writer", "delete" }
+            or (action == "rename" and { "move" } or {})
+        for _, method in ipairs(required) do
+            if type(store[method]) ~= "function" then
+                return nil, failure("ContextActionUnavailable", "Context store omits " .. method)
+            end
+        end
+        if action ~= "delete" and type(schema.lifecycle_document) ~= "function" then
+            return nil, failure("ContextActionUnavailable", "Context lifecycle schema is unavailable")
+        end
+        local now, time_error = system.utc_now()
+        if not utc_parts(now) then
+            return nil, time_error or failure("UtcClockReadFailed", "UTC clock is unavailable")
+        end
+        local pid, pid_error = system.current_process_id()
+        if not valid_integer(pid, 1) then
+            return nil, pid_error or failure("ProcessIdentityUnavailable", "process ID is unavailable")
+        end
+        local opener = action == "delete" and store.open_delete_writer or store.open_writer
+        local writer, document = opener(physical, { pid = pid, started_at = now }, credential)
+        if not writer then return nil, document end
+        local function transact()
+            if action == "delete" then return store.delete(writer) end
+            if type(document) ~= "table" or type(document.header) ~= "table"
+                or type(document.model_view) ~= "table"
+            then
+                return nil, failure("ContextMutationUnknown", "Context writer returned no canonical document")
+            end
+            local old_view, view_error = rebuild_active_model_view(document)
+            if not old_view then return nil, view_error end
+            if (action == "rename" and specification.new_name == document.header.name)
+                or (action == "set_auto_rename_disabled"
+                    and specification.value == (document.header.auto_rename_disabled == true))
+            then
+                return readonly({ outcome = "unchanged", context_path = physical,
+                    logical_path = next_logical, context_hash = context_hash,
+                    generation = document.generation }, "unchanged Context metadata")
+            end
+            local updated_at, next_error = next_utc_time(now, document.header.updated_at)
+            if not updated_at then return nil, next_error end
+            local manifest = document.model_view.active_manifest
+            local mutation = {
+                kind = action, updated_at = updated_at, view_manifest_digest = manifest.digest,
+                view_compaction_id = manifest.compaction_id,
+                view_context_generation = manifest.compaction_id and document.generation + 1 or nil,
+            }
+            if action == "rename" then
+                mutation.new_name = specification.new_name
+                mutation.manual = true
+                mutation.old_logical_path = specification.logical_path
+                mutation.new_logical_path = next_logical
+            else
+                mutation.value = specification.value
+                local old_digest, digest_error = override_digest(
+                    "AutoRenameDisabled", document.header.auto_rename_disabled == true
+                )
+                if not old_digest then return nil, digest_error end
+                local new_digest
+                new_digest, digest_error = override_digest("AutoRenameDisabled", specification.value)
+                if not new_digest then return nil, digest_error end
+                mutation.old_value_digest = old_digest
+                mutation.new_value_digest = new_digest
+                mutation.effective_at = "next-turn"
+                local main_turns, completed = {}, 0
+                for _, event in ipairs(document.facts) do
+                    if event.type == "turn_started" and event.fields.kind == "main" then
+                        main_turns[event.turn_id] = true
+                    elseif event.type == "turn_ended" and event.fields.outcome == "completed"
+                        and main_turns[event.turn_id]
+                    then
+                        completed = completed + 1
+                    end
+                end
+                mutation.naming_waterline = math.max(document.header.naming_waterline or 0, completed)
+            end
+            -- Let the schema form the lifecycle event, then compute its real
+            -- plain/compacted view. The provisional document is never published.
+            local candidate, candidate_error = schema.lifecycle_document(document, mutation)
+            if not candidate then return nil, candidate_error end
+            local facts = {}
+            for index = 1, candidate.event_count - 1 do facts[index] = candidate.facts[index] end
+            local projection
+            if manifest.compaction_id then
+                projection, view_error = durable_compaction_projection(document, manifest)
+                if not projection then return nil, view_error end
+                projection.fact_limit = #facts
+                projection.waterline = #facts
+            end
+            local view
+            view, view_error = cache_model_view(facts, candidate.generation, projection)
+            if not view then return nil, view_error end
+            mutation.view_manifest_digest = view.digest
+            candidate, candidate_error = schema.lifecycle_document(document, mutation)
+            if not candidate then return nil, candidate_error end
+            local next_manifest = candidate.model_view.active_manifest
+            if next_manifest.digest ~= view.digest
+                or next_manifest.first_event_seq ~= view.first_sequence
+                or next_manifest.last_event_seq ~= view.last_sequence
+                or (next_manifest.compaction_id or false) ~= view.compaction_id
+            then
+                return nil, failure("InvalidModelView", "Context lifecycle view binding is inexact")
+            end
+            local random, random_error = system.secure_random(8)
+            if type(random) ~= "string" or #random ~= 8 then
+                return nil, random_error or failure("SecureRandomUnavailable", "temporary identity is unavailable")
+            end
+            local temporary_path = destination .. ".yaca-tmp-" .. hex(random)
+            local published, publish_error
+            if action == "rename" then
+                published, publish_error = store.move(writer, candidate, destination, temporary_path, "rename")
+            else
+                published, publish_error = store.publish(writer, candidate, temporary_path)
+            end
+            if not published then return nil, publish_error end
+            return readonly({
+                outcome = "success", durable = true, context_path = destination,
+                logical_path = next_logical, context_hash = next_hash,
+                previous_context_hash = context_hash, display_name = candidate.header.name,
+                generation = candidate.generation, event_count = candidate.event_count,
+                auto_rename_disabled = candidate.header.auto_rename_disabled == true,
+                view_manifest_snapshot = view.digest,
+            }, "managed Context receipt")
+        end
+        local called, receipt, mutation_error = pcall(transact)
+        local close_called, released, release_error = pcall(store.close_writer, writer)
+        model_views = {}
+        if not close_called or not released then
+            closed = true
+            return nil, failure("ContextMutationUnknown", "Context writer release is unknown",
+                type(release_error) == "table" and release_error.code or "release-failed")
+        end
+        if not called then
+            closed = true
+            return nil, failure("ContextMutationUnknown", "Context transaction raised an exception")
+        end
+        if not receipt then
+            local code = type(mutation_error) == "table" and mutation_error.code or ""
+            if code:find("Unknown", 1, true) or code == "ContextCleanupRequired" then
+                closed = true
+                return nil, failure("ContextMutationUnknown", "Context transaction outcome is unknown", code)
+            end
+            return nil, mutation_error or failure("ContextMutationFailed", "Context transaction failed")
+        end
+        if action == "delete" and receipt.outcome ~= "deleted" then closed = true end
+        return receipt
+    end
+
     function service.publish_first(specification)
         if closed then
             return nil, failure("ContextPublicationClosed", "Context publication service is closed")

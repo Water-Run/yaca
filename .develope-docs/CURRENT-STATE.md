@@ -2,16 +2,15 @@
 
 更新日期：2026-09-14
 
-当前优先级已转为 **Windows 首个可用预览包**，部署目标为 Server 2008（非 R2），
-统一按 XP SP3 / win32-x86 基线推进。已修复首次发布、配置容量、Windows 原生文件/
-进程及已有会话入口的实际阻塞；完整 suite **491/491**，用户指定的现代 Windows
-远端已完成合成模型工具回合、文件/命令审批、保存和重开。见
-[Windows 预览检查点](WINDOWS-PREVIEW-2026-09-14.md) 与
-[首次使用说明](../release/WINDOWS-QUICKSTART.md)。
+当前继续推进 **Windows 首版与 controller 收口**。Windows 预览检查点已保存为
+`f369b35`；其基础上完成 **N2 Context 元数据管理**：重命名、自动命名开关、精确
+确认删除、真实 plain/compacted ModelView 与完整 writer 清理。完整 suite **501/501**，
+全部 coding readiness/TP-003/006/008/010/RP-001 通过；用户指定远端通过真实文件
+事务、重开、busy/替换目标拒绝。见 [N2 检查点](CONTEXT-N2-2026-09-14.md)。
 
-该远端实际为 Server 2025，不能替代 XP / Server 2008 验收。Release Gate R
-继续关闭。此前 N1 Context 只读管理完成；N2/N3 后续按
-[Context 管理计划](CONTEXT-REPL-PLAN.md) 推进。
+部署目标仍为 Server 2008（非 R2），统一按 XP SP3 / win32-x86 基线推进。指定远端
+实际为 Server 2025，不能替代旧系统验收。Release Gate R 继续关闭。下一节点 N3，
+见 [Context 管理计划](CONTEXT-REPL-PLAN.md)；首版全部开发目标仍未完成。
 
 ## yaca 仓库
 
@@ -36,12 +35,12 @@ yaca 当前已有可执行 Lua 入口和平台无关的通用 Agent 核心；代
 - chat `.model` 已接到 draft/production 双 owner：无参数最多投影 64 个 enabled/native-tool 候选的普通文本行，精确 selector 不依赖 ANSI、补全或新式终端。预检保守按 `1 byte <= 1 token` 绑定当前 config、Context generation/sequence、活动 ModelView、四层 Prompt、tool/control schema、输出与 transition reserve；目标放不下时在任何配置/XML 变更前返回 `ModelIncompatible`，不缩水历史、Prompt 或工具。endpoint route、credential slot/policy、Protocol、RemoteModel/usage、Model Prompt、adapter/streaming 或能力边界变化进入默认 deny 的 `model-change-N` 确认；只显示 origin/path、`?configured` 和非秘密 credential identity。确认绑定的 waterline/manifest/Prompt 环境/目标定义任一变化即 stale；保存态经完整配置重载、目标定义复核、Context `session_override + model_view_published` 原子提交和 Runtime receipt adoption 后只在下一 turn 生效，active turn 不热换，也不建立失败 fallback Model。
 - 最小发行 allowlist、component/license manifest、SPDX SBOM、package planner、资源 overlay 和资源门禁测试 Harness。
 - 运行时 curl config 已逐请求用锁定 CLI 可解析的 standalone/no-option 语法显式固定 HTTP/1.1、TLS 1.2+、服务端/HTTPS 代理随包 CA 校验；代理 TLS 下限由 `proxy-tlsv1` 与只启用 TLS 1.2/1.3 的锁定 Mbed TLS 后端共同闭合。代理/主机 DNS 和普通握手只在无 canonical event 时有界重试，证书/CA/CRL/issuer/pin/status 错误立即终止。真实目标 TLS/代理资格仍待 C32。
-- 受 `.tools/run_with_resource_guard.sh` 保护的完整平台无关 Lua suite 当前为 `481/481`（此前 Prompt 编辑器节点为 `471/471`）；本轮验证记录见下节。这不是三目标资格证明。
+- 受 `.tools/run_with_resource_guard.sh` 保护的完整平台无关 Lua suite 当前为 `501/501`；本轮验证记录见下节。这不是三目标资格证明。
 
 仍缺失或不得宣称完成：
 
 - `--continue` 与同 workspace `.context` 已接通，但显式跨 workspace 确认/rebind 尚未开放；三目标 token/资源阈值仍待校准。
-- 在线 self-test Stage 2/3 production adapter 仍返回 failed 占位结果；有效配置的 `config-repl` 字段编辑已接通，但任意无效源的交互修复及 Model/Permission 区域管理尚待完成，`context-repl` 已接通只读管理交互，写事务仍待 N2/N3。这些是实现缺口，不能只归入目标资格待办。
+- 在线 self-test Stage 2/3 production adapter 仍返回 failed 占位结果；有效配置的 `config-repl` 字段编辑已接通，但任意无效源的交互修复及 Model/Permission 区域管理尚待完成，`context-repl` 已接通 N1/N2 管理交互，跨界写事务仍待 N3。这些是实现缺口，不能只归入目标资格待办。
 - 旧环境网络/HTTPS 的源码锁、XP compatibility patch、静态 import/CRT 黑名单和最小协议闭包已有可重复候选证据；仍须在真实 XP/Win7/CentOS 7 证明 TLS/CA、显式代理、redirect/retry/cancel、旧 CMD 路径与错误分类，不能据此开放 Release Gate R。
 - C32 的三个真实 target qualification、C33 的干净机发布旅程/零表面、C34 的最终 SHA-256/license/SBOM/build/test evidence 尚未执行。
 - README 中任何能力声明仍必须受实现和 target evidence 约束；现代 Linux fake/native 边界通过不能外推为 XP、Win7 或 CentOS 7 支持。

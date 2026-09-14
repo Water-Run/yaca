@@ -114,11 +114,14 @@ Context。有效配置中已登记的秘密值，包括二进制字段解码后�
 管理交互仍有 controller 缺口。
 `--config-repl` 已支持有效配置的 catalog 字段编辑，缺文件时仍创建修复模板；
 任意无效源的交互修复及 Model/Permission 区域管理尚待完成，`--model-repl`
-已提供既有的离线 Model 创建/编辑流程。`--context-repl recent|full` 已接通离线只读管理器，支持
+已提供既有的离线 Model 创建/编辑流程。`--context-repl recent|full` 已接通离线管理器，支持
 `list [recent|full]`、`inspect <selector>`、`search <query>`、`refresh`、
 `help` 和 `quit`。列表与搜索使用有界快照，刷新时显式重扫；检查时复核精确目标，
 目标变化即拒绝，不读取不可用 Context 的正文。Esc/EOF 恢复终端并退出。
-元数据写入、导入、修复及管理器内的导出/继续仍待后续节点。在线 self-test Stage 2/3 的调度和同意
+现已支持 `rename <selector> <new-name>`、`set-auto-rename-disabled <selector> <true|false>`
+和 `delete <selector> [--yes]`。重命名不覆盖目标，保留可重建的模型历史；删除需精确 hash
+确认，确认后再次复核同一文件，损坏 XML 也可显式删除。busy/替换对象拒绝，unknown 或
+部分清理立即停止管理。导入、rebind、修复及管理器内的导出/继续仍待后续节点。在线 self-test Stage 2/3 的调度和同意
 门禁已有实现，但 production adapter 当前返回未接通的失败结果，不发起 Model
 请求。
 

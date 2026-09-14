@@ -400,10 +400,12 @@ local function unique(candidate, hash, selections)
     return selected_result(candidate, hash, "Unique", selections)
 end
 
-local function decide_name(candidates, selector, path, scope, selections)
+local function decide_name(candidates, selector, path, scope, selections, deleting)
     for _, candidate in ipairs(candidates) do
         if candidate.display_name == selector or candidate.canonical_name == selector then
-            if candidate.header_state ~= "valid" then
+            if candidate.header_state ~= "valid"
+                and not (deleting and candidate.header_state == "corrupt")
+            then
                 return matched_unavailable(candidate)
             end
             local hash = hash_candidate(candidate, path)
@@ -414,13 +416,15 @@ local function decide_name(candidates, selector, path, scope, selections)
     return nil
 end
 
-local function decide_hash(candidates, selector, path, scope, limits, selections)
+local function decide_hash(candidates, selector, path, scope, limits, selections, deleting)
     local usable, unavailable = {}, {}
     for _, candidate in ipairs(candidates) do
         local hash = hash_candidate(candidate, path)
         if not hash then return scan_incomplete(scope, "context-hash") end
         if hash == selector then
-            if candidate.header_state == "valid" then
+            if candidate.header_state == "valid"
+                or (deleting and candidate.header_state == "corrupt")
+            then
                 usable[#usable + 1] = { candidate = candidate, hash = hash }
             else
                 unavailable[#unavailable + 1] = candidate
@@ -466,7 +470,7 @@ function M.new(ports, options)
     -- @param selector string Exact display name or hash token.
     -- @param origin_logical string Current workspace mirror directory.
     -- @return table ResolveResult immutable discriminated union.
-    function service.resolve(selector, origin_logical)
+    local function resolve(selector, origin_logical, deleting)
         local classified, selector_error = path.classify_selector(selector)
         if not classified then
             return invalid_selector(safe_reason(selector_error, limits, "invalid-token"))
@@ -548,7 +552,8 @@ function M.new(ports, options)
                     path,
                     scope,
                     limits,
-                    selections
+                    selections,
+                    deleting
                 )
             else
                 outcome = decide_name(
@@ -556,12 +561,24 @@ function M.new(ports, options)
                     classified.canonical,
                     path,
                     scope,
-                    selections
+                    selections,
+                    deleting
                 )
             end
             if outcome then return finish(outcome) end
         end
         return finish(scan_incomplete(origin, "ring-limit"))
+    end
+
+    function service.resolve(selector, origin_logical)
+        return resolve(selector, origin_logical, false)
+    end
+
+    ---Resolves a deletable valid or corrupt Context without opening its body.
+    -- A damaged candidate still participates in exact hash collision checks;
+    -- busy and unavailable candidates never become deletion authority.
+    function service.resolve_for_delete(selector, origin_logical)
+        return resolve(selector, origin_logical, true)
     end
 
     ---Computes `.status` hash from the current handle path without scanning.

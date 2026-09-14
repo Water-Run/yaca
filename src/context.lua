@@ -3610,7 +3610,10 @@ local function build_lifecycle_document(document, mutation, admitted)
     if not kind_fields then
         return nil, failure("InvalidLifecycleMutation", "Context lifecycle kind is unknown")
     end
-    local allowed = { kind = true, updated_at = true, view_manifest_digest = true }
+    local allowed = {
+        kind = true, updated_at = true, view_manifest_digest = true,
+        view_compaction_id = true, view_context_generation = true,
+    }
     for name in pairs(kind_fields) do allowed[name] = true end
     for key in pairs(mutation) do
         if type(key) ~= "string" or not allowed[key] then
@@ -3636,6 +3639,20 @@ local function build_lifecycle_document(document, mutation, admitted)
     )
     if not manifest_digest then return nil, digest_error end
 
+    local compaction_id = mutation.view_compaction_id
+    if compaction_id ~= nil then
+        local compaction_error
+        compaction_id, compaction_error = attribute_text(
+            compaction_id, admitted.maximum_identifier_bytes, "/Lifecycle/ViewCompactionId", false
+        )
+        if not compaction_id then return nil, compaction_error end
+        if not valid_integer(mutation.view_context_generation, 1) then
+            return nil, failure("InvalidLifecycleMutation", "compacted lifecycle view needs its generation")
+        end
+    elseif mutation.view_context_generation ~= nil then
+        return nil, failure("InvalidLifecycleMutation", "plain lifecycle view cannot carry compaction generation")
+    end
+
     local candidate, canonical_or_error = lifecycle_candidate(document)
     if not candidate then return nil, canonical_or_error end
     local canonical = canonical_or_error
@@ -3657,24 +3674,30 @@ local function build_lifecycle_document(document, mutation, admitted)
         fields = fields_or_error,
     }
 
-    -- A lifecycle mutation publishes a new complete model-view generation.
-    -- Recording the publication event prevents an older manifest event from
-    -- making the rebuilt document stale after import or compaction history.
+    -- Hash the complete fact prefix before the publication event. Including
+    -- the event's own digest in that prefix would create a circular manifest.
+    local view_last_sequence = #candidate.facts
+    local view_fields = {
+        manifestDigest = manifest_digest,
+        firstEventSeq = view_last_sequence == 0 and "0" or "1",
+        lastEventSeq = tostring(view_last_sequence),
+        replacesManifestDigest = canonical.model_view.active_manifest.digest,
+    }
+    if compaction_id then
+        view_fields.compactionId = compaction_id
+        view_fields.viewContextGeneration = tostring(mutation.view_context_generation)
+    end
     candidate.facts[#candidate.facts + 1] = {
         seq = #candidate.facts + 1,
         type = "model_view_published",
         at = updated_at,
-        fields = {
-            manifestDigest = manifest_digest,
-            firstEventSeq = #candidate.facts == 0 and "0" or "1",
-            lastEventSeq = tostring(#candidate.facts + 1),
-            replacesManifestDigest = canonical.model_view.active_manifest.digest,
-        },
+        fields = view_fields,
     }
     candidate.model_view.active_manifest = {
         digest = manifest_digest,
-        first_event_seq = #candidate.facts == 0 and 0 or 1,
-        last_event_seq = #candidate.facts,
+        first_event_seq = view_last_sequence == 0 and 0 or 1,
+        last_event_seq = view_last_sequence,
+        compaction_id = compaction_id,
     }
     return normalize_document(candidate, admitted)
 end
