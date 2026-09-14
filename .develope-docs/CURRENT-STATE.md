@@ -2,12 +2,16 @@
 
 更新日期：2026-09-14
 
-负责人已要求恢复开发、拉回 WSL 变更并推送检查点。WSL 的九个提交及未提交草稿
-已回收；本次完成 **N1 Context 只读管理交互**。完整 suite **489/489**；
-design-contract **7612**（xmllint 可用）、proof-evidence **56**、
-coding-readiness **553** 条断言通过，TP-003/006/008/010 与 RP-001 全部 PASS。
-下一节点为 N2 元数据写入，见 [本次检查点](CHECKPOINT-2026-09-14.md)
-及 [Context 管理计划](CONTEXT-REPL-PLAN.md)。Release Gate R 继续关闭。
+当前优先级已转为 **Windows 首个可用预览包**，部署目标为 Server 2008（非 R2），
+统一按 XP SP3 / win32-x86 基线推进。已修复首次发布、配置容量、Windows 原生文件/
+进程及已有会话入口的实际阻塞；完整 suite **491/491**，用户指定的现代 Windows
+远端已完成合成模型工具回合、文件/命令审批、保存和重开。见
+[Windows 预览检查点](WINDOWS-PREVIEW-2026-09-14.md) 与
+[首次使用说明](../release/WINDOWS-QUICKSTART.md)。
+
+该远端实际为 Server 2025，不能替代 XP / Server 2008 验收。Release Gate R
+继续关闭。此前 N1 Context 只读管理完成；N2/N3 后续按
+[Context 管理计划](CONTEXT-REPL-PLAN.md) 推进。
 
 ## yaca 仓库
 

@@ -291,6 +291,12 @@ static WCHAR *utf8_to_wide(const char *bytes, size_t length)
   {
     return NULL;
   }
+  /* Empty argv elements are valid. MultiByteToWideChar rejects a zero input
+  ** length, so represent the empty UTF-16 string without calling it. */
+  if (length == 0)
+  {
+    return (WCHAR *)calloc(1U, sizeof(WCHAR));
+  }
   required = MultiByteToWideChar(
     CP_UTF8,
     MB_ERR_INVALID_CHARS,
@@ -1629,9 +1635,11 @@ static int l_fs_flush_directory(lua_State *L)
     {
       return push_failure(L, "InvalidEncoding", "filesystem path is not strict UTF-8");
     }
+    /* FlushFileBuffers requires GENERIC_WRITE, including directory handles.
+    ** A read-only handle opens successfully but every publication then fails. */
     handle = CreateFileW(
       wide_path,
-      GENERIC_READ,
+      GENERIC_READ | GENERIC_WRITE,
       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
       NULL,
       OPEN_EXISTING,
@@ -3237,6 +3245,17 @@ static int l_fs_open_read_verified(lua_State *L)
   {
     free_windows_snapshot(&snapshot);
     return push_failure(L, "TargetChanged", "direct Windows read target changed");
+  }
+  /* BackupRead/BackupSeek during stream inspection may leave this handle at EOF. */
+  {
+    LARGE_INTEGER beginning;
+    beginning.QuadPart = 0;
+    if (!SetFilePointerEx(snapshot.target_handle, beginning, NULL, FILE_BEGIN))
+    {
+      DWORD error_value = GetLastError();
+      free_windows_snapshot(&snapshot);
+      return push_windows_failure(L, error_value, "direct Windows read rewind failed");
+    }
   }
   file = push_file(L);
   file->handle = snapshot.target_handle;
@@ -7431,7 +7450,8 @@ static int build_wide_environment(
       free_wide_environment(environment);
       return 0;
     }
-    if (environment->count == capacity)
+    /* Keep one spare slot for the Windows-derived SystemRoot below. */
+    if (environment->count + 1U >= capacity)
     {
       WCHAR **expanded;
 
@@ -7461,6 +7481,41 @@ static int build_wide_environment(
     lua_pop(L, 1);
   }
   lua_pop(L, 1);
+  {
+    int has_system_root;
+    has_system_root = 0;
+    for (index = 0; index < environment->count; index++)
+    {
+      if (_wcsnicmp(environment->items[index], L"SystemRoot=", 11U) == 0)
+      {
+        has_system_root = 1;
+        break;
+      }
+    }
+    if (!has_system_root)
+    {
+      WCHAR *entry;
+      UINT length;
+      /* Winsock/provider initialization needs SystemRoot even in a minimal
+      ** environment. Resolve it through the XP system API, never ambient
+      ** environment data; proxy, CA and credential variables stay excluded. */
+      entry = (WCHAR *)calloc(11U + MAX_PATH, sizeof(WCHAR));
+      if (entry == NULL)
+      {
+        free_wide_environment(environment);
+        return 0;
+      }
+      memcpy(entry, L"SystemRoot=", 11U * sizeof(WCHAR));
+      length = GetSystemWindowsDirectoryW(entry + 11U, MAX_PATH);
+      if (length == 0 || length >= MAX_PATH)
+      {
+        free(entry);
+        free_wide_environment(environment);
+        return 0;
+      }
+      environment->items[environment->count++] = entry;
+    }
+  }
   qsort(
     environment->items,
     environment->count,
@@ -8307,6 +8362,25 @@ static int l_process_start(lua_State *L)
     startup.hStdError = stderr_write;
     creation_flags = CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT
       | CREATE_NO_WINDOW;
+    /* Before Windows 8 a process can belong to only one job. The onefile
+    ** launcher permits explicit breakaway so this suspended child can enter
+    ** its own cancellable job. Never request breakaway from an unrelated job
+    ** that has not granted it; modern Windows can use nested jobs there. */
+    {
+      JOBOBJECT_EXTENDED_LIMIT_INFORMATION parent_limits;
+      memset(&parent_limits, 0, sizeof(parent_limits));
+      if (QueryInformationJobObject(
+          NULL,
+          JobObjectExtendedLimitInformation,
+          &parent_limits,
+          sizeof(parent_limits),
+          NULL)
+          && (parent_limits.BasicLimitInformation.LimitFlags
+            & JOB_OBJECT_LIMIT_BREAKAWAY_OK))
+      {
+        creation_flags |= CREATE_BREAKAWAY_FROM_JOB;
+      }
+    }
     if (!CreateProcessW(
         application_name,
         command_line,

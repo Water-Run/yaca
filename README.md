@@ -18,7 +18,7 @@ v0.1 is planned as exactly three independently built and qualified portable arch
 
 Each archive embeds Lua 5.5 and does not depend on a system Lua installation. Windows archives contain `yaca.exe`, `Install.cmd`, `README.txt`, `LICENSE`, and `docs/`; Linux uses `yaca` and `Install.sh` with the same outer shape. The thin install helper may add the extracted directory to `PATH`; it does not copy the program or create an install database.
 
-The durable data root is always `__yaca__` next to the actual executable, regardless of the caller's current directory. v0.1 has no built-in updater or code-signing promise. There is no downloadable or verified archive yet.
+The durable data root is always `__yaca__` next to the actual executable, regardless of the caller's current directory. v0.1 has no built-in updater or code-signing promise. A cross-built win32-x86 preview is now available for preliminary deployment; see the [Windows quickstart](release/WINDOWS-QUICKSTART.md). Real XP / Server 2008 qualification and the formal release remain pending.
 
 ## Product shape
 

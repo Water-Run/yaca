@@ -4860,6 +4860,11 @@ function M.start_published_agent(composed, chat, message, source)
         initial_snapshot = handoff.input
     end
 
+    -- A new draft has no Context hash until begin_main publishes its XML.
+    -- Bind every activity, including later main/side turns, to that published
+    -- identity instead of retaining the pre-publication status snapshot.
+    status = chat.draft.status()
+
     local contexts = composed.contexts
     local operation_journal = composed.publication.operation_journal()
     local context_module = require("context")
@@ -7568,7 +7573,14 @@ function M.new_application_coordinator(ports, options)
             message,
             "terminal"
         )
-        if not constructed then return nil, agent_error end
+        if not constructed then
+            local draft_status = admitted_ports.chat.draft.status()
+            if draft_status.lifecycle == "closed" then
+                deferred_failure = agent_error
+                lifecycle = "closing"
+            end
+            return nil, agent_error
+        end
         if type(constructed) ~= "table"
             or type(constructed.loop) ~= "table"
             or type(constructed.driver) ~= "table"
@@ -8421,12 +8433,19 @@ function M.run_interactive_chat(composed, chat, runtime, initial_agent)
         end
         return nil, primary_error
     end
-    local draft_models, draft_models_error = new_draft_model_selection(
-        chat.draft,
-        composed.contexts
-    )
-    if not draft_models then
-        return fail_before_coordinator(draft_models_error)
+    local draft_models
+    if initial_agent then
+        -- A reopened Context already has a saved Model owner and no draft.update.
+        draft_models = initial_agent.models
+    else
+        local draft_models_error
+        draft_models, draft_models_error = new_draft_model_selection(
+            chat.draft,
+            composed.contexts
+        )
+        if not draft_models then
+            return fail_before_coordinator(draft_models_error)
+        end
     end
     local terminal_error
     terminal_port, terminal_error = composed.backend.new_terminal("cooked")
@@ -8478,6 +8497,8 @@ local function model_setup_sections(values)
         Protocol = values.protocol,
         Endpoint = values.endpoint,
         RemoteModel = values.remote_model,
+        ContextLength = values.context_length,
+        MaxOutputTokens = values.max_output_tokens,
     }
     if values.key ~= "" then model_values.Key = values.key end
     return {
@@ -8512,6 +8533,8 @@ local function model_setup_changes(values)
         { section = section, key = "Protocol", value = values.protocol },
         { section = section, key = "Endpoint", value = values.endpoint },
         { section = section, key = "RemoteModel", value = values.remote_model },
+        { section = section, key = "ContextLength", value = values.context_length },
+        { section = section, key = "MaxOutputTokens", value = values.max_output_tokens },
     }
     if values.key ~= "" then
         changes[#changes + 1] = { section = section, key = "Key", value = values.key }
@@ -9013,6 +9036,43 @@ function M.run_model_repl(composed, runtime)
         if not shown then return fail_input(shown_error) end
     end
 
+    local function read_token_limit(label, default_value, minimum, maximum)
+        while true do
+            local answer, answer_error = read_value(
+                label .. " [" .. tostring(default_value) .. "]: ", false
+            )
+            if answer == false or answer == nil then return answer, answer_error end
+            if answer == "" then answer = tostring(default_value) end
+            local value = #answer <= 7 and answer:match("^%d+$") and tonumber(answer)
+            if math.type(value) == "integer" and value >= minimum and value <= maximum then
+                return value
+            end
+            local shown, show_error = input.write(
+                "Enter an integer from " .. tostring(minimum) .. " to "
+                    .. tostring(maximum) .. ".\n"
+            )
+            if not shown then return nil, show_error end
+        end
+    end
+    wrote, write_error = input.write(
+        "Set token limits within the provider's supported model window.\n"
+    )
+    if not wrote then return fail_input(write_error) end
+    local context_length
+    context_length, read_error = read_token_limit(
+        "Context length (tokens)", current and current.context_length or 32768, 2, 2000000
+    )
+    if context_length == false then return cancel_input() end
+    if context_length == nil then return fail_input(read_error) end
+    local max_output_tokens
+    max_output_tokens, read_error = read_token_limit(
+        "Maximum output tokens",
+        math.min(current and current.max_output_tokens or 4096, context_length - 1),
+        1, math.min(131072, context_length - 1)
+    )
+    if max_output_tokens == false then return cancel_input() end
+    if max_output_tokens == nil then return fail_input(read_error) end
+
     local key_prompt = current and current.key_configured == true
         and "Key (hidden; Enter keeps the configured value): "
         or "Key (hidden; Enter configures no key): "
@@ -9022,13 +9082,16 @@ function M.run_model_repl(composed, runtime)
     if key == nil then return fail_input(read_error) end
 
     local summary = string.format(
-        "Publish Model.%s protocol=%s endpoint=%s remote=%s enabled=%s key=%s\n",
+        "Publish Model.%s protocol=%s endpoint=%s remote=%s enabled=%s key=%s"
+            .. " context=%d output=%d\n",
         model_setup_diagnostic(name, 128),
         protocol,
         model_setup_diagnostic(endpoint, 1024),
         model_setup_diagnostic(remote_model, 256),
         tostring(enabled),
-        key ~= "" and "provided" or (current and current.key_configured and "kept" or "none")
+        key ~= "" and "provided" or (current and current.key_configured and "kept" or "none"),
+        context_length,
+        max_output_tokens
     )
     wrote, write_error = input.write(summary)
     if not wrote then return fail_input(write_error) end
@@ -9052,6 +9115,8 @@ function M.run_model_repl(composed, runtime)
         protocol = protocol,
         endpoint = endpoint,
         remote_model = remote_model,
+        context_length = context_length,
+        max_output_tokens = max_output_tokens,
         key = key,
         enabled = enabled,
     }

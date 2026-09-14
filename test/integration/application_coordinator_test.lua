@@ -638,6 +638,10 @@ local function fixture(settings)
     end
     local agent_factory = function(message, source)
         log[#log + 1] = "agent:" .. source .. ":" .. message
+        if settings.factory_error then
+            settings.factory_closed = true
+            return nil, settings.factory_error
+        end
         saved_model = draft_model
         if settings.automatic_preflight then
             loop_status = status("Preparing", {
@@ -657,7 +661,7 @@ local function fixture(settings)
     end
     function chat_draft.status()
         return {
-            lifecycle = "not-saved",
+            lifecycle = settings.factory_closed and "closed" or "not-saved",
             workspace = "/workspace",
             model = draft_model,
             permission = "Std",
@@ -970,6 +974,21 @@ return {
                 A.falsy(table.concat(f.log, "|"):find("must not run", 1, true))
                 A.equal(f.coordinator:status().lifecycle, "closed")
                 A.contains(table.concat(f.log, "|"), "draft-close")
+            end,
+        },
+        {
+            name = "failed first Agent construction closes a consumed draft and restores input",
+            run = function()
+                local f = fixture({
+                    factory_error = { code = "InvalidContextIdentity", message = "identity missing" },
+                    batches = input_lines({ "implement", "must not run" }),
+                })
+                local result, result_error = f.coordinator:run()
+                A.falsy(result)
+                A.equal(result_error.code, "InvalidContextIdentity")
+                A.falsy(table.concat(f.log, "|"):find("must not run", 1, true))
+                A.equal(f.log[#f.log - 1], "terminal-restore")
+                A.equal(f.log[#f.log], "terminal-close")
             end,
         },
         {

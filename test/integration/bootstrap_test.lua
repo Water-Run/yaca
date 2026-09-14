@@ -1200,6 +1200,10 @@ return {
                     "", -- enabled=yes
                     "https://api.example/v1/chat",
                     "remote-main",
+                    "0", -- rejected before any publication
+                    "", -- context length=32768
+                    "32768", -- output must be smaller than the context window
+                    "", -- maximum output=4096
                     "super-secret-key",
                     "APPLY",
                 }
@@ -1244,6 +1248,8 @@ return {
                 A.contains(published, "Enabled = true")
                 A.contains(published, "Endpoint = \"https://api.example/v1/chat\"")
                 A.contains(published, "RemoteModel = \"remote-main\"")
+                A.contains(published, "ContextLength = 32768")
+                A.contains(published, "MaxOutputTokens = 4096")
                 A.contains(published, "Key = \"super-secret-key\"")
                 A.deep_equal(modes, { "cooked", "raw", "cooked" })
                 A.equal(answer_index, #answers)
@@ -1313,6 +1319,8 @@ return {
                     "yes",
                     "https://api.example/v1/chat",
                     "remote-main",
+                    "128000",
+                    "8192",
                     "xp-secret-key",
                     "APPLY",
                 }
@@ -1370,6 +1378,8 @@ return {
                 local published = assert(filesystem.bytes(config_path))
                 A.contains(published, "[Model.主要]")
                 A.contains(published, "Key = \"xp-secret-key\"")
+                A.contains(published, "ContextLength = 128000")
+                A.contains(published, "MaxOutputTokens = 8192")
                 A.deep_equal(modes, { "cooked", "raw", "cooked" })
                 A.equal(answer_index, #answers)
                 A.equal(calls.directory_creates, 1)
@@ -1386,7 +1396,7 @@ return {
                 local native, filesystem, calls, native_path = production_native()
                 local answers = {
                     "", "", "", "https://api.example/v1/chat",
-                    "remote-main", "secret-before-restore", "APPLY",
+                    "remote-main", "", "", "secret-before-restore", "APPLY",
                 }
                 local answer_index = 0
                 local restores = 0

@@ -1056,7 +1056,7 @@ local function fixture(settings)
             model = "Primary",
             double_check = true,
             context_prompt = "workspace context",
-            context_hash = "0123456789ABCDEF",
+            context_hash = published and "0123456789ABCDEF" or false,
         }
     end
     function draft.close()
@@ -1585,6 +1585,40 @@ return {
                     A.truthy(agent.loop:status().halted)
                     A.contains(table.concat(f.log, "|"), scenario.log)
                 end
+            end,
+        },
+        {
+            name = "reopened interactive chat uses its saved Model owner and releases failed terminal setup",
+            run = function()
+                local f = fixture({ continuing = true })
+                local calls = {}
+                f.composed.backend.clock_port.sleep_ms = function() return true end
+                f.composed.backend.new_terminal = function(mode)
+                    A.equal(mode, "cooked")
+                    calls[#calls + 1] = "terminal"
+                    return nil, { code = "TerminalUnavailable", message = "test terminal failure" }
+                end
+                local draft = {
+                    close = function() calls[#calls + 1] = "draft-close" return true end,
+                }
+                local agent = {
+                    models = { list = function() return {} end },
+                    compaction = {
+                        close = function() calls[#calls + 1] = "compaction-close" return true end,
+                    },
+                    session = {
+                        close = function() calls[#calls + 1] = "session-close" return true end,
+                    },
+                    draft = draft,
+                }
+                local result, result_error = f.main.run_interactive_chat(f.composed, {
+                    kind = "continue-chat", outcome = "ready", draft = draft,
+                }, { cli = {}, stdio_facts = {} }, agent)
+                A.falsy(result)
+                A.equal(result_error.code, "TerminalUnavailable")
+                A.deep_equal(calls, {
+                    "terminal", "compaction-close", "session-close", "draft-close",
+                })
             end,
         },
         {
