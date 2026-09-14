@@ -139,8 +139,16 @@ output, including secrets in decoded binary fields. The TTY requirement remains.
 
 Controller gaps remain in management interactions.
 `--config-repl` edits catalog fields in valid configurations and still creates
-a repair template when the file is missing. Arbitrary invalid-source repair and
-Model/Permission section management are pending; `--model-repl` provides the
+a repair template when the file is missing. Invalid bounded files open a private
+line repair draft: `list [page]` shows locations and schema labels; `replace <line>`
+and `insert <line>` read a complete hidden INI line, while `delete <line>` removes
+only that line. `preview`/`validate` check the whole candidate, and `save config-repair-N`
+publishes only the exact valid draft. Unmodified bytes, BOM and line endings are
+preserved; unknown records are never silently discarded. `reset`, `reload`,
+`cancel` and `quit` retain their explicit meanings. External changes require reload;
+uncertain publication stops the editor. Source values, comments and resource names
+are hidden throughout repair, and existing byte/line/input limits still apply.
+Model/Permission section management remains pending; `--model-repl` provides the
 existing offline Model creation/edit flow. `--context-repl recent|full` opens the offline Context manager. It
 shows the requested initial catalog and accepts `list [recent|full]`,
 `inspect <selector>`, `search <query>`, `refresh`, `help`, and `quit`.

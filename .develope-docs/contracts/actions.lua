@@ -45,6 +45,15 @@ return {
       value_input = "separate-schema-typed-ini-value",
       secret_input = "raw-no-echo", online = false,
     },
+    config_repair = {
+      commands = {
+        "list [page]", "replace <line>", "insert <line>", "delete <line>",
+        "preview", "validate", "save <repair-id>", "reset", "reload", "cancel", "quit",
+      },
+      value_input = "separate-hidden-physical-line",
+      save_identity = "exact-current-config-repair-N",
+      online = false,
+    },
   },
   exit_classes = {
     success = 0,

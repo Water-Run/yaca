@@ -649,6 +649,105 @@ return {
             end,
         },
         {
+            name = "invalid configuration enters offline repair and publishes only explicit hidden line edits",
+            run = function()
+                local valid = valid_source()
+                local line = select(2, valid:gsub("\n", "")) + 1
+                for _, settings in ipairs({ {}, { os = "windows", arch = "x86" } }) do
+                    settings.source = valid .. 'Unknown = "unknown-private-value"\n'
+                    local observed = config_editor_fixture({
+                        "help", "list", "save config-repair-1",
+                        "replace " .. tostring(line), "; replacement-private-comment",
+                        "save config-repair-1", "preview", "save config-repair-2",
+                    }, settings)
+                    A.equal(observed.code, 0, observed.stderr .. observed.output)
+                    A.contains(observed.output, "YACA CONFIGURATION REPAIR")
+                    A.contains(observed.output, "VALIDATION FAILED")
+                    A.contains(observed.output, "SCHEMA VALID / AGENT READY")
+                    A.contains(observed.output, "ConfigEditorStale")
+                    A.contains(observed.output, "Repaired configuration published offline")
+                    for _, hidden in ipairs({ "bootstrap-secret", "unknown-private-value",
+                        "replacement-private-comment" }) do
+                        A.falsy(observed.output:find(hidden, 1, true))
+                        A.falsy(observed.stderr:find(hidden, 1, true))
+                    end
+                    A.equal(observed.filesystem.bytes(observed.path), valid .. "; replacement-private-comment\n")
+                    A.deep_equal(observed.modes, { "cooked", "raw", "cooked" })
+                    A.equal(observed.restores, #observed.modes)
+                    A.equal(observed.calls.process_starts, 0)
+                    A.equal(observed.calls.directory_creates, 0)
+                end
+            end,
+        },
+        {
+            name = "configuration repair reset cancel Esc and EOF preserve the damaged source",
+            run = function()
+                local valid = valid_source()
+                local original = valid .. "broken\n"
+                local line = select(2, valid:gsub("\n", "")) + 1
+                for _, ending in ipairs({ "quit", "cancel", { kind = "action", intent = "cancel" }, false }) do
+                    local answers = { "delete " .. tostring(line), "reset", "validate" }
+                    if ending then answers[#answers + 1] = ending end
+                    local observed = config_editor_fixture(answers, { source = original })
+                    A.equal(observed.code, ending == "quit" and 0 or 7, observed.stderr .. observed.output)
+                    A.equal(observed.filesystem.bytes(observed.path), original)
+                    A.falsy(table.concat(observed.filesystem.operations, "|"):find("create:", 1, true))
+                    A.equal(observed.restores, #observed.modes)
+                end
+                local observed = config_editor_fixture({ "replace " .. tostring(line),
+                    { kind = "action", intent = "cancel" } }, { source = original })
+                A.equal(observed.code, 7, observed.stderr .. observed.output)
+                A.deep_equal(observed.modes, { "cooked", "raw" })
+                A.equal(observed.filesystem.bytes(observed.path), original)
+                A.equal(observed.restores, #observed.modes)
+            end,
+        },
+        {
+            name = "configuration repair requires explicit reload after an external replacement",
+            run = function()
+                local valid = valid_source()
+                local original = valid .. "broken\n"
+                local line = select(2, valid:gsub("\n", "")) + 1
+                local observed = config_editor_fixture({
+                    "delete " .. tostring(line), "save config-repair-2", "reload",
+                    "delete " .. tostring(line), "save config-repair-4",
+                }, { source = original, before_poll = function(index, filesystem, path)
+                    if index == 2 then filesystem.external_replace(path, original .. "; external\n") end
+                    if index == 3 then
+                        A.falsy(table.concat(filesystem.operations, "|"):find("create:", 1, true))
+                    end
+                end })
+                A.equal(observed.code, 0, observed.stderr .. observed.output)
+                A.contains(observed.output, "ConfigStale")
+                A.equal(observed.filesystem.bytes(observed.path), valid .. "; external\n")
+                A.equal(observed.calls.process_starts, 0)
+            end,
+        },
+        {
+            name = "configuration repair retries known publication failures and stops on uncertain durability",
+            run = function()
+                local valid = valid_source()
+                local line = select(2, valid:gsub("\n", "")) + 1
+                local observed = config_editor_fixture({
+                    "delete " .. tostring(line), "save config-repair-2", "preview", "save config-repair-2",
+                }, { source = valid .. "broken\n", before_poll = function(index, filesystem)
+                    if index == 2 then filesystem.faults.replace = true end
+                    if index == 4 then filesystem.faults.replace = false end
+                end })
+                A.equal(observed.code, 0, observed.stderr .. observed.output)
+                A.contains(observed.output, "InjectedReplace")
+                A.equal(observed.filesystem.bytes(observed.path), valid)
+                observed = config_editor_fixture({ "delete " .. tostring(line), "save config-repair-2", "quit" },
+                    { source = valid .. "broken\n", before_poll = function(index, filesystem)
+                        if index == 2 then filesystem.faults.flush_directory = true end
+                    end })
+                A.equal(observed.code, 1, observed.stderr .. observed.output)
+                A.contains(observed.stderr, "ConfigPublishUnknown")
+                A.equal(observed.polls, 2)
+                A.equal(observed.restores, #observed.modes)
+            end,
+        },
+        {
             name = "config REPL quit cancel Esc and EOF discard only its unsaved draft",
             run = function()
                 for _, ending in ipairs({ "quit", "cancel", { kind = "action", intent = "cancel" }, false }) do
@@ -1089,13 +1188,22 @@ return {
                 A.contains(table.concat(stdout), "repair template")
 
                 stdout = {}
+                function native.terminal_poll(handle)
+                    return true, handle.cancelled and { { kind = "terminal", outcome = "cancelled" } }
+                        or { { kind = "action", intent = "text", text = "quit\n" } }
+                end
+                function native.terminal_cancel(handle)
+                    handle.cancelled = true
+                    return true, true
+                end
+                function native.terminal_join() return true, { outcome = "cancelled" } end
                 A.equal(main.run_cli({
                     [0] = "/release/yaca", "--config-repl",
-                }, ports), 1)
+                }, ports), 0, table.concat(stderr) .. table.concat(stdout))
                 A.equal(filesystem.bytes(config_path), template)
                 A.equal(calls.directory_creates, 1)
                 A.equal(calls.process_starts, 0)
-                A.contains(table.concat(stdout), "requires repair")
+                A.contains(table.concat(stdout), "YACA CONFIGURATION REPAIR")
 
                 native.workspace_inspect = function()
                     return {

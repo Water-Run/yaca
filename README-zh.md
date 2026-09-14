@@ -113,7 +113,12 @@ Context。有效配置中已登记的秘密值，包括二进制字段解码后�
 
 管理交互仍有 controller 缺口。
 `--config-repl` 已支持有效配置的 catalog 字段编辑，缺文件时仍创建修复模板；
-任意无效源的交互修复及 Model/Permission 区域管理尚待完成，`--model-repl`
+无效配置进入私有行修复：`list [page]` 显示位置与字段标签，`replace <line>` /
+`insert <line>` 单独读取完整隐藏 INI 行，`delete <line>` 精确删除一行。`preview` /
+`validate` 检查整份候选，只有有效草稿才能用 `save config-repair-N` 保存。
+未修改字节、BOM 和换行保留；未知记录不会自动丢弃。原始值、注释与资源名称均隐藏，
+沿用现有字节/行数上限；`reset` / `reload` / `cancel` / `quit` 均需显式操作，
+外部修改要求重载，发布 unknown 时停止。Model/Permission 区域管理尚待完成，`--model-repl`
 已提供既有的离线 Model 创建/编辑流程。`--context-repl recent|full` 已接通离线管理器，支持
 `list [recent|full]`、`inspect <selector>`、`search <query>`、`refresh`、
 `help` 和 `quit`。列表与搜索使用有界快照，刷新时显式重扫；检查时复核精确目标，

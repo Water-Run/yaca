@@ -13,6 +13,7 @@ local text = require("text")
 local M = {}
 
 local draft_states = setmetatable({}, { __mode = "k" })
+local repair_states = setmetatable({}, { __mode = "k" })
 
 local function failure(code, message, reason, detail)
     local result = { code = code, message = message }
@@ -1622,6 +1623,195 @@ function M.new(ports, options)
             context_overrides = overrides,
             consumed = false,
         })
+    end
+
+    local function repair_state(draft)
+        local state = repair_states[draft]
+        if not state or state.owner ~= owner or state.consumed then
+            return nil, failure("InvalidConfigDraft", "configuration repair is stale or foreign")
+        end
+        return state
+    end
+
+    local function repair_handle(state)
+        local draft = readonly({}, "private configuration repair")
+        repair_states[draft] = state
+        return draft
+    end
+
+    local function repair_source(state)
+        local parts = { state.bom }
+        for _, line in ipairs(state.lines) do
+            parts[#parts + 1] = line.content
+            parts[#parts + 1] = line.ending
+        end
+        return table.concat(parts)
+    end
+
+    ---Captures an invalid file for explicit, private line edits. Unparsed bytes
+    -- never enter a public draft or projection, and opening performs no writes.
+    function service.begin_repair(path)
+        if not valid_absolute_path(path) then
+            return nil, failure("InvalidConfigPath", "config repair path must be absolute")
+        end
+        local source, identity_or_error = read_file(path)
+        if not source then return nil, identity_or_error end
+        local generation, validation_error = parse_generation(source, nil, generation_number + 1)
+        if generation then
+            return nil, failure("ConfigRepairNotRequired", "use the field editor for valid configuration")
+        end
+        if not validation_error or validation_error.code ~= "ConfigInvalid" then
+            return nil, validation_error or failure("ConfigEditorFailure", "source validation failed")
+        end
+        local digest_value, digest_error = private_digest(source)
+        if not digest_value then return nil, digest_error end
+        local bom = source:sub(1, 3) == "\239\187\191" and "\239\187\191" or ""
+        local lines = {}
+        local cursor = #bom + 1
+        local newline
+        while cursor <= #source do
+            if #lines >= admitted.ini_limits.maximum_lines then
+                return nil, failure("ConfigRepairLimit", "source exceeds the repair line limit")
+            end
+            local ending_at = source:find("\n", cursor, true)
+            local finish = ending_at and ending_at - 1 or #source
+            local ending = ending_at and "\n" or ""
+            if ending_at and finish >= cursor and source:byte(finish) == 13 then
+                finish = finish - 1
+                ending = "\r\n"
+            end
+            lines[#lines + 1] = { content = source:sub(cursor, finish), ending = ending }
+            if not newline and ending ~= "" then newline = ending end
+            if not ending_at then break end
+            cursor = ending_at + 1
+        end
+        return repair_handle({
+            owner = owner, mode = "replace", path = path,
+            base_digest = digest_value, base_identity = identity_or_error,
+            lines = lines, bom = bom, newline = newline or "\n",
+            edits = {}, consumed = false,
+        })
+    end
+
+    ---Returns line locations and schema labels, never source values, comments,
+    -- resource names, or raw parser messages from an invalid configuration.
+    function service.repair_status(draft, page)
+        local state, state_error = repair_state(draft)
+        if not state then return nil, state_error end
+        page = page or 1
+        if not valid_integer(page, 1) or page > math.max(1, (#state.lines + 31) // 32) then
+            return nil, failure("ConfigEditorPage", "repair line page is out of range")
+        end
+        local generation, parse_error = parse_generation(repair_source(state), nil, generation_number + 1)
+        local rows = {}
+        local family
+        for index, line in ipairs(state.lines) do
+            local content = line.content
+            local label = "unparsed line"
+            local section = content:match("^%s*%[([^%]]+)%]%s*$")
+                or content:match("^%s*%[([^%]]+)%]%s*[;#]")
+            if section then
+                family = section_family(section)
+                label = family and (family == "Model." and "Model.*"
+                    or family == "Permission." and "Permission.*" or family) or "unknown section"
+            elseif content:match("^%s*$") then
+                label = "blank"
+            elseif content:match("^%s*[;#]") then
+                label = "comment"
+            else
+                local key = content:match("^%s*([A-Za-z][A-Za-z0-9]*)%s*=")
+                local descriptor = family and key and DESCRIPTORS[family].by_key[key]
+                if descriptor then label = descriptor.id end
+            end
+            if index > (page - 1) * 32 and index <= page * 32 then
+                rows[#rows + 1] = { line = index, label = label }
+            end
+        end
+        local detail = not generation and type(parse_error.detail) == "table" and parse_error.detail or {}
+        return freeze({
+            valid = generation ~= nil,
+            agent_ready = generation and generation.agent_ready == true or false,
+            reason = not generation and parse_error.reason or false,
+            syntax_reason = detail.reason or false,
+            error_line = valid_integer(detail.line, 1) and detail.line or false,
+            error_column = valid_integer(detail.column, 1) and detail.column or false,
+            lines = #state.lines, page = page, rows = rows, edits = state.edits,
+            maximum_line_bytes = admitted.ini_limits.maximum_line_bytes,
+        }, "configuration repair status")
+    end
+
+    ---Changes exactly one physical line while retaining every untouched byte.
+    -- Intermediate candidates may remain invalid; only commit can publish.
+    function service.edit_repair(draft, operation, number, value)
+        local state, state_error = repair_state(draft)
+        if not state then return nil, state_error end
+        if operation ~= "replace" and operation ~= "insert" and operation ~= "delete" then
+            return nil, failure("InvalidConfigEdit", "unknown line repair operation")
+        end
+        if not valid_integer(number, 1)
+            or number > #state.lines + (operation == "insert" and 1 or 0)
+        then
+            return nil, failure("InvalidConfigEdit", "repair line is out of range")
+        end
+        if #state.edits >= 256 or (operation == "insert"
+            and #state.lines >= admitted.ini_limits.maximum_lines)
+        then
+            return nil, failure("ConfigRepairLimit", "configuration repair limit reached")
+        end
+        if operation ~= "delete" and (not valid_text(value, admitted.ini_limits.maximum_line_bytes)
+            or value:find("[\r\n]"))
+        then
+            return nil, failure("InvalidConfigEdit", "enter one bounded NUL-free UTF-8 line")
+        end
+        if operation == "delete" and value ~= nil then
+            return nil, failure("InvalidConfigEdit", "delete does not accept replacement text")
+        end
+        local next_state = {}
+        for key, item in pairs(state) do next_state[key] = item end
+        next_state.lines = {}
+        next_state.edits = {}
+        for index, line in ipairs(state.lines) do next_state.lines[index] = line end
+        for index, edit in ipairs(state.edits) do next_state.edits[index] = edit end
+        if operation == "delete" then
+            table.remove(next_state.lines, number)
+        elseif operation == "replace" then
+            next_state.lines[number] = { content = value, ending = state.lines[number].ending }
+        else
+            local ending = state.newline
+            if number == #state.lines + 1 and #state.lines > 0
+                and state.lines[#state.lines].ending == ""
+            then
+                local last = state.lines[#state.lines]
+                next_state.lines[#state.lines] = { content = last.content, ending = state.newline }
+                ending = ""
+            end
+            table.insert(next_state.lines, number, { content = value, ending = ending })
+        end
+        if #repair_source(next_state) > admitted.ini_limits.maximum_bytes then
+            return nil, failure("ConfigRepairLimit", "configuration repair exceeds the byte limit")
+        end
+        next_state.edits[#next_state.edits + 1] = { operation = operation, line = number }
+        return repair_handle(next_state)
+    end
+
+    ---Validates the complete repaired candidate before creating a temporary,
+    -- then reuses the ordinary exact-source and atomic-publication transaction.
+    function service.commit_repair(draft, temporary_path)
+        local state, state_error = repair_state(draft)
+        if not state then return nil, state_error end
+        local source = repair_source(state)
+        local generation, document_or_error, overrides = parse_generation(source, nil, generation_number + 1)
+        if not generation then return nil, document_or_error end
+        local publication_state = {
+            mode = "replace", path = state.path, base_digest = state.base_digest,
+            base_identity = state.base_identity, candidate_source = source,
+            document = document_or_error, generation = generation, context_overrides = overrides,
+            consumed = false,
+        }
+        local candidate = new_draft(owner, publication_state)
+        local published, publish_error = service.commit_draft(candidate, temporary_path)
+        if publication_state.consumed then state.consumed = true end
+        return published, publish_error
     end
 
     ---Applies a bounded transaction-sized set of typed semantic changes.

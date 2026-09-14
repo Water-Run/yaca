@@ -58,7 +58,7 @@ return {
 
   field_editor = {
     scope = "valid-main-ini-catalog-fields",
-    source_repair = "no-arbitrary-invalid-source-replacement",
+    source_repair = "separate-private-line-repair",
     value_grammar = "same-schema-typed-ini-codec",
     hidden_input_fields = { "Model.*.Key", "Network.ProxyUrl", "Model.*.AdapterOptions" },
     save_identity = "exact-current-config-edit-N",
@@ -67,6 +67,24 @@ return {
     cancel_persists = false,
     online_requests = false,
     external_change = "stale-until-explicit-reload",
+  },
+
+  repair_editor = {
+    entry = "invalid-bounded-main-ini-only",
+    operations = { "replace-line", "insert-line", "delete-line" },
+    source_values = "never-projected",
+    replacement_input = "raw-no-echo",
+    unmodified_bytes = "preserved-including-bom-and-line-endings",
+    intermediate_invalid = true,
+    publish = "complete-schema-validation-before-temporary-and-exact-source-atomic-transaction",
+    save_identity = "exact-current-config-repair-N",
+    maximum_line_edits = 256,
+    line_page_size = 32,
+    resource_caps = "existing-ini-byte-line-and-input-limits",
+    external_change = "stale-until-explicit-reload",
+    uncertain_publish = "stop-and-consume-draft",
+    cancel_persists = false,
+    online_requests = false,
   },
 
   fields = {

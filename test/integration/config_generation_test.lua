@@ -170,6 +170,132 @@ return {
     name = "integration/config-generation",
     cases = {
         {
+            name = "invalid INI repair preserves exact untouched bytes and hides every source value",
+            run = function()
+                local valid = "\239\187\191" .. source():gsub("\n", "\r\n")
+                local original = valid .. '; private-comment-value\r\nUnknown = "unknown-secret"\r\n'
+                local filesystem, controls = fake_filesystem.new({ [CONFIG_PATH] = original })
+                local service = codec(filesystem)
+                local base = assert(service.begin_repair(CONFIG_PATH))
+                local status = assert(service.repair_status(base))
+                A.falsy(status.valid)
+                local display = A.render(status)
+                for _, secret in ipairs({ "original-secret", "unknown-secret", "private-comment-value",
+                    "api.example", "remote-main", "Primary" }) do
+                    A.falsy(display:find(secret, 1, true))
+                end
+                local repaired = assert(service.edit_repair(base, "delete", status.lines))
+                A.truthy(assert(service.repair_status(repaired)).valid)
+                A.equal(controls.bytes(CONFIG_PATH), original)
+                A.falsy(table.concat(controls.operations, "|"):find("create:", 1, true))
+                assert(service.commit_repair(repaired, TEMP_PATH))
+                A.equal(controls.bytes(CONFIG_PATH), valid .. '; private-comment-value\r\n')
+                A.equal(controls.permissions(CONFIG_PATH), 384)
+                A.falsy(service.repair_status(repaired))
+                A.falsy(service.commit_repair(repaired, TEMP_PATH))
+                A.falsy(service.begin_repair(CONFIG_PATH))
+            end,
+        },
+        {
+            name = "repair supports multiple invalid intermediate lines but writes only a complete valid candidate",
+            run = function()
+                local original = source() .. '[Model.Primary]\nKey = "replacement-secret"\n'
+                local filesystem, controls = fake_filesystem.new({ [CONFIG_PATH] = original })
+                local service = codec(filesystem)
+                local draft = assert(service.begin_repair(CONFIG_PATH))
+                local count = assert(service.repair_status(draft)).lines
+                draft = assert(service.edit_repair(draft, "delete", count - 1))
+                A.falsy(assert(service.repair_status(draft)).valid)
+                A.falsy(service.commit_repair(draft, TEMP_PATH))
+                A.falsy(table.concat(controls.operations, "|"):find("create:", 1, true))
+                draft = assert(service.edit_repair(draft, "delete", count - 1))
+                draft = assert(service.edit_repair(draft, "insert", 1, "; explicit new comment"))
+                assert(service.commit_repair(draft, TEMP_PATH))
+                A.equal(controls.bytes(CONFIG_PATH), "; explicit new comment\n" .. source())
+            end,
+        },
+        {
+            name = "repair fixes invalid encoding and retains mixed endings and missing final newline",
+            run = function()
+                local original = source() .. "\255broken\r"
+                local filesystem, controls = fake_filesystem.new({ [CONFIG_PATH] = original })
+                local service = codec(filesystem)
+                local draft = assert(service.begin_repair(CONFIG_PATH))
+                local count = assert(service.repair_status(draft)).lines
+                draft = assert(service.edit_repair(draft, "replace", count, "; repaired"))
+                draft = assert(service.edit_repair(draft, "insert", count + 1, "; appended"))
+                assert(service.commit_repair(draft, TEMP_PATH))
+                A.equal(controls.bytes(CONFIG_PATH), source() .. "; repaired\n; appended")
+            end,
+        },
+        {
+            name = "repair rejects forged handles external edits and same-byte file replacement before writing",
+            run = function()
+                for _, method in ipairs({ "external_write", "external_replace" }) do
+                    local original = source() .. "broken\n"
+                    local filesystem, controls = fake_filesystem.new({ [CONFIG_PATH] = original })
+                    local service = codec(filesystem)
+                    local base = assert(service.begin_repair(CONFIG_PATH))
+                    A.falsy(service.repair_status({}))
+                    A.falsy(codec(filesystem).repair_status(base))
+                    local draft = assert(service.edit_repair(base, "delete", assert(service.repair_status(base)).lines))
+                    controls[method](CONFIG_PATH, method == "external_replace" and original or original .. "; external\n")
+                    local committed, commit_error = service.commit_repair(draft, TEMP_PATH)
+                    A.falsy(committed)
+                    A.equal(commit_error.code, "ConfigStale")
+                    A.falsy(table.concat(controls.operations, "|"):find("create:", 1, true))
+                end
+            end,
+        },
+        {
+            name = "repair bounds edits and input without changing its original private draft",
+            run = function()
+                local filesystem = fake_filesystem.new({ [CONFIG_PATH] = source() .. "broken\n" })
+                local service = codec(filesystem)
+                local base = assert(service.begin_repair(CONFIG_PATH))
+                local count = assert(service.repair_status(base)).lines
+                for _, value in ipairs({ "line\nextra", "bad\0", "bad\255", string.rep("x", 65537) }) do
+                    A.falsy(service.edit_repair(base, "replace", count, value))
+                end
+                A.falsy(service.edit_repair(base, "replace", 0, "x"))
+                A.falsy(service.edit_repair(base, "delete", count + 1))
+                A.falsy(service.edit_repair(base, "delete", count, "discarded-secret"))
+                A.falsy(service.repair_status(base, 1000000))
+                local draft = base
+                for _ = 1, 256 do
+                    draft = assert(service.edit_repair(draft, "replace", count, "; repair"))
+                end
+                A.falsy(service.edit_repair(draft, "replace", count, "; another"))
+                A.equal(#assert(service.repair_status(base)).edits, 0)
+                A.raises(function() assert(service.repair_status(base)).rows[1].label = "changed" end)
+            end,
+        },
+        {
+            name = "repair reuses temporary validation retries known failures and consumes uncertain publication",
+            run = function()
+                for _, fault in ipairs({ "write", "corrupt_after_write_close", "replace", "flush_directory" }) do
+                    local original = source() .. "broken\n"
+                    local filesystem, controls = fake_filesystem.new({ [CONFIG_PATH] = original })
+                    local service = codec(filesystem)
+                    local draft = assert(service.begin_repair(CONFIG_PATH))
+                    draft = assert(service.edit_repair(draft, "delete", assert(service.repair_status(draft)).lines))
+                    controls.faults[fault] = true
+                    local committed, commit_error = service.commit_repair(draft, TEMP_PATH)
+                    A.falsy(committed)
+                    A.falsy(controls.exists(TEMP_PATH))
+                    if fault == "flush_directory" then
+                        A.equal(commit_error.code, "ConfigPublishUnknown")
+                        A.equal(controls.bytes(CONFIG_PATH), source())
+                        A.falsy(service.commit_repair(draft, TEMP_PATH))
+                    else
+                        A.equal(controls.bytes(CONFIG_PATH), original)
+                        controls.faults[fault] = false
+                        assert(service.commit_repair(draft, TEMP_PATH))
+                    end
+                end
+            end,
+        },
+        {
             name = "config editor field projection hides secret-capable values and validates literal inputs",
             run = function()
                 local original = source():gsub("%[Agent%]",

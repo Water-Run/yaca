@@ -101,6 +101,29 @@ return {
     name = "unit/cli-parser",
     cases = {
         {
+            name = "invalid config repair keeps source off argv and binds save to the exact revision",
+            run = function()
+                local service = new_service()
+                local id = "config-repair-3"
+                A.deep_equal(assert(service.parse_config_repair("replace 12", id)),
+                    { operation = "replace", line = 12 })
+                A.deep_equal(assert(service.parse_config_repair("list 2", id)),
+                    { operation = "list", page = 2 })
+                A.deep_equal(assert(service.parse_config_repair("list", id)),
+                    { operation = "list", page = 1 })
+                A.equal(assert(service.parse_config_repair("save " .. id, id)).operation, "save")
+                for _, line in ipairs({ "help", "preview", "validate", "reset", "reload", "cancel", "quit" }) do
+                    A.equal(assert(service.parse_config_repair(line, id)).operation, line)
+                end
+                for _, line in ipairs({ "save", "save config-repair-2", "save config-edit-3",
+                    "replace 1 secret", "replace 0", "delete -1", "insert 1.5", "insert 1000001",
+                    "list extra", "quit extra", "help\nquit", "replace 1\0", "", "set General Key" }) do
+                    A.falsy(service.parse_config_repair(line, id), line)
+                end
+                A.falsy(service.parse_config_repair("quit", "config-repair-0"))
+            end,
+        },
+        {
             name = "config editor parses exact revisions and keeps values off command lines",
             run = function()
                 local service = new_service()

@@ -401,6 +401,15 @@ local REGISTRY = {
             value_input = "separate-schema-typed-ini-value",
             secret_input = "raw-no-echo", online = false,
         },
+        config_repair = {
+            commands = {
+                "list [page]", "replace <line>", "insert <line>", "delete <line>",
+                "preview", "validate", "save <repair-id>", "reset", "reload", "cancel", "quit",
+            },
+            value_input = "separate-hidden-physical-line",
+            save_identity = "exact-current-config-repair-N",
+            online = false,
+        },
     },
     exit_classes = {
         success = 0,
@@ -1341,6 +1350,11 @@ local function render_action_help(descriptor)
         end
         lines[#lines + 1] = "Values use INI syntax in a separate prompt; secret-capable fields use hidden input."
         lines[#lines + 1] = "Preview validates the complete draft; save uses the displayed config-edit-N identity."
+        lines[#lines + 1] = "Invalid-file repair commands (all source lines and replacement input stay hidden):"
+        for _, command in ipairs(REGISTRY.parser.config_repair.commands) do
+            lines[#lines + 1] = "  " .. command
+        end
+        lines[#lines + 1] = "Repair preserves untouched bytes; only a fully valid candidate can be saved."
     end
     lines[#lines + 1] = "Results: " .. table.concat(descriptor.results, ", ")
     if MACHINE_SUPPORTED[descriptor.id] then
@@ -1746,6 +1760,42 @@ function M.new(options)
             return nil, failure("ConfigEditorInput", "unknown command or invalid arguments; enter help")
         end
         return { operation = operation }
+    end
+
+    ---Parses bounded invalid-file repair directives; raw source is accepted
+    -- only by the separate hidden input, never as a command argument.
+    function service.parse_config_repair(source, repair_id)
+        if not valid_utf8_string(source) or #source > 16384 or source:find("[\r\n]") then
+            return nil, failure("ConfigEditorInput", "enter one bounded UTF-8 command line")
+        end
+        if type(repair_id) ~= "string" or #repair_id > 64
+            or not repair_id:match("^config%-repair%-[1-9][0-9]*$")
+        then
+            return nil, failure("ConfigEditorStale", "configuration repair identity is invalid")
+        end
+        local operation, argument = source:match("^%s*(%S+)%s+(%S+)%s*$")
+        if not operation then operation = source:match("^%s*(%S+)%s*$") end
+        if operation == "save" then
+            if argument ~= repair_id then
+                return nil, failure("ConfigEditorStale", "save requires the current repair identity")
+            end
+            return { operation = operation }
+        end
+        if operation == "list" or operation == "replace" or operation == "insert" or operation == "delete" then
+            if operation == "list" and not argument then return { operation = "list", page = 1 } end
+            local number = argument and argument:match("^[1-9][0-9]*$") and tonumber(argument)
+            if not number or math.type(number) ~= "integer" or number > 1000000 then
+                return nil, failure("ConfigEditorInput", "repair location must be a bounded positive integer")
+            end
+            return { operation = operation, page = operation == "list" and number or nil,
+                line = operation ~= "list" and number or nil }
+        end
+        if not argument and ({ help = true, preview = true, validate = true,
+            reset = true, reload = true, cancel = true, quit = true })[operation]
+        then
+            return { operation = operation }
+        end
+        return nil, failure("ConfigEditorInput", "unknown repair command or invalid arguments; enter help")
     end
 
     ---Parses one Context REPL command line into a semantic request.

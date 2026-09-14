@@ -2,17 +2,16 @@
 
 更新日期：2026-09-14
 
-当前继续推进 **Windows 首版与 controller 收口**。N1/N2、N3 rebind/import/repair 之后，
-已完成 **N4 管理器 export/select 与跨 workspace 继续确认**。`--continue`、管理器
-`select` 和聊天 `.context` 共用精确私有预览；确认前不取得新 writer，取消保留当前状态。
-确认绑定文件和两个目录身份，后续 turn/Tools 保持该目录身份；替换对象拒绝。
-完整 suite **531/531**，validators **7612/56/553** 与全部 coding-readiness proofs 通过。
-指定 Windows 远端已验证导出、取消、确认期间替换拒绝、管理器/CLI 续接和聊天切换往返，
-两份 XML 字节不变且退出无锁残留。见 [N4 检查点](CONTEXT-CONTINUE-2026-09-14.md)。
+Windows 首版已完成 N1--N4 的 Context 管理与跨目录继续，以及 **N5 无效 INI 行修复**。
+修复草稿私有、输入隐藏，保留未修改字节，完整 schema 校验后才复用原子发布事务；
+外部替换拒绝，取消不写文件，发布 unknown 时停止。完整 suite **542/542**，
+validators **7612/56/553** 与全部 coding-readiness proofs PASS。
+指定 Windows 远端已验证隐藏输入、取消、同字节新文件对象的拒绝、显式 reload 和保存，
+未修改配置字节保持一致且无临时文件/Context 残留。见 [N5 检查点](CONFIG-REPAIR-2026-09-14.md)。
 
-部署目标仍为 Server 2008（非 R2），按 XP SP3 / win32-x86 基线推进。指定远端实际是
-Server 2025，不能替代旧系统验收。Release Gate R 继续关闭；首版整体仍未完成。
-下一项为无效 INI 修复、Model/Permission 管理、在线 Stage 2/3 adapter 与真实目标资格。
+首版整体仍未完成。下一项 Model/Permission 区域管理、在线 Stage 2/3 adapter，
+以及 C32--C34 真实目标资格。部署方向仍为 XP SP3 / win32-x86 与 Server 2008 非 R2；
+指定测试远端实际为 Server 2025，Release Gate R 保持关闭。
 
 ## yaca 仓库
 
@@ -42,7 +41,7 @@ yaca 当前已有可执行 Lua 入口和平台无关的通用 Agent 核心；代
 仍缺失或不得宣称完成：
 
 - `--continue`、管理器 select 与聊天 `.context` 的跨 workspace 确认已接通，显式 rebind 已接通；三目标 token/资源阈值仍待校准。
-- 在线 self-test Stage 2/3 production adapter 仍返回 failed 占位结果；有效配置的 `config-repl` 字段编辑已接通，但任意无效源的交互修复及 Model/Permission 区域管理尚待完成，`context-repl` 已接通 N1/N2、N3 rebind/import/repair 和 N4 export/select/跨 workspace 确认。这些是实现缺口，不能只归入目标资格待办。
+- 在线 self-test Stage 2/3 production adapter 仍返回 failed 占位结果；有效配置的 `config-repl` 字段编辑与无效源的交互修复已接通，Model/Permission 区域管理尚待完成，`context-repl` 已接通 N1/N2、N3 rebind/import/repair 和 N4 export/select/跨 workspace 确认。这些是实现缺口，不能只归入目标资格待办。
 - 旧环境网络/HTTPS 的源码锁、XP compatibility patch、静态 import/CRT 黑名单和最小协议闭包已有可重复候选证据；仍须在真实 XP/Win7/CentOS 7 证明 TLS/CA、显式代理、redirect/retry/cancel、旧 CMD 路径与错误分类，不能据此开放 Release Gate R。
 - C32 的三个真实 target qualification、C33 的干净机发布旅程/零表面、C34 的最终 SHA-256/license/SBOM/build/test evidence 尚未执行。
 - README 中任何能力声明仍必须受实现和 target evidence 约束；现代 Linux fake/native 边界通过不能外推为 XP、Win7 或 CentOS 7 支持。

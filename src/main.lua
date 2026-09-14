@@ -9360,6 +9360,177 @@ function M.run_model_repl(composed, runtime)
     }, "published Model setup")
 end
 
+---Repairs an invalid INI through private physical-line edits. The same complete
+-- schema and publication transaction validate the result before any write.
+function M.run_config_repair(composed, runtime)
+    if type(composed) ~= "table" or type(composed.config) ~= "table"
+        or type(composed.layout) ~= "table" or type(composed.layout.config_path) ~= "string"
+        or type(composed.backend) ~= "table" or type(composed.backend.system) ~= "table"
+        or type(composed.backend.system.secure_random) ~= "function"
+        or type(runtime) ~= "table" or type(runtime.cli) ~= "table"
+        or type(runtime.cli.parse_config_repair) ~= "function"
+    then
+        return nil, failure("InvalidConfigEditor", "configuration repair ports are incomplete")
+    end
+    local config = composed.config
+    for _, method in ipairs({ "begin_repair", "repair_status", "edit_repair", "commit_repair" }) do
+        if type(config[method]) ~= "function" then
+            return nil, failure("InvalidConfigEditor", "configuration repair service is incomplete")
+        end
+    end
+    local base, begin_error = config.begin_repair(composed.layout.config_path)
+    if not base then return nil, begin_error end
+    local draft = base
+    local revision = 1
+    local input, input_error = new_model_setup_input(composed, runtime, "Configuration")
+    if not input then return nil, input_error end
+    local function repair_id() return "config-repair-" .. tostring(revision) end
+    local function result(outcome, state, generation)
+        return readonly({ action = "config-repl", outcome = outcome, state = state,
+            config_path = composed.layout.config_path,
+            config_generation = generation and generation.id or false,
+            online_requests = 0 }, "configuration repair result")
+    end
+    local function show_status(page, preview)
+        local status, status_error = config.repair_status(draft, page)
+        if not status then return nil, status_error end
+        local lines = { "CONFIG REPAIR " .. repair_id() .. " lines=" .. tostring(status.lines),
+            status.valid and (status.agent_ready and "SCHEMA VALID / AGENT READY"
+                or "SCHEMA VALID / AGENT INELIGIBLE") or "VALIDATION FAILED" }
+        if not status.valid then
+            lines[#lines + 1] = "Reason: " .. safe_diagnostic(status.reason or "configuration", 128)
+                .. (status.syntax_reason and " / " .. safe_diagnostic(status.syntax_reason, 128) or "")
+                .. (status.error_line and " at line " .. tostring(status.error_line) or "")
+                .. (status.error_column and " column " .. tostring(status.error_column) or "")
+        end
+        if preview then
+            for index, edit in ipairs(status.edits) do
+                lines[#lines + 1] = tostring(index) .. ". " .. edit.operation
+                    .. " line " .. tostring(edit.line) .. " [contents hidden]"
+            end
+            lines[#lines + 1] = status.valid and "Save: save " .. repair_id()
+                or "Save is blocked until the complete configuration validates."
+        else
+            for _, row in ipairs(status.rows) do
+                lines[#lines + 1] = tostring(row.line) .. ": " .. row.label .. " [contents hidden]"
+            end
+            if page * 32 < status.lines then lines[#lines + 1] = "Next: list " .. tostring(page + 1) end
+        end
+        local written, write_error = input.write(table.concat(lines, "\n") .. "\n")
+        if not written then return nil, write_error end
+        return status
+    end
+    local function advance(next_draft)
+        if revision >= 1000000 then
+            return nil, failure("ConfigRepairLimit", "configuration repair revision limit reached")
+        end
+        revision = revision + 1
+        draft = next_draft
+        return true
+    end
+    local function run_repair()
+        local written, write_error = input.write("YACA CONFIGURATION REPAIR\n"
+            .. "Offline line repair; the original file stays unchanged until exact save.\n"
+            .. "All source contents and replacement input are hidden. Untouched bytes are preserved.\n"
+            .. "Enter help for commands. Insert adds before a line; use the last line + 1 to append.\n")
+        if not written then return nil, write_error end
+        local shown, show_error = show_status(1, false)
+        if not shown then return nil, show_error end
+        while true do
+            local source, read_error = input.read(repair_id() .. "> ", false, 16384)
+            if source == nil then return nil, read_error end
+            if source == false then return result("cancelled", "discarded") end
+            local command, action_error = runtime.cli.parse_config_repair(source, repair_id())
+            local handled
+            if command then
+                local operation = command.operation
+                if operation == "quit" or operation == "cancel" then
+                    written, write_error = input.write("Unsaved repair discarded; the file was not changed.\n")
+                    if not written then return nil, write_error end
+                    return result(operation == "quit" and "success" or "cancelled", "discarded")
+                elseif operation == "help" then
+                    handled, action_error = input.write(assert(runtime.cli.render_help("config-repl")))
+                elseif operation == "list" or operation == "preview" or operation == "validate" then
+                    handled, action_error = show_status(command.page or 1, operation ~= "list")
+                elseif operation == "reset" or operation == "reload" then
+                    local replacement = base
+                    if operation == "reload" then
+                        replacement, action_error = config.begin_repair(composed.layout.config_path)
+                    end
+                    if replacement then
+                        handled, action_error = advance(replacement)
+                        if handled then
+                            base = replacement
+                            handled, action_error = show_status(1, false)
+                        end
+                    end
+                elseif operation == "save" then
+                    local status
+                    status, action_error = show_status(1, true)
+                    if status and not status.valid then
+                        handled = true
+                    elseif status then
+                        local closed, close_error = input.close()
+                        if not closed then return nil, close_error end
+                        local committed, commit_error
+                        for _ = 1, 8 do
+                            local random, random_error = composed.backend.system.secure_random(12)
+                            if not random then return nil, random_error end
+                            committed, commit_error = config.commit_repair(draft,
+                                composed.layout.config_path .. ".yaca-edit-" .. hex_bytes(random) .. ".tmp")
+                            if committed then break end
+                            local code = commit_error and commit_error.code
+                            if code ~= "DestinationExists" and code ~= "AlreadyExists"
+                                and code ~= "TemporaryConflict"
+                            then
+                                break
+                            end
+                        end
+                        if committed then
+                            written, write_error = input.write("Repaired configuration published offline.\n")
+                            if not written then return nil, write_error end
+                            return result("success", "published", committed)
+                        end
+                        if commit_error and commit_error.code == "ConfigPublishUnknown" then
+                            return nil, commit_error
+                        end
+                        action_error = commit_error
+                    end
+                else
+                    local status = assert(config.repair_status(draft))
+                    local value
+                    if operation ~= "delete" then
+                        value, action_error = input.read("Complete replacement INI line [hidden]> ",
+                            true, status.maximum_line_bytes)
+                        if value == false then return result("cancelled", "discarded") end
+                    end
+                    if operation == "delete" or value ~= nil then
+                        local replacement
+                        replacement, action_error = config.edit_repair(draft, operation, command.line, value)
+                        value = nil
+                        if replacement then
+                            handled, action_error = advance(replacement)
+                            if handled then handled, action_error = show_status(1, true) end
+                        end
+                    end
+                end
+            end
+            if not handled then
+                if action_error and action_error.code == "BrokenStdout" then return nil, action_error end
+                written, write_error = input.write("ERROR "
+                    .. safe_diagnostic(action_error and action_error.code or "ConfigEditorFailure", 128)
+                    .. ": repair was not applied; use list, preview, reload, or quit.\n")
+                if not written then return nil, write_error end
+            end
+        end
+    end
+    local called, outcome, run_error = pcall(run_repair)
+    local closed, close_error = input.close()
+    if not closed then return nil, close_error end
+    if not called then return nil, failure("ConfigEditorFailure", "configuration repair failed") end
+    return outcome, run_error
+end
+
 ---Runs one offline configuration edit with catalog-derived fields and previews.
 -- Plain ASCII lines work without ANSI or cursor movement. Secret-capable INI
 -- fields use the existing native raw/no-echo input and restore terminal state
@@ -10414,6 +10585,11 @@ default_runtime_dispatch = function(request, runtime)
         local configured, editor_error = M.run_config_repl(composed, runtime)
         if not configured then return nil, editor_error end
         return { output = "", exit_value = configured.outcome == "success" and nil or configured }
+    end
+    if request.id == "config-repl" and result.state == "invalid" then
+        local repaired, repair_error = M.run_config_repair(composed, runtime)
+        if not repaired then return nil, repair_error end
+        return { output = "", exit_value = repaired.outcome == "success" and nil or repaired }
     end
     if request.id == "context-repl"
         and (result.state == "catalog-ready" or result.state == "scan-incomplete")

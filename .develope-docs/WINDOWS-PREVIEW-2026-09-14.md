@@ -4,8 +4,8 @@
 API 基线的 win32-x86 便携包。正式三目标资格仍未完成，Release Gate R 保持关闭。
 
 后续已完成 N1/N2、N3 rebind/import/repair 和 N4 export/select/跨目录继续。
-最新包目录为 `out/windows-preview-20260914-n4`，suite **531/531**；
-见 [N4 检查点](CONTEXT-CONTINUE-2026-09-14.md)。下文记录初始预览的验证范围。
+最新 N5 还接通无效 INI 行修复，包目录为 `out/windows-preview-20260914-n5`，suite **542/542**；
+见 [N5 检查点](CONFIG-REPAIR-2026-09-14.md)。下文记录初始预览的验证范围。
 
 ## 交付与复现
 

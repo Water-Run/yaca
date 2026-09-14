@@ -35,7 +35,7 @@ Model 与 Permission 的物理 section 顺序决定各自默认选择；发行�
 有效主 INI 的 `--config-repl` 使用同一个 config service 打开 stale-bound 草稿。
 所有 singleton 区域（包括尚未物理写出的默认区域）与已有 Model/Permission
 区域都从 schema 和原 physical family 顺序生成。缺文件时沿用修复模板入口；
-任意无效源的交互修复与区域增删/重排不由本字段编辑器猜测。
+无效源进入下面的独立修复模式；区域增删/重排仍待 Model/Permission 管理 controller。
 
 | 命令 | 行为 |
 | --- | --- |
@@ -69,6 +69,26 @@ reload 后重新编辑；replace 后目录 flush 失败返回 `ConfigPublishUnkn
 Model/Permission。移除赋值行保留其行尾注释，其余 physical records、BOM、
 换行格式及字节/行数上限保持。synthetic Linux/旧 CMD 已覆盖 production
 composition，真实目标原子写和终端资格仍待 C32。
+
+## 无效 INI 的显式行修复
+
+`--config-repl` 已接通有界无效源的私有修复草稿，不把无效 generation 交给字段编辑器。
+`list [page]` 每页显示 32 个行号及静态 schema 标签；`replace <line>` / `insert <line>`
+使用单独的 raw/no-echo 输入接收完整 INI 行，`delete <line>` 精确删除一行。
+资源名称、值、注释及无法解析的字节始终不投影；只显示固定原因及语法错误位置。
+
+每次编辑可暂时无效，但 `save config-repair-N` 必须精确匹配当前版本，完整 schema
+验证通过后才创建临时文件，并复用普通配置事务的重读、文件身份、private digest、
+临时文件校验与原子发布。原文中未修改的记录、BOM、混合换行和末尾无换行均保留；
+插入 EOF 时只补齐必要的相邻分隔符。未知/重复记录只能经用户明确编辑消除。
+
+`preview`/`validate` 显示操作位置清单与完整候选状态；`reset`/`reload` 丢弃草稿并
+恢复打开时快照/重新读取仍无效的源。若外部已修好配置，退出后重新打开字段编辑器。
+最多 256 次行编辑，沿用 INI 文件/行数/输入字节上限；过大源不截断。
+取消不写文件，已知保存失败可重试；ConfigStale 要求显式 reload，ConfigPublishUnknown
+消耗草稿并停止。不创建 Context、不启动 Agent/Tool/Model/网络或外部编辑器。
+
+验证见 [N5 检查点](../CONFIG-REPAIR-2026-09-14.md)。
 
 ## 配置 generation 与逐 turn 生效
 
