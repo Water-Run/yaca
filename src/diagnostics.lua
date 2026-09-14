@@ -53,7 +53,7 @@ local ERROR_DEFINITIONS = {
         "Add the explicit invocation consent or use Stage 1."),
     definition("WorkspaceConfirmationRequired", "error", "interaction_required", false,
         "The Context belongs to another workspace.",
-        "Run continue from its recorded workspace or confirm an explicit rebind."),
+        "Confirm the recorded workspace in --continue, select, or .context."),
     definition("NotFound", "error", "resolver_negative", true,
         "No matching Context was found.", "Refresh the Catalog or use a precise hash."),
     definition("HashCollision", "error", "resolver_negative", false,

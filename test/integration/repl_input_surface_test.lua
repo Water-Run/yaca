@@ -324,6 +324,28 @@ local function context_harness(commands, settings)
                 unresolved_operations = 1, unresolved_tools = 1, unknown_operations = 0 }
         end }
     end
+    if settings.controllers then
+        composed.application = {
+            dispatch = function(action)
+                calls.exports = (calls.exports or 0) + 1
+                calls.export_selector = action.selector
+                A.equal(action.id, "export-context")
+                if not action.selector then return nil, { code = "NoActiveContext", message = "provide a selector" } end
+                if settings.export_error then return nil, settings.export_error end
+                return { kind = "context-export", format = "markdown", markdown = "# yaca Context export v1\n\nfixture body\n" }
+            end,
+            preview_continue = function(selector)
+                calls.continue_selectors = calls.continue_selectors or {}
+                calls.continue_selectors[#calls.continue_selectors + 1] = selector
+                if settings.continue_error then return nil, settings.continue_error end
+                calls.continue_preview = { kind = "continue-preview", context_hash = "0123456789ABCDEF",
+                    logical_path = "/work/Task001.xml", recorded_workspace = "/work", origin_workspace = "/",
+                    requires_workspace_confirmation = settings.cross_workspace == true }
+                return calls.continue_preview
+            end,
+            continue_preview = function() error("manager must close its terminal before opening a writer") end,
+        }
+    end
     if settings.change_import_config then
         local write = runtime.stdout
         runtime.stdout = function(bytes)
@@ -346,6 +368,63 @@ local function context_harness(commands, settings)
 end
 
 local context_cases = {
+    {
+        name = "Context manager exports Markdown through the read-only application owner",
+        run = function()
+            local result, err, output, calls = context_harness({ "export Task001", "export", "quit" }, { controllers = true })
+            A.truthy(result, A.render(err))
+            A.contains(output, "# yaca Context export v1\n\nfixture body\n")
+            A.contains(output, "NoActiveContext")
+            A.equal(calls.exports, 2)
+            A.equal(#calls.mutations, 0)
+            result, err, output = context_harness({ "export Task001", "quit" }, {
+                controllers = true, export_error = { code = "RegisteredSecret", message = "export rejected" },
+            })
+            A.truthy(result, A.render(err))
+            A.contains(output, "RegisteredSecret")
+            A.falsy(output:find("fixture body", 1, true))
+        end,
+    },
+    {
+        name = "Context manager restores input before transferring an exact continuation preview",
+        run = function()
+            for _, cross in ipairs({ false, true }) do
+                local commands = { "select Task001" }
+                if cross then commands[2] = "CONTINUE 0123456789ABCDEF" end
+                local result, err, output, calls = context_harness(commands, { controllers = true, cross_workspace = cross })
+                A.truthy(result, A.render(err))
+                A.equal(result.state, "continue-selected")
+                A.equal(result.preview, calls.continue_preview)
+                A.equal(result.confirmation, cross and "CONTINUE 0123456789ABCDEF" or nil)
+                A.equal(#calls.mutations, 0)
+                A.equal(#calls.continue_selectors, 1)
+                if cross then A.contains(output, "Context workspace: /work") end
+            end
+        end,
+    },
+    {
+        name = "Context manager cancels workspace choices without leaving management or opening a writer",
+        run = function()
+            local result, err, output, calls = context_harness({ "select Task001", "no", "list", "quit" }, {
+                controllers = true, cross_workspace = true,
+            })
+            A.truthy(result, A.render(err))
+            A.falsy(result.preview)
+            A.contains(output, "Context continuation cancelled")
+            A.equal(#calls.mutations, 0)
+            result, err, output = context_harness({ "select Task001", "quit" }, {
+                controllers = true, continue_error = { code = "LockConflict", message = "busy" },
+            })
+            A.truthy(result, A.render(err))
+            A.contains(output, "LockConflict")
+            result, err = context_harness({ "select Task001", { kind = "user_action", action = "eof" } }, {
+                controllers = true, cross_workspace = true,
+            })
+            A.truthy(result, A.render(err))
+            A.equal(result.outcome, "cancelled")
+        end,
+    },
+
     {
         name = "Context repair confirms a previous-only target and refuses changed confirmations",
         run = function()

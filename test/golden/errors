@@ -6,7 +6,7 @@ ModelUnavailable|error|invalid_config|3|true|The selected Model is unavailable.|
 PermissionUnavailable|error|invalid_config|3|false|The selected Permission is unavailable.|Map the Context to a valid Permission.
 TtyRequired|error|interaction_required|5|false|This action requires an interactive terminal.|Use a complete non-interactive projection where supported.
 OnlineConsentRequired|error|interaction_required|5|false|Online self-test consent is required.|Add the explicit invocation consent or use Stage 1.
-WorkspaceConfirmationRequired|error|interaction_required|5|false|The Context belongs to another workspace.|Run continue from its recorded workspace or confirm an explicit rebind.
+WorkspaceConfirmationRequired|error|interaction_required|5|false|The Context belongs to another workspace.|Confirm the recorded workspace in --continue, select, or .context.
 NotFound|error|resolver_negative|6|true|No matching Context was found.|Refresh the Catalog or use a precise hash.
 HashCollision|error|resolver_negative|6|false|The Context hash matches multiple paths.|Choose a displayed logical path explicitly.
 MatchedUnavailable|error|resolver_negative|6|true|A matching Context is unavailable.|Inspect permissions or repair the Context.

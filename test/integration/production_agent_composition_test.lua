@@ -708,7 +708,7 @@ local function fixture(settings)
         capture_turn = function(specification)
             A.truthy(specification.kind == "main" or specification.kind == "side")
             local reopening = continuing
-                and specification.expected_context_generation == 7
+                and specification.source == "context-reopen"
             if reopening then
                 A.contains(specification.text, "latest durable Context facts")
                 A.equal(specification.source, "context-reopen")
@@ -719,9 +719,10 @@ local function fixture(settings)
                     specification.kind == "side" and "inspect durable facts" or "second turn"
                 )
                 A.equal(specification.source, "terminal")
-                A.equal(specification.expected_context_generation, 2)
+                A.equal(specification.expected_context_generation, continuing and 7 or 2)
             end
             log[#log + 1] = "capture-turn"
+            if settings.after_capture then settings.after_capture() end
             local prompt_snapshot = reopening and "prompt-snapshot-1"
                 or specification.kind == "side"
                 and "side-prompt-snapshot-2"
@@ -738,7 +739,7 @@ local function fixture(settings)
                 view_manifest_ref = reopening
                     and "sha256:restored-view" or "view-1",
                 double_check = true,
-                context_generation = reopening and 7 or 2,
+                context_generation = specification.expected_context_generation,
                 model_request_limit = reopening and 7 or 6,
                 tool_call_limit = reopening and 11 or 10,
                 queue_limit = reopening and 5 or 4,
@@ -898,6 +899,7 @@ local function fixture(settings)
                 call_digest = "call-digest",
             }, facts, digest))
             log[#log + 1] = "tools"
+            if settings.after_tools then settings.after_tools() end
             return { registry_digest = settings.tool_registry_digest or "registry-1" }
         end,
         new_agent_port = function(_, options)
@@ -1074,7 +1076,7 @@ local function fixture(settings)
                     return true, {
                         identity = {
                             volume = "volume-1",
-                            object = "workspace-1",
+                            object = settings.workspace_object or "workspace-1",
                             kind = "directory",
                         },
                     }
@@ -1151,6 +1153,9 @@ local function fixture(settings)
         kind = continuing and "continue-chat" or "run-chat",
         outcome = "ready",
         draft = draft,
+        workspace_identity = continuing and {
+            volume = "volume-1", object = "workspace-1", kind = "directory",
+        } or nil,
     }
     return {
         main = load_main(modules),
@@ -1310,6 +1315,71 @@ return {
                     "driver",
                     "agent-session",
                 })
+            end,
+        },
+        {
+            name = "continued workspace replacement fails before Agent admission",
+            run = function()
+                for _, phase in ipairs({ "before", "capture", "tools", "missing" }) do
+                    local settings = { continuing = true }
+                    local f = fixture(settings)
+                    local function replace() settings.workspace_object = "replacement" end
+                    if phase == "before" then replace() end
+                    if phase == "capture" then settings.after_capture = replace end
+                    if phase == "tools" then settings.after_tools = replace end
+                    if phase == "missing" then f.chat.workspace_identity = nil end
+                    local agent, agent_error = f.main.start_published_agent(
+                        f.composed, f.chat,
+                        "Continue from the latest durable Context facts.", "context-reopen"
+                    )
+                    A.falsy(agent)
+                    A.equal(agent_error.code, phase == "missing"
+                        and "InvalidAgentComposition" or "ContextTargetChanged")
+                    A.truthy(f.closed())
+                    for _, entry in ipairs(f.log) do
+                        A.falsy(entry:match("^effect:"))
+                        A.falsy(entry == "agent-loop")
+                        if phase == "before" or phase == "missing" then
+                            A.falsy(entry == "capture-turn" or entry == "tools")
+                        end
+                    end
+                end
+            end,
+        },
+        {
+            name = "continued main and side snapshots retain the confirmed workspace identity",
+            run = function()
+                for _, kind in ipairs({ "main", "side" }) do
+                    for _, phase in ipairs({ "before", "capture" }) do
+                        local settings = { continuing = true }
+                        local f = fixture(settings)
+                        local agent = assert(f.main.start_published_agent(
+                            f.composed, f.chat,
+                            "Continue from the latest durable Context facts.", "context-reopen"
+                        ))
+                        local function replace() settings.workspace_object = "replacement" end
+                        if phase == "before" then replace()
+                        else settings.after_capture = replace end
+                        local previous_count = #f.log
+                        local snapshot, snapshot_error = f.capture({
+                            kind = kind,
+                            text = kind == "main" and "second turn" or "inspect durable facts",
+                            source = "terminal",
+                            context_generation = 7,
+                            active_turn_id = false,
+                            cause = { kind = kind == "main" and "direct-main" or "side" },
+                        })
+                        A.falsy(snapshot)
+                        A.equal(snapshot_error.code, "ContextTargetChanged")
+                        A.equal(agent.current_generation().id, "config-generation-1")
+                        for index = previous_count + 1, #f.log do
+                            A.falsy(f.log[index]:match("^effect:"))
+                            A.falsy(f.log[index] == "tools" or f.log[index] == "side-model-builder")
+                        end
+                        if phase == "before" then A.equal(#f.log, previous_count) end
+                        f.chat.draft.close()
+                    end
+                end
             end,
         },
         {
@@ -1645,9 +1715,9 @@ return {
                     }
                 end
                 local next_composed = { application = {} }
-                function next_composed.application.dispatch(request)
-                    A.equal(request.id, "continue")
-                    A.equal(request.selector, "FEDCBA9876543210")
+                function next_composed.application.continue_preview(preview, confirmation)
+                    A.equal(preview.context_hash, "FEDCBA9876543210")
+                    A.equal(confirmation, nil)
                     local draft = { close = function()
                         closed = closed + 1
                         return true
@@ -1710,7 +1780,7 @@ return {
                     compose = function()
                         return { application = {
                             preview_continue = function() return {} end,
-                            dispatch = function()
+                            continue_preview = function()
                                 return {
                                     draft = { close = function()
                                         closed = closed + 1
@@ -1728,7 +1798,7 @@ return {
                         error("changed target must not start an Agent")
                     end,
                 }))
-                local changed, changed_error = mismatch:activate(preview)
+                local changed, changed_error = mismatch:activate(assert(mismatch:preview("Second")))
                 A.falsy(changed)
                 A.equal(changed_error.code, "TargetChanged")
                 A.equal(closed, 1)

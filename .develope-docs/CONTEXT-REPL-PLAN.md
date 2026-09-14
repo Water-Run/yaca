@@ -1,7 +1,7 @@
 # Context 管理交互实现计划（2026-09-14）
 
-**检查点更新：N1/N2、N3a rebind、N3b import、N3c repair 已完成；完整 suite 520/520 和 coding-readiness 通过。下一项管理器导出/继续与跨 workspace 确认。**
-见 [N3c 检查点](CONTEXT-REPAIR-2026-09-14.md)。下文保留实施前调查。
+**检查点更新：N1/N2、N3 rebind/import/repair、N4 export/select 与跨 workspace 确认已完成；完整 suite 531/531，coding-readiness 通过。**
+见 [N4 检查点](CONTEXT-CONTINUE-2026-09-14.md)。下文保留实施前调查。
 
 本文件把 [HANDOFF-2026-09-08](HANDOFF-2026-09-08.md) 的只读调查收敛成可执行计划。
 所有签名与行号均已对照当前 `main`（`067dce8`）源码核实，未修改任何源码。

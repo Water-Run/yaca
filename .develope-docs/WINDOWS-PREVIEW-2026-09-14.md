@@ -3,6 +3,10 @@
 日期：2026-09-14。部署方向：Windows Server 2008（非 R2），统一使用 XP SP3
 API 基线的 win32-x86 便携包。正式三目标资格仍未完成，Release Gate R 保持关闭。
 
+后续已完成 N1/N2、N3 rebind/import/repair 和 N4 export/select/跨目录继续。
+最新包目录为 `out/windows-preview-20260914-n4`，suite **531/531**；
+见 [N4 检查点](CONTEXT-CONTINUE-2026-09-14.md)。下文记录初始预览的验证范围。
+
 ## 交付与复现
 
 - 构建入口：`.tools/qualification/build_windows_candidate.sh`，使用
@@ -61,7 +65,7 @@ Std 写入与 Shell 审批仍正常生效。32768 窗口在四项工具后触发
 - 旧系统非 ASCII 路径、断电/设备持久性、完整进程树与旧 Job 行为。
 - 真实模型服务商的 main/review/compaction 请求。
 - Stage 1 的 ST1-ATOMIC-WRITE 固定 unknown；在线 self-test Stage 2/3 仍未接通。
-- Context 管理器写事务及跨工作目录继续的确认流程；N2/N3 后续另行推进。
+- 初始预览时未接通的 Context 写事务和跨目录继续已由 N2/N3/N4 完成，见上方后续检查点。
 
 用户部署步骤见 [Windows 首次使用](../release/WINDOWS-QUICKSTART.md)。此预览包仅供
 初步实际使用和继续验收，不能把这里的远端烟测写成正式三目标发行资格。

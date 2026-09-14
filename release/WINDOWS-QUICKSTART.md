@@ -65,7 +65,10 @@ Stage 1 中的 `ST1-ATOMIC-WRITE` 目前固定报告 `unknown`（旧系统资格
 主 XML 缺失/损坏且有有效 `.yaca-prev` 时，可运行 `repair <hash>`，核对恢复来源、
 目标和清理路径后输入 `REPAIR <hash>`。它也可清理同一历史的过期 previous；新文件
 验证成功后才删除副本，不破锁、不重放操作。没有有效来源时会拒绝修复。
-管理器内导出/继续和直接跨工作目录继续仍待完成。
+管理器内 `export <hash>` 导出 Markdown，`select <hash>` 继续已有 Context。
+`--continue <hash>`、管理器 `select` 和聊天 `.context <hash>` 均支持跨工作目录：
+核对两个目录后输入 `CONTINUE <hash>`。取消保留当前状态；确认后 Tools 使用 Context
+记录的目录，不移动 XML，不重放未决工作。目录或文件在确认期间变化会拒绝。
 
 ## 数据、升级和退出
 

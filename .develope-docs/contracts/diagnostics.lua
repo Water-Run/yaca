@@ -44,7 +44,7 @@ return {
     error_record("PermissionUnavailable", "error", "invalid_config", false, "The selected Permission is unavailable.", "Map the Context to a valid Permission."),
     error_record("TtyRequired", "error", "interaction_required", false, "This action requires an interactive terminal.", "Use a complete non-interactive projection where supported."),
     error_record("OnlineConsentRequired", "error", "interaction_required", false, "Online self-test consent is required.", "Add the explicit invocation consent or use Stage 1."),
-    error_record("WorkspaceConfirmationRequired", "error", "interaction_required", false, "The Context belongs to another workspace.", "Run continue from its recorded workspace or confirm an explicit rebind."),
+    error_record("WorkspaceConfirmationRequired", "error", "interaction_required", false, "The Context belongs to another workspace.", "Confirm the recorded workspace in --continue, select, or .context."),
     error_record("NotFound", "error", "resolver_negative", true, "No matching Context was found.", "Refresh the Catalog or use a precise hash."),
     error_record("HashCollision", "error", "resolver_negative", false, "The Context hash matches multiple paths.", "Choose a displayed logical path explicitly."),
     error_record("MatchedUnavailable", "error", "resolver_negative", true, "A matching Context is unavailable.", "Inspect permissions or repair the Context."),

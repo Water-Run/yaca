@@ -597,11 +597,14 @@ local function fixture(settings)
             selector = selector,
             logical_path = "/workspace/Second.xml",
             context_hash = "FEDCBA9876543210",
-            recorded_workspace = "/workspace",
+            origin_workspace = "/workspace",
+            recorded_workspace = settings.cross_workspace and "/other" or "/workspace",
+            requires_workspace_confirmation = settings.cross_workspace == true,
         }
     end
-    function context_switch:activate(preview)
+    function context_switch:activate(preview, confirmation)
         log[#log + 1] = "context-activate:" .. preview.context_hash
+        if settings.cross_workspace then A.equal(confirmation, "CONTINUE " .. preview.context_hash) end
         if settings.context_activation_error then
             return nil, settings.context_activation_error
         end
@@ -611,7 +614,7 @@ local function fixture(settings)
             return {
                 lifecycle = "saved",
                 durable = true,
-                workspace = "/workspace",
+                workspace = settings.cross_workspace and "/other" or "/workspace",
                 model = saved_model,
                 permission = "Std",
                 double_check = true,
@@ -1335,6 +1338,35 @@ return {
                 A.contains(A.render(f.blocks), "That Context is already active")
                 A.contains(A.render(f.blocks), "Context switched: second-task")
                 A.contains(joined, "next-draft-close")
+            end,
+        },
+        {
+            name = "cross-workspace chat switching waits for literal consent and cancellation retains its owner",
+            run = function()
+                for _, answer in ipairs({ "no", ".cancel", "CONTINUE FEDCBA9876543210" }) do
+                    local batches = {}
+                    for _, text in ipairs({ ".context second-task", ".status", answer, ".quit" }) do
+                        batches[#batches + 1] = { { kind = "user_action", action = "text", text = text } }
+                        batches[#batches + 1] = { { kind = "user_action", action = "submit-or-queue" } }
+                    end
+                    local f = fixture({ initial_agent = true, initial_state = "Idle", freeze_driver = true,
+                        cross_workspace = true, batches = batches })
+                    assert(f.coordinator:run())
+                    local output = A.render(f.blocks)
+                    local log = table.concat(f.log, "|")
+                    A.contains(output, "Context workspace: /other")
+                    A.contains(output, "context change: FEDCBA9876543210")
+                    if answer:sub(1, 8) == "CONTINUE" then
+                        A.contains(log, "session-close:context-switch")
+                        A.contains(log, "context-activate:FEDCBA9876543210")
+                        A.contains(output, "workspace=/other")
+                    else
+                        A.falsy(log:find("context-activate:", 1, true))
+                        A.falsy(log:find("session-close:context-switch", 1, true))
+                        A.contains(output, "current session remains open")
+                    end
+                    A.falsy(log:find("agent:terminal:CONTINUE", 1, true))
+                end
             end,
         },
         {

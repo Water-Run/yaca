@@ -104,9 +104,9 @@ Context files live in a mirror tree such as `__yaca__/CONTEXT/C/Program Files/My
 
 Opening history is always explicit. A short name selects the first usable match by the specified scope/distance order; a hash is the precise selector and must be unique. Rename, rebind, permanent delete, import mapping, and metadata changes reverify the selected target. A live writer blocks another process from reading the XML body or mutating it; stale locks are never broken by age alone.
 
-`--continue` resolves and reverifies one exact target, acquires its writer, and currently requires invocation from the Context's recorded workspace. It restores the durable event/config/ModelView and identifier waterlines into an Idle Agent; it never replays unfinished work automatically. Unfinished turns, active queue items, unresolved operations or tools, unknown terminal outcomes, and pending compaction require explicit recovery instead. Cross-workspace continuation requires invoking from the recorded workspace; use the Context manager’s explicit rebind to change that binding.
+`--continue <selector>` resolves and reverifies one exact target. If its workspace differs from the current one, it displays both paths and requires `CONTINUE <hash>` before acquiring a writer. Acceptance opens an Idle Agent in the recorded workspace; cancellation opens nothing. It restores durable event/config/ModelView and identifier waterlines without replaying unfinished work. Unfinished turns, active queue items, unresolved operations or tools, unknown terminal outcomes, and pending compaction still require explicit recovery. The confirmed directory identity remains bound to subsequent turns and Tools; a replacement is refused. This changes the Agent workspace without moving XML or changing the process working directory.
 
-Within chat, `.context` without a selector shows a bounded recent list. `.context <selector>` first freezes the verified path and precise hash, closes the current owner only when its queue, side lane, approval, and compaction state are safe, then recomposes and reopens by that hash alone. A post-close race is fatal for that invocation; it never falls back to a replacement short-name match. This switch is also limited to the recorded workspace until explicit cross-workspace confirmation exists.
+Within chat, `.context` without a selector shows a bounded recent list. `.context <selector>` binds the precise hash, file credential, and both directory identities. Cross-workspace switching requires the same `CONTINUE <hash>` response; `.cancel` or another response keeps the current owner. The old owner closes only after acceptance and safe queue, side lane, approval, and compaction checks. The new owner reverifies the original selection. A post-close race ends the invocation without opening a replacement match.
 
 Each interactive coordinator error receives a process-local `error-N` identity. `.details` shows the newest retained error and `.details error-N` selects one explicitly. The fixed ring retains at most 64 sanitized code/message/suggestion/next-action records; expired identities fail closed, and raw exception objects, Tool bodies, and transport payloads are not retained by this surface.
 
@@ -165,7 +165,10 @@ historical approvals remain audit-only and unfinished work is never replayed.
 requires `REPAIR <hash>` and reverifies the exact files before publishing a repair
 record and refreshed ModelView. It restores missing/corrupt XML only from its valid
 named previous file, never breaks a writer lock or replays unfinished operations.
-Export and continuation from this manager remain pending. Online self-test Stage 2/3 scheduling and consent are
+`export <selector>` prints the same verified Markdown as `--export`. `select <selector>`
+closes the manager terminal and continues the exact selection, using the same workspace
+confirmation when needed. A cancelled confirmation stays in management.
+Online self-test Stage 2/3 scheduling and consent are
 implemented, but their production adapters currently report an unavailable
 implementation rather than issuing Model requests.
 

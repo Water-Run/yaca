@@ -2,16 +2,17 @@
 
 更新日期：2026-09-14
 
-当前继续推进 **Windows 首版与 controller 收口**。N1/N2、N3a rebind、N3b import 之后，
-已完成 **N3c 显式 repair**：只读精确计划、缺失/损坏 XML 的 previous 恢复、旧副本清理，
-以及 warning 与真实 ModelView 的一次性发布。完整 suite **520/520**；
-validators **7612/56/553** 与 TP-003/006/008/010、RP-001 全部通过。指定 Windows 远端
-已验证取消、来源变化拒绝、两类恢复、清理与重开；同时修复并验证了原生替换的 DACL 继承问题。
-见 [N3c 检查点](CONTEXT-REPAIR-2026-09-14.md)。
+当前继续推进 **Windows 首版与 controller 收口**。N1/N2、N3 rebind/import/repair 之后，
+已完成 **N4 管理器 export/select 与跨 workspace 继续确认**。`--continue`、管理器
+`select` 和聊天 `.context` 共用精确私有预览；确认前不取得新 writer，取消保留当前状态。
+确认绑定文件和两个目录身份，后续 turn/Tools 保持该目录身份；替换对象拒绝。
+完整 suite **531/531**，validators **7612/56/553** 与全部 coding-readiness proofs 通过。
+指定 Windows 远端已验证导出、取消、确认期间替换拒绝、管理器/CLI 续接和聊天切换往返，
+两份 XML 字节不变且退出无锁残留。见 [N4 检查点](CONTEXT-CONTINUE-2026-09-14.md)。
 
 部署目标仍为 Server 2008（非 R2），按 XP SP3 / win32-x86 基线推进。指定远端实际是
-Server 2025，不能替代旧系统验收。Release Gate R 继续关闭；下一项管理器 export/continue 和跨 workspace 继续确认。
-首版整体仍未完成，见 [Context 管理计划](CONTEXT-REPL-PLAN.md)。
+Server 2025，不能替代旧系统验收。Release Gate R 继续关闭；首版整体仍未完成。
+下一项为无效 INI 修复、Model/Permission 管理、在线 Stage 2/3 adapter 与真实目标资格。
 
 ## yaca 仓库
 
@@ -28,7 +29,7 @@ yaca 当前已有可执行 Lua 入口和平台无关的通用 Agent 核心；代
 - Win32/XP HTTPS 候选闭包已锁定：curl 8.21.0 与 Mbed TLS 3.6.7 的窄下游补丁绑定 archive/patch/基文件 SHA-256；全新 i686 串行复现得到 PE32/Windows 5.01、HTTP/HTTPS、blocking IPv4、CryptoAPI entropy，且最终导入审计无 BCrypt、Vista 同步原语、UCRT 和新 `_s` CRT 符号。该结果明确为 cross-build/static candidate，真实 XP TLS/proxy/CA 仍待 C32。
 - lossless model-view compaction：结构化摘要、atomic groups、Context journal、原子 manifest publication、Runtime receipt/lifecycle gate、公开 `.compact`，以及冻结待发 main/review 请求的自动 threshold preflight、STATUS/cancel/close。
 - existing Context publication core 已能在持有精确 verified target/writer 后重建 plain 或 compacted active ModelView；新格式 pending request/response/cancel/rejection bracket 会先落唯一 cancel pending/unknown 与绑定 terminal error，旧格式 pending 只落保守 unknown、不伪造新式终态，旧 active view 始终保留。compaction serial、连续 automatic failure streak 与不完整旧历史也会从 XML 恢复；自动 compaction 的进程恢复 unknown 计入失败 streak，跨进程 monotonic 时间不可继承时重新开启完整 cooldown。
-- 公开 `--continue` 已接到 existing Context core：selector 必须精确解析并在加 writer 前后复核，调用 workspace 必须与 Context 镜像路径记录的 workspace 具有同一逻辑键和文件系统 identity；打开后先执行保守恢复门禁、整份配置重载与 self-test，再以 Idle Agent 恢复 event/config/ModelView 及八类 serial 水位，绝不自动重放未完成工作。跨 workspace 返回 typed confirmation requirement；存在 unfinished turn、active queue item、未决 operation/tool、unknown terminal outcome 或 pending compaction 时拒绝自动继续并释放 writer。
+- 公开 `--continue` 已接到 existing Context core：selector 必须精确解析并在加 writer 前后复核，跨 workspace 须显式确认，确认绑定 Context 文件及两个 workspace 身份；打开后先执行保守恢复门禁、整份配置重载与 self-test，再以 Idle Agent 恢复 event/config/ModelView 及八类 serial 水位，绝不自动重放未完成工作。公开入口已接通该 typed confirmation；存在 unfinished turn、active queue item、未决 operation/tool、unknown terminal outcome 或 pending compaction 时拒绝自动继续并释放 writer。
 - chat `.context` 已复用同一 reopen core：无参数只投影最多 32 行的 bounded recent Catalog；有 selector 时先只读解析并复核目标、冻结其精确 hash/逻辑路径，只有当前 Agent 为 Idle/WaitingUser 且 queue/side/approval/compaction 全部安全时才关闭旧 owner，随后只按该 hash 在全新 composition 中再次解析/复核并打开。关闭后的 target/config/lock 竞态会作为 fatal switch failure 恢复终端并退出，绝不按短名称改开替代对象；未保存 chat 切换不会发布空 Context。
 - chat `.details` 已接到 ApplicationCoordinator：每次交互错误分配当前进程内单调 `error-N`，只保留最多 64 条经控制字节清理且分别限长的 code/message/suggestion/next-action；无参数读取最新项，显式 ID 精确读取，过期 ID 返回 typed `NotFound`，不保存 raw exception、Tool body 或 transport payload。
 - chat `.cautious status|on|off|toggle|reset` 已接到唯一 Session owner：首条消息前只更新有界内存草稿；保存后先用完整 Context overrides 重载一个 Agent-ready ConfigGeneration，再由单一 Context writer 在同一 XML generation 追加不含明文值的 `session_override` 与匹配 `model_view_published`，最后由 AgentLoop 精确采纳双事件回执。当前 turn 的 Model/Permission/Prompt/DoubleCheck snapshot 不热换，新值只从下一 turn 生效；plain 与 compacted active ModelView 都保持原 publication/compaction identity 链，回执失配会 fail-stop。
@@ -40,8 +41,8 @@ yaca 当前已有可执行 Lua 入口和平台无关的通用 Agent 核心；代
 
 仍缺失或不得宣称完成：
 
-- `--continue` 与同 workspace `.context` 已接通，显式 rebind 已接通，但直接跨 workspace 继续确认尚未开放；三目标 token/资源阈值仍待校准。
-- 在线 self-test Stage 2/3 production adapter 仍返回 failed 占位结果；有效配置的 `config-repl` 字段编辑已接通，但任意无效源的交互修复及 Model/Permission 区域管理尚待完成，`context-repl` 已接通 N1/N2、N3a rebind、N3b import 和 N3c repair，管理器内的导出/继续与跨 workspace 确认仍待实现。这些是实现缺口，不能只归入目标资格待办。
+- `--continue`、管理器 select 与聊天 `.context` 的跨 workspace 确认已接通，显式 rebind 已接通；三目标 token/资源阈值仍待校准。
+- 在线 self-test Stage 2/3 production adapter 仍返回 failed 占位结果；有效配置的 `config-repl` 字段编辑已接通，但任意无效源的交互修复及 Model/Permission 区域管理尚待完成，`context-repl` 已接通 N1/N2、N3 rebind/import/repair 和 N4 export/select/跨 workspace 确认。这些是实现缺口，不能只归入目标资格待办。
 - 旧环境网络/HTTPS 的源码锁、XP compatibility patch、静态 import/CRT 黑名单和最小协议闭包已有可重复候选证据；仍须在真实 XP/Win7/CentOS 7 证明 TLS/CA、显式代理、redirect/retry/cancel、旧 CMD 路径与错误分类，不能据此开放 Release Gate R。
 - C32 的三个真实 target qualification、C33 的干净机发布旅程/零表面、C34 的最终 SHA-256/license/SBOM/build/test evidence 尚未执行。
 - README 中任何能力声明仍必须受实现和 target evidence 约束；现代 Linux fake/native 边界通过不能外推为 XP、Win7 或 CentOS 7 支持。

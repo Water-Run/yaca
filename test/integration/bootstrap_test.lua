@@ -363,7 +363,8 @@ local function application(source, continuation)
             identity = {
                 kind = "directory",
                 volume = "volume-1",
-                object = observed,
+                object = continuation and continuation.workspace_objects
+                    and continuation.workspace_objects[observed] or observed,
             },
         }
     end
@@ -417,7 +418,7 @@ local function application(source, continuation)
     if continuation then
         local logical_path = continuation.logical_path or "/workspace/Task.xml"
         local physical_path = continuation.physical_path
-            or "/data/CONTEXT/posix/workspace/Task.xml"
+            or "/data/CONTEXT/posix" .. logical_path
         local selection = {
             tag = "Unique",
             logical_path = logical_path,
@@ -426,6 +427,7 @@ local function application(source, continuation)
         local credential = {
             physical_path = physical_path,
             logical_path = logical_path,
+            observed_stat = { object = continuation.credential_version or "original" },
         }
         local resolver = {}
         function resolver.resolve(selector, origin)
@@ -471,6 +473,7 @@ local function application(source, continuation)
         function publication.open_existing(specification)
             calls.open_existing = (calls.open_existing or 0) + 1
             calls.last_open = specification
+            if continuation.on_open then continuation.on_open() end
             if continuation.open_error then return nil, continuation.open_error end
             return {
                 outcome = "opened",
@@ -1636,6 +1639,109 @@ return {
                 A.equal(calls.open_existing or 0, 0)
                 A.equal(calls.config, 0)
                 A.equal(app.status().lifecycle, "constructed")
+            end,
+        },
+        {
+            name = "cross-workspace continuation requires exact consent and transfers one private preview",
+            run = function()
+                local settings = { logical_path = "/other/Task.xml", physical_path = "/data/other/Task.xml" }
+                local app, calls = application(valid_source(), settings)
+                local preview = assert(app.preview_continue("Task"))
+                A.truthy(preview.requires_workspace_confirmation)
+                A.equal(preview.origin_workspace, "/workspace")
+                A.equal(preview.recorded_workspace, "/other")
+                A.equal(calls.open_existing or 0, 0)
+                A.equal(calls.config, 0)
+                local rejected, err = app.continue_preview(preview, "yes")
+                A.falsy(rejected)
+                A.equal(err.code, "WorkspaceConfirmationRequired")
+                local next_app, next_calls = application(valid_source(), settings)
+                local opened = assert(next_app.continue_preview(preview, "CONTINUE 0123456789ABCDEF"))
+                A.equal(opened.status.workspace, "/other")
+                A.equal(next_calls.last_selector, "0123456789ABCDEF")
+                A.equal(next_calls.open_existing, 1)
+                A.equal(next_calls.network, 0)
+                rejected, err = app.continue_preview(preview, "CONTINUE 0123456789ABCDEF")
+                A.falsy(rejected)
+                A.equal(err.code, "InvalidContinuePreview")
+                assert(next_app.close())
+            end,
+        },
+        {
+            name = "continuation refuses forged superseded and changed preview targets before opening",
+            run = function()
+                local settings = { logical_path = "/other/Task.xml" }
+                local app, calls = application(valid_source(), settings)
+                local old = assert(app.preview_continue("Task"))
+                local preview = assert(app.preview_continue("Task"))
+                for _, invalid in ipairs({ old, { context_hash = preview.context_hash,
+                    requires_workspace_confirmation = false } }) do
+                    local opened, err = app.continue_preview(invalid, "CONTINUE 0123456789ABCDEF")
+                    A.falsy(opened)
+                    A.equal(err.code, "InvalidContinuePreview")
+                end
+                settings.verify_tag = "TargetChanged"
+                local opened, err = app.continue_preview(preview, "CONTINUE 0123456789ABCDEF")
+                A.falsy(opened)
+                A.equal(err.code, "TargetChanged")
+                A.equal(calls.open_existing or 0, 0)
+                settings.verify_tag = nil
+                preview = assert(app.preview_continue("Task"))
+                local other, other_calls = application(valid_source(), {
+                    logical_path = "/other/Task.xml", credential_version = "replacement",
+                })
+                opened, err = other.continue_preview(preview, "CONTINUE 0123456789ABCDEF")
+                A.falsy(opened)
+                A.equal(err.code, "TargetChanged")
+                A.equal(other_calls.open_existing or 0, 0)
+            end,
+        },
+        {
+            name = "continuation binds both workspace identities and releases a writer on later changes",
+            run = function()
+                for _, changed in ipairs({ "/workspace", "/other" }) do
+                    for _, phase in ipairs({ "confirm", "open" }) do
+                        local settings = { logical_path = "/other/Task.xml", workspace_objects = {} }
+                        local app, calls = application(valid_source(), settings)
+                        local preview = assert(app.preview_continue("Task"))
+                        if phase == "confirm" then settings.workspace_objects[changed] = "replaced"
+                        else settings.on_open = function() settings.workspace_objects[changed] = "replaced" end end
+                        local opened, err = app.continue_preview(preview, "CONTINUE 0123456789ABCDEF")
+                        A.falsy(opened)
+                        A.equal(err.code, "TargetChanged")
+                        A.equal(calls.open_existing or 0, phase == "open" and 1 or 0)
+                        A.equal(calls.publication_close or 0, phase == "open" and 1 or 0)
+                        A.equal(calls.config, 0)
+                        A.equal(calls.network, 0)
+                    end
+                end
+            end,
+        },
+        {
+            name = "workspace consent does not bypass recovery or configuration gates",
+            run = function()
+                for _, case in ipairs({ { valid_source(), false, "ContextRecoveryRequired" },
+                    { false, true, "ConfigMissing" } }) do
+                    local app, calls = application(case[1], { logical_path = "/other/Task.xml", auto_continue = case[2] })
+                    local preview = assert(app.preview_continue("Task"))
+                    local opened, err = app.continue_preview(preview, "CONTINUE 0123456789ABCDEF")
+                    A.falsy(opened)
+                    A.equal(err.code, case[3])
+                    A.equal(calls.publication_close, 1)
+                    A.equal(calls.network, 0)
+                    A.equal(calls.agent, 0)
+                end
+            end,
+        },
+        {
+            name = "continuation selection uses the active draft workspace instead of process cwd",
+            run = function()
+                local app = application(valid_source(), { logical_path = "/other/Task.xml" })
+                assert(app.dispatch({ id = "run-chat", directory = "/other" }))
+                local preview = assert(app.preview_continue("Task"))
+                A.equal(preview.origin_workspace, "/other")
+                A.falsy(preview.requires_workspace_confirmation)
+                assert(app.close())
             end,
         },
         {

@@ -17,8 +17,10 @@ TOCTOU 复核，以及 Linux builder 的串行/5 GiB guard floor/动态 suite �
 publication 与 turn boundary；取消/退出不保存，错误保留安全草稿。
 有效 INI 的配置字段 REPL 也已接通，复用 schema 与完整配置事务，支持隐藏输入、
 set/unset、预览、精确版本保存和显式重载；INI structural edit 保留未改记录。
-随后仍需 Context/Model/Permission 管理、无效源交互修复、在线 self-test Stage 2/3 adapter、
-跨 workspace 确认/rebind，以及真实三目标资格。
+2026-09-14 已完成 Context 管理器全部 12 项投影，包括 rebind/import/repair、
+export/select 与跨 workspace 继续确认，见 [N4 检查点](CONTEXT-CONTINUE-2026-09-14.md)。
+随后仍需 Model/Permission 管理、无效源交互修复、在线 self-test Stage 2/3 adapter，
+以及真实三目标资格。
 机读 phase 保持 `implemented-unqualified`，Release Gate R 保持关闭。
 
 ## 1. 计划边界

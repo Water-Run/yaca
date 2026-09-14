@@ -79,9 +79,9 @@ Context 文件位于镜像树，例如 `__yaca__/CONTEXT/C/Program Files/我的�
 
 历史只通过显式动作打开。短名称按既定 scope/distance 顺序选择首个可用命中；hash 是精准 selector，必须唯一。rename、rebind、永久 delete、import mapping 和 metadata 修改都会复核目标。活动 writer 会阻止第二进程读取 XML 正文或修改该 Context；绝不只按锁龄破锁。
 
-`--continue` 会解析并复核一个精确目标、取得其 writer，且当前要求从该 Context 记录的 workspace 调用。它把 durable event/config/ModelView 与各类标识符水位恢复到 Idle Agent，绝不自动重放未完成工作。若存在 unfinished turn、active queue item、未决 operation/tool、unknown terminal outcome 或 pending compaction，则必须先显式恢复。跨 workspace 继续仍需从记录的目录调用；可通过 Context 管理器的显式 rebind 改变绑定。
+`--continue <selector>` 解析并复核精确目标。跨工作目录时先显示当前目录与记录目录，输入 `CONTINUE <hash>` 后才取得 writer；取消不打开 Context。接受后在记录目录进入 Idle Agent，恢复 durable event/config/ModelView 和各类标识符水位。unfinished turn、active queue item、未决 operation/tool、unknown terminal outcome 或 pending compaction 仍须显式恢复，不自动重放。确认的目录身份贯穿后续 turn 与 Tools，目录被替换会拒绝继续；XML 位置和进程工作目录不变。
 
-chat 中无 selector 的 `.context` 显示有界 recent 列表；`.context <selector>` 先冻结已复核的逻辑路径和精确 hash，只有当前 queue、side lane、approval 与 compaction 均安全时才关闭旧 owner，之后仅按该 hash 重新组合并打开。关闭后若发生竞态，本次 invocation 会致命失败，绝不退回短名称去打开替代对象。显式跨 workspace 确认实现前，该切换同样只限记录的 workspace。
+chat 中无 selector 的 `.context` 显示有界 recent 列表；`.context <selector>` 绑定精确 hash、文件凭据与两个目录身份。跨目录也需输入 `CONTINUE <hash>`；`.cancel` 或其他答复保留旧 owner。接受且 queue、side lane、approval 与 compaction 均安全后才关闭旧 owner，新 owner 再复核原选择。关闭后发生竞态会结束本次 invocation，不打开替代对象。
 
 每个交互式 coordinator 错误都会取得当前进程内的 `error-N` 标识；`.details` 显示最新保留项，`.details error-N` 精确选择一项。固定环最多保留 64 条经清理的 code/message/suggestion；过期标识 fail-closed，且这个表面不保留原始 exception 对象、Tool body 或 transport payload。
 
@@ -128,7 +128,9 @@ Context。有效配置中已登记的秘密值，包括二进制字段解码后�
 确认期间配置或目标变化会拒绝保存；历史审批只作审计，未完成工作不会重放。
 `repair <selector>` 只读预览有效 previous 的恢复或清理，输入 `REPAIR <hash>` 后
 复核精确文件，再保存修复记录和真实 ModelView。缺失/损坏 XML 只从其有效命名副本恢复；
-不会破锁或重放未完成操作。管理器内的导出/继续仍待后续节点。在线 self-test Stage 2/3 的调度和同意
+不会破锁或重放未完成操作。`export <selector>` 输出与 `--export` 相同的已校验 Markdown；
+`select <selector>` 关闭管理终端后继续精确目标，跨目录复用上述确认，取消则留在管理器。
+在线 self-test Stage 2/3 的调度和同意
 门禁已有实现，但 production adapter 当前返回未接通的失败结果，不发起 Model
 请求。
 

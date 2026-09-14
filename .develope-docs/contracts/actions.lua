@@ -133,8 +133,8 @@ return {
     },
     {
       id = "continue", surface = "top", args = { arg("selector", "context-selector", true) },
-      projections = { argv("--continue", "-c", "/c") }, tty = "tty-required", confirm = "none",
-      allowed_states = { "pre-runtime" }, results = { "started", "not-found", "lock-conflict", "error" },
+      projections = { argv("--continue", "-c", "/c") }, tty = "tty-required", confirm = "workspace-confirm-if-needed",
+      allowed_states = { "pre-runtime" }, results = { "started", "not-found", "lock-conflict", "cancelled", "error" },
     },
     {
       id = "export-context", surface = "both", args = { arg("selector", "context-selector", false) },
@@ -198,7 +198,7 @@ return {
     },
     {
       id = "select-context", surface = "chat", args = { arg("selector", "context-selector", false) }, projections = { chat(".context [selector]", false), context_repl("select <selector>") },
-      tty = "tty-required", confirm = "safe-close-current", allowed_states = { "Idle", "WaitingUser" }, results = { "success", "not-found", "lock-conflict", "error" },
+      tty = "tty-required", confirm = "safe-close-and-workspace-if-needed", allowed_states = { "Idle", "WaitingUser" }, results = { "success", "not-found", "lock-conflict", "cancelled", "error" },
     },
     {
       id = "status-chat", surface = "chat", args = {}, projections = { chat(".status", false) }, tty = "tty-required", confirm = "none",

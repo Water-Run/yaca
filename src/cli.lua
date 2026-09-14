@@ -152,8 +152,8 @@ local ACTIONS = {
         argument("selector", "context-selector", true),
     }, {
         argv("--continue", "-c", "/c"),
-    }, "tty-required", "none", PRE_RUNTIME,
-    { "started", "not-found", "lock-conflict", "error" },
+    }, "tty-required", "workspace-confirm-if-needed", PRE_RUNTIME,
+    { "started", "not-found", "lock-conflict", "cancelled", "error" },
     "Continue one Context selected by short name or precise hash.", {
         overview_usage = "yaca --continue <selector>",
     }),
@@ -257,8 +257,8 @@ local ACTIONS = {
     }, {
         chat(".context [selector]", false),
         context_repl("select <selector>", { required_args = { selector = true } }),
-    }, "tty-required", "safe-close-current", { "Idle", "WaitingUser" },
-    { "success", "not-found", "lock-conflict", "error" },
+    }, "tty-required", "safe-close-and-workspace-if-needed", { "Idle", "WaitingUser" },
+    { "success", "not-found", "lock-conflict", "cancelled", "error" },
     "Select a Context through the shared Resolver."),
     action("status-chat", "chat", {}, {
         chat(".status", false),

@@ -816,6 +816,9 @@ local function normalize_config_error(config_error)
     )
 end
 
+---Private continuation credentials survive only an exact in-process handoff.
+local continuation_previews = setmetatable({}, { __mode = "k" })
+
 ---Creates the side-effect-free application composition root.
 -- No component method is called until dispatch receives an explicit semantic
 -- action. Bootstrap-safe routes never receive the optional network/agent ports.
@@ -833,6 +836,7 @@ function M.new(components, options)
     local platform_identity
     local platform_error
     local active_draft
+    local latest_continue_preview
     local lifecycle = "constructed"
     local application = {}
 
@@ -1362,7 +1366,7 @@ function M.new(components, options)
             and left.object == right.object
     end
 
-    local function dispatch_continue(request, preview_only)
+    local function dispatch_continue(request, preview_only, bound_preview)
         if not preview_only and active_draft then
             return nil, failure("SessionActive", "this process already owns an active chat")
         end
@@ -1375,9 +1379,14 @@ function M.new(components, options)
                 "existing Context services are unavailable on this invocation"
             )
         end
+        local origin_path = "."
+        if bound_preview then
+            origin_path = bound_preview.origin.path
+        elseif active_draft then
+            origin_path = active_draft.status().workspace
+        end
         local inspected, workspace, workspace_error = pcall(
-            admitted_components.workspace.inspect,
-            "."
+            admitted_components.workspace.inspect, origin_path
         )
         if not inspected or not workspace then
             return nil, workspace_error or failure(
@@ -1433,6 +1442,15 @@ function M.new(components, options)
                 "ContextTargetVerificationFailure",
                 "Context target verification returned an incomplete credential"
             )
+        end
+        if bound_preview and (verified.logical_path ~= bound_preview.verified.logical_path
+            or verified.hash ~= bound_preview.verified.hash
+            or verified.physical_hint ~= bound_preview.verified.physical_hint
+            or not plain_equal(verified.credential, bound_preview.verified.credential)
+            or workspace.path ~= bound_preview.origin.path
+            or not workspace_identity_equal(workspace.identity, bound_preview.origin.identity))
+        then
+            return nil, failure("TargetChanged", "the confirmed Context or origin workspace changed")
         end
         local recorded_logical, parent_error = context_call(
             catalog.path.parent,
@@ -1496,25 +1514,68 @@ function M.new(components, options)
             platform_kind
         )
         if not origin_key then return nil, origin_key_error end
-        if origin_key ~= expected_key
+        local cross_workspace = origin_key ~= expected_key
             or not workspace_identity_equal(workspace.identity, recorded_workspace.identity)
+        if bound_preview and (recorded_workspace.path ~= bound_preview.recorded.path
+            or not workspace_identity_equal(recorded_workspace.identity, bound_preview.recorded.identity))
         then
-            return nil, failure(
-                "WorkspaceConfirmationRequired",
-                "the selected Context belongs to another workspace; run continue from "
-                    .. recorded_path,
-                "Run --continue from the recorded workspace: " .. recorded_path
-            )
+            return nil, failure("TargetChanged", "the confirmed Context workspace changed")
         end
-
+        local function reverify_workspaces()
+            for _, expected in ipairs({ workspace, recorded_workspace }) do
+                local current, current_error = context_call(admitted_components.workspace.inspect,
+                    "InvalidWorkspace", "continuation workspace reverification", expected.path)
+                if not current then return nil, current_error end
+                if current.path ~= expected.path
+                    or not workspace_identity_equal(current.identity, expected.identity)
+                then
+                    return nil, failure("TargetChanged", "continuation workspace identity changed")
+                end
+            end
+            return true
+        end
+        local workspace_valid, workspace_verify_error = reverify_workspaces()
+        if not workspace_valid then return nil, workspace_verify_error end
         if preview_only then
-            return readonly({
+            verified = assert(freeze(verified, {}, "continuation target"))
+            workspace = assert(freeze(workspace, {}, "continuation origin"))
+            recorded_workspace = assert(freeze(recorded_workspace, {}, "continuation workspace"))
+            local preview = readonly({
                 kind = "continue-preview",
                 selector = request.selector,
                 logical_path = verified.logical_path,
                 context_hash = verified.hash,
+                origin_workspace = workspace.path,
                 recorded_workspace = recorded_workspace.path,
+                requires_workspace_confirmation = cross_workspace,
             }, "existing Context continuation preview")
+            if latest_continue_preview then continuation_previews[latest_continue_preview] = nil end
+            latest_continue_preview = preview
+            continuation_previews[preview] = {
+                verified = verified, origin = workspace, recorded = recorded_workspace,
+                config_path = admitted.config_path,
+                verify = function()
+                    if lifecycle == "closed" then
+                        return nil, failure("InvalidContinuePreview", "continuation preview owner is closed")
+                    end
+                    local current, current_error = context_call(catalog.resolver.verify_target,
+                        "ContextTargetVerificationFailure", "confirmed Context reverification", selection, "open")
+                    if not current then return nil, current_error end
+                    if current.tag ~= "Verified" or not plain_equal(current.credential, verified.credential)
+                        or current.hash ~= verified.hash or current.logical_path ~= verified.logical_path
+                        or current.physical_hint ~= verified.physical_hint
+                    then
+                        return nil, failure("TargetChanged", "the previewed Context changed before continuation")
+                    end
+                    return reverify_workspaces()
+                end,
+            }
+            return preview
+        end
+        if cross_workspace and not bound_preview then
+            return nil, failure("WorkspaceConfirmationRequired",
+                "the selected Context belongs to another workspace; run continue from " .. recorded_path,
+                "Run --continue from the recorded workspace: " .. recorded_path)
         end
 
         local receipt, open_error = context_call(
@@ -1562,6 +1623,8 @@ function M.new(components, options)
                 "existing Context open returned an incomplete durable receipt"
             ))
         end
+        workspace_valid, workspace_verify_error = reverify_workspaces()
+        if not workspace_valid then return release_opened(workspace_verify_error) end
         if receipt.auto_continue ~= true then
             return release_opened(failure(
                 "ContextRecoveryRequired",
@@ -1594,6 +1657,9 @@ function M.new(components, options)
         end
         local self_test_ok, self_test_error = run_startup_self_test(generation)
         if not self_test_ok then return release_opened(self_test_error) end
+
+        workspace_valid, workspace_verify_error = reverify_workspaces()
+        if not workspace_valid then return release_opened(workspace_verify_error) end
 
         local status = readonly({
             lifecycle = "saved",
@@ -1643,6 +1709,9 @@ function M.new(components, options)
             draft = draft,
             status = status,
             open_receipt = receipt,
+            workspace_identity = assert(freeze(
+                recorded_workspace.identity, {}, "continued workspace identity"
+            )),
         }, "existing chat bootstrap result")
     end
 
@@ -1658,6 +1727,26 @@ function M.new(components, options)
             return nil, failure("UsageError", "continue preview requires one Context selector")
         end
         return dispatch_continue({ id = "continue", selector = selector }, true)
+    end
+
+    ---Consumes a private exact preview in this or a fresh composition. Cross-
+    -- workspace admission requires the literal response supplied by the UI;
+    -- all files and directories are reverified before acquiring a writer.
+    function application.continue_preview(preview, confirmation)
+        if lifecycle == "closed" then return nil, failure("ApplicationClosed", "application is closed") end
+        local plan = continuation_previews[preview]
+        if not plan or plan.config_path ~= admitted.config_path then
+            return nil, failure("InvalidContinuePreview", "continuation preview is stale or foreign")
+        end
+        if preview.requires_workspace_confirmation
+            and confirmation ~= "CONTINUE " .. preview.context_hash
+        then
+            return nil, failure("WorkspaceConfirmationRequired", "the recorded workspace requires confirmation")
+        end
+        continuation_previews[preview] = nil
+        local valid, verify_error = plan.verify()
+        if not valid then return nil, verify_error end
+        return dispatch_continue({ id = "continue", selector = preview.context_hash }, false, plan)
     end
 
     ---Dispatches one already-normalized semantic action.
@@ -2060,6 +2149,9 @@ local function build_turn_ports(composed, shared, turn)
             "InvalidWorkspace",
             "the durable workspace identity is unavailable to direct Tools"
         ) or workspace
+    end
+    if shared.workspace_identity and workspace_key ~= shared.workspace_identity then
+        return nil, failure("ContextTargetChanged", "the confirmed workspace was replaced")
     end
     local authorization = tool_authorization_port(contexts.safety, {
         permission_snapshot_digest = profile.snapshot_digest,
@@ -4818,7 +4910,26 @@ function M.start_published_agent(composed, chat, message, source)
     local handoff
     local generation = chat.draft.config_generation()
     local status = chat.draft.status()
+    local continued_workspace_key = continuing and workspace_identity_key(
+        chat.workspace_identity
+    ) or nil
+    local function verify_continued_workspace()
+        if not continuing then return true end
+        if not continued_workspace_key or chat.workspace_identity.kind ~= "directory" then
+            return nil, failure(
+                "InvalidAgentComposition", "the continued workspace identity is missing"
+            )
+        end
+        local inspected, workspace = composed.backend.filesystem.direct_inspect(status.workspace)
+        if not inspected then return nil, workspace end
+        if workspace_identity_key(workspace.identity) ~= continued_workspace_key then
+            return nil, failure("ContextTargetChanged", "the confirmed workspace was replaced")
+        end
+        return true
+    end
     if continuing then
+        local verified, verify_error = verify_continued_workspace()
+        if not verified then chat.draft.close(); return nil, verify_error end
         receipt = chat.draft.open_receipt()
         if type(receipt) ~= "table"
             or receipt.durable ~= true
@@ -4883,6 +4994,7 @@ function M.start_published_agent(composed, chat, message, source)
         operation_journal = operation_journal,
         clock = clock,
         codec = codec,
+        workspace_identity = continued_workspace_key,
     }
     local first_ports, first_ports_error = build_turn_ports(composed, shared, {
         generation = generation,
@@ -4900,11 +5012,15 @@ function M.start_published_agent(composed, chat, message, source)
         tool_registry_snapshot = initial_snapshot.tool_registry_snapshot,
     })
     if not first_ports then chat.draft.close(); return nil, first_ports_error end
+    local verified, verify_error = verify_continued_workspace()
+    if not verified then chat.draft.close(); return nil, verify_error end
     local catalog = new_turn_catalog(first_ports)
     local side_catalog = new_side_catalog()
     local durable_settings_generation = generation
 
     local function reload_turn_snapshot(specification)
+        local workspace_valid, workspace_error = verify_continued_workspace()
+        if not workspace_valid then return nil, nil, workspace_error end
         local turn_context, context_error = composed.publication.turn_context({
             expected_context_generation = specification.context_generation,
         })
@@ -4922,6 +5038,8 @@ function M.start_published_agent(composed, chat, message, source)
             expected_context_generation = specification.context_generation,
         })
         if not snapshot then return nil, nil, snapshot_error end
+        workspace_valid, workspace_error = verify_continued_workspace()
+        if not workspace_valid then return nil, nil, workspace_error end
         return next_generation, snapshot
     end
 
@@ -5690,6 +5808,7 @@ function M.new_application_coordinator(ports, options)
     local approval = false
     local approval_serial = 0
     local model_change = false
+    local context_change = false
     local model_change_serial = 0
     local prompt_edit = false
     local prompt_edit_serial = 0
@@ -6363,6 +6482,7 @@ function M.new_application_coordinator(ports, options)
             for _, line in ipairs(session_status_lines(status)) do
                 lines[#lines + 1] = line
             end
+            lines[#lines + 1] = "context change: " .. (context_change and context_change.context_hash or "none")
             lines[#lines + 1] = "model change: "
                 .. (model_change and tostring(model_change.action_id) or "none")
             return lines
@@ -6377,6 +6497,7 @@ function M.new_application_coordinator(ports, options)
         local lines = {
             "state: " .. tostring(status.state),
             "prompt editor: " .. editing,
+            "context change: " .. (context_change and context_change.context_hash or "none"),
             "turn: " .. tostring(status.turn_id),
             "model change: "
                 .. (model_change and tostring(model_change.action_id) or "none"),
@@ -7251,6 +7372,119 @@ function M.new_application_coordinator(ports, options)
         return publish({ kind = "details", id = "contexts", lines = lines })
     end
 
+    local function context_switch_ready()
+        local current_status
+        if agent then
+            local runtime_status = agent.loop:status()
+            local compact_status = agent.compaction:status()
+            if runtime_status.state ~= "Idle" and runtime_status.state ~= "WaitingUser" then
+                return false, failure(
+                    "InteractiveActionUnavailable",
+                    "Context switching requires an idle or waiting Agent"
+                )
+            end
+            if compact_status.active == true
+                or runtime_status.compaction_preflight_state ~= "idle"
+            then
+                return false, failure(
+                    "InteractiveActionUnavailable",
+                    "finish or cancel compaction before switching Context"
+                )
+            end
+            if runtime_status.queue_count ~= 0 then
+                return false, failure(
+                    "InteractiveActionUnavailable",
+                    "clear or finish every queued item before switching Context"
+                )
+            end
+            if runtime_status.side_state ~= "idle" then
+                return false, failure(
+                    "InteractiveActionUnavailable",
+                    "finish or cancel the side request before switching Context"
+                )
+            end
+            if approval then
+                return false, failure(
+                    "InteractiveActionUnavailable",
+                    "resolve the pending approval before switching Context"
+                )
+            end
+            current_status = agent.draft.status()
+        end
+        return true, current_status
+    end
+
+    local function activate_context(preview, confirmation)
+        local ready, ready_error = context_switch_ready()
+        if not ready then return nil, ready_error end
+        local closed, close_error = close_agent("context-switch")
+        if not closed then
+            deferred_failure = close_error or failure(
+                "ContextLeaseUnknown",
+                "the current Context could not be closed for switching"
+            )
+            lifecycle = "closing"
+            return nil, deferred_failure
+        end
+        local activated, activation_error = coordinator_call(
+            admitted_ports.context_switch,
+            "activate",
+            "ContextSwitchFailure",
+            "exact Context switch activation",
+            preview,
+            confirmation
+        )
+        if not activated then
+            deferred_failure = activation_error or failure(
+                "ContextSwitchFailure",
+                "the selected Context changed after the current session closed"
+            )
+            lifecycle = "closing"
+            return nil, deferred_failure
+        end
+        local next_agent = activated.agent
+        local next_status = activated.status
+        if type(next_agent) ~= "table"
+            or type(next_agent.loop) ~= "table"
+            or type(next_agent.driver) ~= "table"
+            or type(next_agent.session) ~= "table"
+            or type(next_agent.settings) ~= "table"
+            or type(next_agent.settings.status) ~= "function"
+            or type(next_agent.settings.update) ~= "function"
+            or type(next_agent.models) ~= "table"
+            or type(next_agent.models.list) ~= "function"
+            or type(next_agent.models.preview) ~= "function"
+            or type(next_agent.models.apply) ~= "function"
+            or type(next_agent.tools) ~= "table"
+            or type(next_agent.compaction) ~= "table"
+            or type(next_agent.draft) ~= "table"
+            or type(next_status) ~= "table"
+            or next_status.logical_path ~= preview.logical_path
+            or next_status.context_hash ~= preview.context_hash
+            or next_status.workspace ~= preview.recorded_workspace
+        then
+            deferred_failure = failure(
+                "ContextSwitchContract",
+                "Context switch activation did not preserve the previewed target"
+            )
+            lifecycle = "closing"
+            return nil, deferred_failure
+        end
+        agent = next_agent
+        approval = false
+        assistant_draft = ""
+        side_draft = ""
+        side_draft_id = false
+        side_focus_id = false
+        last_wait_key = false
+        tool_ids = {}
+        return publish_status(
+            "Context switched: " .. tostring(next_status.display_name)
+                .. " [" .. tostring(next_status.context_hash) .. "]"
+                .. " workspace=" .. tostring(next_status.workspace)
+        )
+    end
+
     local function switch_context(request)
         if model_change then
             return nil, failure(
@@ -7269,43 +7503,9 @@ function M.new_application_coordinator(ports, options)
             return publish_context_choices(result)
         end
 
-        local current_status
+        local ready, current_status = context_switch_ready()
+        if not ready then return nil, current_status end
         if agent then
-            local runtime_status = agent.loop:status()
-            local compact_status = agent.compaction:status()
-            if runtime_status.state ~= "Idle" and runtime_status.state ~= "WaitingUser" then
-                return nil, failure(
-                    "InteractiveActionUnavailable",
-                    "Context switching requires an idle or waiting Agent"
-                )
-            end
-            if compact_status.active == true
-                or runtime_status.compaction_preflight_state ~= "idle"
-            then
-                return nil, failure(
-                    "InteractiveActionUnavailable",
-                    "finish or cancel compaction before switching Context"
-                )
-            end
-            if runtime_status.queue_count ~= 0 then
-                return nil, failure(
-                    "InteractiveActionUnavailable",
-                    "clear or finish every queued item before switching Context"
-                )
-            end
-            if runtime_status.side_state ~= "idle" then
-                return nil, failure(
-                    "InteractiveActionUnavailable",
-                    "finish or cancel the side request before switching Context"
-                )
-            end
-            if approval then
-                return nil, failure(
-                    "InteractiveActionUnavailable",
-                    "resolve the pending approval before switching Context"
-                )
-            end
-            current_status = agent.draft.status()
             local selector_hash = request.selector:match("^[0-9A-Fa-f]+$")
                 and #request.selector == 16
                 and request.selector:upper() or false
@@ -7341,70 +7541,19 @@ function M.new_application_coordinator(ports, options)
             return publish_status("That Context is already active.")
         end
 
-        local closed, close_error = close_agent("context-switch")
-        if not closed then
-            deferred_failure = close_error or failure(
-                "ContextLeaseUnknown",
-                "the current Context could not be closed for switching"
-            )
-            lifecycle = "closing"
-            return nil, deferred_failure
+        if preview.requires_workspace_confirmation == true then
+            if type(preview.origin_workspace) ~= "string" then
+                return nil, failure("ContextSwitchContract", "workspace confirmation has no origin")
+            end
+            context_change = preview
+            return publish({ kind = "details", id = "context-workspace", lines = {
+                "Current workspace: " .. safe_diagnostic(preview.origin_workspace, 1024),
+                "Context workspace: " .. safe_diagnostic(preview.recorded_workspace, 1024),
+                "Future tools use the Context workspace. History is not moved or replayed.",
+                "Type CONTINUE " .. preview.context_hash .. " to confirm, or .cancel.",
+            } })
         end
-        local activated, activation_error = coordinator_call(
-            admitted_ports.context_switch,
-            "activate",
-            "ContextSwitchFailure",
-            "exact Context switch activation",
-            preview
-        )
-        if not activated then
-            deferred_failure = activation_error or failure(
-                "ContextSwitchFailure",
-                "the selected Context changed after the current session closed"
-            )
-            lifecycle = "closing"
-            return nil, deferred_failure
-        end
-        local next_agent = activated.agent
-        local next_status = activated.status
-        if type(next_agent) ~= "table"
-            or type(next_agent.loop) ~= "table"
-            or type(next_agent.driver) ~= "table"
-            or type(next_agent.session) ~= "table"
-            or type(next_agent.settings) ~= "table"
-            or type(next_agent.settings.status) ~= "function"
-            or type(next_agent.settings.update) ~= "function"
-            or type(next_agent.models) ~= "table"
-            or type(next_agent.models.list) ~= "function"
-            or type(next_agent.models.preview) ~= "function"
-            or type(next_agent.models.apply) ~= "function"
-            or type(next_agent.tools) ~= "table"
-            or type(next_agent.compaction) ~= "table"
-            or type(next_agent.draft) ~= "table"
-            or type(next_status) ~= "table"
-            or next_status.logical_path ~= preview.logical_path
-            or next_status.context_hash ~= preview.context_hash
-        then
-            deferred_failure = failure(
-                "ContextSwitchContract",
-                "Context switch activation did not preserve the previewed target"
-            )
-            lifecycle = "closing"
-            return nil, deferred_failure
-        end
-        agent = next_agent
-        approval = false
-        assistant_draft = ""
-        side_draft = ""
-        side_draft_id = false
-        side_focus_id = false
-        last_wait_key = false
-        tool_ids = {}
-        return publish_status(
-            "Context switched: " .. tostring(next_status.display_name)
-                .. " [" .. tostring(next_status.context_hash) .. "]"
-                .. " workspace=" .. tostring(next_status.workspace)
-        )
+        return activate_context(preview)
     end
 
     local function route_agent_action(request)
@@ -7695,6 +7844,14 @@ function M.new_application_coordinator(ports, options)
             source = chat_source
         end
         local normalized = trim_coordinator_line(source)
+        if context_change and normalized:sub(1, 1) ~= "." then
+            local preview = context_change
+            context_change = false
+            if source ~= "CONTINUE " .. preview.context_hash then
+                return publish_status("Context continuation cancelled; the current session remains open.")
+            end
+            return activate_context(preview, source)
+        end
         if approval and normalized:sub(1, 1) ~= "." then
             return route_approval_line(source)
         end
@@ -7715,6 +7872,13 @@ function M.new_application_coordinator(ports, options)
         end
         if request.id == "help-chat" then return show_help(request.topic) end
         if request.id == "details" then return show_details(request.error_id) end
+        if context_change then
+            if request.id == "cancel" then
+                context_change = false
+                return publish_status("Context continuation cancelled; the current session remains open.")
+            end
+            return nil, failure("InteractiveActionUnavailable", "confirm or cancel the pending workspace change first")
+        end
         if request.id == "cautious" then return apply_cautious(request) end
         if request.id == "prompt-edit" then return apply_prompt(request) end
         if request.id == "select-model" then return select_model(request) end
@@ -7732,6 +7896,9 @@ function M.new_application_coordinator(ports, options)
     end
 
     local function handle_submission(intent)
+        if context_change and intent ~= "submit-or-queue" then
+            return nil, failure("InteractiveActionUnavailable", "confirm or cancel the pending workspace change first")
+        end
         if prompt_edit and intent ~= "submit-or-queue" then
             return nil, failure("PromptEditorBusy", "save or cancel the Prompt editor before using another input lane")
         end
@@ -7762,6 +7929,10 @@ function M.new_application_coordinator(ports, options)
             input_draft = ""
             prompt_needed = true
             return publish_status("Input draft cleared.")
+        end
+        if context_change then
+            context_change = false
+            return publish_status("Context continuation cancelled; the current session remains open.")
         end
         if model_change then return deny_model_change("denied") end
         if approval then return record_approval("deny") end
@@ -8054,7 +8225,7 @@ function M.new_application_coordinator(ports, options)
                 end
             end
             if lifecycle == "running" and prompt_needed then
-                local focus = (approval or model_change) and "approval" or "chat"
+                local focus = (approval or model_change or context_change) and "approval" or "chat"
                 local prompted, prompt_error = show_prompt(focus)
                 if not prompted then return finish_run(prompt_error) end
             end
@@ -8082,6 +8253,7 @@ function M.new_application_coordinator(ports, options)
             approval_action_id = approval and approval.action_id or false,
             model_change_action_id = model_change
                 and model_change.action_id or false,
+            context_change_hash = context_change and context_change.context_hash or false,
             diagnostic_count = #diagnostic_order,
             prompt_editor_id = prompt_edit and prompt_edit.id or false,
             prompt_editor_bytes = prompt_edit and #prompt_edit.draft or 0,
@@ -8214,6 +8386,7 @@ function M.new_context_switcher(initial_composed, runtime, dependencies)
     end
     local current = initial_composed
     local switcher = {}
+    local latest_preview
 
     function switcher:list()
         local called, result, result_error = pcall(
@@ -8247,11 +8420,12 @@ function M.new_context_switcher(initial_composed, runtime, dependencies)
                 "Context switch preview raised an exception"
             )
         end
+        latest_preview = result
         return result, result_error
     end
 
-    function switcher:activate(preview)
-        if type(preview) ~= "table"
+    function switcher:activate(preview, confirmation)
+        if preview ~= latest_preview or type(preview) ~= "table"
             or preview.kind ~= "continue-preview"
             or type(preview.context_hash) ~= "string"
             or type(preview.logical_path) ~= "string"
@@ -8261,6 +8435,7 @@ function M.new_context_switcher(initial_composed, runtime, dependencies)
                 "exact Context activation requires a verified preview"
             )
         end
+        latest_preview = nil
         local composed_call, next_composed, composition_error = pcall(compose, runtime)
         if not composed_call then
             return nil, failure(
@@ -8271,7 +8446,7 @@ function M.new_context_switcher(initial_composed, runtime, dependencies)
         if not next_composed then return nil, composition_error end
         if type(next_composed) ~= "table"
             or type(next_composed.application) ~= "table"
-            or type(next_composed.application.dispatch) ~= "function"
+            or type(next_composed.application.continue_preview) ~= "function"
             or type(next_composed.application.preview_continue) ~= "function"
         then
             return nil, failure(
@@ -8280,8 +8455,9 @@ function M.new_context_switcher(initial_composed, runtime, dependencies)
             )
         end
         local dispatched, chat, dispatch_error = pcall(
-            next_composed.application.dispatch,
-            { id = "continue", selector = preview.context_hash }
+            next_composed.application.continue_preview,
+            preview,
+            confirmation
         )
         if not dispatched then
             return nil, failure(
@@ -9433,6 +9609,42 @@ function M.run_config_repl(composed, runtime)
     return outcome, run_error
 end
 
+---Collects the exact workspace confirmation without opening a Context body.
+local function confirm_context_workspace(input, preview)
+    if preview.requires_workspace_confirmation ~= true then return true end
+    local written, write_error = input.write("CONTINUE " .. safe_diagnostic(preview.context_hash, 16)
+        .. "\nCurrent workspace: " .. safe_diagnostic(preview.origin_workspace, 1024)
+        .. "\nContext workspace: " .. safe_diagnostic(preview.recorded_workspace, 1024)
+        .. "\nFuture tools use the Context workspace. History is not moved or replayed.\n")
+    if not written then return nil, write_error end
+    local answer, answer_error = input.read("Type CONTINUE " .. preview.context_hash .. " to confirm: ", false, 128)
+    if answer == nil then return nil, answer_error end
+    if answer == false then return nil, failure("ContextReplCancelled", "Context continuation was cancelled") end
+    if answer ~= "CONTINUE " .. preview.context_hash then
+        written, write_error = input.write("Context continuation cancelled; the workspace was not changed.\n")
+        if not written then return nil, write_error end
+        return false
+    end
+    return true, answer
+end
+
+---Prompts only for a cross-workspace CLI continuation, restoring the terminal
+-- before the caller can open a writer or start the chat coordinator.
+function M.confirm_continue(composed, runtime, preview)
+    if preview.requires_workspace_confirmation ~= true then return { accepted = true } end
+    local input, input_error = new_model_setup_input(composed, runtime, "Context")
+    if not input then return nil, input_error end
+    local called, accepted, confirmation = pcall(confirm_context_workspace, input, preview)
+    local closed, close_error = input.close()
+    if not closed then return nil, close_error end
+    if not called then return nil, failure("ContextReplFailure", "Context continuation prompt failed") end
+    if accepted == nil then
+        if confirmation and confirmation.code == "ContextReplCancelled" then return { accepted = false } end
+        return nil, confirmation
+    end
+    return { accepted = accepted, confirmation = confirmation }
+end
+
 ---Runs the bounded offline Context management REPL.
 -- Every action resolves through the Resolver and reverifies the precise
 -- TargetSnapshot before reading; catalog display rows are never used to
@@ -9897,9 +10109,31 @@ function M.run_context_repl(composed, runtime, request)
         return rescan()
     end
 
-    local UNCONNECTED = {
-        ["export-context"] = true, ["select-context"] = true,
-    }
+    local function export_context(action)
+        if type(composed.application) ~= "table" or type(composed.application.dispatch) ~= "function" then
+            return nil, failure("ContextActionUnavailable", "read-only Context export is unavailable")
+        end
+        local exported, export_error = composed.application.dispatch({ id = "export-context", selector = action.selector })
+        if not exported then return nil, export_error end
+        if exported.kind ~= "context-export" or exported.format ~= "markdown" or type(exported.markdown) ~= "string" then
+            return nil, failure("ContextExportFailure", "Context export returned an invalid result")
+        end
+        return input.write(exported.markdown)
+    end
+
+    local function select_context(action)
+        if type(composed.application) ~= "table" or type(composed.application.preview_continue) ~= "function"
+            or type(composed.application.continue_preview) ~= "function"
+        then
+            return nil, failure("ContextActionUnavailable", "Context continuation is unavailable")
+        end
+        local preview, preview_error = composed.application.preview_continue(action.selector)
+        if not preview then return nil, preview_error end
+        local accepted, confirmation = confirm_context_workspace(input, preview)
+        if accepted == nil then return nil, confirmation end
+        if not accepted then return true end
+        return result("success", "continue-selected", { preview = preview, confirmation = confirmation })
+    end
 
     local function run_repl()
         local scanned, scan_error = rescan()
@@ -9907,7 +10141,7 @@ function M.run_context_repl(composed, runtime, request)
             return nil, scan_error
         end
         local written, write_error = input.write("YACA CONTEXT MANAGER\n"
-            .. "Offline: list, inspect, search, refresh, rename, rebind, import, repair, delete, set-auto-rename-disabled.\n"
+            .. "Commands: list, inspect, search, export, select, refresh, rename, rebind, import, repair, delete, set-auto-rename-disabled.\n"
             .. "Every inspect reverifies its exact target; busy Contexts show metadata only.\n"
             .. "Enter help for commands or quit to leave.\n")
         if not written then return nil, write_error end
@@ -9951,12 +10185,11 @@ function M.run_context_repl(composed, runtime, request)
                         or request.id == "context-repair"
                     then
                         handled, action_error = mutate(request)
-                    elseif UNCONNECTED[request.id] then
-                        handled, action_error = nil, failure(
-                            "ContextActionUnavailable",
-                            "this Context action is not connected in this build",
-                            safe_diagnostic(request.id, 64)
-                        )
+                    elseif request.id == "export-context" then
+                        handled, action_error = export_context(request)
+                    elseif request.id == "select-context" then
+                        handled, action_error = select_context(request)
+                        if type(handled) == "table" and handled.state == "continue-selected" then return handled end
                     else
                         handled, action_error = nil, failure(
                             "ContextActionUnavailable",
@@ -10157,7 +10390,17 @@ end
 default_runtime_dispatch = function(request, runtime)
     local composed, composition_error = M.compose_runtime(runtime)
     if not composed then return nil, composition_error end
-    local result, dispatch_error = composed.application.dispatch(request)
+    local result, dispatch_error
+    if request.id == "continue" then
+        local preview, preview_error = composed.application.preview_continue(request.selector)
+        if not preview then return nil, preview_error end
+        local choice, choice_error = M.confirm_continue(composed, runtime, preview)
+        if not choice then return nil, choice_error end
+        if not choice.accepted then return { output = "" } end
+        result, dispatch_error = composed.application.continue_preview(preview, choice.confirmation)
+    else
+        result, dispatch_error = composed.application.dispatch(request)
+    end
     if not result then return nil, dispatch_error end
     if request.id == "model-repl" then
         local configured, setup_error = M.run_model_repl(composed, runtime)
@@ -10177,7 +10420,12 @@ default_runtime_dispatch = function(request, runtime)
     then
         local managed, manager_error = M.run_context_repl(composed, runtime, request)
         if not managed then return nil, manager_error end
-        return { output = "", exit_value = managed.outcome == "success" and nil or managed }
+        if managed.state ~= "continue-selected" then
+            return { output = "", exit_value = managed.outcome == "success" and nil or managed }
+        end
+        result, dispatch_error = composed.application.continue_preview(managed.preview, managed.confirmation)
+        if not result then return nil, dispatch_error end
+        request = { id = "continue", selector = managed.preview.context_hash }
     end
     if request.id == "run-chat" or request.id == "continue" then
         local initial_agent
