@@ -60,14 +60,21 @@ logical/physical/display/canonical/created/updated/header_state 与
 `header_state` 指示活动 writer 时走 `busy-metadata-only`，
 只输出候选元数据，不得打开 Context 正文。
 
-## 接入前必须先修的阻塞项
+## 阻塞项状态
 
-`new_model_setup_input`（`src/main.lua:8522`）用
-`label == "Configuration"` 二选一推导 `cancel_code`，
-其余标签一律落到 `ModelSetupCancelled`。Context 回路若直接复用该 helper，
-Esc 取消会报出 model setup 的错误码，属于错误归因。
-N1 开工第一步是把 `cancel_code` 改为按标签显式映射
-（新增 `Context` → `ContextReplCancelled`），再实现回路。
+**已修复（`7a34715`）**：`new_model_setup_input` 原先用
+`label == "Configuration"` 二选一推导 `cancel_code`，其余标签一律落到
+`ModelSetupCancelled`；Context 回路复用该 helper 会把 Esc 取消误报成
+model setup 的错误码。现已改为显式 `SETUP_INPUT_CANCEL_CODES` 映射并对
+未注册标签 fail closed，`Context` → `ContextReplCancelled` 已登记，
+两处调用点均已传播错误。N1 可直接以 `"Context"` 标签复用该 helper。
+
+**仍未解决——测试入口缺口**：`new_model_setup_input`、`run_config_repl`、
+`run_model_repl` 都是 `src/main.lua` 的局部函数，当前**没有任何 suite 加载
+main.lua 的交互 helper**（`test/` 下无 `require("main")`）。
+N1 的第一项工作是建立 main.lua 交互回路的测试夹具
+（伪 terminal/clock/stdout 端口 + 受控 composed），
+否则新回路无法在入口级别取证。该夹具同时是 N2/N3 的前置。
 
 ## 验证
 

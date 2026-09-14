@@ -145,3 +145,28 @@ composition、外部替换/reload、保存失败重试和未知持久性停止�
 `DECISIONS.md`、`READINESS-GAP.md` 和
 [HANDOFF-AUTO-2026-08-10.md](HANDOFF-AUTO-2026-08-10.md)。
 这些历史记录不再充当当前源码进度。
+
+## Context REPL 前置修复（2026-09-14）
+
+本轮只做下一节点的前置准备，未实现 Context 交互回路。
+
+| 项目 | 结论 |
+| --- | --- |
+| 入口现状复核 | `--context-repl` 只做一次目录快照；`default_runtime_dispatch` 无该分支，`parse_context_repl` 无生产调用方 |
+| 注册表 | 10 个 `context-repl` 面动作已声明；`export-context`/`select-context` 共用同一行类，合计 12 个投影 |
+| 已修复 | `new_model_setup_input` 的 `cancel_code` 改为显式标签映射并 fail closed（`7a34715`） |
+| 计划 | [Context 管理交互实现计划](CONTEXT-REPL-PLAN.md)，切分为 N1 只读 / N2 就地写 / N3 跨界写 |
+
+验证：完整 suite **481/481**；design-contract **7611**、proof-evidence **56**、
+coding-readiness **553** 条断言 PASS。
+
+两处须如实记录：
+
+- 上文记录的 design-contract **7612** 已过时。本树在打补丁前后都报 **7611**，
+  与本轮改动无关，后续以 7611 为准。
+- 本机缺少 `xmllint`，TP-008 无法运行，本轮**未**重新证明该 proof。
+  这是环境缺口而非回归，恢复资格前须在具备 `xmllint` 的环境重跑。
+
+遗留缺口：`test/` 下没有任何 suite 加载 `src/main.lua` 的交互 helper，
+因此本次 `cancel_code` 修复没有直接单元测试，仅由完整 suite 证明无回归。
+建立 main.lua 交互回路夹具是 N1 的第一项工作。
