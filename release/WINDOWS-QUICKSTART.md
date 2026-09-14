@@ -3,7 +3,8 @@
 本次便携预览包是 `win32-x86`，按 Windows XP SP3 API 基线构建，部署目标为
 Windows Server 2008（非 R2）。程序、Lua 5.5、XML 解析器、HTTPS 客户端和 CA
 均随包提供，不需要在服务器安装 Lua、Python、Node.js 或开发工具。
-真实 XP / Server 2008 验收尚未完成；现代 Windows 上的测试不能替代旧系统验收。
+N7 已针对 Server 2008 SP2 非 R2 x64 的实际控制台修复首次输入失败，
+并验证中文配置、隐藏 Key 和配置事务。真实 XP 与完整目标验收仍未完成。
 
 ## 解压与配置
 

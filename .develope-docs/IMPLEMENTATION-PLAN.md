@@ -24,6 +24,9 @@ N6 已接通离线 Model 区域管理、引用预览和精确保存，见
 [N6 检查点](MODEL-MANAGEMENT-2026-09-14.md)。Permission 按已选 M05-48 B 编辑现有字段，
 不扩展生命周期操作。随后仍需 Model 联网测试、资源 selector 语义复核、
 在线 self-test Stage 2/3 adapter，以及真实三目标资格。
+N7 已在用户新提供的 Server 2008 SP2 非 R2 环境定位并修复 ReadConsoleW 大请求失败，
+中文首次配置、隐藏输入与配置事务的源码实测通过，见
+[N7 检查点](SERVER2008-CONSOLE-2026-09-14.md)。
 机读 phase 保持 `implemented-unqualified`，Release Gate R 保持关闭。
 
 ## 1. 计划边界

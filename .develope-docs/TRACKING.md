@@ -2,19 +2,20 @@
 
 更新日期：2026-09-14
 
-Windows 首版已完成 N1--N4 Context 管理、N5 无效 INI 修复，以及 **N6 离线 Model 管理**。
-Model 列表/字段编辑、空白新增、重命名、删除和物理排序复用完整配置事务；
-保存前展示并复核 Context 引用，旧行号/文件身份变化拒绝，历史不改写。
-完整 suite **556/556**，validators **7612/56/553** 与全部 coding-readiness proofs PASS。
-指定 Windows 远端已验证新增/.back、隐藏 Key、排序、旧行号拒绝、引用预览、
-同字节 Context 新文件对象的拒绝及重新预览后保存；XML 字节保持一致。
-见 [N6 检查点](MODEL-MANAGEMENT-2026-09-14.md)。
+Windows 首版已完成 N1--N4 Context 管理、N5 无效 INI 修复、N6 离线 Model 管理；
+**N7 已针对真正的 Server 2008 修复原生控制台读取失败**。
+通过用户新增的 `192.168.10.57:26022 → fx6100` 跳板确认目标为 Server 2008 SP2
+Enterprise without Hyper-V、非 R2、x64、6.0.6002。N6 可启动但首次输入报
+TerminalPollFailure；原生探针确认大 ReadConsoleW 请求返回错误 8。
+N7 将单次读取分段，保留原有应用输入上限及严格 UTF-8 转换。旧服务器已通过
+中文首次设置、隐藏 Key、配置/Model 保存及原生文件发布/XML 检查。
+完整 suite **556/556**，validators **7612/56/553** 与全部 coding-readiness proofs PASS；
+另有 Windows 原生 reader 的分段/Unicode/失败检查。见 [N7 检查点](SERVER2008-CONSOLE-2026-09-14.md)。
 
-首版整体仍未完成。下一项 Model 联网测试与在线 Stage 2/3 adapter、资源 selector
-语义复核，以及 C32--C34 真实目标资格。Permission 按 M05-48 的已选 B 只编辑现有字段，
-生命周期通过手工 INI；不再把未选的完整 Permission 区域管理列作实现缺口。
-部署方向仍为 XP SP3 / win32-x86 与 Server 2008 非 R2；指定测试远端实际为
-Server 2025，Release Gate R 保持关闭。
+首版整体仍未完成：Model 联网测试与在线 Stage 2/3 adapter、资源 selector 语义复核、
+C32--C34 完整目标资格仍待完成。Server 2008 的当前 smoke 不替代 XP SP3、Win7+
+和 CentOS 7 的目标 hard gate。Permission 按 M05-48 已选 B 编辑现有字段，生命周期
+通过手工 INI。Release Gate R 保持关闭；Windows 程序仅在用户指定远端运行。
 
 ## 当前阶段
 

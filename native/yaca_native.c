@@ -9324,25 +9324,41 @@ static int push_windows_key_action(
 static DWORD WINAPI windows_cooked_reader(LPVOID opaque)
 {
   yaca_terminal_read *read;
+  DWORD offset;
+  DWORD requested;
   DWORD received;
 
   read = (yaca_terminal_read *)opaque;
-  received = 0;
-  if (ReadConsoleW(
-      read->input,
-      read->wide,
-      read->capacity,
-      &received,
-      NULL))
+  offset = 0;
+  read->error_value = ERROR_SUCCESS;
+  /* Legacy console servers reject large individual buffers even when the
+  ** process allocation succeeded. Keep each OS read small; retain the full
+  ** bounded application buffer and join fragments before UTF-8 conversion. */
+  while (offset < read->capacity)
   {
-    read->received = received;
-    read->error_value = ERROR_SUCCESS;
+    requested = read->capacity - offset;
+    if (requested > 4096U)
+    {
+      requested = 4096U;
+    }
+    received = 0;
+    if (!ReadConsoleW(read->input, read->wide + offset, requested, &received, NULL))
+    {
+      read->error_value = GetLastError();
+      break;
+    }
+    if (received > requested)
+    {
+      read->error_value = ERROR_INVALID_DATA;
+      break;
+    }
+    offset += received;
+    if (received < requested || (offset > 0 && read->wide[offset - 1U] == L'\n'))
+    {
+      break;
+    }
   }
-  else
-  {
-    read->received = 0;
-    read->error_value = GetLastError();
-  }
+  read->received = offset;
   return 0;
 }
 

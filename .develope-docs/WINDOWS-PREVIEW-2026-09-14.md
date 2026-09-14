@@ -4,8 +4,10 @@
 API 基线的 win32-x86 便携包。正式三目标资格仍未完成，Release Gate R 保持关闭。
 
 后续已完成 N1/N2、N3 rebind/import/repair 和 N4 export/select/跨目录继续。
-最新 N5 还接通无效 INI 行修复，包目录为 `out/windows-preview-20260914-n5`，suite **542/542**；
-见 [N5 检查点](CONFIG-REPAIR-2026-09-14.md)。下文记录初始预览的验证范围。
+N5 接通无效 INI 行修复，N6 接通离线 Model 管理。最新 N7 根据用户提供的真实
+Server 2008 SP2 非 R2 x64 修复大缓冲 cooked 读取失败，suite **556/556**，
+包目录为 `out/windows-preview-20260914-n7`；见
+[N7 检查点](SERVER2008-CONSOLE-2026-09-14.md)。下文记录初始预览的验证范围。
 
 ## 交付与复现
 
