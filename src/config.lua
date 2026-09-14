@@ -219,6 +219,12 @@ local function snake_case(value)
     return (value:gsub("(%l)(%u)", "%1_%2"):gsub("(%u)(%u%l)", "%1_%2"):lower())
 end
 
+local function ascii_fold(value)
+    return (value:gsub("[A-Z]", function(character)
+        return string.char(character:byte() + 32)
+    end))
+end
+
 local function config_failure(reason, message, detail)
     return failure("ConfigInvalid", message or "configuration is invalid", reason, detail)
 end
@@ -898,8 +904,16 @@ function M.new(ports, options)
         local section_names = assert(ini_codec.sections(document))
         local exact = {}
         local permission_order, model_order = {}, {}
+        local resource_names = { ["Permission."] = {}, ["Model."] = {} }
         for _, name in ipairs(section_names) do
             local family = section_family(name)
+            if resource_names[family] then
+                local folded = ascii_fold(name:sub(#family + 1))
+                if resource_names[family][folded] then
+                    return nil, config_failure("resource-selector-conflict")
+                end
+                resource_names[family][folded] = true
+            end
             if family == "Permission." then
                 local suffix = name:sub(#family + 1)
                 if not valid_name(suffix, admitted.maximum_name_bytes) then
@@ -1882,6 +1896,126 @@ function M.new(ports, options)
         return new_draft(owner, next_state)
     end
 
+    ---Checks the shared resource-name grammar without constructing a Model.
+    function service.validate_model_name(name)
+        if not valid_name(name, admitted.maximum_name_bytes) then
+            return nil, failure("InvalidConfigEdit", "Model name is invalid")
+        end
+        return name
+    end
+
+    ---Adds one blank-origin typed Model; an existing section is never reused
+    -- or cloned. The complete candidate must validate before a draft is issued.
+    function service.add_model(draft, name, values)
+        local state = draft_states[draft]
+        if not state or state.owner ~= owner or state.consumed then
+            return nil, failure("InvalidConfigDraft", "configuration draft is stale or foreign")
+        end
+        if not valid_name(name, admitted.maximum_name_bytes) or type(values) ~= "table" then
+            return nil, failure("InvalidConfigEdit", "new Model requires a valid name and typed fields")
+        end
+        for _, existing in ipairs(state.generation.model_order) do
+            if ascii_fold(existing) == ascii_fold(name) then
+                return nil, failure("ModelNameConflict", "a Model with that name already exists")
+            end
+        end
+        for key in pairs(values) do
+            if not DESCRIPTORS["Model."].by_key[key] then
+                return nil, failure("InvalidConfigEdit", "new Model contains an unknown field")
+            end
+        end
+        local changes = {}
+        for _, descriptor in ipairs(DESCRIPTORS["Model."].ordered) do
+            if values[descriptor.key] ~= nil then
+                changes[#changes + 1] = { section = "Model." .. name,
+                    key = descriptor.key, value = values[descriptor.key] }
+            end
+        end
+        return service.edit_draft(draft, changes)
+    end
+
+    ---Renames, deletes, or moves a Model in one fully validated draft. Rename
+    -- updates exact INI reviewer references in the same transaction; Context
+    -- references and historical snapshots are deliberately not rewritten.
+    function service.manage_model(draft, operation, name, destination)
+        local state = draft_states[draft]
+        if not state or state.owner ~= owner or state.consumed then
+            return nil, failure("InvalidConfigDraft", "configuration draft is stale or foreign")
+        end
+        if type(name) ~= "string" or not state.generation.models[name] then
+            return nil, failure("UnknownModel", "Model management requires an exact existing name")
+        end
+        local request
+        if operation == "rename" then
+            if not valid_name(destination, admitted.maximum_name_bytes) then
+                return nil, failure("InvalidConfigEdit", "new Model name is invalid")
+            end
+            for _, existing in ipairs(state.generation.model_order) do
+                if existing ~= name and ascii_fold(existing) == ascii_fold(destination) then
+                    return nil, failure("ModelNameConflict", "a Model with that name already exists")
+                end
+            end
+            request = { operation = "rename", name = "Model." .. name, new_name = "Model." .. destination }
+        elseif operation == "delete" and destination == nil then
+            request = { operation = "delete", name = "Model." .. name }
+        elseif operation == "move" then
+            local models = {}
+            local from
+            for index, current in ipairs(state.generation.model_order) do
+                models[index] = current
+                if current == name then from = index end
+            end
+            if not valid_integer(destination, 1) or destination > #models then
+                return nil, failure("InvalidConfigEdit", "Model position is out of range")
+            end
+            table.remove(models, from)
+            table.insert(models, destination, name)
+            local sections = assert(ini_codec.sections(state.document))
+            local order = {}
+            local cursor = 1
+            for index, section in ipairs(sections) do
+                if section_family(section) == "Model." then
+                    order[index] = "Model." .. models[cursor]
+                    cursor = cursor + 1
+                else
+                    order[index] = section
+                end
+            end
+            request = { operation = "reorder", order = order }
+        else
+            return nil, failure("InvalidConfigEdit", "unknown Model management operation")
+        end
+        local document, edit_error = ini_codec.restructure(state.document, request)
+        if not document then return nil, edit_error end
+        if operation == "rename" then
+            local references = {}
+            for _, key in ipairs({ "ActionReviewModel", "TerminationReviewModel" }) do
+                local current = state.generation.get("Agent", key)
+                if current == name then
+                    references[#references + 1] = { section = "Agent", key = key,
+                        value = assert(ini.text(destination)) }
+                end
+            end
+            if #references > 0 then
+                document, edit_error = ini_codec.edit(document, references)
+                if not document then return nil, edit_error end
+            end
+        end
+        local source, write_error = ini_codec.write(document, { preserve_concrete = true })
+        if not source then return nil, write_error end
+        local generation, parsed_or_error, overrides = parse_generation(
+            source, state.context_overrides, generation_number + 1
+        )
+        if not generation then return nil, parsed_or_error end
+        local next_state = {}
+        for key, value in pairs(state) do next_state[key] = value end
+        next_state.candidate_source = source
+        next_state.document = parsed_or_error
+        next_state.generation = generation
+        next_state.context_overrides = overrides
+        return new_draft(owner, next_state)
+    end
+
     ---Returns the immutable non-secret generation represented by a draft.
     function service.draft_generation(draft)
         local state = draft_states[draft]
@@ -1987,7 +2121,7 @@ function M.new(ports, options)
     end
 
     ---Publishes a same-directory temporary after revalidation and stale checks.
-    function service.commit_draft(draft, temporary_path)
+    function service.commit_draft(draft, temporary_path, admission_guard)
         local state = draft_states[draft]
         if not state or state.owner ~= owner or state.consumed then
             return nil, failure("InvalidConfigDraft", "configuration draft is stale or foreign")
@@ -2001,6 +2135,22 @@ function M.new(ports, options)
                 "temporary config must be a distinct same-directory absolute path"
             )
         end
+        if admission_guard ~= nil and type(admission_guard) ~= "function" then
+            return nil, failure("InvalidConfigEdit", "configuration admission guard must be callable")
+        end
+        local function reverify_admission()
+            if not admission_guard then return true end
+            local called, verified, verify_error = pcall(admission_guard)
+            if not called then
+                return nil, failure("ConfigPreconditionFailed", "configuration admission check failed")
+            end
+            if verified ~= true then
+                return nil, verify_error or failure("ConfigPreconditionFailed", "configuration admission changed")
+            end
+            return true
+        end
+        local admitted_write, admission_error = reverify_admission()
+        if not admitted_write then return nil, admission_error end
         if state.mode == "replace" then
             local unchanged, stale_error = check_edit_base(state)
             if not unchanged then return nil, stale_error end
@@ -2025,6 +2175,11 @@ function M.new(ports, options)
         if not identity_equal(temporary_identity, verified_identity) then
             cleanup_temporary(temporary_path, verified_identity)
             return nil, failure("ConfigTemporaryMismatch", "temporary config identity changed")
+        end
+        admitted_write, admission_error = reverify_admission()
+        if not admitted_write then
+            cleanup_temporary(temporary_path, verified_identity)
+            return nil, admission_error
         end
         if state.mode == "replace" then
             local unchanged, stale_error = check_edit_base(state)

@@ -410,6 +410,17 @@ local REGISTRY = {
             save_identity = "exact-current-config-repair-N",
             online = false,
         },
+        model_editor = {
+            commands = {
+                "help", "list [page]", "show <row-id>", "set <row-id> <key>",
+                "unset <row-id> <key>", "add", "rename <row-id> <name>",
+                "delete <row-id>", "move <row-id> <position>", "preview",
+                "save <editor-id>", "reset", "reload", "cancel", "quit",
+            },
+            row_identity = "exact-current-model-edit-N:ordinal",
+            value_input = "separate-schema-typed-ini-value",
+            secret_input = "raw-no-echo", online = false,
+        },
     },
     exit_classes = {
         success = 0,
@@ -1344,6 +1355,7 @@ local function render_action_help(descriptor)
         lines[#lines + 1] = "  No external editor; saved changes apply on the next turn."
     end
     if descriptor.id == "config-repl" then
+        lines[#lines + 1] = "Model sections are summaries; edit Models with --model-repl."
         lines[#lines + 1] = "Editor commands:"
         for _, command in ipairs(REGISTRY.parser.config_editor.commands) do
             lines[#lines + 1] = "  " .. command
@@ -1355,6 +1367,15 @@ local function render_action_help(descriptor)
             lines[#lines + 1] = "  " .. command
         end
         lines[#lines + 1] = "Repair preserves untouched bytes; only a fully valid candidate can be saved."
+    end
+    if descriptor.id == "model-repl" then
+        lines[#lines + 1] = "With valid configuration, manage Models using the current list row identities:"
+        for _, command in ipairs(REGISTRY.parser.model_editor.commands) do
+            lines[#lines + 1] = "  " .. command
+        end
+        lines[#lines + 1] = "Add starts a blank draft; .back returns to the previous guided field."
+        lines[#lines + 1] = "Preview lists Context impacts before save. Context history is never rewritten."
+        lines[#lines + 1] = "Values use separate INI input. No connection test is performed by this editor."
     end
     lines[#lines + 1] = "Results: " .. table.concat(descriptor.results, ", ")
     if MACHINE_SUPPORTED[descriptor.id] then
@@ -1758,6 +1779,65 @@ function M.new(options)
             help = true, preview = true, reset = true, reload = true, cancel = true, quit = true,
         })[operation] then
             return nil, failure("ConfigEditorInput", "unknown command or invalid arguments; enter help")
+        end
+        return { operation = operation }
+    end
+
+    ---Parses Model management without accepting field values on the command line.
+    function service.parse_model_editor(source, editor_id)
+        if not valid_utf8_string(source) or #source > 16384 or source:find("[\r\n]") then
+            return nil, failure("ModelEditorInput", "enter one bounded UTF-8 command line")
+        end
+        if type(editor_id) ~= "string" or #editor_id > 64
+            or not editor_id:match("^model%-edit%-[1-9][0-9]*$")
+        then
+            return nil, failure("ModelEditorStale", "Model editor identity is invalid")
+        end
+        local tokens, cursor = {}, 1
+        while skip_space(source, cursor) <= #source do
+            local token, following, token_error = read_token(source, cursor)
+            if token_error or #tokens >= 3 or token == ""
+                or (following <= #source and skip_space(source, following) == following)
+            then
+                return nil, failure("ModelEditorInput", "invalid Model editor command")
+            end
+            tokens[#tokens + 1], cursor = token, following
+        end
+        local operation = tokens[1]
+        if operation == "save" then
+            if #tokens ~= 2 or tokens[2] ~= editor_id then
+                return nil, failure("ModelEditorStale", "save requires the current Model editor identity")
+            end
+        elseif operation == "list" then
+            local page = #tokens == 1 and 1
+                or #tokens == 2 and tokens[2]:match("^[1-9][0-9]*$") and tonumber(tokens[2])
+            if not page or math.type(page) ~= "integer" or page > 1000000 then
+                return nil, failure("ModelEditorInput", "list page must be a bounded positive integer")
+            end
+            return { operation = operation, page = page }
+        elseif ((operation == "show" or operation == "delete") and #tokens == 2)
+            or ((operation == "set" or operation == "unset" or operation == "rename"
+                or operation == "move") and #tokens == 3)
+        then
+            local prefix, ordinal = tokens[2]:match("^(model%-edit%-[1-9][0-9]*):([1-9][0-9]*)$")
+            local row = ordinal and tonumber(ordinal)
+            if prefix ~= editor_id or not row or math.type(row) ~= "integer" or row > 1000000 then
+                return nil, failure("ModelEditorStale", "use a row identity from the current Model list")
+            end
+            local command = { operation = operation, row = row }
+            if operation == "move" then
+                local position = tokens[3]:match("^[1-9][0-9]*$") and tonumber(tokens[3])
+                if not position or math.type(position) ~= "integer" or position > 1000000 then
+                    return nil, failure("ModelEditorInput", "Model position must be a bounded positive integer")
+                end
+                command.position = position
+            elseif operation == "rename" then command.name = tokens[3]
+            else command.key = tokens[3] end
+            return command
+        elseif #tokens ~= 1 or not ({ help = true, add = true, preview = true,
+            reset = true, reload = true, cancel = true, quit = true })[operation]
+        then
+            return nil, failure("ModelEditorInput", "unknown command or invalid arguments; enter help")
         end
         return { operation = operation }
     end

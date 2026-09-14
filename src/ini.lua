@@ -988,6 +988,102 @@ function M.new(options)
         return write_canonical(state, admitted)
     end
 
+    ---Changes section names, removes one section, or applies an exact section
+    -- permutation. Existing fields and comments travel as concrete blocks;
+    -- the file preamble stays in place and the complete result is reparsed.
+    function service.restructure(document, request)
+        if type(request) ~= "table" then
+            return nil, failure("InvalidIniEdit", "section edit requires a typed request")
+        end
+        local allowed = { operation = true, name = true, new_name = true, order = true }
+        for key in pairs(request) do
+            if not allowed[key] then
+                return nil, failure("InvalidIniEdit", "section edit contains an unknown field")
+            end
+        end
+        local source, source_error = service.write(document, { preserve_concrete = true })
+        if not source then return nil, source_error end
+        local parsed, parse_error = parse_source(source, admitted)
+        if not parsed then return nil, parse_error end
+        local state = document_states[parsed]
+        local blocks, by_name, preamble = {}, {}, {}
+        local current
+        local newline = "\n"
+        for _, record in ipairs(state.physical) do
+            if record.ending ~= "" then newline = record.ending break end
+        end
+        for _, record in ipairs(state.physical) do
+            if record.kind == "section" then
+                if by_name[record.section] then
+                    return nil, failure("InvalidIniEdit", "repeated section headers cannot be restructured")
+                end
+                current = { name = record.section, records = {} }
+                blocks[#blocks + 1] = current
+                by_name[current.name] = current
+            end
+            local records = current and current.records or preamble
+            records[#records + 1] = { content = record.content, ending = record.ending }
+        end
+        local operation = request.operation
+        if operation == "rename" then
+            local selected = by_name[request.name]
+            local replacement = request.new_name
+            if not selected or type(replacement) ~= "string"
+                or #replacement > admitted.limits.maximum_line_bytes
+                or not valid_section_fragment(replacement, true)
+                or not match_section(admitted.schema, replacement)
+                or (by_name[replacement] and replacement ~= request.name) or request.order ~= nil
+            then
+                return nil, failure("InvalidIniEdit", "section rename requires an existing source and unused valid name")
+            end
+            local header = selected.records[1]
+            local opening = assert(header.content:find("[", 1, true))
+            local closing = assert(header.content:find("]", opening + 1, true))
+            local first, last = trim_bounds(header.content, opening + 1, closing - 1)
+            header.content = header.content:sub(1, first - 1) .. replacement .. header.content:sub(last + 1)
+        elseif operation == "delete" then
+            if not by_name[request.name] or request.new_name ~= nil or request.order ~= nil then
+                return nil, failure("InvalidIniEdit", "section deletion requires one existing section")
+            end
+            for index, block in ipairs(blocks) do
+                if block.name == request.name then
+                    table.remove(blocks, index)
+                    break
+                end
+            end
+        elseif operation == "reorder" then
+            if request.name ~= nil or request.new_name ~= nil
+                or is_dense_array(request.order) ~= #blocks
+            then
+                return nil, failure("InvalidIniEdit", "section order must be a complete permutation")
+            end
+            local reordered, seen = {}, {}
+            for index, name in ipairs(request.order) do
+                if type(name) ~= "string" or not by_name[name] or seen[name] then
+                    return nil, failure("InvalidIniEdit", "section order repeats or omits a section")
+                end
+                seen[name] = true
+                reordered[index] = by_name[name]
+            end
+            blocks = reordered
+        else
+            return nil, failure("InvalidIniEdit", "unknown section edit operation")
+        end
+        local parts = { state.has_bom and UTF8_BOM or "" }
+        local ended = true
+        local function append(records)
+            for _, record in ipairs(records) do
+                if not ended then parts[#parts + 1] = newline end
+                parts[#parts + 1] = record.content
+                parts[#parts + 1] = record.ending
+                ended = record.ending ~= ""
+            end
+        end
+        append(preamble)
+        for _, block in ipairs(blocks) do append(block.records) end
+        return parse_source(table.concat(parts), admitted)
+    end
+
     service.limits = readonly({
         maximum_bytes = admitted.limits.maximum_bytes,
         maximum_lines = admitted.limits.maximum_lines,

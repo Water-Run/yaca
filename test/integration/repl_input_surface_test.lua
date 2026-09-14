@@ -125,8 +125,7 @@ end
 ---Terminal double emitting one scripted event batch per poll.
 -- The contract mirrors the production port: start/poll/cancel/close, with
 -- `user_action` and `io_terminal` events.
-local function scripted_terminal(batches)
-    local index = 0
+local function scripted_terminal(batches, cursor)
     local terminal = { started = false, closed = false, cancelled = false }
     function terminal.start(self, now)
         A.equal(math.type(now), "integer")
@@ -138,8 +137,8 @@ local function scripted_terminal(batches)
         A.truthy(self.started)
         A.equal(math.type(now), "integer")
         A.truthy(budget > 0)
-        index = index + 1
-        return batches[index] or { { kind = "io_terminal" } }
+        cursor.index = cursor.index + 1
+        return batches[cursor.index] or { { kind = "io_terminal" } }
     end
     function terminal.cancel(self, now)
         A.equal(math.type(now), "integer")
@@ -165,12 +164,13 @@ local function harness(batches)
         filesystem = filesystem,
     }, options()))
     local terminals, ticks, written = {}, 0, {}
+    local cursor = { index = 0 }
     local composed = {
         config = service,
         layout = { config_path = CONFIG_PATH },
         backend = {
             new_terminal = function(mode)
-                local terminal = scripted_terminal(batches)
+                local terminal = scripted_terminal(batches, cursor)
                 terminal.mode = mode
                 terminals[#terminals + 1] = terminal
                 return terminal
@@ -273,8 +273,10 @@ local function context_harness(commands, settings)
             inspect_import = function(target, credential)
                 calls.import_reads = (calls.import_reads or 0) + 1
                 A.equal(target, credential.physical_path)
+                if settings.body_error then return nil, { code = "InvalidContext", message = "invalid body" } end
                 return { header = { auto_rename_disabled = false }, session = {
-                    current_model = { name = "Foreign" }, current_permission = { name = "ForeignStd" },
+                    current_model = { name = settings.reference_model or "Foreign" },
+                    current_permission = { name = "ForeignStd" },
                     double_check_override = false, double_check_goal_override = { mode = "inherit" },
                     context_prompt = "preserved imported context",
                 } }, { outcome = "validated-readonly" }
@@ -361,13 +363,61 @@ local function context_harness(commands, settings)
             return not bytes:find("context>", 1, true)
         end
     end
-    local result, err = main.run_context_repl(composed, runtime, { view = settings.view or "recent" })
+    local result, err
+    if settings.model_manager then result, err = main.run_model_manager(composed, runtime)
+    else result, err = main.run_context_repl(composed, runtime, { view = settings.view or "recent" }) end
     for _, terminal in ipairs(terminals) do A.truthy(terminal.closed, "terminal must be restored") end
     A.equal(calls.scans, calls.closes + (settings.scan_failure and 1 or 0))
-    return result, err, table.concat(written), calls
+    return result, err, table.concat(written), calls, controls
 end
 
 local context_cases = {
+    {
+        name = "Model rename lists referenced Contexts and saves without rewriting their history",
+        run = function()
+            local result, err, output, calls, controls = context_harness({
+                "rename model-edit-1:1 Renamed", "preview", "save model-edit-2",
+            }, { model_manager = true, reference_model = "Primary" })
+            A.truthy(result, A.render(err))
+            A.equal(result.state, "published")
+            A.contains(output, "Affected Contexts: 2")
+            A.contains(output, "/Task001.xml references Primary")
+            A.contains(output, "explicit mapping on continuation")
+            A.contains(controls.bytes(CONFIG_PATH), "[Model.Renamed]")
+            A.equal(calls.import_reads, 6)
+            A.equal(#calls.mutations, 0)
+        end,
+    },
+    {
+        name = "Model reference preview rejects busy corrupt partial and invalid-body Contexts",
+        run = function()
+            for _, key in ipairs({ "busy", "corrupt", "partial", "body_error" }) do
+                local settings = { model_manager = true, reference_model = "Primary", [key] = true }
+                local result, err, output, calls, controls = context_harness({
+                    "rename model-edit-1:1 Renamed", "preview", "save model-edit-2", "quit",
+                }, settings)
+                A.truthy(result, A.render(err))
+                A.contains(output, "ModelPreviewRequired")
+                A.equal(controls.bytes(CONFIG_PATH), source())
+                A.falsy(table.concat(controls.operations, "|"):find("create:", 1, true))
+                A.equal(#calls.mutations, 0)
+            end
+        end,
+    },
+    {
+        name = "Model reference identity is checked again after confirmation before creating configuration temporary",
+        run = function()
+            local result, err, output, calls, controls = context_harness({
+                "rename model-edit-1:1 Renamed", "preview", "save model-edit-2", "quit",
+            }, { model_manager = true, reference_model = "Primary", changed_after_verify = 6 })
+            A.truthy(result, A.render(err))
+            A.contains(output, "Affected Contexts: 2")
+            A.contains(output, "ModelImpactStale")
+            A.equal(controls.bytes(CONFIG_PATH), source())
+            A.falsy(table.concat(controls.operations, "|"):find("create:", 1, true))
+            A.equal(#calls.mutations, 0)
+        end,
+    },
     {
         name = "Context manager exports Markdown through the read-only application owner",
         run = function()

@@ -303,7 +303,8 @@ local function config_editor_fixture(answers, settings)
     end
     function native.terminal_restore() restores = restores + 1 return true, true end
     function native.terminal_close() return true, true end
-    local code = main.run_cli({ [0] = application_path, "--config-repl" }, {
+    if settings.native_setup then settings.native_setup(native, filesystem) end
+    local code = main.run_cli({ [0] = application_path, settings.action or "--config-repl" }, {
         native = native, native_path = native_path,
         stdout = function(bytes) output[#output + 1] = bytes return true end,
         stderr = function(bytes) errors[#errors + 1] = bytes return true end,
@@ -546,6 +547,82 @@ return {
     name = "integration/bootstrap",
     cases = {
         {
+            name = "Model manager edits hidden fields and binds save to a reviewed draft",
+            run = function()
+                local observed = config_editor_fixture({ "help", "show model-edit-1:1",
+                    "set model-edit-1:1 Key", '"manager-private-key"',
+                    "show model-edit-1:1", "save model-edit-2", "show model-edit-2:1",
+                    "preview", "save model-edit-2" }, { action = "--model-repl" })
+                A.equal(observed.code, 0, observed.stderr .. observed.output)
+                A.contains(observed.output, "YACA MODEL MANAGER")
+                A.contains(observed.output, "ModelEditorStale")
+                A.contains(observed.output, "ModelPreviewRequired")
+                A.contains(observed.output, "Models published offline")
+                A.contains(observed.output, "test=untested")
+                for _, secret in ipairs({ "bootstrap-secret", "manager-private-key" }) do
+                    A.falsy(observed.output:find(secret, 1, true))
+                    A.falsy(observed.stderr:find(secret, 1, true))
+                end
+                A.contains(observed.filesystem.bytes(observed.path), 'Key = "manager-private-key"')
+                A.equal(observed.calls.process_starts, 0)
+                A.deep_equal(observed.modes, { "cooked", "raw", "cooked" })
+                A.equal(observed.restores, #observed.modes)
+            end,
+        },
+        {
+            name = "Model manager blank add supports back and reorders without copying existing credentials",
+            run = function()
+                local observed = config_editor_fixture({ "add", "New", "", "", "https://other.example/chat",
+                    "wrong-model", ".back", "new-model", "", "", "",
+                    "move model-edit-2:2 1", "show model-edit-3:1", "preview", "save model-edit-3" },
+                    { action = "--model-repl" })
+                A.equal(observed.code, 0, observed.stderr .. observed.output)
+                local bytes = observed.filesystem.bytes(observed.path)
+                A.truthy(bytes:find("Model.New", 1, true) < bytes:find("Model.Primary", 1, true))
+                A.contains(bytes, 'RemoteModel = "new-model"')
+                local new = bytes:match("%[Model.New%](.-)%[Model.Primary%]")
+                A.falsy(new:find("Key", 1, true))
+                A.contains(observed.output, "Default Model: Primary -> New")
+                A.falsy(observed.output:find("bootstrap-secret", 1, true))
+                A.equal(observed.calls.process_starts, 0)
+            end,
+        },
+        {
+            name = "Model removal requires a complete Context scan and never writes after an unavailable preview",
+            run = function()
+                local observed = config_editor_fixture({ "rename model-edit-1:1 Renamed", "preview",
+                    "save model-edit-2", "quit" }, { action = "--model-repl" })
+                A.equal(observed.code, 0, observed.stderr .. observed.output)
+                A.contains(observed.output, "ModelPreviewRequired")
+                A.equal(observed.filesystem.bytes(observed.path), observed.original)
+                A.falsy(table.concat(observed.filesystem.operations, "|"):find("create:", 1, true))
+            end,
+        },
+        {
+            name = "Model manager renames after an empty complete Context scan and refuses a stale configuration",
+            run = function()
+                local function empty_catalog(native)
+                    local function missing() return false, { code = "NotFound", message = "absent catalog" } end
+                    for _, method in ipairs({ "fs_inspect_direct", "fs_walk_direct", "fs_open_read_verified",
+                        "fs_create_new_verified", "fs_replace_verified", "fs_rename_no_replace_verified",
+                        "fs_delete_direct_verified" }) do native[method] = missing end
+                end
+                local observed = config_editor_fixture({ "rename model-edit-1:1 Renamed", "preview",
+                    "save model-edit-2" }, { action = "--model-repl", native_setup = empty_catalog })
+                A.equal(observed.code, 0, observed.stderr .. observed.output)
+                A.contains(observed.output, "Affected Contexts: 0")
+                A.contains(observed.filesystem.bytes(observed.path), "[Model.Renamed]")
+                local raced = config_editor_fixture({ "set model-edit-1:1 RemoteModel", '"new-remote"',
+                    "preview", "save model-edit-2", "quit" }, { action = "--model-repl",
+                    before_poll = function(index, filesystem, path)
+                        if index == 4 then filesystem.external_replace(path, valid_source()) end
+                    end })
+                A.equal(raced.code, 0, raced.stderr .. raced.output)
+                A.contains(raced.output, "ConfigStale")
+                A.equal(raced.filesystem.bytes(raced.path), valid_source())
+            end,
+        },
+        {
             name = "Context REPL production dispatch enters the read-only loop without configuration",
             run = function()
                 cache.lxp = fake_lxp(function() error("read-only catalog must not parse Context bodies") end)
@@ -586,7 +663,7 @@ return {
                 settings.before_poll = function(index)
                     if index == 2 then settings.clock_failed = true end
                 end
-                local observed = config_editor_fixture({ "set Model.Primary Key", '"never-published-key"' }, settings)
+                local observed = config_editor_fixture({ "set Network ProxyUrl", '"never-published-key"' }, settings)
                 A.equal(observed.code, 1)
                 A.contains(observed.stderr, "MonotonicClockDegraded")
                 A.deep_equal(observed.modes, { "cooked", "raw" })
@@ -605,7 +682,7 @@ return {
                 A.equal(observed.polls, 1)
                 A.contains(observed.filesystem.bytes(observed.path), "LogLevel = debug")
                 local rejected = config_editor_fixture({ { batch = { { kind = "action", intent = "text",
-                    text = 'set Model.Primary Key\n"untrusted-buffered-key"\nsave config-edit-2\n' } } }, "quit" })
+                    text = 'set Network ProxyUrl\n"untrusted-buffered-key"\nsave config-edit-2\n' } } }, "quit" })
                 A.equal(rejected.code, 0, rejected.stderr .. rejected.output)
                 A.contains(rejected.output, "InputModeBoundary")
                 A.falsy(rejected.output:find("untrusted-buffered-key", 1, true))
@@ -619,9 +696,9 @@ return {
                 for _, settings in ipairs({ {}, { os = "windows", arch = "x86" } }) do
                     local observed = config_editor_fixture({
                         "help", "list", "show Model.Primary", "set General LogLevel", "debug",
-                        "set TUI StartupShowVersion", "false", "set Model.Primary Key", '"new-hidden-key"',
+                        "set TUI StartupShowVersion", "false", "set Model.Primary Key",
                         "set Network ProxyUrl", '"https://user:proxy-hidden-key@proxy.example"',
-                        "preview", "save config-edit-5",
+                        "preview", "save config-edit-4",
                     }, settings)
                     A.equal(observed.code, 0, observed.stderr .. observed.output)
                     A.contains(observed.output, "YACA CONFIGURATION EDITOR")
@@ -637,12 +714,13 @@ return {
                     A.contains(bytes, "; retained config comment")
                     A.contains(bytes, "LogLevel = debug")
                     A.contains(bytes, "StartupShowVersion = false")
-                    A.contains(bytes, 'Key = "new-hidden-key"')
+                    A.contains(bytes, 'Key = "bootstrap-secret"')
+                    A.contains(observed.output, "ModelEditorRequired")
                     A.contains(bytes, 'ProxyUrl = "https://user:proxy-hidden-key@proxy.example"')
                     A.equal(observed.calls.process_starts, 0)
                     A.equal(observed.calls.directory_creates, 0)
                     A.equal(observed.stderr, "")
-                    A.deep_equal(observed.modes, { "cooked", "raw", "cooked", "raw", "cooked" })
+                    A.deep_equal(observed.modes, { "cooked", "raw", "cooked" })
                     A.equal(observed.restores, #observed.modes)
                     for index = 1, #observed.output do A.truthy(observed.output:byte(index) <= 0x7F) end
                 end

@@ -101,6 +101,29 @@ return {
     name = "unit/cli-parser",
     cases = {
         {
+            name = "Model commands bind rows and save to the displayed generation",
+            run = function()
+                local service = new_service()
+                local id = "model-edit-3"
+                A.deep_equal(assert(service.parse_model_editor('rename model-edit-3:2 "团队 A"', id)),
+                    { operation = "rename", row = 2, name = "团队 A" })
+                A.deep_equal(assert(service.parse_model_editor("move model-edit-3:2 1", id)),
+                    { operation = "move", row = 2, position = 1 })
+                A.deep_equal(assert(service.parse_model_editor("set model-edit-3:1 Key", id)),
+                    { operation = "set", row = 1, key = "Key" })
+                for _, line in ipairs({ "help", "add", "preview", "reset", "reload", "cancel", "quit" }) do
+                    A.equal(assert(service.parse_model_editor(line, id)).operation, line)
+                end
+                A.equal(assert(service.parse_model_editor("save " .. id, id)).operation, "save")
+                A.deep_equal(assert(service.parse_model_editor("list", id)), { operation = "list", page = 1 })
+                for _, line in ipairs({ "save", "save model-edit-2", "show Primary", "show model-edit-2:1",
+                    "delete model-edit-3:0", "move model-edit-3:1 -1", "set model-edit-3:1 Key secret",
+                    "clone model-edit-3:1 New", "add name", "list 0", "list 1e9", "quit\nadd" }) do
+                    A.falsy(service.parse_model_editor(line, id), line)
+                end
+            end,
+        },
+        {
             name = "invalid config repair keeps source off argv and binds save to the exact revision",
             run = function()
                 local service = new_service()

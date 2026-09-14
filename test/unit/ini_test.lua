@@ -90,6 +90,52 @@ return {
     name = "unit/ini",
     cases = {
         {
+            name = "section transactions preserve concrete blocks and materialize pending field edits",
+            run = function()
+                local service = codec()
+                local preamble = "\239\187\191; file preamble\r\n"
+                local general = "[General]\r\nLogLevel = info ; retain\r\n"
+                local first = " [ Model.One ] # header\r\nProtocol = openai-chat\r\n; first block\r\n"
+                local last = "[Model.Two]\nProtocol = anthropic-messages"
+                local document = assert(service.parse(preamble .. general .. first .. last))
+                document = assert(service.edit(document, {
+                    { section = "General", key = "LogLevel", value = assert(ini.token("debug")) },
+                }))
+                document = assert(service.restructure(document,
+                    { operation = "rename", name = "Model.One", new_name = "Model.团队" }))
+                document = assert(service.restructure(document,
+                    { operation = "reorder", order = { "General", "Model.Two", "Model.团队" } }))
+                local actual = assert(service.write(document, { preserve_concrete = true }))
+                A.equal(actual, preamble .. general:gsub("info", "debug") .. last .. "\r\n"
+                    .. first:gsub("Model.One", "Model.团队"))
+                document = assert(service.restructure(document, { operation = "delete", name = "Model.Two" }))
+                A.equal(assert(service.write(document, { preserve_concrete = true })),
+                    preamble .. general:gsub("info", "debug") .. first:gsub("Model.One", "Model.团队"))
+            end,
+        },
+        {
+            name = "section edits reject conflicts incomplete permutations repeated headers and limits",
+            run = function()
+                local service = codec()
+                local document = assert(service.parse("[Model.One]\nProtocol = openai-chat\n[Model.Two]\n"))
+                for _, request in ipairs({
+                    { operation = "rename", name = "Model.One", new_name = "Model.Two" },
+                    { operation = "rename", name = "missing", new_name = "Model.New" },
+                    { operation = "rename", name = "Model.One", new_name = "Model.Bad\nName" },
+                    { operation = "rename", name = "Model.One", new_name = "Model." .. string.rep("x", 1024) },
+                    { operation = "delete", name = "missing" },
+                    { operation = "reorder", order = { "Model.One" } },
+                    { operation = "reorder", order = { "Model.One", "Model.One" } },
+                    { operation = "clone", name = "Model.One" },
+                }) do
+                    A.falsy(service.restructure(document, request))
+                end
+                local repeated = assert(service.parse("[General]\nLogLevel = info\n[General]\n"))
+                A.falsy(service.restructure(repeated, { operation = "delete", name = "General" }))
+                A.deep_equal(assert(service.sections(document)), { "Model.One", "Model.Two" })
+            end,
+        },
+        {
             name = "additions and removals retain CRLF comments physical family order and EOF boundaries",
             run = function()
                 local service = codec()

@@ -90,6 +90,31 @@ composition，真实目标原子写和终端资格仍待 C32。
 
 验证见 [N5 检查点](../CONFIG-REPAIR-2026-09-14.md)。
 
+## N6 离线 Model 管理实现状态
+
+有效配置的 `--model-repl` 进入 Model 管理器；`--config-repl` 中 Model 只投影摘要，
+字段编辑由 Model 管理器承担。列表按物理顺序显示当前 `model-edit-N:ordinal`、名称、
+启用/默认/当前状态、协议、远端名称、脱敏 endpoint origin、Streaming、Tools、Key 状态
+及 `untested`。本进程未进入 Context，current 显示 none。每次编辑使旧行号失效。
+
+`show` / `set` / `unset` 使用同一 schema；Key 和 AdapterOptions 隐藏。`add` 从空白
+向导开始，支持 `.back`，不继承旧模型或 Key。`rename` 同步 INI 内 reviewer 引用，
+`delete` 保持完整候选有效，`move` 调整物理默认顺序。不存在 clone。
+`preview` 展示变更和默认项，再以 `save model-edit-N` 确认；reset/reload/cancel/quit
+保留显式丢弃语义。未修改 section bytes 保留，移动 EOF 记录时只增加必要分隔符。
+
+删除/重命名/禁用原 Model 时，预览对完整已知 Context 目录逐项身份复核并解析规范正文；
+busy/corrupt/partial/读取失败拒绝影响确认。显示引用该名称的 Context，允许确认后保存，
+不改写 Context XML 或历史、不建立 fallback。配置临时文件创建前及发布前重扫引用，
+与已确认的完整绑定比较；变化拒绝并清理已创建临时文件，需要新预览。
+这是保存前的逐文件复核，不构成多个进程及多个 Context 文件的全局原子快照。
+
+资源名称在同一类型内拒绝 ASCII 大小写折叠碰撞，其他 UTF-8 字节不折叠；完整 selector
+使用语义仍列后续专项复核，不能由此断言所有选取入口已经满足 M05-57。
+Permission 按 DECISION-REGISTER 中 M05-48 的已选 B 只管理现有字段，生命周期手工编辑
+INI。在线 Model 测试与 Stage 2/3 production adapter 尚待完成。
+验证见 [N6 检查点](../MODEL-MANAGEMENT-2026-09-14.md)。
+
 ## 配置 generation 与逐 turn 生效
 
 Model/config INI 可以在 chat 持有 Context writer 时由独立 REPL 或外部编辑器修改；配置提交锁与 Context writer lease 分离。每个新顶层 `main`/`side` admission 前，配置服务有界读取完整 INI bytes，并计算只留在进程内的 private source digest：

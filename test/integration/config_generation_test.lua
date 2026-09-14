@@ -170,6 +170,119 @@ return {
     name = "integration/config-generation",
     cases = {
         {
+            name = "configuration admission guard rechecks before publication and cleans rejected temporaries",
+            run = function()
+                for _, rejection in ipairs({ "first", "second", "throw", "source-change", "none" }) do
+                    local filesystem, controls = fake_filesystem.new({ [CONFIG_PATH] = source() })
+                    local service = codec(filesystem)
+                    local draft = assert(service.begin_edit(CONFIG_PATH))
+                    draft = assert(service.edit_draft(draft, {
+                        { section = "General", key = "LogLevel", value = "debug" },
+                    }))
+                    local calls = 0
+                    local published, publish_error = service.commit_draft(draft, TEMP_PATH, function()
+                        calls = calls + 1
+                        if rejection == "throw" then error("private guard detail") end
+                        if (rejection == "first" and calls == 1) or (rejection == "second" and calls == 2) then
+                            return nil, { code = "ReferenceChanged", message = "reference changed" }
+                        end
+                        if rejection == "source-change" and calls == 2 then
+                            controls.external_replace(CONFIG_PATH, source("warn"))
+                        end
+                        return true
+                    end)
+                    A.falsy(controls.exists(TEMP_PATH))
+                    if rejection == "none" then
+                        A.truthy(published)
+                        A.equal(calls, 2)
+                        A.contains(controls.bytes(CONFIG_PATH), "LogLevel = debug")
+                    else
+                        A.falsy(published)
+                        A.equal(publish_error.code, rejection == "throw" and "ConfigPreconditionFailed"
+                            or rejection == "source-change" and "ConfigStale" or "ReferenceChanged")
+                        A.equal(controls.bytes(CONFIG_PATH), rejection == "source-change" and source("warn") or source())
+                        if rejection == "first" or rejection == "throw" then
+                            A.falsy(table.concat(controls.operations, "|"):find("create:", 1, true))
+                        end
+                        A.truthy(service.draft_generation(draft))
+                    end
+                end
+            end,
+        },
+        {
+            name = "Model add rename and move share one exact configuration transaction",
+            run = function()
+                local original = source():gsub("%[Agent%]",
+                    '[Agent]\nActionReviewModel = "Primary"', 1)
+                    :gsub("%[Model.Primary%]", " [ Model.Primary ] ; retained model header", 1)
+                local filesystem, controls = fake_filesystem.new({ [CONFIG_PATH] = original })
+                local service = codec(filesystem)
+                local base = assert(service.begin_edit(CONFIG_PATH))
+                local draft = assert(service.add_model(base, "团队", {
+                    Enabled = true, Protocol = "openai-chat", Endpoint = "https://new.example/chat",
+                    RemoteModel = "new-model", ContextLength = 128000, MaxOutputTokens = 4096,
+                }))
+                A.falsy(assert(service.draft_generation(draft)).models["团队"].key_configured)
+                draft = assert(service.manage_model(draft, "rename", "Primary", "Renamed"))
+                draft = assert(service.manage_model(draft, "move", "团队", 1))
+                local generation = assert(service.draft_generation(draft))
+                A.deep_equal(generation.model_order, { "团队", "Renamed" })
+                A.equal(generation.current_model, "团队")
+                A.equal(generation.get("Agent", "ActionReviewModel"), "Renamed")
+                A.equal(controls.bytes(CONFIG_PATH), original)
+                assert(service.commit_draft(draft, TEMP_PATH))
+                local published = controls.bytes(CONFIG_PATH)
+                A.contains(published, 'ActionReviewModel = "Renamed"')
+                A.contains(published, " [ Model.Renamed ] ; retained model header")
+                A.contains(published, 'Key = "original-secret"')
+                A.truthy(published:find("Model.团队", 1, true) < published:find("Model.Renamed", 1, true))
+                A.equal(assert(service.draft_generation(base)).current_model, "Primary")
+            end,
+        },
+        {
+            name = "Model deletion preserves validity and never remaps external Context selectors",
+            run = function()
+                local filesystem, controls = fake_filesystem.new({ [CONFIG_PATH] = source() })
+                local service = codec(filesystem)
+                local draft = assert(service.begin_edit(CONFIG_PATH))
+                A.falsy(service.manage_model(draft, "delete", "Primary"))
+                draft = assert(service.add_model(draft, "Disabled", { Enabled = false, Protocol = "openai-chat" }))
+                A.falsy(service.manage_model(draft, "delete", "Primary"))
+                draft = assert(service.add_model(draft, "Other", {
+                    Enabled = true, Protocol = "openai-chat", Endpoint = "https://other.example/chat",
+                    RemoteModel = "other-model",
+                }))
+                draft = assert(service.manage_model(draft, "delete", "Primary"))
+                A.falsy(assert(service.draft_generation(draft)).agent_ready)
+                assert(service.commit_draft(draft, TEMP_PATH))
+                A.falsy(service.reload_file(CONFIG_PATH, { CurrentModel = "Primary" }))
+                A.falsy(controls.bytes(CONFIG_PATH):find("original-secret", 1, true))
+                draft = assert(service.begin_edit(CONFIG_PATH))
+                draft = assert(service.manage_model(draft, "move", "Other", 1))
+                A.truthy(assert(service.draft_generation(draft)).agent_ready)
+            end,
+        },
+        {
+            name = "Model management refuses case-fold collisions invalid operations and stale publications",
+            run = function()
+                local filesystem, controls = fake_filesystem.new({ [CONFIG_PATH] = source() })
+                local service = codec(filesystem)
+                local base = assert(service.begin_edit(CONFIG_PATH))
+                A.falsy(service.add_model(base, "pRIMARY", { Enabled = false, Protocol = "openai-chat" }))
+                A.falsy(service.add_model(base, "New", { Enabled = false, Protocol = "openai-chat", Unknown = true }))
+                A.falsy(service.manage_model(base, "clone", "Primary", "New"))
+                A.falsy(service.manage_model(base, "move", "Primary", 2))
+                A.falsy(service.manage_model({}, "rename", "Primary", "New"))
+                local renamed = assert(service.manage_model(base, "rename", "Primary", "New"))
+                controls.external_replace(CONFIG_PATH, source())
+                local published, publish_error = service.commit_draft(renamed, TEMP_PATH)
+                A.falsy(published)
+                A.equal(publish_error.code, "ConfigStale")
+                A.falsy(table.concat(controls.operations, "|"):find("create:", 1, true))
+                A.falsy(service.reload(source() .. '[Model.primary]\nEnabled = false\nProtocol = openai-chat\n'))
+            end,
+        },
+        {
             name = "invalid INI repair preserves exact untouched bytes and hides every source value",
             run = function()
                 local valid = "\239\187\191" .. source():gsub("\n", "\r\n")

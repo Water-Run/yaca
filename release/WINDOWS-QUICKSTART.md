@@ -25,7 +25,12 @@ Windows Server 2008（非 R2）。程序、Lua 5.5、XML 解析器、HTTPS 客�
 
 配置器离线工作，保存本身不会测试网络或消耗 API 额度。不要向普通聊天输入 API key。
 配置在 `C:\yaca\__yaca__\config.ini`，以后可重新运行 `--model-repl` 修改模型。
-配置字段编辑使用 `--config-repl`。如需代理，在 `[Network]` 中配置 `ProxyUrl`；
+已有有效配置时，`--model-repl` 进入管理列表：`add` 新增，`show <row-id>` 查看，
+`set <row-id> <key>` 编辑，`rename` / `delete` / `move` 管理名称、删除和顺序。
+行号形如 `model-edit-1:1`，每次编辑后用 `list` 获取新行号；`preview` 查看变更和
+受影响 Context，再按提示输入 `save model-edit-N` 保存。联网状态暂为 `untested`。
+首次向导及 `add` 支持 `.back` 返回上一项；取消不保存。
+其他配置字段和已有 Permission 的编辑使用 `--config-repl`。如需代理，在 `[Network]` 中配置 `ProxyUrl`；
 证书检查默认使用随包 CA，不要通过关闭证书校验解决连接错误。
 
 ## 开始使用与服务器验收

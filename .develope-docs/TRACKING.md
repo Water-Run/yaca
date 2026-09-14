@@ -2,16 +2,19 @@
 
 更新日期：2026-09-14
 
-Windows 首版已完成 N1--N4 的 Context 管理与跨目录继续，以及 **N5 无效 INI 行修复**。
-修复草稿私有、输入隐藏，保留未修改字节，完整 schema 校验后才复用原子发布事务；
-外部替换拒绝，取消不写文件，发布 unknown 时停止。完整 suite **542/542**，
-validators **7612/56/553** 与全部 coding-readiness proofs PASS。
-指定 Windows 远端已验证隐藏输入、取消、同字节新文件对象的拒绝、显式 reload 和保存，
-未修改配置字节保持一致且无临时文件/Context 残留。见 [N5 检查点](CONFIG-REPAIR-2026-09-14.md)。
+Windows 首版已完成 N1--N4 Context 管理、N5 无效 INI 修复，以及 **N6 离线 Model 管理**。
+Model 列表/字段编辑、空白新增、重命名、删除和物理排序复用完整配置事务；
+保存前展示并复核 Context 引用，旧行号/文件身份变化拒绝，历史不改写。
+完整 suite **556/556**，validators **7612/56/553** 与全部 coding-readiness proofs PASS。
+指定 Windows 远端已验证新增/.back、隐藏 Key、排序、旧行号拒绝、引用预览、
+同字节 Context 新文件对象的拒绝及重新预览后保存；XML 字节保持一致。
+见 [N6 检查点](MODEL-MANAGEMENT-2026-09-14.md)。
 
-首版整体仍未完成。下一项 Model/Permission 区域管理、在线 Stage 2/3 adapter，
-以及 C32--C34 真实目标资格。部署方向仍为 XP SP3 / win32-x86 与 Server 2008 非 R2；
-指定测试远端实际为 Server 2025，Release Gate R 保持关闭。
+首版整体仍未完成。下一项 Model 联网测试与在线 Stage 2/3 adapter、资源 selector
+语义复核，以及 C32--C34 真实目标资格。Permission 按 M05-48 的已选 B 只编辑现有字段，
+生命周期通过手工 INI；不再把未选的完整 Permission 区域管理列作实现缺口。
+部署方向仍为 XP SP3 / win32-x86 与 Server 2008 非 R2；指定测试远端实际为
+Server 2025，Release Gate R 保持关闭。
 
 ## 当前阶段
 
@@ -48,7 +51,7 @@ C01--C31 已有核心实现、测试 harness、最小发行规划和现代 Linux
 显式 rebind、管理器 export/select 和三个续接入口的跨 workspace 确认均已接通。
 
 `config-repl` 已接通有效 INI 的 catalog 字段编辑、预览、精确版本保存和重载；
-缺文件时仍提供修复模板；无效源的交互修复已接通。Model/Permission 区域管理
+缺文件时仍提供修复模板；无效源的交互修复已接通。N6 离线 Model 管理已接通；Model 联网测试
 仍待实现；`context-repl` 的 12 项投影已由 N1/N2/N3/N4 全部接通。
 在线 self-test Stage 2/3 的 production adapter 仍返回 failed 占位结果。
 这些属于实现待办，不能归入“仅差目标资格”。
@@ -120,7 +123,7 @@ composition、外部替换/reload、保存失败重试和未知持久性停止�
 
 ## 下一步顺序
 
-1. 补齐 Model/Permission 管理与
+1. 补齐 Model 联网测试、资源 selector 语义复核与
    在线 self-test Stage 2/3 的真实 adapter，保留逐次联网同意和零副作用检查。
 2. 在真实目标验收已接通的 rebind/import/repair 与跨 workspace 继续，保留精确目标/目录/writer 复核。
 3. 在真实目标环境执行 C32；只有完整目标证据通过后才推进 C33/C34 和 Gate R。

@@ -20,8 +20,10 @@ set/unset、预览、精确版本保存和显式重载；INI structural edit 保
 2026-09-14 已完成 Context 管理器全部 12 项投影，包括 rebind/import/repair、
 export/select 与跨 workspace 继续确认，见 [N4 检查点](CONTEXT-CONTINUE-2026-09-14.md)。
 N5 已接通无效源的私有行修复与完整配置事务，见 [N5 检查点](CONFIG-REPAIR-2026-09-14.md)。
-随后仍需 Model/Permission 管理、在线 self-test Stage 2/3 adapter，
-以及真实三目标资格。
+N6 已接通离线 Model 区域管理、引用预览和精确保存，见
+[N6 检查点](MODEL-MANAGEMENT-2026-09-14.md)。Permission 按已选 M05-48 B 编辑现有字段，
+不扩展生命周期操作。随后仍需 Model 联网测试、资源 selector 语义复核、
+在线 self-test Stage 2/3 adapter，以及真实三目标资格。
 机读 phase 保持 `implemented-unqualified`，Release Gate R 保持关闭。
 
 ## 1. 计划边界

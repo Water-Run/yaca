@@ -148,8 +148,18 @@ preserved; unknown records are never silently discarded. `reset`, `reload`,
 `cancel` and `quit` retain their explicit meanings. External changes require reload;
 uncertain publication stops the editor. Source values, comments and resource names
 are hidden throughout repair, and existing byte/line/input limits still apply.
-Model/Permission section management remains pending; `--model-repl` provides the
-existing offline Model creation/edit flow. `--context-repl recent|full` opens the offline Context manager. It
+`--model-repl` now manages valid configuration with `list [page]`, `show <row-id>`,
+`set`/`unset <row-id> <key>`, `add`, `rename <row-id> <name>`, `delete <row-id>`,
+and `move <row-id> <position>`. Use the current `model-edit-N:ordinal` row identity;
+changes invalidate old rows. Add starts a blank guided draft with `.back` and hidden
+Key input. `preview` shows changes, the new default, and affected Context references;
+`save model-edit-N` confirms that preview and rechecks configuration and Context identities.
+Context history is preserved; missing Models require explicit mapping on continuation.
+Busy, corrupt or incompletely scanned Contexts block reference-changing saves.
+`reset`, `reload`, `cancel` and `quit` discard unsaved changes. Model definitions are
+summaries in `--config-repl`; edit them in `--model-repl`. Permission profiles support
+existing-field editing; add/rename/delete/reorder them manually in INI, as selected
+for v0.1. Connection testing remains pending, and the manager reports `untested`. `--context-repl recent|full` opens the offline Context manager. It
 shows the requested initial catalog and accepts `list [recent|full]`,
 `inspect <selector>`, `search <query>`, `refresh`, `help`, and `quit`.
 List and search use a bounded snapshot; `refresh` rescans it explicitly.

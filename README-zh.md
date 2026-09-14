@@ -118,8 +118,15 @@ Context。有效配置中已登记的秘密值，包括二进制字段解码后�
 `validate` 检查整份候选，只有有效草稿才能用 `save config-repair-N` 保存。
 未修改字节、BOM 和换行保留；未知记录不会自动丢弃。原始值、注释与资源名称均隐藏，
 沿用现有字节/行数上限；`reset` / `reload` / `cancel` / `quit` 均需显式操作，
-外部修改要求重载，发布 unknown 时停止。Model/Permission 区域管理尚待完成，`--model-repl`
-已提供既有的离线 Model 创建/编辑流程。`--context-repl recent|full` 已接通离线管理器，支持
+外部修改要求重载，发布 unknown 时停止。`--model-repl` 已支持有效配置的
+`list [page]`、`show <row-id>`、`set`/`unset <row-id> <key>`、`add`、
+`rename <row-id> <name>`、`delete <row-id>` 和 `move <row-id> <position>`。
+使用当前 `model-edit-N:序号`；编辑后旧行号失效。新增从空白草稿开始，支持 `.back`、
+隐藏 Key 输入。`preview` 展示变更、默认模型和受影响 Context，`save model-edit-N`
+确认该预览后复核配置及 Context 身份。历史不改写，缺失模型需在继续时显式映射；
+占用、损坏或扫描不完整会阻断涉及引用的保存。`reset` / `reload` / `cancel` / `quit`
+丢弃未保存变更。配置 REPL 中 Model 只显示摘要；Permission 按首版选定范围编辑现有字段，
+新增、改名、删除和排序通过手工 INI。联网测试仍待接通，管理器如实显示 `untested`。`--context-repl recent|full` 已接通离线管理器，支持
 `list [recent|full]`、`inspect <selector>`、`search <query>`、`refresh`、
 `help` 和 `quit`。列表与搜索使用有界快照，刷新时显式重扫；检查时复核精确目标，
 目标变化即拒绝，不读取不可用 Context 的正文。Esc/EOF 恢复终端并退出。

@@ -3515,7 +3515,7 @@ local function catalog_call(port, method, ...)
     return true, value
 end
 
-local function observe_context_catalog(context_services)
+local function observe_context_catalog(context_services, capture_targets)
     if type(context_services) ~= "table"
         or type(context_services.catalog_scanner) ~= "table"
         or type(context_services.catalog) ~= "table"
@@ -3533,6 +3533,7 @@ local function observe_context_catalog(context_services)
     if not began then return nil, handle_or_error end
     local handle = handle_or_error
     local rows = {}
+    local targets = {}
     local complete = true
     local partial_reason = false
     while true do
@@ -3550,6 +3551,15 @@ local function observe_context_catalog(context_services)
             break
         end
         for _, candidate in ipairs(ring.candidates) do
+            if capture_targets then
+                local selection, selection_error = context_services.catalog.capture_target(candidate)
+                if not selection then
+                    complete = false
+                    partial_reason = selection_error and selection_error.code or "target-capture"
+                    break
+                end
+                targets[#targets + 1] = selection
+            end
             local hash, hash_error = context_services.catalog.current_hash(
                 candidate.logical_path
             )
@@ -3596,6 +3606,7 @@ local function observe_context_catalog(context_services)
         rows = rows,
         statistics = statistics,
         hash_count = #rows,
+        targets = capture_targets and targets or nil,
     }
 end
 
@@ -8703,22 +8714,6 @@ local function model_setup_sections(values)
     }
 end
 
-local function model_setup_changes(values)
-    local section = "Model." .. values.name
-    local changes = {
-        { section = section, key = "Enabled", value = values.enabled },
-        { section = section, key = "Protocol", value = values.protocol },
-        { section = section, key = "Endpoint", value = values.endpoint },
-        { section = section, key = "RemoteModel", value = values.remote_model },
-        { section = section, key = "ContextLength", value = values.context_length },
-        { section = section, key = "MaxOutputTokens", value = values.max_output_tokens },
-    }
-    if values.key ~= "" then
-        changes[#changes + 1] = { section = section, key = "Key", value = values.key }
-    end
-    return changes
-end
-
 -- Each interactive surface owns its cancellation code; an unregistered label
 -- is a construction defect, not a surface that silently reports another
 -- surface's cancellation.
@@ -9023,31 +9018,6 @@ local function new_model_setup_input(composed, runtime, label)
     return input
 end
 
-local function default_model_name(generation)
-    if type(generation) ~= "table" then return "Primary" end
-    if type(generation.current_model) == "string" and generation.current_model ~= "" then
-        return generation.current_model
-    end
-    if type(generation.model_order) == "table"
-        and type(generation.model_order[1]) == "string"
-    then
-        return generation.model_order[1]
-    end
-    return "Primary"
-end
-
-local function another_enabled_model(generation, selected_name)
-    if type(generation) ~= "table" or type(generation.models) ~= "table" then
-        return false
-    end
-    for name, model in pairs(generation.models) do
-        if name ~= selected_name and type(model) == "table" and model.enabled == true then
-            return true
-        end
-    end
-    return false
-end
-
 local function model_setup_cancelled(input)
     local written, write_error = input.write(
         "Model configuration cancelled; no configuration was changed.\n"
@@ -9061,303 +9031,500 @@ local function model_setup_cancelled(input)
     }, "cancelled Model setup")
 end
 
----Runs the offline first-Model/editor transaction with a raw no-echo Key field.
--- The flow never performs a connection test. Existing valid configurations are
--- edited through a stale-bound draft; only the exact yaca repair template may
--- enter the otherwise-forbidden invalid-source replacement path.
-function M.run_model_repl(composed, runtime)
-    if type(composed) ~= "table"
-        or type(composed.config) ~= "table"
-        or type(composed.config.begin_edit) ~= "function"
-        or type(composed.config.begin_new_values) ~= "function"
-        or type(composed.config.begin_exact_repair_values) ~= "function"
-        or type(composed.backend) ~= "table"
-        or type(composed.backend.new_terminal) ~= "function"
-        or type(composed.backend.system) ~= "table"
-        or type(composed.backend.system.secure_random) ~= "function"
-        or type(runtime) ~= "table"
+local function model_context_references(contexts)
+    if type(contexts) ~= "table" or type(contexts.store) ~= "table"
+        or type(contexts.store.inspect_import) ~= "function"
     then
-        return nil, failure(
-            "InvalidModelSetup",
-            "Model setup requires the composed config and terminal services"
+        return nil, failure("ModelImpactUnavailable", "Context reference inspection is unavailable")
+    end
+    local observed, observe_error = observe_context_catalog(contexts, true)
+    if not observed then return nil, observe_error end
+    if observed.complete ~= true or #observed.rows ~= #observed.targets then
+        return nil, failure("ModelImpactUnavailable", "Context reference scan is incomplete")
+    end
+    local bindings = {}
+    for index, selection in ipairs(observed.targets) do
+        if observed.rows[index].header_state ~= "valid" then
+            return nil, failure("ModelImpactUnavailable",
+                "Close active Context writers and inspect unavailable Contexts before changing Model references")
+        end
+        local verified = contexts.catalog.verify_target(selection, "open")
+        if type(verified) ~= "table" or verified.tag ~= "Verified" then
+            return nil, failure("ModelImpactStale", "a Context changed during reference inspection")
+        end
+        local document, document_error = contexts.store.inspect_import(
+            verified.physical_hint, verified.credential
         )
+        if not document then return nil, document_error end
+        local current = contexts.catalog.verify_target(selection, "open")
+        if type(current) ~= "table" or current.tag ~= "Verified"
+            or not plain_equal(current.credential, verified.credential)
+            or current.logical_path ~= verified.logical_path
+        then
+            return nil, failure("ModelImpactStale", "a Context changed during reference inspection")
+        end
+        bindings[#bindings + 1] = {
+            hash = verified.hash, logical_path = verified.logical_path,
+            physical_path = verified.physical_hint, credential = verified.credential,
+            model = document.session.current_model.name,
+            generation = document.generation, event_count = document.event_count,
+        }
+    end
+    table.sort(bindings, function(left, right) return left.logical_path < right.logical_path end)
+    local final, final_error = observe_context_catalog(contexts)
+    if not final then return nil, final_error end
+    if final.complete ~= true or #final.rows ~= #bindings then
+        return nil, failure("ModelImpactStale", "Context membership changed during reference inspection")
+    end
+    table.sort(final.rows, function(left, right) return left.logical_path < right.logical_path end)
+    for index, row in ipairs(final.rows) do
+        if row.logical_path ~= bindings[index].logical_path or row.hash16 ~= bindings[index].hash
+            or row.header_state ~= "valid"
+        then
+            return nil, failure("ModelImpactStale", "Context membership changed during reference inspection")
+        end
+    end
+    for _, selection in ipairs(observed.targets) do
+        local verified = contexts.catalog.verify_target(selection, "open")
+        if type(verified) ~= "table" or verified.tag ~= "Verified" then
+            return nil, failure("ModelImpactStale", "a Context changed during reference inspection")
+        end
+    end
+    return assert(freeze(bindings, {}, "Model reference inspection"))
+end
+
+local function collect_new_model(config, input, suggested_name, make_draft, require_enabled)
+    local values = { name = suggested_name or "", protocol = "openai-chat", enabled = true,
+        endpoint = "", remote_model = "", context_length = 32768, max_output_tokens = 4096, key = "" }
+    local steps = {
+        { key = "name", prompt = "Model name", kind = "name" },
+        { key = "protocol", prompt = "Protocol (openai-chat|anthropic-messages)", kind = "protocol" },
+        { key = "enabled", prompt = "Enable this Model? (yes|no)", kind = "boolean" },
+        { key = "endpoint", prompt = "Endpoint", kind = "endpoint" },
+        { key = "remote_model", prompt = "Remote model", kind = "remote" },
+        { key = "context_length", prompt = "Context length (tokens)", kind = "context" },
+        { key = "max_output_tokens", prompt = "Maximum output tokens", kind = "output" },
+        { key = "key", prompt = "Key (hidden; empty means no key)", kind = "secret" },
+    }
+    local written, write_error = input.write("Blank Model draft. .back returns to the previous field; Esc cancels.\n"
+        .. "Enter keeps the draft value; .clear empties text. Prefix another dot for literal directives.\n"
+        .. "Set token limits within the provider's supported model window.\n")
+    if not written then return nil, write_error end
+    local index = 1
+    while true do
+        local step = steps[index]
+        local current = values[step.key]
+        local default = step.kind == "secret" and ""
+            or (step.kind == "endpoint" or step.kind == "remote" or step.kind == "name")
+                and (current == "" and "" or " [keep draft]")
+            or " [" .. tostring(type(current) == "boolean" and (current and "yes" or "no") or current) .. "]"
+        local answer, read_error = input.read(step.prompt .. default .. ": ", step.kind == "secret", 16384)
+        if answer == nil then return nil, read_error end
+        if answer == false then return false end
+        if answer == ".back" then
+            if index == 1 then return false end
+            index = index - 1
+        else
+            local value = answer == "" and current or answer
+            if answer == ".clear" then value = "" end
+            if answer:sub(1, 2) == ".." then value = answer:sub(2) end
+            local valid = true
+            if step.kind == "name" then
+                valid = config.validate_model_name(value) ~= nil
+            elseif step.kind == "protocol" then
+                valid = value == "openai-chat" or value == "anthropic-messages"
+            elseif step.kind == "boolean" then
+                if type(value) == "string" then
+                    valid = value == "yes" or value == "no"
+                    value = value == "yes"
+                end
+                if valid and require_enabled and not value then
+                    valid = false
+                    written, write_error = input.write("At least one Model must remain enabled.\n")
+                    if not written then return nil, write_error end
+                end
+            elseif step.kind == "endpoint" or step.kind == "remote" then
+                valid = value ~= "" or not values.enabled
+            elseif step.kind == "context" or step.kind == "output" then
+                if type(value) == "string" then
+                    value = #value <= 7 and value:match("^[0-9]+$") and tonumber(value) or nil
+                end
+                valid = valid_integer(value, step.kind == "context" and 2 or 1)
+                    and value <= (step.kind == "context" and 2000000
+                        or math.min(131072, values.context_length - 1))
+            end
+            if valid then
+                values[step.key] = value
+                if step.kind == "context" then
+                    values.max_output_tokens = math.min(values.max_output_tokens, value - 1)
+                end
+                if index < #steps then
+                    index = index + 1
+                else
+                    local draft, draft_error = make_draft(values)
+                    if draft then return draft, values end
+                    written, write_error = input.write("Model draft failed complete validation: "
+                        .. safe_diagnostic(draft_error and draft_error.code or "ConfigInvalid", 128)
+                        .. (draft_error and draft_error.reason and " / " .. safe_diagnostic(draft_error.reason, 128) or "")
+                        .. ". Use .back to correct earlier fields.\n")
+                    if not written then return nil, write_error end
+                end
+            else
+                written, write_error = input.write("That value is invalid for " .. step.prompt .. ".\n")
+                if not written then return nil, write_error end
+            end
+        end
+    end
+end
+
+---Manages physical Model order and private field drafts without network I/O.
+function M.run_model_manager(composed, runtime)
+    local config = composed.config
+    local base, begin_error = config.begin_edit(composed.layout.config_path)
+    if not base then return nil, begin_error end
+    local draft, revision, changes, plan = base, 1, {}, nil
+    local input, input_error = new_model_setup_input(composed, runtime)
+    if not input then return nil, input_error end
+    local function editor_id() return "model-edit-" .. tostring(revision) end
+    local function generation(candidate) return assert(config.draft_generation(candidate or draft)) end
+    local function display(value)
+        local source = tostring(value)
+        for _, candidate in ipairs({ base, draft }) do
+            for _ in pairs(assert(generation(candidate).scan_registered_secrets(source))) do
+                return "[hidden]"
+            end
+        end
+        return ascii_diagnostic(source, 16384)
+    end
+    local function model_line(name, index)
+        local model = generation().models[name]
+        local endpoint = normalized_endpoint_identity(model.endpoint)
+        return editor_id() .. ":" .. tostring(index) .. " " .. display(name)
+            .. " enabled=" .. tostring(model.enabled) .. " default=" .. tostring(index == 1)
+            .. " current=none protocol=" .. display(model.protocol)
+            .. " remote=" .. display(model.remote_model or "(unset)")
+            .. " origin=" .. (endpoint and display(endpoint.origin) or "(unset)")
+            .. " streaming=" .. tostring(model.streaming) .. " tools=" .. tostring(model.tools_enabled)
+            .. " key=" .. (model.key_configured and "set" or "missing") .. " test=untested"
+    end
+    local function field_value(row)
+        if row.hidden then return row.configured and "[hidden; configured]" or "[hidden; default]" end
+        if not row.has_value then return "(unset)" end
+        if row.key == "Endpoint" then
+            local endpoint = normalized_endpoint_identity(row.value)
+            return endpoint and display(endpoint.origin .. endpoint.route:gsub("%?.*$", "?configured"))
+                or "(unavailable)"
+        end
+        return display(row.value) .. (row.configured and "" or " (default)")
+    end
+    local function list(page)
+        local order = generation().model_order
+        local first = (page - 1) * 32 + 1
+        if first > #order then return nil, failure("ModelEditorPage", "Model page is out of range") end
+        local lines = { "MODELS " .. editor_id() .. " total=" .. tostring(#order) }
+        for index = first, math.min(first + 31, #order) do
+            lines[#lines + 1] = model_line(order[index], index)
+        end
+        if first + 31 < #order then lines[#lines + 1] = "Next: list " .. tostring(page + 1) end
+        return input.write(table.concat(lines, "\n") .. "\n")
+    end
+    local function result(outcome, state, committed)
+        return readonly({ action = "model-repl", outcome = outcome, state = state,
+            config_path = composed.layout.config_path,
+            config_generation = committed and committed.id or false, online_requests = 0 }, "Model editor result")
+    end
+    local function advance(candidate, change)
+        if revision == math.maxinteger or #changes >= 256 then
+            return nil, failure("ModelEditorLimit", "save or discard the current Model changes first")
+        end
+        revision, draft, plan = revision + 1, candidate, nil
+        changes[#changes + 1] = change
+        return input.write("Draft " .. editor_id() .. " validated. Use list for current row identities; preview before save.\n")
+    end
+    local function preview()
+        plan = nil
+        local before, after = generation(base), generation()
+        local lines = { "MODEL PREVIEW " .. editor_id() .. " changes=" .. tostring(#changes),
+            "Default Model: " .. display(before.model_order[1]) .. " -> " .. display(after.model_order[1]) }
+        for _, change in ipairs(changes) do
+            lines[#lines + 1] = display(change)
+        end
+        for index, name in ipairs(after.model_order) do
+            if before.model_order[index] ~= name or not before.models[name] then
+                lines[#lines + 1] = model_line(name, index)
+            end
+            if not before.models[name] then
+                for _, row in ipairs(assert(config.draft_fields(draft, "Model." .. name))) do
+                    lines[#lines + 1] = "  " .. row.key .. " = " .. field_value(row)
+                end
+            end
+        end
+        for _, key in ipairs({ "ActionReviewModel", "TerminationReviewModel" }) do
+            local old, new = before.get("Agent", key), after.get("Agent", key)
+            if old ~= new then
+                lines[#lines + 1] = "Agent." .. key .. ": " .. display(old) .. " -> " .. display(new)
+            end
+        end
+        local affected = {}
+        for _, name in ipairs(before.model_order) do
+            if not after.models[name] or (before.models[name].enabled and not after.models[name].enabled) then
+                affected[name] = true
+            end
+        end
+        local references
+        if next(affected) then
+            local reference_error
+            references, reference_error = model_context_references(composed.contexts)
+            if not references then return nil, reference_error end
+            local count = 0
+            for _, binding in ipairs(references) do
+                if affected[binding.model] then
+                    count = count + 1
+                    lines[#lines + 1] = "Context " .. binding.hash .. " " .. display(binding.logical_path)
+                        .. " references " .. display(binding.model)
+                end
+            end
+            lines[#lines + 1] = "Affected Contexts: " .. tostring(count)
+            lines[#lines + 1] = "Context XML and history stay unchanged. A missing or disabled Model requires explicit mapping on continuation."
+        end
+        lines[#lines + 1] = "Complete configuration: valid. Agent ready: " .. tostring(after.agent_ready)
+            .. ". Connection test: untested."
+        for _, warning in ipairs(after.warnings) do
+            lines[#lines + 1] = "WARNING " .. display(warning.code)
+        end
+        lines[#lines + 1] = "Confirm this preview: save " .. editor_id()
+        local shown, show_error = input.write(table.concat(lines, "\n") .. "\n")
+        if shown then plan = { revision = revision, references = references } end
+        return shown, show_error
+    end
+    local function edit(command, name)
+        if command.operation == "rename" or command.operation == "delete" or command.operation == "move" then
+            local candidate, edit_error = config.manage_model(draft, command.operation, name,
+                command.operation == "rename" and command.name or command.position)
+            if not candidate then return nil, edit_error end
+            return advance(candidate, command.operation .. " Model." .. name
+                .. ((command.name or command.position) and " -> " .. tostring(command.name or command.position) or ""))
+        end
+        local section = "Model." .. name
+        local fields = assert(config.draft_fields(draft, section))
+        local selected
+        for _, row in ipairs(fields) do if row.key == command.key then selected = row end end
+        if not selected then return nil, failure("UnknownConfigField", "Model field is unknown") end
+        local candidate, edit_error
+        if command.operation == "unset" then
+            candidate, edit_error = config.edit_draft(draft,
+                { { section = section, key = command.key, value = config.unset } })
+        else
+            local hint = selected.form == "text" and 'quoted INI text, e.g. "text\\nnext line"'
+                or (#selected.values > 0 and table.concat(selected.values, "|") or selected.type)
+            local shown, show_error = input.write("Value type: " .. hint
+                .. (selected.hidden and "; hidden input" or "") .. ". Esc cancels the editor.\n")
+            if not shown then return nil, show_error end
+            local value, read_error = input.read("value> ", selected.hidden, 16384)
+            if value == false or value == nil then return value, read_error end
+            candidate, edit_error = config.edit_draft_value(draft, section, command.key, value)
+        end
+        if not candidate then return nil, edit_error end
+        local after
+        for _, row in ipairs(assert(config.draft_fields(candidate, section))) do
+            if row.key == command.key then after = row end
+        end
+        -- Keep values private until display scans the final candidate's secrets.
+        local old_draft = draft
+        draft = candidate
+        local description = section .. "." .. command.key .. ": "
+            .. field_value(selected) .. " -> " .. field_value(after)
+        draft = old_draft
+        return advance(candidate, description)
+    end
+    local function run_editor()
+        local written, write_error = input.write("YACA MODEL MANAGER\n"
+            .. "Offline configuration draft. Enter help for commands; add starts a blank guided Model.\n")
+        if not written then return nil, write_error end
+        written, write_error = list(1)
+        if not written then return nil, write_error end
+        while true do
+            local source, read_error = input.read(editor_id() .. "> ", false, 16384)
+            if source == false then return model_setup_cancelled(input) end
+            if source == nil then return nil, read_error end
+            local command, action_error = runtime.cli.parse_model_editor(source, editor_id())
+            local handled = command ~= nil
+            if command then
+                local operation = command.operation
+                local name = command.row and generation().model_order[command.row]
+                if command.row and not name then
+                    handled, action_error = nil, failure("UnknownModel", "Model row is out of range")
+                elseif operation == "cancel" or operation == "quit" then
+                    written, write_error = input.write("Unsaved Model edits discarded.\n")
+                    if not written then return nil, write_error end
+                    return result(operation == "quit" and "success" or "cancelled",
+                        #changes == 0 and "unchanged" or "discarded")
+                elseif operation == "help" then
+                    handled, action_error = input.write(assert(runtime.cli.render_help("model-repl")))
+                elseif operation == "list" then
+                    handled, action_error = list(command.page)
+                elseif operation == "show" then
+                    local lines = { model_line(name, command.row) }
+                    for _, row in ipairs(assert(config.draft_fields(draft, "Model." .. name))) do
+                        lines[#lines + 1] = row.key .. " = " .. field_value(row) .. " [" .. row.type .. "]"
+                    end
+                    handled, action_error = input.write(table.concat(lines, "\n") .. "\n")
+                elseif operation == "preview" then
+                    handled, action_error = preview()
+                elseif operation == "add" then
+                    local candidate, values = collect_new_model(config, input, nil, function(fields)
+                        return config.add_model(draft, fields.name, model_setup_sections(fields)[3].values)
+                    end)
+                    if candidate == false then
+                        handled, action_error = input.write("New Model discarded; existing draft retained.\n")
+                    elseif not candidate then handled, action_error = nil, values
+                    else handled, action_error = advance(candidate, "add Model." .. values.name) end
+                elseif operation == "reset" or operation == "reload" then
+                    local candidate = base
+                    if operation == "reload" then candidate, action_error = config.begin_edit(composed.layout.config_path) end
+                    if candidate then
+                        base, draft, changes, plan = candidate, candidate, {}, nil
+                        revision = revision + 1
+                        handled, action_error = list(1)
+                    else handled = nil end
+                elseif operation == "save" then
+                    if not plan or plan.revision ~= revision then
+                        handled, action_error = nil, failure("ModelPreviewRequired", "run preview before confirming save")
+                    elseif #changes == 0 then return result("success", "unchanged")
+                    else
+                        local approved = plan
+                        plan = nil
+                        local function guard()
+                            if not approved.references then return true end
+                            local current, reference_error = model_context_references(composed.contexts)
+                            if not current then return nil, reference_error end
+                            if not plain_equal(approved.references, current) then
+                                return nil, failure("ModelImpactStale", "Context references changed; preview again before saving")
+                            end
+                            return true
+                        end
+                        handled, action_error = input.close()
+                        if not handled then return nil, action_error end
+                        local committed, commit_error
+                        for _ = 1, 8 do
+                            local random, random_error = composed.backend.system.secure_random(12)
+                            if not random then return nil, random_error end
+                            committed, commit_error = config.commit_draft(draft,
+                                composed.layout.config_path .. ".yaca-edit-" .. hex_bytes(random) .. ".tmp", guard)
+                            if committed then break end
+                            local code = commit_error and commit_error.code
+                            if code ~= "DestinationExists" and code ~= "AlreadyExists" and code ~= "TemporaryConflict" then break end
+                        end
+                        if committed then
+                            written, write_error = input.write("Models published offline. No network request was made.\n")
+                            if not written then return nil, write_error end
+                            return result("success", "published", committed)
+                        end
+                        if commit_error and commit_error.code == "ConfigPublishUnknown" then return nil, commit_error end
+                        handled, action_error = nil, commit_error
+                    end
+                else
+                    handled, action_error = edit(command, name)
+                    if handled == false then return model_setup_cancelled(input) end
+                end
+            end
+            if not handled then
+                if action_error and action_error.code == "BrokenStdout" then return nil, action_error end
+                written, write_error = input.write("ERROR " .. display(action_error and action_error.code or "ModelEditorFailure")
+                    .. ": " .. display(action_error and action_error.message or "Model action failed")
+                    .. (action_error and action_error.reason and " (" .. display(action_error.reason) .. ")" or "") .. "\n")
+                if not written then return nil, write_error end
+            end
+        end
+    end
+    local called, outcome, run_error = pcall(run_editor)
+    local closed, close_error = input.close()
+    if not closed then return nil, close_error end
+    if not called then return nil, failure("ModelEditorFailure", "Model editor failed") end
+    return outcome, run_error
+end
+
+---Creates the first Model from a fully validated private draft; valid files
+-- enter the Model manager. Only the exact bootstrap repair template may be
+-- replaced here; arbitrary invalid files require configuration repair.
+function M.run_model_repl(composed, runtime)
+    if type(composed) ~= "table" or type(composed.config) ~= "table"
+        or type(composed.backend) ~= "table" or type(composed.layout) ~= "table"
+        or type(runtime) ~= "table" or type(runtime.cli) ~= "table"
+        or type(runtime.cli.parse_model_editor) ~= "function"
+    then
+        return nil, failure("InvalidModelSetup", "Model setup ports are incomplete")
+    end
+    local config = composed.config
+    local existing, edit_error = config.begin_edit(composed.layout.config_path)
+    if existing then return M.run_model_manager(composed, runtime) end
+    local mode = edit_error and edit_error.code == "NotFound" and "create" or "repair-template"
+    if mode == "repair-template" and read_file_bytes(composed.backend.filesystem,
+        composed.layout.config_path, #CONFIG_REPAIR_TEMPLATE) ~= CONFIG_REPAIR_TEMPLATE
+    then
+        return nil, failure("ConfigRepairRequired", "Use --config-repl to repair the invalid configuration")
     end
     local input, input_error = new_model_setup_input(composed, runtime)
     if not input then return nil, input_error end
-    local function fail_input(original_error)
-        local closed, close_error = input.close()
-        if not closed then return nil, close_error end
-        return nil, original_error
-    end
-    local function cancel_input()
-        local result, result_error = model_setup_cancelled(input)
-        local closed, close_error = input.close()
-        if not result then return nil, result_error end
-        if not closed then return nil, close_error end
-        return result
-    end
-    local existing_draft, edit_error = composed.config.begin_edit(
-        composed.layout.config_path
-    )
-    local mode, generation = "edit", nil
-    if existing_draft then
-        generation, edit_error = composed.config.draft_generation(existing_draft)
-        if not generation then return fail_input(edit_error) end
-    elseif type(edit_error) == "table" and edit_error.code == "NotFound" then
-        mode = "create"
-    else
-        local existing = read_file_bytes(
-            composed.backend.filesystem,
-            composed.layout.config_path,
-            #CONFIG_REPAIR_TEMPLATE
-        )
-        if existing == CONFIG_REPAIR_TEMPLATE then
-            mode = "repair-template"
-        else
-            return fail_input(failure(
-                "ConfigRepairRequired",
-                "Model setup will not replace an arbitrary invalid configuration"
-            ))
-        end
-    end
-
-    local function read_value(prompt, secret)
-        local value, value_error = input.read(prompt, secret, 16384)
-        if value == false and type(value_error) == "table"
-            and value_error.code == "ModelSetupCancelled"
-        then
-            return false
-        end
-        if value == nil then return nil, value_error end
-        return value
-    end
-
-    local wrote, write_error = input.write(table.concat({
-        "YACA MODEL SETUP\n",
-        "Offline only: this publishes configuration and performs no network request.\n",
-    }))
-    if not wrote then return fail_input(write_error) end
-    local suggested_name = default_model_name(generation)
-    local name, read_error = read_value(
-        "Model name [" .. model_setup_diagnostic(suggested_name, 128) .. "]: ",
-        false
-    )
-    if name == false then return cancel_input() end
-    if name == nil then return fail_input(read_error) end
-    if name == "" then name = suggested_name end
-    local current = generation and generation.models and generation.models[name] or nil
-
-    local default_protocol = current and current.protocol or "openai-chat"
-    local protocol
-    while true do
-        protocol, read_error = read_value(
-            "Protocol [" .. default_protocol .. "] (openai-chat|anthropic-messages): ",
-            false
-        )
-        if protocol == false then return cancel_input() end
-        if protocol == nil then return fail_input(read_error) end
-        if protocol == "" then protocol = default_protocol end
-        if protocol == "openai-chat" or protocol == "anthropic-messages" then break end
-        local shown, shown_error = input.write("Protocol must be openai-chat or anthropic-messages.\n")
-        if not shown then return fail_input(shown_error) end
-    end
-
-    local default_enabled = current and current.enabled == false and "no" or "yes"
-    local enabled
-    while true do
-        local enabled_text
-        enabled_text, read_error = read_value(
-            "Enable this Model? [" .. default_enabled .. "] (yes|no): ",
-            false
-        )
-        if enabled_text == false then return cancel_input() end
-        if enabled_text == nil then return fail_input(read_error) end
-        enabled_text = enabled_text == "" and default_enabled or enabled_text:lower()
-        if enabled_text ~= "yes" and enabled_text ~= "no" then
-            local shown, shown_error = input.write("Enable answer must be yes or no.\n")
-            if not shown then return fail_input(shown_error) end
-        elseif enabled_text == "no" and not another_enabled_model(generation, name) then
-            local shown, shown_error = input.write(
-                "At least one Model must remain enabled; answer yes for this Model.\n"
-            )
-            if not shown then return fail_input(shown_error) end
-        else
-            enabled = enabled_text == "yes"
-            break
-        end
-    end
-
-    local default_endpoint = current and current.endpoint or ""
-    local endpoint
-    while true do
-        local suffix = default_endpoint ~= "" and " [keep current]" or ""
-        endpoint, read_error = read_value("Endpoint" .. suffix .. ": ", false)
-        if endpoint == false then return cancel_input() end
-        if endpoint == nil then return fail_input(read_error) end
-        if endpoint == "" then endpoint = default_endpoint end
-        if endpoint ~= "" or not enabled then break end
-        local shown, shown_error = input.write("Endpoint is required for an enabled Model.\n")
-        if not shown then return fail_input(shown_error) end
-    end
-
-    local default_remote = current and current.remote_model or ""
-    local remote_model
-    while true do
-        local suffix = default_remote ~= "" and " [keep current]" or ""
-        remote_model, read_error = read_value("Remote model" .. suffix .. ": ", false)
-        if remote_model == false then return cancel_input() end
-        if remote_model == nil then return fail_input(read_error) end
-        if remote_model == "" then remote_model = default_remote end
-        if remote_model ~= "" or not enabled then break end
-        local shown, shown_error = input.write("Remote model is required for an enabled Model.\n")
-        if not shown then return fail_input(shown_error) end
-    end
-
-    local function read_token_limit(label, default_value, minimum, maximum)
-        while true do
-            local answer, answer_error = read_value(
-                label .. " [" .. tostring(default_value) .. "]: ", false
-            )
-            if answer == false or answer == nil then return answer, answer_error end
-            if answer == "" then answer = tostring(default_value) end
-            local value = #answer <= 7 and answer:match("^%d+$") and tonumber(answer)
-            if math.type(value) == "integer" and value >= minimum and value <= maximum then
-                return value
+    local function run_setup()
+        local written, write_error = input.write("YACA MODEL SETUP\n"
+            .. "Offline only. Default Model name: Primary.\n")
+        if not written then return nil, write_error end
+        local draft, values = collect_new_model(config, input, "Primary", function(fields)
+            local sections = model_setup_sections(fields)
+            if mode == "create" then
+                return config.begin_new_values(composed.layout.config_path, sections)
             end
-            local shown, show_error = input.write(
-                "Enter an integer from " .. tostring(minimum) .. " to "
-                    .. tostring(maximum) .. ".\n"
-            )
-            if not shown then return nil, show_error end
+            return config.begin_exact_repair_values(composed.layout.config_path, CONFIG_REPAIR_TEMPLATE, sections)
+        end, true)
+        if draft == false then return model_setup_cancelled(input) end
+        if not draft then return nil, values end
+        local generation = assert(config.draft_generation(draft))
+        local function display(value)
+            for _ in pairs(assert(generation.scan_registered_secrets(tostring(value)))) do return "[hidden]" end
+            return model_setup_diagnostic(tostring(value), 1024)
         end
+        local endpoint = normalized_endpoint_identity(values.endpoint)
+        written, write_error = input.write("Publish Model." .. display(values.name)
+            .. " protocol=" .. display(values.protocol)
+            .. " endpoint=" .. (endpoint and display(endpoint.origin .. endpoint.route:gsub("%?.*$", "?configured")) or "(unset)")
+            .. " remote=" .. display(values.remote_model) .. " enabled=" .. tostring(values.enabled)
+            .. " key=" .. (values.key ~= "" and "provided" or "none")
+            .. " context=" .. tostring(values.context_length) .. " output=" .. tostring(values.max_output_tokens) .. "\n")
+        if not written then return nil, write_error end
+        local answer, answer_error = input.read("Type APPLY to publish, or press Enter to cancel: ", false, 128)
+        if answer == nil then return nil, answer_error end
+        if answer ~= "APPLY" then return model_setup_cancelled(input) end
+        local closed, close_error = input.close()
+        if not closed then return nil, close_error end
+        if mode == "create" then
+            local created, root_error = ensure_data_root(composed.backend.filesystem,
+                composed.layout.data_root, composed.layout.application_root)
+            if created == nil then return nil, root_error end
+        end
+        local committed, commit_error
+        for _ = 1, 8 do
+            local random, random_error = composed.backend.system.secure_random(12)
+            if not random then return nil, random_error end
+            committed, commit_error = config.commit_draft(draft,
+                composed.layout.config_path .. ".yaca-edit-" .. hex_bytes(random) .. ".tmp")
+            if committed then break end
+            local code = commit_error and commit_error.code
+            if code ~= "DestinationExists" and code ~= "AlreadyExists" and code ~= "TemporaryConflict" then break end
+        end
+        if not committed then return nil, commit_error end
+        written, write_error = input.write("Model " .. display(values.name)
+            .. " was published offline. No network request was made.\n")
+        if not written then return nil, write_error end
+        return readonly({ action = "model-repl", outcome = "success", state = "published",
+            config_path = composed.layout.config_path, model_name = values.name,
+            config_generation = committed.id, online_requests = 0 }, "published Model setup")
     end
-    wrote, write_error = input.write(
-        "Set token limits within the provider's supported model window.\n"
-    )
-    if not wrote then return fail_input(write_error) end
-    local context_length
-    context_length, read_error = read_token_limit(
-        "Context length (tokens)", current and current.context_length or 32768, 2, 2000000
-    )
-    if context_length == false then return cancel_input() end
-    if context_length == nil then return fail_input(read_error) end
-    local max_output_tokens
-    max_output_tokens, read_error = read_token_limit(
-        "Maximum output tokens",
-        math.min(current and current.max_output_tokens or 4096, context_length - 1),
-        1, math.min(131072, context_length - 1)
-    )
-    if max_output_tokens == false then return cancel_input() end
-    if max_output_tokens == nil then return fail_input(read_error) end
-
-    local key_prompt = current and current.key_configured == true
-        and "Key (hidden; Enter keeps the configured value): "
-        or "Key (hidden; Enter configures no key): "
-    local key
-    key, read_error = read_value(key_prompt, true)
-    if key == false then return cancel_input() end
-    if key == nil then return fail_input(read_error) end
-
-    local summary = string.format(
-        "Publish Model.%s protocol=%s endpoint=%s remote=%s enabled=%s key=%s"
-            .. " context=%d output=%d\n",
-        model_setup_diagnostic(name, 128),
-        protocol,
-        model_setup_diagnostic(endpoint, 1024),
-        model_setup_diagnostic(remote_model, 256),
-        tostring(enabled),
-        key ~= "" and "provided" or (current and current.key_configured and "kept" or "none"),
-        context_length,
-        max_output_tokens
-    )
-    wrote, write_error = input.write(summary)
-    if not wrote then return fail_input(write_error) end
-    local confirmation
-    confirmation, read_error = read_value(
-        "Type APPLY to publish, or press Enter to cancel: ",
-        false
-    )
-    if confirmation == false or confirmation == "" then
-        return cancel_input()
-    end
-    if confirmation == nil then return fail_input(read_error) end
-    if confirmation ~= "APPLY" then
-        return cancel_input()
-    end
+    local called, outcome, run_error = pcall(run_setup)
     local closed, close_error = input.close()
     if not closed then return nil, close_error end
-
-    local values = {
-        name = name,
-        protocol = protocol,
-        endpoint = endpoint,
-        remote_model = remote_model,
-        context_length = context_length,
-        max_output_tokens = max_output_tokens,
-        key = key,
-        enabled = enabled,
-    }
-    local draft, draft_error
-    if mode == "edit" then
-        draft, draft_error = composed.config.edit_draft(
-            existing_draft,
-            model_setup_changes(values)
-        )
-    else
-        local sections = model_setup_sections(values)
-        if mode == "create" then
-            local created_root, root_error = ensure_data_root(
-                composed.backend.filesystem,
-                composed.layout.data_root,
-                composed.layout.application_root
-            )
-            if created_root == nil then return nil, root_error end
-            draft, draft_error = composed.config.begin_new_values(
-                composed.layout.config_path,
-                sections
-            )
-        else
-            draft, draft_error = composed.config.begin_exact_repair_values(
-                composed.layout.config_path,
-                CONFIG_REPAIR_TEMPLATE,
-                sections
-            )
-        end
-    end
-    key = nil
-    if not draft then return nil, draft_error end
-    local committed, commit_error
-    for _ = 1, 8 do
-        local random, random_error = composed.backend.system.secure_random(12)
-        if not random then return nil, random_error end
-        local temporary = composed.layout.config_path
-            .. ".yaca-edit-" .. hex_bytes(random) .. ".tmp"
-        committed, commit_error = composed.config.commit_draft(draft, temporary)
-        if committed then break end
-        local code = type(commit_error) == "table" and commit_error.code or nil
-        if code ~= "DestinationExists" and code ~= "AlreadyExists"
-            and code ~= "TemporaryConflict"
-        then
-            break
-        end
-    end
-    if not committed then return nil, commit_error end
-    if not write_direct(
-        runtime.stdout,
-        "Model " .. model_setup_diagnostic(name, 128)
-            .. " was published offline. No network request was made.\n"
-    ) then
-        return nil, failure("BrokenStdout", "Model setup result could not be written")
-    end
-    return readonly({
-        outcome = "success",
-        action = "model-repl",
-        state = "published",
-        config_path = composed.layout.config_path,
-        model_name = name,
-        config_generation = committed.id,
-        online_requests = 0,
-    }, "published Model setup")
+    if not called then return nil, failure("ModelSetupFailure", "Model setup failed") end
+    return outcome, run_error
 end
 
 ---Repairs an invalid INI through private physical-line edits. The same complete
@@ -9634,6 +9801,9 @@ function M.run_config_repl(composed, runtime)
         return true
     end
     local function apply_change(command)
+        if command.section:sub(1, 6) == "Model." then
+            return nil, failure("ModelEditorRequired", "Use --model-repl to edit Model configuration")
+        end
         local row, row_error = selected_field(draft, command.section, command.key)
         if not row then return nil, row_error end
         local key = command.section .. "\0" .. command.key
@@ -9710,8 +9880,19 @@ function M.run_config_repl(composed, runtime)
                     handled = fields ~= nil
                     if fields then
                         local lines = { "[" .. display(command.section) .. "]" }
-                        for _, row in ipairs(fields) do
-                            lines[#lines + 1] = row.key .. " = " .. field_value(row) .. " [" .. row.type .. "]"
+                        if command.section:sub(1, 6) == "Model." then
+                            local model = assert(config.draft_generation(draft)).models[command.section:sub(7)]
+                            local endpoint = normalized_endpoint_identity(model.endpoint)
+                            lines[#lines + 1] = "enabled=" .. tostring(model.enabled)
+                                .. " protocol=" .. display(model.protocol)
+                                .. " remote=" .. display(model.remote_model or "(unset)")
+                                .. " origin=" .. (endpoint and display(endpoint.origin) or "(unset)")
+                                .. " key=" .. (model.key_configured and "set" or "missing")
+                            lines[#lines + 1] = "Edit Models with --model-repl."
+                        else
+                            for _, row in ipairs(fields) do
+                                lines[#lines + 1] = row.key .. " = " .. field_value(row) .. " [" .. row.type .. "]"
+                            end
                         end
                         handled, action_error = input.write(table.concat(lines, "\n") .. "\n")
                     end
