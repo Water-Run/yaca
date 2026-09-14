@@ -1,10 +1,11 @@
 # 当前状态分析
 
-更新日期：2026-09-08
+更新日期：2026-09-14
 
 开发已按负责人“收尾暂停”的要求暂停。最新代码节点 `4d8c336` 已推送，
 完整 suite **481/481**；当前接续点与未完成范围见
-[2026-09-08 交接记录](HANDOFF-2026-09-08.md)。
+[2026-09-08 交接记录](HANDOFF-2026-09-08.md)；
+下一节点的可执行计划见 [Context 管理交互实现计划](CONTEXT-REPL-PLAN.md)。
 
 ## yaca 仓库
 
@@ -129,3 +130,14 @@ Linux 包依赖构建环境中的匹配 Lua 5.5 头文件与共享库。为了�
 ### 外部命令
 
 依赖随包 curl 等工具有利于旧系统兼容，但必须定义：工具查找顺序、版本契约、输出编码、超时、退出码、证书路径以及用户自行替换工具后的支持边界。
+
+### Context 管理交互的入口现状（2026-09-14 复核）
+
+`--context-repl` 仍不是交互回路。`management_service`（`src/main.lua:4043`）
+对该动作只做一次目录快照并返回行集；`default_runtime_dispatch`
+（`src/main.lua:9518`）只为 `model-repl` 与 `config-repl` 分派交互回路，
+没有 `context-repl` 分支，因此 `src/cli.lua:1752` 的 `parse_context_repl`
+目前没有生产调用方。注册表侧的 10 个 `context-repl` 面动作已就位。
+
+本次仅做只读复核并产出 [实现计划](CONTEXT-REPL-PLAN.md)，未修改源码、
+未运行测试；阶段仍为 `implemented-unqualified`。
