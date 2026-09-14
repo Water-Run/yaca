@@ -4,6 +4,10 @@
 原生 cooked 输入失败；完整 suite **556/556**，validators **7612/56/553**，
 TP-003/006/008/010 与 RP-001 PASS。仍为 preview，Release Gate R 关闭。
 
+本轮已按用户要求冻结收尾，最终归档身份及旧机断连导致的未验收范围见
+[N7 收尾记录](WINDOWS-PREVIEW-CLOSEOUT-2026-09-14.md)。下面的交互成功记录来自
+修复源码的独立运行目录，不应解读为最终 N7 onefile exe 已完成现场验收。
+
 ## 真实环境和问题
 
 连接为 `ssh -p 26022 yynicepc@192.168.10.57` 后 `ssh fx6100`；别名实际使用该
