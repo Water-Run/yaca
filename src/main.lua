@@ -8519,9 +8519,24 @@ local function model_setup_changes(values)
     return changes
 end
 
+-- Each interactive surface owns its cancellation code; an unregistered label
+-- is a construction defect, not a surface that silently reports another
+-- surface's cancellation.
+local SETUP_INPUT_CANCEL_CODES = {
+    ["Model setup"] = "ModelSetupCancelled",
+    ["Configuration"] = "ConfigEditorCancelled",
+    ["Context"] = "ContextReplCancelled",
+}
+
 local function new_model_setup_input(composed, runtime, label)
     label = label or "Model setup"
-    local cancel_code = label == "Configuration" and "ConfigEditorCancelled" or "ModelSetupCancelled"
+    local cancel_code = SETUP_INPUT_CANCEL_CODES[label]
+    if not cancel_code then
+        return nil, failure(
+            "InvalidSetupInput",
+            "interactive input label has no registered cancellation code"
+        )
+    end
     local text = require("text")
     local active = false
     local active_mode = false
@@ -8867,7 +8882,8 @@ function M.run_model_repl(composed, runtime)
             "Model setup requires the composed config and terminal services"
         )
     end
-    local input = new_model_setup_input(composed, runtime)
+    local input, input_error = new_model_setup_input(composed, runtime)
+    if not input then return nil, input_error end
     local function fail_input(original_error)
         local closed, close_error = input.close()
         if not closed then return nil, close_error end
@@ -9138,7 +9154,8 @@ function M.run_config_repl(composed, runtime)
     if not base then return nil, begin_error end
     local draft, revision = base, 1
     local changes, changed = {}, {}
-    local input = new_model_setup_input(composed, runtime, "Configuration")
+    local input, input_error = new_model_setup_input(composed, runtime, "Configuration")
+    if not input then return nil, input_error end
     local function editor_id() return "config-edit-" .. tostring(revision) end
     local function result(outcome, state, generation)
         return readonly({
