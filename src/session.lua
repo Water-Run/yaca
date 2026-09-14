@@ -1009,9 +1009,7 @@ function M.new_context_publication(ports, options)
         }
     end
 
-    local function durable_context_overrides()
-        if not active or not active.document then return nil end
-        local document = active.document
+    local function document_overrides(document)
         local goal = document.session.double_check_goal_override
         return {
             CurrentModel = document.session.current_model.name,
@@ -1021,6 +1019,11 @@ function M.new_context_publication(ports, options)
             ContextPrompt = document.session.context_prompt,
             AutoRenameDisabled = document.header.auto_rename_disabled == true,
         }
+    end
+
+    local function durable_context_overrides()
+        if not active or not active.document then return nil end
+        return document_overrides(active.document)
     end
 
     local function generation_matches_context(generation, overrides)
@@ -1123,7 +1126,40 @@ function M.new_context_publication(ports, options)
         return nil, original_error
     end
 
+    local function management_document(document, mutation)
+        local manifest = document.model_view.active_manifest
+        -- Let the schema form the lifecycle event, then compute its real
+        -- plain/compacted view. The provisional document is never published.
+        local candidate, candidate_error = schema.lifecycle_document(document, mutation)
+        if not candidate then return nil, candidate_error end
+        local facts = {}
+        for index = 1, candidate.event_count - 1 do facts[index] = candidate.facts[index] end
+        local projection
+        if manifest.compaction_id then
+            projection, candidate_error = durable_compaction_projection(document, manifest)
+            if not projection then return nil, candidate_error end
+            projection.fact_limit = #facts
+            projection.waterline = #facts
+        end
+        local view
+        view, candidate_error = cache_model_view(facts, candidate.generation, projection)
+        if not view then return nil, candidate_error end
+        mutation.view_manifest_digest = view.digest
+        candidate, candidate_error = schema.lifecycle_document(document, mutation)
+        if not candidate then return nil, candidate_error end
+        local next_manifest = candidate.model_view.active_manifest
+        if next_manifest.digest ~= view.digest
+            or next_manifest.first_event_seq ~= view.first_sequence
+            or next_manifest.last_event_seq ~= view.last_sequence
+            or (next_manifest.compaction_id or false) ~= view.compaction_id
+        then
+            return nil, failure("InvalidModelView", "Context lifecycle view binding is inexact")
+        end
+        return candidate, view
+    end
+
     local rebind_plans = {}
+    local import_plans = {}
 
     local function bound_management_path(specification, allow_corrupt)
         local credential = specification.expected_credential
@@ -1160,10 +1196,10 @@ function M.new_context_publication(ports, options)
         })
     end
 
-    local function verify_rebind_root(plan)
+    local function verify_management_workspace(plan)
         local current, current_error = filesystem.direct_reverify(plan.root_snapshot)
         if not current then
-            return nil, failure("ContextWorkspaceChanged", "rebind workspace changed after inspection",
+            return nil, failure("ContextWorkspaceChanged", "Context workspace changed after inspection",
                 current_error and current_error.code)
         end
         local workspace, workspace_error = admitted_ports.workspace.inspect(plan.root_path)
@@ -1173,7 +1209,7 @@ function M.new_context_publication(ports, options)
         if workspace.path ~= plan.root_path or workspace.enterable ~= true
             or digest ~= plan.new_root_identity
         then
-            return nil, failure("ContextWorkspaceChanged", "rebind workspace identity changed")
+            return nil, failure("ContextWorkspaceChanged", "Context workspace identity changed")
         end
         return true
     end
@@ -1235,7 +1271,7 @@ function M.new_context_publication(ports, options)
             context_path = physical, logical_path = specification.logical_path,
             credential_digest = credential_digest, next_logical = next_logical,
         }
-        local valid, valid_error = verify_rebind_root(plan)
+        local valid, valid_error = verify_management_workspace(plan)
         if not valid then return nil, valid_error end
         local proposal = readonly({
             action = "rebind", context_hash = hash, logical_path = specification.logical_path,
@@ -1243,6 +1279,122 @@ function M.new_context_publication(ports, options)
             target_hash = next_hash, old_root_identity = old_identity, new_root_identity = new_identity,
         }, "Context rebind proposal")
         rebind_plans[proposal] = plan
+        return proposal
+    end
+
+    ---Prepares a complete in-place import generation without acquiring a writer.
+    -- Local mappings replace only effective selectors. Historical authority and
+    -- unfinished operations remain data, and cannot resume work through import.
+    function service.plan_import(specification)
+        import_plans = {}
+        if closed or journal_failure or active then
+            return nil, failure("ContextActionUnavailable", "Context management owner is unavailable")
+        end
+        if type(specification) ~= "table" then
+            return nil, failure("InvalidContextMutation", "an exact import request is required")
+        end
+        if type(store.inspect_import) ~= "function" or type(admitted_ports.workspace) ~= "table"
+            or type(admitted_ports.workspace.inspect) ~= "function"
+            or type(path.context_file) ~= "function" or type(path.from_logical) ~= "function"
+            or type(path.comparison_key) ~= "function" or type(schema.lifecycle_document) ~= "function"
+        then
+            return nil, failure("ContextActionUnavailable", "in-place import inspection is unavailable")
+        end
+        local physical, hash = bound_management_path(specification)
+        if not physical then return nil, hash end
+        local generation, generation_error = validate_generation(specification.generation)
+        if not generation then return nil, generation_error end
+        local document, report = store.inspect_import(physical, specification.expected_credential)
+        if not document then return nil, report end
+        local overrides = document_overrides(document)
+        overrides.CurrentModel = generation.current_model
+        overrides.CurrentPermission = generation.current_permission
+        if not generation_matches_context(generation, overrides) then
+            return nil, failure("ConfigGenerationMismatch", "import mapping changed other Context overrides")
+        end
+        local model_snapshot, model_error = selector_snapshot(generation, "CurrentModel", overrides.CurrentModel)
+        if not model_snapshot then return nil, model_error end
+        local permission_snapshot, permission_error = selector_snapshot(generation,
+            "CurrentPermission", overrides.CurrentPermission)
+        if not permission_snapshot then return nil, permission_error end
+        local details, details_error = path.context_file(specification.logical_path)
+        if not details then return nil, details_error end
+        local root, root_error = path.from_logical(details.parent, admitted.platform_kind)
+        if not root then return nil, root_error end
+        local workspace = admitted_ports.workspace.inspect(root)
+        if not workspace or workspace.enterable ~= true then
+            return nil, failure("WorkspaceMappingRequired", "recorded workspace is unavailable; use rebind first")
+        end
+        local logical, logical_error = path.to_logical(workspace.path)
+        if not logical then return nil, logical_error end
+        if path.comparison_key(logical, admitted.platform_kind)
+            ~= path.comparison_key(details.parent, admitted.platform_kind)
+        then
+            return nil, failure("WorkspaceMappingRequired", "recorded workspace resolves to another directory")
+        end
+        local root_snapshot, snapshot_error = inspect_directory(filesystem, workspace.path)
+        if not root_snapshot then return nil, snapshot_error end
+        if not root_snapshot.exists then
+            return nil, failure("WorkspaceMappingRequired", "recorded workspace is missing")
+        end
+        local identity, identity_error = root_identity_digest(logical, root_snapshot.identity)
+        if not identity then return nil, identity_error end
+        local now, time_error = system.utc_now()
+        if not utc_parts(now) then return nil, time_error or failure("UtcClockReadFailed", "UTC is unavailable") end
+        local updated_at, updated_error = next_utc_time(now, document.header.updated_at)
+        if not updated_at then return nil, updated_error end
+        local function mapping_text(previous, name, digest)
+            return previous.name .. " [" .. previous.snapshot_digest .. "] -> " .. name .. " [" .. digest .. "]"
+        end
+        local manifest = document.model_view.active_manifest
+        local mutation = {
+            kind = "import", updated_at = updated_at, source_schema = document.schema_version,
+            model_name = overrides.CurrentModel, model_snapshot_digest = model_snapshot,
+            permission_name = overrides.CurrentPermission, permission_snapshot_digest = permission_snapshot,
+            model_mappings = mapping_text(document.session.current_model, overrides.CurrentModel, model_snapshot),
+            permission_mappings = mapping_text(document.session.current_permission,
+                overrides.CurrentPermission, permission_snapshot),
+            decision = "approved-local-mapping", notes = "history approvals remain audit-only; no automatic replay",
+            view_manifest_digest = manifest.digest, view_compaction_id = manifest.compaction_id,
+            view_context_generation = manifest.compaction_id and document.generation + 1 or nil,
+        }
+        local hits, scan_error = generation.scan_registered_secrets(
+            mutation.model_mappings .. "\n" .. mutation.permission_mappings)
+        if not hits then return nil, scan_error end
+        if #hits > 0 then return nil, failure("RegisteredSecret", "import mapping contains registered secret material") end
+        model_views = {}
+        local old_view, view_error = rebuild_active_model_view(document)
+        if not old_view then return nil, view_error end
+        local candidate, view = management_document(document, mutation)
+        model_views = {}
+        if not candidate then return nil, view end
+        local bytes, encode_error = schema.encode(document)
+        if not bytes then return nil, encode_error end
+        local document_digest, digest_error = safety.digest(bytes)
+        if not document_digest then return nil, digest_error end
+        local credential_digest, credential_error = snapshot_digest(safety,
+            "yaca-import-selection-v1", specification.expected_credential)
+        if not credential_digest then return nil, credential_error end
+        local plan = {
+            context_path = physical, logical_path = specification.logical_path,
+            credential_digest = credential_digest, document_digest = document_digest,
+            root_path = workspace.path, root_logical = logical,
+            root_snapshot = root_snapshot, new_root_identity = identity,
+            generation = generation, mutation = mutation,
+        }
+        local valid, valid_error = verify_management_workspace(plan)
+        if not valid then return nil, valid_error end
+        local proposal = readonly({
+            action = "import", context_hash = hash, logical_path = specification.logical_path,
+            workspace = workspace.path, model = overrides.CurrentModel, permission = overrides.CurrentPermission,
+            previous_model = document.session.current_model.name,
+            previous_permission = document.session.current_permission.name,
+            generation = candidate.generation, history_approvals = "audit-only", auto_replay = false,
+            auto_continue = false, unresolved_operations = #document.recovery.unresolved_operation_ids,
+            unresolved_tools = #document.recovery.unresolved_tool_call_ids,
+            unknown_operations = #document.recovery.unknown_operation_ids,
+        }, "Context import proposal")
+        import_plans[proposal] = plan
         return proposal
     end
 
@@ -1260,6 +1412,7 @@ function M.new_context_publication(ports, options)
         local allowed = {
             action = true, context_path = true, logical_path = true,
             expected_credential = true, new_name = true, value = true, rebind_plan = true,
+            import_plan = true, generation = true,
         }
         if type(specification) ~= "table" then
             return nil, failure("InvalidContextMutation", "a bound Context action is required")
@@ -1271,13 +1424,32 @@ function M.new_context_publication(ports, options)
         end
         local action = specification.action
         if action ~= "rename" and action ~= "set_auto_rename_disabled"
-            and action ~= "delete" and action ~= "rebind"
+            and action ~= "delete" and action ~= "rebind" and action ~= "import"
         then
             return nil, failure("InvalidContextMutation", "Context management action is unavailable")
         end
         local credential = specification.expected_credential
         local physical, context_hash = bound_management_path(specification, action == "delete")
         if not physical then return nil, context_hash end
+        local importing
+        if action == "import" then
+            importing = import_plans[specification.import_plan]
+            import_plans = {}
+            local digest = snapshot_digest(safety, "yaca-import-selection-v1", credential)
+            if not importing or importing.context_path ~= physical
+                or importing.logical_path ~= specification.logical_path or importing.credential_digest ~= digest
+                or specification.new_name ~= nil or specification.value ~= nil
+            then
+                return nil, failure("InvalidContextMutation", "an exact current import proposal is required")
+            end
+            if specification.generation ~= importing.generation then
+                return nil, failure("ConfigGenerationChanged", "local configuration changed after import planning")
+            end
+            local valid, valid_error = verify_management_workspace(importing)
+            if not valid then return nil, valid_error end
+        elseif specification.import_plan ~= nil or specification.generation ~= nil then
+            return nil, failure("InvalidContextMutation", "only import accepts a local mapping proposal")
+        end
         local rebind
         if action == "rebind" then
             rebind = rebind_plans[specification.rebind_plan]
@@ -1290,7 +1462,7 @@ function M.new_context_publication(ports, options)
             then
                 return nil, failure("InvalidContextMutation", "an exact current rebind proposal is required")
             end
-            local valid, valid_error = verify_rebind_root(rebind)
+            local valid, valid_error = verify_management_workspace(rebind)
             if not valid then return nil, valid_error end
         elseif specification.rebind_plan ~= nil then
             return nil, failure("InvalidContextMutation", "only rebind accepts a workspace proposal")
@@ -1368,84 +1540,77 @@ function M.new_context_publication(ports, options)
             then
                 return nil, failure("ContextMutationUnknown", "Context writer returned no canonical document")
             end
-            local old_view, view_error = rebuild_active_model_view(document)
-            if not old_view then return nil, view_error end
-            if (action == "rename" and specification.new_name == document.header.name)
-                or (action == "set_auto_rename_disabled"
-                    and specification.value == (document.header.auto_rename_disabled == true))
-            then
-                return readonly({ outcome = "unchanged", context_path = physical,
-                    logical_path = next_logical, context_hash = context_hash,
-                    generation = document.generation }, "unchanged Context metadata")
-            end
-            local updated_at, next_error = next_utc_time(now, document.header.updated_at)
-            if not updated_at then return nil, next_error end
-            local manifest = document.model_view.active_manifest
-            local mutation = {
-                kind = action, updated_at = updated_at, view_manifest_digest = manifest.digest,
-                view_compaction_id = manifest.compaction_id,
-                view_context_generation = manifest.compaction_id and document.generation + 1 or nil,
-            }
-            if rebind then
-                mutation.old_logical_path = specification.logical_path
-                mutation.new_logical_path = next_logical
-                mutation.old_root_identity = rebind.old_root_identity
-                mutation.new_root_identity = rebind.new_root_identity
-            elseif action == "rename" then
-                mutation.new_name = specification.new_name
-                mutation.manual = true
-                mutation.old_logical_path = specification.logical_path
-                mutation.new_logical_path = next_logical
-            else
-                mutation.value = specification.value
-                local old_digest, digest_error = override_digest(
-                    "AutoRenameDisabled", document.header.auto_rename_disabled == true
-                )
-                if not old_digest then return nil, digest_error end
-                local new_digest
-                new_digest, digest_error = override_digest("AutoRenameDisabled", specification.value)
-                if not new_digest then return nil, digest_error end
-                mutation.old_value_digest = old_digest
-                mutation.new_value_digest = new_digest
-                mutation.effective_at = "next-turn"
-                local main_turns, completed = {}, 0
-                for _, event in ipairs(document.facts) do
-                    if event.type == "turn_started" and event.fields.kind == "main" then
-                        main_turns[event.turn_id] = true
-                    elseif event.type == "turn_ended" and event.fields.outcome == "completed"
-                        and main_turns[event.turn_id]
-                    then
-                        completed = completed + 1
-                    end
+            local candidate, view
+            if importing then
+                local bytes, encode_error = schema.encode(document)
+                if not bytes then return nil, encode_error end
+                local digest, digest_error = safety.digest(bytes)
+                if not digest then return nil, digest_error end
+                if digest ~= importing.document_digest then
+                    return nil, failure("ContextTargetChanged", "Context body changed after import planning")
                 end
-                mutation.naming_waterline = math.max(document.header.naming_waterline or 0, completed)
-            end
-            -- Let the schema form the lifecycle event, then compute its real
-            -- plain/compacted view. The provisional document is never published.
-            local candidate, candidate_error = schema.lifecycle_document(document, mutation)
-            if not candidate then return nil, candidate_error end
-            local facts = {}
-            for index = 1, candidate.event_count - 1 do facts[index] = candidate.facts[index] end
-            local projection
-            if manifest.compaction_id then
-                projection, view_error = durable_compaction_projection(document, manifest)
-                if not projection then return nil, view_error end
-                projection.fact_limit = #facts
-                projection.waterline = #facts
-            end
-            local view
-            view, view_error = cache_model_view(facts, candidate.generation, projection)
-            if not view then return nil, view_error end
-            mutation.view_manifest_digest = view.digest
-            candidate, candidate_error = schema.lifecycle_document(document, mutation)
-            if not candidate then return nil, candidate_error end
-            local next_manifest = candidate.model_view.active_manifest
-            if next_manifest.digest ~= view.digest
-                or next_manifest.first_event_seq ~= view.first_sequence
-                or next_manifest.last_event_seq ~= view.last_sequence
-                or (next_manifest.compaction_id or false) ~= view.compaction_id
-            then
-                return nil, failure("InvalidModelView", "Context lifecycle view binding is inexact")
+                -- Confirmation can take arbitrarily long. Publish the actual
+                -- mutation time, while retaining the already-reviewed mapping.
+                local updated_at, updated_error = next_utc_time(now, document.header.updated_at)
+                if not updated_at then return nil, updated_error end
+                importing.mutation.updated_at = updated_at
+                candidate, view = management_document(document, importing.mutation)
+                if not candidate then return nil, view end
+            else
+                local old_view, view_error = rebuild_active_model_view(document)
+                if not old_view then return nil, view_error end
+                if (action == "rename" and specification.new_name == document.header.name)
+                    or (action == "set_auto_rename_disabled"
+                        and specification.value == (document.header.auto_rename_disabled == true))
+                then
+                    return readonly({ outcome = "unchanged", context_path = physical,
+                        logical_path = next_logical, context_hash = context_hash,
+                        generation = document.generation }, "unchanged Context metadata")
+                end
+                local updated_at, next_error = next_utc_time(now, document.header.updated_at)
+                if not updated_at then return nil, next_error end
+                local manifest = document.model_view.active_manifest
+                local mutation = {
+                    kind = action, updated_at = updated_at, view_manifest_digest = manifest.digest,
+                    view_compaction_id = manifest.compaction_id,
+                    view_context_generation = manifest.compaction_id and document.generation + 1 or nil,
+                }
+                if rebind then
+                    mutation.old_logical_path = specification.logical_path
+                    mutation.new_logical_path = next_logical
+                    mutation.old_root_identity = rebind.old_root_identity
+                    mutation.new_root_identity = rebind.new_root_identity
+                elseif action == "rename" then
+                    mutation.new_name = specification.new_name
+                    mutation.manual = true
+                    mutation.old_logical_path = specification.logical_path
+                    mutation.new_logical_path = next_logical
+                else
+                    mutation.value = specification.value
+                    local old_digest, digest_error = override_digest(
+                        "AutoRenameDisabled", document.header.auto_rename_disabled == true
+                    )
+                    if not old_digest then return nil, digest_error end
+                    local new_digest
+                    new_digest, digest_error = override_digest("AutoRenameDisabled", specification.value)
+                    if not new_digest then return nil, digest_error end
+                    mutation.old_value_digest = old_digest
+                    mutation.new_value_digest = new_digest
+                    mutation.effective_at = "next-turn"
+                    local main_turns, completed = {}, 0
+                    for _, event in ipairs(document.facts) do
+                        if event.type == "turn_started" and event.fields.kind == "main" then
+                            main_turns[event.turn_id] = true
+                        elseif event.type == "turn_ended" and event.fields.outcome == "completed"
+                            and main_turns[event.turn_id]
+                        then
+                            completed = completed + 1
+                        end
+                    end
+                    mutation.naming_waterline = math.max(document.header.naming_waterline or 0, completed)
+                end
+                candidate, view = management_document(document, mutation)
+                if not candidate then return nil, view end
             end
             local random, random_error = system.secure_random(8)
             if type(random) ~= "string" or #random ~= 8 then
@@ -1453,14 +1618,18 @@ function M.new_context_publication(ports, options)
             end
             local temporary_path = destination .. ".yaca-tmp-" .. hex(random)
             local published, publish_error
+            if importing then
+                local valid, valid_error = verify_management_workspace(importing)
+                if not valid then return nil, valid_error end
+            end
             if rebind then
-                local valid, valid_error = verify_rebind_root(rebind)
+                local valid, valid_error = verify_management_workspace(rebind)
                 if not valid then return nil, valid_error end
                 local mirror, mirror_error, mirror_snapshot = prepare_mirror(rebind.root_path)
                 if not mirror then return nil, mirror_error end
                 local current, current_error = filesystem.direct_reverify(mirror_snapshot)
                 if not current then return nil, current_error end
-                valid, valid_error = verify_rebind_root(rebind)
+                valid, valid_error = verify_management_workspace(rebind)
                 if not valid then return nil, valid_error end
             end
             if action == "rename" or rebind then
@@ -1469,10 +1638,10 @@ function M.new_context_publication(ports, options)
                 published, publish_error = store.publish(writer, candidate, temporary_path)
             end
             if not published then return nil, publish_error end
-            if rebind then
-                local valid, valid_error = verify_rebind_root(rebind)
+            if rebind or importing then
+                local valid, valid_error = verify_management_workspace(rebind or importing)
                 if not valid then
-                    return nil, failure("ContextMutationUnknown", "workspace changed during Context migration",
+                    return nil, failure("ContextMutationUnknown", "workspace changed during Context publication",
                         valid_error and valid_error.code)
                 end
             end
@@ -1483,6 +1652,9 @@ function M.new_context_publication(ports, options)
                 generation = candidate.generation, event_count = candidate.event_count,
                 auto_rename_disabled = candidate.header.auto_rename_disabled == true,
                 view_manifest_snapshot = view.digest,
+                model = importing and candidate.session.current_model.name or nil,
+                permission = importing and candidate.session.current_permission.name or nil,
+                auto_replay = false,
             }, "managed Context receipt")
         end
         local called, receipt, mutation_error = pcall(transact)

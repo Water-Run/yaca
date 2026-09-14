@@ -417,6 +417,10 @@ return {
                     permission_mappings = "RemoteStd->Std",
                     decision = "approved-local-mapping",
                     notes = "history approvals remain audit-only",
+                    model_name = "Local",
+                    model_snapshot_digest = "sha256:local-model",
+                    permission_name = "LocalStd",
+                    permission_snapshot_digest = "sha256:local-permission",
                     updated_at = "2026-08-29T00:00:04Z",
                     view_manifest_digest = "sha256:import-view",
                 })
@@ -426,6 +430,10 @@ return {
                     TARGET .. ".yaca-tmp-import"
                 ))
                 A.equal(mapped.facts[6].type, "import_mapping")
+                A.equal(mapped.session.current_model.name, "Local")
+                A.equal(mapped.session.current_permission.name, "LocalStd")
+                A.equal(mapped.session.current_model.snapshot_digest, "sha256:local-model")
+                A.equal(mapped.facts[5].type, "operation_intent")
                 A.equal(receipt.auto_continue, false)
                 A.deep_equal(receipt.unresolved_operation_ids, { "operation-1" })
                 A.truthy(fixture.store.close_writer(writer))

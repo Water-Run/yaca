@@ -227,6 +227,13 @@ local function fixture(settings)
     end
 
     local store = {}
+    function store.inspect_import(target, credential)
+        observations.import_reads = (observations.import_reads or 0) + 1
+        A.equal(target, credential.physical_path)
+        if settings.import_error then return nil, settings.import_error end
+        return settings.import_document or settings.open_document,
+            { outcome = "validated-readonly", history_approvals = "audit-only", auto_replay = false }
+    end
     function store.create_writer(target, metadata)
         observations.create_attempts = (observations.create_attempts or 0) + 1
         if observations.create_attempts <= (settings.create_collisions or 0) then
@@ -317,7 +324,7 @@ local function fixture(settings)
         return value
     end
     function system.current_process_id() return 1234 end
-    function system.utc_now() return "2026-08-30T12:34:56Z" end
+    function system.utc_now() return settings.now or "2026-08-30T12:34:56Z" end
 
     local publication = assert(session.new_context_publication({
         filesystem = filesystem,
@@ -363,16 +370,34 @@ local function management_spec(receipt, document, action, extra)
     return value
 end
 
-local function management_seed()
+local function management_seed(pending)
     local publication, observed = fixture()
     local draft = assert(session.new_draft(generation(), {
         path = "/work", enterable = true,
     }, { maximum_draft_bytes = 16384 }, publication))
     local receipt = assert(draft.begin_main("preserve this history", "terminal"))
+    local events = { { seq = 3, type = "turn_ended", turn_id = "turn-1", fields = { outcome = "completed" } } }
+    if pending then
+        events = {
+            { seq = 3, type = "model_request", turn_id = "turn-1", fields = {
+                requestId = "request-1", purpose = "main", viewManifestRef = receipt.view_manifest_snapshot,
+            } },
+            { seq = 4, type = "tool_call", turn_id = "turn-1", fields = {
+                toolCallId = "tool-1", requestId = "request-1", name = "exec", canonicalArguments = "{}",
+            } },
+            { seq = 5, type = "approval", turn_id = "turn-1", fields = {
+                approvalId = "approval-1", toolCallId = "tool-1", decision = "approved", snapshotDigest = "sha256:old-approval",
+            } },
+            { seq = 6, type = "operation_intent", turn_id = "turn-1", fields = {
+                operationId = "operation-1", toolCallId = "tool-1", kind = "exec",
+                targetIdentity = "old-workspace-object", expectedDigest = "sha256:old-target",
+            } },
+        }
+    end
     assert(publication.commit({
-        barrier_id = "finish-first", first_sequence = 3, last_sequence = 3, event_count = 1,
+        barrier_id = "finish-first", first_sequence = 3, last_sequence = 2 + #events, event_count = #events,
         expected_context_generation = 1,
-        events = { { seq = 3, type = "turn_ended", turn_id = "turn-1", fields = { outcome = "completed" } } },
+        events = events,
     }))
     assert(draft.close())
     return receipt, observed.published.document
@@ -919,6 +944,135 @@ return {
             end,
         },
         {
+            name = "import preserves historical approvals and unresolved work without granting or replaying it",
+            run = function()
+                local first, document = management_seed(true)
+                local importer, observed = fixture({ open_document = document, workspace_roots = { "/work" } })
+                local request = management_spec(first, document, "import", { generation = generation() })
+                local proposal = assert(importer.plan_import(request))
+                A.equal(proposal.unresolved_operations, 1)
+                A.equal(proposal.unresolved_tools, 1)
+                A.equal(proposal.history_approvals, "audit-only")
+                A.falsy(proposal.auto_continue)
+                request.import_plan = proposal
+                local receipt = assert(importer.manage_context(request))
+                local mapped = observed.published.document
+                A.equal(mapped.facts[5].type, "approval")
+                A.equal(mapped.facts[5].fields.snapshotDigest, "sha256:old-approval")
+                A.deep_equal(mapped.recovery.unresolved_operation_ids, { "operation-1" })
+                A.deep_equal(mapped.recovery.unresolved_tool_call_ids, { "tool-1" })
+                local reopened = fixture({ open_document = mapped })
+                local open_request = management_spec(receipt, mapped, "import")
+                open_request.action = nil
+                local opened = assert(reopened.open_existing(open_request))
+                A.falsy(opened.auto_continue)
+                assert(reopened.close())
+            end,
+        },
+        {
+            name = "in-place import applies both local mappings in one durable generation and rebuilds history",
+            run = function()
+                local first, document = management_seed()
+                local settings = { open_document = document, workspace_roots = { "/work" } }
+                local manager, observed = fixture(settings)
+                local local_generation = generation()
+                local_generation.models.Local = local_generation.models.Primary
+                local_generation.permissions.LocalStd = local_generation.permissions.Std
+                local_generation.current_model = "Local"
+                local_generation.current_permission = "LocalStd"
+                local request = management_spec(first, document, "import", { generation = local_generation })
+                local proposal, plan_error = manager.plan_import(request)
+                A.truthy(proposal, A.render(plan_error))
+                A.equal(observed.import_reads, 1)
+                A.equal(#observed.writers, 0)
+                A.equal(#observed.creates, 0)
+                A.falsy(observed.published)
+                A.equal(proposal.previous_model, "Primary")
+                A.equal(proposal.model, "Local")
+                A.equal(proposal.permission, "LocalStd")
+                A.equal(proposal.workspace, "/work")
+                A.falsy(proposal.auto_replay)
+                request.import_plan = proposal
+                settings.now = "2026-09-01T00:00:00Z"
+                local receipt, import_error = manager.manage_context(request)
+                A.truthy(receipt, A.render(import_error))
+                A.equal(receipt.generation, document.generation + 1)
+                A.equal(receipt.context_hash, first.context_hash)
+                A.equal(receipt.context_path, first.context_path)
+                A.equal(receipt.model, "Local")
+                A.equal(receipt.permission, "LocalStd")
+                A.falsy(receipt.auto_replay)
+                A.equal(observed.closes, 1)
+                local mapped = observed.published.document
+                A.equal(mapped.header.created_at, document.header.created_at)
+                A.equal(mapped.header.updated_at, settings.now)
+                A.equal(mapped.session.current_model.name, "Local")
+                A.equal(mapped.session.current_permission.name, "LocalStd")
+                A.truthy(mapped.session.current_model.snapshot_digest ~= document.session.current_model.snapshot_digest)
+                A.equal(mapped.facts[4].type, "import_mapping")
+                A.contains(mapped.facts[4].fields.modelMappings, "Primary [")
+                A.contains(mapped.facts[4].fields.modelMappings, " -> Local [")
+                A.equal(mapped.facts[3].fields.outcome, "completed")
+                local reopened = fixture({ open_document = mapped })
+                local open_request = management_spec(receipt, mapped, "import")
+                open_request.action = nil
+                local opened = assert(reopened.open_existing(open_request))
+                local view = assert(reopened.resolve_view(opened.view_manifest_snapshot))
+                A.contains(view.body, "preserve this history")
+                A.contains(view.body, "LocalStd")
+                assert(reopened.close())
+                local repeated, repeated_error = manager.manage_context(request)
+                A.falsy(repeated)
+                A.equal(repeated_error.code, "InvalidContextMutation")
+            end,
+        },
+        {
+            name = "import mapping refuses missing workspace invalid profiles changed config and changed source",
+            run = function()
+                local first, document = management_seed()
+                for _, stage in ipairs({ "workspace", "model", "permission", "overrides", "busy-read",
+                    "config", "source", "root", "publish", "unknown" }) do
+                    local settings = { open_document = document, workspace_roots = { "/work" } }
+                    if stage == "workspace" then settings.workspace_roots = {} end
+                    if stage == "busy-read" then settings.import_error = { code = "LockConflict" } end
+                    local manager, observed, _, _, _, schema = fixture(settings)
+                    local local_generation = generation()
+                    if stage == "model" then local_generation.models.Primary.enabled = false end
+                    if stage == "permission" then local_generation.permissions.Std = nil end
+                    if stage == "overrides" then local_generation.context_prompt = "replacement" end
+                    local request = management_spec(first, document, "import", { generation = local_generation })
+                    local proposal, err = manager.plan_import(request)
+                    local early = { workspace = "WorkspaceMappingRequired", model = "ModelUnavailable",
+                        permission = "PermissionUnavailable", overrides = "ConfigGenerationMismatch", ["busy-read"] = "LockConflict" }
+                    if early[stage] then
+                        A.falsy(proposal)
+                        A.equal(err.code, early[stage])
+                        A.equal(#observed.writers, 0)
+                    else
+                        A.truthy(proposal, A.render(err))
+                        request.import_plan = proposal
+                        if stage == "config" then request.generation = generation()
+                        elseif stage == "root" then settings.changed_root = "/work"
+                        elseif stage == "source" then
+                            settings.open_document = assert(schema.lifecycle_document(document, {
+                                kind = "repair", updated_at = "2026-09-01T00:00:00Z", error_id = "error-1",
+                                summary = "changed source", view_manifest_digest = document.model_view.active_manifest.digest,
+                            }))
+                        elseif stage == "publish" then settings.publish_error = { code = "InjectedPublish" }
+                        elseif stage == "unknown" then settings.publish_error = { code = "ContextPublishUnknown" } end
+                        local result
+                        result, err = manager.manage_context(request)
+                        A.falsy(result)
+                        local expected = { config = "ConfigGenerationChanged", root = "ContextWorkspaceChanged",
+                            source = "ContextTargetChanged", publish = "InjectedPublish", unknown = "ContextMutationUnknown" }
+                        A.equal(err.code, expected[stage])
+                        A.equal(observed.closes, (stage == "config" or stage == "root") and 0 or 1)
+                    end
+                    A.equal(#observed.creates, 0)
+                end
+            end,
+        },
+        {
             name = "rebind plans are read-only and publish a reconstructable move with both root identities",
             run = function()
                 local first, document = management_seed()
@@ -1447,6 +1601,25 @@ return {
                 renamed = assert(rebinder.manage_context(move_request))
                 managed = rebound_observed.published.document
                 A.equal(managed.model_view.active_manifest.compaction_id, "compaction-1")
+                local importer, imported_observed = fixture({ open_document = managed,
+                    workspace_roots = { "/compacted-work" } })
+                local mapped_generation = generation()
+                mapped_generation.context_prompt = managed.session.context_prompt
+                mapped_generation.auto_rename_disabled = managed.header.auto_rename_disabled == true
+                if type(managed.session.double_check_override) == "boolean" then
+                    mapped_generation.effective_double_check = managed.session.double_check_override
+                end
+                if managed.session.double_check_goal_override.mode == "value" then
+                    mapped_generation.effective_double_check_goal = managed.session.double_check_goal_override.value
+                end
+                mapped_generation.models.ImportedCompact = mapped_generation.models.Primary
+                mapped_generation.current_model = "ImportedCompact"
+                local import_request = management_spec(renamed, managed, "import", { generation = mapped_generation })
+                import_request.import_plan = assert(importer.plan_import(import_request))
+                renamed = assert(importer.manage_context(import_request))
+                managed = imported_observed.published.document
+                A.equal(managed.model_view.active_manifest.compaction_id, "compaction-1")
+                A.equal(managed.session.current_model.name, "ImportedCompact")
                 local reopened = fixture({ open_document = managed })
                 local specification = management_spec(renamed, managed, "rename")
                 specification.action = nil
@@ -1456,6 +1629,7 @@ return {
                 A.contains(restored, "AFTER-COMPACT")
                 A.contains(restored, "Still Compacted")
                 A.contains(restored, "/compacted-work/")
+                A.contains(restored, "ImportedCompact")
                 A.falsy(restored:find("compact this prefix", 1, true))
                 local _, restored_count = restored:gsub("<StructuredSummary", "")
                 A.equal(restored_count, 1)

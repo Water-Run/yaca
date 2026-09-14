@@ -159,7 +159,7 @@ local function scripted_terminal(batches)
 end
 
 local function harness(batches)
-    local filesystem = fake_filesystem.new({ [CONFIG_PATH] = source() })
+    local filesystem, controls = fake_filesystem.new({ [CONFIG_PATH] = source() })
     local service = assert(config.new({
         sha256 = hash_port(),
         filesystem = filesystem,
@@ -192,7 +192,7 @@ local function harness(batches)
             return true
         end,
     }
-    return composed, runtime, terminals, written
+    return composed, runtime, terminals, written, controls
 end
 
 local function context_harness(commands, settings)
@@ -204,7 +204,7 @@ local function context_harness(commands, settings)
             { kind = "user_action", action = "submit-or-queue" },
         }
     end
-    local composed, runtime, terminals, written = harness(batches)
+    local composed, runtime, terminals, written, controls = harness(batches)
     local path = assert(load_module("path").new(hash_port(), {
         maximum_path_bytes = 2048, maximum_segments = 128,
         maximum_segment_bytes = 255, maximum_hash_chunk_bytes = 64,
@@ -242,23 +242,36 @@ local function context_harness(commands, settings)
         close = function() calls.closes = calls.closes + 1 return true end,
         status = function() return { complete = not settings.partial, partial_reason = "ScanInterrupted" } end,
     }
-    local catalog = assert(load_module("index").new({ path = path, scanner = scanner,
-        verifier = { observe = function(target)
+    local verifier = { observe = function(target)
             calls.verifies = calls.verifies + 1
             for _, row in ipairs(rows) do
                 if row.logical_path == target.logical_path then
                     local copy = {}; for key, value in pairs(row) do copy[key] = value end
-                    if settings.changed or (settings.changed_after_confirm and calls.verifies > 1) then
+                    if settings.changed or (settings.changed_after_confirm and calls.verifies > 1)
+                        or (settings.changed_after_verify and calls.verifies > settings.changed_after_verify)
+                    then
                         copy.observed_stat = { object = "replacement", size = 100 }
                     end
                     return true, copy
                 end
             end
             return false, { code = "NotFound" }
-        end },
-    }, { maximum_scan_candidates = 1024, maximum_search_rings = 8,
+        end }
+    local catalog = assert(load_module("index").new({ path = path, scanner = scanner,
+        verifier = verifier }, { maximum_scan_candidates = 1024, maximum_search_rings = 8,
         maximum_collision_candidates = 4, maximum_reason_bytes = 64 }))
-    composed.contexts = { catalog = catalog, catalog_scanner = scanner, path = path }
+    composed.contexts = { catalog = catalog, catalog_scanner = scanner, path = path,
+        catalog_verifier = verifier, context_root = "/data/CONTEXT", store = {
+            inspect_import = function(target, credential)
+                calls.import_reads = (calls.import_reads or 0) + 1
+                A.equal(target, credential.physical_path)
+                return { header = { auto_rename_disabled = false }, session = {
+                    current_model = { name = "Foreign" }, current_permission = { name = "ForeignStd" },
+                    double_check_override = false, double_check_goal_override = { mode = "inherit" },
+                    context_prompt = "preserved imported context",
+                } }, { outcome = "validated-readonly" }
+            end,
+        } }
     composed.config_generation = { context = { recent_list_limit = 1 } }
     if settings.manage then
         composed.publication = { manage_context = function(specification)
@@ -266,6 +279,13 @@ local function context_harness(commands, settings)
             A.equal(specification.context_path, specification.expected_credential.physical_path)
             A.equal(specification.logical_path, specification.expected_credential.logical_path)
             if settings.mutation_error then return nil, settings.mutation_error end
+            if specification.action == "import" then
+                if specification.generation ~= calls.import_generation then
+                    return nil, { code = "ConfigGenerationChanged", message = "configuration changed" }
+                end
+                return { outcome = "success", context_hash = "0123456789ABCDEF",
+                    model = specification.generation.current_model, permission = specification.generation.current_permission }
+            end
             if specification.action == "delete" then
                 return { outcome = settings.partial_delete and "partial" or "deleted",
                     targets = { { role = "official", outcome = "deleted", path = specification.context_path } } }
@@ -280,7 +300,25 @@ local function context_harness(commands, settings)
                 target_logical_path = "/new-work/Task001.xml", target_hash = "FEDCBA9876543210" }
             calls.proposal = plan
             return plan
+        end, plan_import = function(specification)
+            calls.import_plans = (calls.import_plans or 0) + 1
+            calls.import_generation = specification.generation
+            if settings.plan_error then return nil, settings.plan_error end
+            A.equal(specification.generation.context_prompt, "preserved imported context")
+            A.equal(specification.generation.effective_double_check, false)
+            return { workspace = "/", previous_model = "Foreign", previous_permission = "ForeignStd",
+                model = specification.generation.current_model, permission = specification.generation.current_permission,
+                unresolved_operations = 1, unresolved_tools = 1, unknown_operations = 0 }
         end }
+    end
+    if settings.change_import_config then
+        local write = runtime.stdout
+        runtime.stdout = function(bytes)
+            if bytes:find("Type IMPORT", 1, true) then
+                controls.external_write(CONFIG_PATH, source():gsub("LogLevel = info", "LogLevel = debug"))
+            end
+            return write(bytes)
+        end
     end
     if settings.stdout_failure then
         runtime.stdout = function(bytes)
@@ -295,6 +333,57 @@ local function context_harness(commands, settings)
 end
 
 local context_cases = {
+    {
+        name = "Context import captures an exact in-place file and confirms effective local mappings",
+        run = function()
+            local path = assert(load_module("path").new(hash_port(), {
+                maximum_path_bytes = 2048, maximum_segments = 128,
+                maximum_segment_bytes = 255, maximum_hash_chunk_bytes = 64,
+            }))
+            local hash = assert(path.context_hash("/Task001.xml"))
+            local commands = { "import /data/CONTEXT/Task001.xml", "Primary", "Std", "IMPORT " .. hash, "quit" }
+            local result, err, output, calls = context_harness(commands, { manage = true })
+            A.truthy(result, A.render(err))
+            A.contains(output, "VALIDATED READ-ONLY")
+            A.contains(output, "Model: Foreign -> Primary")
+            A.contains(output, "Permission: ForeignStd -> Std")
+            A.contains(output, "Unresolved operations/tools: 1/1")
+            A.contains(output, "Context mapped:")
+            A.equal(calls.verifies, 4)
+            A.equal(#calls.mutations, 1)
+            A.equal(calls.mutations[1].action, "import")
+            A.equal(calls.mutations[1].generation.current_model, "Primary")
+            result, err, output, calls = context_harness(commands, { manage = true, changed_after_verify = 3 })
+            A.truthy(result, A.render(err))
+            A.contains(output, "ContextTargetChanged")
+            A.equal(#calls.mutations, 0)
+            result, err, output, calls = context_harness(commands, { manage = true, change_import_config = true })
+            A.truthy(result, A.render(err))
+            A.contains(output, "ConfigGenerationChanged")
+            A.falsy(output:find("Context mapped:", 1, true))
+        end,
+    },
+    {
+        name = "Context import rejects outside paths busy files invalid mappings and cancelled consent",
+        run = function()
+            for _, scenario in ipairs({
+                { commands = { "import /elsewhere/Task001.xml", "quit" }, error = "InvalidImportPath", reads = 0 },
+                { commands = { "import /data/CONTEXT/Task001.xml", "quit" }, busy = true,
+                    error = "ContextTargetUnavailable", reads = 0 },
+                { commands = { "import /data/CONTEXT/Task001.xml", "Missing", "quit" },
+                    error = "ModelUnavailable", reads = 1 },
+                { commands = { "import /data/CONTEXT/Task001.xml", "Primary", "Std", "no", "quit" },
+                    error = "Context import cancelled", reads = 1 },
+            }) do
+                local result, err, output, calls = context_harness(scenario.commands,
+                    { manage = true, busy = scenario.busy })
+                A.truthy(result, A.render(err))
+                A.contains(output, scenario.error)
+                A.equal(calls.import_reads or 0, scenario.reads)
+                A.equal(#calls.mutations, 0)
+            end
+        end,
+    },
     {
         name = "Context rebind confirms the inspected destination and reverifies the original selection",
         run = function()

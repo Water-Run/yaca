@@ -9722,8 +9722,151 @@ function M.run_context_repl(composed, runtime, request)
         return rescan()
     end
 
+    ---Imports only a file already placed at its intended Context mirror path.
+    -- The read-only inspection, mapping preview and final writer all retain the
+    -- original private selection; no catalog display row becomes authority.
+    local function import_context(action)
+        local publication = composed.publication
+        if type(publication) ~= "table" or type(publication.plan_import) ~= "function"
+            or type(publication.manage_context) ~= "function"
+            or type(contexts.catalog_verifier) ~= "table"
+            or type(contexts.catalog_verifier.observe) ~= "function"
+            or type(contexts.store) ~= "table" or type(contexts.store.inspect_import) ~= "function"
+            or type(contexts.context_root) ~= "string"
+        then
+            return nil, failure("ContextActionUnavailable", "in-place Context import is unavailable")
+        end
+        local path = contexts.path
+        local platform_kind = runtime.identity and runtime.identity.os == "windows" and "windows" or "posix"
+        local requested = action.path
+        if not valid_absolute_path(requested) then
+            local current, current_error = workspace_port(runtime.native or {}).inspect(".")
+            if not current then return nil, current_error end
+            requested = join_path(current.path, requested, platform_kind)
+        end
+        local absolute, path_error = path.to_logical(requested)
+        if not absolute then return nil, path_error end
+        local root, root_error = path.to_logical(contexts.context_root)
+        if not root then return nil, root_error end
+        if absolute == root or path.is_within_root(absolute, root, platform_kind) ~= true then
+            return nil, failure("InvalidImportPath", "place the XML inside its intended Context mirror first")
+        end
+        local logical = absolute:sub(#root + 1)
+        local details, details_error = path.context_file(logical)
+        if not details then return nil, details_error end
+        local physical, physical_error = path.from_logical(absolute, platform_kind)
+        if not physical then return nil, physical_error end
+        local observed, candidate = contexts.catalog_verifier.observe({ physical_path = physical,
+            logical_path = logical })
+        if not observed then return nil, candidate end
+        local selection, selection_error = contexts.catalog.capture_target(candidate)
+        if not selection then return nil, selection_error end
+        local function verify()
+            local target = contexts.catalog.verify_target(selection, "mutation")
+            if type(target) ~= "table" or target.tag ~= "Verified" then
+                return nil, failure(type(target) == "table" and target.tag == "TargetChanged"
+                    and "ContextTargetChanged" or "ContextTargetUnavailable",
+                    "the in-place Context changed or is unavailable")
+            end
+            return target
+        end
+        local target, target_error = verify()
+        if not target then return nil, target_error end
+        local document, report = contexts.store.inspect_import(target.physical_hint, target.credential)
+        if not document then return nil, report end
+        local written, write_error = input.write("VALIDATED READ-ONLY " .. target.hash
+            .. " " .. safe_diagnostic(target.logical_path, 512)
+            .. "\nHistorical approvals are audit-only; unfinished work will not be replayed.\n")
+        if not written then return nil, write_error end
+        if type(composed.config) ~= "table" or type(composed.config.reload_file) ~= "function"
+            or type(composed.layout) ~= "table" or type(composed.layout.config_path) ~= "string"
+        then
+            return nil, failure("ConfigUnavailable", "valid local configuration is required for import mapping")
+        end
+        local local_generation, config_error = composed.config.reload_file(composed.layout.config_path)
+        if not local_generation then return nil, config_error end
+        local function choose(kind, previous, order, profiles)
+            local names = {}
+            local default
+            for _, name in ipairs(order) do
+                local profile = profiles[name]
+                if kind ~= "Model" or (profile.enabled == true and profile.tools_enabled == true) then
+                    names[#names + 1] = safe_diagnostic(name, 256)
+                    if name == previous then default = name end
+                end
+            end
+            local shown, show_error = input.write("Local " .. kind .. ": " .. table.concat(names, ", ") .. "\n")
+            if not shown then return nil, show_error end
+            if #names == 0 then return nil, failure(kind .. "Unavailable", "no eligible local " .. kind) end
+            local answer, answer_error = input.read(kind .. " mapping for " .. safe_diagnostic(previous, 256)
+                .. (default and " [" .. safe_diagnostic(default, 256) .. "]" or "") .. ": ", false, 256)
+            if answer == false then return nil, failure("ContextReplCancelled", "Context import was cancelled") end
+            if answer == nil then return nil, answer_error end
+            if answer == "" then answer = default end
+            local selected = answer and profiles[answer]
+            if not selected or (kind == "Model" and (selected.enabled ~= true or selected.tools_enabled ~= true)) then
+                return nil, failure(kind .. "Unavailable", "choose an eligible local " .. kind .. " by exact name")
+            end
+            return answer
+        end
+        local model, model_error = choose("Model", document.session.current_model.name,
+            local_generation.model_order, local_generation.models)
+        if not model then return nil, model_error end
+        local permission, permission_error = choose("Permission", document.session.current_permission.name,
+            local_generation.permission_order, local_generation.permissions)
+        if not permission then return nil, permission_error end
+        local goal = document.session.double_check_goal_override
+        local overrides = {
+            CurrentModel = model, CurrentPermission = permission,
+            DoubleCheckOverride = document.session.double_check_override,
+            DoubleCheckGoalOverride = goal.mode == "value" and goal.value or "inherit",
+            ContextPrompt = document.session.context_prompt,
+            AutoRenameDisabled = document.header.auto_rename_disabled == true,
+        }
+        generation, config_error = composed.config.reload_file(composed.layout.config_path, overrides)
+        if not generation then return nil, config_error end
+        target, target_error = verify()
+        if not target then return nil, target_error end
+        local proposal, proposal_error = publication.plan_import({
+            context_path = target.physical_hint, logical_path = target.logical_path,
+            expected_credential = target.credential, generation = generation,
+        })
+        if not proposal then return nil, proposal_error end
+        written, write_error = input.write("IMPORT " .. target.hash
+            .. "\nWorkspace: " .. safe_diagnostic(proposal.workspace, 512)
+            .. "\nModel: " .. safe_diagnostic(proposal.previous_model, 256) .. " -> "
+                .. safe_diagnostic(proposal.model, 256)
+            .. "\nPermission: " .. safe_diagnostic(proposal.previous_permission, 256) .. " -> "
+                .. safe_diagnostic(proposal.permission, 256)
+            .. "\nUnresolved operations/tools: " .. tostring(proposal.unresolved_operations)
+                .. "/" .. tostring(proposal.unresolved_tools)
+            .. "; unknown operations: " .. tostring(proposal.unknown_operations)
+            .. "\nWrites local mappings into this XML. Does not start a chat or replay old approvals.\n")
+        if not written then return nil, write_error end
+        local answer, answer_error = input.read("Type IMPORT " .. target.hash .. " to confirm: ", false, 128)
+        if answer == false then return nil, failure("ContextReplCancelled", "Context import was cancelled") end
+        if answer == nil then return nil, answer_error end
+        if answer ~= "IMPORT " .. target.hash then
+            return input.write("Context import cancelled; no files were changed.\n")
+        end
+        target, target_error = verify()
+        if not target then return nil, target_error end
+        local current, current_error = composed.config.reload_file(composed.layout.config_path, overrides)
+        if not current then return nil, current_error end
+        local receipt, mutation_error = publication.manage_context({
+            action = "import", context_path = target.physical_hint, logical_path = target.logical_path,
+            expected_credential = target.credential, import_plan = proposal, generation = current,
+        })
+        if not receipt then return nil, mutation_error end
+        written, write_error = input.write("Context mapped: " .. safe_diagnostic(receipt.context_hash, 16)
+            .. " Model=" .. safe_diagnostic(receipt.model, 256)
+            .. " Permission=" .. safe_diagnostic(receipt.permission, 256) .. "\n")
+        if not written then return nil, write_error end
+        return rescan()
+    end
+
     local UNCONNECTED = {
-        ["context-import"] = true, ["context-repair"] = true,
+        ["context-repair"] = true,
         ["export-context"] = true, ["select-context"] = true,
     }
 
@@ -9733,7 +9876,7 @@ function M.run_context_repl(composed, runtime, request)
             return nil, scan_error
         end
         local written, write_error = input.write("YACA CONTEXT MANAGER\n"
-            .. "Offline: list, inspect, search, refresh, rename, rebind, delete, set-auto-rename-disabled.\n"
+            .. "Offline: list, inspect, search, refresh, rename, rebind, import, delete, set-auto-rename-disabled.\n"
             .. "Every inspect reverifies its exact target; busy Contexts show metadata only.\n"
             .. "Enter help for commands or quit to leave.\n")
         if not written then return nil, write_error end
@@ -9763,6 +9906,8 @@ function M.run_context_repl(composed, runtime, request)
                         handled, action_error = search(request.query)
                     elseif request.id == "context-inspect" then
                         handled, action_error = inspect(request.selector)
+                    elseif request.id == "context-import" then
+                        handled, action_error = import_context(request)
                     elseif request.id == "context-refresh" then
                         handled, action_error = rescan()
                         if handled then

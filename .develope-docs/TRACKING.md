@@ -2,10 +2,10 @@
 
 更新日期：2026-09-14
 
-Windows x86 预览基础上已完成 N1/N2 管理和 **N3a 显式 workspace rebind**。
-完整 suite **506/506**；validators **7612/56/553**，全部 coding-readiness proofs PASS。
-实际 Windows 远端通过目录替换/重名拒绝、真实迁移和新目录重开；详见
-[N3a 检查点](CONTEXT-REBIND-2026-09-14.md)。下一项 import/repair，Gate R 保持关闭。
+Windows x86 预览基础上已完成 N1/N2、N3a rebind 和 **N3b 原位 import**。
+完整 suite **511/511**；validators **7612/56/553**，全部 coding-readiness proofs PASS。
+Windows 远端验证了真实有效映射、映射后重开、取消/配置变化/busy 拒绝。
+见 [N3b 检查点](CONTEXT-IMPORT-2026-09-14.md)。下一项 typed repair，Gate R 仍关闭。
 
 ## 当前阶段
 
@@ -27,7 +27,7 @@ C01--C31 已有核心实现、测试 harness、最小发行规划和现代 Linux
 | M1 / C02--C04 | 平台 identity、event pump、native ports；现代 Linux 探针与 Windows 交叉编译 | 真实旧 Windows / CentOS wait、console、process 资格 |
 | M2 / C05--C09 | UTF-8、JSON、INI、XML、路径/hash 核心与测试 | 三目标 native XML ABI 和资源校准 |
 | M3--M4 / C10--C14 | immutable config、bootstrap、action/CLI、兼容 TUI/editor | 未接通 controller 及真实旧终端 transcript |
-| M5 / C15--C18 | 单 XML、索引、writer/lock、publication/recovery、管理事务核心 | 目标文件系统 replace/lock/崩溃矩阵；import/repair 与跨 workspace 继续确认 |
+| M5 / C15--C18 | 单 XML、索引、writer/lock、publication/recovery、管理事务核心 | 目标文件系统 replace/lock/崩溃矩阵；typed repair 与跨 workspace 继续确认 |
 | M6 / C19--C22 | curl/SSE/retry/cancel、双 Model 协议、Prompt/control；XP HTTPS 静态候选 | 真实目标 TLS/CA/代理、provider wire 和取消证据 |
 | M7--M8 / C23--C28 | 8 Tools、Permission、operation、AgentLoop、queue/side/review、手工/自动 compaction | 目标进程树/路径/资源上限验证 |
 | M9 / C29--C30 | typed diagnostics、self-test 调度/Stage 1、`.details` | Stage 2/3 production adapter、controller 与目标端到端验证 |
@@ -43,7 +43,7 @@ C01--C31 已有核心实现、测试 harness、最小发行规划和现代 Linux
 
 `config-repl` 已接通有效 INI 的 catalog 字段编辑、预览、精确版本保存和重载；
 缺文件时仍提供修复模板。任意无效源的交互修复、Model/Permission 区域管理
-以及 `context-repl` 的完整交互仍有缺口，后者已完成 N1/N2 交互和 N3a rebind，N3 import/repair 仍待实现。
+以及 `context-repl` 的完整交互仍有缺口，后者已完成 N1/N2、N3a rebind 和 N3b import，typed repair 仍待实现。
 在线 self-test Stage 2/3 的 production adapter 仍返回 failed 占位结果。
 这些属于实现待办，不能归入“仅差目标资格”。
 
@@ -116,7 +116,7 @@ composition、外部替换/reload、保存失败重试和未知持久性停止�
 
 1. 补齐 Context/Model/Permission 管理、无效配置交互修复与
    在线 self-test Stage 2/3 的真实 adapter，保留逐次联网同意和零副作用检查。
-2. 完成 import/typed repair 与跨 workspace 继续确认；rebind 已接通并保留精确目标/目录/writer 复核。
+2. 完成 typed repair 与跨 workspace 继续确认；rebind/import 已接通并保留精确目标/目录/writer 复核。
 3. 在真实目标环境执行 C32；只有完整目标证据通过后才推进 C33/C34 和 Gate R。
 4. Web 继续只维护预留文档，核心 v0.1 不增加 Web 实现。
 

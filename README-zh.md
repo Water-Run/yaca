@@ -123,7 +123,10 @@ Context。有效配置中已登记的秘密值，包括二进制字段解码后�
 确认，确认后再次复核同一文件，损坏 XML 也可显式删除。busy/替换对象拒绝，unknown 或
 部分清理立即停止管理。`rebind <selector> <target-root>` 先预览已存在的目标工作目录、
 新路径/hash，输入 `REBIND <旧hash>` 后重新核对 XML 和目录身份，以不覆盖方式迁移。
-成功后从新目录使用新 hash 继续。导入、修复及管理器内的导出/继续仍待后续节点。在线 self-test Stage 2/3 的调度和同意
+成功后从新目录使用新 hash 继续。`import <in-place-xml-path>` 校验已放入正确镜像位置的 XML，
+预览本机 Model/Permission 映射，输入 `IMPORT <hash>` 后一起保存有效选择及其快照。
+确认期间配置或目标变化会拒绝保存；历史审批只作审计，未完成工作不会重放。
+修复及管理器内的导出/继续仍待后续节点。在线 self-test Stage 2/3 的调度和同意
 门禁已有实现，但 production adapter 当前返回未接通的失败结果，不发起 Model
 请求。
 

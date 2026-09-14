@@ -3493,6 +3493,10 @@ local LIFECYCLE_FIELDS = {
         permission_mappings = true,
         decision = true,
         notes = true,
+        model_name = true,
+        model_snapshot_digest = true,
+        permission_name = true,
+        permission_snapshot_digest = true,
     },
     repair = {
         error_id = true,
@@ -3548,6 +3552,22 @@ local function lifecycle_event(candidate, mutation)
         }
     end
     if kind == "import" then
+        local mapped = mutation.model_name ~= nil or mutation.model_snapshot_digest ~= nil
+            or mutation.permission_name ~= nil or mutation.permission_snapshot_digest ~= nil
+        if mapped then
+            for _, name in ipairs({ "model_name", "model_snapshot_digest",
+                "permission_name", "permission_snapshot_digest" }) do
+                if type(mutation[name]) ~= "string" or mutation[name] == "" then
+                    return nil, failure("InvalidLifecycleMutation", "import requires both complete local mappings")
+                end
+            end
+            candidate.session.current_model = {
+                name = mutation.model_name, snapshot_digest = mutation.model_snapshot_digest,
+            }
+            candidate.session.current_permission = {
+                name = mutation.permission_name, snapshot_digest = mutation.permission_snapshot_digest,
+            }
+        end
         local fields = {
             sourceSchema = mutation.source_schema,
             modelMappings = mutation.model_mappings,

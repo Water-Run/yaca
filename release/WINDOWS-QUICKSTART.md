@@ -59,7 +59,10 @@ Stage 1 中的 `ST1-ATOMIC-WRITE` 目前固定报告 `unknown`（旧系统资格
 `set-auto-rename-disabled <selector> <true|false>`、`delete <selector> [--yes]`。
 删除需要精确 hash 确认，且没有撤销。`rebind <selector> <target-root>` 可迁移到已存在的
 工作目录；核对新目录、路径与 hash 后输入 `REBIND <旧hash>`。成功后从新工作目录
-用新 hash 运行 `--continue`。导入、修复和直接跨工作目录继续仍待完成。
+用新 hash 运行 `--continue`。接收外来 XML 时，先手工放到正确的 Context 镜像目录，
+然后运行 `import <XML完整路径>`；按提示选择本机 Model/Permission 并以 `IMPORT <hash>`
+确认。它原位保存映射，不复制文件、不启动聊天、不重放历史操作。目录缺失时先 rebind。
+修复和直接跨工作目录继续仍待完成。
 
 ## 数据、升级和退出
 

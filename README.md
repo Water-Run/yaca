@@ -156,7 +156,12 @@ delete corrupt XML. Busy or replaced targets are refused; uncertain publication
 or partial cleanup stops management. `rebind <selector> <target-root>` previews an
 existing workspace and the new Context path/hash, requires `REBIND <old-hash>`,
 and reverifies both the selected XML and workspace before moving without replacement.
-Continue from the new workspace using the new hash. Import, repair, export and continuation
+Continue from the new workspace using the new hash. `import <in-place-xml-path>`
+validates an XML already in its intended mirror, previews explicit local Model and
+Permission mappings, and writes both effective selectors and their snapshots after
+`IMPORT <hash>` confirmation. Configuration or target changes abort the import;
+historical approvals remain audit-only and unfinished work is never replayed.
+Repair, export and continuation
 from this manager remain pending. Online self-test Stage 2/3 scheduling and consent are
 implemented, but their production adapters currently report an unavailable
 implementation rather than issuing Model requests.
