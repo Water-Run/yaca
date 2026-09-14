@@ -195,7 +195,152 @@ local function harness(batches)
     return composed, runtime, terminals, written
 end
 
-return {
+local function context_harness(commands, settings)
+    settings = settings or {}
+    local batches = {}
+    for _, command in ipairs(commands) do
+        batches[#batches + 1] = type(command) == "table" and { command } or {
+            { kind = "user_action", action = "text", text = command },
+            { kind = "user_action", action = "submit-or-queue" },
+        }
+    end
+    local composed, runtime, terminals, written = harness(batches)
+    local path = assert(load_module("path").new(hash_port(), {
+        maximum_path_bytes = 2048, maximum_segments = 128,
+        maximum_segment_bytes = 255, maximum_hash_chunk_bytes = 64,
+    }))
+    local rows, calls = {}, { scans = 0, closes = 0, verifies = 0 }
+    for i = 1, settings.count or 2 do
+        local name = string.format("Task%03d", i)
+        local logical = "/" .. name .. ".xml"
+        rows[i] = {
+            logical_path = logical, physical_path = "/data/CONTEXT" .. logical,
+            display_path = "CONTEXT" .. logical, display_name = name, canonical_name = name,
+            created_at = "2026-09-14T00:00:00Z", updated_at = "2026-09-14T00:00:01Z",
+            observed_stat = { object = logical, size = 100 }, header_state = "valid",
+        }
+    end
+    if settings.busy then
+        rows[1].header_state = "unavailable"
+        rows[1].canonical_name, rows[1].created_at, rows[1].updated_at = nil, nil, nil
+    end
+    local scanner = {
+        begin = function()
+            calls.scans = calls.scans + 1
+            if settings.scan_failure then return false, { code = "ScanDenied", message = "scan denied" } end
+            return true, { next = 0 }
+        end,
+        next_ring = function(handle)
+            handle.next = handle.next + 1
+            if handle.next == 1 then return true, { scope = "/", complete = true, candidates = rows } end
+            if settings.partial and handle.next == 2 then
+                return false, { code = "ScanInterrupted" }
+            end
+            return true, nil
+        end,
+        close = function() calls.closes = calls.closes + 1 return true end,
+        status = function() return { complete = not settings.partial, partial_reason = "ScanInterrupted" } end,
+    }
+    local catalog = assert(load_module("index").new({ path = path, scanner = scanner,
+        verifier = { observe = function(target)
+            calls.verifies = calls.verifies + 1
+            for _, row in ipairs(rows) do
+                if row.logical_path == target.logical_path then
+                    local copy = {}; for key, value in pairs(row) do copy[key] = value end
+                    if settings.changed then copy.observed_stat = { object = "replacement", size = 100 } end
+                    return true, copy
+                end
+            end
+            return false, { code = "NotFound" }
+        end },
+    }, { maximum_scan_candidates = 1024, maximum_search_rings = 8,
+        maximum_collision_candidates = 4, maximum_reason_bytes = 64 }))
+    composed.contexts = { catalog = catalog, catalog_scanner = scanner, path = path }
+    composed.config_generation = { context = { recent_list_limit = 1 } }
+    if settings.stdout_failure then
+        runtime.stdout = function(bytes)
+            written[#written + 1] = bytes
+            return not bytes:find("context>", 1, true)
+        end
+    end
+    local result, err = main.run_context_repl(composed, runtime, { view = settings.view or "recent" })
+    for _, terminal in ipairs(terminals) do A.truthy(terminal.closed, "terminal must be restored") end
+    A.equal(calls.scans, calls.closes + (settings.scan_failure and 1 or 0))
+    return result, err, table.concat(written), calls
+end
+
+local context_cases = {
+    {
+        name = "Context read-only loop lists searches verifies refreshes and closes without body access",
+        run = function()
+            local result, err, output, calls = context_harness({
+                "list full", "search Task002", "inspect Task001", "refresh", "help", "quit",
+            })
+            A.truthy(result, A.render(err)); A.equal(result.outcome, "success")
+            A.equal(result.online_requests, 0); A.equal(result.total, 2)
+            A.contains(output, "CONTEXT CATALOG view=recent")
+            A.contains(output, "CONTEXT CATALOG view=full")
+            A.contains(output, "CONTEXT SEARCH Task002")
+            A.contains(output, "verified: reverified for open")
+            A.contains(output, "Catalog rescanned; 2 Context(s)")
+            A.falsy(output:find("ERROR", 1, true)); A.equal(calls.verifies, 1); A.equal(calls.scans, 3)
+        end,
+    },
+    {
+        name = "Context inspection refuses replaced and busy targets without selecting replacements",
+        run = function()
+            local result, err, output, calls = context_harness({ "inspect Task001", "quit" }, { changed = true })
+            A.truthy(result, A.render(err)); A.contains(output, "ContextTargetChanged")
+            A.falsy(output:find("verified: reverified", 1, true)); A.equal(calls.scans, 2); A.equal(calls.verifies, 1)
+            result, err, output, calls = context_harness({ "inspect Task001", "quit" }, { busy = true })
+            A.truthy(result, A.render(err)); A.contains(output, "UNAVAILABLE-METADATA-ONLY")
+            A.equal(calls.verifies, 0); A.falsy(output:find("verified: reverified", 1, true))
+        end,
+    },
+    {
+        name = "Context loop rejects mutations and malformed commands then accepts subsequent input",
+        run = function()
+            local result, err, output = context_harness({ "rename Task001 NewName", "nonsense", "list", "quit" })
+            A.truthy(result, A.render(err)); A.contains(output, "ContextActionUnavailable")
+            A.contains(output, "context-rename"); A.contains(output, "CONTEXT CATALOG")
+        end,
+    },
+    {
+        name = "Context full initial view bounds rows and reports true search totals",
+        run = function()
+            local result, err, output = context_harness({ "search Task", "quit" }, { count = 300, view = "full" })
+            A.truthy(result, A.render(err)); A.contains(output, "CONTEXT CATALOG view=full")
+            A.contains(output, "Total: 300"); A.contains(output, "Results were truncated")
+            A.truthy(#output < 100000)
+            result, err, output = context_harness({ "search Task", "quit" }, { count = 100, view = "full" })
+            A.truthy(result, A.render(err)); A.contains(output, "Total: 100")
+            A.falsy(output:find("truncated", 1, true), "an exact page is not truncated")
+        end,
+    },
+    {
+        name = "Context partial scans remain explicit and refreshable and scan failures propagate",
+        run = function()
+            local result, err, output = context_harness({ "refresh", "list", "quit" }, { partial = true })
+            A.truthy(result, A.render(err)); A.contains(output, "scan incomplete")
+            result, err = context_harness({}, { scan_failure = true })
+            A.falsy(result); A.equal(err.code, "ScanDenied")
+        end,
+    },
+    {
+        name = "Context cancellation EOF and broken stdout always close the terminal",
+        run = function()
+            for _, event in ipairs({ { kind = "user_action", action = "cancel" },
+                { kind = "user_action", action = "eof" }, { kind = "io_terminal" } }) do
+                local result, err = context_harness({ event })
+                A.truthy(result, A.render(err)); A.equal(result.outcome, "cancelled")
+            end
+            local result, err = context_harness({ "quit" }, { stdout_failure = true })
+            A.falsy(result); A.equal(err.code, "BrokenStdout")
+        end,
+    },
+}
+
+local suite = {
     name = "integration/repl-input-surface",
     cases = {
         {
@@ -215,3 +360,6 @@ return {
         },
     },
 }
+
+for _, case in ipairs(context_cases) do suite.cases[#suite.cases + 1] = case end
+return suite

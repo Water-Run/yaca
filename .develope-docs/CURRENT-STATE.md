@@ -2,11 +2,12 @@
 
 更新日期：2026-09-14
 
-开发已按负责人“收尾暂停”的要求暂停。最新代码节点 `4d8c336` 已推送，
-完整 suite **481/481**；当前接续点与未完成范围见
-[2026-09-08 交接记录](HANDOFF-2026-09-08.md)；
-最近一次交接见 [2026-09-14 交接记录](HANDOFF-2026-09-14.md)，
-下一节点的可执行计划见 [Context 管理交互实现计划](CONTEXT-REPL-PLAN.md)。
+负责人已要求恢复开发、拉回 WSL 变更并推送检查点。WSL 的九个提交及未提交草稿
+已回收；本次完成 **N1 Context 只读管理交互**。完整 suite **489/489**；
+design-contract **7612**（xmllint 可用）、proof-evidence **56**、
+coding-readiness **553** 条断言通过，TP-003/006/008/010 与 RP-001 全部 PASS。
+下一节点为 N2 元数据写入，见 [本次检查点](CHECKPOINT-2026-09-14.md)
+及 [Context 管理计划](CONTEXT-REPL-PLAN.md)。Release Gate R 继续关闭。
 
 ## yaca 仓库
 
@@ -36,7 +37,7 @@ yaca 当前已有可执行 Lua 入口和平台无关的通用 Agent 核心；代
 仍缺失或不得宣称完成：
 
 - `--continue` 与同 workspace `.context` 已接通，但显式跨 workspace 确认/rebind 尚未开放；三目标 token/资源阈值仍待校准。
-- 在线 self-test Stage 2/3 production adapter 仍返回 failed 占位结果；有效配置的 `config-repl` 字段编辑已接通，但任意无效源的交互修复及 Model/Permission 区域管理尚待完成，`context-repl` 只提供 Catalog 列表。这些是实现缺口，不能只归入目标资格待办。
+- 在线 self-test Stage 2/3 production adapter 仍返回 failed 占位结果；有效配置的 `config-repl` 字段编辑已接通，但任意无效源的交互修复及 Model/Permission 区域管理尚待完成，`context-repl` 已接通只读管理交互，写事务仍待 N2/N3。这些是实现缺口，不能只归入目标资格待办。
 - 旧环境网络/HTTPS 的源码锁、XP compatibility patch、静态 import/CRT 黑名单和最小协议闭包已有可重复候选证据；仍须在真实 XP/Win7/CentOS 7 证明 TLS/CA、显式代理、redirect/retry/cancel、旧 CMD 路径与错误分类，不能据此开放 Release Gate R。
 - C32 的三个真实 target qualification、C33 的干净机发布旅程/零表面、C34 的最终 SHA-256/license/SBOM/build/test evidence 尚未执行。
 - README 中任何能力声明仍必须受实现和 target evidence 约束；现代 Linux fake/native 边界通过不能外推为 XP、Win7 或 CentOS 7 支持。

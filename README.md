@@ -6,7 +6,7 @@ yaca is the design for a simple, single-agent, terminal-only general Agent,
 licensed under GPL v3. Software development is a first-class common workload,
 not its exclusive purpose.
 
-> **Project status (2026-09-08): platform-independent core implemented through M9; controller closure and target qualification pending.** No target archive has qualified for release. The sections below distinguish connected behavior from parser-only command grammar. Target-specific behavior remains unqualified until it passes independently on Win32 x86, Win64 x86_64, and Linux x86_64. Gate A/B remain passed and Release Gate R remains closed.
+> **Project status (2026-09-14): platform-independent core implemented through M9; controller closure and target qualification pending.** No target archive has qualified for release. The sections below distinguish connected behavior from parser-only command grammar. Target-specific behavior remains unqualified until it passes independently on Win32 x86, Win64 x86_64, and Linux x86_64. Gate A/B remain passed and Release Gate R remains closed.
 
 ## Supported release targets
 
@@ -141,8 +141,15 @@ Controller gaps remain in management interactions.
 `--config-repl` edits catalog fields in valid configurations and still creates
 a repair template when the file is missing. Arbitrary invalid-source repair and
 Model/Permission section management are pending; `--model-repl` provides the
-existing offline Model creation/edit flow. `--context-repl` currently displays
-the catalog, with its full management interaction pending. Online self-test Stage 2/3 scheduling and consent are
+existing offline Model creation/edit flow. `--context-repl recent|full` opens the offline read-only Context manager. It
+shows the requested initial catalog and accepts `list [recent|full]`,
+`inspect <selector>`, `search <query>`, `refresh`, `help`, and `quit`.
+List and search use a bounded snapshot; `refresh` rescans it explicitly.
+Inspection resolves and reverifies one exact target before displaying metadata;
+a changed target is refused and unavailable Contexts never have their bodies
+opened. Incomplete scans are labelled. Esc or EOF closes the manager and restores
+the terminal. Metadata writes, import, repair, export and continuation from this
+manager remain pending and are refused explicitly. Online self-test Stage 2/3 scheduling and consent are
 implemented, but their production adapters currently report an unavailable
 implementation rather than issuing Model requests.
 

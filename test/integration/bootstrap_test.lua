@@ -543,6 +543,40 @@ return {
     name = "integration/bootstrap",
     cases = {
         {
+            name = "Context REPL production dispatch enters the read-only loop without configuration",
+            run = function()
+                cache.lxp = fake_lxp(function() error("read-only catalog must not parse Context bodies") end)
+                local native, filesystem, calls, native_path = production_native()
+                local function missing() return false, { code = "NotFound", message = "absent catalog" } end
+                for _, method in ipairs({ "fs_inspect_direct", "fs_walk_direct", "fs_open_read_verified",
+                    "fs_create_new_verified", "fs_replace_verified", "fs_rename_no_replace_verified",
+                    "fs_delete_direct_verified" }) do native[method] = missing end
+                local polls, restores, output, errors = 0, 0, {}, {}
+                local answers = { "list full", "refresh", "quit" }
+                function native.terminal_start() return true, {} end
+                function native.terminal_poll(handle)
+                    if handle.cancelled then return true, { { kind = "terminal", outcome = "cancelled" } } end
+                    polls = polls + 1
+                    if not answers[polls] then return true, { { kind = "action", intent = "eof" } } end
+                    return true, { { kind = "action", intent = "text", text = answers[polls] .. "\n" } }
+                end
+                function native.terminal_cancel(handle) handle.cancelled = true return true, true end
+                function native.terminal_join() return true, { outcome = "cancelled" } end
+                function native.terminal_restore() restores = restores + 1 return true, true end
+                function native.terminal_close() return true, true end
+                A.equal(main.run_cli({ [0] = "/release/yaca", "--context-repl", "full" }, {
+                    native = native, native_path = native_path,
+                    stdout = function(bytes) output[#output + 1] = bytes return true end,
+                    stderr = function(bytes) errors[#errors + 1] = bytes return true end,
+                }), 0)
+                A.contains(table.concat(output), "YACA CONTEXT MANAGER")
+                A.contains(table.concat(output), "CONTEXT CATALOG view=full")
+                A.contains(table.concat(output), "Catalog rescanned; 0 Context(s)")
+                A.equal(polls, 3); A.equal(restores, 1); A.equal(calls.process_starts, 0)
+                A.falsy(filesystem.bytes(CONFIG_PATH)); A.deep_equal(errors, {})
+            end,
+        },
+        {
             name = "configuration secret input restores the terminal even after its clock fails",
             run = function()
                 local settings = {}
@@ -1104,13 +1138,22 @@ return {
                     stdout = function(bytes) stdout[#stdout + 1] = bytes return true end,
                     stderr = function(bytes) stderr[#stderr + 1] = bytes return true end,
                 }
+                function native.terminal_start() return true, {} end
+                function native.terminal_poll(handle)
+                    return true, handle.cancelled and { { kind = "terminal", outcome = "cancelled" } }
+                        or { { kind = "action", intent = "text", text = "quit\n" } }
+                end
+                function native.terminal_cancel(handle) handle.cancelled = true return true, true end
+                function native.terminal_join() return true, { outcome = "cancelled" } end
+                function native.terminal_restore() return true, true end
+                function native.terminal_close() return true, true end
                 A.equal(main.run_cli({
                     [0] = "/release/yaca", "--context-repl", "recent",
                 }, ports), 0)
                 local rendered = table.concat(stdout)
-                A.contains(rendered, "CONTEXT CATALOG view=recent total=0 shown=0")
-                A.contains(rendered, "No Contexts found.")
-                A.contains(rendered, "catalog complete=true")
+                A.contains(rendered, "CONTEXT CATALOG view=recent")
+                A.contains(rendered, "No matching Contexts were found.")
+                A.contains(rendered, "Total: 0")
                 A.deep_equal(stderr, {})
                 A.equal(calls.process_starts, 0)
 

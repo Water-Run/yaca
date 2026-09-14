@@ -9367,6 +9367,247 @@ function M.run_config_repl(composed, runtime)
     return outcome, run_error
 end
 
+---Runs the bounded read-only Context management REPL.
+-- Every action resolves through the Resolver and reverifies the precise
+-- TargetSnapshot before reading; catalog display rows are never used to
+-- rebuild a target. Contexts held by an active writer report bounded
+-- metadata only and never open the Context body. Mutating actions are
+-- registered but not yet connected and are refused explicitly.
+-- @param composed table Composed runtime carrying Context services.
+-- @param runtime table Admitted TTY invocation with shared CLI and stdout.
+-- @return table|nil result Bounded catalog outcome or cancellation.
+-- @return table|nil err Typed input, output, scan, or resolver failure.
+function M.run_context_repl(composed, runtime, request)
+    if type(composed) ~= "table"
+        or type(composed.backend) ~= "table"
+        or type(composed.backend.new_terminal) ~= "function"
+        or type(composed.backend.clock_port) ~= "table"
+        or type(composed.backend.clock_port.monotonic_now) ~= "function"
+        or type(composed.backend.clock_port.sleep_ms) ~= "function"
+        or type(runtime) ~= "table" or type(runtime.cli) ~= "table"
+        or type(runtime.cli.parse_context_repl) ~= "function"
+        or type(runtime.cli.render_help) ~= "function"
+    then
+        return nil, failure("InvalidContextRepl", "Context REPL ports are incomplete")
+    end
+    local contexts = composed.contexts
+    if type(contexts) ~= "table" or type(contexts.catalog) ~= "table" then
+        return nil, failure("ContextCatalogUnavailable", "Context catalog services are unavailable")
+    end
+    local input, input_error = new_model_setup_input(composed, runtime, "Context")
+    if not input then return nil, input_error end
+
+    local observation, generation = false, composed.config_generation or false
+    local function result(outcome, state, extra)
+        local value = {
+            action = "context-repl", outcome = outcome, state = state,
+            online_requests = 0,
+        }
+        for key, item in pairs(extra or {}) do value[key] = item end
+        return readonly(value, "Context REPL result")
+    end
+    local function show_error(err)
+        return input.write("ERROR " .. safe_diagnostic(err and err.code or "ContextReplFailure", 128)
+            .. ": " .. safe_diagnostic(err and err.message or "Context action failed", 512)
+            .. (err and type(err.next_action) == "string" and " (" .. safe_diagnostic(err.next_action, 128) .. ")" or "")
+            .. "\n")
+    end
+
+    ---Re-observes the catalog; every listing reads this bounded snapshot.
+    local function rescan()
+        local observed, observe_error = observe_context_catalog(contexts)
+        if not observed then return nil, observe_error end
+        observation = observed
+        return true
+    end
+
+    local function row_line(index, row)
+        return string.format(
+            "%2d %s [%-11s] %s - %s",
+            index,
+            safe_diagnostic(row.hash16, 16),
+            safe_diagnostic(row.header_state, 32),
+            safe_diagnostic(row.display_name, 128),
+            safe_diagnostic(row.logical_path, 256)
+        )
+    end
+
+    local function render_rows(heading, rows, total, truncated, hint)
+        local lines = { heading }
+        if #rows == 0 then
+            lines[#lines + 1] = "No matching Contexts were found."
+        else
+            for index, row in ipairs(rows) do lines[#lines + 1] = row_line(index, row) end
+        end
+        if truncated then lines[#lines + 1] = hint end
+        lines[#lines + 1] = "Total: " .. tostring(total)
+        return input.write(table.concat(lines, "\n") .. "\n")
+    end
+
+    local function list(view)
+        local page = context_catalog_page(contexts, observation, generation, view)
+        return render_rows(
+            "CONTEXT CATALOG view=" .. view
+                .. " sort=" .. safe_diagnostic(tostring(page.sort_by), 32)
+                .. "/" .. safe_diagnostic(tostring(page.sort_direction), 32)
+                .. (observation.complete and "" or " (scan incomplete)"),
+            page.rows, page.total, page.truncated,
+            view == "recent" and "More Contexts exist; use list full."
+                or "Results were truncated; use search to narrow the catalog."
+        )
+    end
+
+    ---Filters the current snapshot; it never rescans behind the operator.
+    local function search(query)
+        local needle = query:lower()
+        local matches, total = {}, 0
+        for _, row in ipairs(observation.rows) do
+            local name = tostring(row.display_name or ""):lower()
+            local logical = tostring(row.logical_path or ""):lower()
+            if name:find(needle, 1, true) or logical:find(needle, 1, true)
+                or tostring(row.hash16 or ""):lower():find(needle, 1, true)
+            then
+                total = total + 1
+                if #matches < CONTEXT_BROWSER_PAGE_LIMIT then matches[#matches + 1] = row end
+            end
+        end
+        return render_rows(
+            "CONTEXT SEARCH " .. ascii_diagnostic(query, 128)
+                .. (observation.complete and "" or " (scan incomplete)"),
+            matches, total, total > #matches,
+            "Results were truncated; narrow the query."
+        )
+    end
+
+    ---Resolves the selector, then reverifies the captured TargetSnapshot.
+    -- The rendered row is never used to rebuild the target.
+    local function inspect(selector)
+        local selection = contexts.catalog.resolve(selector, "/")
+        if type(selection) ~= "table" or type(selection.tag) ~= "string" then
+            return nil, failure("ContextResolverContract", "Context resolver returned an invalid result")
+        end
+        if selection.tag == "MatchedUnavailable" then
+            return input.write("CONTEXT UNAVAILABLE-METADATA-ONLY " .. safe_diagnostic(selection.logical_path, 256)
+                .. "\nreason: " .. safe_diagnostic(selection.reason, 128)
+                .. "\nAn active writer or unreadable header blocks inspection; the body was not opened.\n")
+        end
+        if selection.tag ~= "Unique" then
+            local detail = selection.reason or selection.scope or ""
+            return nil, failure(
+                "ContextSelectorUnresolved",
+                "selector did not resolve to one Context",
+                safe_diagnostic(tostring(selection.tag) .. (detail ~= "" and ":" .. tostring(detail) or ""), 128)
+            )
+        end
+        local verified = contexts.catalog.verify_target(selection, "open")
+        if type(verified) ~= "table" or type(verified.tag) ~= "string" then
+            return nil, failure("ContextResolverContract", "Context reverification returned an invalid result")
+        end
+        if verified.tag ~= "Verified" then
+            return nil, failure(
+                verified.tag == "TargetChanged" and "ContextTargetChanged" or "ContextTargetUnavailable",
+                "the selected Context could not be reverified for inspection",
+                safe_diagnostic(tostring(verified.tag) .. ":" .. tostring(verified.reason or ""), 128)
+            )
+        end
+        local credential = verified.credential
+        local lines = {
+            "CONTEXT " .. safe_diagnostic(verified.hash, 16),
+            "logical:  " .. safe_diagnostic(verified.logical_path, 256),
+            "display:  " .. safe_diagnostic(verified.display_path, 256),
+            "state:    " .. safe_diagnostic(verified.header_state, 32),
+            "name:     " .. safe_diagnostic(tostring(credential.canonical_name or "(none)"), 256),
+            "created:  " .. safe_diagnostic(tostring(credential.created_at or "(unknown)"), 64),
+            "updated:  " .. safe_diagnostic(tostring(credential.updated_at or "(unknown)"), 64),
+            "verified: reverified for open immediately before this display.",
+        }
+        if verified.physical_hint and verified.physical_hint ~= verified.display_path then
+            lines[#lines + 1] = "physical: " .. safe_diagnostic(verified.physical_hint, 256)
+        end
+        return input.write(table.concat(lines, "\n") .. "\n")
+    end
+
+    local UNCONNECTED = {
+        ["context-rename"] = true, ["context-rebind"] = true,
+        ["context-delete"] = true, ["context-set-auto-rename-disabled"] = true,
+        ["context-import"] = true, ["context-repair"] = true,
+        ["export-context"] = true, ["select-context"] = true,
+    }
+
+    local function run_repl()
+        local scanned, scan_error = rescan()
+        if not scanned then
+            return nil, scan_error
+        end
+        local written, write_error = input.write("YACA CONTEXT MANAGER\n"
+            .. "Read-only in this build: list, inspect, search, refresh.\n"
+            .. "Every inspect reverifies its exact target; busy Contexts show metadata only.\n"
+            .. "Enter help for commands or quit to leave.\n")
+        if not written then return nil, write_error end
+        written, write_error = list(request and request.view or "recent")
+        if not written then return nil, write_error end
+        while true do
+            local source, read_error = input.read("context> ", false, 4096)
+            if source == false then return result("cancelled", "cancelled") end
+            if source == nil then return nil, read_error end
+            local trimmed = source:gsub("^%s+", ""):gsub("%s+$", "")
+            local handled, action_error = true, nil
+            if trimmed == "quit" or trimmed == "exit" then
+                return result("success", "closed", {
+                    total = observation.total or #observation.rows,
+                })
+            elseif trimmed == "help" then
+                handled, action_error = input.write(assert(runtime.cli.render_help("context-repl")))
+            elseif trimmed == "" then
+                handled = true
+            else
+                local request
+                request, action_error = runtime.cli.parse_context_repl(trimmed)
+                if request then
+                    if request.id == "context-list" then
+                        handled, action_error = list(request.view)
+                    elseif request.id == "context-search" then
+                        handled, action_error = search(request.query)
+                    elseif request.id == "context-inspect" then
+                        handled, action_error = inspect(request.selector)
+                    elseif request.id == "context-refresh" then
+                        handled, action_error = rescan()
+                        if handled then
+                            handled, action_error = input.write("Catalog rescanned; "
+                                .. tostring(#observation.rows) .. " Context(s)"
+                                .. (observation.complete and "." or "; scan incomplete.") .. "\n")
+                        end
+                    elseif UNCONNECTED[request.id] then
+                        handled, action_error = nil, failure(
+                            "ContextActionUnavailable",
+                            "this Context action is not connected in this build",
+                            safe_diagnostic(request.id, 64)
+                        )
+                    else
+                        handled, action_error = nil, failure(
+                            "ContextActionUnavailable",
+                            "unknown Context action",
+                            safe_diagnostic(tostring(request.id), 64)
+                        )
+                    end
+                else
+                    handled = false
+                end
+            end
+            if not handled then
+                if action_error and action_error.code == "BrokenStdout" then return nil, action_error end
+                written, write_error = show_error(action_error)
+                if not written then return nil, write_error end
+            end
+        end
+    end
+    local called, outcome, run_error = pcall(run_repl)
+    local closed, close_error = input.close()
+    if not closed then return nil, close_error end
+    if not called then return nil, failure("ContextReplFailure", "Context manager failed") end
+    return outcome, run_error
+end
+
 local function render_self_test(cli_service, request, result)
     if request.machine == true then
         local records = {}
@@ -9549,6 +9790,13 @@ default_runtime_dispatch = function(request, runtime)
         local configured, editor_error = M.run_config_repl(composed, runtime)
         if not configured then return nil, editor_error end
         return { output = "", exit_value = configured.outcome == "success" and nil or configured }
+    end
+    if request.id == "context-repl"
+        and (result.state == "catalog-ready" or result.state == "scan-incomplete")
+    then
+        local managed, manager_error = M.run_context_repl(composed, runtime, request)
+        if not managed then return nil, manager_error end
+        return { output = "", exit_value = managed.outcome == "success" and nil or managed }
     end
     if request.id == "run-chat" or request.id == "continue" then
         local initial_agent

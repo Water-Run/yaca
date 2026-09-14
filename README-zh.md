@@ -5,7 +5,7 @@
 yaca 是一款简单、单 Agent、terminal-only 的通用 Agent 设计，以 GPL v3
 许可开源。软件开发是一级且常见的工作负载，但不是唯一用途。
 
-> **项目状态（2026-09-08）：平台无关核心已实现至 M9；controller 收口和目标资格验证待完成。** 目前还没有任何目标发行包通过资格验证。下文分别说明已接通能力和命令 grammar；Win32 x86、Win64 x86_64 与 Linux x86_64 的目标相关行为仍须分别验证。Gate A/B 保持通过，Release Gate R 仍关闭。
+> **项目状态（2026-09-14）：平台无关核心已实现至 M9；controller 收口和目标资格验证待完成。** 目前还没有任何目标发行包通过资格验证。下文分别说明已接通能力和命令 grammar；Win32 x86、Win64 x86_64 与 Linux x86_64 的目标相关行为仍须分别验证。Gate A/B 保持通过，Release Gate R 仍关闭。
 
 ## 支持的发行目标
 
@@ -114,8 +114,11 @@ Context。有效配置中已登记的秘密值，包括二进制字段解码后�
 管理交互仍有 controller 缺口。
 `--config-repl` 已支持有效配置的 catalog 字段编辑，缺文件时仍创建修复模板；
 任意无效源的交互修复及 Model/Permission 区域管理尚待完成，`--model-repl`
-已提供既有的离线 Model 创建/编辑流程。`--context-repl` 当前显示 Catalog，
-完整管理交互待接通。在线 self-test Stage 2/3 的调度和同意
+已提供既有的离线 Model 创建/编辑流程。`--context-repl recent|full` 已接通离线只读管理器，支持
+`list [recent|full]`、`inspect <selector>`、`search <query>`、`refresh`、
+`help` 和 `quit`。列表与搜索使用有界快照，刷新时显式重扫；检查时复核精确目标，
+目标变化即拒绝，不读取不可用 Context 的正文。Esc/EOF 恢复终端并退出。
+元数据写入、导入、修复及管理器内的导出/继续仍待后续节点。在线 self-test Stage 2/3 的调度和同意
 门禁已有实现，但 production adapter 当前返回未接通的失败结果，不发起 Model
 请求。
 
