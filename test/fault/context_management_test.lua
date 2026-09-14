@@ -567,6 +567,150 @@ return {
             end,
         },
         {
+            name = "typed repair plans are read-only and restore a missing or damaged official in one publication",
+            run = function()
+                for _, damaged in ipairs({ false, true }) do
+                    local fixture = harness.new(modules)
+                    local _, old_bytes = fixture.document(harness.minimal("Task"))
+                    fixture.controls.external_replace(PREVIOUS, old_bytes)
+                    if damaged then fixture.controls.external_replace(TARGET, "<broken>") end
+                    local credential = { physical_path = TARGET, logical_path = "/C/work/Task.xml",
+                        header_state = damaged and "corrupt" or "unavailable" }
+                    if damaged then credential.observed_stat = fixture.controls.identity(TARGET)
+                    else credential.recovery_stat = fixture.controls.identity(PREVIOUS) end
+                    local plan, base = fixture.store.plan_repair(TARGET, credential)
+                    A.truthy(plan, A.render(base))
+                    A.equal(plan.action, "restore-previous")
+                    A.falsy(fixture.controls.exists(LOCK))
+                    A.equal(fixture.controls.bytes(PREVIOUS), old_bytes)
+                    A.equal(fixture.controls.bytes(TARGET), damaged and "<broken>" or nil)
+                    local repaired = lifecycle(fixture, base, { kind = "repair", error_id = "PreviousValidRestored",
+                        summary = "restored validated previous with an audited publication",
+                        updated_at = "2026-08-29T00:00:05Z", view_manifest_digest = "sha256:repaired-view" })
+                    local receipt, err = fixture.store.apply_repair(plan, repaired, TARGET .. ".yaca-tmp-repair", fixture.metadata())
+                    A.truthy(receipt, A.render(err))
+                    A.equal(receipt.outcome, "restored-previous")
+                    A.equal(receipt.generation, 2)
+                    A.falsy(receipt.auto_replay)
+                    A.falsy(fixture.controls.exists(PREVIOUS))
+                    A.falsy(fixture.controls.exists(LOCK))
+                    A.equal(fixture.controls.bytes(TARGET), assert(fixture.schema.encode(repaired)))
+                    local repeated, repeated_error = fixture.store.apply_repair(plan, repaired,
+                        TARGET .. ".yaca-tmp-repeat", fixture.metadata())
+                    A.falsy(repeated)
+                    A.equal(repeated_error.code, "InvalidRepairPlan")
+                end
+            end,
+        },
+        {
+            name = "typed repair rejects stale sources destinations and live locks before changing files",
+            run = function()
+                for _, changed in ipairs({ "previous", "official", "lock", "under-lease" }) do
+                    local fixture = harness.new(modules)
+                    local _, old_bytes = fixture.document(harness.minimal("Task"))
+                    fixture.controls.external_replace(PREVIOUS, old_bytes)
+                    local plan, base = assert(fixture.store.plan_repair(TARGET, { physical_path = TARGET,
+                        logical_path = "/C/work/Task.xml", header_state = "unavailable",
+                        recovery_stat = fixture.controls.identity(PREVIOUS) }))
+                    local repaired = lifecycle(fixture, base, { kind = "repair", error_id = "PreviousValidRestored",
+                        summary = "restore previous", updated_at = "2026-08-29T00:00:05Z",
+                        view_manifest_digest = "sha256:repaired-view" })
+                    if changed == "previous" then fixture.controls.external_replace(PREVIOUS, old_bytes)
+                    elseif changed == "official" then fixture.controls.external_replace(TARGET, "replacement")
+                    elseif changed == "lock" then fixture.controls.external_replace(LOCK, "old-looking lock")
+                    else
+                        fixture.hooks.after.fs_create_new = function(ok, _, target)
+                            if ok and target == LOCK then fixture.controls.external_replace(PREVIOUS, old_bytes) end
+                        end
+                    end
+                    local result, err = fixture.store.apply_repair(plan, repaired,
+                        TARGET .. ".yaca-tmp-repair", fixture.metadata())
+                    A.falsy(result)
+                    A.equal(err.code, "TargetChanged")
+                    A.equal(fixture.controls.bytes(TARGET), changed == "official" and "replacement" or nil)
+                    A.equal(fixture.controls.bytes(PREVIOUS), old_bytes)
+                    A.equal(fixture.controls.exists(LOCK), changed == "lock")
+                    A.falsy(fixture.controls.exists(TARGET .. ".yaca-tmp-repair"))
+                end
+            end,
+        },
+        {
+            name = "typed repair retains the recovery source on publish and cleanup failures",
+            run = function()
+                for _, stage in ipairs({ "write", "publish", "flush", "cleanup", "release" }) do
+                    local fixture = harness.new(modules)
+                    local _, old_bytes = fixture.document(harness.minimal("Task"))
+                    fixture.controls.external_replace(PREVIOUS, old_bytes)
+                    local plan, base = assert(fixture.store.plan_repair(TARGET, { physical_path = TARGET,
+                        logical_path = "/C/work/Task.xml", header_state = "unavailable",
+                        recovery_stat = fixture.controls.identity(PREVIOUS) }))
+                    local repaired = lifecycle(fixture, base, { kind = "repair", error_id = "PreviousValidRestored",
+                        summary = "restore previous", updated_at = "2026-08-29T00:00:05Z",
+                        view_manifest_digest = "sha256:repaired-view" })
+                    if stage == "write" then
+                        fixture.controls.faults.write = true
+                    elseif stage == "publish" then
+                        fixture.hooks.before.fs_rename_no_replace_verified = function() error("synthetic publication exception") end
+                    elseif stage == "flush" then
+                        fixture.hooks.after.fs_rename_no_replace_verified = function(ok)
+                            if ok then fixture.controls.faults.flush_directory = true end
+                        end
+                    elseif stage == "cleanup" then
+                        fixture.hooks.before.fs_delete_verified = function(target)
+                            if target == PREVIOUS then error("synthetic cleanup exception") end
+                        end
+                    else
+                        fixture.hooks.before.fs_delete_verified = function(target)
+                            if target == LOCK then error("synthetic lease release exception") end
+                        end
+                    end
+                    local receipt, err = fixture.store.apply_repair(plan, repaired, TARGET .. ".yaca-tmp-repair", fixture.metadata())
+                    A.falsy(receipt)
+                    if stage == "write" then
+                        A.equal(err.code, "InjectedWrite")
+                        A.falsy(fixture.controls.exists(TARGET))
+                    else A.equal(err.code, "ContextRepairUnknown") end
+                    if stage ~= "release" then A.equal(fixture.controls.bytes(PREVIOUS), old_bytes) end
+                    if stage == "flush" or stage == "cleanup" or stage == "release" then
+                        A.equal(fixture.controls.bytes(TARGET), assert(fixture.schema.encode(repaired)))
+                    end
+                end
+            end,
+        },
+        {
+            name = "typed repair cleans an obsolete previous but refuses conflicting histories and active locks",
+            run = function()
+                local fixture = harness.new(modules, { [TARGET] = harness.minimal("Task") })
+                local old_bytes = fixture.controls.bytes(TARGET)
+                local credential = { physical_path = TARGET, logical_path = "/C/work/Task.xml",
+                    observed_stat = fixture.controls.identity(TARGET), header_state = "valid" }
+                local noop, base = assert(fixture.store.plan_repair(TARGET, credential))
+                A.equal(noop.action, "no-repair-needed")
+                A.equal(fixture.store.apply_repair(noop).outcome, "unchanged")
+                A.falsy(fixture.controls.exists(LOCK))
+                fixture.controls.external_replace(PREVIOUS, old_bytes)
+                local plan = assert(fixture.store.plan_repair(TARGET, credential))
+                A.equal(plan.action, "clean-previous")
+                local repaired = lifecycle(fixture, base, { kind = "repair", error_id = "PreviousValidCleaned",
+                    summary = "clean previous", updated_at = "2026-08-29T00:00:05Z",
+                    view_manifest_digest = "sha256:repaired-view" })
+                A.equal(assert(fixture.store.apply_repair(plan, repaired,
+                    TARGET .. ".yaca-tmp-repair", fixture.metadata())).outcome, "cleaned-previous")
+                A.falsy(fixture.controls.exists(PREVIOUS))
+                credential.observed_stat = fixture.controls.identity(TARGET)
+                fixture.controls.external_replace(PREVIOUS, "<invalid>")
+                local unsafe, unsafe_error = fixture.store.plan_repair(TARGET, credential)
+                A.falsy(unsafe)
+                A.equal(unsafe_error.code, "NoSafeRepair")
+                fixture.controls.external_replace(LOCK, "old-looking-lock")
+                local blocked, blocked_error = fixture.store.plan_repair(TARGET, credential)
+                A.falsy(blocked)
+                A.equal(blocked_error.code, "LockConflict")
+                A.equal(fixture.controls.bytes(PREVIOUS), "<invalid>")
+                A.equal(fixture.controls.bytes(LOCK), "old-looking-lock")
+            end,
+        },
+        {
             name = "repair uses only previous-valid evidence and never breaks a stale lock",
             run = function()
                 local fixture = harness.new(modules)

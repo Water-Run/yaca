@@ -161,8 +161,11 @@ validates an XML already in its intended mirror, previews explicit local Model a
 Permission mappings, and writes both effective selectors and their snapshots after
 `IMPORT <hash>` confirmation. Configuration or target changes abort the import;
 historical approvals remain audit-only and unfinished work is never replayed.
-Repair, export and continuation
-from this manager remain pending. Online self-test Stage 2/3 scheduling and consent are
+`repair <selector>` previews a validated previous-file recovery or cleanup, then
+requires `REPAIR <hash>` and reverifies the exact files before publishing a repair
+record and refreshed ModelView. It restores missing/corrupt XML only from its valid
+named previous file, never breaks a writer lock or replays unfinished operations.
+Export and continuation from this manager remain pending. Online self-test Stage 2/3 scheduling and consent are
 implemented, but their production adapters currently report an unavailable
 implementation rather than issuing Model requests.
 

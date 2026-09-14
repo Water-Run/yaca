@@ -227,6 +227,23 @@ local function fixture(settings)
     end
 
     local store = {}
+    function store.plan_repair(target, credential)
+        observations.repair_plans = (observations.repair_plans or 0) + 1
+        A.equal(target, credential.physical_path)
+        if settings.repair_error then return nil, settings.repair_error end
+        local document = settings.open_document
+        return { action = settings.repair_action or "restore-previous", path = target,
+            source_path = target .. ".yaca-prev", previous_path = target .. ".yaca-prev",
+            official_exists = credential.observed_stat ~= nil, generation = document.generation }, document
+    end
+    function store.apply_repair(plan, document, temporary, metadata)
+        observations.applied_repair = plan
+        if settings.apply_repair_error then return nil, settings.apply_repair_error end
+        if plan.action == "no-repair-needed" then return { outcome = "unchanged", generation = plan.generation } end
+        observations.closes = observations.closes + 1
+        observations.published = { document = document, temporary_path = temporary, metadata = metadata }
+        return { outcome = "restored-previous", generation = document.generation }
+    end
     function store.inspect_import(target, credential)
         observations.import_reads = (observations.import_reads or 0) + 1
         A.equal(target, credential.physical_path)
@@ -944,6 +961,67 @@ return {
             end,
         },
         {
+            name = "repair keeps previous-only targets read-only until a reconstructable audited publication",
+            run = function()
+                local first, document = management_seed()
+                local manager, observed = fixture({ open_document = document })
+                local request = management_spec(first, document, "repair")
+                local credential = request.expected_credential
+                credential.recovery_stat, credential.observed_stat = credential.observed_stat, nil
+                credential.canonical_name, credential.created_at, credential.updated_at = nil, nil, nil
+                credential.header_state = "unavailable"
+                local proposal = assert(manager.plan_repair(request))
+                A.equal(proposal.action, "restore-previous")
+                A.equal(#observed.writers, 0)
+                A.falsy(observed.published)
+                request.repair_plan = proposal
+                local receipt = assert(manager.manage_context(request))
+                A.equal(receipt.context_hash, first.context_hash)
+                A.equal(receipt.generation, document.generation + 1)
+                local repaired = observed.published.document
+                A.equal(repaired.facts[4].type, "warning")
+                A.equal(repaired.facts[4].fields.errorId, "PreviousValidRestored")
+                A.equal(repaired.header.created_at, document.header.created_at)
+                local reopened = fixture({ open_document = repaired })
+                local open_request = management_spec(receipt, repaired, "repair")
+                open_request.action = nil
+                local opened = assert(reopened.open_existing(open_request))
+                A.contains(assert(reopened.resolve_view(opened.view_manifest_snapshot)).body, "preserve this history")
+                assert(reopened.close())
+                local repeated, repeated_error = manager.manage_context(request)
+                A.falsy(repeated)
+                A.equal(repeated_error.code, "InvalidRepairPlan")
+            end,
+        },
+        {
+            name = "repair no-op leaves the generation intact and uncertain repair stops further mutation",
+            run = function()
+                local first, document = management_seed()
+                for _, noop in ipairs({ true, false }) do
+                    local manager, observed = fixture({ open_document = document,
+                        repair_action = noop and "no-repair-needed" or nil,
+                        apply_repair_error = not noop and { code = "ContextRepairUnknown" } or nil })
+                    local request = management_spec(first, document, "repair")
+                    request.repair_plan = assert(manager.plan_repair(request))
+                    local receipt, err = manager.manage_context(request)
+                    if noop then
+                        A.truthy(receipt, A.render(err))
+                        A.equal(receipt.outcome, "unchanged")
+                        A.equal(receipt.generation, document.generation)
+                    else
+                        A.falsy(receipt)
+                        A.equal(err.code, "ContextMutationUnknown")
+                        local later, later_error = manager.manage_context(management_spec(first, document,
+                            "rename", { new_name = "Later" }))
+                        A.falsy(later)
+                        A.equal(later_error.code, "ContextMutationUnknown")
+                    end
+                    A.falsy(observed.published)
+                    A.equal(observed.closes, 0)
+                end
+            end,
+        },
+        {
             name = "import preserves historical approvals and unresolved work without granting or replaying it",
             run = function()
                 local first, document = management_seed(true)
@@ -1620,6 +1698,12 @@ return {
                 managed = imported_observed.published.document
                 A.equal(managed.model_view.active_manifest.compaction_id, "compaction-1")
                 A.equal(managed.session.current_model.name, "ImportedCompact")
+                local repairer, repaired_observed = fixture({ open_document = managed })
+                local repair_request = management_spec(renamed, managed, "repair")
+                repair_request.repair_plan = assert(repairer.plan_repair(repair_request))
+                renamed = assert(repairer.manage_context(repair_request))
+                managed = repaired_observed.published.document
+                A.equal(managed.model_view.active_manifest.compaction_id, "compaction-1")
                 local reopened = fixture({ open_document = managed })
                 local specification = management_spec(renamed, managed, "rename")
                 specification.action = nil
@@ -1630,6 +1714,7 @@ return {
                 A.contains(restored, "Still Compacted")
                 A.contains(restored, "/compacted-work/")
                 A.contains(restored, "ImportedCompact")
+                A.contains(restored, "PreviousValidRestored")
                 A.falsy(restored:find("compact this prefix", 1, true))
                 local _, restored_count = restored:gsub("<StructuredSummary", "")
                 A.equal(restored_count, 1)

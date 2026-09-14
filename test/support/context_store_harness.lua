@@ -233,6 +233,58 @@ end
 
 local function wrap_native(raw, hooks)
     local native = {}
+    local function same_identity(left, right)
+        if type(left) ~= "table" or type(right) ~= "table" then return false end
+        for _, key in ipairs({ "kind", "volume", "object", "size", "modified" }) do
+            if left[key] ~= right[key] then return false end
+        end
+        return true
+    end
+    local function directory_identity(path)
+        return { kind = "directory", volume = "fixture-directory", object = path, size = 0, modified = "stable" }
+    end
+    local direct = {}
+    function direct.inspect(path)
+        local exists, identity = raw.stat_identity(path)
+        if not exists and identity.code ~= "NotFound" then return false, identity end
+        local parent = path:match("^(.*)/[^/]+$")
+        if parent == "" then parent = "/" end
+        return true, { requested_path = path, canonical_path = path, exists = exists,
+            identity = exists and identity or false, parent_identity = directory_identity(parent),
+            metadata = exists and { link_count = 1, behavior_digest = "fixture-metadata",
+                preservation = "proven", link_target = false } or false,
+            ancestors = { { path = "/", identity = directory_identity("/") },
+                { path = parent, identity = directory_identity(parent) } }, ancestry_complete = true }
+    end
+    function direct.replace(source, target, expected_source, expected_target)
+        local source_ok, source_id = raw.stat_identity(source)
+        local target_ok, target_id = raw.stat_identity(target)
+        if not source_ok or not target_ok or not same_identity(source_id, expected_source)
+            or not same_identity(target_id, expected_target)
+        then return false, { code = "TargetChanged", message = "direct replacement changed" } end
+        return raw.replace(source, target)
+    end
+    function direct.rename(source, target, expected_source)
+        local source_ok, source_id = raw.stat_identity(source)
+        if not source_ok or not same_identity(source_id, expected_source) then
+            return false, { code = "TargetChanged", message = "direct rename source changed" }
+        end
+        return raw.rename_no_replace(source, target)
+    end
+    for native_name, method in pairs({ fs_inspect_direct = "inspect",
+        fs_replace_verified = "replace", fs_rename_no_replace_verified = "rename" }) do
+        native[native_name] = function(...)
+            hooks.counts[native_name] = (hooks.counts[native_name] or 0) + 1
+            if hooks.before[native_name] then hooks.before[native_name](...) end
+            local ok, value = direct[method](...)
+            if hooks.after[native_name] then hooks.after[native_name](ok, value, ...) end
+            return ok, value
+        end
+    end
+    for _, name in ipairs({ "fs_walk_direct", "fs_open_read_verified", "fs_create_new_verified",
+        "fs_delete_direct_verified" }) do
+        native[name] = function() error("unused direct fixture operation: " .. name) end
+    end
     local mappings = {
         fs_open_read = "open_read",
         fs_create_new = "create_new",

@@ -221,6 +221,12 @@ local function context_harness(commands, settings)
         }
     end
     if settings.corrupt then rows[1].header_state = "corrupt" end
+    if settings.previous_only then
+        rows[1].header_state = "unavailable"
+        rows[1].observed_stat = nil
+        rows[1].canonical_name, rows[1].created_at, rows[1].updated_at = nil, nil, nil
+        rows[1].recovery_stat = { kind = "file", object = "previous-file", size = 100 }
+    end
     if settings.busy then
         rows[1].header_state = "unavailable"
         rows[1].canonical_name, rows[1].created_at, rows[1].updated_at = nil, nil, nil
@@ -250,7 +256,9 @@ local function context_harness(commands, settings)
                     if settings.changed or (settings.changed_after_confirm and calls.verifies > 1)
                         or (settings.changed_after_verify and calls.verifies > settings.changed_after_verify)
                     then
-                        copy.observed_stat = { object = "replacement", size = 100 }
+                        if settings.previous_only then
+                            copy.recovery_stat = { kind = "file", object = "replacement", size = 100 }
+                        else copy.observed_stat = { object = "replacement", size = 100 } end
                     end
                     return true, copy
                 end
@@ -300,6 +308,11 @@ local function context_harness(commands, settings)
                 target_logical_path = "/new-work/Task001.xml", target_hash = "FEDCBA9876543210" }
             calls.proposal = plan
             return plan
+        end, plan_repair = function(specification)
+            calls.repair_plans = (calls.repair_plans or 0) + 1
+            if settings.plan_error then return nil, settings.plan_error end
+            return { action = settings.repair_action or "restore-previous", source_path = specification.context_path .. ".yaca-prev",
+                previous_path = specification.context_path .. ".yaca-prev" }
         end, plan_import = function(specification)
             calls.import_plans = (calls.import_plans or 0) + 1
             calls.import_generation = specification.generation
@@ -333,6 +346,51 @@ local function context_harness(commands, settings)
 end
 
 local context_cases = {
+    {
+        name = "Context repair confirms a previous-only target and refuses changed confirmations",
+        run = function()
+            local path = assert(load_module("path").new(hash_port(), {
+                maximum_path_bytes = 2048, maximum_segments = 128,
+                maximum_segment_bytes = 255, maximum_hash_chunk_bytes = 64,
+            }))
+            local hash = assert(path.context_hash("/Task001.xml"))
+            local commands = { "repair " .. hash, "REPAIR " .. hash, "quit" }
+            local result, err, output, calls = context_harness(commands, { manage = true, previous_only = true })
+            A.truthy(result, A.render(err))
+            A.contains(output, "Action: restore-previous")
+            A.contains(output, "Task001.xml.yaca-prev")
+            A.equal(#calls.mutations, 1)
+            A.equal(calls.mutations[1].action, "repair")
+            A.equal(calls.mutations[1].expected_credential.recovery_stat.object, "previous-file")
+            A.falsy(calls.mutations[1].expected_credential.observed_stat)
+            result, err, output, calls = context_harness(commands,
+                { manage = true, previous_only = true, changed_after_confirm = true })
+            A.truthy(result, A.render(err))
+            A.contains(output, "ContextTargetChanged")
+            A.equal(#calls.mutations, 0)
+        end,
+    },
+    {
+        name = "Context repair cancellation no-op and unsafe repair never start an unconfirmed mutation",
+        run = function()
+            local result, err, output, calls = context_harness({ "repair Task001", "no", "quit" },
+                { manage = true, corrupt = true })
+            A.truthy(result, A.render(err))
+            A.contains(output, "Context repair cancelled")
+            A.equal(#calls.mutations, 0)
+            result, err, output, calls = context_harness({ "repair Task001", "quit" },
+                { manage = true, repair_action = "no-repair-needed" })
+            A.truthy(result, A.render(err))
+            A.contains(output, "No previous-file repair is needed")
+            A.falsy(output:find("Type REPAIR", 1, true))
+            A.equal(#calls.mutations, 1)
+            result, err, output, calls = context_harness({ "repair Task001", "quit" },
+                { manage = true, plan_error = { code = "NoSafeRepair" } })
+            A.truthy(result, A.render(err))
+            A.contains(output, "NoSafeRepair")
+            A.equal(#calls.mutations, 0)
+        end,
+    },
     {
         name = "Context import captures an exact in-place file and confirms effective local mappings",
         run = function()

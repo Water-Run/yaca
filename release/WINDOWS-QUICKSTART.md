@@ -62,7 +62,10 @@ Stage 1 中的 `ST1-ATOMIC-WRITE` 目前固定报告 `unknown`（旧系统资格
 用新 hash 运行 `--continue`。接收外来 XML 时，先手工放到正确的 Context 镜像目录，
 然后运行 `import <XML完整路径>`；按提示选择本机 Model/Permission 并以 `IMPORT <hash>`
 确认。它原位保存映射，不复制文件、不启动聊天、不重放历史操作。目录缺失时先 rebind。
-修复和直接跨工作目录继续仍待完成。
+主 XML 缺失/损坏且有有效 `.yaca-prev` 时，可运行 `repair <hash>`，核对恢复来源、
+目标和清理路径后输入 `REPAIR <hash>`。它也可清理同一历史的过期 previous；新文件
+验证成功后才删除副本，不破锁、不重放操作。没有有效来源时会拒绝修复。
+管理器内导出/继续和直接跨工作目录继续仍待完成。
 
 ## 数据、升级和退出
 

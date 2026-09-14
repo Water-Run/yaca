@@ -258,6 +258,11 @@ local function filesystem_catalog(settings)
         [root .. "/D"] = true,
         [root .. "/C/work/folder.xml"] = true,
     }
+    if settings.previous_only then
+        for i = #paths, 1, -1 do
+            if paths[i] == root .. "/C/work/Task.xml" then table.remove(paths, i) end
+        end
+    end
     local controls = {
         root = root,
         walks = 0,
@@ -267,12 +272,21 @@ local function filesystem_catalog(settings)
     }
     local filesystem = {}
     function filesystem.direct_inspect(physical_path)
+        if settings.previous_only and physical_path == root .. "/C/work/Task.xml" then
+            local snapshot = catalog_snapshot(physical_path, "file")
+            snapshot.exists, snapshot.identity, snapshot.metadata = false, false, false
+            return true, snapshot
+        end
         if directories[physical_path] then
             return true, catalog_snapshot(physical_path, "directory")
         end
         for _, candidate_path in ipairs(paths) do
             if candidate_path == physical_path then
-                return true, catalog_snapshot(physical_path, "file")
+                local snapshot = catalog_snapshot(physical_path, "file")
+                if controls.recovery_changed and physical_path:sub(-14) == ".xml.yaca-prev" then
+                    snapshot.identity.object = "changed-previous"
+                end
+                return true, snapshot
             end
         end
         return false, { code = "NotFound" }
@@ -671,6 +685,29 @@ return {
                 A.equal(hashes.hashes, 1)
                 A.falsy(service.current_hash("/C/work/not-context.txt"))
                 A.equal(scan.begins, 0)
+            end,
+        },
+        {
+            name = "previous-only files are discoverable for repair without becoming ordinary Contexts",
+            run = function()
+                local scan, verifier, path_port, controls = filesystem_catalog({ previous_only = true })
+                local catalog = assert(index.new({ path = path_port, scanner = scan, verifier = verifier }, options()))
+                local hash = assert(path_port.context_hash("/C/work/Task.xml"))
+                A.equal(catalog.resolve(hash, "/C/work").tag, "MatchedUnavailable")
+                A.equal(catalog.resolve_for_delete(hash, "/C/work").tag, "MatchedUnavailable")
+                local selection = catalog.resolve_for_repair(hash, "/C/work")
+                A.equal(selection.tag, "Unique")
+                A.equal(catalog.verify_target(selection, "open").tag, "TargetUnavailable")
+                local verified = catalog.verify_target(selection, "repair")
+                A.equal(verified.tag, "Verified")
+                A.falsy(verified.credential.observed_stat)
+                A.equal(verified.credential.recovery_stat.kind, "file")
+                for _, observed_path in ipairs(controls.header_paths) do
+                    A.falsy(observed_path:find(".yaca-prev", 1, true))
+                    A.falsy(observed_path == controls.root .. "/C/work/Task.xml")
+                end
+                controls.recovery_changed = true
+                A.equal(catalog.verify_target(selection, "repair").tag, "TargetChanged")
             end,
         },
         {

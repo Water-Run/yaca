@@ -126,7 +126,9 @@ Context。有效配置中已登记的秘密值，包括二进制字段解码后�
 成功后从新目录使用新 hash 继续。`import <in-place-xml-path>` 校验已放入正确镜像位置的 XML，
 预览本机 Model/Permission 映射，输入 `IMPORT <hash>` 后一起保存有效选择及其快照。
 确认期间配置或目标变化会拒绝保存；历史审批只作审计，未完成工作不会重放。
-修复及管理器内的导出/继续仍待后续节点。在线 self-test Stage 2/3 的调度和同意
+`repair <selector>` 只读预览有效 previous 的恢复或清理，输入 `REPAIR <hash>` 后
+复核精确文件，再保存修复记录和真实 ModelView。缺失/损坏 XML 只从其有效命名副本恢复；
+不会破锁或重放未完成操作。管理器内的导出/继续仍待后续节点。在线 self-test Stage 2/3 的调度和同意
 门禁已有实现，但 production adapter 当前返回未接通的失败结果，不发起 Model
 请求。
 

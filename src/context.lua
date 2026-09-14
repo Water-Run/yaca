@@ -4578,6 +4578,9 @@ local function validate_store_filesystem(filesystem)
         end
         snapshot[name] = filesystem[name]
     end
+    for _, name in ipairs({ "direct_inspect", "direct_reverify", "direct_replace", "direct_rename" }) do
+        if type(filesystem[name]) == "function" then snapshot[name] = filesystem[name] end
+    end
     local capabilities = filesystem.capabilities
     if type(capabilities) ~= "table"
         or not valid_integer(capabilities.maximum_chunk_bytes, 1)
@@ -5150,6 +5153,7 @@ function M.new_store(schema, ports, options)
     local store = {}
     local owner = {}
     local writer_states = setmetatable({}, { __mode = "k" })
+    local repair_plans = setmetatable({}, { __mode = "k" })
 
     local function new_writer(state)
         local writer = readonly({}, "Context writer")
@@ -5596,6 +5600,231 @@ function M.new_store(schema, ports, options)
     -- the operation to the selected file object.
     function store.open_delete_writer(path, metadata, expected_credential)
         return acquire_delete(path, metadata, expected_credential)
+    end
+
+    local function repair_file(path)
+        local inspected, snapshot = filesystem.direct_inspect(path)
+        if not inspected then return nil, snapshot end
+        if snapshot.requested_path ~= path or snapshot.canonical_path ~= path
+            or snapshot.ancestry_complete ~= true
+            or type(snapshot.parent_identity) ~= "table" or snapshot.parent_identity.kind ~= "directory"
+            or type(snapshot.ancestors) ~= "table" or #snapshot.ancestors == 0
+        then
+            return nil, failure("NoSafeRepair", "repair path has unverified ancestry")
+        end
+        for _, ancestor in ipairs(snapshot.ancestors) do
+            if type(ancestor.identity) ~= "table" or ancestor.identity.kind ~= "directory" then
+                return nil, failure("NoSafeRepair", "repair path contains a redirected ancestor")
+            end
+        end
+        if snapshot.exists and (snapshot.identity.kind ~= "file"
+            or type(snapshot.metadata) ~= "table" or snapshot.metadata.link_target ~= false)
+        then
+            return nil, failure("NoSafeRepair", "repair requires ordinary files without redirection")
+        end
+        return snapshot
+    end
+
+    local function verify_repair_plan(plan, own_lease)
+        for _, snapshot in ipairs(own_lease and { plan.official, plan.previous }
+            or { plan.lock, plan.official, plan.previous }) do
+            local current, current_error = filesystem.direct_reverify(snapshot)
+            if not current then
+                return nil, failure("TargetChanged", "repair source or target changed after inspection",
+                    current_error and current_error.code)
+            end
+        end
+        local source_path = plan.action == "restore-previous" and plan.previous.requested_path or plan.path
+        local document, document_error = stable_read(schema, filesystem, source_path, limits)
+        if not document then return nil, document_error end
+        if not deep_equal(document_states[document], document_states[plan.document]) then
+            return nil, failure("TargetChanged", "repair source body changed after inspection")
+        end
+        for _, snapshot in ipairs(own_lease and { plan.official, plan.previous }
+            or { plan.lock, plan.official, plan.previous }) do
+            local current, current_error = filesystem.direct_reverify(snapshot)
+            if not current then
+                return nil, failure("TargetChanged", "repair files changed during source validation",
+                    current_error and current_error.code)
+            end
+        end
+        return true
+    end
+
+    ---Inspects only the official and its named previous file, without a lease
+    -- or recovery. The returned opaque plan binds every source and destination.
+    function store.plan_repair(path, credential)
+        for _, name in ipairs({ "direct_inspect", "direct_reverify", "direct_replace", "direct_rename" }) do
+            if type(filesystem[name]) ~= "function" then
+                return nil, failure("NoSafeRepair", "verified repair filesystem operations are unavailable")
+            end
+        end
+        local target, target_error = validate_context_target(path)
+        if not target then return nil, target_error end
+        local lock, lock_error = repair_file(path .. ".yaca-lock")
+        if not lock then return nil, lock_error end
+        if lock.exists then return nil, failure("LockConflict", "repair never breaks an existing writer lock") end
+        local official, official_error = repair_file(path)
+        if not official then return nil, official_error end
+        local previous, previous_error = repair_file(path .. ".yaca-prev")
+        if not previous then return nil, previous_error end
+        if type(credential) ~= "table" or credential.physical_path ~= path then
+            return nil, failure("InvalidTargetCredential", "repair requires an exact selected target")
+        end
+        if official.exists then
+            local valid, valid_error = validate_target_credential(credential, path)
+            if not valid then return nil, valid_error end
+            if not credential_matches(credential, path, official.identity) then
+                return nil, failure("TargetChanged", "selected repair target changed")
+            end
+        else
+            local valid, valid_error = validate_target_credential({ physical_path = path,
+                logical_path = credential.logical_path, observed_stat = credential.recovery_stat }, path)
+            if not valid then return nil, valid_error end
+            if credential.observed_stat ~= nil or not previous.exists
+                or not identity_equal(credential.recovery_stat, previous.identity)
+            then
+                return nil, failure("TargetChanged", "selected previous-only target changed")
+            end
+        end
+        local document, read_error
+        if official.exists then document, read_error = stable_read(schema, filesystem, path, limits)
+        else read_error = failure("NotFound", "official XML is missing") end
+        if not document and not recoverable_official_error(read_error) then
+            return nil, failure("NoSafeRepair", "official XML failure has no safe automatic repair", read_error.code)
+        end
+        local prior
+        if previous.exists then
+            prior, previous_error = stable_read(schema, filesystem, previous.requested_path, limits)
+            if not prior then
+                return nil, failure("NoSafeRepair", "previous file is not a valid Context", previous_error.code)
+            end
+            if prior.header.name ~= target.name
+                or (credential.created_at and prior.header.created_at ~= credential.created_at)
+            then
+                return nil, failure("NoSafeRepair", "previous file belongs to another Context")
+            end
+        end
+        local action
+        if document then
+            if document.header.name ~= target.name or not credential_matches(credential, path, official.identity, document) then
+                return nil, failure("TargetChanged", "repair target header changed")
+            end
+            action = prior and "clean-previous" or "no-repair-needed"
+            if prior then
+                if prior.header.created_at ~= document.header.created_at or prior.generation > document.generation
+                    or prior.event_count > document.event_count
+                then
+                    return nil, failure("NoSafeRepair", "previous file is not an earlier generation of this Context")
+                end
+                for index = 1, prior.event_count do
+                    if not deep_equal(prior.facts[index], document.facts[index]) then
+                        return nil, failure("NoSafeRepair", "previous history is not a prefix of the official history")
+                    end
+                end
+            end
+        elseif prior then
+            action, document = "restore-previous", prior
+        else
+            return nil, failure("NoSafeRepair", "no validated previous generation is available")
+        end
+        local plan = { path = path, target = target, official = official, previous = previous,
+            lock = lock, document = document, action = action }
+        local valid, valid_error = verify_repair_plan(plan)
+        if not valid then return nil, valid_error end
+        local proposal = assert(freeze({ action = action, path = path,
+            source_path = action == "restore-previous" and previous.requested_path or path,
+            previous_path = previous.requested_path, official_exists = official.exists,
+            generation = document.generation, auto_replay = false,
+        }, "read-only Context repair plan"))
+        repair_plans[proposal] = plan
+        return proposal, document
+    end
+
+    ---Publishes one confirmed repair generation while retaining the previous
+    -- source until the new official has been flushed and verified.
+    function store.apply_repair(proposal, document, temporary_path, metadata)
+        local plan = repair_plans[proposal]
+        if not plan then return nil, failure("InvalidRepairPlan", "repair plan is stale or foreign") end
+        repair_plans[proposal] = nil
+        local verified, verify_error = verify_repair_plan(plan)
+        if not verified then return nil, verify_error end
+        if plan.action == "no-repair-needed" then
+            return assert(freeze({ outcome = "unchanged", path = plan.path,
+                generation = plan.document.generation, auto_replay = false }, "Context repair receipt"))
+        end
+        local canonical, canonical_error = validate_publication_document({ mode = "replace",
+            target = plan.target, base_document = plan.document }, document)
+        if not canonical then return nil, canonical_error end
+        local warning = document.facts[plan.document.event_count + 1]
+        local expected_error = plan.action == "restore-previous" and "PreviousValidRestored" or "PreviousValidCleaned"
+        if document.event_count ~= plan.document.event_count + 2 or warning.type ~= "warning"
+            or warning.fields.errorId ~= expected_error
+        then
+            return nil, failure("InvalidRepairPlan", "repair generation omits the confirmed repair audit")
+        end
+        local valid_temp, temp_error = validate_temp_path(plan.path, temporary_path, limits)
+        if not valid_temp then return nil, temp_error end
+        local lock_bytes, metadata_error = encode_lock_metadata(metadata, limits)
+        if not lock_bytes then return nil, metadata_error end
+        local acquired, lease = filesystem.acquire_lease(plan.lock.requested_path, lock_bytes, limits.lock_permissions)
+        if not acquired then return nil, lease end
+        local temporary_identity, publication_attempted, published = nil, false, false
+        local function transact()
+            local current, current_error = verify_repair_plan(plan, true)
+            if not current then return nil, current_error end
+            local written, write_error = write_new_document(schema, filesystem, temporary_path, document, limits)
+            if not written then return nil, write_error end
+            temporary_identity = written
+            local checked, check_error = verify_document_path(schema, filesystem, temporary_path,
+                document, temporary_identity, limits)
+            if not checked then return nil, check_error end
+            local temporary, inspect_error = repair_file(temporary_path)
+            if not temporary then return nil, inspect_error end
+            if not identity_equal(temporary.identity, checked) then
+                return nil, failure("TargetChanged", "repair temporary changed before publication")
+            end
+            current, current_error = verify_repair_plan(plan, true)
+            if not current then return nil, current_error end
+            publication_attempted = true
+            local moved, move_error
+            if plan.official.exists then moved, move_error = filesystem.direct_replace(temporary, plan.official)
+            else moved, move_error = filesystem.direct_rename(temporary, plan.official) end
+            if not moved then
+                if move_error.code == "TargetChanged" or move_error.code == "IdentityChanged"
+                    or move_error.code == "DestinationExists"
+                then publication_attempted = false end
+                return nil, move_error
+            end
+            published = true
+            local flushed, flush_error = filesystem.flush_directory(plan.target.directory)
+            if not flushed then return nil, flush_error end
+            checked, check_error = verify_document_path(schema, filesystem, plan.path, document, nil, limits)
+            if not checked then return nil, check_error end
+            current, current_error = filesystem.direct_reverify(plan.previous)
+            if not current then return nil, current_error end
+            local cleaned, cleanup_error = filesystem.delete_verified(plan.previous.requested_path, plan.previous.identity)
+            if not cleaned then return nil, cleanup_error end
+            flushed, flush_error = filesystem.flush_directory(plan.target.directory)
+            if not flushed then return nil, flush_error end
+            local final_identity, final_error = verify_document_path(schema, filesystem, plan.path,
+                document, checked, limits)
+            if not final_identity then return nil, final_error end
+            return assert(freeze({ outcome = plan.action == "restore-previous" and "restored-previous" or "cleaned-previous",
+                path = plan.path, generation = document.generation, event_count = document.event_count,
+                auto_replay = false, auto_continue = false }, "Context repair receipt"))
+        end
+        local called, receipt, repair_error = pcall(transact)
+        if not publication_attempted and temporary_identity then
+            local clean_called, cleaned = pcall(cleanup_file, filesystem, temporary_path, temporary_identity)
+            if not clean_called or not cleaned then publication_attempted = true end
+        end
+        local release_called, released = pcall(filesystem.release_lease, lease)
+        if not called or not release_called or not released or (not receipt and (publication_attempted or published)) then
+            return nil, failure("ContextRepairUnknown", "repair publication or cleanup is uncertain",
+                type(repair_error) == "table" and repair_error.code or nil)
+        end
+        return receipt, repair_error
     end
 
     ---Runs only evidence-safe previous-valid recovery under the normal lease.

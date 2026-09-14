@@ -3350,11 +3350,26 @@ static int synchronize_windows_candidate_metadata(
         required->security_descriptor,
         required->security_descriptor_length) != 0)
   {
-    if (!SetKernelObjectSecurity(
-        handle,
-        security,
-        required->security_descriptor))
+    unsigned char *descriptor = (unsigned char *)malloc(required->security_descriptor_length);
+    BOOL copied;
+    DWORD error_value;
+    if (descriptor == NULL)
     {
+      SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+      return 0;
+    }
+    memcpy(descriptor, required->security_descriptor, required->security_descriptor_length);
+    /* Request inheritance-control assignment as well as the exact ACEs.
+    ** Otherwise the setter retains the temporary's old AUTO_INHERITED bit.
+    ** This is a file with no children; the complete result is verified below. */
+    copied = SetSecurityDescriptorControl(descriptor,
+      SE_DACL_AUTO_INHERIT_REQ, SE_DACL_AUTO_INHERIT_REQ)
+      && SetKernelObjectSecurity(handle, security, descriptor);
+    error_value = GetLastError();
+    free(descriptor);
+    if (!copied)
+    {
+      SetLastError(error_value);
       return 0;
     }
   }
@@ -3403,6 +3418,69 @@ static int windows_snapshot_matches_lua(
 {
   return snapshot->exists
     && windows_handle_matches_lua(L, index, snapshot->target_handle);
+}
+
+/* ReplaceFileW may mark matching legacy ACEs as inherited. Admit only that
+** inheritance-model conversion for restoration, never changed principals,
+** access masks, ACE ordering, attributes, or descriptor components. */
+static int windows_metadata_added_auto_inheritance(
+  const yaca_windows_metadata_state *original,
+  const yaca_windows_metadata_state *current)
+{
+  unsigned char *normalized;
+  SECURITY_DESCRIPTOR_CONTROL before_control;
+  SECURITY_DESCRIPTOR_CONTROL after_control;
+  DWORD revision;
+  PACL before_dacl;
+  PACL after_dacl;
+  BOOL present;
+  BOOL defaulted;
+  WORD index;
+  int equal = 0;
+  if (!original->proven || !current->proven
+      || original->attributes != current->attributes
+      || original->security_descriptor_length != current->security_descriptor_length
+      || !GetSecurityDescriptorControl(original->security_descriptor, &before_control, &revision)
+      || !GetSecurityDescriptorControl(current->security_descriptor, &after_control, &revision)
+      || (before_control & SE_DACL_AUTO_INHERITED) != 0
+      || after_control != (before_control | SE_DACL_AUTO_INHERITED))
+  {
+    return 0;
+  }
+  normalized = (unsigned char *)malloc(current->security_descriptor_length);
+  if (normalized == NULL)
+  {
+    return 0;
+  }
+  memcpy(normalized, current->security_descriptor, current->security_descriptor_length);
+  if (!SetSecurityDescriptorControl(normalized, SE_DACL_AUTO_INHERITED, 0)
+      || !GetSecurityDescriptorDacl(original->security_descriptor, &present, &before_dacl, &defaulted)
+      || !present || before_dacl == NULL
+      || !GetSecurityDescriptorDacl(normalized, &present, &after_dacl, &defaulted)
+      || !present || after_dacl == NULL
+      || before_dacl->AceCount != after_dacl->AceCount)
+  {
+    goto done;
+  }
+  for (index = 0; index < before_dacl->AceCount; ++index)
+  {
+    ACE_HEADER *before_ace;
+    ACE_HEADER *after_ace;
+    if (!GetAce(before_dacl, index, (LPVOID *)&before_ace)
+        || !GetAce(after_dacl, index, (LPVOID *)&after_ace))
+    {
+      goto done;
+    }
+    if ((before_ace->AceFlags & INHERITED_ACE) == 0)
+    {
+      after_ace->AceFlags &= ~INHERITED_ACE;
+    }
+  }
+  equal = memcmp(original->security_descriptor, normalized,
+    original->security_descriptor_length) == 0;
+done:
+  free(normalized);
+  return equal;
 }
 
 static int l_fs_replace_verified(lua_State *L)
@@ -3619,6 +3697,41 @@ static int l_fs_replace_verified(lua_State *L)
     goto failed;
   }
   if (windows_snapshot_matches_lua(L, 3, &published)
+      && windows_snapshot_matches_lua(L, 4, &displaced)
+      && windows_metadata_states_equal(&target.metadata, &displaced.metadata)
+      && windows_metadata_added_auto_inheritance(&target.metadata, &published.metadata))
+  {
+    candidate_handle = CreateFileW(
+      published.canonical_path,
+      GENERIC_READ | GENERIC_WRITE | READ_CONTROL | WRITE_DAC | WRITE_OWNER,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+      NULL, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+    free_windows_metadata_state(&candidate_metadata);
+    if (candidate_handle == INVALID_HANDLE_VALUE
+        || !windows_handle_matches_lua(L, 3, candidate_handle)
+        || !GetFileInformationByHandle(candidate_handle, &candidate_information)
+        || capture_windows_metadata(candidate_handle, &candidate_information,
+          published.canonical_path, 1, &candidate_metadata) != 1
+        || !windows_metadata_added_auto_inheritance(&target.metadata, &candidate_metadata)
+        || !synchronize_windows_candidate_metadata(published.canonical_path,
+          candidate_handle, &candidate_metadata, &target.metadata)
+        || !FlushFileBuffers(candidate_handle))
+    {
+      code = "Unknown";
+      message = "direct Windows legacy metadata restoration is unknown";
+      goto failed;
+    }
+    CloseHandle(candidate_handle);
+    candidate_handle = INVALID_HANDLE_VALUE;
+    free_windows_snapshot(&published);
+    if (!inspect_windows_path(target_path, target_length, &published, &code, &message))
+    {
+      code = "Unknown";
+      message = "direct Windows legacy metadata verification is unknown";
+      goto failed;
+    }
+  }
+  if (windows_snapshot_matches_lua(L, 3, &published)
       && published.metadata.proven
       && windows_behavior_digest(&published.metadata, behavior)
       && strlen(behavior) == expected_behavior_length
@@ -3674,7 +3787,8 @@ static int l_fs_replace_verified(lua_State *L)
           &restored,
           &code,
           &message)
-        && windows_snapshot_matches_lua(L, 4, &restored))
+        && windows_snapshot_matches_lua(L, 4, &restored)
+        && windows_metadata_states_equal(&target.metadata, &restored.metadata))
     {
       rollback_succeeded = 1;
     }

@@ -9610,7 +9610,9 @@ function M.run_context_repl(composed, runtime, request)
         end
         local deleting = action.id == "context-delete"
         local rebinding = action.id == "context-rebind"
-        local resolve = deleting and contexts.catalog.resolve_for_delete or contexts.catalog.resolve
+        local repairing = action.id == "context-repair"
+        local resolve = repairing and contexts.catalog.resolve_for_repair
+            or (deleting and contexts.catalog.resolve_for_delete or contexts.catalog.resolve)
         if type(resolve) ~= "function" then
             return nil, failure("ContextActionUnavailable", "Context deletion resolver is unavailable")
         end
@@ -9619,7 +9621,7 @@ function M.run_context_repl(composed, runtime, request)
             return nil, failure("ContextSelectorUnresolved", "selector did not resolve to one manageable Context",
                 type(selection) == "table" and selection.tag or "resolver-contract")
         end
-        local purpose = deleting and "delete" or "mutation"
+        local purpose = repairing and "repair" or (deleting and "delete" or "mutation")
         local function verify()
             local target = contexts.catalog.verify_target(selection, purpose)
             if type(target) ~= "table" or target.tag ~= "Verified" then
@@ -9632,6 +9634,35 @@ function M.run_context_repl(composed, runtime, request)
         local target, target_error = verify()
         if not target then return nil, target_error end
         local rebind_plan
+        local repair_plan
+        if repairing then
+            if type(publication.plan_repair) ~= "function" then
+                return nil, failure("ContextActionUnavailable", "read-only Context repair planning is unavailable")
+            end
+            repair_plan, target_error = publication.plan_repair({ context_path = target.physical_hint,
+                logical_path = target.logical_path, expected_credential = target.credential })
+            if not repair_plan then return nil, target_error end
+            if repair_plan.action == "no-repair-needed" then
+                local written, write_error = input.write("No previous-file repair is needed; no changes.\n")
+                if not written then return nil, write_error end
+            else
+                local written, write_error = input.write("REPAIR " .. target.hash
+                    .. "\nAction: " .. safe_diagnostic(repair_plan.action, 64)
+                    .. "\nSource: " .. safe_diagnostic(repair_plan.source_path, 512)
+                    .. "\nTarget: " .. safe_diagnostic(target.physical_hint, 512)
+                    .. "\nCleanup after verified publication: " .. safe_diagnostic(repair_plan.previous_path, 512)
+                    .. "\nPublishes the validated history with a repair record. No operation replay.\n")
+                if not written then return nil, write_error end
+                local answer, answer_error = input.read("Type REPAIR " .. target.hash .. " to confirm: ", false, 128)
+                if answer == false then return nil, failure("ContextReplCancelled", "Context repair was cancelled") end
+                if answer == nil then return nil, answer_error end
+                if answer ~= "REPAIR " .. target.hash then
+                    return input.write("Context repair cancelled; no files were changed.\n")
+                end
+            end
+            target, target_error = verify()
+            if not target then return nil, target_error end
+        end
         if rebinding then
             if type(publication.plan_rebind) ~= "function" then
                 return nil, failure("ContextActionUnavailable", "Context rebind planning is unavailable")
@@ -9689,7 +9720,7 @@ function M.run_context_repl(composed, runtime, request)
             end
         end
         local receipt, mutation_error = publication.manage_context({
-            action = deleting and "delete" or (rebinding and "rebind") or (action.id == "context-rename"
+            action = repairing and "repair" or (deleting and "delete") or (rebinding and "rebind") or (action.id == "context-rename"
                 and "rename" or "set_auto_rename_disabled"),
             context_path = target.physical_hint,
             logical_path = target.logical_path,
@@ -9697,6 +9728,7 @@ function M.run_context_repl(composed, runtime, request)
             new_name = action.new_name,
             value = action.value,
             rebind_plan = rebind_plan,
+            repair_plan = repair_plan,
         })
         if not receipt then return nil, mutation_error end
         local lines = {}
@@ -9866,7 +9898,6 @@ function M.run_context_repl(composed, runtime, request)
     end
 
     local UNCONNECTED = {
-        ["context-repair"] = true,
         ["export-context"] = true, ["select-context"] = true,
     }
 
@@ -9876,7 +9907,7 @@ function M.run_context_repl(composed, runtime, request)
             return nil, scan_error
         end
         local written, write_error = input.write("YACA CONTEXT MANAGER\n"
-            .. "Offline: list, inspect, search, refresh, rename, rebind, import, delete, set-auto-rename-disabled.\n"
+            .. "Offline: list, inspect, search, refresh, rename, rebind, import, repair, delete, set-auto-rename-disabled.\n"
             .. "Every inspect reverifies its exact target; busy Contexts show metadata only.\n"
             .. "Enter help for commands or quit to leave.\n")
         if not written then return nil, write_error end
@@ -9917,6 +9948,7 @@ function M.run_context_repl(composed, runtime, request)
                         end
                     elseif request.id == "context-rename" or request.id == "context-delete"
                         or request.id == "context-set-auto-rename-disabled" or request.id == "context-rebind"
+                        or request.id == "context-repair"
                     then
                         handled, action_error = mutate(request)
                     elseif UNCONNECTED[request.id] then

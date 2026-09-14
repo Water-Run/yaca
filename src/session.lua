@@ -1160,15 +1160,19 @@ function M.new_context_publication(ports, options)
 
     local rebind_plans = {}
     local import_plans = {}
+    local repair_plans = {}
 
     local function bound_management_path(specification, allow_corrupt)
         local credential = specification.expected_credential
+        local missing = allow_corrupt == "repair" and type(credential) == "table"
+            and credential.header_state == "unavailable" and credential.observed_stat == nil
+            and type(credential.recovery_stat) == "table"
         if type(credential) ~= "table"
             or credential.physical_path ~= specification.context_path
             or credential.logical_path ~= specification.logical_path
-            or type(credential.observed_stat) ~= "table"
+            or (type(credential.observed_stat) ~= "table" and not missing)
             or (credential.header_state ~= "valid"
-                and not (allow_corrupt and credential.header_state == "corrupt"))
+                and not (allow_corrupt and credential.header_state == "corrupt") and not missing)
         then
             return nil, failure("InvalidContextMutation", "an exact verified Context credential is required")
         end
@@ -1398,6 +1402,103 @@ function M.new_context_publication(ports, options)
         return proposal
     end
 
+    local function repair_document(document, action, now, previous_updated_at)
+        local old_view, view_error = rebuild_active_model_view(document)
+        if not old_view then return nil, view_error end
+        local previous = document.header.updated_at
+        if utc_parts(previous_updated_at) and previous_updated_at > previous then previous = previous_updated_at end
+        local updated_at, updated_error = next_utc_time(now, previous)
+        if not updated_at then return nil, updated_error end
+        local manifest = document.model_view.active_manifest
+        return management_document(document, {
+            kind = "repair", updated_at = updated_at,
+            error_id = action == "restore-previous" and "PreviousValidRestored" or "PreviousValidCleaned",
+            summary = action == "restore-previous" and "restored the validated previous generation; no operation replay"
+                or "removed the verified obsolete previous generation; no operation replay",
+            view_manifest_digest = manifest.digest, view_compaction_id = manifest.compaction_id,
+            view_context_generation = manifest.compaction_id and document.generation + 1 or nil,
+        })
+    end
+
+    ---Previews a bounded physical repair without acquiring a writer or moving
+    -- files. Missing officials remain unavailable until confirmed publication.
+    function service.plan_repair(specification)
+        repair_plans = {}
+        if closed or journal_failure or active then
+            return nil, failure("ContextActionUnavailable", "Context management owner is unavailable")
+        end
+        if type(specification) ~= "table" or type(store.plan_repair) ~= "function"
+            or type(store.apply_repair) ~= "function"
+        then
+            return nil, failure("ContextActionUnavailable", "typed Context repair is unavailable")
+        end
+        local physical, hash = bound_management_path(specification, "repair")
+        if not physical then return nil, hash end
+        local proposal, document = store.plan_repair(physical, specification.expected_credential)
+        if not proposal then return nil, document end
+        if proposal.action ~= "no-repair-needed" then
+            local now, time_error = system.utc_now()
+            if not utc_parts(now) then return nil, time_error or failure("UtcClockReadFailed", "UTC is unavailable") end
+            model_views = {}
+            local prepared, prepare_error = repair_document(document, proposal.action, now,
+                specification.expected_credential.updated_at)
+            model_views = {}
+            if not prepared then return nil, prepare_error end
+        end
+        local digest, digest_error = snapshot_digest(safety, "yaca-repair-selection-v1", specification.expected_credential)
+        if not digest then return nil, digest_error end
+        local result = readonly({ action = proposal.action, context_hash = hash,
+            context_path = physical, logical_path = specification.logical_path,
+            source_path = proposal.source_path, previous_path = proposal.previous_path,
+            official_exists = proposal.official_exists, generation = proposal.generation,
+            auto_replay = false }, "Context repair proposal")
+        repair_plans[result] = { store_plan = proposal, document = document,
+            physical = physical, logical = specification.logical_path, credential_digest = digest }
+        return result
+    end
+
+    local function apply_context_repair(specification)
+        local plan = repair_plans[specification.repair_plan]
+        repair_plans = {}
+        local physical, hash = bound_management_path(specification, "repair")
+        if not physical then return nil, hash end
+        local digest = snapshot_digest(safety, "yaca-repair-selection-v1", specification.expected_credential)
+        if not plan or plan.physical ~= physical or plan.logical ~= specification.logical_path
+            or plan.credential_digest ~= digest or specification.new_name ~= nil or specification.value ~= nil
+            or specification.rebind_plan ~= nil or specification.import_plan ~= nil or specification.generation ~= nil
+        then
+            return nil, failure("InvalidRepairPlan", "an exact current repair proposal is required")
+        end
+        local document, temporary, metadata
+        if plan.store_plan.action ~= "no-repair-needed" then
+            local now, time_error = system.utc_now()
+            if not utc_parts(now) then return nil, time_error or failure("UtcClockReadFailed", "UTC is unavailable") end
+            local pid, pid_error = system.current_process_id()
+            if not valid_integer(pid, 1) then return nil, pid_error or failure("ProcessIdentityUnavailable", "PID is unavailable") end
+            metadata = { pid = pid, started_at = now }
+            local document_error
+            document, document_error = repair_document(plan.document, plan.store_plan.action, now,
+                specification.expected_credential.updated_at)
+            model_views = {}
+            if not document then return nil, document_error end
+            local random, random_error = system.secure_random(8)
+            if type(random) ~= "string" or #random ~= 8 then
+                return nil, random_error or failure("SecureRandomUnavailable", "repair temporary identity is unavailable")
+            end
+            temporary = physical .. ".yaca-tmp-" .. hex(random)
+        end
+        local called, receipt, repair_error = pcall(store.apply_repair, plan.store_plan, document, temporary, metadata)
+        local code = type(repair_error) == "table" and repair_error.code or ""
+        if not called or code:find("Unknown", 1, true) or code == "ContextCleanupRequired" then
+            closed = true
+            return nil, failure("ContextMutationUnknown", "Context repair outcome is uncertain", code)
+        end
+        if not receipt then return nil, repair_error end
+        return readonly({ outcome = receipt.outcome, context_path = physical,
+            logical_path = specification.logical_path, context_hash = hash,
+            generation = receipt.generation, auto_replay = false }, "managed Context repair receipt")
+    end
+
     ---Performs one offline management transaction against an exact selection.
     -- This uses a separate short-lived writer, never opens a Runtime, and never
     -- recovers or replays pending work. Every path releases its writer before
@@ -1413,6 +1514,7 @@ function M.new_context_publication(ports, options)
             action = true, context_path = true, logical_path = true,
             expected_credential = true, new_name = true, value = true, rebind_plan = true,
             import_plan = true, generation = true,
+            repair_plan = true,
         }
         if type(specification) ~= "table" then
             return nil, failure("InvalidContextMutation", "a bound Context action is required")
@@ -1423,6 +1525,10 @@ function M.new_context_publication(ports, options)
             end
         end
         local action = specification.action
+        if action == "repair" then return apply_context_repair(specification) end
+        if specification.repair_plan ~= nil then
+            return nil, failure("InvalidContextMutation", "only repair accepts a repair proposal")
+        end
         if action ~= "rename" and action ~= "set_auto_rename_disabled"
             and action ~= "delete" and action ~= "rebind" and action ~= "import"
         then

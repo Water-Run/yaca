@@ -37,6 +37,7 @@ local CANDIDATE_FIELDS = {
     scope_rank = true,
     hash16 = true,
     observed_stat = true,
+    recovery_stat = true,
     header_state = true,
 }
 
@@ -302,6 +303,12 @@ local function validate_candidate(candidate, rank, path)
     if candidate.observed_stat ~= nil and type(candidate.observed_stat) ~= "table" then
         return nil, "candidate-observation"
     end
+    if candidate.recovery_stat ~= nil and (type(candidate.recovery_stat) ~= "table"
+        or candidate.recovery_stat.kind ~= "file" or candidate.observed_stat ~= nil
+        or candidate.header_state ~= "unavailable")
+    then
+        return nil, "candidate-recovery-observation"
+    end
     if candidate.header_state == "valid" then
         if candidate.canonical_name ~= details.display_name
             or not valid_text(candidate.created_at, false)
@@ -320,6 +327,7 @@ local function validate_candidate(candidate, rank, path)
         created_at = candidate.created_at,
         updated_at = candidate.updated_at,
         observed_stat = candidate.observed_stat,
+        recovery_stat = candidate.recovery_stat,
         header_state = candidate.header_state,
         scope_rank = rank,
     }
@@ -400,12 +408,17 @@ local function unique(candidate, hash, selections)
     return selected_result(candidate, hash, "Unique", selections)
 end
 
+local function manageable(candidate, mode)
+    return candidate.header_state == "valid"
+        or (mode and candidate.header_state == "corrupt")
+        or (mode == "repair" and candidate.header_state == "unavailable"
+            and type(candidate.recovery_stat) == "table")
+end
+
 local function decide_name(candidates, selector, path, scope, selections, deleting)
     for _, candidate in ipairs(candidates) do
         if candidate.display_name == selector or candidate.canonical_name == selector then
-            if candidate.header_state ~= "valid"
-                and not (deleting and candidate.header_state == "corrupt")
-            then
+            if not manageable(candidate, deleting) then
                 return matched_unavailable(candidate)
             end
             local hash = hash_candidate(candidate, path)
@@ -422,9 +435,7 @@ local function decide_hash(candidates, selector, path, scope, limits, selections
         local hash = hash_candidate(candidate, path)
         if not hash then return scan_incomplete(scope, "context-hash") end
         if hash == selector then
-            if candidate.header_state == "valid"
-                or (deleting and candidate.header_state == "corrupt")
-            then
+            if manageable(candidate, deleting) then
                 usable[#usable + 1] = { candidate = candidate, hash = hash }
             else
                 unavailable[#unavailable + 1] = candidate
@@ -581,6 +592,12 @@ function M.new(ports, options)
         return resolve(selector, origin_logical, true)
     end
 
+    ---Includes damaged officials and exact previous-only observations solely
+    -- for explicit repair. Ordinary open/delete never acquire these targets.
+    function service.resolve_for_repair(selector, origin_logical)
+        return resolve(selector, origin_logical, "repair")
+    end
+
     ---Computes `.status` hash from the current handle path without scanning.
     -- @param logical_path string Current Context LogicalPath.
     -- @return string|nil hash Canonical 16-uppercase-hex address.
@@ -624,7 +641,7 @@ function M.new(ports, options)
     -- replacement when the selected path has changed.
     function service.verify_target(selection, purpose)
         purpose = purpose or "open"
-        if purpose ~= "open" and purpose ~= "mutation" and purpose ~= "delete" then
+        if purpose ~= "open" and purpose ~= "mutation" and purpose ~= "delete" and purpose ~= "repair" then
             return result({ tag = "TargetUnavailable", reason = "invalid-purpose" })
         end
         local expected = selections[selection]
@@ -674,6 +691,7 @@ function M.new(ports, options)
             and observed.updated_at == expected.updated_at
             and observed.header_state == expected.header_state
             and deep_equal(observed.observed_stat, expected.observed_stat)
+            and deep_equal(observed.recovery_stat, expected.recovery_stat)
         if not same then
             return result({
                 tag = "TargetChanged",
@@ -681,10 +699,12 @@ function M.new(ports, options)
                 reason = "observation-changed",
             })
         end
-        local delete_damaged = purpose == "delete"
+        local delete_damaged = (purpose == "delete" or purpose == "repair")
             and observed.header_state == "corrupt"
             and type(observed.observed_stat) == "table"
-        if observed.header_state ~= "valid" and not delete_damaged then
+        local repair_missing = purpose == "repair" and observed.header_state == "unavailable"
+            and observed.observed_stat == nil and type(observed.recovery_stat) == "table"
+        if observed.header_state ~= "valid" and not delete_damaged and not repair_missing then
             return result({
                 tag = "TargetUnavailable",
                 logical_path = expected.logical_path,
@@ -711,6 +731,7 @@ function M.new(ports, options)
                 physical_path = observed.physical_path,
                 logical_path = observed.logical_path,
                 observed_stat = observed.observed_stat,
+                recovery_stat = observed.recovery_stat,
                 canonical_name = observed.canonical_name,
                 created_at = observed.created_at,
                 updated_at = observed.updated_at,
@@ -1046,6 +1067,26 @@ function M.new_filesystem_scanner(ports, options)
         return candidate
     end
 
+    local function inspect_missing_candidate(snapshot, previous, logical, details, rank, statistics)
+        local candidate = unavailable_candidate(snapshot, logical, details, rank)
+        increment(statistics, "unavailable")
+        if snapshot.exists or not previous.exists or previous.identity.kind ~= "file"
+            or snapshot.ancestry_complete ~= true or previous.ancestry_complete ~= true
+            or snapshot.canonical_path ~= snapshot.requested_path
+            or previous.canonical_path ~= previous.requested_path
+            or type(previous.metadata) ~= "table" or previous.metadata.link_target ~= false
+        then return candidate end
+        local writer = call_value(store, "inspect_writer", snapshot.requested_path)
+        if not writer or writer.busy ~= false or writer.metadata_state ~= "absent" then
+            if writer and writer.busy then increment(statistics, "busy") end
+            return candidate
+        end
+        local current = call_status(filesystem, "direct_reverify", snapshot)
+        local current_previous = call_status(filesystem, "direct_reverify", previous)
+        if current and current_previous then candidate.recovery_stat = current_previous.identity end
+        return candidate
+    end
+
     local function mark_partial(state, reason)
         state.statistics.complete = false
         state.statistics.partial_reason = reason
@@ -1197,6 +1238,8 @@ function M.new_filesystem_scanner(ports, options)
                 maximum_entries = remaining,
             }
             local child_directories = {}
+            local entries_by_name = {}
+            for _, entry in ipairs(walked.entries) do entries_by_name[entry.relative_path] = true end
             for _, entry in ipairs(walked.entries) do
                 local logical = directory.logical == "/"
                     and "/" .. entry.relative_path
@@ -1243,6 +1286,24 @@ function M.new_filesystem_scanner(ports, options)
                     )
                     candidates[#candidates + 1] = candidate
                     new_paths[#new_paths + 1] = logical
+                elseif logical:sub(-14) == ".xml.yaca-prev" then
+                    local official_logical = logical:sub(1, -11)
+                    local official_name = entry.relative_path:sub(1, -11)
+                    if not entries_by_name[official_name] and not state.seen[official_logical] then
+                        local details = path.context_file(official_logical)
+                        local official, inspect_error = call_status(filesystem, "direct_inspect",
+                            entry.snapshot.requested_path:sub(1, -11))
+                        if not details or not official or official.exists then
+                            return incomplete_ring(state, scope, rank,
+                                observation_reason(inspect_error, "repair-candidate-changed"))
+                        end
+                        if state.statistics.candidates + #candidates >= state.maximum_scan_candidates then
+                            return incomplete_ring(state, scope, rank, "scan-limit")
+                        end
+                        candidates[#candidates + 1] = inspect_missing_candidate(official, entry.snapshot,
+                            official_logical, details, rank, ring_statistics)
+                        new_paths[#new_paths + 1] = official_logical
+                    end
                 end
             end
             for index = #child_directories, 1, -1 do
@@ -1419,9 +1480,6 @@ function M.new_filesystem_scanner(ports, options)
             request.physical_path
         )
         if not snapshot then return false, inspect_error end
-        if snapshot.exists ~= true then
-            return false, failure("NotFound", "Context target is unavailable")
-        end
         local details, details_error = path.context_file(request.logical_path)
         if not details then return false, details_error end
         local statistics = {
@@ -1434,6 +1492,13 @@ function M.new_filesystem_scanner(ports, options)
             lock_unavailable = 0,
             header_bytes = 0,
         }
+        if snapshot.exists ~= true then
+            local previous, previous_error = call_status(filesystem, "direct_inspect",
+                request.physical_path .. ".yaca-prev")
+            if not previous then return false, previous_error end
+            if not previous.exists then return false, failure("NotFound", "Context target is unavailable") end
+            return true, inspect_missing_candidate(snapshot, previous, request.logical_path, details, nil, statistics)
+        end
         return true, inspect_candidate(
             snapshot,
             request.logical_path,
