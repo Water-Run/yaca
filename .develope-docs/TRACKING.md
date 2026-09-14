@@ -167,6 +167,10 @@ coding-readiness **553** 条断言 PASS。
 - 本机缺少 `xmllint`，TP-008 无法运行，本轮**未**重新证明该 proof。
   这是环境缺口而非回归，恢复资格前须在具备 `xmllint` 的环境重跑。
 
-遗留缺口：`test/` 下没有任何 suite 加载 `src/main.lua` 的交互 helper，
+遗留缺口：`test/` 下没有任何 suite 加载 `src/main.lua`，
 因此本次 `cancel_code` 修复没有直接单元测试，仅由完整 suite 证明无回归。
-建立 main.lua 交互回路夹具是 N1 的第一项工作。
+
+但实测澄清了缺口范围：`src/main.lua:9590` 的 `YACA_TEST_ROOT` 守卫使
+main.lua 本就可按普通模块加载，导出含 `run_config_repl` / `run_model_repl`
+/ `run_interactive_chat`。**无需新建加载器**，N1 只需补 terminal/clock/
+stdout/config 端口替身。详见 [实现计划](CONTEXT-REPL-PLAN.md)。

@@ -69,12 +69,26 @@ model setup 的错误码。现已改为显式 `SETUP_INPUT_CANCEL_CODES` 映射�
 未注册标签 fail closed，`Context` → `ContextReplCancelled` 已登记，
 两处调用点均已传播错误。N1 可直接以 `"Context"` 标签复用该 helper。
 
-**仍未解决——测试入口缺口**：`new_model_setup_input`、`run_config_repl`、
-`run_model_repl` 都是 `src/main.lua` 的局部函数，当前**没有任何 suite 加载
-main.lua 的交互 helper**（`test/` 下无 `require("main")`）。
-N1 的第一项工作是建立 main.lua 交互回路的测试夹具
-（伪 terminal/clock/stdout 端口 + 受控 composed），
-否则新回路无法在入口级别取证。该夹具同时是 N2/N3 的前置。
+**测试入口缺口（已实测缩小）**：`src/main.lua:9590` 已有
+`if MODULE_NAME == nil and _G.YACA_TEST_ROOT == nil then os.exit(...)` 守卫，
+即 main.lua **本就可在测试环境按普通模块加载**。实测（设置 `YACA_TEST_ROOT`
+后按现有 `load_module` 模式加载）导出 10 个函数，其中已含
+`run_config_repl`、`run_model_repl`、`run_interactive_chat`、`compose_runtime`。
+因此 `M.run_context_repl` 一旦加入即可被 suite 直接调用，**无需新建加载器**。
+
+仍缺的只是端口替身：`composed`（`config` 服务、`layout.config_path`、
+`backend.new_terminal` / `clock_port.monotonic_now` / `clock_port.sleep_ms` /
+`system.secure_random`）与 `runtime`（`cli.parse_context_repl`、
+`cli.render_help`、`stdout`）。终端替身须满足
+`poll` / `cancel` / `join` / `restore` 事件契约（见 `src/terminal.lua`
+与 `src/main.lua:7817` 起的用法），事件形如
+`{kind="user_action", action="text"|"cancel"|"eof", text=...}` 与
+`{kind="io_terminal"}`。
+N1 的第一项工作是写这组替身，可先用 `run_config_repl` 作参照面校准，
+该夹具同时是 N2/N3 的前置。
+
+注意 `new_model_setup_input` 仍是 main.lua 的局部函数，只能经
+`run_*_repl` 间接覆盖，不要为测试把它导出。
 
 ## 验证
 
