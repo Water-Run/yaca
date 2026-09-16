@@ -93,6 +93,7 @@ Context 管理器提供列表、检查、搜索，以及 `rename <selector> <new
 `--continue <hash>`、管理器 `select` 和聊天 `.context <hash>` 均支持跨工作目录：
 核对两个目录后输入 `CONTINUE <hash>`。取消保留当前状态；确认后 Tools 使用 Context
 记录的目录，不移动 XML，不重放未决工作。目录或文件在确认期间变化会拒绝。
+恢复后新的工具操作仍需按当前权限审批；输入界面本次显示的审批编号，历史同意不复用。
 
 ## 修复无效配置
 

@@ -2324,6 +2324,7 @@ function M.new_context_publication(ports, options)
         values.unfinished_turn_ids = durable_recovery.unfinished_turn_ids
         values.active_queue_item_ids = durable_recovery.active_queue_item_ids
         values.runtime_initial_serials = durable_recovery.runtime_initial_serials
+        values.approval_initial_serial = durable_recovery.approval_initial_serial
         active.receipt = readonly(values, "existing Context publication receipt")
         return active.receipt
     end

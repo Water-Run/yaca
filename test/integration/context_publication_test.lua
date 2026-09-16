@@ -1044,6 +1044,7 @@ return {
                 open_request.action = nil
                 local opened = assert(reopened.open_existing(open_request))
                 A.falsy(opened.auto_continue)
+                A.equal(opened.approval_initial_serial, 1)
                 assert(reopened.close())
             end,
         },

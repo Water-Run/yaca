@@ -555,6 +555,7 @@ local function fixture(settings)
     end
 
     local constructed_agent = {
+        approval_initial_serial = settings.approval_initial_serial,
         loop = loop,
         driver = driver,
         session = session,
@@ -777,6 +778,21 @@ end
 return {
     name = "integration/application-coordinator",
     cases = {
+        {
+            name = "reopened approvals continue above the durable identity waterline",
+            run = function()
+                local lines = input_lines({ "allow approval-8 once", ".quit" })
+                local f = fixture({ initial_agent = true, approval = true,
+                    approval_initial_serial = 7, batches = { {}, lines[1], lines[2] } })
+                assert(f.coordinator:run())
+                local actions = blocks_of_kind(f.blocks, "action")
+                A.equal(actions[1].id, "approval-8")
+                A.equal(actions[2].text, "allowed once")
+                local joined = table.concat(f.log, "|")
+                A.contains(joined, "record-approval:turn-1:tool:1:tighten:approval-8:approve")
+                A.falsy(joined:find("tighten:approval-1:approve", 1, true))
+            end,
+        },
         {
             name = "unresolved reviews explain the available recovery without claiming success",
             run = function()

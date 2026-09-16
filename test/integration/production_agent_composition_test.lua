@@ -1045,6 +1045,7 @@ local function fixture(settings)
             event_count = 29,
             last_sequence = 29,
             view_manifest_snapshot = "sha256:restored-view",
+            approval_initial_serial = 7,
             runtime_initial_serials = {
                 turn = 4, message = 8, request = 6, tool = 3,
                 operation = 2, queue = 5, queue_display = 2, side = 1,
@@ -1287,6 +1288,7 @@ return {
                 A.equal(agent.admission, false)
                 A.equal(agent.loop:status().state, "Idle")
                 A.truthy(agent.capabilities.reopened_existing_context)
+                A.equal(agent.approval_initial_serial, 7)
                 A.falsy(agent.capabilities.published_first_turn)
                 local options = f.runtime_options()
                 A.equal(options.initial_sequence, 29)

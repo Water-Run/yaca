@@ -384,6 +384,11 @@ return {
                     name = "exec",
                     canonicalArguments = "{}",
                 }, "turn-12")
+                for index, id in ipairs({ "approval-42", "imported-approval", "approval-5" }) do
+                    add("approval", { approvalId = id, toolCallId = "turn-12:tool:8",
+                        decision = index == 3 and "approve" or "defer",
+                        snapshotDigest = "sha256:approval" }, "turn-12")
+                end
                 add("operation_intent", {
                     operationId = "turn-12:operation:7",
                     toolCallId = "turn-12:tool:8",
@@ -452,6 +457,7 @@ return {
 
                 local recovered = assert(service.build(candidate))
                 A.truthy(recovered.recovery.auto_continue)
+                A.equal(recovered.recovery.approval_initial_serial, 42)
                 A.deep_equal(recovered.recovery.unfinished_turn_ids, {})
                 A.deep_equal(recovered.recovery.active_queue_item_ids, {})
                 A.deep_equal(recovered.recovery.runtime_initial_serials, {

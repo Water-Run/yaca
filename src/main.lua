@@ -5887,6 +5887,7 @@ function M.start_published_agent(composed, chat, message, source)
             or not valid_integer(receipt.event_count, 0)
             or receipt.last_sequence ~= receipt.event_count
             or type(receipt.runtime_initial_serials) ~= "table"
+            or not valid_integer(receipt.approval_initial_serial, 0)
             or type(receipt.view_manifest_snapshot) ~= "string"
             or receipt.view_manifest_snapshot == ""
         then
@@ -6557,6 +6558,7 @@ function M.start_published_agent(composed, chat, message, source)
         settings = session_settings,
         compaction = compaction_owner,
         draft = chat.draft,
+        approval_initial_serial = continuing and receipt.approval_initial_serial or 0,
         context_status = function()
             local called, result, inspection_error = pcall(composed.publication.inspect_active)
             if not called or not result then
@@ -7208,6 +7210,15 @@ function M.new_application_coordinator(ports, options)
             review_verdict
         )
         if not snapshot then return nil, snapshot_error end
+        local initial_serial = agent.approval_initial_serial
+        if initial_serial == nil then initial_serial = 0 end
+        if not valid_integer(initial_serial, 0) then
+            return nil, failure("ApprovalIdentityInvalid", "the approval identity waterline is invalid")
+        end
+        approval_serial = math.max(approval_serial, initial_serial)
+        if approval_serial == math.maxinteger then
+            return nil, failure("ApprovalIdentityExhausted", "the approval identity range is exhausted")
+        end
         approval_serial = approval_serial + 1
         local action_id = "approval-" .. tostring(approval_serial)
         approval = {

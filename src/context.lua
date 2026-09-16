@@ -924,6 +924,7 @@ local function validate_relations(events)
     local automatic_failure_count = 0
     local automatic_failure_history_complete = true
     local compaction_initial_serial = 0
+    local approval_initial_serial = 0
     local runtime_initial_serials = {
         turn = 0,
         message = 0,
@@ -1194,6 +1195,10 @@ local function validate_relations(events)
             end
             local ok, id_error = unique_id(approvals, fields.approvalId, "approval", path)
             if not ok then return nil, id_error end
+            local serial = tonumber(fields.approvalId:match("^approval%-([1-9][0-9]*)$"))
+            if valid_integer(serial, 1) and serial > approval_initial_serial then
+                approval_initial_serial = serial
+            end
             if fields.operationId and operations[fields.operationId] == nil then
                 -- An approval can bind the operation identity before its intent
                 -- is published. Reserve it without treating it as an intent.
@@ -1499,6 +1504,7 @@ local function validate_relations(events)
         automatic_failure_count = automatic_failure_count,
         automatic_failure_history_complete = automatic_failure_history_complete,
         compaction_initial_serial = compaction_initial_serial,
+        approval_initial_serial = approval_initial_serial,
         unfinished_turn_ids = unfinished_turn_ids,
         active_queue_item_ids = active_queue_item_ids,
         runtime_initial_serials = runtime_initial_serials,
@@ -1823,6 +1829,7 @@ local function normalize_document(candidate, admitted)
         automatic_compaction_failure_history_complete =
             relations.automatic_failure_history_complete,
         compaction_initial_serial = relations.compaction_initial_serial,
+        approval_initial_serial = relations.approval_initial_serial,
         runtime_initial_serials = {
             turn = relations.runtime_initial_serials.turn,
             message = relations.runtime_initial_serials.message,
