@@ -9,8 +9,10 @@ Stage 1 实际文件发布探针、在线 Stage 2/3 的生产组合，以及 M05
 
 在用户指定的 Server 2008 非 R2 x64 上，以真实 DeepSeek 服务继续验收。
 已修复相对工具路径、聚合 SSE 响应的事件上限、action review 的 Permission
-审计值，以及自检提示冲突/主动取消误判。最新交付与实测记录见
-[本轮收尾记录](WINDOWS-PREVIEW-CLOSEOUT-2026-09-16.md)。
+审计值、自检提示冲突/主动取消误判，以及恢复历史后审批编号冲突。N13 从历史
+approvalId 最大编号继续分配，并明确显示未决 review 的恢复方式。最新交付与实测见
+[基本可用验收](BASIC-USABILITY-ACCEPTANCE-2026-09-16.md)；此前 N8--N11 记录保留在
+[本轮早期收尾记录](WINDOWS-PREVIEW-CLOSEOUT-2026-09-16.md)。
 
 首版功能收口与正式发行资格分开记录。C32--C34 的 XP SP3 x86、Win7 SP1 x64、
 CentOS 7 x64 完整资格仍待执行，Release Gate R 保持关闭。
@@ -32,7 +34,7 @@ yaca 当前已有可执行 Lua 入口和平台无关的通用 Agent 核心；代
 - Win32/XP HTTPS 候选闭包已锁定：curl 8.21.0 与 Mbed TLS 3.6.7 的窄下游补丁绑定 archive/patch/基文件 SHA-256；全新 i686 串行复现得到 PE32/Windows 5.01、HTTP/HTTPS、blocking IPv4、CryptoAPI entropy，且最终导入审计无 BCrypt、Vista 同步原语、UCRT 和新 `_s` CRT 符号。该结果明确为 cross-build/static candidate，真实 XP TLS/proxy/CA 仍待 C32。
 - lossless model-view compaction：结构化摘要、atomic groups、Context journal、原子 manifest publication、Runtime receipt/lifecycle gate、公开 `.compact`，以及冻结待发 main/review 请求的自动 threshold preflight、STATUS/cancel/close。
 - existing Context publication core 已能在持有精确 verified target/writer 后重建 plain 或 compacted active ModelView；新格式 pending request/response/cancel/rejection bracket 会先落唯一 cancel pending/unknown 与绑定 terminal error，旧格式 pending 只落保守 unknown、不伪造新式终态，旧 active view 始终保留。compaction serial、连续 automatic failure streak 与不完整旧历史也会从 XML 恢复；自动 compaction 的进程恢复 unknown 计入失败 streak，跨进程 monotonic 时间不可继承时重新开启完整 cooldown。
-- 公开 `--continue` 已接到 existing Context core：selector 必须精确解析并在加 writer 前后复核，跨 workspace 须显式确认，确认绑定 Context 文件及两个 workspace 身份；打开后先执行保守恢复门禁、整份配置重载与 self-test，再以 Idle Agent 恢复 event/config/ModelView 及八类 serial 水位，绝不自动重放未完成工作。公开入口已接通该 typed confirmation；存在 unfinished turn、active queue item、未决 operation/tool、unknown terminal outcome 或 pending compaction 时拒绝自动继续并释放 writer。
+- 公开 `--continue` 已接到 existing Context core：selector 必须精确解析并在加 writer 前后复核，跨 workspace 须显式确认，确认绑定 Context 文件及两个 workspace 身份；打开后先执行保守恢复门禁、整份配置重载与 self-test，再以 Idle Agent 恢复 event/config/ModelView 及八类 Runtime serial 与独立审批编号水位，绝不自动重放未完成工作。公开入口已接通该 typed confirmation；存在 unfinished turn、active queue item、未决 operation/tool、unknown terminal outcome 或 pending compaction 时拒绝自动继续并释放 writer。
 - chat `.context` 已复用同一 reopen core：无参数只投影最多 32 行的 bounded recent Catalog；有 selector 时先只读解析并复核目标、冻结其精确 hash/逻辑路径，只有当前 Agent 为 Idle/WaitingUser 且 queue/side/approval/compaction 全部安全时才关闭旧 owner，随后只按该 hash 在全新 composition 中再次解析/复核并打开。关闭后的 target/config/lock 竞态会作为 fatal switch failure 恢复终端并退出，绝不按短名称改开替代对象；未保存 chat 切换不会发布空 Context。
 - chat `.details` 已接到 ApplicationCoordinator：每次交互错误分配当前进程内单调 `error-N`，只保留最多 64 条经控制字节清理且分别限长的 code/message/suggestion/next-action；无参数读取最新项，显式 ID 精确读取，过期 ID 返回 typed `NotFound`，不保存 raw exception、Tool body 或 transport payload。
 - chat `.cautious status|on|off|toggle|reset` 已接到唯一 Session owner：首条消息前只更新有界内存草稿；保存后先用完整 Context overrides 重载一个 Agent-ready ConfigGeneration，再由单一 Context writer 在同一 XML generation 追加不含明文值的 `session_override` 与匹配 `model_view_published`，最后由 AgentLoop 精确采纳双事件回执。当前 turn 的 Model/Permission/Prompt/DoubleCheck snapshot 不热换，新值只从下一 turn 生效；plain 与 compacted active ModelView 都保持原 publication/compaction identity 链，回执失配会 fail-stop。
@@ -40,7 +42,7 @@ yaca 当前已有可执行 Lua 入口和平台无关的通用 Agent 核心；代
 - chat `.model` 已接到 draft/production 双 owner：无参数最多投影 64 个 enabled/native-tool 候选的普通文本行，精确 selector 不依赖 ANSI、补全或新式终端。预检保守按 `1 byte <= 1 token` 绑定当前 config、Context generation/sequence、活动 ModelView、四层 Prompt、tool/control schema、输出与 transition reserve；目标放不下时在任何配置/XML 变更前返回 `ModelIncompatible`，不缩水历史、Prompt 或工具。endpoint route、credential slot/policy、Protocol、RemoteModel/usage、Model Prompt、adapter/streaming 或能力边界变化进入默认 deny 的 `model-change-N` 确认；只显示 origin/path、`?configured` 和非秘密 credential identity。确认绑定的 waterline/manifest/Prompt 环境/目标定义任一变化即 stale；保存态经完整配置重载、目标定义复核、Context `session_override + model_view_published` 原子提交和 Runtime receipt adoption 后只在下一 turn 生效，active turn 不热换，也不建立失败 fallback Model。
 - 最小发行 allowlist、component/license manifest、SPDX SBOM、package planner、资源 overlay 和资源门禁测试 Harness。
 - 运行时 curl config 已逐请求用锁定 CLI 可解析的 standalone/no-option 语法显式固定 HTTP/1.1、TLS 1.2+、服务端/HTTPS 代理随包 CA 校验；代理 TLS 下限由 `proxy-tlsv1` 与只启用 TLS 1.2/1.3 的锁定 Mbed TLS 后端共同闭合。代理/主机 DNS 和普通握手只在无 canonical event 时有界重试，证书/CA/CRL/issuer/pin/status 错误立即终止。真实目标 TLS/代理资格仍待 C32。
-- 受 `.tools/run_with_resource_guard.sh` 保护的完整平台无关 Lua suite 当前为 `573/573`；最新验证记录见本轮收尾记录。这不是三目标资格证明。
+- 受 `.tools/run_with_resource_guard.sh` 保护的完整平台无关 Lua suite 当前为 `575/575`；最新验证记录见基本可用验收。这不是三目标资格证明。
 
 仍缺失或不得宣称完成：
 
@@ -115,7 +117,7 @@ yaca 当前已有可执行 Lua 入口和平台无关的通用 Agent 核心；代
 - native profile 已覆盖 x86/x86_64，Windows 生成代码对 x86/x86_64 固定 `_WIN32_WINNT=0x0501`，PE subsystem 分别为 5.01/5.02。
 - 1.3.0 已加入 i686/x86_64 MinGW 生成源码与 XP import/subsystem 静态检查、Windows XP onefile watchdog 后备及 Linux native x86 CI。
 
-此前记录的“Windows profile guard 拒绝 x86 / recipe 仅 x64”已被 1.3.0 的实现与测试取代，不能继续作为当前阻塞原因。现存缺口是 **yaca-specific qualification**：尚未用 yaca 的 Lua 5.5 入口、XML 模块、curl/CA 与最终最小依赖闭包生成 Win32/Win64 候选，也没有 XP--11、Win7--11 的完整目标机证据。luainstaller 自身把真实 XP 列为 supplemental evidence，而 yaca 的 D-007/D-056 仍把 XP 完整测试设为硬门；因此 AR-P0-16 已达到 `qualification-bound` 计划状态，但 Gate R 未通过。
+此前记录的“Windows profile guard 拒绝 x86 / recipe 仅 x64”已被 1.3.0 的实现与测试取代，不能继续作为当前阻塞原因。现存缺口是 **yaca-specific qualification**：Win32 x86 候选已包含 yaca 的 Lua 5.5 入口、XML 模块、curl/CA 与最小依赖闭包，并在指定 Server 2008 上完成基本可用旅程；Win64 候选及 XP--11、Win7--11 的完整目标机资格仍待完成。luainstaller 自身把真实 XP 列为 supplemental evidence，而 yaca 的 D-007/D-056 仍把 XP 完整测试设为硬门；因此 AR-P0-16 已达到 `qualification-bound` 计划状态，但 Gate R 未通过。
 
 ## XML 库候选现状
 

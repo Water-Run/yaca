@@ -17,7 +17,7 @@ v0.1 计划只发布三个彼此独立构建、独立验收的便携 zip：
 
 每个包嵌入 Lua 5.5，不依赖系统 Lua。Windows zip 根包含 `yaca.exe`、`Install.cmd`、`README.txt`、`LICENSE`、`docs/`；Linux 对应使用 `yaca` 与 `Install.sh`。薄安装脚本只可把解压目录加入 `PATH`，不复制程序，也不建立安装数据库。
 
-长期数据根始终是实际 executable 相邻的 `__yaca__`，不随调用者 cwd 漂移。v0.1 没有内建更新器，也不承诺代码签名。现已提供 win32-x86 交叉构建预览包用于初步部署，见 [Windows 首次使用](release/WINDOWS-QUICKSTART.md)。Server 2008 / DeepSeek 的真实旅程见 [最新预览记录](.develope-docs/WINDOWS-PREVIEW-CLOSEOUT-2026-09-16.md)；XP/Win7/CentOS 全套资格及正式发行仍待完成。
+长期数据根始终是实际 executable 相邻的 `__yaca__`，不随调用者 cwd 漂移。v0.1 没有内建更新器，也不承诺代码签名。现已提供 win32-x86 交叉构建预览包用于初步部署，见 [Windows 首次使用](release/WINDOWS-QUICKSTART.md)。Server 2008 / DeepSeek 的真实旅程见 [最新预览记录](.develope-docs/BASIC-USABILITY-ACCEPTANCE-2026-09-16.md)；XP/Win7/CentOS 全套资格及正式发行仍待完成。
 
 ## 产品形态
 

@@ -9,8 +9,10 @@ Stage 1 实际文件发布探针、在线 Stage 2/3 的生产组合，以及 M05
 
 在用户指定的 Server 2008 非 R2 x64 上，以真实 DeepSeek 服务继续验收。
 已修复相对工具路径、聚合 SSE 响应的事件上限、action review 的 Permission
-审计值，以及自检提示冲突/主动取消误判。最新交付与实测记录见
-[本轮收尾记录](WINDOWS-PREVIEW-CLOSEOUT-2026-09-16.md)。
+审计值、自检提示冲突/主动取消误判，以及恢复历史后审批编号冲突。N13 从历史
+approvalId 最大编号继续分配，并明确显示未决 review 的恢复方式。最新交付与实测见
+[基本可用验收](BASIC-USABILITY-ACCEPTANCE-2026-09-16.md)；此前 N8--N11 记录保留在
+[本轮早期收尾记录](WINDOWS-PREVIEW-CLOSEOUT-2026-09-16.md)。
 
 首版功能收口与正式发行资格分开记录。C32--C34 的 XP SP3 x86、Win7 SP1 x64、
 CentOS 7 x64 完整资格仍待执行，Release Gate R 保持关闭。

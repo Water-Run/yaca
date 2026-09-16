@@ -1,5 +1,8 @@
 # Windows 首个可用预览收尾（2026-09-16）
 
+本页保留 N8--N11 阶段证据。后续恢复工具审批的故障修复、N13 最终交付与完整代码
+修复旅程见[基本可用验收](BASIC-USABILITY-ACCEPTANCE-2026-09-16.md)。
+
 本轮接续 ZCode 的 `9284f2f` 在线自检实现，完成剩余功能收口，并在用户指定的
 `Administrator@192.168.5.10` 真实 Windows Server 2008 非 R2 x64 上验证。
 现场 `ver` 为 **6.0.6003**；使用 `ssh -tt` 外加真实本地 PTY 与 `winpty cmd`。
@@ -27,7 +30,7 @@
 
 ## 自动验证
 
-最终平台无关 Lua suite **573/573**；design-contract/proof-evidence/coding-readiness
+N11 阶段平台无关 Lua suite **573/573**；design-contract/proof-evidence/coding-readiness
 分别 **7612/56/553** 条断言通过。TP-003/006/008/010 与 RP-001 全部通过。
 所有重型验证串行执行，先查看内存/pressure/遗留进程，再使用资源 guard。
 源码缓存逐次 SHA-256 校验；Windows 构建串行且要求至少 5 GiB 可用内存。
@@ -61,7 +64,7 @@ N10 Context hash 为 `8DD524C1DA0F1422`。最终 XML 有 65 个连续 Event、
 没有伪装成 UTF-8。N10 zip SHA-256 为
 `02136a909cbd782c16eff935275afbb1678da031454c8464926f5dc1c0dd5584`。
 
-## 最终 N11 交付
+## N11 阶段交付
 
 N11 从干净源码提交 `59ed5735efdd31196f6607251d377d3a86bebe48` 构建；build log 的
 `source-changes.patch` 为空。最终记录提交仅追加验收证据，不改变该可执行文件。

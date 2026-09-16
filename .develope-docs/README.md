@@ -22,6 +22,7 @@
 ## 文件索引
 
 - `TRACKING.md`：阶段、子系统状态和下一步。
+- [2026-09-16 基本可用验收](BASIC-USABILITY-ACCEPTANCE-2026-09-16.md)：N13 交付、575 项测试及真实代码修复与两次恢复审批。
 - [2026-09-16 Windows 收尾记录](WINDOWS-PREVIEW-CLOSEOUT-2026-09-16.md)：N11 包、源码哈希和 Server 2008 / DeepSeek 真实验收。
 - `HANDOFF-AUTO-2026-08-10.md`：2026-08-10 离线自动规格硬化交接笔记（D-070）。
 - `DECISIONS.md` D-071：2026-08-29 编码就绪收尾、modern proof 与核心节点推送 `main` 的现行授权。
