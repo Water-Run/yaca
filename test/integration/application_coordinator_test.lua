@@ -461,7 +461,7 @@ local function fixture(settings)
                 events = {
                     {
                         kind = "model-event",
-                        event = { kind = "text_delta", text = "implemented" },
+                        event = settings.model_control or { kind = "text_delta", text = "implemented" },
                     },
                     {
                         kind = "model-event",
@@ -777,6 +777,22 @@ end
 return {
     name = "integration/application-coordinator",
     cases = {
+        {
+            name = "finish summaries and refusal reasons remain visible assistant content",
+            run = function()
+                for _, control in ipairs({
+                    { kind = "control", control = "finish", payload = { summary = "verified file contents" } },
+                    { kind = "control", control = "refuse", payload = { reason = "requested capability denied" } },
+                }) do
+                    local f = fixture({ initial_agent = true, model_control = control,
+                        batches = { {}, input_lines({ ".quit" })[1] } })
+                    assert(f.coordinator:run())
+                    local assistant = blocks_of_kind(f.blocks, "assistant")
+                    A.equal(#assistant, 1)
+                    A.equal(assistant[1].text, control.payload.summary or control.payload.reason)
+                end
+            end,
+        },
         {
             name = "Prompt edit publication failure retains its draft for explicit retry",
             run = function()

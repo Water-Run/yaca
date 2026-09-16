@@ -279,6 +279,24 @@ return {
     name = "integration/self-test-online-request",
     cases = {
         {
+            name = "advisory reviews cannot report malformed or incomplete JSON as no issue",
+            run = function()
+                local main = load_module("main", cache)
+                local observation = { events = {}, online_requests = 1,
+                    response = { canonical_body = '{"issues":[]}',
+                        normalized = { finish_class = "stop" } } }
+                A.equal(main.evaluate_self_test_advisory(observation).outcome, "passed")
+                for _, body in ipairs({ '{"issues":{}}', '{"issues":[true]}',
+                    '{"issues":[],"extra":true}', '{"issues":["a","b","c","d"]}' }) do
+                    observation.response.canonical_body = body
+                    A.equal(main.evaluate_self_test_advisory(observation).outcome, "warning")
+                end
+                observation.response.canonical_body = '{"issues":[]}'
+                observation.response.normalized.incomplete = true
+                A.equal(main.evaluate_self_test_advisory(observation).outcome, "warning")
+            end,
+        },
+        {
             name = "control probe accepts only the exact complete validated inert call",
             run = function()
                 local main = load_module("main", cache)

@@ -1,25 +1,21 @@
 # 开发追踪
 
-更新日期：2026-09-14
+更新日期：2026-09-16
 
-用户已要求快速收尾并推送；本轮冻结为 N7 预览检查点。构建与本地归档校验完成，
-旧机上传成功，但随后 SSH 转发握手超时，最终包现场验收未完成。
-产物哈希、源码提交与后续清单见 [收尾记录](WINDOWS-PREVIEW-CLOSEOUT-2026-09-14.md)。
+本轮接续 ZCode 的 N8 在线自检实现，完成 Model 管理器显式联网测试、
+Stage 1 实际文件发布探针、在线 Stage 2/3 的生产组合，以及 M05-57
+资源 selector 语义复核。配置/映射/`.model` 统一使用完整 logical name，
+只折叠 ASCII 大小写，保留原始 UTF-8 拼写和 Model/Permission 独立命名空间。
 
-Windows 首版已完成 N1--N4 Context 管理、N5 无效 INI 修复、N6 离线 Model 管理；
-**N7 已针对真正的 Server 2008 修复原生控制台读取失败**。
-通过用户新增的 `192.168.10.57:26022 → fx6100` 跳板确认目标为 Server 2008 SP2
-Enterprise without Hyper-V、非 R2、x64、6.0.6002。N6 可启动但首次输入报
-TerminalPollFailure；原生探针确认大 ReadConsoleW 请求返回错误 8。
-N7 将单次读取分段，保留原有应用输入上限及严格 UTF-8 转换。旧服务器已通过
-中文首次设置、隐藏 Key、配置/Model 保存及原生文件发布/XML 检查。
-完整 suite **556/556**，validators **7612/56/553** 与全部 coding-readiness proofs PASS；
-另有 Windows 原生 reader 的分段/Unicode/失败检查。见 [N7 检查点](SERVER2008-CONSOLE-2026-09-14.md)。
+在用户指定的 Server 2008 非 R2 x64 上，以真实 DeepSeek 服务继续验收。
+已修复相对工具路径、聚合 SSE 响应的事件上限、action review 的 Permission
+审计值，以及自检提示冲突/主动取消误判。最新交付与实测记录见
+[本轮收尾记录](WINDOWS-PREVIEW-CLOSEOUT-2026-09-16.md)。
 
-首版整体仍未完成：Model 联网测试与在线 Stage 2/3 adapter、资源 selector 语义复核、
-C32--C34 完整目标资格仍待完成。Server 2008 的当前 smoke 不替代 XP SP3、Win7+
-和 CentOS 7 的目标 hard gate。Permission 按 M05-48 已选 B 编辑现有字段，生命周期
-通过手工 INI。Release Gate R 保持关闭；Windows 程序仅在用户指定远端运行。
+首版功能收口与正式发行资格分开记录。C32--C34 的 XP SP3 x86、Win7 SP1 x64、
+CentOS 7 x64 完整资格仍待执行，Release Gate R 保持关闭。
+Permission 按 M05-48 已选 B 编辑现有字段，生命周期通过手工 INI。
+Windows 程序只在用户指定远端运行。
 
 ## 当前阶段
 
@@ -40,11 +36,11 @@ C01--C31 已有核心实现、测试 harness、最小发行规划和现代 Linux
 | M0 / C01 | 测试发现与隔离、loader allowlist、release manifest | 最终 zip 零表面检查 |
 | M1 / C02--C04 | 平台 identity、event pump、native ports；现代 Linux 探针与 Windows 交叉编译 | 真实旧 Windows / CentOS wait、console、process 资格 |
 | M2 / C05--C09 | UTF-8、JSON、INI、XML、路径/hash 核心与测试 | 三目标 native XML ABI 和资源校准 |
-| M3--M4 / C10--C14 | immutable config、bootstrap、action/CLI、兼容 TUI/editor | 未接通 controller 及真实旧终端 transcript |
+| M3--M4 / C10--C14 | immutable config、bootstrap、action/CLI、兼容 TUI/editor | 三目标完整旧终端资格 |
 | M5 / C15--C18 | 单 XML、索引、writer/lock、publication/recovery、管理事务核心 | 目标文件系统 replace/lock/崩溃矩阵；previous 修复及跨 workspace 确认已接通 |
 | M6 / C19--C22 | curl/SSE/retry/cancel、双 Model 协议、Prompt/control；XP HTTPS 静态候选 | 真实目标 TLS/CA/代理、provider wire 和取消证据 |
 | M7--M8 / C23--C28 | 8 Tools、Permission、operation、AgentLoop、queue/side/review、手工/自动 compaction | 目标进程树/路径/资源上限验证 |
-| M9 / C29--C30 | typed diagnostics、self-test 调度/Stage 1、`.details` | Stage 2/3 production adapter、controller 与目标端到端验证 |
+| M9 / C29--C30 | typed diagnostics、self-test 调度/Stage 1、`.details` | 已接通 Stage 2/3；三目标完整端到端资格待执行 |
 | M10 / C31 | 最小包 allowlist、依赖锁/license/SBOM、资源 overlay、候选构建脚本 | C32--C34 |
 | C32 | 三目标资格计划与部分候选工具 | XP SP3 x86、Win7 SP1 x64、CentOS 7 x64 真实构建/运行/完整测试 |
 | C33 | 发行旅程与零表面契约 | 三个最终 zip 的干净机安装、配置、新建/恢复、退出、升级、卸载 |
@@ -56,10 +52,9 @@ C01--C31 已有核心实现、测试 harness、最小发行规划和现代 Linux
 显式 rebind、管理器 export/select 和三个续接入口的跨 workspace 确认均已接通。
 
 `config-repl` 已接通有效 INI 的 catalog 字段编辑、预览、精确版本保存和重载；
-缺文件时仍提供修复模板；无效源的交互修复已接通。N6 离线 Model 管理已接通；Model 联网测试
-仍待实现；`context-repl` 的 12 项投影已由 N1/N2/N3/N4 全部接通。
-在线 self-test Stage 2/3 的 production adapter 仍返回 failed 占位结果。
-这些属于实现待办，不能归入“仅差目标资格”。
+缺文件时仍提供修复模板；无效源的交互修复已接通。Model 管理器包含离线编辑与
+需单独确认的 `test <row-id>` 联网测试；`context-repl` 的 12 项投影均已接通。
+在线 self-test Stage 2/3 已使用真实生产 Model adapter，Stage 3 仅报告建议。
 
 ## 本轮推进（2026-09-07）
 
@@ -128,8 +123,7 @@ composition、外部替换/reload、保存失败重试和未知持久性停止�
 
 ## 下一步顺序
 
-1. 补齐 Model 联网测试、资源 selector 语义复核与
-   在线 self-test Stage 2/3 的真实 adapter，保留逐次联网同意和零副作用检查。
+1. 保持已闭合的 Model 联网测试、资源 selector 和 Stage 2/3 回归；继续积累真实目标证据。
 2. 在真实目标验收已接通的 rebind/import/repair 与跨 workspace 继续，保留精确目标/目录/writer 复核。
 3. 在真实目标环境执行 C32；只有完整目标证据通过后才推进 C33/C34 和 Gate R。
 4. Web 继续只维护预留文档，核心 v0.1 不增加 Web 实现。

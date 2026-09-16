@@ -9,6 +9,9 @@ Server 2008 SP2 非 R2 x64 修复大缓冲 cooked 读取失败，suite **556/556
 包目录为 `out/windows-preview-20260914-n7`；见
 [N7 检查点](SERVER2008-CONSOLE-2026-09-14.md)。下文记录初始预览的验证范围。
 
+最新收尾与真实 Server 2008 / DeepSeek 验收见
+[2026-09-16 记录](WINDOWS-PREVIEW-CLOSEOUT-2026-09-16.md)。下方“尚未验收”仅记录初始版本。
+
 ## 交付与复现
 
 - 构建入口：`.tools/qualification/build_windows_candidate.sh`，使用

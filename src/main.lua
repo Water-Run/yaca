@@ -4761,7 +4761,7 @@ local function self_test_semantic_observation(check_id, snapshot)
         .. "\n</projection>"
 end
 
-local function advisory_review_result(observation)
+function M.evaluate_self_test_advisory(observation)
     local facts = classify_self_test_observation(observation)
     if not observation.response then
         return online_check_result(
@@ -4800,11 +4800,17 @@ local function advisory_review_result(observation)
         maximum_number_bytes = 32,
     })
     local document = codec and codec.parse(facts.canonical_body)
-    local issues = type(document) == "table"
-        and type(document.issues) == "table"
-        and #document.issues >= 0
-        and document.issues
-        or nil
+    local issues = json.kind(document) == "object"
+        and json.kind(document.issues) == "array" and document.issues or nil
+    if issues then
+        if facts.incomplete or #issues > 3 then issues = nil end
+        for key in pairs(document) do
+            if key ~= "issues" then issues = nil end
+        end
+        for _, issue in ipairs(document.issues) do
+            if type(issue) ~= "string" or issue == "" then issues = nil end
+        end
+    end
     if not issues then
         return online_check_result(
             "warning",
@@ -4890,7 +4896,7 @@ local function build_online_advisory_self_test(composed)
                 0
             )
         end
-        local evaluated, evaluated_result = pcall(advisory_review_result, observation)
+        local evaluated, evaluated_result = pcall(M.evaluate_self_test_advisory, observation)
         if not evaluated or type(evaluated_result) ~= "table" then
             return online_check_result(
                 "warning",
@@ -7011,6 +7017,15 @@ function M.new_application_coordinator(ports, options)
         if event.kind == "control" then
             local flushed, flush_error = flush_assistant()
             if not flushed then return nil, flush_error end
+            local payload = type(event.payload) == "table" and event.payload or {}
+            local statement = event.control == "finish" and payload.summary
+                or event.control == "refuse" and payload.reason
+            if type(statement) == "string" and statement ~= "" then
+                local appended, append_error = append_assistant(statement)
+                if not appended then return nil, append_error end
+                flushed, flush_error = flush_assistant()
+                if not flushed then return nil, flush_error end
+            end
             return publish_status("Model control: " .. tostring(event.control))
         end
         if event.kind == "protocol_error" or event.kind == "transport_error" then

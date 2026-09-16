@@ -1,6 +1,6 @@
 # yaca v0.1 全程序实施计划
 
-版本：2026-09-08.1
+版本：2026-09-16.1
 状态：**计划已确认 / Gate B passed / 平台无关核心已实现至 M9 / controller 收口和资格验证待完成**
 当前主线：**收口现有 controller 与构建证据，再执行 C32--C34**
 
@@ -22,8 +22,9 @@ export/select 与跨 workspace 继续确认，见 [N4 检查点](CONTEXT-CONTINU
 N5 已接通无效源的私有行修复与完整配置事务，见 [N5 检查点](CONFIG-REPAIR-2026-09-14.md)。
 N6 已接通离线 Model 区域管理、引用预览和精确保存，见
 [N6 检查点](MODEL-MANAGEMENT-2026-09-14.md)。Permission 按已选 M05-48 B 编辑现有字段，
-不扩展生命周期操作。随后仍需 Model 联网测试、资源 selector 语义复核、
-在线 self-test Stage 2/3 adapter，以及真实三目标资格。
+不扩展生命周期操作。2026-09-16 已完成 Model 联网测试、资源 selector 语义复核
+和在线 self-test Stage 2/3 生产组合；真实三目标完整资格仍待执行，见
+[本轮收尾记录](WINDOWS-PREVIEW-CLOSEOUT-2026-09-16.md)。
 N7 已在用户新提供的 Server 2008 SP2 非 R2 环境定位并修复 ReadConsoleW 大请求失败，
 中文首次配置、隐藏输入与配置事务的源码实测通过，见
 [N7 检查点](SERVER2008-CONSOLE-2026-09-14.md)。

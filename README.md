@@ -6,7 +6,7 @@ yaca is the design for a simple, single-agent, terminal-only general Agent,
 licensed under GPL v3. Software development is a first-class common workload,
 not its exclusive purpose.
 
-> **Project status (2026-09-16): platform-independent core implemented through M9; controller closure and target qualification pending.** No target archive has qualified for release. The sections below distinguish connected behavior from parser-only command grammar. Target-specific behavior remains unqualified until it passes independently on Win32 x86, Win64 x86_64, and Linux x86_64. Gate A/B remain passed and Release Gate R remains closed.
+> **Project status (2026-09-16): Windows usable preview verified on Server 2008 with a real provider; formal target qualification pending.** No target archive has qualified for release. The sections below distinguish connected behavior from parser-only command grammar. Target-specific behavior remains unqualified until it passes independently on Win32 x86, Win64 x86_64, and Linux x86_64. Gate A/B remain passed and Release Gate R remains closed.
 
 ## Supported release targets
 
@@ -18,7 +18,7 @@ v0.1 is planned as exactly three independently built and qualified portable arch
 
 Each archive embeds Lua 5.5 and does not depend on a system Lua installation. Windows archives contain `yaca.exe`, `Install.cmd`, `README.txt`, `LICENSE`, and `docs/`; Linux uses `yaca` and `Install.sh` with the same outer shape. The thin install helper may add the extracted directory to `PATH`; it does not copy the program or create an install database.
 
-The durable data root is always `__yaca__` next to the actual executable, regardless of the caller's current directory. v0.1 has no built-in updater or code-signing promise. A cross-built win32-x86 preview is now available for preliminary deployment; see the [Windows quickstart](release/WINDOWS-QUICKSTART.md). Real XP / Server 2008 qualification and the formal release remain pending.
+The durable data root is always `__yaca__` next to the actual executable, regardless of the caller's current directory. v0.1 has no built-in updater or code-signing promise. A cross-built win32-x86 preview is now available for preliminary deployment; see the [Windows quickstart](release/WINDOWS-QUICKSTART.md). The real Server 2008 / DeepSeek journey is recorded in the [latest preview report](.develope-docs/WINDOWS-PREVIEW-CLOSEOUT-2026-09-16.md). Full XP/Win7/CentOS qualification and the formal release remain pending.
 
 ## Product shape
 

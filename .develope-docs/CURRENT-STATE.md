@@ -1,25 +1,21 @@
 # 当前状态分析
 
-更新日期：2026-09-14
+更新日期：2026-09-16
 
-用户已要求快速收尾并推送；本轮冻结为 N7 预览检查点。构建与本地归档校验完成，
-旧机上传成功，但随后 SSH 转发握手超时，最终包现场验收未完成。
-产物哈希、源码提交与后续清单见 [收尾记录](WINDOWS-PREVIEW-CLOSEOUT-2026-09-14.md)。
+本轮接续 ZCode 的 N8 在线自检实现，完成 Model 管理器显式联网测试、
+Stage 1 实际文件发布探针、在线 Stage 2/3 的生产组合，以及 M05-57
+资源 selector 语义复核。配置/映射/`.model` 统一使用完整 logical name，
+只折叠 ASCII 大小写，保留原始 UTF-8 拼写和 Model/Permission 独立命名空间。
 
-Windows 首版已完成 N1--N4 Context 管理、N5 无效 INI 修复、N6 离线 Model 管理；
-**N7 已针对真正的 Server 2008 修复原生控制台读取失败**。
-通过用户新增的 `192.168.10.57:26022 → fx6100` 跳板确认目标为 Server 2008 SP2
-Enterprise without Hyper-V、非 R2、x64、6.0.6002。N6 可启动但首次输入报
-TerminalPollFailure；原生探针确认大 ReadConsoleW 请求返回错误 8。
-N7 将单次读取分段，保留原有应用输入上限及严格 UTF-8 转换。旧服务器已通过
-中文首次设置、隐藏 Key、配置/Model 保存及原生文件发布/XML 检查。
-完整 suite **556/556**，validators **7612/56/553** 与全部 coding-readiness proofs PASS；
-另有 Windows 原生 reader 的分段/Unicode/失败检查。见 [N7 检查点](SERVER2008-CONSOLE-2026-09-14.md)。
+在用户指定的 Server 2008 非 R2 x64 上，以真实 DeepSeek 服务继续验收。
+已修复相对工具路径、聚合 SSE 响应的事件上限、action review 的 Permission
+审计值，以及自检提示冲突/主动取消误判。最新交付与实测记录见
+[本轮收尾记录](WINDOWS-PREVIEW-CLOSEOUT-2026-09-16.md)。
 
-首版整体仍未完成：Model 联网测试与在线 Stage 2/3 adapter、资源 selector 语义复核、
-C32--C34 完整目标资格仍待完成。Server 2008 的当前 smoke 不替代 XP SP3、Win7+
-和 CentOS 7 的目标 hard gate。Permission 按 M05-48 已选 B 编辑现有字段，生命周期
-通过手工 INI。Release Gate R 保持关闭；Windows 程序仅在用户指定远端运行。
+首版功能收口与正式发行资格分开记录。C32--C34 的 XP SP3 x86、Win7 SP1 x64、
+CentOS 7 x64 完整资格仍待执行，Release Gate R 保持关闭。
+Permission 按 M05-48 已选 B 编辑现有字段，生命周期通过手工 INI。
+Windows 程序只在用户指定远端运行。
 
 ## yaca 仓库
 
@@ -44,12 +40,12 @@ yaca 当前已有可执行 Lua 入口和平台无关的通用 Agent 核心；代
 - chat `.model` 已接到 draft/production 双 owner：无参数最多投影 64 个 enabled/native-tool 候选的普通文本行，精确 selector 不依赖 ANSI、补全或新式终端。预检保守按 `1 byte <= 1 token` 绑定当前 config、Context generation/sequence、活动 ModelView、四层 Prompt、tool/control schema、输出与 transition reserve；目标放不下时在任何配置/XML 变更前返回 `ModelIncompatible`，不缩水历史、Prompt 或工具。endpoint route、credential slot/policy、Protocol、RemoteModel/usage、Model Prompt、adapter/streaming 或能力边界变化进入默认 deny 的 `model-change-N` 确认；只显示 origin/path、`?configured` 和非秘密 credential identity。确认绑定的 waterline/manifest/Prompt 环境/目标定义任一变化即 stale；保存态经完整配置重载、目标定义复核、Context `session_override + model_view_published` 原子提交和 Runtime receipt adoption 后只在下一 turn 生效，active turn 不热换，也不建立失败 fallback Model。
 - 最小发行 allowlist、component/license manifest、SPDX SBOM、package planner、资源 overlay 和资源门禁测试 Harness。
 - 运行时 curl config 已逐请求用锁定 CLI 可解析的 standalone/no-option 语法显式固定 HTTP/1.1、TLS 1.2+、服务端/HTTPS 代理随包 CA 校验；代理 TLS 下限由 `proxy-tlsv1` 与只启用 TLS 1.2/1.3 的锁定 Mbed TLS 后端共同闭合。代理/主机 DNS 和普通握手只在无 canonical event 时有界重试，证书/CA/CRL/issuer/pin/status 错误立即终止。真实目标 TLS/代理资格仍待 C32。
-- 受 `.tools/run_with_resource_guard.sh` 保护的完整平台无关 Lua suite 当前为 `520/520`；本轮验证记录见下节。这不是三目标资格证明。
+- 受 `.tools/run_with_resource_guard.sh` 保护的完整平台无关 Lua suite 当前为 `573/573`；最新验证记录见本轮收尾记录。这不是三目标资格证明。
 
 仍缺失或不得宣称完成：
 
 - `--continue`、管理器 select 与聊天 `.context` 的跨 workspace 确认已接通，显式 rebind 已接通；三目标 token/资源阈值仍待校准。
-- 在线 self-test Stage 2/3 production adapter 仍返回 failed 占位结果；有效配置的 `config-repl` 字段编辑与无效源的交互修复已接通，离线 Model 管理已接通，Model 联网测试仍待接通，`context-repl` 已接通 N1/N2、N3 rebind/import/repair 和 N4 export/select/跨 workspace 确认。这些是实现缺口，不能只归入目标资格待办。
+- 在线 self-test Stage 2/3、Model 管理器显式联网测试和各管理 controller 已接通；Server 2008 的真实服务商验收见最新收尾记录，三目标完整资格仍待执行。
 - 旧环境网络/HTTPS 的源码锁、XP compatibility patch、静态 import/CRT 黑名单和最小协议闭包已有可重复候选证据；仍须在真实 XP/Win7/CentOS 7 证明 TLS/CA、显式代理、redirect/retry/cancel、旧 CMD 路径与错误分类，不能据此开放 Release Gate R。
 - C32 的三个真实 target qualification、C33 的干净机发布旅程/零表面、C34 的最终 SHA-256/license/SBOM/build/test evidence 尚未执行。
 - README 中任何能力声明仍必须受实现和 target evidence 约束；现代 Linux fake/native 边界通过不能外推为 XP、Win7 或 CentOS 7 支持。
