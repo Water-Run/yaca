@@ -19,7 +19,7 @@ Windows 程序只在用户指定远端运行。
 
 ## 当前阶段
 
-**平台无关核心已实现至 M9，正在收口 controller 与发布准备。**
+**平台无关核心与首版 controller 已闭合，Windows 可用预览已验收；正式目标资格待完成。**
 C01--C31 已有核心实现、测试 harness、最小发行规划和现代 Linux 候选证据；
 这不表示全部目标相关 hard gate 已完成。机读阶段维持
 `implemented-unqualified`，Gate A/B 已通过，Release Gate R 关闭。

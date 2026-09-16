@@ -7,7 +7,7 @@
 - 本目录是项目正式的设计与开发追踪资料，纳入 Git 版本控制。
 - 设计资料直接在 `main` 分支维护并按完整批次提交；D-071 已授权本轮核心节点推送 `main`。
 - 这里可以持续修订；项目源码和公开用户文档只有在相关设计确认后才修改。
-- Gate A/B 已在 2026-08-29 通过；当前核心已实现至 M9，主线是 controller 收口与 C32--C34。未完成的 target qualification 继续阻止 Gate R/发布，现代机 proof 不能替代目标证据。
+- Gate A/B 已在 2026-08-29 通过；首版核心/controller 已闭合，Server 2008 与真实服务商已验收，主线进入 C32--C34。未完成的 target qualification 继续阻止 Gate R/发布，现代机 proof 不能替代目标证据。
 
 ## 工作方式
 
@@ -22,6 +22,7 @@
 ## 文件索引
 
 - `TRACKING.md`：阶段、子系统状态和下一步。
+- [2026-09-16 Windows 收尾记录](WINDOWS-PREVIEW-CLOSEOUT-2026-09-16.md)：N11 包、源码哈希和 Server 2008 / DeepSeek 真实验收。
 - `HANDOFF-AUTO-2026-08-10.md`：2026-08-10 离线自动规格硬化交接笔记（D-070）。
 - `DECISIONS.md` D-071：2026-08-29 编码就绪收尾、modern proof 与核心节点推送 `main` 的现行授权。
 - `OWNER-QUESTIONS-01.md`：已经回答并冻结的负责人集中问卷；保留 29 题收到回复时的候选语境。

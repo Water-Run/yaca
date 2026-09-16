@@ -36,7 +36,7 @@
 ## Server 2008 + 真实服务商验收
 
 连接为 `openai-chat`、`https://api.deepseek.com/chat/completions`、
-`deepseek-flash`（DeepSeek V4.1 Flash），Streaming=force、RetryCount=0。
+`deepseek-flash`（[DeepSeek V4.1 Flash](https://api-docs.deepseek.com/zh-cn/news/news260910/)），Streaming=force、RetryCount=0。
 API Key 来自用户原授权位置，经私有 stdin 传输；不进入源码、包或证据。
 配置保留 Std 写入/Shell confirm，DoubleCheck 默认开启。
 
@@ -60,6 +60,40 @@ N10 Context hash 为 `8DD524C1DA0F1422`。最终 XML 有 65 个连续 Event、
 真实中文 CMD 的 `ver` 输出为 GBK；按既有契约作为有类型 binary/base64 交给模型，
 没有伪装成 UTF-8。N10 zip SHA-256 为
 `02136a909cbd782c16eff935275afbb1678da031454c8464926f5dc1c0dd5584`。
+
+## 最终 N11 交付
+
+N11 从干净源码提交 `59ed5735efdd31196f6607251d377d3a86bebe48` 构建；build log 的
+`source-changes.patch` 为空。最终记录提交仅追加验收证据，不改变该可执行文件。
+
+- 包：`out/windows-preview-20260916-n11/yaca-0.1.0-preview-win32-x86.zip`。
+- 完整可重建源码：同目录 `yaca-0.1.0-preview-win32-x86-source.tar.gz`。
+- zip SHA-256：`6cdaaf5aa3fc096bbc18d2446d9b5283fd639287d80f7d121f120ab78edbde3a`。
+- executable SHA-256：`6c5603ac5d4d7594b45254f0562201a6e36f286410aac4cb9c8d30f17d385291`。
+- 项目源码快照 SHA-256：`2475ca3525a10e4296a34e1e855187891c37b14838df5193a5e014a299d21cbb`。
+- 服务器目录：`C:\Users\Administrator\yaca-0.1.0-preview-n11`，上传后哈希一致。
+- 私有运行配置已经就位；便携 zip 不包含 config.ini、Context 或凭据。
+  327 个源码、包内文件和当时的证据文件通过已注册 Key 扫描。
+
+N11 最终实测：Stage 1/2 全部 passed；Stage 3 三项 warning（config 响应形状不符，
+permission/naming 给出建议），整体 `passed / completed-stage=3 / online-requests=10 / auto-fixes=0`。
+list、审批 write、read 及只经 finish 载体返回总结均成功；receipt.txt 的内容为
+`N11_READY`，9 bytes，SHA-256
+`6cb191fc1e4e76d1f50c4abf40307da6fb1e0e18139f55a51876dd75eceea0ae`。
+
+终审服务商两次未按严格 JSON 契约回答，被保守标为 uncertain，保持 WaitingUser；
+没有伪造完成或重放文件修改。追加两条澄清后第三次终审 pass，最终 completed。
+此行为属于真实服务商响应限制，不能把 N11 写成“所有在线检查无警告”。
+遇到此状态可用 `.status` 确认 `pending: termination-review`，再输入澄清继续。
+N11 Context hash `8CFCA5D494A87A82`；49 个连续 Event，3 对工具结果、1 对操作结果，
+终审序列 uncertain/uncertain/pass，唯一 turn_ended=completed。退出后无残留锁和自检临时文件。
+
+在服务器 CMD 中可直接启动：
+
+```bat
+cd /d C:\Users\Administrator\yaca-0.1.0-preview-n11
+yaca.exe work
+```
 
 ## 复现与证据
 
