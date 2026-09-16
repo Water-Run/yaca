@@ -7247,6 +7247,16 @@ function M.new_application_coordinator(ports, options)
                 "The Model yielded without finish; the next message starts a fresh turn."
             )
         end
+        if status.state == "WaitingUser" and status.pending_kind == "termination-review" then
+            return publish({ kind = "notice", text =
+                "Termination review has not accepted completion. "
+                .. "Reply with clarification to continue, or use .cancel to stop this turn." })
+        end
+        if status.state == "WaitingUser" and status.pending_kind == "action-review" then
+            return publish({ kind = "notice", text =
+                "Action review is unresolved; the proposed tool has not run. "
+                .. "Use .cancel to stop this turn, then revise the request or review Model settings." })
+        end
         if status.state == "Idle" and status.last_outcome ~= false then
             return publish_status("Turn outcome: " .. tostring(status.last_outcome))
         end

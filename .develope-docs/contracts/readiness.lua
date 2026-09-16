@@ -64,9 +64,9 @@ return {
       ["pre-coding"] = { en = "not implemented yet", zh = "目前尚未实现", plan = "尚未开始产品实现" },
       implementing = { en = "implementation in progress", zh = "正在实现", plan = "产品实现进行中" },
       ["implemented-unqualified"] = {
-        en = "platform-independent core implemented through M9; controller closure and target qualification pending",
-        zh = "平台无关核心已实现至 M9；controller 收口和目标资格验证待完成",
-        plan = "平台无关核心已实现至 M9 / controller 收口和资格验证待完成",
+        en = "platform-independent core implemented through M9; target qualification pending",
+        zh = "平台无关核心已实现至 M9；目标资格验证待完成",
+        plan = "平台无关核心已实现至 M9 / 目标资格验证待完成",
       },
     },
   },

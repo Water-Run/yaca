@@ -81,7 +81,7 @@ local function fixture(settings)
     local prompts = {}
     local batches = settings.batches or {}
     local now = 0
-    local loop_status = status(settings.initial_state or "RequestingModel")
+    local loop_status = status(settings.initial_state or "RequestingModel", settings.initial_status)
     local driver_steps = 0
     local side_started = false
     local side_emitted = false
@@ -777,6 +777,25 @@ end
 return {
     name = "integration/application-coordinator",
     cases = {
+        {
+            name = "unresolved reviews explain the available recovery without claiming success",
+            run = function()
+                for _, kind in ipairs({ "termination-review", "action-review" }) do
+                    local lines = input_lines({ ".cancel", ".quit" })
+                    local f = fixture({ initial_agent = true, freeze_driver = true,
+                        initial_state = "WaitingUser", initial_status = { pending_kind = kind },
+                        batches = { {}, {}, lines[1], lines[2] } })
+                    assert(f.coordinator:run())
+                    local notices = blocks_of_kind(f.blocks, "notice")
+                    A.equal(#notices, 1)
+                    A.contains(notices[1].text, ".cancel")
+                    A.contains(notices[1].text, kind == "termination-review"
+                        and "Reply with clarification" or "proposed tool has not run")
+                    A.contains(table.concat(f.log, "|"), "loop-cancel")
+                    A.falsy(A.render(f.blocks):find("Turn outcome: completed", 1, true))
+                end
+            end,
+        },
         {
             name = "finish summaries and refusal reasons remain visible assistant content",
             run = function()

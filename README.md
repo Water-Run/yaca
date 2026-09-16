@@ -6,7 +6,7 @@ yaca is the design for a simple, single-agent, terminal-only general Agent,
 licensed under GPL v3. Software development is a first-class common workload,
 not its exclusive purpose.
 
-> **Project status (2026-09-16): Windows usable preview verified on Server 2008 with a real provider; formal target qualification pending.** No target archive has qualified for release. The sections below distinguish connected behavior from parser-only command grammar. Target-specific behavior remains unqualified until it passes independently on Win32 x86, Win64 x86_64, and Linux x86_64. Gate A/B remain passed and Release Gate R remains closed.
+> **Project status (2026-09-16): platform-independent core implemented through M9; target qualification pending.** The Windows usable preview has been verified on Server 2008 with a real provider. No target archive has qualified for release. The sections below distinguish connected behavior from parser-only command grammar. Target-specific behavior remains unqualified until it passes independently on Win32 x86, Win64 x86_64, and Linux x86_64. Gate A/B remain passed and Release Gate R remains closed.
 
 ## Supported release targets
 
