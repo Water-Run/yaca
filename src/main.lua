@@ -3967,6 +3967,846 @@ local function build_offline_self_test(runtime)
     end
 end
 
+local SELF_TEST_ONLINE_LIMITS = {
+    poll_budget = 32,
+    pump_slice_ms = 10,
+    capability_timeout_ms = 90000,
+    semantic_timeout_ms = 180000,
+    cancel_drain_ms = 15000,
+    connect_timeout_ms = 30000,
+    capability_output_tokens = 1024,
+    semantic_output_tokens = 2048,
+}
+
+local SELF_TEST_CAPABILITY_INSTRUCTIONS = {
+    ["ST2-MODEL-TRANSPORT"] = "This is a connectivity probe. Reply with the single word READY.",
+    ["ST2-MODEL-AUTH"] = "This is a credential probe. Reply with the single word READY.",
+    ["ST2-MODEL-WIRE"] = "This is a protocol probe. Reply with the single word READY.",
+    ["ST2-MODEL-STREAM"] = "This is a streaming probe. Reply with exactly: STREAM CHECK OK.",
+    ["ST2-MODEL-TOOLS"] = "This request carries an inert tool schema. Do not call any tool. Reply with the single word READY.",
+    ["ST2-MODEL-CONTROL"] = 'This is a tool-carrier probe. Call the function list with arguments {"path":"."} exactly once. The tool is inert and will not run.',
+    ["ST2-MODEL-USAGE-CANCEL"] = "This is a cancellation probe. Reply with the single word READY.",
+}
+
+local function online_check_result(outcome, summary, evidence, online_requests)
+    return {
+        outcome = outcome,
+        summary = summary,
+        evidence = evidence or {},
+        online_requests = online_requests or 0,
+        auto_fixes = 0,
+    }
+end
+
+local function evidence_line(label, value)
+    return ascii_diagnostic(label .. "=" .. tostring(value), 200)
+end
+
+local function resolve_self_test_generation(composed, specification)
+    if type(composed.config) ~= "table"
+        or type(composed.config.reload_file) ~= "function"
+        or type(composed.layout) ~= "table"
+        or type(composed.layout.config_path) ~= "string"
+        or type(composed.model_adapter) ~= "table"
+        or type(composed.network) ~= "table"
+        or type(composed.contexts) ~= "table"
+        or type(composed.contexts.safety) ~= "table"
+        or type(composed.contexts.prompt) ~= "table"
+        or type(composed.contexts.tool_registry) ~= "table"
+    then
+        return nil, "SelfTestUnavailable", "production self-test ports are incomplete"
+    end
+    local generation = composed.config.reload_file(composed.layout.config_path)
+    if not generation then
+        return nil, "ConfigUnavailable", "the configuration could not be reloaded for the online check"
+    end
+    local model = generation.models and generation.models[specification.model.id]
+    if type(model) ~= "table" or model.enabled ~= true then
+        return nil, "ModelUnavailable", "the Model is no longer enabled in the current configuration"
+    end
+    if model.endpoint ~= specification.model.endpoint then
+        return nil, "ModelChanged", "the Model endpoint changed after the self-test snapshot"
+    end
+    return generation
+end
+
+-- Starts one purpose=self-test Model request through the production adapter,
+-- transport, proxy, and CA policy, then pumps it to a typed terminal state.
+-- cancel_after_start requests cancellation before the first poll so the
+-- cancellation path itself is exercised. Returns an observation table whose
+-- online_requests counts started provider attempts.
+local function run_self_test_model_request(composed, specification, definition)
+    local generation, code, message
+    generation, code, message = resolve_self_test_generation(composed, specification)
+    if not generation then
+        return nil, code, message
+    end
+    local model = generation.models[specification.model.id]
+    local model_module = require("model")
+    local builder, builder_error = model_module.new_self_test_request_builder({
+        adapter = composed.model_adapter,
+        prompt = composed.contexts.prompt,
+        generation = generation,
+        tool_registry = composed.contexts.tool_registry,
+        safety = composed.contexts.safety,
+    }, {
+        model_name = specification.model.id,
+        phase = definition.phase,
+        synthetic_observation = definition.instruction,
+        tool_set = definition.tool_set,
+        default_connect_timeout_ms = SELF_TEST_ONLINE_LIMITS.connect_timeout_ms,
+        default_request_timeout_ms = definition.timeout_ms,
+        maximum_request_time_ms = definition.timeout_ms,
+        default_retry_base_delay_ms = 1000,
+        default_max_output_tokens = definition.max_output_tokens,
+    })
+    if not builder then
+        return nil, "SelfTestRequestInvalid",
+            "self-test request preparation failed: "
+            .. safe_diagnostic(builder_error and builder_error.code or "?", 96)
+    end
+    local activity_options = copy_plain(composed.model_activity_options, {})
+    if not activity_options then
+        return nil, "SelfTestRequestInvalid", "self-test activity limits are unavailable"
+    end
+    activity_options.identity_namespace = "self-test"
+    local activity, activity_error = model_module.new_activity({
+        adapter = composed.model_adapter,
+        transport = composed.network,
+        safety = composed.contexts.safety,
+        clock = composed.backend.clock_port,
+        requests = builder,
+    }, activity_options)
+    if not activity then
+        return nil, "SelfTestRequestInvalid",
+            "self-test Model activity is unavailable: "
+            .. safe_diagnostic(activity_error and activity_error.code or "?", 96)
+    end
+    local clock = composed.backend.clock_port
+    local started_at, clock_error
+    started_at, clock_error = clock.monotonic_now()
+    if type(started_at) ~= "number" then
+        return nil, "SelfTestClockFailed", "self-test clock is unavailable"
+    end
+    local handle, start_error = activity.start({
+        request_id = "selftest-" .. string.lower(specification.check.id),
+        turn_id = "self-test",
+        purpose = "self-test",
+        continuation = false,
+        view_manifest_ref = builder.snapshots.view,
+        progress_identity = "self-test/" .. specification.check.id,
+    })
+    if not handle then
+        return nil, "SelfTestRequestInvalid",
+            "self-test Model request could not start: "
+            .. safe_diagnostic(start_error and start_error.code or "?", 96)
+    end
+    local observation = {
+        online_requests = 1,
+        events = {},
+        response = false,
+        cancel_requested = false,
+        deadline_exceeded = false,
+        model = model,
+    }
+    if definition.cancel_after_start then
+        activity.cancel(handle, "self-test-cancel")
+        observation.cancel_requested = true
+    end
+    local deadline_at = started_at + definition.timeout_ms
+    local drain_at = deadline_at + SELF_TEST_ONLINE_LIMITS.cancel_drain_ms
+    while true do
+        local observed_now = clock.monotonic_now()
+        if type(observed_now) ~= "number" then
+            observation.deadline_exceeded = true
+            break
+        end
+        local batch, poll_error = activity.poll(SELF_TEST_ONLINE_LIMITS.poll_budget)
+        if not batch then
+            observation.poll_error = poll_error and poll_error.code or "poll-failed"
+            break
+        end
+        for _, item in ipairs(batch) do
+            if item.kind == "response" then
+                observation.response = item.wrapper
+            elseif item.kind == "adapter-event" then
+                observation.events[#observation.events + 1] = item.event
+            end
+        end
+        if observation.response then break end
+        if observed_now >= (observation.cancel_issued_at and drain_at or deadline_at) then
+            if not observation.cancel_issued_at then
+                activity.cancel(handle, "self-test-deadline")
+                observation.cancel_issued_at = true
+                observation.cancel_requested = true
+            elseif observed_now >= drain_at then
+                observation.deadline_exceeded = true
+                break
+            end
+        end
+        if #batch == 0 then
+            local slept, sleep_result = pcall(
+                clock.sleep_ms,
+                SELF_TEST_ONLINE_LIMITS.pump_slice_ms
+            )
+            if not slept or sleep_result == false then
+                observation.deadline_exceeded = true
+                break
+            end
+        end
+    end
+    return observation
+end
+
+local function classify_self_test_observation(observation)
+    local facts = {
+        http_status = false,
+        connection_error = false,
+        protocol_error = false,
+        deltas = 0,
+        tool_calls = 0,
+        usage = false,
+        finish_class = false,
+        incomplete = false,
+        canonical_body = false,
+    }
+    for _, event in ipairs(observation.events) do
+        local kind = event.kind
+        if kind == "transport_error" then
+            if type(event.status) == "number" then
+                facts.http_status = event.status
+            else
+                facts.connection_error = event.error_id or "transport-failure"
+            end
+        elseif kind == "protocol_error" then
+            facts.protocol_error = event.error_id or "protocol-error"
+        elseif kind == "text_delta" or kind == "reasoning_summary_delta"
+            or kind == "tool_arguments_delta" then
+            facts.deltas = facts.deltas + 1
+        elseif kind == "tool_call_complete" then
+            facts.tool_calls = facts.tool_calls + 1
+        elseif kind == "usage_update" then
+            facts.usage = true
+        elseif kind == "response_finish" and event.finish_class then
+            facts.finish_class = event.finish_class
+        end
+    end
+    local wrapper = observation.response
+    if type(wrapper) == "table" and type(wrapper.normalized) == "table" then
+        local normalized = wrapper.normalized
+        facts.finish_class = normalized.finish_class or facts.finish_class
+        facts.incomplete = normalized.incomplete == true
+        if type(wrapper.canonical_body) == "string" then
+            facts.canonical_body = wrapper.canonical_body
+        end
+        if type(normalized.tool_calls) == "table" then
+            facts.tool_calls = math.max(facts.tool_calls, #normalized.tool_calls)
+        end
+        if normalized.usage then facts.usage = true end
+    end
+    return facts
+end
+
+local function self_test_binding_failure(code, message)
+    return online_check_result("failed", message, { evidence_line("reason", code) }, 0)
+end
+
+local function self_test_transport_failure(code, facts)
+    return online_check_result(
+        "failed",
+        "the Model transport failed before a provider response",
+        {
+            evidence_line("transport", facts.connection_error),
+            evidence_line("finish", facts.finish_class or "none"),
+        },
+        1
+    )
+end
+
+local function evaluate_st2_check(check_id, observation, model)
+    local facts = classify_self_test_observation(observation)
+    if not observation.response and observation.deadline_exceeded then
+        return online_check_result(
+            "failed",
+            "the online Model request did not reach a terminal state in time",
+            { evidence_line("timeout", check_id) },
+            1
+        )
+    end
+    if not observation.response and observation.poll_error then
+        return online_check_result(
+            "failed",
+            "the online Model request ended in an internal failure",
+            { evidence_line("internal", observation.poll_error) },
+            1
+        )
+    end
+    if facts.connection_error then
+        return self_test_transport_failure(check_id, facts)
+    end
+    if check_id == "ST2-MODEL-TRANSPORT" then
+        if facts.http_status then
+            return online_check_result(
+                "passed",
+                "the provider endpoint answered the transport probe",
+                {
+                    evidence_line("http", facts.http_status),
+                    evidence_line("finish", facts.finish_class or "none"),
+                },
+                1
+            )
+        end
+        return online_check_result(
+            "passed",
+            "a complete provider response arrived over the configured transport",
+            {
+                evidence_line("http", "2xx"),
+                evidence_line("finish", facts.finish_class or "none"),
+            },
+            1
+        )
+    end
+    if check_id == "ST2-MODEL-AUTH" then
+        if model.key_configured ~= true then
+            return online_check_result(
+                "failed",
+                "the enabled Model has no configured credential",
+                { evidence_line("credential", "missing") },
+                0
+            )
+        end
+        if facts.http_status == 401 or facts.http_status == 403 then
+            return online_check_result(
+                "failed",
+                "the provider rejected the configured credential",
+                { evidence_line("http", facts.http_status) },
+                1
+            )
+        end
+        if facts.http_status or facts.finish_class then
+            return online_check_result(
+                "passed",
+                "the configured credential was accepted by the provider",
+                {
+                    evidence_line("credential", "accepted"),
+                    evidence_line("finish", facts.finish_class or "none"),
+                },
+                1
+            )
+        end
+        return online_check_result(
+            "failed",
+            "the authentication probe produced no usable provider verdict",
+            { evidence_line("finish", facts.finish_class or "none") },
+            1
+        )
+    end
+    if check_id == "ST2-MODEL-WIRE" then
+        if facts.protocol_error then
+            return online_check_result(
+                "failed",
+                "the provider response violated the adapter protocol",
+                { evidence_line("protocol", facts.protocol_error) },
+                1
+            )
+        end
+        if facts.http_status then
+            return online_check_result(
+                "failed",
+                "the provider refused the canonical wire request",
+                {
+                    evidence_line("http", facts.http_status),
+                    evidence_line("finish", facts.finish_class or "none"),
+                },
+                1
+            )
+        end
+        if facts.finish_class and not facts.incomplete then
+            return online_check_result(
+                "passed",
+                "the provider answered with a complete canonical response",
+                {
+                    evidence_line("finish", facts.finish_class),
+                    evidence_line("protocol", model.protocol),
+                },
+                1
+            )
+        end
+        return online_check_result(
+            "failed",
+            "the provider response was incomplete",
+            { evidence_line("finish", facts.finish_class or "none") },
+            1
+        )
+    end
+    if check_id == "ST2-MODEL-STREAM" then
+        local mode = model.streaming
+        if facts.http_status or facts.incomplete or facts.protocol_error then
+            return online_check_result(
+                "failed",
+                "the streaming probe did not produce a complete response",
+                {
+                    evidence_line("mode", mode),
+                    evidence_line("http", facts.http_status or "none"),
+                    evidence_line("protocol", facts.protocol_error or "none"),
+                },
+                1
+            )
+        end
+        if mode == "off" then
+            return online_check_result(
+                "passed",
+                "non-streaming responses parse completely as configured",
+                {
+                    evidence_line("mode", "off"),
+                    evidence_line("finish", facts.finish_class or "none"),
+                },
+                1
+            )
+        end
+        if facts.deltas > 0 then
+            return online_check_result(
+                "passed",
+                "streamed provider events arrived and parsed canonically",
+                {
+                    evidence_line("mode", mode),
+                    evidence_line("streamed-events", facts.deltas),
+                },
+                1
+            )
+        end
+        if mode == "try" then
+            return online_check_result(
+                "passed",
+                "try streaming completed through its single non-streaming fallback",
+                {
+                    evidence_line("mode", "try"),
+                    evidence_line("fallback", "true"),
+                    evidence_line("finish", facts.finish_class or "none"),
+                },
+                1
+            )
+        end
+        return online_check_result(
+            "failed",
+            "forced streaming produced no streamed provider events",
+            {
+                evidence_line("mode", "force"),
+                evidence_line("streamed-events", 0),
+            },
+            1
+        )
+    end
+    if check_id == "ST2-MODEL-TOOLS" then
+        if facts.http_status or facts.protocol_error then
+            return online_check_result(
+                "failed",
+                "the provider rejected the request carrying the tool schema",
+                {
+                    evidence_line("http", facts.http_status or "none"),
+                    evidence_line("protocol", facts.protocol_error or "none"),
+                },
+                1
+            )
+        end
+        if facts.finish_class and not facts.incomplete then
+            return online_check_result(
+                "passed",
+                "the provider accepted the inert production tool schema round-trip",
+                {
+                    evidence_line("tools", "accepted"),
+                    evidence_line("registry", "production-v1"),
+                    evidence_line("finish", facts.finish_class),
+                },
+                1
+            )
+        end
+        return online_check_result(
+            "failed",
+            "the tool schema probe response was incomplete",
+            { evidence_line("finish", facts.finish_class or "none") },
+            1
+        )
+    end
+    if check_id == "ST2-MODEL-CONTROL" then
+        if facts.tool_calls > 0 then
+            return online_check_result(
+                "passed",
+                "the provider tool-call carrier round-tripped with schema-valid arguments",
+                {
+                    evidence_line("carrier", "provider-tool-call"),
+                    evidence_line("calls", facts.tool_calls),
+                    evidence_line("schema", "validated"),
+                },
+                1
+            )
+        end
+        if facts.http_status or facts.protocol_error then
+            return online_check_result(
+                "failed",
+                "the control carrier probe failed before a provider verdict",
+                {
+                    evidence_line("http", facts.http_status or "none"),
+                    evidence_line("protocol", facts.protocol_error or "none"),
+                },
+                1
+            )
+        end
+        return online_check_result(
+            "failed",
+            "the Model completed without returning the requested tool call",
+            {
+                evidence_line("carrier", "absent"),
+                evidence_line("finish", facts.finish_class or "none"),
+            },
+            1
+        )
+    end
+    if check_id == "ST2-MODEL-USAGE-CANCEL" then
+        if facts.finish_class == "cancelled" then
+            return online_check_result(
+                "passed",
+                "cancellation terminated the request with a typed cancelled state",
+                {
+                    evidence_line("cancel", "typed"),
+                    evidence_line("usage", facts.usage and "parsed" or "absent-allowed"),
+                },
+                1
+            )
+        end
+        if facts.http_status or facts.protocol_error or facts.connection_error then
+            return online_check_result(
+                "failed",
+                "the cancellation probe failed before a terminal verdict",
+                {
+                    evidence_line("http", facts.http_status or "none"),
+                    evidence_line("protocol", facts.protocol_error or "none"),
+                },
+                1
+            )
+        end
+        if facts.usage then
+            return online_check_result(
+                "passed",
+                "usage accounting parsed and the request ended typed",
+                {
+                    evidence_line("cancel", "completed-before-effect"),
+                    evidence_line("usage", "parsed"),
+                },
+                1
+            )
+        end
+        return online_check_result(
+            "warning",
+            "the request completed before cancellation and reported no usage",
+            {
+                evidence_line("cancel", "completed-before-effect"),
+                evidence_line("usage", "absent"),
+            },
+            1
+        )
+    end
+    return online_check_result(
+        "failed",
+        "the online Model adapter has no composed behavior for this check",
+        { evidence_line("check", check_id) },
+        0
+    )
+end
+
+---Composes the production online Stage 2 Model port. Every admitted check
+---performs one real provider request through the production adapter and
+---transport; no Tool executes and no configuration is mutated.
+local function build_online_model_self_test(composed)
+    return function(specification)
+        local check_id = specification.check.id
+        local instruction = SELF_TEST_CAPABILITY_INSTRUCTIONS[check_id]
+        if not instruction then
+            return online_check_result(
+                "failed",
+                "the online Model adapter has no instruction for this check",
+                { evidence_line("check", check_id) },
+                0
+            )
+        end
+        local called, observation, code, message = pcall(
+            run_self_test_model_request,
+            composed,
+            specification,
+            {
+                phase = "capability",
+                instruction = instruction,
+                tool_set = (check_id == "ST2-MODEL-TOOLS"
+                    or check_id == "ST2-MODEL-CONTROL") and "production" or "none",
+                cancel_after_start = check_id == "ST2-MODEL-USAGE-CANCEL",
+                timeout_ms = SELF_TEST_ONLINE_LIMITS.capability_timeout_ms,
+                max_output_tokens = SELF_TEST_ONLINE_LIMITS.capability_output_tokens,
+            }
+        )
+        if not called then
+            return online_check_result(
+                "failed",
+                "the online Model check raised an internal failure",
+                { evidence_line("internal", "exception") },
+                0
+            )
+        end
+        if not observation then
+            return self_test_binding_failure(code, message)
+        end
+        local called_evaluation, evaluated = pcall(
+            evaluate_st2_check,
+            check_id,
+            observation,
+            observation.model
+        )
+        if not called_evaluation or type(evaluated) ~= "table" then
+            return online_check_result(
+                "failed",
+                "the online Model check could not be evaluated",
+                { evidence_line("internal", "evaluation") },
+                observation.online_requests
+            )
+        end
+        return evaluated
+    end
+end
+
+local function bounded_value(value, maximum)
+    local text = tostring(value)
+    if #text > maximum then text = text:sub(1, maximum) .. "..." end
+    return text
+end
+
+-- Builds the bounded, secret-free projection each Stage 3 advisory review
+-- quotes to the confirmed Model. The projection is bound to the same frozen
+-- self-test snapshot the run started from.
+local function self_test_semantic_observation(check_id, snapshot)
+    local config = type(snapshot) == "table" and snapshot.config or nil
+    if type(config) ~= "table" or config.available ~= true
+        or type(config.generation) ~= "table"
+    then
+        return nil
+    end
+    local generation = config.generation
+    local lines = {}
+    if check_id == "ST3-CONFIG-SEMANTICS" then
+        local general, network, exec = generation.general or {}, {}
+        network = generation.network or {}
+        exec = generation.exec or {}
+        local agent = generation.agent or {}
+        local scalars = {
+            { "General.StartupSelfTest", general.startup_self_test },
+            { "General.AutoRenameInterval", general.auto_rename_interval },
+            { "Network.ConnectTimeoutMs", network.connect_timeout_ms },
+            { "Network.RequestTimeoutMs", network.request_timeout_ms },
+            { "Network.RetryCount", network.retry_count },
+            { "Network.FollowProxy", network.follow_proxy },
+            { "Network.NoProxy", network.no_proxy },
+            { "Exec.EnvironmentMode", exec.environment_mode },
+            { "Exec.MaxOutputKb", exec.max_output_kb },
+            { "Exec.TimeoutMs", exec.timeout_ms },
+            { "Agent.ActionReviewEnabled", agent.action_review_enabled },
+            { "Agent.ActionReviewModel", agent.action_review_model },
+            { "Agent.TerminationReviewModel", agent.termination_review_model },
+            { "Agent.MaxTurnModelRequests", agent.max_turn_model_requests },
+            { "Agent.MaxTurnToolCalls", agent.max_turn_tool_calls },
+        }
+        lines[#lines + 1] = "scope: general/network/exec/agent scalar settings"
+        for _, item in ipairs(scalars) do
+            lines[#lines + 1] = item[1] .. " = " .. bounded_value(item[2], 96)
+        end
+    elseif check_id == "ST3-PERMISSION-SEMANTICS" then
+        lines[#lines + 1] = "scope: permission profiles"
+        for _, name in ipairs(generation.permission_order or {}) do
+            local permission = generation.permissions[name]
+            if type(permission) == "table" then
+                lines[#lines + 1] = "Permission." .. name
+                    .. " read=" .. bounded_value(permission.read, 24)
+                    .. " write=" .. bounded_value(permission.write, 24)
+                    .. " delete=" .. bounded_value(permission.delete, 24)
+                    .. " shell=" .. bounded_value(permission.shell, 24)
+                    .. " outside=" .. bounded_value(permission.outside_workspace, 24)
+                lines[#lines + 1] = "  description: "
+                    .. bounded_value(permission.description, 200)
+            end
+        end
+    elseif check_id == "ST3-NAMING-AND-SPELLING" then
+        lines[#lines + 1] = "scope: names, descriptions, and spellings"
+        for _, name in ipairs(generation.model_order or {}) do
+            local model = generation.models[name]
+            if type(model) == "table" then
+                lines[#lines + 1] = "Model." .. name
+                    .. " remote=" .. bounded_value(model.remote_model, 96)
+                    .. " enabled=" .. bounded_value(model.enabled, 12)
+                lines[#lines + 1] = "  description: "
+                    .. bounded_value(model.description, 200)
+            end
+        end
+        for _, name in ipairs(generation.permission_order or {}) do
+            local permission = generation.permissions[name]
+            if type(permission) == "table" then
+                lines[#lines + 1] = "Permission." .. name
+                lines[#lines + 1] = "  description: "
+                    .. bounded_value(permission.description, 200)
+            end
+        end
+    else
+        return nil
+    end
+    local projection = table.concat(lines, "\n")
+    if #projection > 12000 then projection = projection:sub(1, 12000) .. "\n..." end
+    return "You are reviewing one yaca configuration projection for obvious"
+        .. " semantic problems. Reply with plain text only and no other words:"
+        .. ' the compact JSON object {"issues":["problem one","problem two"]}'
+        .. " listing at most three clear problems, or the exact object"
+        .. ' {"issues":[]} when the projection is coherent. Do not call any'
+        .. " tool and do not change anything.\n\n<projection>\n"
+        .. projection
+        .. "\n</projection>"
+end
+
+local function advisory_review_result(observation)
+    local facts = classify_self_test_observation(observation)
+    if not observation.response then
+        return online_check_result(
+            "warning",
+            "the advisory review request did not reach a terminal state",
+            { evidence_line("internal", observation.poll_error or "no-response") },
+            observation.online_requests
+        )
+    end
+    if facts.connection_error or facts.http_status or facts.protocol_error then
+        return online_check_result(
+            "warning",
+            "the advisory review request failed against the provider",
+            {
+                evidence_line("transport", facts.connection_error or "none"),
+                evidence_line("http", facts.http_status or "none"),
+                evidence_line("protocol", facts.protocol_error or "none"),
+            },
+            observation.online_requests
+        )
+    end
+    if not facts.canonical_body then
+        return online_check_result(
+            "warning",
+            "the advisory review returned no canonical answer body",
+            { evidence_line("body", "absent") },
+            observation.online_requests
+        )
+    end
+    local json = require("json")
+    local codec = json.new({
+        maximum_bytes = 65536,
+        maximum_depth = 8,
+        maximum_nodes = 512,
+        maximum_string_bytes = 8192,
+        maximum_number_bytes = 32,
+    })
+    local document = codec and codec.parse(facts.canonical_body)
+    local issues = type(document) == "table"
+        and type(document.issues) == "table"
+        and #document.issues >= 0
+        and document.issues
+        or nil
+    if not issues then
+        return online_check_result(
+            "warning",
+            "the advisory review answer did not match the expected JSON shape",
+            { evidence_line("summary", "unparseable") },
+            observation.online_requests
+        )
+    end
+    local evidence = {}
+    for index, issue in ipairs(issues) do
+        if index > 3 then break end
+        if type(issue) == "string" then
+            evidence[#evidence + 1] = evidence_line("issue", issue)
+        end
+    end
+    if #issues == 0 then
+        return online_check_result(
+            "passed",
+            "the confirmed Model reviewed the projection and found no issue",
+            { evidence_line("review", "no-issue") },
+            observation.online_requests
+        )
+    end
+    return online_check_result(
+        "warning",
+        "the confirmed Model reported configuration issues for review",
+        evidence,
+        observation.online_requests
+    )
+end
+
+---Composes the production Stage 3 advisory port. Each check asks one
+---confirmed Model to review a bounded projection of the frozen snapshot;
+---findings are advisory only and never mutate configuration.
+local function build_online_advisory_self_test(composed)
+    return function(specification)
+        local check_id = specification.check.id
+        local instruction = self_test_semantic_observation(
+            check_id,
+            specification.snapshot
+        )
+        if not instruction then
+            return online_check_result(
+                "skipped",
+                "the advisory projection is unavailable for this check",
+                { evidence_line("projection", "unavailable") },
+                0
+            )
+        end
+        if type(specification.confirmed_models) ~= "table"
+            or #specification.confirmed_models == 0
+        then
+            return online_check_result(
+                "skipped",
+                "no confirmed Model is available for the advisory review",
+                { evidence_line("models", "none") },
+                0
+            )
+        end
+        local target = specification.confirmed_models[1]
+        local called, observation = pcall(
+            run_self_test_model_request,
+            composed,
+            {
+                check = specification.check,
+                model = { id = target.id, endpoint = target.endpoint },
+            },
+            {
+                phase = "semantic",
+                instruction = instruction,
+                tool_set = "none",
+                cancel_after_start = false,
+                timeout_ms = SELF_TEST_ONLINE_LIMITS.semantic_timeout_ms,
+                max_output_tokens = SELF_TEST_ONLINE_LIMITS.semantic_output_tokens,
+            }
+        )
+        if not called or not observation then
+            return online_check_result(
+                "skipped",
+                "the advisory review request could not be started",
+                { evidence_line("internal", "request") },
+                0
+            )
+        end
+        local evaluated, evaluated_result = pcall(advisory_review_result, observation)
+        if not evaluated or type(evaluated_result) ~= "table" then
+            return online_check_result(
+                "warning",
+                "the advisory review could not be evaluated",
+                { evidence_line("internal", "evaluation") },
+                observation.online_requests
+            )
+        end
+        return evaluated_result
+    end
+end
+
 local function cleanup_created_file(filesystem, path)
     local stated, identity = filesystem.stat_identity(path)
     if not stated then
@@ -4283,22 +5123,12 @@ function M.compose_runtime(runtime)
         },
         model = {
             online = true,
-            run = function()
-                return check_result(
-                    "failed",
-                    "online Model qualification adapter is not yet composed"
-                )
-            end,
+            run = build_online_model_self_test(composed),
         },
         advisory = {
             online = true,
             auto_fix = false,
-            run = function()
-                return check_result(
-                    "failed",
-                    "online advisory adapter is not yet composed"
-                )
-            end,
+            run = build_online_advisory_self_test(composed),
         },
     }, SELF_TEST_OPTIONS)
     if not self_test then return nil, self_test_error end

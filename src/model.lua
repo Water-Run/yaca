@@ -2433,6 +2433,245 @@ function M.new_side_request_builder(ports, options)
     return readonly(service, "side model request builder")
 end
 
+local SELF_TEST_BUILDER_OPTION_FIELDS = {
+    model_name = true,
+    phase = true,
+    synthetic_observation = true,
+    tool_set = true,
+    default_connect_timeout_ms = true,
+    default_request_timeout_ms = true,
+    maximum_request_time_ms = true,
+    default_retry_base_delay_ms = true,
+    default_max_output_tokens = true,
+}
+
+local function validate_self_test_request_builder(ports, options)
+    local port_fields = {
+        adapter = true,
+        prompt = true,
+        generation = true,
+        tool_registry = true,
+        safety = true,
+    }
+    if not exact_activity_fields(ports, port_fields)
+        or type(ports.adapter) ~= "table"
+        or type(ports.adapter.normalize_request) ~= "function"
+        or type(ports.prompt) ~= "table"
+        or type(ports.prompt.assemble) ~= "function"
+        or type(ports.generation) ~= "table"
+        or type(ports.generation.reveal_secret) ~= "function"
+        or type(ports.generation.secret_descriptors) ~= "function"
+        or type(ports.generation.scan_registered_secrets) ~= "function"
+        or type(ports.tool_registry) ~= "table"
+        or type(ports.tool_registry.digest) ~= "string"
+        or type(ports.safety) ~= "table"
+        or type(ports.safety.digest) ~= "function"
+        or not exact_activity_fields(options, SELF_TEST_BUILDER_OPTION_FIELDS)
+        or not valid_token(options.model_name, 128)
+        or (options.phase ~= "capability" and options.phase ~= "semantic")
+        or type(options.synthetic_observation) ~= "string"
+        or options.synthetic_observation == ""
+        or #options.synthetic_observation > 16384
+        or (options.tool_set ~= "none" and options.tool_set ~= "production")
+        or not valid_integer(options.default_connect_timeout_ms, 1)
+        or not valid_integer(options.default_request_timeout_ms, 1)
+        or options.default_connect_timeout_ms > options.default_request_timeout_ms
+        or not valid_integer(options.maximum_request_time_ms, 1)
+        or not valid_integer(options.default_retry_base_delay_ms, 0)
+        or not valid_integer(options.default_max_output_tokens, 1)
+    then
+        return nil, failure(
+            "InvalidSelfTestRequestBuilder",
+            "self-test request builder is incomplete"
+        )
+    end
+    local generation = ports.generation
+    local model_ref = generation.models and generation.models[options.model_name]
+    if not valid_token(generation.id, 256)
+        or type(generation.general) ~= "table"
+        or type(generation.network) ~= "table"
+        or type(model_ref) ~= "table"
+        or model_ref.enabled ~= true
+    then
+        return nil, failure(
+            "InvalidSelfTestRequestBuilder",
+            "configuration or Model snapshot is unavailable"
+        )
+    end
+    return {
+        ports = ports,
+        options = options,
+        generation = generation,
+        model = model_ref,
+    }
+end
+
+---Builds one frozen self-test Model request from a freshly reloaded Config
+---generation. The synthetic observation is quoted data; Tools travel in the
+---inert registry only, and no durable Context view is bound.
+function M.new_self_test_request_builder(ports, options)
+    local admitted, admission_error = validate_self_test_request_builder(ports, options)
+    if not admitted then return nil, admission_error end
+    local generation = admitted.generation
+    local model_ref = admitted.model
+    local safety = admitted.ports.safety
+    local empty_digest, empty_error = safety.digest("yaca-empty-tool-registry-v1\0[]")
+    if not empty_digest then return nil, empty_error end
+    local empty_registry = assert(freeze({
+        version = "yaca-empty-tool-registry-v1",
+        digest = empty_digest,
+        tools = {},
+    }, "empty self-test tool registry"))
+    local view_digest, view_error = safety.digest("yaca-self-test-model-view-v1\0")
+    if not view_digest then return nil, view_error end
+    local capabilities_digest, capability_error = safety.digest(table.concat({
+        "yaca-self-test-model-ref-v1\0",
+        admitted.options.model_name,
+        "\0",
+        model_ref.endpoint,
+        "\0",
+        model_ref.protocol,
+        "\0",
+        model_ref.remote_model or "",
+    }))
+    if not capabilities_digest then return nil, capability_error end
+    local service = {}
+
+    local function proxy_snapshot()
+        local configured = generation.network
+        if configured.follow_proxy ~= true then return { mode = "off" } end
+        if configured.proxy_url_configured == true then
+            return {
+                mode = "explicit",
+                secret_id = "Network.ProxyUrl",
+                destination = "network-proxy",
+                no_proxy = configured.no_proxy or "",
+            }
+        end
+        if type(configured.proxy_url) == "string" and configured.proxy_url ~= "" then
+            return {
+                mode = "explicit",
+                url = configured.proxy_url,
+                no_proxy = configured.no_proxy or "",
+            }
+        end
+        return { mode = "off" }
+    end
+
+    function service.prepare(start)
+        local start_admitted, start_error = validate_activity_start(start)
+        if not start_admitted then return nil, start_error end
+        if start_admitted.purpose ~= "self-test"
+            or start_admitted.continuation ~= false
+            or start_admitted.view_manifest_ref ~= view_digest
+        then
+            return nil, failure(
+                "InvalidModelPurpose",
+                "self-test request builder received another purpose or view"
+            )
+        end
+        local bundle, bundle_error = admitted.ports.prompt:assemble({
+            purpose = "self-test",
+            config_generation = generation.id,
+            layers = {
+                global = {
+                    source = "General.SystemPrompt",
+                    version = generation.id,
+                    text = generation.general.system_prompt,
+                },
+                model = {
+                    source = "Model." .. admitted.options.model_name .. ".SystemPrompt",
+                    version = generation.id,
+                    text = model_ref.system_prompt,
+                },
+                permission = {
+                    source = "Permission.SelfTest.SystemPrompt",
+                    version = generation.id,
+                    text = "",
+                },
+                context = {
+                    source = "ContextPrompt",
+                    version = generation.id,
+                    text = "",
+                },
+            },
+            input = {
+                phase = admitted.options.phase,
+                synthetic_observation = admitted.options.synthetic_observation,
+            },
+            tool_mode = "inert",
+        })
+        if not bundle then return nil, bundle_error end
+        local registry = admitted.options.tool_set == "production"
+            and admitted.ports.tool_registry
+            or empty_registry
+        local public_model_ref = {
+            name = admitted.options.model_name,
+            protocol = model_ref.protocol,
+            endpoint = model_ref.endpoint,
+            remote_model = model_ref.remote_model,
+            capabilities_digest = capabilities_digest,
+            adapter_options = model_ref.adapter_options or {},
+        }
+        if model_ref.key_configured == true then
+            public_model_ref.auth_secret_id = "Model."
+                .. admitted.options.model_name .. ".Key"
+        end
+        local configured_tokens = model_ref.max_output_tokens
+            or admitted.options.default_max_output_tokens
+        local retry_count = model_ref.retry_count or 0
+        local retry_base_delay = model_ref.retry_base_delay_ms
+            or admitted.options.default_retry_base_delay_ms
+        local normalized, normalize_error = admitted.ports.adapter:normalize_request({
+            request_id = start_admitted.request_id,
+            purpose = "self-test",
+            model_ref = public_model_ref,
+            config_generation = generation.id,
+            prompt_bundle = bundle,
+            model_view_manifest = { digest = view_digest },
+            tool_registry = registry,
+            controls_schema = bundle.controls_schema,
+            streaming = model_ref.streaming,
+            limits = {
+                max_output_tokens = math.min(
+                    configured_tokens,
+                    admitted.options.default_max_output_tokens
+                ),
+            },
+            retry_policy = {
+                count = retry_count,
+                base_delay_ms = retry_base_delay,
+            },
+        })
+        if not normalized then return nil, normalize_error end
+        local total_timeout = math.min(
+            model_ref.request_timeout_ms or admitted.options.maximum_request_time_ms,
+            admitted.options.maximum_request_time_ms
+        )
+        local connect_timeout = generation.network.connect_timeout_ms
+            or admitted.options.default_connect_timeout_ms
+        if connect_timeout > total_timeout then connect_timeout = total_timeout end
+        return readonly({
+            request = normalized,
+            secret_source = generation,
+            proxy = freeze(proxy_snapshot(), "self-test model proxy snapshot"),
+            ca_bundle_path = generation.network.ca_bundle_path,
+            connect_timeout_ms = connect_timeout,
+            total_timeout_ms = total_timeout,
+        }, "prepared self-test model request")
+    end
+
+    service.snapshots = freeze({
+        generation = generation.id,
+        model = capabilities_digest,
+        view = view_digest,
+        transmitted_tools = admitted.options.tool_set == "production"
+            and admitted.ports.tool_registry.digest
+            or empty_registry.digest,
+    }, "self-test request builder snapshots")
+    return readonly(service, "self-test request builder")
+end
+
 local REVIEW_BUILDER_OPTION_FIELDS = {
     main_model_name = true,
     permission_name = true,
