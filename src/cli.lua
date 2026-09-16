@@ -412,14 +412,14 @@ local REGISTRY = {
         },
         model_editor = {
             commands = {
-                "help", "list [page]", "show <row-id>", "set <row-id> <key>",
+                "help", "list [page]", "show <row-id>", "test <row-id>", "set <row-id> <key>",
                 "unset <row-id> <key>", "add", "rename <row-id> <name>",
                 "delete <row-id>", "move <row-id> <position>", "preview",
                 "save <editor-id>", "reset", "reload", "cancel", "quit",
             },
             row_identity = "exact-current-model-edit-N:ordinal",
             value_input = "separate-schema-typed-ini-value",
-            secret_input = "raw-no-echo", online = false,
+            secret_input = "raw-no-echo", online = "explicit-confirmed-test-only",
         },
     },
     exit_classes = {
@@ -1375,7 +1375,7 @@ local function render_action_help(descriptor)
         end
         lines[#lines + 1] = "Add starts a blank draft; .back returns to the previous guided field."
         lines[#lines + 1] = "Preview lists Context impacts before save. Context history is never rewritten."
-        lines[#lines + 1] = "Values use separate INI input. No connection test is performed by this editor."
+        lines[#lines + 1] = "Values use separate INI input. Saving is offline; test requires a saved Model and separate confirmation."
     end
     lines[#lines + 1] = "Results: " .. table.concat(descriptor.results, ", ")
     if MACHINE_SUPPORTED[descriptor.id] then
@@ -1815,7 +1815,7 @@ function M.new(options)
                 return nil, failure("ModelEditorInput", "list page must be a bounded positive integer")
             end
             return { operation = operation, page = page }
-        elseif ((operation == "show" or operation == "delete") and #tokens == 2)
+        elseif ((operation == "show" or operation == "delete" or operation == "test") and #tokens == 2)
             or ((operation == "set" or operation == "unset" or operation == "rename"
                 or operation == "move") and #tokens == 3)
         then

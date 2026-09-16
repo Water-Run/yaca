@@ -29,7 +29,9 @@ N7 已针对 Server 2008 SP2 非 R2 x64 的实际控制台修复首次输入失�
 已有有效配置时，`--model-repl` 进入管理列表：`add` 新增，`show <row-id>` 查看，
 `set <row-id> <key>` 编辑，`rename` / `delete` / `move` 管理名称、删除和顺序。
 行号形如 `model-edit-1:1`，每次编辑后用 `list` 获取新行号；`preview` 查看变更和
-受影响 Context，再按提示输入 `save model-edit-N` 保存。联网状态暂为 `untested`。
+受影响 Context，再按提示输入 `save model-edit-N` 保存。保存后重新进入管理器，运行
+`test model-edit-1:1`，核对服务地址及费用范围，再输入 `TEST model-edit-1:1` 进行
+连接测试。结果仅针对本次配置；修改或重载后清除。未保存草稿不能联网测试。
 首次向导及 `add` 支持 `.back` 返回上一项；取消不保存。
 其他配置字段和已有 Permission 的编辑使用 `--config-repl`。如需代理，在 `[Network]` 中配置 `ProxyUrl`；
 证书检查默认使用随包 CA，不要通过关闭证书校验解决连接错误。
@@ -44,9 +46,9 @@ C:\yaca\yaca.exe --self-test --through-stage 1
 C:\yaca\yaca.exe C:\work\yaca-test
 ```
 
-Stage 1 中的 `ST1-ATOMIC-WRITE` 目前固定报告 `unknown`（旧系统资格待验收），
-因此总结果可能返回非零退出码；这不是一项已通过的断电持久性证明。其他检查项
-应逐项核对，实际创建和恢复会话另按下面步骤验证。
+Stage 1 的 `ST1-ATOMIC-WRITE` 使用独立随机临时文件，实际验证创建、刷新、
+无覆盖重命名、替换、读取和清理。通过表示本次文件系统操作成功，不是断电
+持久性或所有旧系统的资格证明；失败或清理结果不确定会阻止后续在线阶段。
 
 在交互界面依次确认：
 
@@ -60,8 +62,20 @@ Stage 1 中的 `ST1-ATOMIC-WRITE` 目前固定报告 `unknown`（旧系统资格
 请记录服务器的 `ver`、32/64 位、文件系统、上述结果及出现的错误编号；这些是
 本机验收依据。`.details` 可以查看当前进程最近的清理后诊断。
 
-可用 `.help` 查看聊天命令，`--help` 查看命令行说明。在线 self-test Stage 2/3
-尚未接通，首次网络验证使用上面的真实聊天。Context 管理器提供列表、检查、搜索，以及 `rename <selector> <new-name>`、
+可用 `.help` 查看聊天命令，`--help` 查看命令行说明。在线自检须在真实 CMD
+控制台运行，并逐次显式同意消耗 API 额度：
+
+```bat
+yaca.exe --self-test --through-stage 2 --i-accept-online-self-test
+yaca.exe --self-test --through-stage 3 --i-accept-online-self-test
+```
+
+Stage 2 检查配置中启用 Model 的连接、认证、协议、流式回复、惰性工具载体和取消；
+Stage 3 给出配置语义建议，不自动修改配置。失败的前置阶段不会被跳过。
+Cygwin SSH 测试需保持真实 PTY，再运行 `winpty cmd`；普通管道不满足 TTY 条件。
+工具相对路径以当前 Context 的工作目录为基准；仍须遵守 Permission 和保留目录限制。
+
+Context 管理器提供列表、检查、搜索，以及 `rename <selector> <new-name>`、
 `set-auto-rename-disabled <selector> <true|false>`、`delete <selector> [--yes]`。
 删除需要精确 hash 确认，且没有撤销。`rebind <selector> <target-root>` 可迁移到已存在的
 工作目录；核对新目录、路径与 hash 后输入 `REBIND <旧hash>`。成功后从新工作目录

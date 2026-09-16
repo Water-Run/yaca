@@ -125,6 +125,26 @@ return {
     name = "integration/model-adapter",
     cases = {
         {
+            name = "coalesced SSE reads preserve all frames across parser batch limits",
+            run = function()
+                local service = assert(load_module("model").new(limits({ maximum_sse_events_per_push = 2, maximum_events = 1024 })))
+                local normalized = request(service, "openai-chat", "force", "coalesced")
+                local session = assert(service:new_response(normalized))
+                local chunks = {}
+                for index = 1, 300 do
+                    chunks[index] = 'data: {"id":"r1","choices":[{"index":0,"delta":{"content":"x"},"finish_reason":null}]}\n\n'
+                end
+                chunks[#chunks + 1] = 'data: {"id":"r1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'
+                assert(session:push(table.concat(chunks)))
+                local _, response = session:finish()
+                A.falsy(response.incomplete)
+                A.equal(response.finish_class, "stop")
+                local bytes = {}
+                for _, block in ipairs(response.content_blocks) do if block.kind == "text" then bytes[#bytes+1] = block.text end end
+                A.equal(table.concat(bytes), string.rep("x", 300))
+            end,
+        },
+        {
             name = "durable model view is quoted between authority layers and current input",
             run = function()
                 local cache = {}

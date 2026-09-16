@@ -371,7 +371,81 @@ local function context_harness(commands, settings)
     return result, err, table.concat(written), calls, controls
 end
 
+local function model_test_harness(commands, settings)
+    settings = settings or {}
+    local batches = {}
+    for _, command in ipairs(commands) do
+        batches[#batches + 1] = {
+            { kind = "user_action", action = "text", text = command },
+            { kind = "user_action", action = "submit-or-queue" },
+        }
+    end
+    local composed, runtime, terminals, written, controls = harness(batches)
+    local new_terminal = composed.backend.new_terminal
+    composed.backend.new_terminal = function(mode)
+        local terminal = new_terminal(mode)
+        local poll = terminal.poll
+        terminal.poll = function(self, now, budget)
+            if self.cancelled then return { { kind = "io_terminal" } } end
+            return poll(self, now, budget)
+        end
+        return terminal
+    end
+    local calls = 0
+    local original = main.check_model_connection
+    main.check_model_connection = function(_, name, saved)
+        calls = calls + 1
+        A.equal(name, "Primary")
+        A.truthy(saved.models.Primary.enabled)
+        for _, terminal in ipairs(terminals) do A.truthy(terminal.closed) end
+        return { outcome = "passed", summary = "probe passed", online_requests = 1 }
+    end
+    if settings.change then
+        local output = runtime.stdout
+        runtime.stdout = function(bytes)
+            if bytes:find("MODELS model-edit-1", 1, true) then
+                controls.external_write(CONFIG_PATH, source():gsub("example%-secret%-value", "changed-secret-value"))
+            end
+            return output(bytes)
+        end
+    end
+    local called, result, err = pcall(main.run_model_manager, composed, runtime)
+    main.check_model_connection = original
+    A.truthy(called, result)
+    for _, terminal in ipairs(terminals) do A.truthy(terminal.closed) end
+    return result, err, table.concat(written), calls, controls
+end
+
 local context_cases = {
+    {
+        name = "Model connection tests need exact consent and report current results without saving",
+        run = function()
+            local result, err, output, calls, controls = model_test_harness({
+                "test model-edit-1:1", "no", "test model-edit-1:1", "TEST model-edit-1:1", "list", "quit",
+            })
+            A.truthy(result, A.render(err))
+            A.equal(calls, 1, output)
+            A.equal(result.online_requests, 1)
+            A.contains(output, "test=passed")
+            A.contains(output, "Connection test cancelled")
+            A.equal(controls.bytes(CONFIG_PATH), source())
+        end,
+    },
+    {
+        name = "Model connection tests refuse unsaved or externally changed secret definitions",
+        run = function()
+            local result, err, output, calls = model_test_harness({
+                "rename model-edit-1:1 Renamed", "test model-edit-2:1", "quit",
+            })
+            A.truthy(result, A.render(err))
+            A.equal(calls, 0)
+            A.contains(output, "ModelTestUnsaved")
+            result, err, output, calls = model_test_harness({ "test model-edit-1:1", "quit" }, { change = true })
+            A.truthy(result, A.render(err))
+            A.equal(calls, 0)
+            A.contains(output, "ModelTestStale")
+        end,
+    },
     {
         name = "Model rename lists referenced Contexts and saves without rewriting their history",
         run = function()

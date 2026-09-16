@@ -1434,17 +1434,23 @@ local function new_response_session(codec, options, request_data, registry, cont
             buffered[#buffered + 1] = bytes
             return freeze(batch, "model event batch")
         end
-        local events, sse_error = sse:push(bytes)
-        if not events then
-            protocol_fail(sse_error.code, protocol == "openai-chat")
-            return freeze(batch, "model event batch")
-        end
-        for _, event in ipairs(events) do
-            if protocol == "openai-chat" then
-                if event.data ~= "[DONE]" and not handle_openai_json(event.data) then break end
-            elseif not handle_anthropic_event(event.event, event.data) then
+        -- A completed curl body can contain many SSE frames in one read. Feed
+        -- bounded slices so transport chunking never becomes an SSE event cap.
+        local step = math.min(options.maximum_sse_events_per_push, 4096)
+        for offset = 1, #bytes, step do
+            local events, sse_error = sse:push(bytes:sub(offset, offset + step - 1))
+            if not events then
+                protocol_fail(sse_error.code, protocol == "openai-chat")
                 break
             end
+            for _, event in ipairs(events) do
+                if protocol == "openai-chat" then
+                    if event.data ~= "[DONE]" and not handle_openai_json(event.data) then break end
+                elseif not handle_anthropic_event(event.event, event.data) then
+                    break
+                end
+            end
+            if state ~= "open" then break end
         end
         return freeze(batch, "model event batch")
     end

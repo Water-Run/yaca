@@ -237,6 +237,20 @@ return {
     name = "integration/direct-tools",
     cases = {
         {
+            name = "relative tool paths resolve only against the bound workspace and retain reserved-root denial",
+            run = function()
+                local service = fixture()
+                local listed = run(service, "list", { path = ".", depth = 1, page_size = 16 }, "relative-list")
+                A.equal(listed.outcome, "success")
+                local read = run(service, "read", { path = "sub/../a.txt", start_line = 1, max_lines = 1 }, "relative-read")
+                A.equal(read.outcome, "success")
+                local denied, err = call(service, "read", { path = "../reserved/config.ini", start_line = 1, max_lines = 1 }, "reserved-relative")
+                A.falsy(denied)
+                A.equal(err.code, "ReservedTreeDenied")
+                A.falsy(call(service, "read", { path = "C:ambiguous", start_line = 1, max_lines = 1 }, "drive-relative"))
+            end,
+        },
+        {
             name = "registry is exactly eight versioned tools and non-main purposes are empty",
             run = function()
                 local service = fixture()

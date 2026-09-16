@@ -926,6 +926,22 @@ function M.new(dependencies, options)
         return result
     end
 
+    local function resolve_tool_path(value, label)
+        if not valid_string(value, limits.maximum_path_bytes, false) then
+            return nil, failure("InvalidToolArguments", label .. " is not a bounded path")
+        end
+        local normalized = limits.platform_kind == "windows" and value:gsub("\\", "/") or value
+        if normalized:sub(1, 1) ~= "/" and not normalized:match("^[A-Za-z]:/") then
+            if normalized:match("^[A-Za-z]:") then
+                return nil, failure("InvalidToolArguments", "drive-relative paths are ambiguous")
+            end
+            normalized = limits.workspace_path .. "/" .. normalized
+        end
+        local logical, path_error = ports.path.to_logical(normalized)
+        if not logical then return nil, path_error end
+        return ports.path.from_logical(logical, limits.platform_kind)
+    end
+
     local function normalize_arguments(tool, arguments)
         if tool == "list" then
             if not exact_fields(arguments, {
@@ -933,7 +949,7 @@ function M.new(dependencies, options)
             }) then
                 return nil, failure("InvalidToolArguments", "list arguments contain unknown fields")
             end
-            local path, path_error = normalize_path(arguments.path, limits, "list path")
+            local path, path_error = resolve_tool_path(arguments.path, "list path")
             if not path then return nil, path_error end
             if not valid_integer(arguments.depth, 0) or arguments.depth > limits.maximum_list_depth
                 or not valid_integer(arguments.page_size, 1)
@@ -958,7 +974,7 @@ function M.new(dependencies, options)
             if not exact_fields(arguments, { path = true, start_line = true, max_lines = true }) then
                 return nil, failure("InvalidToolArguments", "read arguments contain unknown fields")
             end
-            local path, path_error = normalize_path(arguments.path, limits, "read path")
+            local path, path_error = resolve_tool_path(arguments.path, "read path")
             if not path then return nil, path_error end
             if not valid_integer(arguments.start_line, 1)
                 or not valid_integer(arguments.max_lines, 1)
@@ -982,7 +998,7 @@ function M.new(dependencies, options)
             }) then
                 return nil, failure("InvalidToolArguments", "search arguments contain unknown fields")
             end
-            local path, path_error = normalize_path(arguments.path, limits, "search path")
+            local path, path_error = resolve_tool_path(arguments.path, "search path")
             if not path then return nil, path_error end
             if not valid_string(arguments.pattern, limits.maximum_search_pattern_bytes, false)
                 or (arguments.dialect ~= "literal" and arguments.dialect ~= "lua-pattern-v1")
@@ -1030,7 +1046,7 @@ function M.new(dependencies, options)
             }) then
                 return nil, failure("InvalidToolArguments", "write arguments contain unknown fields")
             end
-            local path, path_error = normalize_path(arguments.path, limits, "write path")
+            local path, path_error = resolve_tool_path(arguments.path, "write path")
             if not path then return nil, path_error end
             local content, content_error = normalize_policy_text(
                 arguments.content,
@@ -1100,7 +1116,7 @@ function M.new(dependencies, options)
             }) then
                 return nil, failure("InvalidToolArguments", "patch arguments contain unknown fields")
             end
-            local path, path_error = normalize_path(arguments.path, limits, "patch path")
+            local path, path_error = resolve_tool_path(arguments.path, "patch path")
             if not path then return nil, path_error end
             local target, target_error = inspect_path(path)
             if not target then return nil, target_error end
@@ -1134,9 +1150,9 @@ function M.new(dependencies, options)
             }) then
                 return nil, failure("InvalidToolArguments", "rename arguments contain unknown fields")
             end
-            local source_path, source_error = normalize_path(arguments.source, limits, "rename source")
+            local source_path, source_error = resolve_tool_path(arguments.source, "rename source")
             if not source_path then return nil, source_error end
-            local target_path, target_path_error = normalize_path(arguments.target, limits, "rename target")
+            local target_path, target_path_error = resolve_tool_path(arguments.target, "rename target")
             if not target_path then return nil, target_path_error end
             local source, inspect_error = inspect_path(source_path)
             if not source then return nil, inspect_error end
@@ -1175,7 +1191,7 @@ function M.new(dependencies, options)
             }) then
                 return nil, failure("InvalidToolArguments", "delete arguments contain unknown fields")
             end
-            local path, path_error = normalize_path(arguments.path, limits, "delete path")
+            local path, path_error = resolve_tool_path(arguments.path, "delete path")
             if not path then return nil, path_error end
             local target, target_error = inspect_path(path)
             if not target then return nil, target_error end
@@ -1207,7 +1223,7 @@ function M.new(dependencies, options)
                 return nil, failure("InvalidToolArguments", "opaque command is invalid or too large")
             end
             local cwd = arguments.cwd or workspace.canonical_path
-            local cwd_path, cwd_error = normalize_path(cwd, limits, "exec cwd")
+            local cwd_path, cwd_error = resolve_tool_path(cwd, "exec cwd")
             if not cwd_path then return nil, cwd_error end
             local cwd_target, inspect_error = inspect_path(cwd_path)
             if not cwd_target then return nil, inspect_error end

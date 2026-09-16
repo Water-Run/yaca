@@ -114,6 +114,7 @@ return {
                 for _, line in ipairs({ "help", "add", "preview", "reset", "reload", "cancel", "quit" }) do
                     A.equal(assert(service.parse_model_editor(line, id)).operation, line)
                 end
+                A.deep_equal(assert(service.parse_model_editor("test model-edit-3:2", id)), { operation = "test", row = 2 })
                 A.equal(assert(service.parse_model_editor("save " .. id, id)).operation, "save")
                 A.deep_equal(assert(service.parse_model_editor("list", id)), { operation = "list", page = 1 })
                 for _, line in ipairs({ "save", "save model-edit-2", "show Primary", "show model-edit-2:1",

@@ -1872,12 +1872,12 @@ local MODEL_ADAPTER_OPTIONS = {
     maximum_tool_argument_bytes = 32768,
     maximum_total_tool_argument_bytes = 262144,
     maximum_content_blocks = 256,
-    maximum_events = 512,
+    maximum_events = 16384,
 }
 
 local MODEL_ACTIVITY_OPTIONS = {
     maximum_poll_events = 128,
-    maximum_queued_events = 1024,
+    maximum_queued_events = 16386,
     maximum_header_bytes = 262144,
     maximum_header_line_bytes = 16384,
     maximum_header_lines = 1024,
@@ -3671,6 +3671,79 @@ local function context_catalog_page(context_services, observation, generation, v
     }
 end
 
+---Exercises publication in private, uniquely named fixtures on this filesystem.
+-- A successful probe is runtime evidence, never power-loss or release qualification.
+function M.check_publication(runtime)
+    local fs = runtime.backend.filesystem
+    local root = runtime.layout.data_root
+    local random = runtime.backend.system.secure_random(16)
+    if type(random) ~= "string" or #random ~= 16 then
+        return check_result("failed", "publication probe randomness is unavailable")
+    end
+    local suffix = random:gsub(".", function(byte) return string.format("%02x", byte:byte()) end)
+    local prefix = root .. "/.yaca-self-test-" .. suffix
+    local owned, handles = {}, {}
+    local function need(ok, value)
+        if not ok then error(type(value) == "table" and value.code or "PublicationProbeFailed", 0) end
+        return value
+    end
+    local function create(path, bytes)
+        local missing = need(fs.direct_inspect(path))
+        if missing.exists then error("PublicationProbeCollision", 0) end
+        local handle = need(fs.direct_create_new(missing, 384))
+        handles[handle] = path
+        owned[path] = need(fs.stat_identity(handle))
+        need(fs.stream_write(handle, bytes))
+        owned[path] = need(fs.stat_identity(handle))
+        need(fs.flush_file(handle))
+        need(fs.close(handle))
+        handles[handle] = nil
+        return need(fs.direct_inspect(path))
+    end
+    local ok, problem = pcall(function()
+        local first = create(prefix .. ".old", "publication-before\n")
+        local missing = need(fs.direct_inspect(prefix .. ".target"))
+        need(fs.direct_rename(first, missing))
+        owned[prefix .. ".target"], owned[prefix .. ".old"] = first.identity, nil
+        need(fs.flush_directory(root))
+        local temporary = create(prefix .. ".new", "publication-after\n")
+        local target = need(fs.direct_inspect(prefix .. ".target"))
+        need(fs.direct_replace(temporary, target))
+        owned[prefix .. ".target"], owned[prefix .. ".new"] = temporary.identity, nil
+        need(fs.flush_directory(root))
+        local bytes, identity = read_file_bytes(fs, prefix .. ".target", 128)
+        if not bytes then error(identity.code or "PublicationProbeRead", 0) end
+        if identity.volume ~= temporary.identity.volume or identity.object ~= temporary.identity.object then
+            error("PublicationProbeTargetChanged", 0)
+        end
+        if bytes ~= "publication-after\n" then error("PublicationProbeMismatch", 0) end
+        owned[prefix .. ".target"] = identity
+    end)
+    local cleaned = true
+    for handle, path in pairs(handles) do
+        local stated, valid, identity = pcall(fs.stat_identity, handle)
+        if stated and valid then owned[path] = identity end
+        local called, closed = pcall(fs.close, handle)
+        if not called or not closed then cleaned = false end
+    end
+    for path, identity in pairs(owned) do
+        local called, deleted = pcall(fs.delete_verified, path, identity)
+        if not called or not deleted then cleaned = false end
+    end
+    local called, flushed = pcall(fs.flush_directory, root)
+    if not called or not flushed then cleaned = false end
+    if not cleaned then
+        return check_result("unknown", "publication probe cleanup or directory flush could not be verified",
+            { "scope=isolated-runtime-probe", "qualification=not-assessed" })
+    end
+    if not ok then
+        return check_result("failed", "publication round-trip failed",
+            { "code=" .. safe_diagnostic(problem, 128), "qualification=not-assessed" })
+    end
+    return check_result("passed", "isolated publication round-trip and cleanup passed",
+        { "create-flush-rename-replace-read-delete=passed", "qualification=not-assessed" })
+end
+
 local function build_offline_self_test(runtime)
     local filesystem = runtime.backend.filesystem
     local layout = runtime.layout
@@ -3817,11 +3890,7 @@ local function build_offline_self_test(runtime)
                 and capabilities.rename_no_replace_candidate
                 and capabilities.verified_delete_candidate
             then
-                return check_result(
-                    "unknown",
-                    "publication primitives still require target qualification",
-                    { "qualification=pending-target-evidence" }
-                )
+                return M.check_publication(runtime)
             end
             return check_result("failed", "required publication primitives are unavailable")
         end
@@ -3984,7 +4053,7 @@ local SELF_TEST_CAPABILITY_INSTRUCTIONS = {
     ["ST2-MODEL-WIRE"] = "This is a protocol probe. Reply with the single word READY.",
     ["ST2-MODEL-STREAM"] = "This is a streaming probe. Reply with exactly: STREAM CHECK OK.",
     ["ST2-MODEL-TOOLS"] = "This request carries an inert tool schema. Do not call any tool. Reply with the single word READY.",
-    ["ST2-MODEL-CONTROL"] = 'This is a tool-carrier probe. Call the function list with arguments {"path":"."} exactly once. The tool is inert and will not run.',
+    ["ST2-MODEL-CONTROL"] = 'This is a tool-carrier probe. Call the function list with arguments {"path":".","depth":1,"page_size":1} exactly once. The tool is inert and will not run.',
     ["ST2-MODEL-USAGE-CANCEL"] = "This is a cancellation probe. Reply with the single word READY.",
 }
 
@@ -4026,6 +4095,9 @@ local function resolve_self_test_generation(composed, specification)
     end
     if model.endpoint ~= specification.model.endpoint then
         return nil, "ModelChanged", "the Model endpoint changed after the self-test snapshot"
+    end
+    if generation.id ~= specification.snapshot_id then
+        return nil, "ConfigChanged", "configuration changed after the online test was confirmed"
     end
     return generation
 end
@@ -4572,6 +4644,15 @@ local function build_online_model_self_test(composed)
     end
 end
 
+---Runs a confirmed connection probe against one saved configuration generation.
+function M.check_model_connection(composed, name, generation)
+    return build_online_model_self_test(composed)({
+        check = { id = "ST2-MODEL-WIRE" },
+        model = { id = name, endpoint = generation.models[name].endpoint },
+        snapshot_id = generation.id,
+    })
+end
+
 local function bounded_value(value, maximum)
     local text = tostring(value)
     if #text > maximum then text = text:sub(1, maximum) .. "..." end
@@ -4776,6 +4857,7 @@ local function build_online_advisory_self_test(composed)
             {
                 check = specification.check,
                 model = { id = target.id, endpoint = target.endpoint },
+                snapshot_id = specification.snapshot_id,
             },
             {
                 phase = "semantic",
@@ -5111,6 +5193,9 @@ function M.compose_runtime(runtime)
         layout = layout,
         backend = backend,
         context_services = contexts,
+        contexts = contexts,
+        config = config_service,
+        model_activity_options = MODEL_ACTIVITY_OPTIONS,
         context_error = contexts_error,
         model_adapter = model_adapter,
         network = network_service,
@@ -10007,12 +10092,13 @@ local function collect_new_model(config, input, suggested_name, make_draft, requ
     end
 end
 
----Manages physical Model order and private field drafts without network I/O.
+---Manages private Model drafts; a separate confirmed action tests saved Models.
 function M.run_model_manager(composed, runtime)
     local config = composed.config
     local base, begin_error = config.begin_edit(composed.layout.config_path)
     if not base then return nil, begin_error end
     local draft, revision, changes, plan = base, 1, {}, nil
+    local test_results, online_requests = {}, 0
     local input, input_error = new_model_setup_input(composed, runtime)
     if not input then return nil, input_error end
     local function editor_id() return "model-edit-" .. tostring(revision) end
@@ -10035,7 +10121,8 @@ function M.run_model_manager(composed, runtime)
             .. " remote=" .. display(model.remote_model or "(unset)")
             .. " origin=" .. (endpoint and display(endpoint.origin) or "(unset)")
             .. " streaming=" .. tostring(model.streaming) .. " tools=" .. tostring(model.tools_enabled)
-            .. " key=" .. (model.key_configured and "set" or "missing") .. " test=untested"
+            .. " key=" .. (model.key_configured and "set" or "missing")
+            .. " test=" .. (test_results[name] or "untested")
     end
     local function field_value(row)
         if row.hidden then return row.configured and "[hidden; configured]" or "[hidden; default]" end
@@ -10061,13 +10148,15 @@ function M.run_model_manager(composed, runtime)
     local function result(outcome, state, committed)
         return readonly({ action = "model-repl", outcome = outcome, state = state,
             config_path = composed.layout.config_path,
-            config_generation = committed and committed.id or false, online_requests = 0 }, "Model editor result")
+            config_generation = committed and committed.id or false,
+            online_requests = online_requests }, "Model editor result")
     end
     local function advance(candidate, change)
         if revision == math.maxinteger or #changes >= 256 then
             return nil, failure("ModelEditorLimit", "save or discard the current Model changes first")
         end
         revision, draft, plan = revision + 1, candidate, nil
+        test_results = {}
         changes[#changes + 1] = change
         return input.write("Draft " .. editor_id() .. " validated. Use list for current row identities; preview before save.\n")
     end
@@ -10169,7 +10258,7 @@ function M.run_model_manager(composed, runtime)
     end
     local function run_editor()
         local written, write_error = input.write("YACA MODEL MANAGER\n"
-            .. "Offline configuration draft. Enter help for commands; add starts a blank guided Model.\n")
+            .. "Configuration draft. Enter help; add starts a blank Model; test checks a saved Model after confirmation.\n")
         if not written then return nil, write_error end
         written, write_error = list(1)
         if not written then return nil, write_error end
@@ -10199,6 +10288,43 @@ function M.run_model_manager(composed, runtime)
                         lines[#lines + 1] = row.key .. " = " .. field_value(row) .. " [" .. row.type .. "]"
                     end
                     handled, action_error = input.write(table.concat(lines, "\n") .. "\n")
+                elseif operation == "test" then
+                    handled, action_error = nil, nil
+                    local saved, saved_error = config.reload_file(composed.layout.config_path)
+                    if #changes > 0 then
+                        action_error = failure("ModelTestUnsaved", "save and reopen the manager before testing edited Models")
+                    elseif not saved then action_error = saved_error
+                    elseif not plain_equal(saved.models[name], generation().models[name])
+                        or not plain_equal(saved.network, generation().network)
+                        or not plain_equal(saved.general, generation().general)
+                        or saved.matches_model_secrets(generation(), name) ~= true
+                    then
+                        action_error = failure("ModelTestStale", "configuration changed; reload before testing")
+                    elseif not saved.models[name].enabled then
+                        action_error = failure("ModelTestDisabled", "enable and save the Model before testing")
+                    else
+                        local row = editor_id() .. ":" .. tostring(command.row)
+                        local endpoint = normalized_endpoint_identity(saved.models[name].endpoint)
+                        local attempts = 1 + (saved.models[name].retry_count or 0)
+                        written, write_error = input.write("Connection test for " .. display(name) .. " at "
+                            .. display(endpoint.origin .. endpoint.route:gsub("%?.*$", "?configured"))
+                            .. ". Up to " .. tostring(attempts) .. " provider attempts, 1024 output tokens per attempt; API charges may apply.\n"
+                            .. "Sends a synthetic probe and configured system prompts; no Context or tools.\n")
+                        if not written then return nil, write_error end
+                        local answer, answer_error = input.read("Type TEST " .. row .. " to connect: ", false, 128)
+                        if answer == nil then return nil, answer_error end
+                        if answer ~= "TEST " .. row then
+                            handled, action_error = input.write("Connection test cancelled.\n")
+                        else
+                            handled, action_error = input.close()
+                            if not handled then return nil, action_error end
+                            local tested = M.check_model_connection(composed, name, saved)
+                            online_requests = online_requests + tested.online_requests
+                            test_results[name] = tested.outcome
+                            handled, action_error = input.write("Connection test " .. display(tested.outcome)
+                                .. ": " .. display(tested.summary) .. "\n")
+                        end
+                    end
                 elseif operation == "preview" then
                     handled, action_error = preview()
                 elseif operation == "add" then
@@ -10214,6 +10340,7 @@ function M.run_model_manager(composed, runtime)
                     if operation == "reload" then candidate, action_error = config.begin_edit(composed.layout.config_path) end
                     if candidate then
                         base, draft, changes, plan = candidate, candidate, {}, nil
+                        test_results = {}
                         revision = revision + 1
                         handled, action_error = list(1)
                     else handled = nil end
@@ -10246,7 +10373,9 @@ function M.run_model_manager(composed, runtime)
                             if code ~= "DestinationExists" and code ~= "AlreadyExists" and code ~= "TemporaryConflict" then break end
                         end
                         if committed then
-                            written, write_error = input.write("Models published offline. No network request was made.\n")
+                            written, write_error = input.write(online_requests == 0
+                                and "Models published offline. No network request was made.\n"
+                                or "Models published. Saving makes no network request.\n")
                             if not written then return nil, write_error end
                             return result("success", "published", committed)
                         end

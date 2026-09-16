@@ -279,6 +279,24 @@ return {
     name = "integration/self-test-online-request",
     cases = {
         {
+            name = "online production probe rejects a changed generation before transport starts",
+            run = function()
+                local main = load_module("main", cache)
+                local saved, changed = generation(), generation()
+                changed.id = "config-generation-2"
+                local composed = {
+                    config = { reload_file = function() return changed end },
+                    layout = { config_path = "/data/config.ini" },
+                    model_adapter = {}, network = {},
+                    contexts = { safety = {}, prompt = {}, tool_registry = {} },
+                }
+                local result = main.check_model_connection(composed, "Primary", saved)
+                A.equal(result.online_requests, 0)
+                A.equal(result.outcome, "failed")
+                A.contains(table.concat(result.evidence), "ConfigChanged")
+            end,
+        },
+        {
             name = "self-test builder binds the synthetic view and hides secrets",
             run = function()
                 local value = builder({ observation = "Reply with READY." })

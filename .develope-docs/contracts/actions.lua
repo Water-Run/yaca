@@ -56,14 +56,14 @@ return {
     },
     model_editor = {
       commands = {
-        "help", "list [page]", "show <row-id>", "set <row-id> <key>",
+        "help", "list [page]", "show <row-id>", "test <row-id>", "set <row-id> <key>",
         "unset <row-id> <key>", "add", "rename <row-id> <name>",
         "delete <row-id>", "move <row-id> <position>", "preview",
         "save <editor-id>", "reset", "reload", "cancel", "quit",
       },
       row_identity = "exact-current-model-edit-N:ordinal",
       value_input = "separate-schema-typed-ini-value",
-      secret_input = "raw-no-echo", online = false,
+      secret_input = "raw-no-echo", online = "explicit-confirmed-test-only",
     },
   },
   exit_classes = {
