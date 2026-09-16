@@ -1496,7 +1496,7 @@ return {
                 A.truthy(catalog.rows[1].current)
                 A.equal(catalog.rows[2].name, "Secondary")
 
-                local preview = assert(agent.models:preview("Secondary"))
+                local preview = assert(agent.models:preview("sECONDARY"))
                 A.truthy(preview.confirmation_required)
                 A.equal(preview.effective_at, "next-turn")
                 A.equal(preview.from.endpoint_origin, "https://primary.example")

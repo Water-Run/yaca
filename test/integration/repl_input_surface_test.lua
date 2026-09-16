@@ -602,7 +602,7 @@ local context_cases = {
                 maximum_segment_bytes = 255, maximum_hash_chunk_bytes = 64,
             }))
             local hash = assert(path.context_hash("/Task001.xml"))
-            local commands = { "import /data/CONTEXT/Task001.xml", "Primary", "Std", "IMPORT " .. hash, "quit" }
+            local commands = { "import /data/CONTEXT/Task001.xml", "pRIMARY", "sTD", "IMPORT " .. hash, "quit" }
             local result, err, output, calls = context_harness(commands, { manage = true })
             A.truthy(result, A.render(err))
             A.contains(output, "VALIDATED READ-ONLY")

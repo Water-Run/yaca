@@ -6,7 +6,7 @@ yaca is the design for a simple, single-agent, terminal-only general Agent,
 licensed under GPL v3. Software development is a first-class common workload,
 not its exclusive purpose.
 
-> **Project status (2026-09-14): platform-independent core implemented through M9; controller closure and target qualification pending.** No target archive has qualified for release. The sections below distinguish connected behavior from parser-only command grammar. Target-specific behavior remains unqualified until it passes independently on Win32 x86, Win64 x86_64, and Linux x86_64. Gate A/B remain passed and Release Gate R remains closed.
+> **Project status (2026-09-16): platform-independent core implemented through M9; controller closure and target qualification pending.** No target archive has qualified for release. The sections below distinguish connected behavior from parser-only command grammar. Target-specific behavior remains unqualified until it passes independently on Win32 x86, Win64 x86_64, and Linux x86_64. Gate A/B remain passed and Release Gate R remains closed.
 
 ## Supported release targets
 
@@ -159,7 +159,7 @@ Busy, corrupt or incompletely scanned Contexts block reference-changing saves.
 `reset`, `reload`, `cancel` and `quit` discard unsaved changes. Model definitions are
 summaries in `--config-repl`; edit them in `--model-repl`. Permission profiles support
 existing-field editing; add/rename/delete/reorder them manually in INI, as selected
-for v0.1. Connection testing remains pending, and the manager reports `untested`. `--context-repl recent|full` opens the offline Context manager. It
+for v0.1. `test <row-id>` checks a saved Model after an explicit, bounded online confirmation; edits clear the observed test status. `--context-repl recent|full` opens the offline Context manager. It
 shows the requested initial catalog and accepts `list [recent|full]`,
 `inspect <selector>`, `search <query>`, `refresh`, `help`, and `quit`.
 List and search use a bounded snapshot; `refresh` rescans it explicitly.
@@ -186,11 +186,9 @@ named previous file, never breaks a writer lock or replays unfinished operations
 `export <selector>` prints the same verified Markdown as `--export`. `select <selector>`
 closes the manager terminal and continues the exact selection, using the same workspace
 confirmation when needed. A cancelled confirmation stays in management.
-Online self-test Stage 2/3 scheduling and consent are
-implemented, but their production adapters currently report an unavailable
-implementation rather than issuing Model requests.
+Online self-test Stage 2/3 use the production Model and transport adapters. Stage 1 first verifies an isolated filesystem publication round-trip. Online probes never execute product tools or modify configuration; Stage 3 findings are advisory.
 
-Bare `yaca` is exactly `yaca .`. `--` ends option parsing, so a directory beginning with `-` remains expressible. Linux never treats `/...` as an option. Non-TTY self-test Stage 2 or 3 requires the explicit current-invocation flag `--i-accept-online-self-test`; otherwise it performs zero Model requests and fails closed.
+Bare `yaca` is exactly `yaca .`. `--` ends option parsing, so a directory beginning with `-` remains expressible. Linux never treats `/...` as an option. Self-test Stage 2 or 3 requires a real interactive TTY and the current-invocation flag `--i-accept-online-self-test`; a pipe remains unsupported even with consent.
 
 Chat text fallbacks are `.queue` (`list|delete|move|edit|clear`), `.immediate`, `.side`, `.multiline`, `.cancel`, `.cautious`, `.model`, `.context`, `.status`, `.help`, `.details`, `.prompt`, `.compact`, and `.quit`. They project the same semantic actions as terminal shortcuts and do not create a remote/headless controller.
 
@@ -216,3 +214,5 @@ the same guard instead of invoking it unguarded:
 ```sh
 bash .tools/run_with_resource_guard.sh bin/lua55 test/run.lua
 ```
+
+Model and Permission selectors match full logical names with ASCII-only case folding; persisted names retain their configured spelling. Relative tool paths resolve against the current Context workspace and retain the same Permission and reserved-tree checks.

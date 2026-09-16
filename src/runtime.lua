@@ -2007,6 +2007,8 @@ function M.new_agent_loop(ports, options)
                     or (admission.after_review ~= false
                         and admission.after_review ~= "allow"
                         and admission.after_review ~= "confirm")
+                    or (admission.decision == "review"
+                        and admission.after_review == false)
                 then
                     local result = synthetic_result(
                         "synthetic-admission-error",
@@ -2028,7 +2030,10 @@ function M.new_agent_loop(ports, options)
                     fields = {
                         toolCallId = call.id,
                         capabilities = admission.capabilities,
-                        decision = admission.decision,
+                        -- Review is a Runtime phase, not a Permission verdict.
+                        -- Preserve the base capability decision in the XML.
+                        decision = admission.decision == "review"
+                            and admission.after_review or admission.decision,
                         profileSnapshot = admission.permission_snapshot_digest,
                     },
                 } })

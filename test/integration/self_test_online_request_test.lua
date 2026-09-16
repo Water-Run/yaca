@@ -279,6 +279,43 @@ return {
     name = "integration/self-test-online-request",
     cases = {
         {
+            name = "control probe accepts only the exact complete validated inert call",
+            run = function()
+                local main = load_module("main", cache)
+                local normalized = { finish_class = "tool_calls", tool_calls_validated = true,
+                    tool_calls = { { name = "list", canonical_arguments = '{"depth":1,"page_size":1,"path":"."}' } } }
+                local observation = { events = {}, response = { normalized = normalized } }
+                local function outcome()
+                    return main.evaluate_self_test_check("ST2-MODEL-CONTROL", observation, {}).outcome
+                end
+                A.equal(outcome(), "passed")
+                normalized.incomplete = true
+                A.equal(outcome(), "failed")
+                normalized.incomplete = false
+                normalized.tool_calls[1].canonical_arguments = '{"path":"."}'
+                A.equal(outcome(), "failed")
+                normalized.tool_calls = {}
+                A.equal(outcome(), "failed")
+            end,
+        },
+        {
+            name = "an explicitly cancelled probe is a cancellation success rather than a transport failure",
+            run = function()
+                local main = load_module("main", cache)
+                local observation = { cancel_requested = true, online_requests = 1,
+                    events = { { kind = "transport_error", error_id = "self-test-cancel" } },
+                    response = { normalized = { finish_class = "cancelled", tool_calls = {} } },
+                }
+                local result = main.evaluate_self_test_check("ST2-MODEL-USAGE-CANCEL", observation, {})
+                A.equal(result.outcome, "passed")
+                observation.cancel_requested = false
+                A.equal(main.evaluate_self_test_check("ST2-MODEL-USAGE-CANCEL", observation, {}).outcome, "failed")
+                observation.response.normalized.finish_class = "incomplete"
+                observation.cancel_requested = true
+                A.equal(main.evaluate_self_test_check("ST2-MODEL-USAGE-CANCEL", observation, {}).outcome, "failed")
+            end,
+        },
+        {
             name = "online production probe rejects a changed generation before transport starts",
             run = function()
                 local main = load_module("main", cache)

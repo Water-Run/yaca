@@ -5,7 +5,7 @@ Use only the schemas supplied in this request. Do not invent tools, capabilities
 
 return {
   contract_version = "0.1.0-readiness.1",
-  prompt_version = "yaca-prompt-v0.1.0-readiness.2",
+  prompt_version = "yaca-prompt-v0.1.0-readiness.3",
   decision_refs = { "D-020", "D-027", "D-044", "D-049", "D-051", "D-052" },
 
   segment_order = { "runtime-purpose", "global", "model", "permission", "context", "user-message" },
@@ -69,7 +69,7 @@ Produce only the requested StructuredSummary. Preserve required identities, unre
       controls = "inert-observation-only",
       user_instruction_layers = { "global", "model" },
       text = runtime_contract .. [[
-Perform only the requested self-test observation. Do not execute a product tool, mutate configuration, grant Permission, or repair anything. Return the exact self-test schema.]],
+Perform the synthetic observation specified by the self-test fixture. For a capability probe, return the requested text or emit the single requested inert tool call with the exact supplied arguments. Emitting an inert call tests the protocol only: no tool will execute and no external effect may be claimed. For semantic review, return only the requested JSON object. Never mutate configuration, grant Permission, or repair anything.]],
     },
     ["context-name"] = {
       tools = "none",

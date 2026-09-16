@@ -1628,6 +1628,12 @@ return {
                     calls = { call("exec", 1) },
                 })))
                 A.equal(f.loop:status().state, "EvaluatingAction")
+                local permission_event
+                for _, event in ipairs(f.events) do
+                    if event.type == "permission_decision" then permission_event = event end
+                end
+                A.truthy(permission_event)
+                A.equal(permission_event.fields.decision, "confirm")
                 assert(f.loop:resolve_action_review({
                     verdict = "tighten",
                     review_id = "action-review-1",

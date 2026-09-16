@@ -10,7 +10,7 @@ local text = require("text")
 local M = {}
 local ASSEMBLED_BUNDLES = setmetatable({}, { __mode = "k" })
 
-local PROMPT_VERSION = "yaca-prompt-v0.1.0-readiness.2"
+local PROMPT_VERSION = "yaca-prompt-v0.1.0-readiness.3"
 local CONTROL_VERSION = "yaca-controls-v0.1.0-readiness.1"
 
 local RUNTIME_CONTRACT = [[You are the model inside yaca, a terminal coding agent.
@@ -32,7 +32,7 @@ Review whether the bound completion claim satisfies the supplied goal and eviden
     compaction = RUNTIME_CONTRACT .. [[
 Produce only the requested StructuredSummary. Preserve required identities, unresolved work, user decisions, approvals as historical facts, unknown effects, and atomic call/result groups. Never claim that omitted facts were deleted.]],
     ["self-test"] = RUNTIME_CONTRACT .. [[
-Perform only the requested self-test observation. Do not execute a product tool, mutate configuration, grant Permission, or repair anything. Return the exact self-test schema.]],
+Perform the synthetic observation specified by the self-test fixture. For a capability probe, return the requested text or emit the single requested inert tool call with the exact supplied arguments. Emitting an inert call tests the protocol only: no tool will execute and no external effect may be claimed. For semantic review, return only the requested JSON object. Never mutate configuration, grant Permission, or repair anything.]],
     ["context-name"] = RUNTIME_CONTRACT .. [[
 Suggest one concise filesystem-safe Context basename from the supplied committed main-turn facts. Return only the naming schema. Do not call tools, change facts, or continue the task.]],
 }

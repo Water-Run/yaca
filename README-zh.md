@@ -5,7 +5,7 @@
 yaca 是一款简单、单 Agent、terminal-only 的通用 Agent 设计，以 GPL v3
 许可开源。软件开发是一级且常见的工作负载，但不是唯一用途。
 
-> **项目状态（2026-09-14）：平台无关核心已实现至 M9；controller 收口和目标资格验证待完成。** 目前还没有任何目标发行包通过资格验证。下文分别说明已接通能力和命令 grammar；Win32 x86、Win64 x86_64 与 Linux x86_64 的目标相关行为仍须分别验证。Gate A/B 保持通过，Release Gate R 仍关闭。
+> **项目状态（2026-09-16）：平台无关核心已实现至 M9；controller 收口和目标资格验证待完成。** 目前还没有任何目标发行包通过资格验证。下文分别说明已接通能力和命令 grammar；Win32 x86、Win64 x86_64 与 Linux x86_64 的目标相关行为仍须分别验证。Gate A/B 保持通过，Release Gate R 仍关闭。
 
 ## 支持的发行目标
 
@@ -126,7 +126,7 @@ Context。有效配置中已登记的秘密值，包括二进制字段解码后�
 确认该预览后复核配置及 Context 身份。历史不改写，缺失模型需在继续时显式映射；
 占用、损坏或扫描不完整会阻断涉及引用的保存。`reset` / `reload` / `cancel` / `quit`
 丢弃未保存变更。配置 REPL 中 Model 只显示摘要；Permission 按首版选定范围编辑现有字段，
-新增、改名、删除和排序通过手工 INI。联网测试仍待接通，管理器如实显示 `untested`。`--context-repl recent|full` 已接通离线管理器，支持
+新增、改名、删除和排序通过手工 INI。`test <row-id>` 在明确确认联网范围后测试已保存的 Model；编辑后清除观察结果。`--context-repl recent|full` 已接通离线管理器，支持
 `list [recent|full]`、`inspect <selector>`、`search <query>`、`refresh`、
 `help` 和 `quit`。列表与搜索使用有界快照，刷新时显式重扫；检查时复核精确目标，
 目标变化即拒绝，不读取不可用 Context 的正文。Esc/EOF 恢复终端并退出。
@@ -142,11 +142,9 @@ Context。有效配置中已登记的秘密值，包括二进制字段解码后�
 复核精确文件，再保存修复记录和真实 ModelView。缺失/损坏 XML 只从其有效命名副本恢复；
 不会破锁或重放未完成操作。`export <selector>` 输出与 `--export` 相同的已校验 Markdown；
 `select <selector>` 关闭管理终端后继续精确目标，跨目录复用上述确认，取消则留在管理器。
-在线 self-test Stage 2/3 的调度和同意
-门禁已有实现，但 production adapter 当前返回未接通的失败结果，不发起 Model
-请求。
+在线 self-test Stage 2/3 已接通生产 Model 和传输端口。Stage 1 先验证隔离文件的发布往返；在线检查不执行产品工具、不修改配置，Stage 3 仅提出建议。
 
-裸 `yaca` 与 `yaca .` 完全等价。`--` 结束选项解析，因此以 `-` 开头的目录仍可表达。Linux 永远不把 `/...` 当选项。非 TTY 执行 self-test Stage 2/3 时，必须显式带本次 invocation 的 `--i-accept-online-self-test`；否则零 Model 请求并 fail-closed。
+裸 `yaca` 与 `yaca .` 完全等价。`--` 结束选项解析，因此以 `-` 开头的目录仍可表达。Linux 永远不把 `/...` 当选项。self-test Stage 2/3 必须使用真实交互 TTY，并显式带本次 invocation 的 `--i-accept-online-self-test`；普通管道即使带同意标志也不支持。
 
 chat 文本后备包括 `.queue`（`list|delete|move|edit|clear`）、`.immediate`、`.side`、`.multiline`、`.cancel`、`.cautious`、`.model`、`.context`、`.status`、`.help`、`.details`、`.prompt`、`.compact`、`.quit`。它们与终端快捷键投影同一 semantic action，不形成 remote/headless controller。
 
@@ -163,3 +161,5 @@ v0.1 不提供 Web UI、图像/音频输入、transcription、TTS、公共 remot
 ```sh
 bash .tools/run_coding_readiness.sh
 ```
+
+Model 与 Permission 按完整名称匹配，仅折叠 ASCII 大小写，持久数据保留配置中的正式拼写。工具相对路径以当前 Context 的工作目录为基准，仍执行原有 Permission 与保留目录检查。

@@ -225,6 +225,24 @@ local function ascii_fold(value)
     end))
 end
 
+---Resolves a full logical name using only ASCII case folding, never aliases.
+function M.resolve_resource(generation, family, selector)
+    local collection = type(generation) == "table" and
+        (family == "Model" and generation.models or family == "Permission" and generation.permissions)
+    if type(collection) ~= "table" or type(selector) ~= "string" or selector == "" then
+        return nil, failure("InvalidConfigSelector", "a typed resource name is required")
+    end
+    local folded, found = ascii_fold(selector), nil
+    for name in pairs(collection) do
+        if ascii_fold(name) == folded then
+            if found then return nil, failure("ConfigInvalid", "resource selector is ambiguous", "resource-selector-conflict") end
+            found = name
+        end
+    end
+    if not found then return nil, failure("ResourceNotFound", "the resource name was not found") end
+    return found
+end
+
 local function config_failure(reason, message, detail)
     return failure("ConfigInvalid", message or "configuration is invalid", reason, detail)
 end
@@ -912,7 +930,7 @@ function M.new(ports, options)
                 if resource_names[family][folded] then
                     return nil, config_failure("resource-selector-conflict")
                 end
-                resource_names[family][folded] = true
+                resource_names[family][folded] = name:sub(#family + 1)
             end
             if family == "Permission." then
                 local suffix = name:sub(#family + 1)
@@ -1084,19 +1102,22 @@ function M.new(ports, options)
         for _, key in ipairs({ "ActionReviewModel", "TerminationReviewModel" }) do
             local reference = exact.Agent[key]
             if reference ~= "" then
-                local candidate = exact["Model." .. reference]
+                local canonical = resource_names["Model."][ascii_fold(reference)]
+                local candidate = canonical and exact["Model." .. canonical]
                 if not candidate or not candidate.Enabled then
                     return nil, config_failure("reviewer-model")
                 end
+                exact.Agent[key] = canonical
+                public.agent[snake_case(key)] = canonical
             end
         end
 
-        local current_model = overrides.CurrentModel or model_order[1]
-        local current_permission = overrides.CurrentPermission or permission_order[1]
-        if not exact["Model." .. current_model] then
+        local current_model = resource_names["Model."][ascii_fold(overrides.CurrentModel or model_order[1])]
+        local current_permission = resource_names["Permission."][ascii_fold(overrides.CurrentPermission or permission_order[1])]
+        if not current_model then
             return nil, config_failure("current-model")
         end
-        if not exact["Permission." .. current_permission] then
+        if not current_permission then
             return nil, config_failure("current-permission")
         end
         local effective_double_check = exact.Agent.DoubleCheck

@@ -1016,12 +1016,18 @@ function M.new(components, options)
             config_error
         )
         if not projection then return nil, projection_error end
+        local excluded_models = {}
+        for index, selector in ipairs(request.excluded_models or {}) do
+            excluded_models[index] = generation
+                and require("config").resolve_resource(generation, "Model", selector) or selector
+            if not excluded_models[index] then excluded_models[index] = selector end
+        end
         local specification = freeze({
             mode = mode,
             through_stage = request.through_stage or 1,
             list_checks = request.list_checks == true,
             online_consent = request.online_consent == true,
-            excluded_models = request.excluded_models or {},
+            excluded_models = excluded_models,
             excluded_checks = request.excluded_checks or {},
             selected_checks = request.selected_checks or {},
             snapshot_id = projection.snapshot_id,
@@ -4295,7 +4301,7 @@ local function self_test_transport_failure(code, facts)
     )
 end
 
-local function evaluate_st2_check(check_id, observation, model)
+function M.evaluate_self_test_check(check_id, observation, model)
     local facts = classify_self_test_observation(observation)
     if not observation.response and observation.deadline_exceeded then
         return online_check_result(
@@ -4313,7 +4319,8 @@ local function evaluate_st2_check(check_id, observation, model)
             1
         )
     end
-    if facts.connection_error then
+    if facts.connection_error and not (check_id == "ST2-MODEL-USAGE-CANCEL"
+        and observation.cancel_requested and facts.finish_class == "cancelled") then
         return self_test_transport_failure(check_id, facts)
     end
     if check_id == "ST2-MODEL-TRANSPORT" then
@@ -4501,7 +4508,14 @@ local function evaluate_st2_check(check_id, observation, model)
         )
     end
     if check_id == "ST2-MODEL-CONTROL" then
-        if facts.tool_calls > 0 then
+        local normalized = observation.response and observation.response.normalized
+        local calls = normalized and normalized.tool_calls
+        if not facts.incomplete and not facts.protocol_error
+            and facts.finish_class == "tool_calls"
+            and normalized and normalized.tool_calls_validated == true
+            and type(calls) == "table" and #calls == 1
+            and calls[1].name == "list"
+            and calls[1].canonical_arguments == '{"depth":1,"page_size":1,"path":"."}' then
             return online_check_result(
                 "passed",
                 "the provider tool-call carrier round-tripped with schema-valid arguments",
@@ -4526,7 +4540,7 @@ local function evaluate_st2_check(check_id, observation, model)
         end
         return online_check_result(
             "failed",
-            "the Model completed without returning the requested tool call",
+            "the Model did not return the exact requested inert tool call",
             {
                 evidence_line("carrier", "absent"),
                 evidence_line("finish", facts.finish_class or "none"),
@@ -4627,7 +4641,7 @@ local function build_online_model_self_test(composed)
             return self_test_binding_failure(code, message)
         end
         local called_evaluation, evaluated = pcall(
-            evaluate_st2_check,
+            M.evaluate_self_test_check,
             check_id,
             observation,
             observation.model
@@ -5735,6 +5749,9 @@ local function new_draft_model_selection(draft, contexts)
     end
 
     function owner:preview(selector)
+        local resolved = require("config").resolve_resource(generation, "Model", selector)
+        if not resolved then return nil, failure("ModelNotFound", "the Model selector was not found") end
+        selector = resolved
         local status = draft.status()
         local preview, preview_error = model_switch_preview({
             generation = generation,
@@ -6395,6 +6412,9 @@ function M.start_published_agent(composed, chat, message, source)
             )
         end
         local generation = durable_settings_generation
+        local resolved = require("config").resolve_resource(generation, "Model", selector)
+        if not resolved then return nil, failure("ModelNotFound", "the Model selector was not found") end
+        selector = resolved
         local preview, preview_error = model_switch_preview({
             generation = generation,
             current_model = turn_context.overrides.CurrentModel,
@@ -11342,12 +11362,13 @@ function M.run_context_repl(composed, runtime, request)
         if not local_generation then return nil, config_error end
         local function choose(kind, previous, order, profiles)
             local names = {}
+            local previous_name = require("config").resolve_resource(local_generation, kind, previous)
             local default
             for _, name in ipairs(order) do
                 local profile = profiles[name]
                 if kind ~= "Model" or (profile.enabled == true and profile.tools_enabled == true) then
                     names[#names + 1] = safe_diagnostic(name, 256)
-                    if name == previous then default = name end
+                    if name == previous_name then default = name end
                 end
             end
             local shown, show_error = input.write("Local " .. kind .. ": " .. table.concat(names, ", ") .. "\n")
@@ -11358,6 +11379,7 @@ function M.run_context_repl(composed, runtime, request)
             if answer == false then return nil, failure("ContextReplCancelled", "Context import was cancelled") end
             if answer == nil then return nil, answer_error end
             if answer == "" then answer = default end
+            if answer then answer = require("config").resolve_resource(local_generation, kind, answer) end
             local selected = answer and profiles[answer]
             if not selected or (kind == "Model" and (selected.enabled ~= true or selected.tools_enabled ~= true)) then
                 return nil, failure(kind .. "Unavailable", "choose an eligible local " .. kind .. " by exact name")

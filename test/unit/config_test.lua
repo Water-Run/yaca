@@ -167,6 +167,27 @@ return {
     name = "unit/config",
     cases = {
         {
+            name = "resource selectors fold ASCII only and publish canonical logical names",
+            run = function()
+                local generation = assert(codec().parse(source({ agent_extra = 'ActionReviewModel = "pRiMaRy"' }), {
+                    CurrentModel = "PRIMARY", CurrentPermission = "sTD",
+                }))
+                A.equal(generation.current_model, "Primary")
+                A.equal(generation.current_permission, "Std")
+                A.equal(generation.agent.action_review_model, "Primary")
+                A.equal(config.resolve_resource(generation, "Model", "primary"), "Primary")
+                A.equal(config.resolve_resource(generation, "Permission", "READONLY"), "Readonly")
+                A.falsy(config.resolve_resource(generation, "Model", "pri"))
+                A.falsy(config.resolve_resource(generation, "Model", "Std"))
+                local unicode = { models = { ["团队A"] = {}, ["Ä"] = {} } }
+                A.equal(config.resolve_resource(unicode, "Model", "团队a"), "团队A")
+                A.falsy(config.resolve_resource(unicode, "Model", "ä"))
+                local ambiguous, err = config.resolve_resource({ models = { Name = {}, NAME = {} } }, "Model", "name")
+                A.falsy(ambiguous)
+                A.equal(err.reason, "resource-selector-conflict")
+            end,
+        },
+        {
             name = "runtime catalog is exactly the frozen complete field catalog",
             run = function()
                 local service = codec()
