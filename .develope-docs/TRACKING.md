@@ -2,7 +2,16 @@
 
 更新日期：2026-09-19
 
-2026-09-19 本轮在新的 Linux 构建机上重建全部锁定源码缓存与基线
+2026-09-19 第二轮：以 rootless podman 的 CentOS 7.9.2009 容器完成
+linux-x86_64 锁定工具链（glibc 2.17 / GCC 4.8.5）资格构建
+（full_tests=575/575）与真实 DeepSeek 安装验收（Stage 1/2/3、工具/
+审批/`--continue` 恢复）；落地 C33 零表面检查器
+（`.tools/check_zero_surface.lua`，真实 win32/win64 包 PASS）与
+`clean_machine_test.lua`，完整 suite 升至 **584/584**。见
+[CentOS 7 资格与 C33](LINUX-CENTOS7-QUALIFICATION-2026-09-19.md)。
+容器共享宿主内核，裸机 CentOS 7 与 XP/Win7 硬门仍未执行。
+
+2026-09-19 第一轮在新 Linux 构建机上重建全部锁定源码缓存与基线
 （suite 575/575、validators 7612/56/553、TP-003/006/008/010 与 RP-001
 全部 PASS），新增 `win64-x86_64` 候选构建路径并修复三个真实构建问题
 （curl configure 的 mingw mbedtls 探测缺 `-lbcrypt`、64 位 msvcrt 的
