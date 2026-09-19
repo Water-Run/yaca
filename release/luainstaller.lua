@@ -322,7 +322,13 @@ local function validate_lock(lock)
     if type(lock) ~= "table" or lock.schema_version ~= "yaca-dependency-lock-v1" then
         return nil, "unexpected dependency lock schema"
     end
-    if lock.release_authorized ~= false or lock.target_artifacts_qualified ~= false then
+    local authorized = lock.release_authorized == true
+    if lock.release_authorized ~= authorized
+        or lock.target_artifacts_qualified ~= authorized
+    then
+        return nil, "dependency lock authorization flags are inconsistent"
+    end
+    if not authorized and lock.target_artifacts_qualified ~= false then
         return nil, "dependency lock must not authorize unqualified artifacts"
     end
     if lock.hash_algorithm ~= "sha256" then return nil, "dependency lock must use sha256" end
@@ -393,9 +399,10 @@ local function validate_lock(lock)
         or lock.curl_profile.upx ~= false
         or not is_empty_array(lock.curl_profile.allowed_non_system_runtime_dependencies)
         or type(lock.curl_profile.target_compatibility) ~= "table"
-        or lock.curl_profile.target_compatibility.qualification ~= "pending"
+        or lock.curl_profile.target_compatibility.qualification
+            ~= (authorized and "passed-per-D-072-tested-environments" or "pending")
     then
-        return nil, "curl profile is not the minimal unqualified static profile"
+        return nil, "curl profile is not the minimal static profile"
     end
     local xp_profile = lock.curl_profile.target_build_overrides
         and lock.curl_profile.target_build_overrides["win32-x86"]
@@ -416,23 +423,24 @@ local function validate_lock(lock)
     for _, target_id in ipairs(TARGET_ORDER) do
         local target = lock.target_policy and lock.target_policy[target_id]
         if type(target) ~= "table" or target.id ~= target_id
-            or target.qualification ~= "pending"
+            or target.qualification ~= (authorized and "passed" or "pending")
         then
-            return nil, "dependency lock omits pending target " .. target_id
+            return nil, "dependency lock target state is inconsistent: " .. target_id
         end
     end
     return true
 end
 
 local function validate_manifest(manifest, lock)
+    local authorized = lock.release_authorized == true
     if type(manifest) ~= "table"
         or manifest.schema_version ~= "yaca-release-manifest-v0.1.0"
         or manifest.product_version ~= "0.1.0"
-        or manifest.release_state ~= "unqualified"
-        or manifest.release_authorized ~= false
-        or manifest.target_qualification_complete ~= false
+        or manifest.release_state ~= (authorized and "qualified" or "unqualified")
+        or manifest.release_authorized ~= authorized
+        or manifest.target_qualification_complete ~= authorized
     then
-        return nil, "release manifest is not an unqualified v0.1.0 manifest"
+        return nil, "release manifest state disagrees with the dependency lock"
     end
     if manifest.dependency_lock ~= "release/dependencies.lock" then
         return nil, "release manifest does not bind the dependency lock"
@@ -479,7 +487,7 @@ local function validate_manifest(manifest, lock)
         local locked = lock.target_policy[target_id]
         if target.id ~= target_id or target.os ~= locked.os or target.arch ~= locked.arch
             or target.minimum ~= locked.minimum or target.object_format ~= locked.object_format
-            or target.qualification ~= "pending"
+            or target.qualification ~= (authorized and "passed" or "pending")
         then
             return nil, "release target disagrees with dependency lock: " .. target_id
         end
@@ -802,9 +810,9 @@ function M.new(manifest, lock)
             target_minimum = target.minimum,
             object_format = target.object_format,
             archive = target.archive,
-            status = "candidate-unqualified",
-            release_authorized = false,
-            target_qualification_complete = false,
+            status = admitted_lock.release_authorized and "released" or "candidate-unqualified",
+            release_authorized = admitted_lock.release_authorized,
+            target_qualification_complete = admitted_lock.target_artifacts_qualified == true,
             root_entries = root_entries,
             package_files = package_files,
             outer_runtime_components = {},
@@ -914,7 +922,9 @@ function M.new(manifest, lock)
                     annotationDate = admitted_lock.lock_date .. "T00:00:00Z",
                     annotationType = "OTHER",
                     annotator = "Tool: yaca-release-planner-0.1.0",
-                    comment = "candidate-unqualified; independent target evidence is pending for "
+                    comment = (admitted_lock.release_authorized
+                            and "released per D-072 on tested environments: "
+                            or "candidate-unqualified; independent target evidence is pending for ")
                         .. canonical.target_id,
                 },
             },
@@ -956,8 +966,8 @@ function M.new(manifest, lock)
             target_id = canonical.target_id,
             archive = canonical.archive,
             source_revision = canonical.source_revision,
-            status = "candidate-unqualified",
-            release_authorized = false,
+            status = admitted_lock.release_authorized and "released" or "candidate-unqualified",
+            release_authorized = admitted_lock.release_authorized,
             components = components,
             required_license_ids = copy(
                 admitted_lock.license_policy.required_license_ids

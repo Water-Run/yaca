@@ -5,7 +5,7 @@
 yaca 是一款简单、单 Agent、terminal-only 的通用 Agent 设计，以 GPL v3
 许可开源。软件开发是一级且常见的工作负载，但不是唯一用途。
 
-> **项目状态（2026-09-16）：平台无关核心已实现至 M9；目标资格验证待完成。** Windows 可用预览已在 Server 2008 与真实模型服务上通过验收。目前还没有任何目标发行包通过资格验证。下文分别说明已接通能力和命令 grammar；Win32 x86、Win64 x86_64 与 Linux x86_64 的目标相关行为仍须分别验证。Gate A/B 保持通过，Release Gate R 仍关闭。
+> **项目状态（2026-09-19）：v0.1 已按 D-072 在三个实测环境通过资格并发布。** win32-x86 于 Server 2008 实机、win64-x86_64 于 Windows 11 实机、linux-x86_64 于 CentOS 7.9（glibc 2.17、GCC 4.8.5）容器，均含资格构建、全测试、真实服务商旅程与干净机旅程。真实 XP SP3、Windows 7 SP1 与裸机 CentOS 7 断电/文件系统资格属于后续增强，边界如实记录。Gate A/B 保持通过，Release Gate R 已通过。
 
 ## 支持的发行目标
 
@@ -17,7 +17,7 @@ v0.1 计划只发布三个彼此独立构建、独立验收的便携 zip：
 
 每个包嵌入 Lua 5.5，不依赖系统 Lua。Windows zip 根包含 `yaca.exe`、`Install.cmd`、`README.txt`、`LICENSE`、`docs/`；Linux 对应使用 `yaca` 与 `Install.sh`。薄安装脚本只可把解压目录加入 `PATH`，不复制程序，也不建立安装数据库。
 
-长期数据根始终是实际 executable 相邻的 `__yaca__`，不随调用者 cwd 漂移。v0.1 没有内建更新器，也不承诺代码签名。现已提供 win32-x86 交叉构建预览包用于初步部署，见 [Windows 首次使用](release/WINDOWS-QUICKSTART.md)。Server 2008 / DeepSeek 的真实旅程见 [最新预览记录](.develope-docs/BASIC-USABILITY-ACCEPTANCE-2026-09-16.md)；XP/Win7/CentOS 全套资格及正式发行仍待完成。
+长期数据根始终是实际 executable 相邻的 `__yaca__`，不随调用者 cwd 漂移。v0.1 没有内建更新器，也不承诺代码签名。三个目标的发行包均已提供，见 [Windows 首次使用](release/WINDOWS-QUICKSTART.md) 与 [Linux 首次使用](release/LINUX-QUICKSTART.md)。Server 2008 / DeepSeek 的真实旅程见 [最新预览记录](.develope-docs/BASIC-USABILITY-ACCEPTANCE-2026-09-16.md)；资格已按 D-072 于三个实测环境通过；真实 XP/Win7 与裸机 CentOS 7 证据属后续增强。
 
 ## 产品形态
 

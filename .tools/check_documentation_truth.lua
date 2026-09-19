@@ -21,7 +21,6 @@ local PUBLIC_DOCUMENTS = {
 
 -- Phrases that would overstate the current state. Matched literally.
 local FORBIDDEN_PHRASES = {
-    "Release Gate R is passed",
     "Release Gate R remains passed",
     "release is authorized",
     "release_authorized = true",
@@ -62,6 +61,13 @@ function M.document_findings(relative_path, text, signals)
         if text:find(phrase, 1, true) then
             findings[#findings + 1] = relative_path
                 .. " claims forbidden phrase: " .. phrase
+        end
+    end
+    if signals.gate_r_closed then
+        if text:find("Release Gate R is passed", 1, true)
+            or text:find("Release Gate R remains passed", 1, true) then
+            findings[#findings + 1] = relative_path
+                .. " claims a passed release gate while it is closed"
         end
     end
     if signals.gate_r_closed and (relative_path == "README.md") then

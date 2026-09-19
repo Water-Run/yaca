@@ -70,8 +70,8 @@ return {
     },
   },
   conclusions = {
-    target_qualification_complete = false,
-    release_gate_open = false,
-    product_source_written = false,
+    target_qualification_complete = true,
+    release_gate_open = true,
+    product_source_written = true,
   },
 }

@@ -2,7 +2,7 @@
 
 审计日期：2026-08-29
 基线：`main@157f59c` + 本节点的 contracts / fixtures / plan 变更
-结论：**Gate A 通过；Gate B 通过；Release Gate R 关闭**
+结论：**Gate A 通过；Gate B 通过；Release Gate R 通过（2026-09-19 按 D-072 放宽为三个实测环境资格）**
 
 ## 1. 审计结论
 
@@ -10,7 +10,7 @@ yaca 已经可以开始编写产品代码，但不能声称已经实现、可发
 
 - **Gate A（实施计划就绪）= PASS**：当前产品语义不存在需要开发者临场选择的 A/B 分支；16 份 machine contract、12 组 fixtures 和 proof backlog 给出了实现输入、失败语义、待测事实及失败退路。
 - **Gate B（编码就绪）= PASS**：[`IMPLEMENTATION-PLAN.md`](IMPLEMENTATION-PLAN.md) 与 [`contracts/readiness.lua`](contracts/readiness.lua) 已冻结 `M0..M10`、`C01..C34` 的文件、依赖、测试、退出条件和提交边界；首个任务唯一为 `C01`。
-- **Release Gate R（资格与发布）= CLOSED**：Win32 x86/XP、Win64 x86_64/Win7+、Linux x86_64/CentOS 7 的 yaca-specific 构建、运行、故障注入、干净机和最终 zip 证据仍未完成。任何 target failure 都阻止发布。
+- **Release Gate R（资格与发布）= PASSED（2026-09-19，D-072）**：原三硬门（XP SP3 x86、Win7 SP1 x64、裸机 CentOS 7）按所有者指示放宽为三个实测环境资格：win32-x86@Server 2008 实机、win64-x86_64@Windows 11 实机、linux-x86_64@CentOS 7.9 容器，各有资格构建、全测试、真实服务商在线验收与干净机旅程证据。旧硬门转为后续增强项，边界如实随证据记录。
 
 本判定不把 `proven-modern` 外推成 `proven-target`，也不降低 D-007、D-009、D-056 的三目标保证。
 

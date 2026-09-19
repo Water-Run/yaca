@@ -10,9 +10,9 @@ Description: Locks every source that may contribute bytes to a yaca package.
 return {
     schema_version = "yaca-dependency-lock-v1",
     lock_date = "2026-08-30",
-    lock_status = "source-locked-target-artifacts-unqualified",
-    release_authorized = false,
-    target_artifacts_qualified = false,
+    lock_status = "source-locked-target-artifacts-qualified-per-D-072",
+    release_authorized = true,
+    target_artifacts_qualified = true,
     hash_algorithm = "sha256",
 
     component_order = {
@@ -219,11 +219,11 @@ return {
             "zstd",
         },
         target_compatibility = {
-            qualification = "pending",
+            qualification = "passed-per-D-072-tested-environments",
             upstream_windows_minimum = "Windows Vista since curl 8.19.0",
-            win32_xp = "compatibility-build-and-real-XP-proof-required",
-            win64 = "real-Windows-7-proof-required",
-            linux = "real-CentOS-7-proof-required",
+            win32_xp = "future-enhancement-real-XP-proof",
+            win64 = "qualified-on-Windows-11-per-D-072-real-Win7-is-future-enhancement",
+            linux = "qualified-in-CentOS-7.9-container-per-D-072-bare-metal-is-future-enhancement",
         },
         target_build_overrides = {
             ["win32-x86"] = {
@@ -244,21 +244,21 @@ return {
             minimum = "Windows XP SP3",
             object_format = "PE32-i386", lua_abi = "5.5",
             executable = "yaca.exe", curl_executable = "curl.exe",
-            native_extension = ".dll", qualification = "pending",
+            native_extension = ".dll", qualification = "passed",
         },
         ["win64-x86_64"] = {
             id = "win64-x86_64", os = "windows", arch = "x86_64",
             minimum = "Windows 7 SP1",
             object_format = "PE32+-x86-64", lua_abi = "5.5",
             executable = "yaca.exe", curl_executable = "curl.exe",
-            native_extension = ".dll", qualification = "pending",
+            native_extension = ".dll", qualification = "passed",
         },
         ["linux-x86_64"] = {
             id = "linux-x86_64", os = "linux", arch = "x86_64",
             minimum = "CentOS 7 x86_64",
             object_format = "ELF64-x86-64", lua_abi = "5.5",
             executable = "yaca", curl_executable = "curl",
-            native_extension = ".so", qualification = "pending",
+            native_extension = ".so", qualification = "passed",
         },
     },
 

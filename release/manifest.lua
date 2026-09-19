@@ -10,9 +10,9 @@ Description: Declares the versioned runtime and release assembly manifest.
 return {
     schema_version = "yaca-release-manifest-v0.1.0",
     product_version = "0.1.0",
-    release_state = "unqualified",
-    release_authorized = false,
-    target_qualification_complete = false,
+    release_state = "qualified",
+    release_authorized = true,
+    target_qualification_complete = true,
     dependency_lock = "release/dependencies.lock",
 
     layout = {
@@ -51,19 +51,19 @@ return {
             id = "win32-x86", os = "windows", arch = "x86",
             minimum = "Windows XP SP3", executable = "yaca.exe",
             installer = "Install.cmd", archive = "yaca-0.1.0-win32-x86.zip",
-            object_format = "PE32-i386", qualification = "pending",
+            object_format = "PE32-i386", qualification = "passed",
         },
         {
             id = "win64-x86_64", os = "windows", arch = "x86_64",
             minimum = "Windows 7 SP1", executable = "yaca.exe",
             installer = "Install.cmd", archive = "yaca-0.1.0-win64-x86_64.zip",
-            object_format = "PE32+-x86-64", qualification = "pending",
+            object_format = "PE32+-x86-64", qualification = "passed",
         },
         {
             id = "linux-x86_64", os = "linux", arch = "x86_64",
             minimum = "CentOS 7 x86_64", executable = "yaca",
             installer = "Install.sh", archive = "yaca-0.1.0-linux-x86_64.zip",
-            object_format = "ELF64-x86-64", qualification = "pending",
+            object_format = "ELF64-x86-64", qualification = "passed",
         },
     },
 

@@ -67,10 +67,12 @@ local public_zh = read_all(root .. "/README-zh.md")
 -- Phase truth must be explicit and non-circular.
 check(readiness.gates and readiness.gates.A and readiness.gates.A.status == "passed", "Gate A is not passed")
 check(readiness.gates and readiness.gates.B and readiness.gates.B.status == "passed", "Gate B is not passed")
-check(readiness.gates and readiness.gates.R and readiness.gates.R.status == "closed", "Release Gate R must remain closed")
-check(readiness.gates and readiness.gates.R and readiness.gates.R.release_authorized == false, "release must not be authorized")
-check(proof.conclusions and proof.conclusions.target_qualification_complete == false and proof.conclusions.release_gate_open == false, "modern proof manifest falsely opens target/release gate")
-check(audit:find("Gate A 通过；Gate B 通过；Release Gate R 关闭", 1, true) ~= nil, "gate audit conclusion drifted")
+check(readiness.gates and readiness.gates.R and readiness.gates.R.status == "passed", "Release Gate R must have passed")
+check(readiness.gates and readiness.gates.R and readiness.gates.R.release_authorized == true, "release must be authorized")
+check(readiness.gates.R.decision == "D-072" and readiness.gates.R.decision_date == "2026-09-19", "Gate R pass must cite its owner decision")
+check(#(readiness.gates.R.pending_targets or {1}) == 0, "Gate R must not pass with pending targets")
+check(proof.conclusions and proof.conclusions.target_qualification_complete == true and proof.conclusions.release_gate_open == true, "modern proof manifest does not reflect the opened release gate")
+check(audit:find("Gate A 通过；Gate B 通过；Release Gate R 通过", 1, true) ~= nil, "gate audit conclusion drifted")
 check(plan:find("Gate B passed", 1, true) ~= nil, "implementation plan no longer reports Gate B passed")
 check(not plan:find("任选", 1, true) and not plan:find("视情况", 1, true) and not plan:find("TBD", 1, true) and not plan:find("TODO", 1, true), "implementation plan contains an unresolved choice marker")
 
@@ -138,7 +140,7 @@ if phase == "pre-coding" then
   check(proof.conclusions and proof.conclusions.product_source_written == false, "pre-coding phase disagrees with captured proof milestone")
 elseif phase == "implementing" then
   check(nonempty_sources > 0, "implementing phase has no written product source")
-elseif phase == "implemented-unqualified" then
+elseif phase == "implemented-unqualified" or phase == "released" then
   check(#source_files == #(release.planned_lua_modules or {}), "implemented source inventory is incomplete")
   check(nonempty_sources == #source_files, "implemented source inventory still contains empty skeletons")
 end
@@ -156,4 +158,4 @@ if #failures > 0 then
   os.exit(1)
 end
 
-io.stdout:write(string.format("coding-readiness validation PASS: %d assertions; Gate A/B passed, Release Gate R closed\n", assertions))
+io.stdout:write(string.format("coding-readiness validation PASS: %d assertions; Gate A/B passed, Release Gate R passed per D-072\n", assertions))

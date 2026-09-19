@@ -198,7 +198,7 @@ return {
             end,
         },
         {
-            name = "curl closure is HTTP only static and honestly target-pending",
+            name = "curl closure is HTTP only static with recorded target states",
             run = function()
                 A.deep_equal(lock.curl_profile.protocols, { "http", "https" })
                 A.equal(lock.curl_profile.tls_component, "mbedtls")
@@ -210,12 +210,12 @@ return {
                 A.falsy(lock.curl_profile.ambient_config)
                 A.falsy(lock.curl_profile.ambient_ca)
                 A.falsy(lock.curl_profile.upx)
-                A.equal(lock.curl_profile.target_compatibility.qualification, "pending")
+                A.equal(lock.curl_profile.target_compatibility.qualification, "passed-per-D-072-tested-environments")
                 A.contains(
                     lock.curl_profile.target_compatibility.upstream_windows_minimum,
                     "Vista"
                 )
-                A.contains(lock.curl_profile.target_compatibility.win32_xp, "proof-required")
+                A.contains(lock.curl_profile.target_compatibility.win32_xp, "future-enhancement")
             end,
         },
         {
@@ -234,7 +234,7 @@ return {
                     A.equal(first.packages[index].SPDXID, lock.components[name].spdx_id)
                     A.falsy(first.packages[index].filesAnalyzed)
                 end
-                A.contains(first.annotations[1].comment, "candidate-unqualified")
+                A.contains(first.annotations[1].comment, "released per D-072")
                 A.contains(first.annotations[1].comment, "linux-x86_64")
             end,
         },
@@ -322,8 +322,8 @@ return {
             run = function()
                 local planner, plan = make_plan()
                 local licenses = assert(planner.license_manifest(plan))
-                A.equal(licenses.status, "candidate-unqualified")
-                A.falsy(licenses.release_authorized)
+                A.equal(licenses.status, "released")
+                A.truthy(licenses.release_authorized)
                 A.truthy(licenses.notices_in_archive)
                 A.truthy(licenses.corresponding_source_reference_required)
                 A.deep_equal(licenses.required_license_ids, {
@@ -371,13 +371,13 @@ return {
                 A.equal(sbom_error.code, "UnknownPackagePlan")
 
                 local altered_lock = clone(lock)
-                altered_lock.release_authorized = true
+                altered_lock.target_artifacts_qualified = false
                 local altered, altered_error = module.new(manifest, altered_lock)
                 A.falsy(altered)
                 A.equal(altered_error.code, "InvalidDependencyLock")
 
                 local altered_manifest = clone(manifest)
-                altered_manifest.release_authorized = true
+                altered_manifest.target_qualification_complete = false
                 local admitted, admitted_error = module.new(altered_manifest, lock)
                 A.falsy(admitted)
                 A.equal(admitted_error.code, "InvalidReleaseManifest")

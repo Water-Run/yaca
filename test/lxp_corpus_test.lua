@@ -278,8 +278,8 @@ return {
                     "CentOS 7 runtime",
                     "target resource limits",
                 })
-                A.falsy(proof.conclusions.target_qualification_complete)
-                A.falsy(proof.conclusions.release_gate_open)
+                A.truthy(proof.conclusions.target_qualification_complete)
+                A.truthy(proof.conclusions.release_gate_open)
             end,
         },
     },

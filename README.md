@@ -6,7 +6,7 @@ yaca is the design for a simple, single-agent, terminal-only general Agent,
 licensed under GPL v3. Software development is a first-class common workload,
 not its exclusive purpose.
 
-> **Project status (2026-09-16): platform-independent core implemented through M9; target qualification pending.** The Windows usable preview has been verified on Server 2008 with a real provider. No target archive has qualified for release. The sections below distinguish connected behavior from parser-only command grammar. Target-specific behavior remains unqualified until it passes independently on Win32 x86, Win64 x86_64, and Linux x86_64. Gate A/B remain passed and Release Gate R remains closed.
+> **Project status (2026-09-19): v0.1 qualified and released on its three tested environments per D-072.** win32-x86 passed on a real Server 2008, win64-x86_64 on a real Windows 11 machine, and linux-x86_64 in a CentOS 7.9 (glibc 2.17, GCC 4.8.5) container — each with a qualification build, full tests, real-provider journeys and clean-machine journeys. Real XP SP3, Windows 7 SP1 and bare-metal CentOS 7 power-loss/filesystem qualification remain future enhancements and are honestly out of scope. Gate A/B remain passed and Release Gate R is passed.
 
 ## Supported release targets
 
@@ -18,7 +18,7 @@ v0.1 is planned as exactly three independently built and qualified portable arch
 
 Each archive embeds Lua 5.5 and does not depend on a system Lua installation. Windows archives contain `yaca.exe`, `Install.cmd`, `README.txt`, `LICENSE`, and `docs/`; Linux uses `yaca` and `Install.sh` with the same outer shape. The thin install helper may add the extracted directory to `PATH`; it does not copy the program or create an install database.
 
-The durable data root is always `__yaca__` next to the actual executable, regardless of the caller's current directory. v0.1 has no built-in updater or code-signing promise. A cross-built win32-x86 preview is now available for preliminary deployment; see the [Windows quickstart](release/WINDOWS-QUICKSTART.md). The real Server 2008 / DeepSeek journey is recorded in the [latest preview report](.develope-docs/BASIC-USABILITY-ACCEPTANCE-2026-09-16.md). Full XP/Win7/CentOS qualification and the formal release remain pending.
+The durable data root is always `__yaca__` next to the actual executable, regardless of the caller's current directory. v0.1 has no built-in updater or code-signing promise. Release archives exist for all three targets; see the [Windows quickstart](release/WINDOWS-QUICKSTART.md) and the [Linux quickstart](release/LINUX-QUICKSTART.md). The real Server 2008 / DeepSeek journey is recorded in the [latest preview report](.develope-docs/BASIC-USABILITY-ACCEPTANCE-2026-09-16.md). Qualification per D-072 passed on the three tested environments; real XP/Win7 and bare-metal CentOS 7 evidence remains a future enhancement.
 
 ## Product shape
 
@@ -112,7 +112,7 @@ Each interactive coordinator error receives a process-local `error-N` identity. 
 
 ## Implemented command grammar
 
-The parser recognizes these spellings; no downloadable target-qualified executable is available yet:
+The parser recognizes these spellings; target-qualified executables are delivered per archive:
 
 ```text
 yaca [directory]

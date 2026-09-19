@@ -89,11 +89,11 @@ return {
                     ".develope-docs/contracts/readiness.lua")
                 local manifest = load_value("release/manifest.lua")
                 local value = truth.signals(readiness, manifest)
-                A.equal(value.phase, "implemented-unqualified")
-                A.truthy(value.gate_r_closed)
-                A.truthy(value.release_not_authorized)
-                A.truthy(not value.all_targets_passed)
-                A.equal(#value.pending_targets, 3)
+                A.equal(value.phase, "released")
+                A.falsy(value.gate_r_closed)
+                A.falsy(value.release_not_authorized)
+                A.truthy(value.all_targets_passed)
+                A.equal(#value.pending_targets, 0)
                 local passed_manifest = {
                     targets = {
                         { id = "a", qualification = "passed" },

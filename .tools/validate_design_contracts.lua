@@ -212,14 +212,15 @@ check(release.implementation_candidates and release.implementation_candidates.st
 -- Phase-separated readiness and executable implementation graph.
 check(readiness.gates and readiness.gates.A and readiness.gates.A.status == "passed", "Gate A must be explicitly audited passed")
 check(readiness.gates and readiness.gates.B and readiness.gates.B.status == "passed", "Gate B must be explicitly planned passed")
-check(readiness.gates and readiness.gates.R and readiness.gates.R.status == "closed" and readiness.gates.R.release_authorized == false, "Release Gate R must remain closed")
-exact_set("release-gate pending targets", readiness.gates and readiness.gates.R and readiness.gates.R.pending_targets or {}, value_list(product.release_targets, "id"))
+check(readiness.gates and readiness.gates.R and readiness.gates.R.status == "passed" and readiness.gates.R.release_authorized == true and readiness.gates.R.decision == "D-072", "Release Gate R must be passed per D-072")
+exact_set("release-gate pending targets", readiness.gates and readiness.gates.R and readiness.gates.R.pending_targets or {}, {})
+exact_set("release-gate qualified environments", value_list(readiness.gates.R.qualified_environments, "target"), value_list(product.release_targets, "id"))
 check(readiness.source_start and readiness.source_start.authorized_after_this_contract_and_validators_commit == true, "source-start authorization is not explicit")
 local implementation_phase = readiness.source_start and readiness.source_start.implementation_phase
 local implementation_phase_set = as_set(readiness.source_start and readiness.source_start.allowed_implementation_phases or {}, "implementation phases")
 check(implementation_phase_set[implementation_phase], "source implementation phase is invalid")
 check(readiness.source_start and readiness.source_start.source_is_currently_skeleton_only == (implementation_phase == "pre-coding"), "skeleton flag disagrees with implementation phase")
-check(readiness.source_start and readiness.source_start.release_is_not_authorized == true, "source/release phase boundary drifted")
+check(readiness.source_start and readiness.source_start.release_is_not_authorized == (readiness.gates.R.status ~= "passed"), "source/release phase boundary drifted")
 local transition_by_from = {}
 for _, transition in ipairs(readiness.source_start and readiness.source_start.transitions or {}) do
   check(implementation_phase_set[transition.from] and implementation_phase_set[transition.to], "implementation transition has an invalid phase")
@@ -755,7 +756,7 @@ if implementation_phase == "pre-coding" then
 elseif implementation_phase == "implementing" then
   local allowed_source_modules = as_set(expected_source_modules, "allowed implementation source modules")
   for _, module_id in ipairs(source_modules) do check(allowed_source_modules[module_id], "implementation source inventory contains an unplanned module " .. module_id) end
-elseif implementation_phase == "implemented-unqualified" then
+elseif implementation_phase == "implemented-unqualified" or implementation_phase == "released" then
   exact_set("implemented src Lua modules", source_modules, expected_source_modules)
 end
 check(platform.safe_loading.current_working_directory == false and platform.safe_loading.environment_lua_path == false and platform.safe_loading.environment_lua_cpath == false, "safe loading must exclude cwd and environment module paths")

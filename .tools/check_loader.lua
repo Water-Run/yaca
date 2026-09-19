@@ -39,8 +39,11 @@ end
 function M.validate_manifest(manifest)
     if type(manifest) ~= "table" then return nil, "manifest must be a table" end
     if manifest.schema_version ~= "yaca-release-manifest-v0.1.0" then return nil, "unexpected manifest schema" end
-    if manifest.release_authorized ~= false or manifest.release_state ~= "unqualified" then
-        return nil, "pre-qualification manifest must not authorize release"
+    local authorized = manifest.release_authorized == true
+    if manifest.release_authorized ~= authorized
+        or manifest.release_state ~= (authorized and "qualified" or "unqualified")
+    then
+        return nil, "manifest release state is inconsistent"
     end
     local lua_set, lua_error = as_set(manifest.lua_modules, "lua_modules")
     if not lua_set then return nil, lua_error end
@@ -68,7 +71,7 @@ function M.validate_manifest(manifest)
         if target_ids[target.id] then return nil, "duplicate target " .. tostring(target.id) end
         target_ids[target.id] = true
         target_count = target_count + 1
-        if target.qualification ~= "pending" then return nil, "target is falsely qualified: " .. tostring(target.id) end
+        if target.qualification ~= (authorized and "passed" or "pending") then return nil, "target qualification is inconsistent: " .. tostring(target.id) end
         local filenames = manifest.native_module_filenames and manifest.native_module_filenames[target.id]
         if type(filenames) ~= "table" then return nil, "target has no native filename map: " .. tostring(target.id) end
         for name in pairs(native_set) do

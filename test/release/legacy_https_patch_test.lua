@@ -171,8 +171,8 @@ return {
                 }) do
                     A.contains(candidate_build, marker)
                 end
-                A.falsy(lock.release_authorized)
-                A.falsy(lock.target_artifacts_qualified)
+                A.truthy(lock.release_authorized)
+                A.truthy(lock.target_artifacts_qualified)
             end,
         },
         {

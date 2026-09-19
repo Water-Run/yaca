@@ -79,8 +79,8 @@ return {
                 A.equal(service.capabilities.config_carrier, "anonymous-stdin-pipe")
                 A.falsy(service.capabilities.secret_in_argv)
                 A.falsy(service.capabilities.secret_in_environment)
-                A.falsy(service.capabilities.target_qualified)
-                A.contains(service.capabilities.qualification, "target-curl-tls-proxy-ca-pending")
+                A.truthy(service.capabilities.target_qualified)
+                A.contains(service.capabilities.qualification, "target-curl-tls-proxy-ca-passed-per-D-072")
                 A.raises(function()
                     service.capabilities.fixed_arguments[1] = "--config"
                 end, "cannot be modified")
@@ -109,9 +109,9 @@ return {
                     "t",
                     _ENV
                 ))()
-                A.equal(manifest.release_state, "unqualified")
-                A.falsy(manifest.release_authorized)
-                A.falsy(manifest.target_qualification_complete)
+                A.equal(manifest.release_state, "qualified")
+                A.truthy(manifest.release_authorized)
+                A.truthy(manifest.target_qualification_complete)
                 A.equal(manifest.dependencies.curl.version, "8.21.0")
                 A.equal(manifest.dependencies.mbedtls.version, "3.6.7")
                 A.equal(manifest.dependencies.ca_bundle.version, "2026-08-13")
@@ -139,7 +139,7 @@ return {
                     A.equal(target.os, values[2])
                     A.equal(target.arch, values[3])
                     A.equal(target.minimum, values[4])
-                    A.equal(target.qualification, "pending")
+                    A.equal(target.qualification, "passed")
                 end
             end,
         },

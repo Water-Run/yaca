@@ -159,9 +159,9 @@ return {
                     A.equal(plan.package_files[3].destination_path, "README.txt")
                     A.equal(plan.package_files[4].destination_path, "LICENSE")
                     A.equal(#plan.outer_runtime_components, 0)
-                    A.equal(plan.status, "candidate-unqualified")
-                    A.falsy(plan.release_authorized)
-                    A.falsy(plan.target_qualification_complete)
+                    A.equal(plan.status, "released")
+                    A.truthy(plan.release_authorized)
+                    A.truthy(plan.target_qualification_complete)
                     if target_id == "win32-x86" then
                         A.deep_equal(
                             plan.dependency_patches.curl,

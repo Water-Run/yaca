@@ -2310,8 +2310,8 @@ function M.new(ports, options)
         sse = "bounded-exact-lf-crlf-cr",
         redirects = "runtime-controlled-307-308-same-origin-only",
         retry = "runtime-controlled-bounded-no-replay-after-canonical-event",
-        target_qualified = false,
-        qualification = "runtime-tls-ca-policy-closed;target-curl-tls-proxy-ca-pending",
+        target_qualified = true,
+        qualification = "runtime-tls-ca-policy-closed;target-curl-tls-proxy-ca-passed-per-D-072",
     }, "network capabilities")
 
     return readonly(service, "network service")

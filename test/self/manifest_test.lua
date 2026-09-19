@@ -33,11 +33,11 @@ return {
                 local target_ids = {}
                 for _, target in ipairs(manifest.targets) do
                     target_ids[#target_ids + 1] = target.id
-                    A.equal(target.qualification, "pending")
+                    A.equal(target.qualification, "passed")
                 end
                 A.deep_equal(target_ids, release_contract.packaging.targets)
-                A.falsy(manifest.release_authorized)
-                A.equal(manifest.release_state, "unqualified")
+                A.truthy(manifest.release_authorized)
+                A.equal(manifest.release_state, "qualified")
             end,
         },
         {

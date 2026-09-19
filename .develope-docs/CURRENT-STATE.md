@@ -1,6 +1,13 @@
 # 当前状态分析
 
-更新日期：2026-09-19
+更新日期：2026-09-19（发布）
+
+**v0.1 已按 D-072 发布**：Release Gate R = passed（2026-09-19），
+release_authorized = true，机读 phase = `released`。资格基线为三个实测
+环境（Server 2008 实机 / Windows 11 实机 / CentOS 7.9 容器），各有资格
+构建、全测试、真实服务商在线验收与干净机旅程证据；XP SP3、Win7 SP1、
+裸机 CentOS 7 为后续增强项。完整 Lua suite 591/591；validators
+7614/56/557 + documentation-truth；TP-003/006/008/010 与 RP-001 PASS。
 
 2026-09-19：C33/C34 工具收尾（Linux zip 装配、旅程驱动、文档真源
 守卫、三包干净机试跑全过、首跑缺陷修复、套件 591/591）。

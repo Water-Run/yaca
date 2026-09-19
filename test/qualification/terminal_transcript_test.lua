@@ -266,11 +266,11 @@ return {
                 for _, target in ipairs(manifest.targets) do
                     targets[target.id] = target.qualification
                 end
-                A.equal(targets["win32-x86"], "pending")
-                A.equal(targets["win64-x86_64"], "pending")
-                A.equal(targets["linux-x86_64"], "pending")
-                A.falsy(manifest.release_authorized)
-                A.equal(manifest.release_state, "unqualified")
+                A.equal(targets["win32-x86"], "passed")
+                A.equal(targets["win64-x86_64"], "passed")
+                A.equal(targets["linux-x86_64"], "passed")
+                A.truthy(manifest.release_authorized)
+                A.equal(manifest.release_state, "qualified")
             end,
         },
     },

@@ -1,6 +1,15 @@
 # 开发追踪
 
-更新日期：2026-09-19
+更新日期：2026-09-19（发布）
+
+**v0.1 已发布**：按所有者 D-072 决策，Release Gate R 以独立发布提交
+翻转为 passed；资格基线为三个实测环境（win32-x86@Server 2008 实机、
+win64-x86_64@Windows 11 实机、linux-x86_64@CentOS 7.9 容器）。翻转同步
+更新了 readiness/manifest/lock/planner/check_loader/network 能力投影、
+四个 validator（7614/56/557 + documentation-truth 5 文档）、公开文档与
+全部关联测试；最终验证：完整 Lua suite **591/591**，TP-003/006/008/010
+与 RP-001 全部 PASS。旧三硬门（XP SP3/Win7 SP1/裸机 CentOS 7）转为
+后续增强项，边界如实记录在各验收文档。
 
 2026-09-19 第三轮：C33/C34 工具收尾——Linux zip 装配器
 （`package_linux_zip.py` + `LINUX-QUICKSTART.md`）、干净机旅程驱动

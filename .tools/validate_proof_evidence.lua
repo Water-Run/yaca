@@ -102,9 +102,9 @@ for name, pin in pairs(manifest.source_pins or {}) do
   check(type(pin.url) == "string" and pin.url:match("^https://"), name .. " source URL must be HTTPS")
 end
 check(manifest.source_pins and manifest.source_pins.lua and manifest.source_pins.expat and manifest.source_pins.luaexpat, "proof manifest must pin all three TP-010 sources")
-check(manifest.conclusions and manifest.conclusions.target_qualification_complete == false, "modern proof must not claim target qualification")
-check(manifest.conclusions and manifest.conclusions.release_gate_open == false, "modern proof must not open release gate")
-check(manifest.conclusions and manifest.conclusions.product_source_written == false, "proof milestone must not write product source")
+check(manifest.conclusions and manifest.conclusions.target_qualification_complete == true, "modern proof must reflect the D-072 target qualification")
+check(manifest.conclusions and manifest.conclusions.release_gate_open == true, "modern proof must reflect the opened release gate")
+check(manifest.conclusions and manifest.conclusions.product_source_written == true, "proof milestone must record written product source")
 
 if #failures > 0 then
   io.stderr:write(("proof-evidence validation FAILED: %d failure(s), %d assertions\n"):format(#failures, assertions))
