@@ -1,8 +1,19 @@
 # 开发追踪
 
-更新日期：2026-09-16
+更新日期：2026-09-19
 
-本轮接续 ZCode 的 N8 在线自检实现，完成 Model 管理器显式联网测试、
+2026-09-19 本轮在新的 Linux 构建机上重建全部锁定源码缓存与基线
+（suite 575/575、validators 7612/56/553、TP-003/006/008/010 与 RP-001
+全部 PASS），新增 `win64-x86_64` 候选构建路径并修复三个真实构建问题
+（curl configure 的 mingw mbedtls 探测缺 `-lbcrypt`、64 位 msvcrt 的
+secure-CRT 审计语义、console-reader fixture 的基线宏重定义）。两个包
+分别安装到 win2008（Server 2008 非 R2 x64，win32-x86）与 evader-admin
+（Windows 11 x64，win64-x86_64），均以真实 DeepSeek 完成 Stage 1/2/3、
+文件/Shell 工具审批、干净退出与 `--continue` 恢复；详见
+[两测试系统验收](TWO-TARGET-ACCEPTANCE-2026-09-19.md)。Win11 证据不
+外推 Win7 SP1，C32--C34 仍待执行，Release Gate R 保持关闭。
+
+此前 2026-09-16 记录：接续 ZCode 的 N8 在线自检实现，完成 Model 管理器显式联网测试、
 Stage 1 实际文件发布探针、在线 Stage 2/3 的生产组合，以及 M05-57
 资源 selector 语义复核。配置/映射/`.model` 统一使用完整 logical name，
 只折叠 ASCII 大小写，保留原始 UTF-8 拼写和 Model/Permission 独立命名空间。

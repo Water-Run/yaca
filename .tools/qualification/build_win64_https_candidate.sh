@@ -15,7 +15,7 @@ usage() {
 }
 
 die() {
-  echo "win32 XP HTTPS candidate build: $*" >&2
+  echo "win64 HTTPS candidate build: $*" >&2
   exit 1
 }
 
@@ -29,8 +29,8 @@ OUTPUT_ROOT="$OUTPUT_PARENT/$(basename "$2")"
 [[ "$(basename "$OUTPUT_ROOT")" != "." && "$(basename "$OUTPUT_ROOT")" != ".." ]] \
   || die "output basename is unsafe"
 
-for command in awk cp file grep i686-w64-mingw32-ar i686-w64-mingw32-gcc \
-  i686-w64-mingw32-objdump i686-w64-mingw32-ranlib make patch sed sha256sum \
+for command in awk cp file grep x86_64-w64-mingw32-ar x86_64-w64-mingw32-gcc \
+  x86_64-w64-mingw32-objdump x86_64-w64-mingw32-ranlib make sed sha256sum \
   sort strings tar; do
   command -v "$command" >/dev/null 2>&1 \
     || die "required command is missing: $command"
@@ -49,8 +49,6 @@ MBEDTLS_PREFIX="$OUTPUT_ROOT/prefix/mbedtls"
 ARTIFACT_ROOT="$OUTPUT_ROOT/artifacts"
 CURL_ARCHIVE="$SOURCE_CACHE/curl-8.21.0.tar.xz"
 MBEDTLS_ARCHIVE="$SOURCE_CACHE/mbedtls-3.6.7.tar.bz2"
-CURL_PATCH="$REPO_ROOT/release/patches/curl-8.21.0-winxp.patch"
-MBEDTLS_PATCH="$REPO_ROOT/release/patches/mbedtls-3.6.7-winxp.patch"
 
 verify_sha256() {
   local path=$1
@@ -62,14 +60,13 @@ verify_sha256() {
     || die "checksum mismatch for $(basename "$path"): expected=$expected actual=$actual"
 }
 
+# win64-x86_64 builds the same locked upstream sources without the win32-xp
+# downstream patches: the target floor is Windows 7 SP1, where the upstream
+# BCrypt entropy and Vista-era sync primitives are natively available.
 verify_sha256 "$CURL_ARCHIVE" \
   aa1b66a70eace83dc624508745646c08ae561de512ab403adffb93ac87fc72e6
 verify_sha256 "$MBEDTLS_ARCHIVE" \
   a7e8bcbec0e6f761b4af24f25677626b35f762f68eef79c08677a363212d11f6
-verify_sha256 "$CURL_PATCH" \
-  8dd8c9d31dca0a5611a88f662bcda56a3531caebd638d63f78ff9ae1ed9c594f
-verify_sha256 "$MBEDTLS_PATCH" \
-  500c30ccad77f5e33d95c2241b97b6f879dcc1525de6c58b0456fbdd9c6dd4f2
 
 tar -xJf "$CURL_ARCHIVE" -C "$WORK_ROOT"
 tar -xjf "$MBEDTLS_ARCHIVE" -C "$WORK_ROOT"
@@ -105,11 +102,6 @@ verify_sha256 "$MBEDTLS_SOURCE/library/platform.c" \
 verify_sha256 "$MBEDTLS_SOURCE/include/mbedtls/mbedtls_config.h" \
   004edfaa0f9877a9f3baa7911ab708fd9d7c615f836f6b6674434e337145b7be
 
-patch --batch --forward --fuzz=0 -d "$CURL_SOURCE" -p1 -i "$CURL_PATCH" \
-  >"$LOG_ROOT/curl-patch.log" 2>&1
-patch --batch --forward --fuzz=0 -d "$MBEDTLS_SOURCE" -p1 -i "$MBEDTLS_PATCH" \
-  >"$LOG_ROOT/mbedtls-patch.log" 2>&1
-
 require_source_pattern() {
   local path=$1
   local pattern=$2
@@ -143,17 +135,17 @@ grep -q 'case CURL_SSLVERSION_TLSv1:' "$CURL_SOURCE/lib/vtls/mbedtls.c" \
 grep -q 'ver_min = MBEDTLS_SSL_VERSION_TLS1_2;' "$CURL_SOURCE/lib/vtls/mbedtls.c" \
   || die "curl Mbed TLS minimum does not map to TLS 1.2"
 
-export SOURCE_DATE_EPOCH=1787990400
+export SOURCE_DATE_EPOCH=1789344000
 export LC_ALL=C
 export TZ=UTC
 
-COMMON_DEFINES="-DWINVER=0x0501 -D_WIN32_WINNT=0x0501"
+COMMON_DEFINES="-DWINVER=0x0601 -D_WIN32_WINNT=0x0601"
 COMMON_CFLAGS="-Os -ffunction-sections -fdata-sections"
 COMMON_LDFLAGS="-static -Wl,--gc-sections -Wl,--build-id=none \
--Wl,--major-subsystem-version,5,--minor-subsystem-version,1"
+-Wl,--major-subsystem-version,6,--minor-subsystem-version,1"
 
 if ! make -C "$MBEDTLS_SOURCE" -j1 lib \
-  CC=i686-w64-mingw32-gcc AR=i686-w64-mingw32-ar ARFLAGS=rcD \
+  CC=x86_64-w64-mingw32-gcc AR=x86_64-w64-mingw32-ar ARFLAGS=rcD \
   CFLAGS="-std=c99 $COMMON_CFLAGS $COMMON_DEFINES" \
   >"$LOG_ROOT/mbedtls-build.log" 2>&1; then
   tail -80 "$LOG_ROOT/mbedtls-build.log" >&2
@@ -167,13 +159,16 @@ cp "$MBEDTLS_SOURCE/library/libmbedcrypto.a" \
 
 if ! (
   cd "$CURL_SOURCE"
-  env CC=i686-w64-mingw32-gcc AR=i686-w64-mingw32-ar \
-    RANLIB=i686-w64-mingw32-ranlib \
+  # Upstream's mbedtls probe does not add -lbcrypt for Windows targets, so
+  # the unpatched 64-bit entropy source fails to link during detection.
+  env CC=x86_64-w64-mingw32-gcc AR=x86_64-w64-mingw32-ar \
+    RANLIB=x86_64-w64-mingw32-ranlib \
     CFLAGS="$COMMON_CFLAGS" \
     CPPFLAGS="$COMMON_DEFINES -I$MBEDTLS_PREFIX/include" \
     LDFLAGS="-L$MBEDTLS_PREFIX/lib $COMMON_LDFLAGS" PKG_CONFIG=false \
+    LIBS="-lbcrypt" \
     ./configure \
-      --host=i686-w64-mingw32 --disable-shared --enable-static \
+      --host=x86_64-w64-mingw32 --disable-shared --enable-static \
       --enable-http --disable-ftp --disable-file --disable-ipfs \
       --disable-ldap --disable-ldaps --disable-rtsp --disable-dict \
       --disable-telnet --disable-tftp --disable-pop3 --disable-imap \
@@ -201,36 +196,39 @@ fi
 
 cp "$CURL_SOURCE/src/curl.exe" "$ARTIFACT_ROOT/curl.exe"
 file "$ARTIFACT_ROOT/curl.exe" >"$OUTPUT_ROOT/curl-file.txt"
-i686-w64-mingw32-objdump -p "$ARTIFACT_ROOT/curl.exe" \
+x86_64-w64-mingw32-objdump -p "$ARTIFACT_ROOT/curl.exe" \
   >"$OUTPUT_ROOT/curl-objdump.txt"
 sha256sum "$ARTIFACT_ROOT/curl.exe" >"$OUTPUT_ROOT/artifact-sha256.txt"
 strings "$ARTIFACT_ROOT/curl.exe" >"$OUTPUT_ROOT/curl-strings.txt"
 
-# file(1) wording differs across versions ("for MS Windows 5.01 (console),
-# Intel i386" vs "(console) Intel 80386, for MS Windows"); the objdump
-# subsystem fields below are the authoritative XP image check.
-grep -Eq 'PE32 executable.*\(console\).*Intel[[:space:]]+(i386|80386)' \
-  "$OUTPUT_ROOT/curl-file.txt" || die "curl is not a PE32 i386 console image"
-grep -Eq '^MajorSubsystemVersion[[:space:]]+5$' "$OUTPUT_ROOT/curl-objdump.txt" \
-  || die "PE major subsystem version is not 5"
+grep -Eq 'PE32\+ executable.*console.*x86-64' "$OUTPUT_ROOT/curl-file.txt" \
+  || die "curl is not a PE32+ x86-64 console image"
+grep -Eq '^MajorSubsystemVersion[[:space:]]+6$' "$OUTPUT_ROOT/curl-objdump.txt" \
+  || die "PE major subsystem version is not 6"
 grep -Eq '^MinorSubsystemVersion[[:space:]]+1$' "$OUTPUT_ROOT/curl-objdump.txt" \
   || die "PE minor subsystem version is not 1"
 
-BANNED_IMPORTS='BCrypt|bcrypt\.dll|InitializeCriticalSectionEx|SRWLock|ConditionVariable|if_nametoindex|GetTickCount64|CancelIoEx|GetFileInformationByHandleEx|SetFileInformationByHandle|CreateSymbolicLink|GetFinalPathNameByHandle|freopen_s|wfreopen_s|mbstowcs_s|wcstombs_s|wcscpy_s|wcsncpy_s|vsnprintf_s|api-ms-win-crt|ucrtbase'
+# The Windows 7 SP1 floor makes the 64-bit msvcrt.dll's own secure-CRT
+# surface (wcstombs_s and friends) a bundled import, so only genuinely
+# unbundled CRT linkage is rejected here; the DLL closure check above
+# remains the hard dependency guarantee.
+BANNED_IMPORTS='api-ms-win-crt|ucrtbase'
 if grep -Ei "$BANNED_IMPORTS" "$OUTPUT_ROOT/curl-objdump.txt"; then
-  die "curl imports a post-XP or unbundled CRT symbol"
+  die "curl imports an unbundled CRT symbol"
 fi
 
-for required_import in CryptAcquireContextW CryptGenRandom CryptReleaseContext \
-  InitializeCriticalSection GetTickCount getaddrinfo; do
+for required_import in getaddrinfo BCryptGenRandom; do
   grep -q "$required_import" "$OUTPUT_ROOT/curl-objdump.txt" \
-    || die "required XP import is missing: $required_import"
+    || die "required win64 import is missing: $required_import"
 done
 
-DLLS=$(sed -n 's/^[[:space:]]*DLL Name: //p' "$OUTPUT_ROOT/curl-objdump.txt" | sort)
-EXPECTED_DLLS=$(printf '%s\n' ADVAPI32.dll KERNEL32.dll WS2_32.dll msvcrt.dll | sort)
-[[ "$DLLS" == "$EXPECTED_DLLS" ]] \
-  || die "unexpected runtime DLL closure: ${DLLS//$'\n'/,}"
+DLLS=$(sed -n 's/^[[:space:]]*DLL Name: //p' "$OUTPUT_ROOT/curl-objdump.txt" | sort -u)
+for dll in $DLLS; do
+  case "$dll" in
+    ADVAPI32.dll|KERNEL32.dll|WS2_32.dll|bcrypt.dll|msvcrt.dll) ;;
+    *) die "unexpected runtime DLL closure member: $dll" ;;
+  esac
+done
 
 grep -q '^libcurl/8\.21\.0$' "$OUTPUT_ROOT/curl-strings.txt" \
   || die "curl version marker is missing"
@@ -238,24 +236,24 @@ grep -q '^TLSv1\.2 or greater$' "$OUTPUT_ROOT/curl-strings.txt" \
   || die "TLS 1.2 carrier support marker is missing"
 
 {
-  echo "schema=yaca-win32-xp-https-candidate-v1"
+  echo "schema=yaca-win64-https-candidate-v1"
   echo "status=PASS"
-  echo "target=win32-x86"
-  echo "minimum-image-subsystem=Windows-5.01"
+  echo "target=win64-x86_64"
+  echo "minimum-image-subsystem=Windows-6.1"
   echo "evidence=cross-build-and-static-import-audit"
   echo "curl=8.21.0"
-  echo "curl_patch_sha256=8dd8c9d31dca0a5611a88f662bcda56a3531caebd638d63f78ff9ae1ed9c594f"
+  echo "curl_downstream_patches=none"
   echo "mbedtls=3.6.7"
-  echo "mbedtls_patch_sha256=500c30ccad77f5e33d95c2241b97b6f879dcc1525de6c58b0456fbdd9c6dd4f2"
+  echo "mbedtls_downstream_patches=none"
   echo "protocols=http,https"
   echo "curl_config_grammar=standalone-no-option"
   echo "minimum_tls=TLSv1.2-or-newer"
   echo "proxy_tls_floor=TLSv1.2-or-newer-via-mbedtls"
   echo "resolver=blocking"
   echo "ipv6=false"
-  echo "entropy=CryptoAPI-CryptGenRandom"
+  echo "entropy=BCryptGenRandom"
   echo "runtime_qualified=false"
-  echo "real_xp_https_proof=pending"
+  echo "real_windows7_https_proof=pending"
   echo "release_authorized=false"
 } >"$OUTPUT_ROOT/build-summary.txt"
 

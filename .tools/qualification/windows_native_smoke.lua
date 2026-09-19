@@ -6,10 +6,12 @@ Description: Exercises real Windows publication primitives and the bundled XML m
 ]]
 
 local root = assert(arg[1], "an isolated writable test directory is required")
+local expected_arch = arg[2] or "x86"
 local native = require("yaca_native")
 local lxp = require("lxp")
 assert(native.platform_identity().os == "windows")
-assert(native.platform_identity().arch == "x86")
+assert(native.platform_identity().arch == expected_arch,
+    "native architecture mismatch: " .. tostring(native.platform_identity().arch))
 assert(native.abi_version() == "yaca-native-v0.1.0")
 assert(lxp._VERSION == "LuaExpat 1.5.2")
 assert(lxp._EXPAT_VERSION == "expat_2.8.2")

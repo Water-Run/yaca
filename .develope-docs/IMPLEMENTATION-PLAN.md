@@ -25,6 +25,10 @@ N6 已接通离线 Model 区域管理、引用预览和精确保存，见
 不扩展生命周期操作。2026-09-16 已完成 Model 联网测试、资源 selector 语义复核
 和在线 self-test Stage 2/3 生产组合；真实三目标完整资格仍待执行，见
 [本轮收尾记录](WINDOWS-PREVIEW-CLOSEOUT-2026-09-16.md)。
+2026-09-19 新增 win64-x86_64 候选构建路径（Win7 SP1 6.1 基线、无下游
+补丁、bcrypt 熵闭包），并在 win2008 与 Windows 11 两台测试系统完成安装
+验收，见[两测试系统验收](TWO-TARGET-ACCEPTANCE-2026-09-19.md)；
+C32 的真实 Win7 SP1/XP/CentOS 7 资格仍待执行。
 N7 已在用户新提供的 Server 2008 SP2 非 R2 环境定位并修复 ReadConsoleW 大请求失败，
 中文首次配置、隐藏输入与配置事务的源码实测通过，见
 [N7 检查点](SERVER2008-CONSOLE-2026-09-14.md)。

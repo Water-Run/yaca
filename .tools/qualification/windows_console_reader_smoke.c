@@ -6,8 +6,14 @@
 ** double, including UTF-16 fragments and failures. Run on Windows; this is a
 ** deterministic reader check, not a substitute for real console interaction.
 */
+/* Default to the XP header baseline; command-line -D values (for example the
+** win64 0x0601 baseline) override these without a redefinition diagnostic. */
+#ifndef WINVER
 #define WINVER 0x0501
+#endif
+#ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0501
+#endif
 #include <windows.h>
 #include <assert.h>
 #include <stdlib.h>
