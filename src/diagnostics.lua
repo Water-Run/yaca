@@ -1337,7 +1337,12 @@ function M.new_self_test(ports, options)
             for _, dependency in ipairs(check_item.dependencies) do
                 local status = dependency:sub(1, 3) == "ST1"
                     and stage1_status[dependency] or statuses[dependency]
-                if status ~= "passed" then return false end
+                -- A dependency warning (for example stage 1 with no
+                -- configuration yet) must not skip dependents: only a real
+                -- failure or an unresolved state blocks downstream checks.
+                if status ~= "passed" and status ~= "warning" then
+                    return false
+                end
             end
             return true
         end

@@ -3876,6 +3876,15 @@ local function build_offline_self_test(runtime)
                     "schema=0.1.0",
                 })
             end
+            if config.available == false
+                and config.error and config.error.code == "ConfigMissing"
+            then
+                return check_result("warning",
+                    "configuration is not initialized yet", {
+                        "config=absent",
+                        "next=run --model-repl to create one",
+                    })
+            end
             return check_result("failed", "configuration schema is unavailable or invalid")
         end
         if id == "ST1-CONFIG-SOURCE" then
@@ -3887,6 +3896,15 @@ local function build_offline_self_test(runtime)
                         "config-source=present",
                     })
                 end
+                return check_result("failed", "configuration source cannot be verified")
+            end
+            if config.available == false
+                and config.error and config.error.code == "ConfigMissing"
+            then
+                return check_result("warning",
+                    "configuration is not initialized yet", {
+                        "config=absent",
+                    })
             end
             return check_result("failed", "configuration source cannot be verified")
         end

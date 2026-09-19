@@ -2,6 +2,15 @@
 
 更新日期：2026-09-19
 
+2026-09-19 第三轮：C33/C34 工具收尾——Linux zip 装配器
+（`package_linux_zip.py` + `LINUX-QUICKSTART.md`）、干净机旅程驱动
+（`test/release/journeys.lua`，Linux 容器内 6/6 PASS）、文档真源守卫
+（`.tools/check_documentation_truth.lua`，入 readiness 链）。三包
+（win32/win64/linux）均按同标准重建/组装并完成机器内试跑；
+干净机首跑发现并修复两个真实缺陷：zip 预置空 `__yaca__` 数据根、
+未初始化配置记 warning 且不阻断依赖（`outcome=partial`）。套件
+**591/591**。见 [C33/C34 工具收尾](C33-C34-TOOLING-2026-09-19.md)。
+
 2026-09-19 第二轮：以 rootless podman 的 CentOS 7.9.2009 容器完成
 linux-x86_64 锁定工具链（glibc 2.17 / GCC 4.8.5）资格构建
 （full_tests=575/575）与真实 DeepSeek 安装验收（Stage 1/2/3、工具/

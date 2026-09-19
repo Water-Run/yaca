@@ -14,8 +14,7 @@ local M = {}
 
 local IS_WINDOWS = package.config:sub(1, 1) == "\\"
 
-local DOC_FILES = {
-    ["docs/WINDOWS-QUICKSTART.md"] = true,
+local SHARED_DOC_FILES = {
     ["docs/COMPONENTS.txt"] = true,
     ["docs/build-summary.json"] = true,
     ["docs/SBOM.spdx.json"] = true,
@@ -26,6 +25,11 @@ local DOC_FILES = {
     ["docs/licenses/curl.txt"] = true,
     ["docs/licenses/Mbed-TLS.txt"] = true,
     ["docs/licenses/Mozilla-CA.pem"] = true,
+}
+
+local QUICKSTART_BY_OS = {
+    windows = "docs/WINDOWS-QUICKSTART.md",
+    linux = "docs/LINUX-QUICKSTART.md",
 }
 
 -- Name fragments of components that must never ship. Mirrors the manifest's
@@ -83,7 +87,9 @@ function M.verify(manifest, entries, target_id)
         if entry:sub(-1) == "/" then
             -- A required directory contributes its versioned file set.
             if entry == "docs/" then
-                for doc in pairs(DOC_FILES) do expect(doc) end
+                for doc in pairs(SHARED_DOC_FILES) do expect(doc) end
+                expect(assert(QUICKSTART_BY_OS[target.os],
+                    "manifest target has no quickstart mapping"))
             else
                 return false, {
                     "manifest requires unmapped directory entry: " .. entry,

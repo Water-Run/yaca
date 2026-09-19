@@ -17,6 +17,7 @@ end
 
 local manifest = load_value("release/manifest.lua")
 local surface = load_value(".tools/check_zero_surface.lua")
+local journeys = load_value("test/release/journeys.lua")
 
 local WINDOWS_ROOT = {
     "yaca.exe", "Install.cmd", "README.txt", "LICENSE",
@@ -30,7 +31,7 @@ local WINDOWS_ROOT = {
 
 local LINUX_ROOT = {
     "yaca", "Install.sh", "README.txt", "LICENSE",
-    "docs/WINDOWS-QUICKSTART.md", "docs/COMPONENTS.txt",
+    "docs/LINUX-QUICKSTART.md", "docs/COMPONENTS.txt",
     "docs/build-summary.json", "docs/SBOM.spdx.json",
     "docs/licenses/Lua-MIT.html", "docs/licenses/Expat-MIT.txt",
     "docs/licenses/LuaExpat-MIT.html", "docs/licenses/luainstaller-LGPL.txt",
@@ -177,6 +178,78 @@ return {
                     clone(WINDOWS_ROOT), "win32-x86")
                 A.falsy(ok)
                 A.equal(findings[1], "manifest is missing its packaging section")
+            end,
+        },
+        {
+            name = "journey plan is offline by default and gates online steps on consent",
+            run = function()
+                local offline, plan_error = journeys.plan("linux-x86_64", {})
+                A.truthy(offline, plan_error)
+                A.equal(#offline, 6)
+                A.equal(offline[1].id, "extract")
+                A.equal(offline[6].id, "verify-no-residue")
+                local without_consent = journeys.plan("win32-x86",
+                    { online = true })
+                A.equal(#without_consent, 6)
+                local with_consent = journeys.plan("win32-x86",
+                    { online = true, online_consent = true })
+                A.equal(#with_consent, 10)
+                A.equal(with_consent[5].id, "configure")
+                A.equal(with_consent[10].id, "verify-no-residue")
+                local bad, bad_error = journeys.plan("win16", {})
+                A.falsy(bad)
+                A.truthy(bad_error)
+            end,
+        },
+        {
+            name = "journey step verification accepts matching and rejects wrong evidence",
+            run = function()
+                local ok = journeys.verify_step("version", "linux-x86_64",
+                    { output = "yaca 0.1.0 (linux-x86_64)\n" })
+                A.truthy(ok)
+                ok = journeys.verify_step("version", "linux-x86_64",
+                    { output = "yaca 0.1.0 (win32-x86)\n" })
+                A.falsy(ok)
+                ok = journeys.verify_step("selftest-stage1", "win32-x86",
+                    { exit_code = 0,
+                      output = "self-test outcome=passed completed-stage=1 online-requests=0 auto-fixes=0" })
+                A.truthy(ok)
+                ok = journeys.verify_step("selftest-stage1", "win32-x86",
+                    { exit_code = 0,
+                      output = "self-test outcome=passed completed-stage=1 auto-fixes=2" })
+                A.falsy(ok)
+                ok = journeys.verify_step("selftest-stage1", "linux-x86_64",
+                    { exit_code = 1,
+                      output = "self-test outcome=partial completed-stage=1 online-requests=0 auto-fixes=0" })
+                A.truthy(ok)
+                ok = journeys.verify_step("selftest-stage1", "linux-x86_64",
+                    { exit_code = 1,
+                      output = "self-test outcome=error completed-stage=1 auto-fixes=0" })
+                A.falsy(ok)
+                ok = journeys.verify_step("zero-surface", "win32-x86",
+                    { exit_code = 0, output = "zero-surface=PASS target=win32-x86 files=15" })
+                A.truthy(ok)
+                ok = journeys.verify_step("verify-no-residue", "win32-x86",
+                    { residue_paths = {} })
+                A.truthy(ok)
+                local failed, finding = journeys.verify_step(
+                    "verify-no-residue", "win32-x86",
+                    { residue_paths = { "/tmp/yaca-install" } })
+                A.falsy(failed)
+                A.truthy(finding:find("residue", 1, true))
+            end,
+        },
+        {
+            name = "host mismatch only skips run and online steps",
+            run = function()
+                local steps = journeys.plan("win64-x86_64", {})
+                local skipped = journeys.skipped_on_host_mismatch(steps, "linux")
+                A.equal(#skipped, 2)
+                A.equal(skipped[1], "version")
+                A.equal(skipped[2], "selftest-stage1")
+                local none = journeys.skipped_on_host_mismatch(
+                    journeys.plan("linux-x86_64", {}), "linux")
+                A.equal(#none, 0)
             end,
         },
         {

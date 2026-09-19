@@ -157,9 +157,16 @@ def main():
             "luainstaller-97192d1.tar.gz", "cacert-2026-08-13.pem",
         ):
             archive.add(cache / name, arcname="dependencies/" + name)
+    # The shipped archive pre-creates the empty data root so a
+    # first --self-test passes on a clean machine.
+    (package / "__yaca__").mkdir(exist_ok=True)
     zip_output = output / "yaca-0.1.0-preview-win64-x86_64.zip"
     with zipfile.ZipFile(zip_output, "w", zipfile.ZIP_DEFLATED) as archive:
         for path in sorted(package.rglob("*")):
+            if path.is_dir() and path.name == "__yaca__":
+                info = zipfile.ZipInfo(str(path.relative_to(package)) + "/")
+                info.external_attr = (0o755 << 16) | 0x10
+                archive.writestr(info, b"")
             if path.is_file():
                 archive.write(path, str(path.relative_to(package)))
     (output / "SHA256SUMS.txt").write_text(
