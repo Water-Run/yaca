@@ -1,7 +1,7 @@
 --[[
-File: platform_test.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-09-23
+File: platform_test.lua
 Description: Verifies normalized immutable platform identities and failures.
 ]]
 
@@ -12,6 +12,9 @@ local loader_module = assert(loadfile(YACA_TEST_ROOT .. "/.tools/check_loader.lu
 local secure_loader = assert(loader_module.new(manifest, YACA_TEST_ROOT))
 local platform = secure_loader:require_lua("platform")
 
+--Supplies identity fields behavior required by this suite.
+--@param identity table File or process identity under inspection.
+--@return any observed identity fields value observed by the scenario assertion.
 local function identity_fields(identity)
     local fields = {}
     for key in pairs(identity) do fields[#fields + 1] = key end
@@ -24,6 +27,9 @@ return {
     cases = {
         {
             name = "identity is canonical immutable and probed once",
+            --Verifies identity is canonical immutable and probed once.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify identity is canonical immutable and probed once.
             run = function()
                 local native = fake_native.platform({ os = "windows", arch = "x86" })
                 local service = assert(platform.new(native, "win32-x86"))
@@ -36,12 +42,21 @@ return {
                 A.equal(first.arch, "x86")
                 A.equal(first.target, "win32-x86")
                 A.truthy(first.supported)
+                --Executes the action expected to raise in the 'identity is canonical immutable and probed once' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify identity is canonical immutable and probed once.
                 A.raises(function() first.os = "linux" end, "cannot be modified")
+                --Executes the action expected to raise in the 'identity is canonical immutable and probed once' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify identity is canonical immutable and probed once.
                 A.raises(function() service.identity = false end, "cannot be modified")
             end,
         },
         {
             name = "all release identities map exactly",
+            --Verifies all release identities map exactly.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify all release identities map exactly.
             run = function()
                 local vectors = {
                     { "windows", "x86", "win32-x86" },
@@ -58,6 +73,9 @@ return {
         },
         {
             name = "recognized runtime mismatch is explicit and unsupported",
+            --Verifies all release identities map exactly.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify all release identities map exactly.
             run = function()
                 local service = assert(platform.new(fake_native.platform({ os = "linux", arch = "x86_64" }), "win64-x86_64"))
                 local identity = assert(service.identity())
@@ -67,6 +85,9 @@ return {
         },
         {
             name = "unknown release target is rejected before probing",
+            --Verifies recognized runtime mismatch is explicit and unsupported.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify recognized runtime mismatch is explicit and unsupported.
             run = function()
                 local native = fake_native.platform({ os = "linux", arch = "x86_64" })
                 local service, platform_error = platform.new(native, "linux-arm64")
@@ -77,6 +98,9 @@ return {
         },
         {
             name = "unknown observation fields including OS version are rejected",
+            --Verifies unknown release target is rejected before probing.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify unknown release target is rejected before probing.
             run = function()
                 local native = fake_native.platform({ os = "windows", arch = "x86", version = "5.1" })
                 local service = assert(platform.new(native, "win32-x86"))
@@ -92,6 +116,9 @@ return {
         },
         {
             name = "unknown OS or architecture fails closed",
+            --Verifies unknown observation fields including OS version are rejected.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify unknown observation fields including OS version are rejected.
             run = function()
                 for _, observation in ipairs({
                     { os = "macos", arch = "x86_64" },
@@ -107,6 +134,9 @@ return {
         },
         {
             name = "native absence exceptions and malformed results are typed",
+            --Verifies unknown OS or architecture fails closed.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify unknown OS or architecture fails closed.
             run = function()
                 local service, port_error = platform.new({}, "linux-x86_64")
                 A.falsy(service)
@@ -118,6 +148,9 @@ return {
                 A.equal(missing_error.code, "PlatformProbeFailed")
                 A.contains(missing_error.detail, "no platform API")
 
+                --Supplies platform behavior required by the 'native absence exceptions and malformed results are typed' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify unknown OS or architecture fails closed.
                 local throwing_native = fake_native.platform(function() error("probe exploded") end)
                 local throwing = assert(platform.new(throwing_native, "linux-x86_64"))
                 local throwing_identity, throwing_error = throwing.identity()

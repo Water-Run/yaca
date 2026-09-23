@@ -1,3 +1,10 @@
+--[[
+Author: WaterRun
+Date: 2026-09-23
+File: agentloop.lua
+Description: Supplies expected Agent state and durable event traces for contract checks.
+]]
+
 return {
   contract_version = "0.1.0-readiness.1",
   traces = {

@@ -1,7 +1,7 @@
 --[[
-File: self_test_test.lua
-Date: 2026-08-30
 Author: WaterRun
+Date: 2026-09-23
+File: self_test_test.lua
 Description: Verifies ordered offline, Model, and advisory self-test execution.
 ]]
 
@@ -40,6 +40,9 @@ local CHECK_IDS = {
     "ST3-NAMING-AND-SPELLING",
 }
 
+--Builds validated options for this suite's component fixture.
+--@param overrides table|nil Per-case overrides of default fixture behavior.
+--@return any options options used to configure the component under test.
 local function options(overrides)
     local result = {
         maximum_models = 8,
@@ -57,6 +60,9 @@ local function options(overrides)
     return result
 end
 
+--Simulates the request port for this suite.
+--@param overrides table|nil Per-case overrides of default fixture behavior.
+--@return any observed request value observed by the scenario assertion.
 local function request(overrides)
     local result = {
         mode = "explicit",
@@ -93,6 +99,11 @@ local function request(overrides)
     return result
 end
 
+--Supplies raw result behavior required by this suite.
+--@param outcome string Expected terminal outcome.
+--@param online_requests any The online requests supplied to the fake service for this scenario.
+--@param overrides table|nil Per-case overrides of default fixture behavior.
+--@return any observed raw result value observed by the scenario assertion.
 local function raw_result(outcome, online_requests, overrides)
     local result = {
         outcome = outcome or "passed",
@@ -105,6 +116,12 @@ local function raw_result(outcome, online_requests, overrides)
     return result
 end
 
+--Constructs new fixture for this test scenario.
+--@param settings table|nil Fixture settings and scenario overrides.
+--@param option_overrides table|nil Per-case overrides of default options.
+--@return any created Constructed new fixture fixture value.
+--@return any secondary2 Configured control actions returned by the fixture.
+--@return any secondary3 Additional status or structured error from the fixture operation.
 local function new_fixture(settings, option_overrides)
     settings = settings or {}
     local controls = {
@@ -116,8 +133,17 @@ local function new_fixture(settings, option_overrides)
         reentrant_error = false,
     }
     local service
+    --Supplies immutable behavior required by this suite.
+    --@param specification table Test specification used to construct the fixture.
+    --@return nil No value; the fake port or test assertion observes this callback's effects.
     local function immutable(specification)
+        --Supplies pcall behavior required by this suite.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return nil No value; the fake port or test assertion observes this callback's effects.
         local root_ok = pcall(function() specification.no_auto_fix = false end)
+        --Supplies pcall behavior required by this suite.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return nil No value; the fake port or test assertion observes this callback's effects.
         local check_ok = pcall(function() specification.check.id = "changed" end)
         controls.immutable_requests = controls.immutable_requests
             and not root_ok and not check_ok
@@ -127,6 +153,9 @@ local function new_fixture(settings, option_overrides)
         model = { online = true },
         advisory = { online = true, auto_fix = false },
     }
+    --Supplies run behavior required by this suite.
+    --@param specification table Test specification used to construct the fixture.
+    --@return any observed run value observed by the scenario assertion.
     function ports.offline.run(specification)
         immutable(specification)
         controls.offline_calls[#controls.offline_calls + 1] = specification
@@ -140,6 +169,9 @@ local function new_fixture(settings, option_overrides)
         if type(configured) == "function" then return configured(specification) end
         return raw_result(configured or "passed", 0)
     end
+    --Supplies run behavior required by this suite.
+    --@param specification table Test specification used to construct the fixture.
+    --@return any observed run value observed by the scenario assertion.
     function ports.model.run(specification)
         immutable(specification)
         controls.model_calls[#controls.model_calls + 1] = specification
@@ -152,6 +184,9 @@ local function new_fixture(settings, option_overrides)
         controls.network_requests = controls.network_requests + online_requests
         return raw_result(configured or "passed", online_requests)
     end
+    --Supplies run behavior required by this suite.
+    --@param specification table Test specification used to construct the fixture.
+    --@return any observed run value observed by the scenario assertion.
     function ports.advisory.run(specification)
         immutable(specification)
         controls.advisory_calls[#controls.advisory_calls + 1] = specification
@@ -167,6 +202,9 @@ local function new_fixture(settings, option_overrides)
     return service, controls, ports
 end
 
+--Supplies call ids behavior required by this suite.
+--@param calls any The calls supplied to the fake service for this scenario.
+--@return any observed call ids value observed by the scenario assertion.
 local function call_ids(calls)
     local result = {}
     for index, call in ipairs(calls) do result[index] = call.check.id end
@@ -178,6 +216,9 @@ return {
     cases = {
         {
             name = "registry is exact topological immutable and declares no mutation surface",
+            --Verifies registry is exact topological immutable and declares no mutation surface.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify registry is exact topological immutable and declares no mutation surface.
             run = function()
                 local service = assert(new_fixture())
                 A.equal(service.online, "explicit-current-invocation-only")
@@ -185,6 +226,9 @@ return {
                 A.truthy(service.stage3_is_advisory)
                 A.truthy(service.strict_dependency_order)
                 A.equal(#service.checks, 25)
+                --Supplies an assertion callback for the registry is exact topological immutable and declares no mutation surface scenario.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return any value Callback value consumed by the enclosing scenario assertion.
                 A.deep_equal(call_ids((function()
                     local wrapped = {}
                     for index, item in ipairs(service.checks) do
@@ -199,6 +243,9 @@ return {
                     end
                     seen[item.id] = true
                 end
+                --Executes the action expected to raise in the 'registry is exact topological immutable and declares no mutation surface' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; the fake port or test assertion observes this callback's effects.
                 A.raises(function() service.checks[1].id = "changed" end, "cannot be modified")
                 A.falsy(service.repair)
                 A.falsy(service.apply)
@@ -207,6 +254,9 @@ return {
         },
         {
             name = "listing all stages performs no check and no online request",
+            --Verifies listing all stages performs no check and no online request.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify listing all stages performs no check and no online request.
             run = function()
                 local service, controls = new_fixture()
                 local result = assert(service:run(request({
@@ -229,6 +279,9 @@ return {
         },
         {
             name = "Stage 1 runs all offline checks in order and tolerates optional warning",
+            --Verifies stage 1 runs all offline checks in order and tolerates optional warning.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify stage 1 runs all offline checks in order and tolerates optional warning.
             run = function()
                 local service, controls = new_fixture({
                     offline = { ["ST1-TTY-INPUT"] = "warning" },
@@ -255,6 +308,9 @@ return {
         },
         {
             name = "online consent is checked before every offline or Model effect",
+            --Verifies online consent is checked before every offline or Model effect.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify online consent is checked before every offline or Model effect.
             run = function()
                 for _, stage in ipairs({ 2, 3 }) do
                     local service, controls = new_fixture()
@@ -272,6 +328,9 @@ return {
         },
         {
             name = "Stage 2 checks every enabled Model independently with real requests",
+            --Verifies online consent is checked before every offline or Model effect.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify online consent is checked before every offline or Model effect.
             run = function()
                 local service, controls = new_fixture()
                 local result = assert(service:run(request({
@@ -303,6 +362,9 @@ return {
         },
         {
             name = "required Model or check exclusion is partial and prevents Stage 3",
+            --Verifies required Model or check exclusion is partial and prevents Stage 3.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify required Model or check exclusion is partial and prevents Stage 3.
             run = function()
                 local service, controls = new_fixture()
                 local result = assert(service:run(request({
@@ -342,6 +404,9 @@ return {
         },
         {
             name = "Stage 2 failure skips dependents and withholds failed Model from Stage 3",
+            --Verifies stage 2 failure skips dependents and withholds failed Model from Stage 3.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify stage 2 failure skips dependents and withholds failed Model from Stage 3.
             run = function()
                 local service, controls = new_fixture({
                     model = {
@@ -363,6 +428,9 @@ return {
         },
         {
             name = "Stage 3 sees only confirmed Models and cannot block with advisories",
+            --Verifies stage 3 sees only confirmed Models and cannot block with advisories.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify stage 3 sees only confirmed Models and cannot block with advisories.
             run = function()
                 local service, controls = new_fixture({
                     advisory = {
@@ -395,9 +463,15 @@ return {
         },
         {
             name = "executor network and mutation contract violations fail closed",
+            --Verifies executor network and mutation contract violations fail closed.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify executor network and mutation contract violations fail closed.
             run = function()
                 local service, controls = new_fixture({
                     offline = {
+                        --Supplies an assertion callback for the executor network and mutation contract violations fail closed scenario.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return any value Callback value consumed by the enclosing scenario assertion.
                         ["ST1-PLATFORM"] = function()
                             return raw_result("passed", 1)
                         end,
@@ -419,6 +493,9 @@ return {
 
                 service, controls = new_fixture({
                     advisory = {
+                        --Supplies an assertion callback for the executor network and mutation contract violations fail closed scenario.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return any value Callback value consumed by the enclosing scenario assertion.
                         ["ST3-CONFIG-SEMANTICS"] = function()
                             return raw_result("passed", 1, { auto_fixes = 1 })
                         end,
@@ -445,6 +522,9 @@ return {
         },
         {
             name = "requests filters caps and synchronous reentry are bounded",
+            --Verifies requests filters caps and synchronous reentry are bounded.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify requests filters caps and synchronous reentry are bounded.
             run = function()
                 local service, controls = new_fixture({ reenter = true })
                 local result = assert(service:run(request()))

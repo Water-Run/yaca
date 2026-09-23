@@ -1,3 +1,10 @@
+<#
+Author: WaterRun
+Date: 2026-09-23
+File: windows_mock_provider.ps1
+Description: Synthetic loopback provider for the Windows deployment smoke journey.
+#>
+
 # Synthetic loopback provider for the Windows deployment smoke journey.
 # Run only in an isolated test directory; it does not contact a model service.
 param([int]$Port = 18632, [string]$Root = $PSScriptRoot)

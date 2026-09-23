@@ -1,7 +1,7 @@
 --[[
-File: main.lua
-Date: 2026-08-30
 Author: WaterRun
+Date: 2026-09-23
+File: main.lua
 Description: Routes the offline bootstrap lifecycle from the unique composition root.
 ]]
 
@@ -18,21 +18,50 @@ local BOOTSTRAP_ACTIONS = {
     ["context-repl"] = true,
 }
 
+-- Construct a structured diagnostic without throwing or formatting its optional fields.
+--@param code string Stable diagnostic code used by callers to choose recovery behavior.
+--@param message string Human-readable summary supplied by the failing operation.
+--@param next_action string|nil Suggested recovery action for the user-facing diagnostic.
+--@return table New diagnostic record; optional non-nil fields are retained without deep copying.
 local function failure(code, message, next_action)
     local result = { code = code, message = message }
     if next_action ~= nil then result.next_action = next_action end
     return result
 end
 
+-- Create a shallow read-only view without copying the backing table.
+--@param values table Backing fields retained by reference; the caller owns their stability.
+--@param label string|nil Diagnostic label; defaults to "readonly value".
+--@return table Empty proxy exposing the backing fields through its locked metatable.
+--@ownership Retains values by reference; nested values and the backing table are not frozen.
 local function readonly(values, label)
+    --@metatable readonly_proxy Forwards reads and iteration; ordinary assignments raise an error.
+    --@field __index table Backing values used for missing-key reads.
+    --@field __newindex function Rejects ordinary assignments without changing the backing values.
+    --@field __pairs function Enumerates the backing table with next.
+    --@field __len function Reports the backing table sequence length.
+    --@field __metatable string Hides this metatable behind the fixed "locked" marker.
     return setmetatable({}, {
         __index = values,
+        -- Reject a write through the proxy before it can create an ordinary field.
+        --@param _ table Proxy receiving the assignment; its contents are not consulted.
+        --@param key any Attempted field name included in the diagnostic.
+        --@return nil Does not return normally.
+        --@error Always raises a read-only assignment error at the caller frame.
         __newindex = function(_, key)
             error((label or "readonly value") .. " cannot be modified: " .. tostring(key), 2)
         end,
+        -- Iterate the backing fields instead of the empty proxy table.
+        --@param none The proxy argument supplied by pairs is ignored.
+        --@return function The standard next iterator.
+        --@return table Backing values used as iterator state.
+        --@return nil Initial key used to start iteration.
         __pairs = function()
             return next, values, nil
         end,
+        -- Forward sequence-length queries to the backing table.
+        --@param none The proxy operand supplied by Lua is ignored.
+        --@return integer Length of the backing sequence under the Lua length operator.
         __len = function()
             return #values
         end,
@@ -40,6 +69,11 @@ local function readonly(values, label)
     })
 end
 
+---Copies a plain composition value into read-only proxies, rejecting cycles.
+--@param value any Value to freeze recursively.
+--@param visiting table|nil Ancestor set shared by recursive calls.
+--@param label string|nil Proxy diagnostic label.
+--@return any|nil frozen Read-only copy, or nil for cyclic tables.
 local function freeze(value, visiting, label)
     if type(value) ~= "table" then return value end
     visiting = visiting or {}
@@ -58,10 +92,17 @@ local function freeze(value, visiting, label)
     return readonly(copy, label)
 end
 
+-- Check the Lua integer subtype and the caller's inclusive lower bound.
+--@param value any Candidate value; floats and non-numeric values are rejected.
+--@param minimum integer Inclusive minimum accepted by this check.
+--@return boolean True only for an integer at least minimum.
 local function valid_integer(value, minimum)
     return math.type(value) == "integer" and value >= minimum
 end
 
+---Checks a dense one-based array of nonempty NUL-free strings.
+--@param values any Candidate argument or configuration array.
+--@return boolean valid Whether every index and value is admissible.
 local function dense_string_array(values)
     if type(values) ~= "table" then return false end
     local count = 0
@@ -78,6 +119,11 @@ local function dense_string_array(values)
     return true
 end
 
+---Copies finite plain data without cycles or executable Lua values.
+--@param value any Candidate scalar or nested table.
+--@param visiting table|nil Ancestor set for recursive calls.
+--@return any|nil copied Detached plain value when valid.
+--@return boolean valid Whether the complete value is plain and finite.
 local function copy_plain(value, visiting)
     local value_type = type(value)
     if value_type == "nil" or value_type == "string" or value_type == "boolean" then
@@ -108,6 +154,11 @@ local function copy_plain(value, visiting)
     return copy, true
 end
 
+---Compares nested plain values for a stable configuration binding.
+--@param left any First value.
+--@param right any Second value.
+--@param visited table|nil Previously compared table pairs.
+--@return boolean equal Whether both structures have equal keys and values.
 local function plain_equal(left, right, visited)
     if left == right then return true end
     if type(left) ~= type(right) or type(left) ~= "table" then return false end
@@ -123,6 +174,9 @@ local function plain_equal(left, right, visited)
     return true
 end
 
+---Checks a NUL-free absolute POSIX, drive, or UNC path.
+--@param value any Candidate physical path.
+--@return boolean valid Whether the path is absolute.
 local function valid_absolute_path(value)
     if type(value) ~= "string" or value == "" or value:find("\0", 1, true) then return false end
     local normalized = value:gsub("\\", "/")
@@ -137,6 +191,10 @@ local RUNTIME_TARGETS = {
     ["linux-x86_64"] = "linux",
 }
 
+---Validates the observed executable path in the release target's path syntax.
+--@param value any Native-observed executable path.
+--@param style string Linux or Windows path style.
+--@return string|nil path Canonical executable path or nil when ambiguous.
 local function normalize_executable_path(value, style)
     if type(value) ~= "string" or value == "" or value:find("\0", 1, true) then
         return nil
@@ -170,6 +228,10 @@ local function normalize_executable_path(value, style)
     return normalized
 end
 
+---Extracts the directory of a canonical native executable path.
+--@param path string Canonical executable path.
+--@param style string Linux or Windows path style.
+--@return string|nil directory Parent directory when one exists.
 local function executable_directory(path, style)
     local separator = style == "windows" and "\\" or "/"
     local last
@@ -187,6 +249,11 @@ local function executable_directory(path, style)
     return path:sub(1, last - 1)
 end
 
+---Joins a trusted root and one leaf using the release target separator.
+--@param root string Canonical parent directory.
+--@param leaf string Child path component.
+--@param style string Linux or Windows path style.
+--@return string path Joined physical path.
 local function join_path(root, leaf, style)
     local separator = style == "windows" and "\\" or "/"
     if root:sub(-1) == separator then return root .. leaf end
@@ -197,11 +264,11 @@ end
 -- The outer onefile executable owns adjacent user data. The inner extracted
 -- executable owns immutable bundled components; neither root is derived from
 -- cwd, PATH text, or a caller-provided resource directory.
--- @param native table Native port exposing executable_paths(argv0).
--- @param argv0 string Original process argv[0] preserved by the onefile launcher.
--- @param target_id string One exact release target id.
--- @return table|nil Immutable runtime layout.
--- @return table|nil Structured layout failure.
+--@param native table Native port exposing executable_paths(argv0).
+--@param argv0 string Original process argv[0] preserved by the onefile launcher.
+--@param target_id string One exact release target id.
+--@return table|nil Immutable runtime layout.
+--@return table|nil Structured layout failure.
 function M.resolve_runtime_layout(native, argv0, target_id)
     local style = RUNTIME_TARGETS[target_id]
     if type(native) ~= "table"
@@ -281,6 +348,10 @@ local TARGET_BY_NATIVE_IDENTITY = {
     ["linux\0x86_64"] = "linux-x86_64",
 }
 
+---Bounds diagnostic text and replaces control bytes before display.
+--@param value any Candidate error message.
+--@param maximum_bytes integer Maximum retained message bytes.
+--@return string safe Sanitized bounded diagnostic text.
 local function safe_diagnostic(value, maximum_bytes)
     value = type(value) == "string" and value or "internal failure"
     value = value:gsub("[%z\1-\31\127]", "?")
@@ -288,15 +359,25 @@ local function safe_diagnostic(value, maximum_bytes)
     return value
 end
 
+---Escapes non-ASCII bytes for a portable terminal diagnostic.
+--@param value any Candidate error message.
+--@param maximum_bytes integer Maximum retained message bytes.
+--@return string ascii ASCII-only diagnostic text.
 local function ascii_diagnostic(value, maximum_bytes)
     return (safe_diagnostic(value, maximum_bytes):gsub(
         "[\128-\255]",
+        ---Formats one non-ASCII byte as a hexadecimal escape.
+        --@param byte string One matched byte.
+        --@return string escaped ASCII hexadecimal byte escape.
         function(byte) return string.format("\\x%02X", byte:byte()) end
     ))
 end
 
 -- Shares the public Session fields between the one-shot CLI status and chat.
 -- No selector lookup or storage scan belongs to this projection.
+--@param status table Public Session status fields.
+--@param render function|nil Diagnostic text renderer.
+--@return table lines Ordered status lines for CLI or chat.
 local function session_status_lines(status, render)
     render = render or safe_diagnostic
     local hash = status.context_hash
@@ -321,6 +402,10 @@ local function session_status_lines(status, render)
     }
 end
 
+---Writes one output chunk through a function or writer object safely.
+--@param writer function|table Output writer.
+--@param bytes string Chunk to write.
+--@return boolean written Whether the writer accepted the complete call.
 local function write_direct(writer, bytes)
     local called, result
     if type(writer) == "function" then
@@ -333,6 +418,10 @@ local function write_direct(writer, bytes)
     return called and result ~= nil and result ~= false
 end
 
+---Renders a stable ASCII error line without leaking control bytes.
+--@param writer function|table Diagnostic output writer.
+--@param err table|any Structured error or thrown value.
+--@return boolean written Whether the diagnostic was written.
 local function diagnostic(writer, err)
     local code = type(err) == "table" and err.code or "InternalError"
     if type(code) ~= "string" or not code:match("^[A-Za-z][A-Za-z0-9]+$") then
@@ -346,6 +435,10 @@ local function diagnostic(writer, err)
     return write_direct(writer, line .. "\n")
 end
 
+---Validates argv[0] and copies dense NUL-free process arguments.
+--@param arguments table Process argv with index zero.
+--@return table|nil invocation Detached argv0 and argument values.
+--@return table|nil err Structured usage failure.
 local function copy_arguments(arguments)
     if type(arguments) ~= "table"
         or type(arguments[0]) ~= "string"
@@ -375,6 +468,11 @@ local function copy_arguments(arguments)
     return { argv0 = arguments[0], values = values }
 end
 
+---Loads only the bundled native module from the fixed runtime path.
+--@param none No arguments.
+--@return table|nil native Opened native module.
+--@return table|nil err Structured loader failure.
+--@return string|nil path Absolute bundled native module path.
 local function default_native_module()
     if type(package) ~= "table"
         or type(package.cpath) ~= "string"
@@ -409,6 +507,10 @@ local function default_native_module()
     return native, nil, path
 end
 
+---Checks native ABI and maps the observed OS/architecture to a release target.
+--@param native table Candidate bundled native module.
+--@return table|nil identity Admitted OS, architecture, and target.
+--@return table|nil err Structured ABI or platform failure.
 local function admit_native(native)
     if type(native) ~= "table"
         or type(native.abi_version) ~= "function"
@@ -444,6 +546,10 @@ local function admit_native(native)
     }
 end
 
+---Builds the bounded CLI parser and machine-output codec for one platform.
+--@param platform_name string Admitted release target ID.
+--@return table|nil cli Bounded CLI service.
+--@return table|nil err Structured codec or CLI construction failure.
 local function new_cli(platform_name)
     local json = require("json")
     local cli = require("cli")
@@ -466,16 +572,40 @@ end
 ---Runs one complete top-level argv projection and returns its stable exit code.
 -- Production loads the native module only from luainstaller's first absolute
 -- bundled path. Tests may inject the same narrow native contract and writers.
--- @param arguments table Process arguments including string argv[0].
--- @param ports table|nil Test/runtime injection for native and output writers.
--- @return integer Stable CLI exit code.
+--@param arguments table Process arguments including string argv[0].
+--@param ports table|nil Test/runtime injection for native and output writers.
+--@return integer Stable CLI exit code.
 function M.run_cli(arguments, ports)
     ports = ports or {}
-    local stdout = ports.stdout or function(bytes)
-        local result = io.stdout:write(bytes)
-        return result ~= nil
+    local native, native_error, native_path
+    ---Attempts native console output, leaving pipe fallback to the caller.
+    --@param stream string Stdout or stderr target.
+    --@param bytes string UI output bytes.
+    --@return boolean|nil written True on console write, false on failure, nil for a pipe.
+    local function write_console(stream, bytes)
+        if not native or type(native.console_write) ~= "function" then return nil end
+        local ok, result = native.console_write(stream, bytes)
+        if ok then return true end
+        if result and result.code == "NotConsole" then return nil end
+        return false
     end
+    ---Writes stdout with immediate flushing for Cygwin PTY visibility.
+    --@param bytes string User-facing output chunk.
+    --@return boolean written Whether native console or standard output accepted it.
+    local stdout = ports.stdout or function(bytes)
+        local console = write_console("stdout", bytes)
+        if console ~= nil then return console end
+        local result = io.stdout:write(bytes)
+        -- A Cygwin PTY is a pipe to the Windows C runtime. Flush each UI write
+        -- so prompts and streamed answers are visible before input is read.
+        return result ~= nil and io.stdout:flush() ~= nil
+    end
+    ---Writes stderr through native console or the process error stream.
+    --@param bytes string Diagnostic output chunk.
+    --@return boolean written Whether the output stream accepted it.
     local stderr = ports.stderr or function(bytes)
+        local console = write_console("stderr", bytes)
+        if console ~= nil then return console end
         local result = io.stderr:write(bytes)
         return result ~= nil
     end
@@ -485,7 +615,6 @@ function M.run_cli(arguments, ports)
         return 2
     end
 
-    local native, native_error, native_path
     if ports.native ~= nil then
         native = ports.native
         native_path = ports.native_path
@@ -597,6 +726,10 @@ function M.run_cli(arguments, ports)
     return 0
 end
 
+---Checks the narrow services admitted into the side-effect-free application root.
+--@param components table Platform, Config, Workspace, and optional runtime services.
+--@return table|nil components Admitted service record.
+--@return table|nil err Structured missing or ambiguous component failure.
 local function validate_components(components)
     if type(components) ~= "table" then
         return nil, failure("InvalidBootstrapComponents", "bootstrap components are required")
@@ -685,6 +818,10 @@ local function validate_components(components)
     return components
 end
 
+---Validates product identity, target, Config path, and draft limit.
+--@param options table Candidate application construction options.
+--@return table|nil options Admitted option record.
+--@return table|nil err Structured option failure.
 local function validate_options(options)
     if type(options) ~= "table" then
         return nil, failure("InvalidBootstrapOptions", "bootstrap options are required")
@@ -715,6 +852,10 @@ local function validate_options(options)
     return options
 end
 
+---Checks one semantic CLI action and its exact allowed fields.
+--@param request table Parsed semantic action record.
+--@return table|nil request Admitted original request.
+--@return table|nil err Structured usage failure.
 local function validate_request(request)
     if type(request) ~= "table" or type(request.id) ~= "string" or request.id == "" then
         return nil, failure("UsageError", "a semantic action id is required")
@@ -797,6 +938,9 @@ local function validate_request(request)
     return request
 end
 
+---Maps low-level Config read failures to stable user-facing recovery guidance.
+--@param config_error table|nil Config service failure.
+--@return table err Normalized ConfigMissing or ConfigInvalid diagnostic.
 local function normalize_config_error(config_error)
     if type(config_error) ~= "table" then
         return failure("ConfigInvalid", "the main configuration could not be loaded")
@@ -817,15 +961,17 @@ local function normalize_config_error(config_error)
 end
 
 ---Private continuation credentials survive only an exact in-process handoff.
+--@metatable continuation_previews Associates continuation previews with the workspace and Context facts requiring confirmation.
+--@field __mode string Fixed k mode: keys are weak; entries remain mutable within their owning module.
 local continuation_previews = setmetatable({}, { __mode = "k" })
 
 ---Creates the side-effect-free application composition root.
 -- No component method is called until dispatch receives an explicit semantic
 -- action. Bootstrap-safe routes never receive the optional network/agent ports.
--- @param components table Injected platform/config/workspace/offline handlers.
--- @param options table Product identity, config path, target, and draft cap.
--- @return table|nil application Immutable application facade.
--- @return table|nil err Structured construction failure.
+--@param components table Injected platform/config/workspace/offline handlers.
+--@param options table Product identity, config path, target, and draft cap.
+--@return table|nil application Immutable application facade.
+--@return table|nil err Structured construction failure.
 function M.new(components, options)
     local admitted_components, components_error = validate_components(components)
     if not admitted_components then return nil, components_error end
@@ -840,6 +986,10 @@ function M.new(components, options)
     local lifecycle = "constructed"
     local application = {}
 
+    ---Checks release target identity exactly once for this application.
+    --@param none No arguments.
+    --@return table|nil identity Admitted platform identity.
+    --@return table|nil err Structured platform failure.
     local function check_platform()
         if platform_attempted then return platform_identity, platform_error end
         platform_attempted = true
@@ -862,6 +1012,10 @@ function M.new(components, options)
         return identity
     end
 
+    ---Loads the current ConfigGeneration with optional Context overrides.
+    --@param overrides table|nil Durable Session override values.
+    --@return table|nil generation Validated ConfigGeneration.
+    --@return table|nil err Normalized Config failure.
     local function load_config(overrides)
         local called, generation, config_error
         if overrides == nil then
@@ -883,6 +1037,12 @@ function M.new(components, options)
         return generation
     end
 
+    ---Freezes product, platform, Config, and enabled Model self-test facts.
+    --@param identity table Admitted platform identity.
+    --@param generation table|nil Current ConfigGeneration.
+    --@param config_error table|nil Config load failure.
+    --@return table|nil projection Immutable self-test snapshot and Model list.
+    --@return table|nil err Structured snapshot failure.
     local function self_test_snapshot(identity, generation, config_error)
         local config_snapshot
         local models = {}
@@ -1009,6 +1169,14 @@ function M.new(components, options)
         }
     end
 
+    ---Runs one explicit offline or consented-online self-test specification.
+    --@param mode string Requested self-test mode.
+    --@param request table Parsed self-test filters and stage.
+    --@param identity table Admitted platform identity.
+    --@param generation table|nil Current ConfigGeneration.
+    --@param config_error table|nil Config load failure.
+    --@return table|nil report Immutable self-test report.
+    --@return table|nil err Structured snapshot or runner failure.
     local function run_self_test(mode, request, identity, generation, config_error)
         local projection, projection_error = self_test_snapshot(
             identity,
@@ -1071,6 +1239,10 @@ function M.new(components, options)
         return frozen
     end
 
+    ---Routes an explicit self-test action with its selected stage and consent.
+    --@param request table Parsed self-test action.
+    --@return table|nil report Self-test result for rendering.
+    --@return table|nil err Structured platform, Config, or runner failure.
     local function dispatch_self_test(request)
         local identity, identity_error = check_platform()
         if not identity then return nil, identity_error end
@@ -1087,6 +1259,10 @@ function M.new(components, options)
         return run_self_test("explicit", request, identity, generation, config_error)
     end
 
+    ---Runs an offline bootstrap management action.
+    --@param request table Parsed Config, Model, or Context management action.
+    --@return table|nil result Management result for rendering.
+    --@return table|nil err Structured management failure.
     local function dispatch_management(request)
         local identity, identity_error = check_platform()
         if not identity then return nil, identity_error end
@@ -1115,6 +1291,10 @@ function M.new(components, options)
         return frozen
     end
 
+    ---Projects current public application status without opening Agent effects.
+    --@param none No arguments.
+    --@return table|nil status Public Session and platform state.
+    --@return table|nil err Structured platform or Config failure.
     local function dispatch_status()
         local identity, identity_error = check_platform()
         if not identity then return nil, identity_error end
@@ -1162,6 +1342,10 @@ function M.new(components, options)
         }, "read-only invocation status")
     end
 
+    ---Requires the bounded startup checks for an Agent-ready ConfigGeneration.
+    --@param generation table Current ConfigGeneration.
+    --@return boolean|nil ready True when startup checks pass.
+    --@return table|nil err Structured readiness failure.
     local function run_startup_self_test(generation)
         local requested = generation.general.startup_self_test
         if requested == "off" then return true end
@@ -1196,6 +1380,10 @@ function M.new(components, options)
         return true
     end
 
+    ---Creates one fresh chat draft from the current Workspace and Config.
+    --@param request table Parsed run-chat action.
+    --@return table|nil draft Active draft Session facade.
+    --@return table|nil err Structured Workspace, Config, or readiness failure.
     local function dispatch_chat(request)
         if active_draft then
             return nil, failure("SessionActive", "this process already owns an active chat")
@@ -1236,6 +1424,13 @@ function M.new(components, options)
         }, "chat bootstrap result")
     end
 
+    ---Calls a Context port while normalizing raised exceptions to one diagnostic.
+    --@param callable function Context service operation.
+    --@param code string Failure code for an exception or missing result.
+    --@param message string Failure summary for the caller.
+    --@param ... any Context port arguments.
+    --@return any|nil result Port result on success.
+    --@return table|nil err Structured port failure.
     local function context_call(callable, code, message, ...)
         local called, value, value_error = pcall(callable, ...)
         if not called then return nil, failure(code, message .. " raised an exception") end
@@ -1243,6 +1438,9 @@ function M.new(components, options)
         return value, value_error
     end
 
+    ---Maps a non-unique Context selector result to a stable diagnostic.
+    --@param selection table Resolver result with ambiguity or missing tag.
+    --@return table err Structured Context selection failure.
     local function context_selection_error(selection)
         local tag = type(selection) == "table" and selection.tag or nil
         if tag == "InvalidSelector" then
@@ -1265,6 +1463,10 @@ function M.new(components, options)
         )
     end
 
+    ---Exports a selected Context through read-only, identity-bound validation.
+    --@param request table Parsed export action and optional selector.
+    --@return table|nil result Markdown export and Context identity.
+    --@return table|nil err Structured selection, secret, or target failure.
     local function dispatch_export(request)
         local identity, identity_error = check_platform()
         if not identity then return nil, identity_error end
@@ -1364,6 +1566,10 @@ function M.new(components, options)
         }, "read-only Context export result")
     end
 
+    ---Compares the stable object identity of two observed workspaces.
+    --@param left table First workspace file identity.
+    --@param right table Second workspace file identity.
+    --@return boolean equal Whether kind, volume, and object match.
     local function workspace_identity_equal(left, right)
         return type(left) == "table"
             and type(right) == "table"
@@ -1372,6 +1578,12 @@ function M.new(components, options)
             and left.object == right.object
     end
 
+    ---Previews or opens one existing Context under exact target and Workspace binding.
+    --@param request table Parsed continuation selector.
+    --@param preview_only boolean Whether to stop before opening the writer.
+    --@param bound_preview table|nil Previously confirmed private preview facts.
+    --@return table|nil result Preview or active continued Session draft.
+    --@return table|nil err Structured stale, recovery, or configuration failure.
     local function dispatch_continue(request, preview_only, bound_preview)
         if not preview_only and active_draft then
             return nil, failure("SessionActive", "this process already owns an active chat")
@@ -1527,6 +1739,10 @@ function M.new(components, options)
         then
             return nil, failure("TargetChanged", "the confirmed Context workspace changed")
         end
+        ---Rechecks both origin and recorded Workspace objects before handoff.
+        --@param none No arguments.
+        --@return boolean|nil valid True while both identities remain exact.
+        --@return table|nil err Structured changed-workspace failure.
         local function reverify_workspaces()
             for _, expected in ipairs({ workspace, recorded_workspace }) do
                 local current, current_error = context_call(admitted_components.workspace.inspect,
@@ -1560,6 +1776,10 @@ function M.new(components, options)
             continuation_previews[preview] = {
                 verified = verified, origin = workspace, recorded = recorded_workspace,
                 config_path = admitted.config_path,
+                ---Revalidates the preview target and both Workspace identities.
+                --@param none No arguments.
+                --@return boolean|nil valid True while preview facts remain current.
+                --@return table|nil err Structured stale-preview failure.
                 verify = function()
                     if lifecycle == "closed" then
                         return nil, failure("InvalidContinuePreview", "continuation preview owner is closed")
@@ -1596,6 +1816,10 @@ function M.new(components, options)
         )
         if not receipt then return nil, open_error end
         local released = false
+        ---Closes a newly opened writer before returning a continuation failure.
+        --@param primary_error table Original structured continuation failure.
+        --@return nil No draft is returned after opening fails.
+        --@return table err Original failure or unknown-lease failure.
         local function release_opened(primary_error)
             if released then return nil, primary_error end
             released = true
@@ -1685,9 +1909,22 @@ function M.new(components, options)
         }, "opened session status")
         local close_failure
         local draft = {}
+        ---Returns the immutable status of this opened Context Session.
+        --@param none No arguments.
+        --@return table status Public opened Session status.
         function draft.status() return status end
+        ---Returns the ConfigGeneration used by this continued Session.
+        --@param none No arguments.
+        --@return table generation Current validated ConfigGeneration.
         function draft.config_generation() return generation end
+        ---Returns the durable Context-open receipt for runtime handoff.
+        --@param none No arguments.
+        --@return table receipt Exact Context-open receipt.
         function draft.open_receipt() return receipt end
+        ---Closes the owned Context writer once and retains release failures.
+        --@param none No arguments.
+        --@return boolean|nil closed True on release, false if already closed.
+        --@return table|nil err Structured unknown-lease failure.
         function draft.close()
             if released then
                 if close_failure then return nil, close_failure end
@@ -1725,6 +1962,9 @@ function M.new(components, options)
     ---Resolves and reverifies one continuation target without acquiring its
     -- writer. This is the first phase of an in-chat Context switch; the later
     -- open must use the returned precise hash and repeat all verification.
+    --@param selector string User-selected Context name or hash.
+    --@return table|nil preview Read-only target and Workspace binding.
+    --@return table|nil err Structured selection or verification failure.
     function application.preview_continue(selector)
         if lifecycle == "closed" then
             return nil, failure("ApplicationClosed", "the application lifecycle is closed")
@@ -1738,6 +1978,10 @@ function M.new(components, options)
     ---Consumes a private exact preview in this or a fresh composition. Cross-
     -- workspace admission requires the literal response supplied by the UI;
     -- all files and directories are reverified before acquiring a writer.
+    --@param preview table Preview issued by this application or a fresh peer.
+    --@param confirmation string|nil Literal cross-Workspace confirmation.
+    --@return table|nil result Continued Context Session draft.
+    --@return table|nil err Structured stale or confirmation failure.
     function application.continue_preview(preview, confirmation)
         if lifecycle == "closed" then return nil, failure("ApplicationClosed", "application is closed") end
         local plan = continuation_previews[preview]
@@ -1757,6 +2001,9 @@ function M.new(components, options)
 
     ---Dispatches one already-normalized semantic action.
     -- Parsing argv and rendering human/machine output are later adapters.
+    --@param request table Parsed semantic CLI action.
+    --@return table|nil result Bootstrap, management, or chat result.
+    --@return table|nil err Structured action or lifecycle failure.
     function application.dispatch(request)
         if lifecycle == "closed" then
             return nil, failure("ApplicationClosed", "the application lifecycle is closed")
@@ -1793,6 +2040,8 @@ function M.new(components, options)
     end
 
     ---Returns lifecycle facts without loading config or scanning Contexts.
+    --@param none No arguments.
+    --@return table status Immutable application lifecycle snapshot.
     function application.status()
         return readonly({
             lifecycle = lifecycle,
@@ -1802,6 +2051,9 @@ function M.new(components, options)
     end
 
     ---Closes the current in-memory draft and prevents further dispatch.
+    --@param none No arguments.
+    --@return boolean|nil closed True after close, false if already closed.
+    --@return table|nil err Structured draft release failure.
     function application.close()
         if lifecycle == "closed" then return false end
         local closed_draft, close_error = true, nil
@@ -1874,7 +2126,7 @@ local MODEL_ADAPTER_OPTIONS = {
     maximum_response_bytes = 16 * 1024 * 1024,
     maximum_text_bytes = 65536,
     maximum_reasoning_bytes = 65536,
-    maximum_tool_calls = 64,
+    maximum_tool_calls = 8,
     maximum_tool_argument_bytes = 32768,
     maximum_total_tool_argument_bytes = 262144,
     maximum_content_blocks = 256,
@@ -1937,8 +2189,8 @@ local AGENT_RELEASE_OPTIONS = {
             tool_calls = 256,
             reviews = 64,
             steps = 512,
-            message_bytes = 262144,
-            result_bytes = 16 * 1024 * 1024,
+            message_bytes = 65536,
+            result_bytes = 262144,
         },
         stuck = {
             snapshot_id = "tp017-modern-candidate-v1",
@@ -1959,16 +2211,16 @@ local AGENT_RELEASE_OPTIONS = {
             operation = 0,
             queue = 0,
             queue_display = 0,
-            side = 0,
+            ask = 0,
         },
         automatic_compaction = true,
         maximum_identifier_bytes = 256,
         hard_cap_snapshot_id = "tp017-modern-candidate-v1",
         lanes = {
             queue_maximum = 9,
-            side_active_time_ms = 120000,
-            side_response_bytes = 65536,
-            side_snapshot_id = "tp022-modern-candidate-v1",
+            ask_active_time_ms = 120000,
+            ask_response_bytes = 65536,
+            ask_snapshot_id = "tp022-modern-candidate-v1",
         },
     },
 }
@@ -1979,12 +2231,18 @@ local CONTINUATION_INSTRUCTION = table.concat({
     " Use a typed control when the current turn has a reportable outcome.",
 })
 
+---Exposes the native monotonic clock to the production AgentLoop.
+--@param backend table Admitted native backend with clock port.
+--@return table clock Read-only Agent clock facade.
 local function production_clock(backend)
     return readonly({
         now = backend.clock_port.monotonic_now,
     }, "production Agent clock")
 end
 
+---Projects configured Permission switches into the runtime permission names.
+--@param configured table|nil Selected ConfigGeneration Permission.
+--@return table|nil matrix Runtime Read/Write/Delete/Shell/OutsideWorkspace matrix.
 local function permission_matrix(configured)
     if type(configured) ~= "table" then return nil end
     return {
@@ -1996,6 +2254,9 @@ local function permission_matrix(configured)
     }
 end
 
+---Serializes one observed Workspace object identity for Tool authority binding.
+--@param identity table Native directory identity.
+--@return string|nil key Volume, object, and kind composite.
 local function workspace_identity_key(identity)
     if type(identity) ~= "table"
         or type(identity.volume) ~= "string"
@@ -2007,7 +2268,15 @@ local function workspace_identity_key(identity)
     return identity.volume .. "\0" .. identity.object .. "\0" .. identity.kind
 end
 
+---Builds a Tool authority port bound to this turn's immutable security facts.
+--@param safety_service table Binding digest service.
+--@param expected table Permission, Config, Workspace, and review expectations.
+--@return table authorization Read-only admit/reverify port.
 local function tool_authorization_port(safety_service, expected)
+    ---Hashes one Tool call together with the exact admitted authority facts.
+    --@param call table Candidate Tool call and call digest.
+    --@param facts table Current permission, approval, intent, and review facts.
+    --@return string|nil digest Exact authority digest or nil for a mismatch.
     local function authority_digest(call, facts)
         if type(call) ~= "table"
             or type(call.call_digest) ~= "string"
@@ -2039,11 +2308,21 @@ local function tool_authorization_port(safety_service, expected)
         })
     end
     return readonly({
+        ---Admits one Tool call only when its authority facts match this turn.
+        --@param call table Candidate Tool call.
+        --@param facts table Current authority evidence.
+        --@return boolean admitted Whether the evidence matches.
+        --@return string|nil digest Bound authority digest on success.
         admit = function(call, facts)
             local digest = authority_digest(call, facts)
             if not digest then return false end
             return true, digest
         end,
+        ---Rechecks authority immediately before the Tool effect.
+        --@param call table Candidate Tool call.
+        --@param facts table Current authority evidence.
+        --@param digest string Previously admitted authority digest.
+        --@return boolean current Whether the exact authority still holds.
         reverify = function(call, facts, digest)
             local current = authority_digest(call, facts)
             return current ~= nil and current == digest
@@ -2051,8 +2330,14 @@ local function tool_authorization_port(safety_service, expected)
     }, "production Tool authorization")
 end
 
+---Derives bounded Tool limits from the selected ConfigGeneration and target.
+--@param composed table Production runtime composition.
+--@param generation table Selected ConfigGeneration.
+--@param workspace_path string Native Workspace path.
+--@return table options Direct Tool and execution hard limits.
 local function tool_options(composed, generation, workspace_path)
-    local output_limit = (generation.exec.max_output_kb or 1024) * 1024
+    local output_limit = math.min((generation.exec.max_output_kb or 1024) * 1024,
+        AGENT_RELEASE_OPTIONS.runtime.hard_caps.result_bytes // 4)
     local deadline = generation.exec.timeout_ms or 3600000
     return {
         maximum_argument_bytes = 65536,
@@ -2079,17 +2364,29 @@ local function tool_options(composed, generation, workspace_path)
         maximum_exec_deadline_ms = deadline,
         platform_kind = composed.identity.os == "windows" and "windows" or "posix",
         workspace_path = workspace_path,
+        -- Use the running inner payload: XP/Win7 cannot nest the outer
+        -- extractor's Job inside the foreground tool's containment Job.
+        lua_executable = composed.layout.runtime_executable,
         reserved_paths = { composed.layout.data_root },
     }
 end
 
+---Copies release AgentLoop caps so each owner gets independent mutable options.
+--@param none No arguments.
+--@return table|nil options Detached AgentLoop release options.
 local function runtime_options()
     local candidate = copy_plain(AGENT_RELEASE_OPTIONS.runtime, {})
     if not candidate then return nil end
     return candidate
 end
 
-local function scoped_model_activity_options(composed, context_hash, side)
+---Scopes Model activity IDs and response caps to one durable Context.
+--@param composed table Production runtime composition.
+--@param context_hash string Exact uppercase Context hash.
+--@param ask boolean Whether to apply the smaller no-tool Ask caps.
+--@return table|nil options Read-only scoped Model activity limits.
+--@return table|nil err Structured identity or option failure.
+local function scoped_model_activity_options(composed, context_hash, ask)
     if type(context_hash) ~= "string"
         or context_hash == ""
         or #context_hash > 64
@@ -2108,19 +2405,25 @@ local function scoped_model_activity_options(composed, context_hash, side)
         )
     end
     candidate.identity_namespace = "context-" .. context_hash
-    if side then
+    if ask then
         candidate.maximum_turn_time_ms = math.min(
             candidate.maximum_turn_time_ms,
-            AGENT_RELEASE_OPTIONS.runtime.lanes.side_active_time_ms
+            AGENT_RELEASE_OPTIONS.runtime.lanes.ask_active_time_ms
         )
         candidate.maximum_canonical_body_bytes = math.min(
             candidate.maximum_canonical_body_bytes,
-            AGENT_RELEASE_OPTIONS.runtime.lanes.side_response_bytes
+            AGENT_RELEASE_OPTIONS.runtime.lanes.ask_response_bytes
         )
     end
     return readonly(candidate, "Context-scoped Model activity options")
 end
 
+---Builds one generation-bound Model, Tool, review, and compaction port set.
+--@param composed table Production runtime composition.
+--@param shared table Durable journal, codec, clock, and Workspace binding.
+--@param turn table Frozen turn selection and Context identity.
+--@return table|nil ports Current turn activity ports and compaction binding.
+--@return table|nil err Structured permission, identity, or port failure.
 local function build_turn_ports(composed, shared, turn)
     local generation = turn.generation
     local contexts = composed.contexts
@@ -2170,6 +2473,7 @@ local function build_turn_ports(composed, shared, turn)
         new_stream_scanner = generation.new_stream_scanner,
     }, "turn secret scanner")
     local tools_module = require("tools")
+    local admitted_tool_options = tool_options(composed, generation, turn.workspace)
     local tool_service, tool_error = tools_module.new({
         filesystem = composed.backend.filesystem,
         path = contexts.path,
@@ -2178,7 +2482,7 @@ local function build_turn_ports(composed, shared, turn)
         authorization = authorization,
         processes = composed.backend.processes,
         operations = shared.operations,
-    }, tool_options(composed, generation, turn.workspace))
+    }, admitted_tool_options)
     if not tool_service then return nil, tool_error end
     if tool_service.registry_digest ~= turn.tool_registry_snapshot then
         return nil, failure(
@@ -2200,8 +2504,8 @@ local function build_turn_ports(composed, shared, turn)
             config_generation = generation.id,
             environment_mode = generation.exec.environment_mode,
             environment = {},
-            output_limit_bytes = (generation.exec.max_output_kb or 1024) * 1024,
-            deadline_ms = generation.exec.timeout_ms or 3600000,
+            output_limit_bytes = admitted_tool_options.maximum_exec_output_bytes,
+            deadline_ms = admitted_tool_options.maximum_exec_deadline_ms,
             decoder = "utf-8-strict-candidate-v1",
         },
     })
@@ -2350,36 +2654,41 @@ local function build_turn_ports(composed, shared, turn)
     }
 end
 
-local function build_side_activity(composed, side)
+---Builds an isolated no-tool Ask Model activity for one frozen Ask snapshot.
+--@param composed table Production runtime composition.
+--@param ask table Frozen Ask Model selection and Context identity.
+--@return table|nil activity Ask generation and Model activity.
+--@return table|nil err Structured builder or transport failure.
+local function build_ask_activity(composed, ask)
     local model_module = require("model")
     local views = readonly({
         resolve_view = composed.publication.resolve_view,
-    }, "durable side Model views")
-    local request_builder, builder_error = model_module.new_side_request_builder({
+    }, "durable ask Model views")
+    local request_builder, builder_error = model_module.new_ask_request_builder({
         adapter = composed.model_adapter,
         prompt = composed.contexts.prompt,
         views = views,
-        generation = side.generation,
+        generation = ask.generation,
         tool_registry = composed.contexts.tool_registry,
         safety = composed.contexts.safety,
     }, {
-        model_name = side.model,
-        permission_name = side.permission,
-        model_snapshot = side.model_snapshot,
-        permission_snapshot = side.permission_snapshot,
-        prompt_snapshot = side.prompt_snapshot,
-        tool_registry_snapshot = side.tool_registry_snapshot,
-        initial_message = side.initial_message,
-        context_prompt = side.context_prompt,
+        model_name = ask.model,
+        permission_name = ask.permission,
+        model_snapshot = ask.model_snapshot,
+        permission_snapshot = ask.permission_snapshot,
+        prompt_snapshot = ask.prompt_snapshot,
+        tool_registry_snapshot = ask.tool_registry_snapshot,
+        initial_message = ask.initial_message,
+        context_prompt = ask.context_prompt,
         default_connect_timeout_ms = 120000,
-        maximum_request_time_ms = AGENT_RELEASE_OPTIONS.runtime.lanes.side_active_time_ms,
+        maximum_request_time_ms = AGENT_RELEASE_OPTIONS.runtime.lanes.ask_active_time_ms,
         default_retry_base_delay_ms = 1000,
         maximum_output_tokens = 1024,
     })
     if not request_builder then return nil, builder_error end
     local activity_options, activity_options_error = scoped_model_activity_options(
         composed,
-        side.context_hash,
+        ask.context_hash,
         true
     )
     if not activity_options then return nil, activity_options_error end
@@ -2392,14 +2701,14 @@ local function build_side_activity(composed, side)
     }, activity_options)
     if not activity then return nil, activity_error end
     return {
-        generation = side.generation,
-        view_manifest_ref = side.view_manifest_ref,
+        generation = ask.generation,
+        view_manifest_ref = ask.view_manifest_ref,
         activity = activity,
     }
 end
 
-local SIDE_RUNTIME_REQUEST_FIELDS = {
-    side_id = true,
+local ASK_RUNTIME_REQUEST_FIELDS = {
+    ask_id = true,
     turn_id = true,
     request_id = true,
     purpose = true,
@@ -2410,21 +2719,34 @@ local SIDE_RUNTIME_REQUEST_FIELDS = {
     budget_snapshot_id = true,
 }
 
-local function new_side_catalog()
+---Owns the prepared and active no-tool Ask Model activity independently.
+--@param none No arguments.
+--@return table catalog Read-only Ask activity catalog.
+local function new_ask_catalog()
     local prepared = false
     local current = false
     local catalog = {}
 
+    ---Checks whether an Ask activity has no active Model request.
+    --@param candidate table|false Prepared or current Ask activity.
+    --@return boolean idle Whether the activity is absent or idle.
     local function idle_activity(candidate)
         if not candidate then return true end
         local called, status = pcall(candidate.activity.status)
         return called and type(status) == "table" and status.state == "idle"
     end
 
+    ---Checks both prepared and current Ask activity for idle state.
+    --@param none No arguments.
+    --@return boolean idle Whether Ask has no active Model effect.
     function catalog.idle()
         return idle_activity(prepared) and idle_activity(current)
     end
 
+    ---Stages one generation-bound Ask activity while the lane is idle.
+    --@param candidate table Ask generation, view, and activity port.
+    --@return boolean|nil prepared True after staging.
+    --@return table|nil err Structured busy or invalid-port failure.
     function catalog.prepare(candidate)
         if type(candidate) ~= "table"
             or type(candidate.generation) ~= "table"
@@ -2436,66 +2758,70 @@ local function new_side_catalog()
             or type(candidate.activity.status) ~= "function"
         then
             return nil, failure(
-                "InvalidSideActivity",
-                "prepared side Model activity is incomplete"
+                "InvalidAskActivity",
+                "prepared ask Model activity is incomplete"
             )
         end
         if not catalog.idle() then
             return nil, failure(
-                "SideActivityBusy",
-                "a side Model activity is already active"
+                "AskActivityBusy",
+                "a ask Model activity is already active"
             )
         end
         prepared = candidate
         return true
     end
 
+    ---Starts a staged Ask request only for its exact frozen release snapshot.
+    --@param specification table AgentLoop no-tool Ask request.
+    --@return any|nil handle Active Model activity handle.
+    --@return table|nil err Structured unavailable or binding failure.
     function catalog.start(specification)
         if type(specification) ~= "table" or not prepared then
             return nil, failure(
-                "SideActivityUnavailable",
-                "the frozen side Model activity is unavailable"
+                "AskActivityUnavailable",
+                "the frozen ask Model activity is unavailable"
             )
         end
         for key in pairs(specification) do
-            if type(key) ~= "string" or not SIDE_RUNTIME_REQUEST_FIELDS[key] then
+            if type(key) ~= "string" or not ASK_RUNTIME_REQUEST_FIELDS[key] then
                 return nil, failure(
-                    "InvalidSideActivity",
-                    "side Runtime request is ambiguous"
+                    "InvalidAskActivity",
+                    "ask Runtime request is ambiguous"
                 )
             end
         end
-        for key in pairs(SIDE_RUNTIME_REQUEST_FIELDS) do
+        for key in pairs(ASK_RUNTIME_REQUEST_FIELDS) do
             if specification[key] == nil then
                 return nil, failure(
-                    "InvalidSideActivity",
-                    "side Runtime request is incomplete"
+                    "InvalidAskActivity",
+                    "ask Runtime request is incomplete"
                 )
             end
         end
-        if specification.purpose ~= "side"
+        if specification.purpose ~= "ask"
             or specification.no_tools ~= true
-            or specification.side_id ~= specification.turn_id
+            or specification.ask_id ~= specification.turn_id
             or specification.view_manifest_ref ~= prepared.view_manifest_ref
             or specification.active_time_cap_ms
-                ~= AGENT_RELEASE_OPTIONS.runtime.lanes.side_active_time_ms
+                ~= AGENT_RELEASE_OPTIONS.runtime.lanes.ask_active_time_ms
             or specification.response_byte_cap
-                ~= AGENT_RELEASE_OPTIONS.runtime.lanes.side_response_bytes
+                ~= AGENT_RELEASE_OPTIONS.runtime.lanes.ask_response_bytes
             or specification.budget_snapshot_id
-                ~= AGENT_RELEASE_OPTIONS.runtime.lanes.side_snapshot_id
+                ~= AGENT_RELEASE_OPTIONS.runtime.lanes.ask_snapshot_id
         then
             return nil, failure(
-                "InvalidSideActivity",
-                "side Runtime request contradicts its frozen release snapshot"
+                "InvalidAskActivity",
+                "ask Runtime request contradicts its frozen release snapshot"
             )
         end
         local handle, start_error = prepared.activity.start({
             request_id = specification.request_id,
             turn_id = specification.turn_id,
-            purpose = "side",
+            purpose = "ask",
             continuation = false,
             view_manifest_ref = specification.view_manifest_ref,
-            progress_identity = "side:" .. specification.side_id,
+            progress_identity = "ask:" .. specification.ask_id,
         })
         if not handle then return nil, start_error end
         current = prepared
@@ -2503,71 +2829,153 @@ local function new_side_catalog()
         return handle
     end
 
+    ---Cancels the currently active Ask Model request.
+    --@param handle any Active Ask activity handle.
+    --@param reason string Cancellation reason.
+    --@return table outcome Cancel result, unknown if no activity remains.
     function catalog.cancel(handle, reason)
         if not current then return { outcome = "unknown" } end
         return current.activity.cancel(handle, reason)
     end
 
+    ---Polls a bounded batch from the active Ask Model activity.
+    --@param budget integer Maximum activity events.
+    --@return table events Ask events, empty when idle.
+    --@return table|nil err Structured activity failure.
     function catalog.poll(budget)
         if not current then return {} end
         return current.activity.poll(budget)
     end
 
+    ---Projects current Ask activity, prepared generation, or idle state.
+    --@param none No arguments.
+    --@return table status Ask activity status.
     function catalog.status()
         if current then return current.activity.status() end
         if prepared then return readonly({
             state = "prepared",
             generation = prepared.generation.id,
-        }, "prepared side activity status") end
-        return readonly({ state = "idle" }, "side activity status")
+        }, "prepared ask activity status") end
+        return readonly({ state = "idle" }, "ask activity status")
     end
 
+    ---Returns the ConfigGeneration bound to prepared or active Ask work.
+    --@param none No arguments.
+    --@return table|false generation Bound ConfigGeneration or false when idle.
     function catalog.generation()
         local candidate = prepared or current
         return candidate and candidate.generation or false
     end
 
-    return readonly(catalog, "production side activity catalog")
+    return readonly(catalog, "production ask activity catalog")
 end
 
+---Provides stable Model, Tool, review, and compaction facades across turns.
+--@param initial table Initial generation-bound activity ports.
+--@return table catalog Read-only replaceable turn activity catalog.
 local function new_turn_catalog(initial)
     local current = initial
+    ---Forwards one activity call to the currently selected turn generation.
+    --@param domain string Model, tools, reviews, or compaction port.
+    --@param method string Port method name.
+    --@param ... any Forwarded method arguments.
+    --@return any result Current generation's method result.
     local function invoke(domain, method, ...)
         return current[domain][method](...)
     end
     local model = readonly({
+        ---Starts a request on the currently bound Model activity.
+        --@param ... any Model start arguments.
+        --@return any result Current Model start result.
         start = function(...) return invoke("model", "start", ...) end,
+        ---Cancels the currently bound Model activity.
+        --@param ... any Model cancel arguments.
+        --@return any result Current Model cancel result.
         cancel = function(...) return invoke("model", "cancel", ...) end,
+        ---Polls the currently bound Model activity.
+        --@param ... any Model poll arguments.
+        --@return any result Current Model poll result.
         poll = function(...) return invoke("model", "poll", ...) end,
+        ---Reads the currently bound Model activity status.
+        --@param ... any Model status arguments.
+        --@return any result Current Model status result.
         status = function(...) return invoke("model", "status", ...) end,
     }, "generation-bound Model port")
     local tools = readonly({
+        ---Admits a Tool call through the current generation's policy port.
+        --@param ... any Tool admission arguments.
+        --@return any result Current Tool admission result.
         admit = function(...) return invoke("tools", "admit", ...) end,
+        ---Starts an admitted Tool on the current generation.
+        --@param ... any Tool start arguments.
+        --@return any result Current Tool start result.
         start = function(...) return invoke("tools", "start", ...) end,
+        ---Cancels a current-generation Tool activity.
+        --@param ... any Tool cancel arguments.
+        --@return any result Current Tool cancel result.
         cancel = function(...) return invoke("tools", "cancel", ...) end,
+        ---Polls bounded Tool events from the current generation.
+        --@param ... any Tool poll arguments.
+        --@return any result Current Tool poll result.
         poll = function(...) return invoke("tools", "poll", ...) end,
+        ---Prepares one exact approval for the current Tool call.
+        --@param ... any Approval preparation arguments.
+        --@return any result Current approval preparation result.
         prepare_approval = function(...)
             return invoke("tools", "prepare_approval", ...)
         end,
+        ---Records a typed approval in the current Tool authority port.
+        --@param ... any Approval record arguments.
+        --@return any result Current approval record result.
         record_approval = function(...)
             return invoke("tools", "record_approval", ...)
         end,
+        ---Returns the active current-generation Tool handle.
+        --@param ... any Tool handle query arguments.
+        --@return any result Active Tool handle or false.
         active_handle = function(...) return invoke("tools", "active_handle", ...) end,
     }, "generation-bound Tool port")
     local reviews = readonly({
+        ---Starts a no-tool review on the current generation.
+        --@param ... any Review start arguments.
+        --@return any result Current review start result.
         start = function(...) return invoke("reviews", "start", ...) end,
+        ---Cancels a current-generation review.
+        --@param ... any Review cancel arguments.
+        --@return any result Current review cancel result.
         cancel = function(...) return invoke("reviews", "cancel", ...) end,
+        ---Polls current-generation review events.
+        --@param ... any Review poll arguments.
+        --@return any result Current review poll result.
         poll = function(...) return invoke("reviews", "poll", ...) end,
+        ---Reads the current-generation review status.
+        --@param ... any Review status arguments.
+        --@return any result Current review status result.
         status = function(...) return invoke("reviews", "status", ...) end,
     }, "generation-bound review port")
     local compaction = readonly({
+        ---Starts a compaction Model request on the current generation.
+        --@param ... any Compaction start arguments.
+        --@return any result Current compaction start result.
         start = function(...) return invoke("compaction", "start", ...) end,
+        ---Cancels a current-generation compaction Model request.
+        --@param ... any Compaction cancel arguments.
+        --@return any result Current compaction cancel result.
         cancel = function(...) return invoke("compaction", "cancel", ...) end,
+        ---Polls current-generation compaction Model events.
+        --@param ... any Compaction poll arguments.
+        --@return any result Current compaction poll result.
         poll = function(...) return invoke("compaction", "poll", ...) end,
+        ---Reads current-generation compaction Model status.
+        --@param ... any Compaction status arguments.
+        --@return any result Current compaction status result.
         status = function(...) return invoke("compaction", "status", ...) end,
     }, "generation-bound compaction Model port")
     local catalog = {}
 
+    ---Checks all generation-bound effects before replacing turn ports.
+    --@param none No arguments.
+    --@return boolean idle Whether Model, Tool, review, and compaction are idle.
     function catalog.idle()
         local model_ok, model_status = pcall(current.model.status)
         local review_ok, review_status = pcall(current.reviews.status)
@@ -2580,6 +2988,10 @@ local function new_turn_catalog(initial)
             and tool_ok and tool_handle == false
     end
 
+    ---Swaps in a fully constructed turn generation only while all effects are idle.
+    --@param candidate table Next generation-bound activity port set.
+    --@return boolean|nil replaced True after atomic catalog replacement.
+    --@return table|nil err Structured busy or invalid-port failure.
     function catalog.replace(candidate)
         if not catalog.idle() then
             return nil, failure(
@@ -2605,10 +3017,16 @@ local function new_turn_catalog(initial)
         return true
     end
 
+    ---Returns the ConfigGeneration bound to the current turn ports.
+    --@param none No arguments.
+    --@return table generation Current ConfigGeneration.
     function catalog.generation()
         return current.generation
     end
 
+    ---Returns the frozen compaction Model/Prompt binding for current ports.
+    --@param none No arguments.
+    --@return table binding Current generation compaction binding.
     function catalog.compaction_binding()
         return current.compaction_binding
     end
@@ -2620,6 +3038,11 @@ local function new_turn_catalog(initial)
     return readonly(catalog, "production turn catalog")
 end
 
+---Bounds prompt bytes charged against the compaction Model window.
+--@param generation table Current ConfigGeneration.
+--@param binding table Frozen compaction Model and Prompt selection.
+--@return integer|nil bytes Conservative prompt byte upper bound.
+--@return table|nil err Structured missing-snapshot failure.
 local function compaction_prompt_upper_bound(generation, binding)
     local model = generation.models[binding.model_name]
     local permission = generation.permissions[binding.permission_name]
@@ -2651,6 +3074,14 @@ local function compaction_prompt_upper_bound(generation, binding)
     return total
 end
 
+---Builds bounded compaction policy from Model window and recovery history.
+--@param generation table Current ConfigGeneration.
+--@param binding table Frozen compaction Model binding.
+--@param initial_serial integer Restored compaction serial.
+--@param initial_automatic_failure_count integer Restored automatic failure streak.
+--@param automatic_failure_history_complete boolean Whether recovery saw full history.
+--@return table|nil options Production compaction limits and trigger policy.
+--@return table|nil err Structured capacity or snapshot failure.
 local function compaction_options(
     generation,
     binding,
@@ -2730,6 +3161,12 @@ end
 ---Composes the current turn's no-tool compaction Model with the Context
 -- journal and Runtime external-receipt gate. The owner is single-concurrency,
 -- polls in bounded batches, and never derives completion from rendered text.
+--@param composed table Runtime Context, publication, and Model services.
+--@param catalog table Generation-bound turn activity catalog.
+--@param loop table Owning AgentLoop external-receipt gate.
+--@param clock table Monotonic Agent clock port.
+--@return table|nil owner Read-only production compaction owner.
+--@return table|nil err Structured missing-port failure.
 local function new_production_compaction(composed, catalog, loop, clock)
     if type(composed.publication.compaction_snapshot) ~= "function"
         or type(composed.publication.compaction_journal) ~= "function"
@@ -2761,6 +3198,11 @@ local function new_production_compaction(composed, catalog, loop, clock)
     local closed = false
     local owner = {}
 
+    ---Halts Runtime after an ambiguous compaction journal barrier.
+    --@param reason string Stable ambiguity reason.
+    --@param fallback table|nil Original journal failure.
+    --@return boolean accepted Always false after fail-stop.
+    --@return table err Runtime barrier or original failure.
     local function fail_compaction_barrier(reason, fallback)
         local _, barrier_error = loop:fail_compaction_barrier(reason)
         return false, barrier_error or fallback
@@ -2771,11 +3213,21 @@ local function new_production_compaction(composed, catalog, loop, clock)
         "commit_intent", "commit_response", "commit_rejection",
         "publish", "commit_correction",
     }) do
+        ---Commits one compaction Fact and adopts its exact Runtime receipt.
+        --@param record table Typed compaction journal operation.
+        --@return boolean committed True after durable adoption.
+        --@return table receipt_or_error Exact receipt or structured failure.
         journal[method] = function(record)
             local called, committed, receipt = pcall(
                 durable_journal[method],
                 record
             )
+            if called and committed ~= true and method == "commit_intent"
+                and record.attempt == 1 and type(receipt) == "table"
+                and receipt.code == "ContextCapacity" and receipt.publication_started == false
+            then
+                return false, receipt
+            end
             if not called or committed ~= true then
                 return fail_compaction_barrier(
                     not called and "journal-exception" or "journal-rejected",
@@ -2820,6 +3272,11 @@ local function new_production_compaction(composed, catalog, loop, clock)
     end
     journal = readonly(journal, "Runtime-adopting compaction journal")
 
+    ---Builds or reuses compaction service for the current ConfigGeneration.
+    --@param snapshot table Durable Context compaction snapshot.
+    --@param binding table Frozen Model/Prompt generation binding.
+    --@return table|nil service Current compaction service.
+    --@return table|nil err Structured generation or service failure.
     local function ensure_service(snapshot, binding)
         local generation = catalog.generation()
         if type(generation) ~= "table" or generation.id ~= binding.generation_id then
@@ -2850,6 +3307,10 @@ local function new_production_compaction(composed, catalog, loop, clock)
         local candidate, candidate_error = compact.new({
             safety = composed.contexts.safety,
             estimator = readonly({
+                ---Conservatively charges one token per source byte on old targets.
+                --@param bytes string Exact compaction source bytes.
+                --@return integer|nil tokens Conservative token count.
+                --@return table|nil err Structured non-string source failure.
                 estimate = function(bytes)
                     if type(bytes) ~= "string" then
                         return nil, failure(
@@ -2875,6 +3336,10 @@ local function new_production_compaction(composed, catalog, loop, clock)
         return service
     end
 
+    ---Captures the AgentLoop's exact Context generation, sequence, and view.
+    --@param none No arguments.
+    --@return table|nil status Current AgentLoop status.
+    --@return table observed_or_error Immutable waterline or structured failure.
     local function observation()
         local status = loop:status()
         if type(status.active_view_manifest_ref) ~= "string"
@@ -2892,6 +3357,10 @@ local function new_production_compaction(composed, catalog, loop, clock)
         }, "compaction Runtime observation")
     end
 
+    ---Binds durable Context facts and current Model window to one compaction input.
+    --@param mode string Manual or automatic compaction mode.
+    --@return table|nil prepared Exact observed input and snapshot.
+    --@return table|nil err Structured stale or capacity failure.
     local function build_input(mode)
         local status, observed = observation()
         if not status then return nil, observed end
@@ -2960,6 +3429,9 @@ local function new_production_compaction(composed, catalog, loop, clock)
         }, "bound production compaction input")
     end
 
+    ---Normalizes a compaction decision or terminal record into its outcome.
+    --@param result table|any Compaction service result.
+    --@return string|nil outcome Known settlement outcome, if terminal.
     local function result_outcome(result)
         if type(result) ~= "table" then return nil end
         if type(result.outcome) == "string" then return result.outcome end
@@ -2970,6 +3442,10 @@ local function new_production_compaction(composed, catalog, loop, clock)
         return nil
     end
 
+    ---Closes the Runtime compaction gate after exact terminal publication.
+    --@param result table Compaction service result.
+    --@return table|false|nil settlement Bound terminal result, false if still active.
+    --@return table|nil err Structured Runtime settlement failure.
     local function settle(result)
         local outcome = result_outcome(result)
         if not outcome then return false end
@@ -2992,6 +3468,11 @@ local function new_production_compaction(composed, catalog, loop, clock)
         return last_result
     end
 
+    ---Admits a single manual or automatic compaction lifecycle.
+    --@param self table Production compaction owner.
+    --@param mode string Manual or automatic mode.
+    --@return table|nil admission Active request or terminal result.
+    --@return table|nil err Structured busy, snapshot, or journal failure.
     function owner:begin(mode)
         if closed then
             return nil, failure("CompactionClosed", "compaction owner is closed")
@@ -3030,7 +3511,9 @@ local function new_production_compaction(composed, catalog, loop, clock)
         local result, begin_error = service:begin(prepared.input)
         if not result then
             local status = loop:status()
-            local release_outcome = mode == "automatic"
+            local release_outcome = (mode == "automatic"
+                or (type(begin_error) == "table" and begin_error.code == "ContextCapacity"
+                    and begin_error.publication_started == false))
                 and "waiting_user" or "unknown"
             local released, release_error = loop:finish_compaction({
                 outcome = release_outcome,
@@ -3066,6 +3549,10 @@ local function new_production_compaction(composed, catalog, loop, clock)
         }, "production compaction admission")
     end
 
+    ---Polls bounded compaction Model events and settles terminal outcomes.
+    --@param self table Production compaction owner.
+    --@return table|nil batch Progress events and current status.
+    --@return table|nil err Structured activity or journal failure.
     function owner:poll()
         if not active then
             return readonly({
@@ -3131,6 +3618,11 @@ local function new_production_compaction(composed, catalog, loop, clock)
         }, "production compaction poll")
     end
 
+    ---Cancels the active compaction request through its owning service.
+    --@param self table Production compaction owner.
+    --@param reason string Cancellation reason.
+    --@return table|nil result Terminal or pending cancellation state.
+    --@return table|nil err Structured missing-request or settlement failure.
     function owner:cancel(reason)
         if not active then
             return nil, failure(
@@ -3150,6 +3642,9 @@ local function new_production_compaction(composed, catalog, loop, clock)
         }, "production compaction cancellation")
     end
 
+    ---Reports current compaction lifecycle and automatic circuit state.
+    --@param self table Production compaction owner.
+    --@return table status Immutable compaction owner projection.
     function owner:status()
         local compact_status = service and service:status() or false
         return readonly({
@@ -3171,6 +3666,11 @@ local function new_production_compaction(composed, catalog, loop, clock)
         }, "production compaction status")
     end
 
+    ---Closes compaction admission, cancelling an active request first.
+    --@param self table Production compaction owner.
+    --@param reason string|nil Close cancellation reason.
+    --@return boolean|table|nil closed True, false if already closed, or pending result.
+    --@return table|nil err Structured cancellation failure.
     function owner:close(reason)
         if closed then return false end
         if active then
@@ -3188,6 +3688,9 @@ local function new_production_compaction(composed, catalog, loop, clock)
     return readonly(owner, "production compaction owner")
 end
 
+---Builds release-bounded HTTP transport options from bundled runtime paths.
+--@param layout table Observed executable and bundled component layout.
+--@return table options Network limits and bundled curl/CA paths.
 local function network_options(layout)
     return {
         curl_executable = layout.curl_executable,
@@ -3236,6 +3739,9 @@ local CONFIG_REPAIR_TEMPLATE = table.concat({
     "",
 }, "\n")
 
+---Builds the strict INI and runtime bounds for ConfigGeneration parsing.
+--@param ca_bundle_path string Bundled trust store path.
+--@return table options Config schema, limits, and defaults.
 local function config_options(ca_bundle_path)
     return {
         schema_version = "0.1.0",
@@ -3272,6 +3778,10 @@ local function config_options(ca_bundle_path)
     }
 end
 
+---Checks a complete native filesystem object identity record.
+--@param value any Candidate identity.
+--@param expected_kind string|nil Required object kind, if any.
+--@return boolean exact Whether all identity fields are present and admissible.
 local function exact_identity(value, expected_kind)
     if type(value) ~= "table" then return false end
     local allowed = {
@@ -3292,8 +3802,15 @@ local function exact_identity(value, expected_kind)
         and type(value.modified) == "string" and value.modified ~= ""
 end
 
+---Wraps native Workspace inspection with path and identity validation.
+--@param native table Bundled native module with workspace_inspect.
+--@return table port Read-only Workspace inspection service.
 local function workspace_port(native)
     return readonly({
+        ---Inspects an enterable Workspace and freezes its native object identity.
+        --@param requested string User-requested Workspace path.
+        --@return table|nil observation Canonical path and exact directory identity.
+        --@return table|nil err Structured invalid or unavailable Workspace failure.
         inspect = function(requested)
             if type(requested) ~= "string" or requested == ""
                 or requested:find("\0", 1, true)
@@ -3345,7 +3862,15 @@ local function workspace_port(native)
     }, "workspace service")
 end
 
-local function build_context_services(native, filesystem, data_root, platform_kind)
+---Composes bounded Context schema, storage, path, prompt, and catalog services.
+--@param native table Bundled native module.
+--@param filesystem table Bounded native filesystem port.
+--@param data_root string Application-owned data directory.
+--@param platform_kind string Linux or Windows path style.
+--@param layout table|nil Observed executable and optional tools layout.
+--@return table|nil services Read-only Context service bundle.
+--@return table|nil err Structured dependency or construction failure.
+local function build_context_services(native, filesystem, data_root, platform_kind, layout)
     local safety = require("safety")
     local xml = require("xml")
     local context = require("context")
@@ -3364,15 +3889,15 @@ local function build_context_services(native, filesystem, data_root, platform_ki
     end
     local codec, codec_error = xml.new({
         lxp = lxp,
-        maximum_bytes = 1024 * 1024,
+        maximum_bytes = 64 * 1024 * 1024,
         maximum_depth = 32,
-        maximum_elements = 4096,
+        maximum_elements = 131072,
         maximum_attributes_per_element = 8,
-        maximum_text_node_bytes = 131072,
-        maximum_total_text_bytes = 512 * 1024,
-        maximum_sax_events = 16384,
-        maximum_context_events = 256,
-        maximum_carrier_bytes = 65536,
+        maximum_text_node_bytes = 524288,
+        maximum_total_text_bytes = 16 * 1024 * 1024,
+        maximum_sax_events = 393216,
+        maximum_context_events = 4096,
+        maximum_carrier_bytes = 262144,
         maximum_chunk_bytes = 65536,
     })
     if not codec then return nil, codec_error end
@@ -3382,18 +3907,24 @@ local function build_context_services(native, filesystem, data_root, platform_ki
         maximum_name_bytes = 256,
         maximum_identifier_bytes = 256,
         maximum_field_name_bytes = 64,
-        maximum_field_bytes = 65536,
-        maximum_events = 256,
+        maximum_field_bytes = 262144,
+        maximum_events = 4096,
         maximum_compaction_records = 64,
-        maximum_export_bytes = 1024 * 1024,
+        maximum_export_bytes = 64 * 1024 * 1024,
     })
     if not schema then return nil, schema_error end
     local store, store_error = context.new_store(schema, { filesystem = filesystem }, {
-        maximum_context_bytes = 1024 * 1024,
+        maximum_context_bytes = 64 * 1024 * 1024,
         maximum_lock_hostname_bytes = 64,
         maximum_temp_nonce_bytes = 32,
         context_permissions = 384,
         lock_permissions = 384,
+        settlement_reserve = {
+            model_calls = MODEL_ADAPTER_OPTIONS.maximum_tool_calls,
+            model_bytes = MODEL_ACTIVITY_OPTIONS.maximum_canonical_body_bytes,
+            message_bytes = AGENT_RELEASE_OPTIONS.runtime.hard_caps.message_bytes,
+            result_bytes = AGENT_RELEASE_OPTIONS.runtime.hard_caps.result_bytes,
+        },
     })
     if not store then return nil, store_error end
     local path_service, path_error = path.new(native, {
@@ -3405,6 +3936,7 @@ local function build_context_services(native, filesystem, data_root, platform_ki
     if not path_service then return nil, path_error end
     local prompt_service, prompt_error = prompt.new({
         digest = safety_service.digest,
+        environment = layout and tools.describe_environment(filesystem, layout, platform_kind) or nil,
     }, {
         maximum_component_bytes = 32768,
         maximum_quoted_bytes = 16384,
@@ -3450,6 +3982,12 @@ local function build_context_services(native, filesystem, data_root, platform_ki
     }, "Context runtime services")
 end
 
+---Reads one bounded ordinary file through the native stream port.
+--@param filesystem table Native filesystem port.
+--@param path string Physical file path.
+--@param maximum_bytes integer Maximum admitted file size.
+--@return string|nil bytes Complete file bytes.
+--@return table identity_or_error Observed file identity or structured failure.
 local function read_file_bytes(filesystem, path, maximum_bytes)
     local opened, handle_or_error = filesystem.open_read(path)
     if not opened then return nil, handle_or_error end
@@ -3486,12 +4024,24 @@ local function read_file_bytes(filesystem, path, maximum_bytes)
     return table.concat(chunks), identity_or_error
 end
 
+---Hashes a bounded file for a local self-test fixture.
+--@param filesystem table Native filesystem port.
+--@param safety_service table Digest service.
+--@param path string Physical file path.
+--@param maximum_bytes integer Maximum admitted file size.
+--@return string|nil digest File digest.
+--@return table|nil err Structured read or digest failure.
 local function file_digest(filesystem, safety_service, path, maximum_bytes)
     local bytes, read_error = read_file_bytes(filesystem, path, maximum_bytes)
     if not bytes then return nil, read_error end
     return safety_service.digest(bytes)
 end
 
+---Creates a normalized offline self-test check result.
+--@param outcome string Passed, failed, skipped, or partial outcome.
+--@param summary string Human-readable check summary.
+--@param evidence table|nil Bounded evidence array.
+--@return table result Offline check with zero online requests and fixes.
 local function check_result(outcome, summary, evidence)
     return {
         outcome = outcome,
@@ -3502,6 +4052,12 @@ local function check_result(outcome, summary, evidence)
     }
 end
 
+---Calls one Context catalog method and normalizes port exceptions.
+--@param port table Scanner or catalog service.
+--@param method string Port method name.
+--@param ... any Forwarded method arguments.
+--@return boolean ok Whether the port accepted the call.
+--@return any value_or_error Port value or structured failure.
 local function catalog_call(port, method, ...)
     local called, ok, value = pcall(port[method], ...)
     if not called then
@@ -3521,6 +4077,11 @@ local function catalog_call(port, method, ...)
     return true, value
 end
 
+---Scans Context catalog rings into bounded rows and optional target bindings.
+--@param context_services table Context scanner, catalog, and path services.
+--@param capture_targets boolean Whether to retain target credentials.
+--@return table|nil observation Rows, scan completeness, and optional targets.
+--@return table|nil err Structured catalog failure.
 local function observe_context_catalog(context_services, capture_targets)
     if type(context_services) ~= "table"
         or type(context_services.catalog_scanner) ~= "table"
@@ -3623,7 +4184,16 @@ local CATALOG_STATE_ORDER = {
     changed = 4,
 }
 
+---Builds a deterministic comparator with valid Contexts before failures.
+--@param path_service table Canonical logical-path comparison service.
+--@param sort_by string Created, updated, or name field.
+--@param direction string Ascending or descending order.
+--@return function compare Comparator for catalog rows.
 local function catalog_row_order(path_service, sort_by, direction)
+    ---Orders two catalog rows by state, configured field, then logical path.
+    --@param left table First catalog row.
+    --@param right table Second catalog row.
+    --@return boolean before Whether left precedes right.
     return function(left, right)
         local left_state = CATALOG_STATE_ORDER[left.header_state] or 9
         local right_state = CATALOG_STATE_ORDER[right.header_state] or 9
@@ -3646,6 +4216,12 @@ local function catalog_row_order(path_service, sort_by, direction)
     end
 end
 
+---Projects one sorted and bounded recent or full Context catalog page.
+--@param context_services table Context path comparison service.
+--@param observation table Scanned catalog rows.
+--@param generation table|nil Current ConfigGeneration list preferences.
+--@param view string Recent or full catalog view.
+--@return table page Rows, counts, sort order, and truncation status.
 local function context_catalog_page(context_services, observation, generation, view)
     local sort_by = "updated"
     local direction = "descending"
@@ -3679,6 +4255,8 @@ end
 
 ---Exercises publication in private, uniquely named fixtures on this filesystem.
 -- A successful probe is runtime evidence, never power-loss or release qualification.
+--@param runtime table Production backend, data root, and safety service.
+--@return table result Publication probe outcome and bounded evidence.
 function M.check_publication(runtime)
     local fs = runtime.backend.filesystem
     local root = runtime.layout.data_root
@@ -3686,13 +4264,24 @@ function M.check_publication(runtime)
     if type(random) ~= "string" or #random ~= 16 then
         return check_result("failed", "publication probe randomness is unavailable")
     end
+    ---Encodes one random byte into the private fixture's hexadecimal suffix.
+    --@param byte string One secure random byte.
+    --@return string hex Two lowercase hexadecimal digits.
     local suffix = random:gsub(".", function(byte) return string.format("%02x", byte:byte()) end)
     local prefix = root .. "/.yaca-self-test-" .. suffix
     local owned, handles = {}, {}
+    ---Requires a native fixture operation to succeed or raises its stable code.
+    --@param ok boolean Native operation success flag.
+    --@param value any Native result or structured failure.
+    --@return any value Successful native result.
     local function need(ok, value)
         if not ok then error(type(value) == "table" and value.code or "PublicationProbeFailed", 0) end
         return value
     end
+    ---Creates, writes, and flushes one private publication fixture.
+    --@param path string New fixture path.
+    --@param bytes string Fixture content.
+    --@return table snapshot Direct post-close file observation.
     local function create(path, bytes)
         local missing = need(fs.direct_inspect(path))
         if missing.exists then error("PublicationProbeCollision", 0) end
@@ -3706,20 +4295,23 @@ function M.check_publication(runtime)
         handles[handle] = nil
         return need(fs.direct_inspect(path))
     end
+    ---Probes no-replace rename and replacement on private filesystem fixtures.
+    --@param none No arguments.
+    --@return nil Raises if any fixture step fails.
     local ok, problem = pcall(function()
         local first = create(prefix .. ".old", "publication-before\n")
         local missing = need(fs.direct_inspect(prefix .. ".target"))
-        need(fs.direct_rename(first, missing))
-        owned[prefix .. ".target"], owned[prefix .. ".old"] = first.identity, nil
+        local renamed = need(fs.direct_rename(first, missing))
+        owned[prefix .. ".target"], owned[prefix .. ".old"] = renamed, nil
         need(fs.flush_directory(root))
         local temporary = create(prefix .. ".new", "publication-after\n")
         local target = need(fs.direct_inspect(prefix .. ".target"))
-        need(fs.direct_replace(temporary, target))
-        owned[prefix .. ".target"], owned[prefix .. ".new"] = temporary.identity, nil
+        local published = need(fs.direct_replace(temporary, target))
+        owned[prefix .. ".target"], owned[prefix .. ".new"] = published, nil
         need(fs.flush_directory(root))
         local bytes, identity = read_file_bytes(fs, prefix .. ".target", 128)
         if not bytes then error(identity.code or "PublicationProbeRead", 0) end
-        if identity.volume ~= temporary.identity.volume or identity.object ~= temporary.identity.object then
+        if identity.volume ~= published.volume or identity.object ~= published.object then
             error("PublicationProbeTargetChanged", 0)
         end
         if bytes ~= "publication-after\n" then error("PublicationProbeMismatch", 0) end
@@ -3750,6 +4342,9 @@ function M.check_publication(runtime)
         { "create-flush-rename-replace-read-delete=passed", "qualification=not-assessed" })
 end
 
+---Builds offline platform, package, Context, and publication self-test checks.
+--@param runtime table Production backend, layout, and Context services.
+--@return function check Offline check callback for the self-test runner.
 local function build_offline_self_test(runtime)
     local filesystem = runtime.backend.filesystem
     local layout = runtime.layout
@@ -3762,11 +4357,19 @@ local function build_offline_self_test(runtime)
     local catalog_observation
     local catalog_observation_error
 
+    ---Checks whether a required package path is an ordinary file.
+    --@param path string Physical package path.
+    --@return boolean regular Whether a regular file was observed.
+    --@return table|nil identity_or_error Native identity or failure.
     local function stat_file(path)
         local stated, value = filesystem.stat_identity(path)
         return stated and value.kind == "file", value
     end
 
+    ---Scans Context rows and verifies each distinct recorded Workspace root.
+    --@param specification table Frozen self-test snapshot identity.
+    --@return table|nil observation Catalog and Workspace-root counts.
+    --@return table|nil err Structured catalog failure.
     local function scan_catalog(specification)
         catalog_snapshot_id = specification.snapshot_id
         catalog_observation, catalog_observation_error = observe_context_catalog(
@@ -3816,6 +4419,10 @@ local function build_offline_self_test(runtime)
         return catalog_observation
     end
 
+    ---Reuses the catalog scan for one exact self-test snapshot.
+    --@param specification table Frozen self-test snapshot identity.
+    --@return table|nil observation Current catalog observation.
+    --@return table|nil err Structured scan failure.
     local function current_catalog(specification)
         if catalog_snapshot_id ~= specification.snapshot_id then
             return scan_catalog(specification)
@@ -3823,6 +4430,9 @@ local function build_offline_self_test(runtime)
         return catalog_observation, catalog_observation_error
     end
 
+    ---Evaluates one named offline self-test against observed runtime facts.
+    --@param specification table Selected check and frozen snapshot.
+    --@return table result Offline check outcome and evidence.
     return function(specification)
         local id = specification.check.id
         if id == "ST1-PLATFORM" then
@@ -4081,6 +4691,12 @@ local SELF_TEST_CAPABILITY_INSTRUCTIONS = {
     ["ST2-MODEL-USAGE-CANCEL"] = "This is a cancellation probe. Reply with the single word READY.",
 }
 
+---Creates a normalized online self-test result with explicit request count.
+--@param outcome string Check outcome.
+--@param summary string Human-readable finding.
+--@param evidence table|nil Bounded evidence lines.
+--@param online_requests integer|nil Started provider request count.
+--@return table result Online check outcome with no automatic fixes.
 local function online_check_result(outcome, summary, evidence, online_requests)
     return {
         outcome = outcome,
@@ -4091,10 +4707,20 @@ local function online_check_result(outcome, summary, evidence, online_requests)
     }
 end
 
+---Formats a bounded ASCII self-test evidence key and value.
+--@param label string Evidence field name.
+--@param value any Observed value to display.
+--@return string line Safe evidence line.
 local function evidence_line(label, value)
     return ascii_diagnostic(label .. "=" .. tostring(value), 200)
 end
 
+---Revalidates the confirmed Model endpoint and ConfigGeneration before a request.
+--@param composed table Production Config, Model, and network services.
+--@param specification table Frozen self-test Model and snapshot ID.
+--@return table|nil generation Current matching ConfigGeneration.
+--@return string|nil code Stable binding failure code.
+--@return string|nil message Binding failure explanation.
 local function resolve_self_test_generation(composed, specification)
     if type(composed.config) ~= "table"
         or type(composed.config.reload_file) ~= "function"
@@ -4131,6 +4757,12 @@ end
 -- cancel_after_start requests cancellation before the first poll so the
 -- cancellation path itself is exercised. Returns an observation table whose
 -- online_requests counts started provider attempts.
+--@param composed table Production Model, network, Context, and clock services.
+--@param specification table Confirmed self-test check and Model snapshot.
+--@param definition table Probe phase, prompt, tool set, timeout, and cancel policy.
+--@return table|nil observation Canonical events and terminal response.
+--@return string|nil code Stable pre-request binding failure code.
+--@return string|nil message Pre-request binding failure explanation.
 local function run_self_test_model_request(composed, specification, definition)
     local generation, code, message
     generation, code, message = resolve_self_test_generation(composed, specification)
@@ -4254,6 +4886,9 @@ local function run_self_test_model_request(composed, specification, definition)
     return observation
 end
 
+---Projects provider events and terminal response into capability facts.
+--@param observation table Canonical Model self-test event observation.
+--@return table facts Transport, protocol, delta, Tool, usage, and finish facts.
 local function classify_self_test_observation(observation)
     local facts = {
         http_status = false,
@@ -4303,10 +4938,18 @@ local function classify_self_test_observation(observation)
     return facts
 end
 
+---Reports a pre-request Model binding failure without claiming online traffic.
+--@param code string Stable binding failure code.
+--@param message string Human-readable binding failure.
+--@return table result Failed online check with zero requests.
 local function self_test_binding_failure(code, message)
     return online_check_result("failed", message, { evidence_line("reason", code) }, 0)
 end
 
+---Reports a provider transport failure with observed terminal evidence.
+--@param code string Check identity retained by the caller.
+--@param facts table Classified transport and finish observations.
+--@return table result Failed online check with one started request.
 local function self_test_transport_failure(code, facts)
     return online_check_result(
         "failed",
@@ -4319,6 +4962,11 @@ local function self_test_transport_failure(code, facts)
     )
 end
 
+---Evaluates one Stage 2 capability probe from canonical provider facts.
+--@param check_id string Stage 2 Model check identity.
+--@param observation table Canonical activity events and terminal response.
+--@param model table Confirmed Model capabilities.
+--@return table result Passed, warning, or failed capability outcome.
 function M.evaluate_self_test_check(check_id, observation, model)
     local facts = classify_self_test_observation(observation)
     if not observation.response and observation.deadline_exceeded then
@@ -4621,7 +5269,12 @@ end
 ---Composes the production online Stage 2 Model port. Every admitted check
 ---performs one real provider request through the production adapter and
 ---transport; no Tool executes and no configuration is mutated.
+--@param composed table Production Model, network, Config, and Context services.
+--@return function check Stage 2 online check callback.
 local function build_online_model_self_test(composed)
+    ---Runs one confirmed capability probe and evaluates its canonical facts.
+    --@param specification table Selected check and frozen Model snapshot.
+    --@return table result Normalized online capability result.
     return function(specification)
         local check_id = specification.check.id
         local instruction = SELF_TEST_CAPABILITY_INSTRUCTIONS[check_id]
@@ -4677,6 +5330,10 @@ local function build_online_model_self_test(composed)
 end
 
 ---Runs a confirmed connection probe against one saved configuration generation.
+--@param composed table Production Model self-test services.
+--@param name string Selected Model name.
+--@param generation table Confirmed ConfigGeneration.
+--@return table result Wire connection probe outcome.
 function M.check_model_connection(composed, name, generation)
     return build_online_model_self_test(composed)({
         check = { id = "ST2-MODEL-WIRE" },
@@ -4685,6 +5342,10 @@ function M.check_model_connection(composed, name, generation)
     })
 end
 
+---Bounds a scalar before including it in an advisory projection.
+--@param value any Config scalar value.
+--@param maximum integer Maximum retained bytes.
+--@return string text Bounded display value.
 local function bounded_value(value, maximum)
     local text = tostring(value)
     if #text > maximum then text = text:sub(1, maximum) .. "..." end
@@ -4694,6 +5355,9 @@ end
 -- Builds the bounded, secret-free projection each Stage 3 advisory review
 -- quotes to the confirmed Model. The projection is bound to the same frozen
 -- self-test snapshot the run started from.
+--@param check_id string Stage 3 semantic check identity.
+--@param snapshot table Frozen self-test Config snapshot.
+--@return string|nil instruction Bounded advisory prompt or nil when unavailable.
 local function self_test_semantic_observation(check_id, snapshot)
     local config = type(snapshot) == "table" and snapshot.config or nil
     if type(config) ~= "table" or config.available ~= true
@@ -4779,6 +5443,9 @@ local function self_test_semantic_observation(check_id, snapshot)
         .. "\n</projection>"
 end
 
+---Parses a no-tool Stage 3 advisory response into bounded findings.
+--@param observation table Canonical provider events and response.
+--@return table result Advisory pass or warning with evidence.
 function M.evaluate_self_test_advisory(observation)
     local facts = classify_self_test_observation(observation)
     if not observation.response then
@@ -4863,7 +5530,12 @@ end
 ---Composes the production Stage 3 advisory port. Each check asks one
 ---confirmed Model to review a bounded projection of the frozen snapshot;
 ---findings are advisory only and never mutate configuration.
+--@param composed table Production Model, network, and Config services.
+--@return function check Stage 3 advisory check callback.
 local function build_online_advisory_self_test(composed)
+    ---Runs one confirmed advisory request against a frozen Config projection.
+    --@param specification table Selected Stage 3 check and confirmed Model.
+    --@return table result Normalized advisory finding.
     return function(specification)
         local check_id = specification.check.id
         local instruction = self_test_semantic_observation(
@@ -4927,6 +5599,11 @@ local function build_online_advisory_self_test(composed)
     end
 end
 
+---Deletes a newly created fixture only against its currently observed identity.
+--@param filesystem table Bounded native filesystem port.
+--@param path string Created fixture path.
+--@return boolean|nil cleaned Whether the file is absent or verified deleted.
+--@return table|nil err Structured deletion failure.
 local function cleanup_created_file(filesystem, path)
     local stated, identity = filesystem.stat_identity(path)
     if not stated then
@@ -4935,6 +5612,12 @@ local function cleanup_created_file(filesystem, path)
     return filesystem.delete_verified(path, identity)
 end
 
+---Creates the adjacent application data directory with durable parent flush.
+--@param filesystem table Native filesystem port.
+--@param path string Application-owned data root.
+--@param parent_path string Outer executable directory to flush.
+--@return boolean|nil created True if newly created, false if already present.
+--@return table|nil err Structured conflict or durability failure.
 local function ensure_data_root(filesystem, path, parent_path)
     local stated, identity_or_error = filesystem.stat_identity(path)
     if stated then
@@ -4959,6 +5642,11 @@ local function ensure_data_root(filesystem, path, parent_path)
     return true
 end
 
+---Publishes a default Config template through a verified no-replace temporary.
+--@param filesystem table Native filesystem port.
+--@param layout table Observed application data and Config paths.
+--@return table|nil receipt Data-root creation outcome.
+--@return table|nil err Structured conflict, validation, or durability failure.
 local function publish_repair_template(filesystem, layout)
     local created_root, root_error = ensure_data_root(
         filesystem,
@@ -4976,6 +5664,10 @@ local function publish_repair_template(filesystem, layout)
         )
     end
     local handle = handle_or_error
+    ---Closes and removes a failed Config temporary when identity permits.
+    --@param original table Original structured write failure.
+    --@return nil No template receipt on failure.
+    --@return table err Original or unknown-publication failure.
     local function abort(original)
         filesystem.close(handle)
         local cleaned = cleanup_created_file(filesystem, temporary_path)
@@ -5056,8 +5748,16 @@ local function publish_repair_template(filesystem, layout)
     return readonly({ created_data_root = created_root }, "template publication result")
 end
 
+---Builds an offline Config, Model, and Context management router.
+--@param filesystem table Native filesystem port.
+--@param layout table Observed application Config and data paths.
+--@param context_services table|nil Context catalog services.
+--@return table service Offline management service.
 local function management_service(filesystem, layout, context_services)
     local service = { online = false }
+    ---Runs one bootstrap-safe offline management action.
+    --@param context table Action, Config state, and optional catalog view.
+    --@return table result Management status and evidence.
     function service.run(context)
         if context.action == "config-repl" then
             if context.config_generation then
@@ -5153,6 +5853,9 @@ end
 ---Composes production adapters for one already-admitted packaged invocation.
 -- Construction resolves all mutable and immutable roots from native executable
 -- identities; it never derives them from cwd or ambient environment variables.
+--@param runtime table Admitted native, CLI, target, and argv identity.
+--@return table|nil composed Read-only production application and runtime services.
+--@return table|nil err Structured layout or adapter construction failure.
 function M.compose_runtime(runtime)
     if type(runtime) ~= "table"
         or type(runtime.native) ~= "table"
@@ -5186,7 +5889,8 @@ function M.compose_runtime(runtime)
         runtime.native,
         backend.filesystem,
         layout.data_root,
-        runtime.identity.os == "windows" and "windows" or "posix"
+        runtime.identity.os == "windows" and "windows" or "posix",
+        layout
     )
     local model_module = require("model")
     local model_adapter, model_error = model_module.new(MODEL_ADAPTER_OPTIONS)
@@ -5256,7 +5960,12 @@ function M.compose_runtime(runtime)
     }, SELF_TEST_OPTIONS)
     if not self_test then return nil, self_test_error end
     local application_components = {
-        platform = { identity = function() return runtime.identity end },
+        platform = {
+            ---Returns the platform identity already admitted by native startup.
+            --@param none No arguments.
+            --@return table identity Admitted OS, architecture, and release target.
+            identity = function() return runtime.identity end,
+        },
         config = config_service,
         workspace = workspace_port(runtime.native),
         self_test = self_test,
@@ -5302,6 +6011,9 @@ end
 local MODEL_SELECTION_LIST_LIMIT = 64
 local MODEL_SELECTION_TRANSITION_RESERVE = 4096
 
+---Canonicalizes a Model endpoint into scheme, origin, and route identity.
+--@param endpoint string Candidate configured Model endpoint.
+--@return table|nil identity Normalized endpoint components.
 local function normalized_endpoint_identity(endpoint)
     if type(endpoint) ~= "string" or endpoint == ""
         or endpoint:find("[%z\r\n]") or endpoint:find("#", 1, true)
@@ -5332,6 +6044,10 @@ local function normalized_endpoint_identity(endpoint)
     }
 end
 
+---Bounds serializable public preview data without accepting cycles or code.
+--@param value any Candidate scalar or table.
+--@param state table|nil Recursive seen set and byte/node counters.
+--@return integer|nil bytes Conservative cumulative byte count.
 local function conservative_public_bytes(value, state)
     state = state or { seen = {}, nodes = 0, bytes = 0 }
     local kind = type(value)
@@ -5367,12 +6083,19 @@ local function conservative_public_bytes(value, state)
     return state.bytes <= 262144 and state.bytes or nil
 end
 
+---Copies one Model definition into plain data for stale-preview checks.
+--@param model table Candidate ConfigGeneration Model definition.
+--@return table|nil snapshot Detached plain Model definition.
 local function model_definition_snapshot(model)
     local copied, copied_ok = copy_plain(model)
     if not copied_ok then return nil end
     return copied
 end
 
+---Copies non-secret environment policy relevant to Model switch preflight.
+--@param generation table Current ConfigGeneration.
+--@param permission_name string Selected Permission name.
+--@return table|nil snapshot Detached general, network, and Permission fields.
 local function model_preflight_environment_snapshot(generation, permission_name)
     if type(generation) ~= "table"
         or type(generation.general) ~= "table"
@@ -5392,6 +6115,9 @@ local function model_preflight_environment_snapshot(generation, permission_name)
     return copied
 end
 
+---Classifies configured proxy disclosure without exposing secret proxy URLs.
+--@param generation table Current ConfigGeneration.
+--@return string policy Off, explicit secret slot, or public URL.
 local function proxy_policy(generation)
     local network = type(generation.network) == "table" and generation.network or {}
     if network.follow_proxy ~= true then return "off" end
@@ -5402,6 +6128,11 @@ local function proxy_policy(generation)
     return "off"
 end
 
+---Projects one enabled main Model into compatibility and disclosure facts.
+--@param generation table Current ConfigGeneration.
+--@param name string Canonical Model name.
+--@param model table Selected Model definition.
+--@return table|nil summary Public protocol, endpoint, limits, and policy facts.
 local function model_public_summary(generation, name, model)
     local endpoint = normalized_endpoint_identity(model.endpoint)
     if not endpoint then return nil end
@@ -5451,6 +6182,10 @@ local function model_public_summary(generation, name, model)
     }
 end
 
+---Removes endpoint query values from a user-facing Model summary.
+--@param summary table Internal Model compatibility summary.
+--@param flags table|nil Current/default status flags.
+--@return table disclosure Read-only Model summary safe for display.
 local function model_disclosure_summary(summary, flags)
     local endpoint_path = summary.endpoint_route:match("^([^?]*)") or "/"
     local result = {
@@ -5478,6 +6213,11 @@ local function model_disclosure_summary(summary, flags)
     return readonly(result, "Model disclosure summary")
 end
 
+---Lists bounded enabled main Models with current/default annotations.
+--@param generation table Current ConfigGeneration.
+--@param current_model string Selected Model name.
+--@return table|nil catalog Read-only Model rows and truncation counts.
+--@return table|nil err Structured missing-catalog failure.
 local function model_catalog(generation, current_model)
     if type(generation) ~= "table" or type(generation.models) ~= "table"
         or type(generation.model_order) ~= "table"
@@ -5521,6 +6261,10 @@ local function model_catalog(generation, current_model)
     }, "bounded Model catalog")
 end
 
+---Checks target Model compatibility and disclosure before any selection change.
+--@param specification table Current/target Model, Prompt, view, and generation facts.
+--@return table|nil preview Read-only compatibility and confirmation reasons.
+--@return table|nil err Structured incompatible or stale-snapshot failure.
 local function model_switch_preview(specification)
     local generation = specification.generation
     local current_name = specification.current_model
@@ -5670,6 +6414,9 @@ local function model_switch_preview(specification)
     end
 
     local reasons, reason_set = {}, {}
+    ---Adds one distinct Model-switch confirmation reason in stable order.
+    --@param name string Disclosure or compatibility reason.
+    --@return nil Updates the preview's reason list.
     local function reason(name)
         if not reason_set[name] then
             reason_set[name] = true
@@ -5744,6 +6491,10 @@ local function model_switch_preview(specification)
     }, "Model selection preview")
 end
 
+---Adds the selection effective time to a detached Model status record.
+--@param status table Draft or Session status fields.
+--@param effective_at string First or next turn effective time.
+--@return table projection Read-only Model selection status.
 local function model_status_projection(status, effective_at)
     local values = {}
     for key, value in pairs(status) do values[key] = value end
@@ -5751,6 +6502,11 @@ local function model_status_projection(status, effective_at)
     return readonly(values, "Model selection status")
 end
 
+---Owns Model previews and one-time application for an unsaved draft.
+--@param draft table Mutable draft Session facade.
+--@param contexts table Prompt and Tool registry services.
+--@return table|nil owner Read-only draft Model selection facade.
+--@return table|nil err Structured missing-port failure.
 local function new_draft_model_selection(draft, contexts)
     if type(draft) ~= "table" or type(draft.status) ~= "function"
         or type(draft.update) ~= "function"
@@ -5764,14 +6520,25 @@ local function new_draft_model_selection(draft, contexts)
         )
     end
     local generation = draft.config_generation()
+    --@metatable bindings Associates control previews with the private operation facts used to reject stale admission.
+    --@field __mode string Fixed k mode: keys are weak; entries remain mutable within their owning module.
     local bindings = setmetatable({}, { __mode = "k" })
     local owner = {}
 
+    ---Lists main Models compatible with the draft's ConfigGeneration.
+    --@param self table Draft Model selection owner.
+    --@return table|nil catalog Bounded Model catalog.
+    --@return table|nil err Structured catalog failure.
     function owner:list()
         local status = draft.status()
         return model_catalog(generation, status.model)
     end
 
+    ---Builds a bound first-turn Model-switch preview for the unsaved draft.
+    --@param self table Draft Model selection owner.
+    --@param selector string User Model selector.
+    --@return table|nil preview Immutable compatibility preview.
+    --@return table|nil err Structured missing or incompatible Model failure.
     function owner:preview(selector)
         local resolved = require("config").resolve_resource(generation, "Model", selector)
         if not resolved then return nil, failure("ModelNotFound", "the Model selector was not found") end
@@ -5806,6 +6573,11 @@ local function new_draft_model_selection(draft, contexts)
         return preview
     end
 
+    ---Applies a still-current draft Model preview exactly once.
+    --@param self table Draft Model selection owner.
+    --@param preview table Preview issued by this owner.
+    --@return table|nil status Updated first-turn Model status.
+    --@return table|nil err Structured stale or update failure.
     function owner:apply(preview)
         local binding = bindings[preview]
         local status = draft.status()
@@ -5834,8 +6606,17 @@ end
 -- reachable before the relevant durable writer and Runtime bindings succeed.
 -- Every later main turn reloads the complete Config and atomically replaces
 -- its generation-bound Model/Tool/review ports while all are idle.
-function M.start_published_agent(composed, chat, message, source)
+--@param composed table Production runtime and Context services.
+--@param chat table New or continued Session bootstrap result.
+--@param message string First user input text.
+--@param source string First input source identity.
+--@param first_lane string|nil Main or no-tool Ask first lane.
+--@return table|nil agent Composed durable Agent and activity owners.
+--@return table|nil err Structured publication, snapshot, or port failure.
+function M.start_published_agent(composed, chat, message, source, first_lane)
     local continuing = type(chat) == "table" and chat.kind == "continue-chat"
+    first_lane = first_lane or "main"
+    local first_ask = not continuing and first_lane == "ask"
     if type(composed) ~= "table"
         or type(composed.backend) ~= "table"
         or type(composed.contexts) ~= "table"
@@ -5865,6 +6646,8 @@ function M.start_published_agent(composed, chat, message, source)
         ))
         or type(message) ~= "string"
         or message == ""
+        or (first_lane ~= "main" and first_lane ~= "ask")
+        or (first_ask and type(chat.draft.begin_ask) ~= "function")
     then
         return nil, failure(
             "InvalidAgentComposition",
@@ -5880,6 +6663,10 @@ function M.start_published_agent(composed, chat, message, source)
     local continued_workspace_key = continuing and workspace_identity_key(
         chat.workspace_identity
     ) or nil
+    ---Rechecks the bound Workspace object before and after Context handoffs.
+    --@param none No arguments.
+    --@return boolean|nil valid True while the Workspace identity remains exact.
+    --@return table|nil err Structured replaced-Workspace failure.
     local function verify_continued_workspace()
         if not continuing then return true end
         if not continued_workspace_key or chat.workspace_identity.kind ~= "directory" then
@@ -5929,7 +6716,8 @@ function M.start_published_agent(composed, chat, message, source)
         end
     else
         local publication_error
-        receipt, publication_error = chat.draft.begin_main(message, source)
+        local begin = first_ask and chat.draft.begin_ask or chat.draft.begin_main
+        receipt, publication_error = begin(message, source)
         if not receipt then return nil, publication_error end
         local handoff_error
         handoff, handoff_error = chat.draft.agent_handoff()
@@ -5941,7 +6729,7 @@ function M.start_published_agent(composed, chat, message, source)
     end
 
     -- A new draft has no Context hash until begin_main publishes its XML.
-    -- Bind every activity, including later main/side turns, to that published
+    -- Bind every activity, including later main/ask turns, to that published
     -- identity instead of retaining the pre-publication status snapshot.
     status = chat.draft.status()
 
@@ -5983,9 +6771,14 @@ function M.start_published_agent(composed, chat, message, source)
     local verified, verify_error = verify_continued_workspace()
     if not verified then chat.draft.close(); return nil, verify_error end
     local catalog = new_turn_catalog(first_ports)
-    local side_catalog = new_side_catalog()
+    local ask_catalog = new_ask_catalog()
     local durable_settings_generation = generation
 
+    ---Reloads current Config and captures a new turn from durable Session facts.
+    --@param specification table Turn kind, user text, source, and Context generation.
+    --@return table|nil generation Current ConfigGeneration.
+    --@return table|nil snapshot Captured immutable turn snapshot.
+    --@return table|nil err Structured stale or Config failure.
     local function reload_turn_snapshot(specification)
         local workspace_valid, workspace_error = verify_continued_workspace()
         if not workspace_valid then return nil, nil, workspace_error end
@@ -6012,13 +6805,17 @@ function M.start_published_agent(composed, chat, message, source)
     end
 
     local snapshots = readonly({
+        ---Captures a fresh turn and stages its generation-bound activity ports.
+        --@param specification table Requested turn kind and exact Context observation.
+        --@return table|nil snapshot Immutable turn configuration snapshot.
+        --@return table|nil err Structured stale or port-construction failure.
         capture = function(specification)
             if type(specification) ~= "table"
-                or (specification.kind ~= "main" and specification.kind ~= "side")
+                or (specification.kind ~= "main" and specification.kind ~= "ask")
             then
                 return nil, failure(
                     "InvalidTurnSnapshot",
-                    "production snapshot catalog accepts only main or side turns"
+                    "production snapshot catalog accepts only main or ask turns"
                 )
             end
             if specification.kind == "main" and not catalog.idle() then
@@ -6027,10 +6824,10 @@ function M.start_published_agent(composed, chat, message, source)
                     "a later turn cannot replace active generation ports"
                 )
             end
-            if specification.kind == "side" and not side_catalog.idle() then
+            if specification.kind == "ask" and not ask_catalog.idle() then
                 return nil, failure(
-                    "SideActivityBusy",
-                    "a side turn cannot replace an active side generation"
+                    "AskActivityBusy",
+                    "a ask turn cannot replace an active ask generation"
                 )
             end
             local next_generation, snapshot, snapshot_error = reload_turn_snapshot(
@@ -6058,7 +6855,7 @@ function M.start_published_agent(composed, chat, message, source)
                 if not replaced then return nil, replace_error end
                 durable_settings_generation = next_generation
             else
-                local candidate, candidate_error = build_side_activity(composed, {
+                local candidate, candidate_error = build_ask_activity(composed, {
                     generation = next_generation,
                     context_hash = status.context_hash,
                     model = next_generation.current_model,
@@ -6072,7 +6869,7 @@ function M.start_published_agent(composed, chat, message, source)
                     view_manifest_ref = snapshot.view_manifest_ref,
                 })
                 if not candidate then return nil, candidate_error end
-                local prepared, prepare_error = side_catalog.prepare(candidate)
+                local prepared, prepare_error = ask_catalog.prepare(candidate)
                 if not prepared then return nil, prepare_error end
             end
             return snapshot
@@ -6085,7 +6882,7 @@ function M.start_published_agent(composed, chat, message, source)
         chat.draft.close()
         return nil, failure("InvalidAgentOptions", "production Agent caps could not be copied")
     end
-    if continuing then
+    if continuing or first_ask then
         local restored_serials, restored_ok = copy_plain(
             receipt.runtime_initial_serials,
             {}
@@ -6109,12 +6906,16 @@ function M.start_published_agent(composed, chat, message, source)
         tools = catalog.tools,
         reviews = catalog.reviews,
         snapshots = snapshots,
-        side = side_catalog,
+        ask = ask_catalog,
         views = readonly({
             prepare = composed.publication.prepare_view,
         }, "active durable Model view publication"),
     }, loop_options)
     if not loop then chat.draft.close(); return nil, loop_error end
+    ---Closes a partially composed AgentLoop and draft after construction fails.
+    --@param agent_error table Original structured composition failure.
+    --@return nil No Agent is returned.
+    --@return table err Original failure after best-effort cleanup.
     local function fail_after_loop(agent_error)
         -- resume_published_main may already own an active network/tool handle.
         -- Closing is best-effort here: the original construction failure stays
@@ -6133,6 +6934,12 @@ function M.start_published_agent(composed, chat, message, source)
     end
     local session_settings = {}
 
+    ---Projects effective durable Session settings and update timing.
+    --@param active_generation table Current validated ConfigGeneration.
+    --@param overrides table Durable Context Session override values.
+    --@param context_generation integer Current Context generation.
+    --@param effective_at string Current or next-turn application time.
+    --@return table status Read-only Session settings projection.
     local function settings_projection(
         active_generation,
         overrides,
@@ -6152,6 +6959,10 @@ function M.start_published_agent(composed, chat, message, source)
         }, "durable Session settings")
     end
 
+    ---Binds a Session update to a live Runtime and exact Context generation.
+    --@param none No arguments.
+    --@return table|nil status Current Runtime status.
+    --@return table context_or_error Durable turn Context or structured failure.
     local function session_update_observation()
         local runtime_status = loop:status()
         if runtime_status.halted == true then
@@ -6176,6 +6987,10 @@ function M.start_published_agent(composed, chat, message, source)
         return runtime_status, turn_context
     end
 
+    ---Returns effective Session settings under a fresh durable observation.
+    --@param self table Session settings owner.
+    --@return table|nil status Read-only settings projection.
+    --@return table|nil err Structured observation failure.
     function session_settings:status()
         local runtime_status, turn_context = session_update_observation()
         if not runtime_status then return nil, turn_context end
@@ -6189,10 +7004,19 @@ function M.start_published_agent(composed, chat, message, source)
 
     ---Checks editor bytes against the current durable settings' private registry.
     -- Only non-secret hit descriptors leave the ConfigGeneration owner.
+    ---Checks bytes against the current ConfigGeneration secret registry.
+    --@param bytes string Candidate exported or displayed text.
+    --@return boolean|nil safe Whether no registered secret was found.
+    --@return table|nil err Structured secret-scan failure.
     function session_settings.scan_registered_secrets(bytes)
         return durable_settings_generation.scan_registered_secrets(bytes)
     end
 
+    ---Publishes one typed Session override and adopts its exact Runtime receipt.
+    --@param self table Session settings owner.
+    --@param change table Override name, value, and update mode.
+    --@return table|nil status New effective settings projection.
+    --@return table|nil err Structured stale, publication, or durability failure.
     function session_settings:update(change)
         if type(change) ~= "table" then
             return nil, failure(
@@ -6365,9 +7189,16 @@ function M.start_published_agent(composed, chat, message, source)
         session_settings,
         "production Session settings owner"
     )
+    --@metatable model_bindings Associates model request previews with their private model, configuration and request bindings.
+    --@field __mode string Fixed k mode: keys are weak; entries remain mutable within their owning module.
     local model_bindings = setmetatable({}, { __mode = "k" })
     local model_selection = {}
 
+    ---Binds Model selection to current Config, Session, Runtime, and view facts.
+    --@param none No arguments.
+    --@return table|nil status Current Runtime status.
+    --@return table|nil context Durable Session and Context state.
+    --@return table|nil err Structured binding mismatch.
     local function bound_model_observation()
         local runtime_status, turn_context = session_update_observation()
         if not runtime_status then return nil, nil, turn_context end
@@ -6392,6 +7223,10 @@ function M.start_published_agent(composed, chat, message, source)
         return runtime_status, turn_context
     end
 
+    ---Lists enabled main Models under the current durable Session binding.
+    --@param self table Model selection owner.
+    --@return table|nil catalog Bounded Model catalog.
+    --@return table|nil err Structured stale or unavailable binding.
     function model_selection:list()
         local runtime_status, turn_context, observation_error
             = bound_model_observation()
@@ -6402,6 +7237,11 @@ function M.start_published_agent(composed, chat, message, source)
         )
     end
 
+    ---Preflights one Model switch against the exact durable view and policy.
+    --@param self table Model selection owner.
+    --@param selector string User-selected Model name.
+    --@return table|nil preview Bound compatibility and disclosure preview.
+    --@return table|nil err Structured stale, missing, or incompatible Model.
     function model_selection:preview(selector)
         if type(selector) ~= "string" or selector == ""
             or selector:find("[%z\r\n]")
@@ -6481,6 +7321,11 @@ function M.start_published_agent(composed, chat, message, source)
         return preview
     end
 
+    ---Publishes a confirmed, still-current Model switch for a later turn.
+    --@param self table Model selection owner.
+    --@param preview table Private preview issued by this owner.
+    --@return table|nil status Updated durable Model selection.
+    --@return table|nil err Structured stale, publication, or durability failure.
     function model_selection:apply(preview)
         local binding = model_bindings[preview]
         local runtime_status, turn_context, observation_error
@@ -6547,7 +7392,7 @@ function M.start_published_agent(composed, chat, message, source)
     )
     if not compaction_owner then return fail_after_loop(compaction_error) end
     local admission = false
-    if not continuing then
+    if not continuing and not first_ask then
         local admission_error
         admission, admission_error = loop:resume_published_main(handoff)
         if not admission then return fail_after_loop(admission_error) end
@@ -6557,7 +7402,7 @@ function M.start_published_agent(composed, chat, message, source)
         model = catalog.model,
         tools = catalog.tools,
         reviews = catalog.reviews,
-        side = side_catalog,
+        ask = ask_catalog,
         clock = clock,
     }, AGENT_RELEASE_OPTIONS.driver)
     if not driver then return fail_after_loop(driver_error) end
@@ -6577,6 +7422,10 @@ function M.start_published_agent(composed, chat, message, source)
         compaction = compaction_owner,
         draft = chat.draft,
         approval_initial_serial = continuing and receipt.approval_initial_serial or 0,
+        ---Revalidates the active Context before exposing its current status.
+        --@param none No arguments.
+        --@return table|nil status Fresh exact Context inspection.
+        --@return table|nil err Structured stale-Context failure.
         context_status = function()
             local called, result, inspection_error = pcall(composed.publication.inspect_active)
             if not called or not result then
@@ -6591,16 +7440,16 @@ function M.start_published_agent(composed, chat, message, source)
         end,
         generation = generation,
         current_generation = catalog.generation,
-        current_side_generation = side_catalog.generation,
+        current_ask_generation = ask_catalog.generation,
         capabilities = readonly({
-            published_first_turn = not continuing,
+            published_first_turn = not continuing and not first_ask,
             reopened_existing_context = continuing,
             model = true,
             tools = true,
             reviews = true,
             approvals = true,
             later_turn_snapshots = true,
-            side = true,
+            ask = true,
             model_selection = true,
             session_settings = true,
             compaction = true,
@@ -6617,6 +7466,10 @@ local COORDINATOR_OPTION_FIELDS = {
     terminal_poll_events = true,
 }
 
+---Validates bounded interactive polling, draft, and output limits.
+--@param options table Candidate coordinator hard limits.
+--@return table|nil options Normalized admitted limits.
+--@return table|nil err Structured invalid-limit failure.
 local function coordinator_options(options)
     if type(options) ~= "table" then
         return nil, failure(
@@ -6654,6 +7507,10 @@ local function coordinator_options(options)
     }
 end
 
+---Checks terminal, renderer, CLI, Session, and Agent coordinator ports.
+--@param ports table Candidate interactive application dependencies.
+--@return table|nil ports Admitted original port set.
+--@return table|nil err Structured missing-port failure.
 local function coordinator_ports(ports)
     if type(ports) ~= "table"
         or type(ports.terminal) ~= "table"
@@ -6724,6 +7581,14 @@ local function coordinator_ports(ports)
     return ports
 end
 
+---Calls an owned coordinator port method and normalizes exceptions.
+--@param owner table Port owner object.
+--@param method string Method name.
+--@param code string Structured failure code.
+--@param message string Failure summary.
+--@param ... any Forwarded method arguments.
+--@return any|nil result Port result.
+--@return table|nil err Structured port failure.
 local function coordinator_call(owner, method, code, message, ...)
     local called, result, result_error = pcall(owner[method], owner, ...)
     if not called then return nil, failure(code, message .. " raised an exception") end
@@ -6731,6 +7596,13 @@ local function coordinator_call(owner, method, code, message, ...)
     return result, result_error
 end
 
+---Calls a standalone coordinator port function and normalizes exceptions.
+--@param callable function Port operation.
+--@param code string Structured failure code.
+--@param message string Failure summary.
+--@param ... any Forwarded function arguments.
+--@return any|nil result Port result.
+--@return table|nil err Structured port failure.
 local function coordinator_function(callable, code, message, ...)
     local called, result, result_error = pcall(callable, ...)
     if not called then return nil, failure(code, message .. " raised an exception") end
@@ -6738,6 +7610,9 @@ local function coordinator_function(callable, code, message, ...)
     return result, result_error
 end
 
+---Extracts a safe stable code from a coordinator diagnostic.
+--@param value any Structured error or thrown value.
+--@return string code Valid public diagnostic identifier.
 local function coordinator_error_id(value)
     local code = type(value) == "table" and value.code or "InternalError"
     if type(code) ~= "string" or not code:match("^[A-Za-z][A-Za-z0-9]+$") then
@@ -6746,6 +7621,9 @@ local function coordinator_error_id(value)
     return code
 end
 
+---Trims leading and trailing whitespace from one command input line.
+--@param value string Input line.
+--@return string trimmed Command text without surrounding whitespace.
 local function trim_coordinator_line(value)
     return value:match("^%s*(.-)%s*$")
 end
@@ -6755,10 +7633,10 @@ end
 -- all pass through this owner.  It uses bounded polling and an injected idle
 -- wait, never infers domain state from already-rendered output, and restores
 -- the terminal on every returned path.
--- @param ports table Terminal, clock, CLI, view, chat, and Agent factory ports.
--- @param options table Fixed input, output, polling, wait, and close limits.
--- @return table|nil coordinator Readonly coordinator with a run method.
--- @return table|nil err Structured construction failure.
+--@param ports table Terminal, clock, CLI, view, chat, and Agent factory ports.
+--@param options table Fixed input, output, polling, wait, and close limits.
+--@return table|nil coordinator Readonly coordinator with a run method.
+--@return table|nil err Structured construction failure.
 function M.new_application_coordinator(ports, options)
     local admitted_ports, ports_error = coordinator_ports(ports)
     if not admitted_ports then return nil, ports_error end
@@ -6771,10 +7649,13 @@ function M.new_application_coordinator(ports, options)
     local terminal_outcome = false
     local agent = admitted_ports.initial_agent or false
     local input_draft = ""
+    local multiline = false
+    local multiline_bytes = 0
+    local draft_rejected = false
     local assistant_draft = ""
-    local side_draft = ""
-    local side_draft_id = false
-    local side_focus_id = false
+    local ask_draft = ""
+    local ask_draft_id = false
+    local ask_focus_id = false
     local last_now
     local prompt_needed = false
     local approval = false
@@ -6795,6 +7676,10 @@ function M.new_application_coordinator(ports, options)
     local diagnostics_by_id = {}
     local coordinator = {}
 
+    ---Reads a monotonic tick shared by terminal and Agent activity handling.
+    --@param none No arguments.
+    --@return integer|nil now Current monotonic tick.
+    --@return table|nil err Structured clock failure.
     local function now()
         local observed, clock_error = coordinator_function(
             admitted_ports.clock.now,
@@ -6813,6 +7698,10 @@ function M.new_application_coordinator(ports, options)
         return observed
     end
 
+    ---Publishes one semantic transcript block through the renderer.
+    --@param block table User-visible semantic block.
+    --@return boolean|nil published True when renderer accepts it.
+    --@return table|nil err Structured renderer failure.
     local function publish(block)
         local published, publish_error = coordinator_call(
             admitted_ports.view,
@@ -6825,6 +7714,10 @@ function M.new_application_coordinator(ports, options)
         return true
     end
 
+    ---Displays a bounded diagnostic and retains its details for inspection.
+    --@param value any Structured operation failure.
+    --@return boolean|nil published Whether the diagnostic was rendered.
+    --@return table|nil err Structured renderer failure.
     local function publish_error(value)
         local message = type(value) == "table" and value.message or nil
         if type(message) ~= "string" or message == "" then
@@ -6866,10 +7759,18 @@ function M.new_application_coordinator(ports, options)
         })
     end
 
+    ---Displays one status message without changing domain state.
+    --@param message string User-visible status text.
+    --@return boolean|nil published Whether the status was rendered.
+    --@return table|nil err Structured renderer failure.
     local function publish_status(message)
         return publish({ kind = "status", text = message })
     end
 
+    ---Closes an active Prompt draft and preserves its cancellation reason.
+    --@param reason string Prompt editor cancellation reason.
+    --@return boolean|nil cancelled Whether edit state was cleared.
+    --@return table|nil err Structured renderer or draft failure.
     local function cancel_prompt_edit(reason)
         if not prompt_edit then return true end
         local id = prompt_edit.id
@@ -6879,6 +7780,10 @@ function M.new_application_coordinator(ports, options)
         return publish({ kind = "action", id = id, text = "not saved; " .. reason })
     end
 
+    ---Renders the next input prompt for the current main or Ask focus.
+    --@param focus string|nil Prompt focus override.
+    --@return boolean|nil shown Whether the prompt was rendered.
+    --@return table|nil err Structured renderer failure.
     local function show_prompt(focus)
         local shown, prompt_error = coordinator_call(
             admitted_ports.view,
@@ -6892,6 +7797,9 @@ function M.new_application_coordinator(ports, options)
         return true
     end
 
+    ---Assigns a short display ID to a canonical durable Tool call.
+    --@param canonical_id string Durable Tool call identity.
+    --@return string display_id Stable display label for this chat.
     local function tool_display_id(canonical_id)
         local display_id = tool_ids[canonical_id]
         if display_id then return display_id end
@@ -6901,6 +7809,10 @@ function M.new_application_coordinator(ports, options)
         return display_id
     end
 
+    ---Publishes buffered main Model text as one transcript block.
+    --@param none No arguments.
+    --@return boolean|nil flushed Whether the buffer was rendered or empty.
+    --@return table|nil err Structured renderer failure.
     local function flush_assistant()
         if assistant_draft == "" then return true end
         local value = assistant_draft
@@ -6908,6 +7820,10 @@ function M.new_application_coordinator(ports, options)
         return publish({ kind = "assistant", text = value })
     end
 
+    ---Adds a bounded main Model text delta to the visible response buffer.
+    --@param value string New assistant text delta.
+    --@return boolean|nil appended Whether the delta was retained.
+    --@return table|nil err Structured output-limit or renderer failure.
     local function append_assistant(value)
         if type(value) ~= "string"
             or #assistant_draft + #value > admitted.maximum_assistant_bytes
@@ -6921,44 +7837,58 @@ function M.new_application_coordinator(ports, options)
         return true
     end
 
-    local function flush_side(side_id)
-        if side_draft == "" then
-            side_draft_id = false
+    ---Publishes buffered no-tool Ask text for the matching Ask turn.
+    --@param ask_id string Active Ask identity.
+    --@return boolean|nil flushed Whether Ask text was rendered or empty.
+    --@return table|nil err Structured renderer failure.
+    local function flush_ask(ask_id)
+        if ask_draft == "" then
+            ask_draft_id = false
             return true
         end
-        if type(side_id) ~= "string" or side_id == "" or side_id ~= side_draft_id then
+        if type(ask_id) ~= "string" or ask_id == "" or ask_id ~= ask_draft_id then
             return nil, failure(
-                "SideActivityContract",
-                "side transcript identity changed while streaming"
+                "AskActivityContract",
+                "ask transcript identity changed while streaming"
             )
         end
-        local value = side_draft
-        side_draft = ""
-        side_draft_id = false
-        return publish({ kind = "side", id = side_id, text = value })
+        local value = ask_draft
+        ask_draft = ""
+        ask_draft_id = false
+        return publish({ kind = "ask", id = ask_id, text = value })
     end
 
-    local function append_side(side_id, value)
-        if type(side_id) ~= "string" or side_id == ""
+    ---Adds a bounded Ask Model delta without merging it into main text.
+    --@param ask_id string Active Ask identity.
+    --@param value string New Ask text delta.
+    --@return boolean|nil appended Whether the delta was retained.
+    --@return table|nil err Structured output-limit or renderer failure.
+    local function append_ask(ask_id, value)
+        if type(ask_id) ~= "string" or ask_id == ""
             or type(value) ~= "string"
-            or (side_draft_id ~= false and side_draft_id ~= side_id)
-            or #side_draft + #value > admitted.maximum_assistant_bytes
+            or (ask_draft_id ~= false and ask_draft_id ~= ask_id)
+            or #ask_draft + #value > admitted.maximum_assistant_bytes
         then
             return nil, failure(
                 "CoordinatorOutputLimit",
-                "side transcript exceeds its fixed byte limit or binding"
+                "ask transcript exceeds its fixed byte limit or binding"
             )
         end
-        side_draft_id = side_id
-        side_draft = side_draft .. value
+        ask_draft_id = ask_id
+        ask_draft = ask_draft .. value
         return true
     end
 
-    local function project_side_model_event(side_id, event)
+    ---Projects one no-tool Ask Model event into the separate Ask transcript.
+    --@param ask_id string Active Ask turn identity.
+    --@param event table Canonical Ask Model event.
+    --@return boolean|nil projected Whether the event was handled.
+    --@return table|nil err Structured invalid-event or renderer failure.
+    local function project_ask_model_event(ask_id, event)
         if type(event) ~= "table" or type(event.kind) ~= "string" then
             return nil, failure(
-                "SideActivityContract",
-                "interactive side Model event is invalid"
+                "AskActivityContract",
+                "interactive ask Model event is invalid"
             )
         end
         if event.kind == "response_start"
@@ -6968,33 +7898,37 @@ function M.new_application_coordinator(ports, options)
         then
             return true
         end
-        if event.kind == "text_delta" then return append_side(side_id, event.text) end
-        if event.kind == "response_finish" then return flush_side(side_id) end
+        if event.kind == "text_delta" then return append_ask(ask_id, event.text) end
+        if event.kind == "response_finish" then return flush_ask(ask_id) end
         if event.kind == "tool_call_start"
             or event.kind == "tool_call_complete"
             or event.kind == "control"
         then
-            local flushed, flush_error = flush_side(side_id)
+            local flushed, flush_error = flush_ask(ask_id)
             if not flushed then return nil, flush_error end
             return publish_error({
-                code = "InvalidSideResponse",
-                message = "The side Model attempted a Tool or control action; it was rejected.",
+                code = "InvalidAskResponse",
+                message = "The Ask response attempted a Tool or control action; it was rejected.",
             })
         end
         if event.kind == "protocol_error" or event.kind == "transport_error" then
-            local flushed, flush_error = flush_side(side_id)
+            local flushed, flush_error = flush_ask(ask_id)
             if not flushed then return nil, flush_error end
             return publish_error({
-                code = "SideModelResponseError",
-                message = "Side Model response failed: " .. tostring(event.error_id),
+                code = "AskModelResponseError",
+                message = "Ask Model response failed: " .. tostring(event.error_id),
             })
         end
         return nil, failure(
-            "SideActivityContract",
-            "interactive side Model event kind is unknown"
+            "AskActivityContract",
+            "interactive ask Model event kind is unknown"
         )
     end
 
+    ---Projects a canonical main Model event into text, Tool, or notice blocks.
+    --@param event table Canonical Model activity event.
+    --@return boolean|nil projected Whether the event was handled.
+    --@return table|nil err Structured invalid-event or renderer failure.
     local function project_model_event(event)
         if type(event) ~= "table" or type(event.kind) ~= "string" then
             return nil, failure(
@@ -7062,6 +7996,11 @@ function M.new_application_coordinator(ports, options)
         )
     end
 
+    ---Projects foreground Tool progress and terminal events by display ID.
+    --@param event table Canonical Tool activity event.
+    --@param active_tool_call_id string|nil Durable Tool call identity.
+    --@return boolean|nil projected Whether the event was rendered.
+    --@return table|nil err Structured invalid-event or renderer failure.
     local function project_tool_event(event, active_tool_call_id)
         if type(event) ~= "table" or type(event.kind) ~= "string" then
             return nil, failure(
@@ -7091,6 +8030,10 @@ function M.new_application_coordinator(ports, options)
         )
     end
 
+    ---Projects a typed AgentLoop transition after its durable reduction.
+    --@param event table Driver transition with cause and typed result.
+    --@return boolean|nil projected Whether the transition was displayed.
+    --@return table|nil err Structured invalid-cause or renderer failure.
     local function project_transition(event)
         local result = event.result
         if type(result) ~= "table" then
@@ -7121,12 +8064,12 @@ function M.new_application_coordinator(ports, options)
         if event.cause == "termination-review" then
             return publish_status("Termination review completed.")
         end
-        if event.cause == "side-response" then
-            local flushed, flush_error = flush_side(event.side_id)
+        if event.cause == "ask-response" then
+            local flushed, flush_error = flush_ask(event.ask_id)
             if not flushed then return nil, flush_error end
-            if side_focus_id == event.side_id then side_focus_id = false end
+            if ask_focus_id == event.ask_id then ask_focus_id = false end
             return publish_status(
-                "Side " .. tostring(event.side_id)
+                "Ask " .. tostring(event.ask_id)
                     .. " outcome: " .. tostring(result.outcome)
             )
         end
@@ -7136,20 +8079,25 @@ function M.new_application_coordinator(ports, options)
         )
     end
 
+    ---Renders a bounded driver event batch in causal order.
+    --@param step table Agent activity driver step result.
+    --@param before table AgentLoop status before the step.
+    --@return boolean|nil projected True after every event is handled.
+    --@return table|nil err Structured projection failure.
     local function project_driver_events(step, before)
         for _, event in ipairs(step.events) do
             local projected, projection_error
             if event.kind == "model-event" then
                 projected, projection_error = project_model_event(event.event)
-            elseif event.kind == "side-model-event" then
-                projected, projection_error = project_side_model_event(
-                    event.side_id,
+            elseif event.kind == "ask-model-event" then
+                projected, projection_error = project_ask_model_event(
+                    event.ask_id,
                     event.event
                 )
             elseif event.kind == "tool-event" then
                 projected, projection_error = project_tool_event(
                     event.event,
-                    before.active_tool_call_id
+                    event.adapter_call_id or event.tool_call_id or before.active_tool_call_id
                 )
             elseif event.kind == "runtime-transition" then
                 projected, projection_error = project_transition(event)
@@ -7164,6 +8112,10 @@ function M.new_application_coordinator(ports, options)
         return true
     end
 
+    ---Builds the exact user approval card for one pending Tool call.
+    --@param action_id string Local approval display identity.
+    --@param snapshot table Frozen Tool target, capabilities, and argument facts.
+    --@return table lines Ordered approval details and one-shot choices.
     local function approval_lines(action_id, snapshot)
         local capabilities = snapshot.required_capabilities
         local rendered_capabilities = "none"
@@ -7185,6 +8137,10 @@ function M.new_application_coordinator(ports, options)
         }
     end
 
+    ---Prepares and displays a typed approval for the exact pending Tool call.
+    --@param status table Current AgentLoop status.
+    --@return boolean|nil ready True when no approval or a matching card is shown.
+    --@return table|nil err Structured snapshot or renderer failure.
     local function ensure_approval(status)
         if status.state ~= "AwaitingApproval"
             and not (status.state == "WaitingUser"
@@ -7257,6 +8213,10 @@ function M.new_application_coordinator(ports, options)
         return true
     end
 
+    ---Displays a newly observed waiting or terminal Agent state once.
+    --@param status table Current AgentLoop status.
+    --@return boolean|nil projected Whether the state was handled.
+    --@return table|nil err Structured renderer failure.
     local function project_wait(status)
         local key = tostring(status.turn_id) .. "\0" .. tostring(status.state)
             .. "\0" .. tostring(status.pending_kind)
@@ -7293,6 +8253,10 @@ function M.new_application_coordinator(ports, options)
         return true
     end
 
+    ---Advances one Agent activity step and renders its typed events.
+    --@param none No arguments.
+    --@return boolean|nil progressed Whether the Agent changed or emitted output.
+    --@return table|nil err Structured driver or projection failure.
     local function drive_agent()
         if not agent then return false end
         local before = agent.loop:status()
@@ -7311,6 +8275,9 @@ function M.new_application_coordinator(ports, options)
         return step.progressed or #step.events > 0
     end
 
+    ---Extracts a typed compaction terminal outcome from its owner result.
+    --@param result table|any Compaction owner result.
+    --@return string|false outcome Terminal outcome or false while active.
     local function compaction_outcome(result)
         local settlement = type(result) == "table" and result.settlement or nil
         if type(settlement) == "table" then return settlement.outcome end
@@ -7324,6 +8291,10 @@ function M.new_application_coordinator(ports, options)
         return false
     end
 
+    ---Resumes or blocks a deferred Agent request after compaction settles.
+    --@param result table Compaction owner terminal result.
+    --@return boolean|nil resolved True when no preflight or exact resolution succeeds.
+    --@return table|nil err Structured mismatch or Runtime failure.
     local function resolve_automatic_preflight(result)
         local status = agent.loop:status()
         if status.compaction_preflight_state == nil
@@ -7362,6 +8333,10 @@ function M.new_application_coordinator(ports, options)
         return resolved
     end
 
+    ---Displays one typed compaction result and its durable settlement.
+    --@param result table Compaction owner terminal result.
+    --@return boolean|nil published Whether the outcome was rendered.
+    --@return table|nil err Structured renderer or preflight failure.
     local function publish_compaction_result(result)
         local outcome = compaction_outcome(result)
         if outcome == "completed" then
@@ -7393,6 +8368,10 @@ function M.new_application_coordinator(ports, options)
         )
     end
 
+    ---Polls the active compaction owner and projects its events.
+    --@param none No arguments.
+    --@return boolean|nil progressed Whether compaction emitted or changed state.
+    --@return table|nil err Structured activity or renderer failure.
     local function drive_compaction()
         if not agent or type(agent.compaction) ~= "table" then return false end
         local status = agent.compaction:status()
@@ -7429,12 +8408,16 @@ function M.new_application_coordinator(ports, options)
         return step.progressed
     end
 
+    ---Starts automatic compaction for a pending Model preflight when needed.
+    --@param none No arguments.
+    --@return boolean|nil progressed Whether preflight advanced.
+    --@return table|nil err Structured compaction or Runtime failure.
     local function drive_automatic_preflight()
         if not agent or type(agent.compaction) ~= "table" then return false end
         local status = agent.loop:status()
         if status.compaction_preflight_state ~= "pending" then return false end
         if agent.compaction:status().active == true
-            or status.side_state ~= "idle"
+            or status.ask_state ~= "idle"
             or status.active_request_id ~= false
             or status.active_tool_call_id ~= false
         then
@@ -7473,6 +8456,9 @@ function M.new_application_coordinator(ports, options)
         return true
     end
 
+    ---Builds the current user-facing Session and Agent status lines.
+    --@param none No arguments.
+    --@return table lines Ordered bounded status text.
     local function status_lines()
         local editing = prompt_edit and (prompt_edit.id .. " ("
             .. tostring(#prompt_edit.draft) .. " bytes; not saved)") or "none"
@@ -7508,8 +8494,8 @@ function M.new_application_coordinator(ports, options)
                 .. " " .. tostring(status.compaction_preflight_id),
             "queue: " .. tostring(status.queue_count)
                 .. "/" .. tostring(status.queue_maximum),
-            "side: " .. tostring(status.side_state)
-                .. " " .. tostring(status.active_side_id),
+            "ask: " .. tostring(status.ask_state)
+                .. " " .. tostring(status.active_ask_id),
             "last outcome: " .. tostring(status.last_outcome),
             "compaction: " .. tostring(compact_status.state)
                 .. " " .. tostring(compact_status.active_compaction_id),
@@ -7556,6 +8542,10 @@ function M.new_application_coordinator(ports, options)
         return lines
     end
 
+    ---Renders interactive help for one CLI topic.
+    --@param topic string|nil Requested help topic.
+    --@return boolean|nil shown Whether help was rendered.
+    --@return table|nil err Structured renderer or help failure.
     local function show_help(topic)
         local rendered, render_error = coordinator_function(
             admitted_ports.cli.render_help,
@@ -7567,6 +8557,10 @@ function M.new_application_coordinator(ports, options)
         return publish({ kind = "notice", text = rendered })
     end
 
+    ---Displays retained details for a previously shown diagnostic identity.
+    --@param diagnostic_id string Local diagnostic display ID.
+    --@return boolean|nil shown Whether details were rendered.
+    --@return table|nil err Structured missing-detail or renderer failure.
     local function show_details(diagnostic_id)
         if diagnostic_id == nil then
             diagnostic_id = diagnostic_order[#diagnostic_order]
@@ -7609,12 +8603,20 @@ function M.new_application_coordinator(ports, options)
         return publish({ kind = "details", id = record.id, lines = lines })
     end
 
+    ---Normalizes one cautious-command scalar for bounded display.
+    --@param value any Candidate command value.
+    --@return string word Safe scalar text.
     local function cautious_word(value)
         if value == true then return "on" end
         if value == false then return "off" end
         return tostring(value)
     end
 
+    ---Displays a cautious Session setting preview with its effective timing.
+    --@param values table Proposed or current setting values.
+    --@param suffix string|nil Additional status line.
+    --@return boolean|nil published Whether the preview was rendered.
+    --@return table|nil err Structured renderer failure.
     local function publish_cautious(values, suffix)
         local effective = values.double_check_effective
         if effective == nil then effective = values.double_check end
@@ -7627,6 +8629,10 @@ function M.new_application_coordinator(ports, options)
         return publish_status(text)
     end
 
+    ---Reads the current durable Session settings from the active Agent.
+    --@param none No arguments.
+    --@return table|nil status Effective Session settings.
+    --@return table|nil err Structured unavailable or stale Session failure.
     local function session_settings_status()
         if agent then
             return coordinator_call(
@@ -7643,6 +8649,10 @@ function M.new_application_coordinator(ports, options)
         )
     end
 
+    ---Applies a typed cautious Session setting through its durable owner.
+    --@param request table Parsed cautious command.
+    --@return boolean|nil applied Whether the change was rendered.
+    --@return table|nil err Structured validation or publication failure.
     local function apply_cautious(request)
         local current, status_error = session_settings_status()
         if not current then return nil, status_error end
@@ -7700,6 +8710,11 @@ function M.new_application_coordinator(ports, options)
         )
     end
 
+    ---Displays the current or proposed Context Prompt with bounded lines.
+    --@param values table Prompt setting fields.
+    --@param suffix string|nil Additional status line.
+    --@return boolean|nil published Whether the prompt summary was rendered.
+    --@return table|nil err Structured renderer failure.
     local function publish_context_prompt(values, suffix)
         local prompt = values.context_prompt
         if type(prompt) ~= "string" then
@@ -7721,6 +8736,10 @@ function M.new_application_coordinator(ports, options)
         })
     end
 
+    ---Applies a typed Context Prompt change through durable Session settings.
+    --@param request table Parsed prompt command.
+    --@return boolean|nil applied Whether the update was rendered.
+    --@return table|nil err Structured validation or publication failure.
     local function apply_prompt(request)
         local current, status_error = session_settings_status()
         if not current then return nil, status_error end
@@ -7832,6 +8851,10 @@ function M.new_application_coordinator(ports, options)
         )
     end
 
+    ---Rejects a Prompt editor draft containing a registered Config secret.
+    --@param value string Candidate in-memory Prompt text.
+    --@return boolean|nil safe True when the draft contains no registered secret.
+    --@return table|nil err Structured scan or secret failure.
     local function prompt_draft_safe(value)
         local hits, scan_error = coordinator_function(
             prompt_edit.scan, "PromptSecretScanFailure", "Prompt draft secret scan", value
@@ -7847,8 +8870,11 @@ function M.new_application_coordinator(ports, options)
     end
 
     -- Owns one bounded multi-line edit until exact save, cancel, or preemption.
-    -- Draft content is never submitted to a main/side/steer lane or persisted
+    -- Draft content is never submitted to a main/ask/steer lane or persisted
     -- before save; publication continues to use the existing Session owner.
+    --@param source string Raw Prompt editor input line.
+    --@return boolean|nil handled Whether the edit command was handled.
+    --@return table|nil err Structured draft or renderer failure.
     local function route_prompt_editor(source)
         local command, command_error = coordinator_function(
             admitted_ports.cli.parse_prompt_editor, "PromptEditorInput", "Prompt editor parsing",
@@ -7904,10 +8930,17 @@ function M.new_application_coordinator(ports, options)
             .. "/" .. tostring(admitted.maximum_draft_bytes) .. " bytes; not saved.")
     end
 
+    ---Returns the saved or unsaved Model selection owner for this chat.
+    --@param none No arguments.
+    --@return table owner Current Model selection facade.
     local function active_model_owner()
         return agent and agent.models or admitted_ports.draft_models
     end
 
+    ---Validates and renders a bounded Model catalog without endpoint secrets.
+    --@param result table Model picker catalog result.
+    --@return boolean|nil published Whether catalog details were rendered.
+    --@return table|nil err Structured contract or renderer failure.
     local function publish_model_catalog(result)
         if type(result) ~= "table" or type(result.rows) ~= "table"
             or type(result.current) ~= "string"
@@ -7977,6 +9010,10 @@ function M.new_application_coordinator(ports, options)
         return publish({ kind = "details", id = "models", lines = lines })
     end
 
+    ---Builds disclosure-safe lines for one before/after Model summary.
+    --@param prefix string From or to display label.
+    --@param summary table Public Model summary without query values.
+    --@return table lines Ordered Model disclosure lines.
     local function model_summary_lines(prefix, summary)
         return {
             prefix .. " name: " .. safe_diagnostic(summary.name, 128),
@@ -8002,6 +9039,9 @@ function M.new_application_coordinator(ports, options)
         }
     end
 
+    ---Checks all public Model disclosure fields before rendering a preview.
+    --@param summary any Candidate Model summary.
+    --@return boolean valid Whether required public fields are present.
     local function valid_model_summary(summary)
         return type(summary) == "table"
             and type(summary.name) == "string" and summary.name ~= ""
@@ -8021,6 +9061,10 @@ function M.new_application_coordinator(ports, options)
             and type(summary.roles) == "string"
     end
 
+    ---Checks compatibility, history, and confirmation facts in a Model preview.
+    --@param preview table Candidate saved or draft Model switch preview.
+    --@return boolean|nil valid True when disclosure is coherent.
+    --@return table|nil err Structured preview contract failure.
     local function validate_model_preview(preview)
         if type(preview) ~= "table"
             or preview.kind ~= "model-switch-preview"
@@ -8075,6 +9119,11 @@ function M.new_application_coordinator(ports, options)
         return true
     end
 
+    ---Displays the effective Model after a preview is applied or unchanged.
+    --@param updated table Model selection status.
+    --@param unchanged boolean Whether the selected Model remained the same.
+    --@return boolean|nil published Whether the result was rendered.
+    --@return table|nil err Structured contract or renderer failure.
     local function publish_model_result(updated, unchanged)
         if type(updated) ~= "table" or type(updated.model) ~= "string"
             or type(updated.effective_at) ~= "string"
@@ -8097,6 +9146,11 @@ function M.new_application_coordinator(ports, options)
         )
     end
 
+    ---Applies one still-current Model preview through its owning facade.
+    --@param owner table Saved or draft Model selection owner.
+    --@param preview table Exact preview issued by that owner.
+    --@return boolean|nil applied Whether the result was rendered.
+    --@return table|nil err Structured stale or publication failure.
     local function apply_model_preview(owner, preview)
         local updated, update_error = coordinator_call(
             owner,
@@ -8109,6 +9163,10 @@ function M.new_application_coordinator(ports, options)
         return publish_model_result(updated, preview.unchanged == true)
     end
 
+    ---Builds an exact confirmation card for a Model switch disclosure.
+    --@param action_id string Local Model action identity.
+    --@param preview table Bound Model compatibility preview.
+    --@return table lines Before/after, history, reasons, and choices.
     local function model_confirmation_lines(action_id, preview)
         local lines = {}
         for _, line in ipairs(model_summary_lines("from", preview.from)) do
@@ -8137,6 +9195,10 @@ function M.new_application_coordinator(ports, options)
         return lines
     end
 
+    ---Lists or previews a Model selection from the current Session.
+    --@param request table Parsed Model command.
+    --@return boolean|nil handled Whether catalog or preview was rendered.
+    --@return table|nil err Structured selector or preflight failure.
     local function select_model(request)
         if model_change then
             return nil, failure(
@@ -8195,6 +9257,10 @@ function M.new_application_coordinator(ports, options)
         return true
     end
 
+    ---Expires a pending Model switch without altering the current selection.
+    --@param message string User-visible denial reason.
+    --@return boolean|nil denied Whether the action result was rendered.
+    --@return table|nil err Structured renderer failure.
     local function deny_model_change(message)
         local action_id = model_change.action_id
         model_change = false
@@ -8205,6 +9271,10 @@ function M.new_application_coordinator(ports, options)
         })
     end
 
+    ---Parses a one-shot allow/deny response for a pending Model switch.
+    --@param source string Raw confirmation input line.
+    --@return boolean|nil handled Whether the response was applied or denied.
+    --@return table|nil err Structured invalid or stale confirmation.
     local function route_model_confirmation_line(source)
         local normalized = trim_coordinator_line(source)
         if normalized == "" then return deny_model_change("denied by default") end
@@ -8259,6 +9329,11 @@ function M.new_application_coordinator(ports, options)
         )
     end
 
+    ---Stages a typed Agent action and renders its exact accepted result.
+    --@param method string AgentLoop method name.
+    --@param message table Typed action payload.
+    --@return boolean|nil applied Whether the action was rendered.
+    --@return table|nil err Structured Runtime or renderer failure.
     local function stage_and_apply(method, message)
         local staged, stage_error = coordinator_call(
             agent.session,
@@ -8293,15 +9368,19 @@ function M.new_application_coordinator(ports, options)
                 text = "accepted for the active turn",
             })
         end
-        if method == "side" then
-            side_focus_id = result.side_id
+        if method == "ask" then
+            ask_focus_id = result.ask_id
             return publish_status(
-                "Side request accepted: " .. tostring(result.side_id)
+                "Ask request accepted: " .. tostring(result.ask_id)
             )
         end
         return publish_status("Input accepted.")
     end
 
+    ---Displays the current ordered durable user queue.
+    --@param none No arguments.
+    --@return boolean|nil listed Whether queue rows were rendered.
+    --@return table|nil err Structured Runtime or renderer failure.
     local function list_queue()
         local projection, queue_error = coordinator_call(
             agent.session,
@@ -8322,6 +9401,10 @@ function M.new_application_coordinator(ports, options)
         return true
     end
 
+    ---Renders bounded Context selector choices and their state labels.
+    --@param result table Context browser search or list result.
+    --@return boolean|nil published Whether choices were rendered.
+    --@return table|nil err Structured contract or renderer failure.
     local function publish_context_choices(result)
         if type(result) ~= "table"
             or result.action ~= "context-repl"
@@ -8372,6 +9455,10 @@ function M.new_application_coordinator(ports, options)
         return publish({ kind = "details", id = "contexts", lines = lines })
     end
 
+    ---Checks that Agent, Ask, approval, and editor lanes are idle for a switch.
+    --@param none No arguments.
+    --@return boolean|nil ready True when Context switching can proceed.
+    --@return table|nil err Structured busy-lane failure.
     local function context_switch_ready()
         local current_status
         if agent then
@@ -8397,10 +9484,10 @@ function M.new_application_coordinator(ports, options)
                     "clear or finish every queued item before switching Context"
                 )
             end
-            if runtime_status.side_state ~= "idle" then
+            if runtime_status.ask_state ~= "idle" then
                 return false, failure(
                     "InteractiveActionUnavailable",
-                    "finish or cancel the side request before switching Context"
+                    "finish or cancel the Ask request before switching Context"
                 )
             end
             if approval then
@@ -8414,6 +9501,11 @@ function M.new_application_coordinator(ports, options)
         return true, current_status
     end
 
+    ---Reverifies and activates a selected Context with optional Workspace consent.
+    --@param preview table Exact Context switch preview.
+    --@param confirmation string|nil Literal cross-Workspace confirmation.
+    --@return boolean|nil activated Whether the new Context became active.
+    --@return table|nil err Structured stale or activation failure.
     local function activate_context(preview, confirmation)
         local ready, ready_error = context_switch_ready()
         if not ready then return nil, ready_error end
@@ -8473,9 +9565,9 @@ function M.new_application_coordinator(ports, options)
         agent = next_agent
         approval = false
         assistant_draft = ""
-        side_draft = ""
-        side_draft_id = false
-        side_focus_id = false
+        ask_draft = ""
+        ask_draft_id = false
+        ask_focus_id = false
         last_wait_key = false
         tool_ids = {}
         return publish_status(
@@ -8485,6 +9577,10 @@ function M.new_application_coordinator(ports, options)
         )
     end
 
+    ---Lists, previews, or activates a Context from a parsed switch command.
+    --@param request table Parsed Context selector action.
+    --@return boolean|nil handled Whether the action was rendered.
+    --@return table|nil err Structured selection or activation failure.
     local function switch_context(request)
         if model_change then
             return nil, failure(
@@ -8556,6 +9652,10 @@ function M.new_application_coordinator(ports, options)
         return activate_context(preview)
     end
 
+    ---Routes a typed chat command to queue, Ask, steer, review, or Session owner.
+    --@param request table Parsed semantic Agent action.
+    --@return boolean|nil handled Whether the action was accepted and rendered.
+    --@return table|nil err Structured invalid, busy, or durability failure.
     local function route_agent_action(request)
         local compact_status = agent.compaction:status()
         local runtime_status = agent.loop:status()
@@ -8597,8 +9697,8 @@ function M.new_application_coordinator(ports, options)
         if request.id == "steer" then
             return stage_and_apply("steer", request.message)
         end
-        if request.id == "side" then
-            return stage_and_apply("side", request.message)
+        if request.id == "ask" then
+            return stage_and_apply("ask", request.message)
         end
         if request.id == "queue-list" then return list_queue() end
         if request.id == "queue-delete" then
@@ -8666,31 +9766,31 @@ function M.new_application_coordinator(ports, options)
                 return resolve_automatic_preflight(result)
             end
             local current = agent.loop:status()
-            if side_focus_id ~= false
-                and current.active_side_id == side_focus_id
-                and current.side_state == "cancelling"
+            if ask_focus_id ~= false
+                and current.active_ask_id == ask_focus_id
+                and current.ask_state == "cancelling"
             then
-                return publish_status("Side cancellation is already pending.")
+                return publish_status("Ask cancellation is already pending.")
             end
-            if side_focus_id ~= false
-                and current.active_side_id == side_focus_id
-                and current.side_state == "active"
+            if ask_focus_id ~= false
+                and current.active_ask_id == ask_focus_id
+                and current.ask_state == "active"
             then
                 local result, action_error = coordinator_call(
                     agent.loop,
-                    "cancel_side",
+                    "cancel_ask",
                     "CancelFailure",
-                    "side cancellation",
+                    "ask cancellation",
                     {
-                        side_id = side_focus_id,
+                        ask_id = ask_focus_id,
                         reason = "user-cancel",
                         expected_context_generation = current.context_generation,
                         expected_turn_id = current.turn_id,
                     }
                 )
                 if not result then return nil, action_error end
-                if result.cancel_pending ~= true then side_focus_id = false end
-                return publish_status("Side cancellation requested.")
+                if result.cancel_pending ~= true then ask_focus_id = false end
+                return publish_status("Ask cancellation requested.")
             end
             local result, action_error = coordinator_call(
                 agent.loop,
@@ -8706,22 +9806,25 @@ function M.new_application_coordinator(ports, options)
             return publish({ kind = "details", id = "status", lines = status_lines() })
         end
         if request.id == "help-chat" then return show_help(request.topic) end
-        if request.id == "multiline" then
-            return publish_status("Use Shift+Enter or embedded newlines, then submit.")
-        end
         return nil, failure(
             "InteractiveActionUnavailable",
             "this registered chat action is not attached to the active coordinator"
         )
     end
 
-    local function start_first_agent(message)
+    ---Publishes the first Context turn and composes its durable Agent owner.
+    --@param message string First user input.
+    --@param lane string Main or Ask first lane.
+    --@return boolean|nil started Whether Agent admission succeeded.
+    --@return table|nil err Structured publication or composition failure.
+    local function start_first_agent(message, lane)
         local constructed, agent_error = coordinator_function(
             admitted_ports.agent_factory,
             "AgentCompositionFailure",
             "published production Agent construction",
             message,
-            "terminal"
+            "terminal",
+            lane or "main"
         )
         if not constructed then
             local draft_status = admitted_ports.chat.draft.status()
@@ -8752,7 +9855,9 @@ function M.new_application_coordinator(ports, options)
             )
         end
         agent = constructed
-        local published, publish_error = publish({ kind = "user", text = message })
+        local published, publish_error
+        if lane == "ask" then published, publish_error = stage_and_apply("ask", message)
+        else published, publish_error = publish({ kind = "user", text = message }) end
         if not published then return nil, publish_error end
         local status = agent.draft.status()
         published, publish_error = publish_status(
@@ -8763,6 +9868,10 @@ function M.new_application_coordinator(ports, options)
         return true
     end
 
+    ---Records an exact one-shot Tool approval or rejection.
+    --@param answer string Allow or deny decision.
+    --@return boolean|nil recorded Whether the decision was committed and rendered.
+    --@return table|nil err Structured stale or durability failure.
     local function record_approval(answer)
         local envelope, envelope_error = coordinator_function(
             agent.tools.record_approval,
@@ -8791,6 +9900,10 @@ function M.new_application_coordinator(ports, options)
         })
     end
 
+    ---Parses the pending Tool approval response from one input line.
+    --@param source string Raw user input line.
+    --@return boolean|nil handled Whether approval was applied or denied.
+    --@return table|nil err Structured invalid or stale approval.
     local function route_approval_line(source)
         local normalized = trim_coordinator_line(source)
         if normalized == "" then return record_approval("deny") end
@@ -8825,6 +9938,10 @@ function M.new_application_coordinator(ports, options)
         )
     end
 
+    ---Parses one interactive line into a typed chat command.
+    --@param source string Raw user input line.
+    --@return table|nil request Parsed semantic command.
+    --@return table|nil err Structured usage failure.
     local function parse_chat(source)
         local request, parse_error = coordinator_function(
             admitted_ports.cli.parse_chat,
@@ -8837,7 +9954,44 @@ function M.new_application_coordinator(ports, options)
         return request
     end
 
+    ---Routes one user line through the active approval, editor, or Agent lane.
+    --@param source string Raw user input line.
+    --@return boolean|nil handled Whether input was accepted.
+    --@return table|nil err Structured command or runtime failure.
     local function route_line(source)
+        if multiline then
+            if source == ".cancel" then
+                multiline, multiline_bytes = false, 0
+                return publish_status("Multiline draft discarded.")
+            elseif source == ".quit" then
+                multiline, multiline_bytes = false, 0
+                -- Continue through the ordinary session close path below.
+            elseif source == ".clear" then
+                multiline, multiline_bytes = {}, 0
+                return publish_status("Multiline draft cleared.")
+            elseif source == ".show" then
+                return publish({ kind = "details", id = "multiline", text = table.concat(multiline, "\n") })
+            elseif source == ".submit" or source == ".ask" or source == ".immediate" then
+                local message = table.concat(multiline, "\n")
+                if message == "" then return nil, failure("DraftEmpty", "multiline draft is empty") end
+                local lane = source == ".ask" and "ask" or (source == ".immediate" and "steer" or "submit")
+                local accepted, action_error
+                if agent then accepted, action_error = stage_and_apply(lane, message)
+                elseif lane == "steer" then
+                    return nil, failure("NoMainTurn", "immediate input requires an active main turn")
+                else accepted, action_error = start_first_agent(message, lane == "ask" and "ask" or "main") end
+                if accepted then multiline, multiline_bytes = false, 0 end
+                return accepted, action_error
+            else
+                if source:sub(1, 2) == ".." then source = source:sub(2) end
+                local size = multiline_bytes + #source + (#multiline > 0 and 1 or 0)
+                if size > admitted.maximum_draft_bytes then
+                    return nil, failure("DraftLimit", "multiline draft exceeds its byte limit")
+                end
+                multiline[#multiline + 1], multiline_bytes = source, size
+                return true
+            end
+        end
         if prompt_edit then
             local handled, editor_error, chat_source = route_prompt_editor(source)
             if not chat_source then return handled, editor_error end
@@ -8883,9 +10037,16 @@ function M.new_application_coordinator(ports, options)
         if request.id == "prompt-edit" then return apply_prompt(request) end
         if request.id == "select-model" then return select_model(request) end
         if request.id == "select-context" then return switch_context(request) end
+        if request.id == "multiline" then
+            multiline, multiline_bytes = {}, 0
+            return publish_status("Multiline input: .submit | .ask | .immediate | .show | .clear | .cancel; use .. for a literal leading dot.")
+        end
         if not agent then
             if request.id == "queue-add" then
                 return start_first_agent(request.message)
+            end
+            if request.id == "ask" then
+                return start_first_agent(request.message, "ask")
             end
             return nil, failure(
                 "NoSavedContext",
@@ -8895,6 +10056,10 @@ function M.new_application_coordinator(ports, options)
         return route_agent_action(request)
     end
 
+    ---Consumes one terminal submission without interpreting render output.
+    --@param intent table Typed terminal submit event.
+    --@return boolean|nil handled Whether the submitted input was routed.
+    --@return table|nil err Structured input or command failure.
     local function handle_submission(intent)
         if context_change and intent ~= "submit-or-queue" then
             return nil, failure("InteractiveActionUnavailable", "confirm or cancel the pending workspace change first")
@@ -8916,19 +10081,29 @@ function M.new_application_coordinator(ports, options)
         elseif intent == "steer" then
             result, action_error = stage_and_apply("steer", input_draft)
         else
-            result, action_error = stage_and_apply("side", input_draft)
+            result, action_error = stage_and_apply("ask", input_draft)
         end
         if result or prompt_edit then input_draft = "" end
+        draft_rejected = not result and input_draft ~= ""
         prompt_needed = lifecycle ~= "closing"
         return result, action_error
     end
 
+    ---Routes a terminal cancel gesture to the innermost active interaction.
+    --@param none No arguments.
+    --@return boolean|nil handled Whether cancellation was accepted.
+    --@return table|nil err Structured cancellation failure.
     local function handle_cancel()
         if prompt_edit then return cancel_prompt_edit("cancelled") end
         if input_draft ~= "" then
             input_draft = ""
+            draft_rejected = false
             prompt_needed = true
             return publish_status("Input draft cleared.")
+        end
+        if multiline then
+            multiline, multiline_bytes = false, 0
+            return publish_status("Multiline draft discarded.")
         end
         if context_change then
             context_change = false
@@ -8940,6 +10115,10 @@ function M.new_application_coordinator(ports, options)
         return route_agent_action({ id = "cancel" })
     end
 
+    ---Reduces one typed terminal event into draft, command, or close state.
+    --@param event table Native terminal event.
+    --@return boolean|nil handled Whether the event was reduced.
+    --@return table|nil err Structured terminal or command failure.
     local function handle_terminal_event(event)
         if type(event) ~= "table" or type(event.kind) ~= "string" then
             return nil, failure(
@@ -8961,10 +10140,15 @@ function M.new_application_coordinator(ports, options)
         end
         if event.action == "text" then
             if type(event.text) ~= "string"
-                or #input_draft + #event.text > admitted.maximum_draft_bytes
+                or (draft_rejected and 0 or #input_draft) + #event.text
+                    > admitted.maximum_draft_bytes
             then
                 return nil, failure("DraftLimit", "terminal draft exceeds its byte limit")
             end
+            -- A submitted line is no longer in the host's cooked editor.
+            -- Keep rejected text available for cancel/retry, but new input
+            -- starts a replacement line instead of silently appending to it.
+            if draft_rejected then input_draft, draft_rejected = "", false end
             input_draft = input_draft .. event.text
             return true
         end
@@ -8977,7 +10161,7 @@ function M.new_application_coordinator(ports, options)
         end
         if event.action == "submit-or-queue"
             or event.action == "steer"
-            or event.action == "side"
+            or event.action == "ask"
         then
             return handle_submission(event.action)
         end
@@ -8994,6 +10178,10 @@ function M.new_application_coordinator(ports, options)
         )
     end
 
+    ---Joins, restores, and closes the terminal after coordinator completion.
+    --@param none No arguments.
+    --@return boolean|nil closed Whether terminal restoration succeeded.
+    --@return table|nil err Structured terminal lifecycle failure.
     local function close_terminal()
         if not terminal_started then return true end
         local observed_now = last_now or 0
@@ -9032,6 +10220,10 @@ function M.new_application_coordinator(ports, options)
         return true
     end
 
+    ---Closes the active Agent and waits for its durable activities to settle.
+    --@param reason string Reason recorded by the session close path.
+    --@return boolean|nil closed Whether the draft and Agent closed cleanly.
+    --@return table|nil err Structured close or timeout failure.
     close_agent = function(reason)
         if not agent then
             return coordinator_call(
@@ -9127,6 +10319,10 @@ function M.new_application_coordinator(ports, options)
         )
     end
 
+    ---Closes both owners and reports the final interactive outcome.
+    --@param primary_error table|nil Earlier failure that takes precedence.
+    --@return table|nil result Immutable successful interactive result.
+    --@return table|nil err Structured run or close failure.
     local function finish_run(primary_error)
         prompt_edit = false
         local closed_agent, agent_error = close_agent("application-close")
@@ -9150,8 +10346,9 @@ function M.new_application_coordinator(ports, options)
     end
 
     ---Runs until a typed quit or terminal outcome, then closes in dependency order.
-    -- @return table|nil result Immutable successful interactive result.
-    -- @return table|nil err Structured terminal, Agent, renderer, or close failure.
+    --@param self table ApplicationCoordinator instance.
+    --@return table|nil result Immutable successful interactive result.
+    --@return table|nil err Structured terminal, Agent, renderer, or close failure.
     function coordinator:run()
         if lifecycle ~= "created" then
             return nil, failure(
@@ -9242,6 +10439,9 @@ function M.new_application_coordinator(ports, options)
         return finish_run(deferred_failure or nil)
     end
 
+    ---Reports the current terminal, Context, and pending action state.
+    --@param self table ApplicationCoordinator instance.
+    --@return table status Immutable coordinator status snapshot.
     function coordinator:status()
         return readonly({
             lifecycle = lifecycle,
@@ -9263,6 +10463,11 @@ function M.new_application_coordinator(ports, options)
     return readonly(coordinator, "ApplicationCoordinator")
 end
 
+---Creates the cooked-terminal transcript view for a production chat.
+--@param composed table Production runtime composition and data layout.
+--@param runtime table CLI output ports.
+--@return table|nil view Read-only transcript view.
+--@return table|nil err Structured output or renderer failure.
 local function production_chat_view(composed, runtime)
     if type(runtime.stdout) ~= "function"
         and (type(runtime.stdout) ~= "table"
@@ -9274,19 +10479,20 @@ local function production_chat_view(composed, runtime)
         )
     end
     local tui = require("tui")
-    local enhanced_keys = composed.identity.os == "windows"
+    -- Production chat uses the host's cooked line editor on every platform.
+    -- Advertise only keys that this actual input path delivers independently.
     local renderer, renderer_error = tui.new({
         width = 80,
         capabilities = {
             ansi = false,
             color = false,
-            unicode = false,
+            unicode = true,
             keys = {
                 Enter = true,
-                ["Ctrl+Enter"] = enhanced_keys,
-                ["Shift+Enter"] = enhanced_keys,
-                ["Alt+Enter"] = enhanced_keys,
-                Esc = true,
+                ["Ctrl+Enter"] = false,
+                ["Shift+Enter"] = false,
+                ["Alt+Enter"] = false,
+                Esc = false,
             },
         },
         maximum_block_bytes = 524288,
@@ -9297,6 +10503,10 @@ local function production_chat_view(composed, runtime)
     if not renderer then return nil, renderer_error end
     local view = {}
 
+    ---Writes a fully rendered transcript block to standard output.
+    --@param bytes string Rendered output bytes.
+    --@return boolean|nil written Whether all bytes were written.
+    --@return table|nil err Structured broken-output failure.
     local function write_rendered(bytes)
         if not write_direct(runtime.stdout, bytes) then
             return nil, failure(
@@ -9308,6 +10518,10 @@ local function production_chat_view(composed, runtime)
     end
 
     ---Writes the independent ASCII-first startup fields before input starts.
+    --@param self table Production chat view.
+    --@param status table Chat startup status.
+    --@return boolean|nil written Whether startup output was written.
+    --@return table|nil err Structured renderer or output failure.
     function view:startup(status)
         local existing = status.durable == true
         local rendered, render_error = renderer.render_startup({
@@ -9338,6 +10552,10 @@ local function production_chat_view(composed, runtime)
     end
 
     ---Appends one validated complete semantic transcript block.
+    --@param self table Production chat view.
+    --@param block table Semantic transcript block.
+    --@return boolean|nil appended Whether the renderer accepted the block.
+    --@return table|nil err Structured renderer failure.
     function view:publish(block)
         local rendered, render_error = renderer.append(block)
         if not rendered then return nil, render_error end
@@ -9345,6 +10563,10 @@ local function production_chat_view(composed, runtime)
     end
 
     ---Writes one plain focus prompt without assuming ANSI or cursor movement.
+    --@param self table Production chat view.
+    --@param focus string Prompt focus lane.
+    --@return boolean|nil written Whether the prompt was written.
+    --@return table|nil err Structured renderer or output failure.
     function view:prompt(focus)
         local rendered, render_error = renderer.render_prompt(focus)
         if not rendered then return nil, render_error end
@@ -9354,6 +10576,12 @@ local function production_chat_view(composed, runtime)
     return readonly(view, "production chat view")
 end
 
+---Creates a Context switch port that verifies and activates exact previews.
+--@param initial_composed table Initial production runtime composition.
+--@param runtime table CLI invocation ports and facts.
+--@param dependencies table|nil Optional composition and Agent factories.
+--@return table|nil switcher Read-only Context switch port.
+--@return table|nil err Structured dependency failure.
 function M.new_context_switcher(initial_composed, runtime, dependencies)
     dependencies = dependencies or {}
     if type(initial_composed) ~= "table"
@@ -9388,6 +10616,10 @@ function M.new_context_switcher(initial_composed, runtime, dependencies)
     local switcher = {}
     local latest_preview
 
+    ---Lists bounded recent Context rows from the current composition.
+    --@param self table Context switch port.
+    --@return table|nil result Recent Context catalog result.
+    --@return table|nil err Structured catalog failure.
     function switcher:list()
         local called, result, result_error = pcall(
             current.application.dispatch,
@@ -9409,6 +10641,11 @@ function M.new_context_switcher(initial_composed, runtime, dependencies)
         return result
     end
 
+    ---Previews one Context selector before exact activation.
+    --@param self table Context switch port.
+    --@param selector string Context selector.
+    --@return table|nil preview Verified continuation preview.
+    --@return table|nil err Structured preview failure.
     function switcher:preview(selector)
         local called, result, result_error = pcall(
             current.application.preview_continue,
@@ -9424,6 +10661,12 @@ function M.new_context_switcher(initial_composed, runtime, dependencies)
         return result, result_error
     end
 
+    ---Activates a previously returned preview in a fresh composition.
+    --@param self table Context switch port.
+    --@param preview table Exact preview returned by this switcher.
+    --@param confirmation table|string|nil Confirmation for the selected Context.
+    --@return table|nil activation Replacement Agent and chat status.
+    --@return table|nil err Structured activation or cleanup failure.
     function switcher:activate(preview, confirmation)
         if preview ~= latest_preview or type(preview) ~= "table"
             or preview.kind ~= "continue-preview"
@@ -9476,6 +10719,10 @@ function M.new_context_switcher(initial_composed, runtime, dependencies)
                 "exact Context activation returned an incomplete chat"
             )
         end
+        ---Releases the newly opened writer after failed activation.
+        --@param message string Failure detail if writer state is unknown.
+        --@return boolean|nil released Whether the writer closed.
+        --@return table|nil err Structured writer-release failure.
         local function release_chat_writer(message)
             local close_called, closed, close_error = pcall(chat.draft.close)
             if not close_called or closed == nil then
@@ -9558,12 +10805,12 @@ end
 -- terminal size probe, or cursor movement.  Windows modifier keys are exposed
 -- only when the native console adapter reports their semantic events; every
 -- action retains its registry-generated text fallback.
--- @param composed table Production runtime composition.
--- @param chat table Ready run-chat or continue-chat bootstrap result.
--- @param runtime table CLI invocation ports and exact fd facts.
--- @param initial_agent table|nil Already composed idle Agent for continue-chat.
--- @return table|nil result Immutable interactive outcome.
--- @return table|nil err Structured composition, runtime, or close failure.
+--@param composed table Production runtime composition.
+--@param chat table Ready run-chat or continue-chat bootstrap result.
+--@param runtime table CLI invocation ports and exact fd facts.
+--@param initial_agent table|nil Already composed idle Agent for continue-chat.
+--@return table|nil result Immutable interactive outcome.
+--@return table|nil err Structured composition, runtime, or close failure.
 function M.run_interactive_chat(composed, chat, runtime, initial_agent)
     if type(composed) ~= "table"
         or type(composed.backend) ~= "table"
@@ -9585,6 +10832,10 @@ function M.run_interactive_chat(composed, chat, runtime, initial_agent)
         )
     end
     local terminal_port
+    ---Releases acquired terminal and Context owners after composition fails.
+    --@param primary_error table Original composition failure.
+    --@return nil result No interactive result.
+    --@return table err Original or writer-release failure.
     local function fail_before_coordinator(primary_error)
         if terminal_port then pcall(terminal_port.close, terminal_port) end
         if initial_agent then
@@ -9642,8 +10893,14 @@ function M.run_interactive_chat(composed, chat, runtime, initial_agent)
         draft_models = draft_models,
         context_switch = context_switch,
         initial_agent = initial_agent,
-        agent_factory = function(message, source)
-            return M.start_published_agent(composed, chat, message, source)
+        ---Starts the published Agent when the coordinator saves its draft.
+        --@param message string Initial user message.
+        --@param source string Source of the initial message.
+        --@param lane string Agent activity lane.
+        --@return table|nil agent Published Agent composition.
+        --@return table|nil err Structured startup failure.
+        agent_factory = function(message, source, lane)
+            return M.start_published_agent(composed, chat, message, source, lane)
         end,
     }, {
         close_poll_steps = 1024,
@@ -9656,6 +10913,9 @@ function M.run_interactive_chat(composed, chat, runtime, initial_agent)
     return coordinator:run()
 end
 
+---Encodes raw bytes as lowercase hexadecimal for safe diagnostics.
+--@param value string Raw bytes.
+--@return string encoded Hexadecimal representation.
 local function hex_bytes(value)
     local output = {}
     for index = 1, #value do
@@ -9664,10 +10924,17 @@ local function hex_bytes(value)
     return table.concat(output)
 end
 
+---Bounds setup input before displaying it in a diagnostic.
+--@param value string Input value.
+--@param maximum_source_bytes integer Maximum source bytes retained.
+--@return string diagnostic Safe printable diagnostic.
 local function model_setup_diagnostic(value, maximum_source_bytes)
     return ascii_diagnostic(value, maximum_source_bytes)
 end
 
+---Builds configuration sections for the interactive Model setup.
+--@param values table Validated Model setup fields.
+--@return table sections Configuration document sections.
 local function model_setup_sections(values)
     local model_values = {
         Enabled = values.enabled,
@@ -9712,6 +10979,12 @@ local SETUP_INPUT_CANCEL_CODES = {
     ["Context"] = "ContextReplCancelled",
 }
 
+---Creates a line-input port with separate cooked and hidden raw modes.
+--@param composed table Production backend and clock ports.
+--@param runtime table CLI output port.
+--@param label string|nil Input surface label and cancellation identity.
+--@return table|nil input Interactive input port.
+--@return table|nil err Structured input setup failure.
 local function new_model_setup_input(composed, runtime, label)
     label = label or "Model setup"
     local cancel_code = SETUP_INPUT_CANCEL_CODES[label]
@@ -9728,6 +11001,10 @@ local function new_model_setup_input(composed, runtime, label)
     local pending_events, pending_index = {}, 1
     local input = {}
 
+    ---Writes a setup prompt or status message completely.
+    --@param bytes string Output bytes.
+    --@return boolean|nil written Whether the write completed.
+    --@return table|nil err Structured output failure.
     local function output(bytes)
         if not write_direct(runtime.stdout, bytes) then
             return nil, failure("BrokenStdout", label .. " output could not be completed")
@@ -9735,6 +11012,10 @@ local function new_model_setup_input(composed, runtime, label)
         return true
     end
 
+    ---Reads the validated monotonic clock for terminal operations.
+    --@param none No arguments.
+    --@return integer|nil value Monotonic timestamp.
+    --@return table|nil err Structured clock failure.
     local function now()
         local called, value = pcall(composed.backend.clock_port.monotonic_now)
         if not called or not valid_integer(value, 0) then
@@ -9743,6 +11024,10 @@ local function new_model_setup_input(composed, runtime, label)
         return value
     end
 
+    ---Cancels, joins, and restores any active terminal input mode.
+    --@param none No arguments.
+    --@return boolean|nil closed Whether terminal restoration completed.
+    --@return table|nil err Structured terminal or clock failure.
     local function close_active()
         if not active then return true end
         local observed_now, clock_error = now()
@@ -9842,6 +11127,10 @@ local function new_model_setup_input(composed, runtime, label)
         return true
     end
 
+    ---Switches the input terminal to cooked or hidden raw mode.
+    --@param mode string Requested terminal input mode.
+    --@return boolean|nil active Whether the mode started.
+    --@return table|nil err Structured mode-transition failure.
     local function activate(mode)
         if active_mode == mode then return true end
         if pending_index <= #pending_events then
@@ -9868,6 +11157,9 @@ local function new_model_setup_input(composed, runtime, label)
         return true
     end
 
+    ---Removes the final UTF-8 scalar after a hidden-input backspace.
+    --@param value string Current hidden input.
+    --@return string shortened Input without its final scalar.
     local function remove_last_scalar(value)
         if value == "" then return value end
         local index = #value
@@ -9879,6 +11171,12 @@ local function new_model_setup_input(composed, runtime, label)
         return value:sub(1, index - 1)
     end
 
+    ---Applies raw hidden-input bytes with backspace and limit checks.
+    --@param value string Current hidden input.
+    --@param chunk string Newly received raw bytes.
+    --@param maximum_bytes integer Allowed hidden-input byte length.
+    --@return string|nil appended Updated hidden input.
+    --@return table|nil err Structured control-byte or length failure.
     local function append_raw(value, chunk, maximum_bytes)
         local current = value
         for index = 1, #chunk do
@@ -9900,6 +11198,12 @@ local function new_model_setup_input(composed, runtime, label)
         return current
     end
 
+    ---Reads one UTF-8 line, using raw mode for secret fields.
+    --@param prompt string Prompt displayed before reading.
+    --@param secret boolean Whether to hide and separately collect input.
+    --@param maximum_bytes integer Maximum input byte length.
+    --@return string|false|nil value Line, cancellation marker, or failure.
+    --@return table|nil err Structured read failure or cancellation code.
     function input.read(prompt, secret, maximum_bytes)
         local mode = secret and "raw" or "cooked"
         local activated, activate_error = activate(mode)
@@ -9996,10 +11300,18 @@ local function new_model_setup_input(composed, runtime, label)
         end
     end
 
+    ---Writes text through the setup output port.
+    --@param bytes string Output bytes.
+    --@return boolean|nil written Whether the write completed.
+    --@return table|nil err Structured output failure.
     function input.write(bytes)
         return output(bytes)
     end
 
+    ---Closes and restores the current terminal input mode.
+    --@param none No arguments.
+    --@return boolean|nil closed Whether restoration completed.
+    --@return table|nil err Structured terminal failure.
     function input.close()
         return close_active()
     end
@@ -10007,6 +11319,10 @@ local function new_model_setup_input(composed, runtime, label)
     return input
 end
 
+---Reports a cancelled Model setup without persisting a draft.
+--@param input table Active setup input/output port.
+--@return table|nil result Immutable cancellation result.
+--@return table|nil err Structured output failure.
 local function model_setup_cancelled(input)
     local written, write_error = input.write(
         "Model configuration cancelled; no configuration was changed.\n"
@@ -10020,6 +11336,10 @@ local function model_setup_cancelled(input)
     }, "cancelled Model setup")
 end
 
+---Inspects stable Context references before removing a Model binding.
+--@param contexts table Context catalog and store services.
+--@return table|nil bindings Immutable verified Model references.
+--@return table|nil err Structured incomplete or stale scan failure.
 local function model_context_references(contexts)
     if type(contexts) ~= "table" or type(contexts.store) ~= "table"
         or type(contexts.store.inspect_import) ~= "function"
@@ -10059,12 +11379,20 @@ local function model_context_references(contexts)
             generation = document.generation, event_count = document.event_count,
         }
     end
+    ---Orders verified bindings by their logical Context paths.
+    --@param left table First verified binding.
+    --@param right table Second verified binding.
+    --@return boolean before Whether the first path sorts earlier.
     table.sort(bindings, function(left, right) return left.logical_path < right.logical_path end)
     local final, final_error = observe_context_catalog(contexts)
     if not final then return nil, final_error end
     if final.complete ~= true or #final.rows ~= #bindings then
         return nil, failure("ModelImpactStale", "Context membership changed during reference inspection")
     end
+    ---Orders the second catalog scan for exact membership comparison.
+    --@param left table First observed Context row.
+    --@param right table Second observed Context row.
+    --@return boolean before Whether the first path sorts earlier.
     table.sort(final.rows, function(left, right) return left.logical_path < right.logical_path end)
     for index, row in ipairs(final.rows) do
         if row.logical_path ~= bindings[index].logical_path or row.hash16 ~= bindings[index].hash
@@ -10082,6 +11410,14 @@ local function model_context_references(contexts)
     return assert(freeze(bindings, {}, "Model reference inspection"))
 end
 
+---Collects and validates a new Model draft field by field.
+--@param config table Configuration validation service.
+--@param input table Interactive setup input/output port.
+--@param suggested_name string|nil Initial Model name.
+--@param make_draft function Factory validating the complete field set.
+--@param require_enabled boolean Whether this Model must remain enabled.
+--@return table|false|nil draft Valid draft, cancellation, or failure.
+--@return table|nil values Complete values or structured failure.
 local function collect_new_model(config, input, suggested_name, make_draft, require_enabled)
     local values = { name = suggested_name or "", protocol = "openai-chat", enabled = true,
         endpoint = "", remote_model = "", context_length = 32768, max_output_tokens = 4096, key = "" }
@@ -10167,6 +11503,10 @@ local function collect_new_model(config, input, suggested_name, make_draft, requ
 end
 
 ---Manages private Model drafts; a separate confirmed action tests saved Models.
+--@param composed table Production runtime composition.
+--@param runtime table CLI invocation ports.
+--@return table|nil result Immutable Model manager outcome.
+--@return table|nil err Structured manager failure.
 function M.run_model_manager(composed, runtime)
     local config = composed.config
     local base, begin_error = config.begin_edit(composed.layout.config_path)
@@ -10175,8 +11515,17 @@ function M.run_model_manager(composed, runtime)
     local test_results, online_requests = {}, 0
     local input, input_error = new_model_setup_input(composed, runtime)
     if not input then return nil, input_error end
+    ---Builds the current revision-bound Model editor identity.
+    --@param none No arguments.
+    --@return string id Current editor identity.
     local function editor_id() return "model-edit-" .. tostring(revision) end
+    ---Derives validated Model generation data from a draft.
+    --@param candidate table|nil Draft override.
+    --@return table generation Validated configuration generation.
     local function generation(candidate) return assert(config.draft_generation(candidate or draft)) end
+    ---Redacts registered secrets before showing an editor value.
+    --@param value any Value to display.
+    --@return string shown Safe diagnostic string.
     local function display(value)
         local source = tostring(value)
         for _, candidate in ipairs({ base, draft }) do
@@ -10186,6 +11535,10 @@ function M.run_model_manager(composed, runtime)
         end
         return ascii_diagnostic(source, 16384)
     end
+    ---Formats one Model row with its active capabilities and test state.
+    --@param name string Model name.
+    --@param index integer Position in the Model order.
+    --@return string line Display row.
     local function model_line(name, index)
         local model = generation().models[name]
         local endpoint = normalized_endpoint_identity(model.endpoint)
@@ -10198,6 +11551,9 @@ function M.run_model_manager(composed, runtime)
             .. " key=" .. (model.key_configured and "set" or "missing")
             .. " test=" .. (test_results[name] or "untested")
     end
+    ---Formats a Model field while hiding secrets and endpoint queries.
+    --@param row table Model draft field.
+    --@return string value Safe field text.
     local function field_value(row)
         if row.hidden then return row.configured and "[hidden; configured]" or "[hidden; default]" end
         if not row.has_value then return "(unset)" end
@@ -10208,6 +11564,10 @@ function M.run_model_manager(composed, runtime)
         end
         return display(row.value) .. (row.configured and "" or " (default)")
     end
+    ---Writes one bounded page of Model rows.
+    --@param page integer One-based Model page.
+    --@return boolean|nil written Whether the page was written.
+    --@return table|nil err Structured page or output failure.
     local function list(page)
         local order = generation().model_order
         local first = (page - 1) * 32 + 1
@@ -10219,12 +11579,22 @@ function M.run_model_manager(composed, runtime)
         if first + 31 < #order then lines[#lines + 1] = "Next: list " .. tostring(page + 1) end
         return input.write(table.concat(lines, "\n") .. "\n")
     end
+    ---Builds the immutable Model manager result.
+    --@param outcome string Manager outcome.
+    --@param state string Terminal editor state.
+    --@param committed table|nil Committed configuration generation.
+    --@return table result Immutable manager result.
     local function result(outcome, state, committed)
         return readonly({ action = "model-repl", outcome = outcome, state = state,
             config_path = composed.layout.config_path,
             config_generation = committed and committed.id or false,
             online_requests = online_requests }, "Model editor result")
     end
+    ---Advances the draft revision after a validated Model edit.
+    --@param candidate table Replacement private draft.
+    --@param change string Human-readable change summary.
+    --@return boolean|nil written Whether the revision notice was written.
+    --@return table|nil err Structured limit or output failure.
     local function advance(candidate, change)
         if revision == math.maxinteger or #changes >= 256 then
             return nil, failure("ModelEditorLimit", "save or discard the current Model changes first")
@@ -10234,6 +11604,10 @@ function M.run_model_manager(composed, runtime)
         changes[#changes + 1] = change
         return input.write("Draft " .. editor_id() .. " validated. Use list for current row identities; preview before save.\n")
     end
+    ---Displays a complete Model diff and binds the save confirmation.
+    --@param none No arguments.
+    --@return boolean|nil shown Whether the preview was written.
+    --@return table|nil err Structured reference-scan or output failure.
     local function preview()
         plan = nil
         local before, after = generation(base), generation()
@@ -10290,6 +11664,11 @@ function M.run_model_manager(composed, runtime)
         if shown then plan = { revision = revision, references = references } end
         return shown, show_error
     end
+    ---Applies one validated Model operation to the private draft.
+    --@param command table Parsed Model editor command.
+    --@param name string Selected Model name.
+    --@return boolean|false|nil handled Edit output, cancellation, or failure.
+    --@return table|nil err Structured validation or input failure.
     local function edit(command, name)
         if command.operation == "rename" or command.operation == "delete" or command.operation == "move" then
             local candidate, edit_error = config.manage_model(draft, command.operation, name,
@@ -10330,6 +11709,10 @@ function M.run_model_manager(composed, runtime)
         draft = old_draft
         return advance(candidate, description)
     end
+    ---Runs the Model manager command loop until save or exit.
+    --@param none No arguments.
+    --@return table|nil result Immutable manager outcome.
+    --@return table|nil err Structured editor failure.
     local function run_editor()
         local written, write_error = input.write("YACA MODEL MANAGER\n"
             .. "Configuration draft. Enter help; add starts a blank Model; test checks a saved Model after confirmation.\n")
@@ -10402,6 +11785,10 @@ function M.run_model_manager(composed, runtime)
                 elseif operation == "preview" then
                     handled, action_error = preview()
                 elseif operation == "add" then
+                    ---Validates the collected fields as a new Model draft.
+                    --@param fields table Complete Model setup field values.
+                    --@return table|nil draft Validated Model draft.
+                    --@return table|nil err Structured configuration failure.
                     local candidate, values = collect_new_model(config, input, nil, function(fields)
                         return config.add_model(draft, fields.name, model_setup_sections(fields)[3].values)
                     end)
@@ -10425,6 +11812,10 @@ function M.run_model_manager(composed, runtime)
                     else
                         local approved = plan
                         plan = nil
+                        ---Rejects publication if referenced Contexts changed after preview.
+                        --@param none No arguments.
+                        --@return boolean|nil valid Whether references remain identical.
+                        --@return table|nil err Structured stale-reference failure.
                         local function guard()
                             if not approved.references then return true end
                             local current, reference_error = model_context_references(composed.contexts)
@@ -10480,6 +11871,10 @@ end
 ---Creates the first Model from a fully validated private draft; valid files
 -- enter the Model manager. Only the exact bootstrap repair template may be
 -- replaced here; arbitrary invalid files require configuration repair.
+--@param composed table Production runtime composition.
+--@param runtime table CLI invocation ports.
+--@return table|nil result Immutable setup or Model manager outcome.
+--@return table|nil err Structured setup or publication failure.
 function M.run_model_repl(composed, runtime)
     if type(composed) ~= "table" or type(composed.config) ~= "table"
         or type(composed.backend) ~= "table" or type(composed.layout) ~= "table"
@@ -10499,10 +11894,18 @@ function M.run_model_repl(composed, runtime)
     end
     local input, input_error = new_model_setup_input(composed, runtime)
     if not input then return nil, input_error end
+    ---Runs first-Model setup through explicit offline publication.
+    --@param none No arguments.
+    --@return table|nil result Immutable setup outcome.
+    --@return table|nil err Structured input or publication failure.
     local function run_setup()
         local written, write_error = input.write("YACA MODEL SETUP\n"
             .. "Offline only. Default Model name: Primary.\n")
         if not written then return nil, write_error end
+        ---Validates the first Model against create or exact repair mode.
+        --@param fields table Complete Model setup field values.
+        --@return table|nil draft Validated configuration draft.
+        --@return table|nil err Structured validation failure.
         local draft, values = collect_new_model(config, input, "Primary", function(fields)
             local sections = model_setup_sections(fields)
             if mode == "create" then
@@ -10513,6 +11916,9 @@ function M.run_model_repl(composed, runtime)
         if draft == false then return model_setup_cancelled(input) end
         if not draft then return nil, values end
         local generation = assert(config.draft_generation(draft))
+        ---Redacts registered secrets in first-Model confirmation text.
+        --@param value any Value to display.
+        --@return string shown Safe diagnostic text.
         local function display(value)
             for _ in pairs(assert(generation.scan_registered_secrets(tostring(value)))) do return "[hidden]" end
             return model_setup_diagnostic(tostring(value), 1024)
@@ -10562,6 +11968,10 @@ end
 
 ---Repairs an invalid INI through private physical-line edits. The same complete
 -- schema and publication transaction validate the result before any write.
+--@param composed table Production runtime composition.
+--@param runtime table CLI invocation ports.
+--@return table|nil result Immutable repair outcome.
+--@return table|nil err Structured repair or publication failure.
 function M.run_config_repair(composed, runtime)
     if type(composed) ~= "table" or type(composed.config) ~= "table"
         or type(composed.layout) ~= "table" or type(composed.layout.config_path) ~= "string"
@@ -10584,13 +11994,26 @@ function M.run_config_repair(composed, runtime)
     local revision = 1
     local input, input_error = new_model_setup_input(composed, runtime, "Configuration")
     if not input then return nil, input_error end
+    ---Builds the revision-bound configuration repair identity.
+    --@param none No arguments.
+    --@return string id Current repair identity.
     local function repair_id() return "config-repair-" .. tostring(revision) end
+    ---Builds an immutable configuration repair outcome.
+    --@param outcome string Repair outcome.
+    --@param state string Terminal repair state.
+    --@param generation table|nil Published configuration generation.
+    --@return table result Immutable repair result.
     local function result(outcome, state, generation)
         return readonly({ action = "config-repl", outcome = outcome, state = state,
             config_path = composed.layout.config_path,
             config_generation = generation and generation.id or false,
             online_requests = 0 }, "configuration repair result")
     end
+    ---Shows a bounded physical-line page or redacted repair preview.
+    --@param page integer One-based line page.
+    --@param preview boolean Whether to display the edit summary.
+    --@return table|nil status Configuration repair status.
+    --@return table|nil err Structured status or output failure.
     local function show_status(page, preview)
         local status, status_error = config.repair_status(draft, page)
         if not status then return nil, status_error end
@@ -10620,6 +12043,10 @@ function M.run_config_repair(composed, runtime)
         if not written then return nil, write_error end
         return status
     end
+    ---Advances the repair revision after a validated line edit.
+    --@param next_draft table Replacement private repair draft.
+    --@return boolean|nil advanced Whether the revision advanced.
+    --@return table|nil err Structured revision-limit failure.
     local function advance(next_draft)
         if revision >= 1000000 then
             return nil, failure("ConfigRepairLimit", "configuration repair revision limit reached")
@@ -10628,6 +12055,10 @@ function M.run_config_repair(composed, runtime)
         draft = next_draft
         return true
     end
+    ---Runs the physical-line repair command loop.
+    --@param none No arguments.
+    --@return table|nil result Immutable repair outcome.
+    --@return table|nil err Structured input, edit, or publication failure.
     local function run_repair()
         local written, write_error = input.write("YACA CONFIGURATION REPAIR\n"
             .. "Offline line repair; the original file stays unchanged until exact save.\n"
@@ -10735,10 +12166,10 @@ end
 -- Plain ASCII lines work without ANSI or cursor movement. Secret-capable INI
 -- fields use the existing native raw/no-echo input and restore terminal state
 -- on every outcome. Saves retain the config service's exact stale/atomic gates.
--- @param composed table Runtime with config, layout, terminal, clock, and random ports.
--- @param runtime table Admitted TTY invocation with shared CLI and stdout.
--- @return table|nil result Saved, unchanged, discarded, or cancelled outcome.
--- @return table|nil err Typed input, output, validation, or publication failure.
+--@param composed table Runtime with config, layout, terminal, clock, and random ports.
+--@param runtime table Admitted TTY invocation with shared CLI and stdout.
+--@return table|nil result Saved, unchanged, discarded, or cancelled outcome.
+--@return table|nil err Typed input, output, validation, or publication failure.
 function M.run_config_repl(composed, runtime)
     if type(composed) ~= "table" or type(composed.config) ~= "table"
         or type(composed.layout) ~= "table" or type(composed.layout.config_path) ~= "string"
@@ -10769,7 +12200,15 @@ function M.run_config_repl(composed, runtime)
     local changes, changed = {}, {}
     local input, input_error = new_model_setup_input(composed, runtime, "Configuration")
     if not input then return nil, input_error end
+    ---Builds the revision-bound configuration editor identity.
+    --@param none No arguments.
+    --@return string id Current editor identity.
     local function editor_id() return "config-edit-" .. tostring(revision) end
+    ---Builds the immutable configuration editor outcome.
+    --@param outcome string Editor outcome.
+    --@param state string Terminal editor state.
+    --@param generation table|nil Published configuration generation.
+    --@return table result Immutable editor result.
     local function result(outcome, state, generation)
         return readonly({
             action = "config-repl", outcome = outcome, state = state,
@@ -10778,6 +12217,9 @@ function M.run_config_repl(composed, runtime)
             online_requests = 0,
         }, "configuration editor result")
     end
+    ---Redacts registered secrets in configuration editor output.
+    --@param value any Value to display.
+    --@return string shown Safe diagnostic string.
     local function display(value)
         local source = tostring(value)
         for _, candidate in ipairs({ base, draft }) do
@@ -10787,6 +12229,9 @@ function M.run_config_repl(composed, runtime)
         end
         return ascii_diagnostic(source, 16384)
     end
+    ---Formats one configuration field with secret and default markers.
+    --@param row table Catalog-derived field row.
+    --@return string value Safe displayed field value.
     local function field_value(row)
         if row.hidden then return row.configured and "[hidden; configured]" or "[hidden; default]" end
         if not row.has_value then return "(unset)" end
@@ -10796,6 +12241,12 @@ function M.run_config_repl(composed, runtime)
         end
         return value .. (row.configured and "" or " (default)")
     end
+    ---Finds one catalog field in a validated draft.
+    --@param candidate table Configuration draft to inspect.
+    --@param section string INI section name.
+    --@param key string INI field key.
+    --@return table|nil row Selected field row.
+    --@return table|nil err Structured unknown-field failure.
     local function selected_field(candidate, section, key)
         local fields, fields_error = config.draft_fields(candidate, section)
         if not fields then return nil, fields_error end
@@ -10804,12 +12255,20 @@ function M.run_config_repl(composed, runtime)
         end
         return nil, failure("UnknownConfigField", "config field is unknown")
     end
+    ---Writes a bounded configuration action error.
+    --@param err table|nil Structured action failure.
+    --@return boolean|nil written Whether the message was written.
+    --@return table|nil write_error Structured output failure.
     local function show_error(err)
         return input.write("ERROR " .. safe_diagnostic(err and err.code or "ConfigEditorFailure", 128)
             .. ": " .. safe_diagnostic(err and err.message or "configuration action failed", 512)
             .. (err and type(err.reason) == "string" and " (" .. safe_diagnostic(err.reason, 128) .. ")" or "")
             .. "\n")
     end
+    ---Displays all changed configuration fields before exact save.
+    --@param none No arguments.
+    --@return boolean|nil written Whether the preview was written.
+    --@return table|nil err Structured output failure.
     local function preview()
         local lines = { "CONFIG PREVIEW " .. editor_id() .. " changes=" .. tostring(#changes) }
         for _, item in ipairs(changes) do
@@ -10826,6 +12285,10 @@ function M.run_config_repl(composed, runtime)
         lines[#lines + 1] = "Save: save " .. editor_id() .. "; reset/reload/cancel/quit discard unsaved edits."
         return input.write(table.concat(lines, "\n") .. "\n")
     end
+    ---Advances the configuration editor identity after an edit.
+    --@param none No arguments.
+    --@return boolean|nil advanced Whether the revision advanced.
+    --@return table|nil err Structured revision-limit failure.
     local function advance_revision()
         if revision == math.maxinteger then
             return nil, failure("ConfigEditorLimit", "config editor identity space is exhausted")
@@ -10833,6 +12296,10 @@ function M.run_config_repl(composed, runtime)
         revision = revision + 1
         return true
     end
+    ---Applies one catalog-validated field change to the private draft.
+    --@param command table Parsed configuration editor command.
+    --@return boolean|false|nil handled Output, cancellation, or failure.
+    --@return table|nil err Structured validation or input failure.
     local function apply_change(command)
         if command.section:sub(1, 6) == "Model." then
             return nil, failure("ModelEditorRequired", "Use --model-repl to edit Model configuration")
@@ -10871,6 +12338,10 @@ function M.run_config_repl(composed, runtime)
         return input.write("Draft " .. editor_id() .. " validated; " .. tostring(#changes)
             .. " changed field(s). Use preview before save.\n")
     end
+    ---Runs the configuration editor command loop until save or exit.
+    --@param none No arguments.
+    --@return table|nil result Immutable editor outcome.
+    --@return table|nil err Structured editor failure.
     local function run_editor()
         local written, write_error = input.write("YACA CONFIGURATION EDITOR\n"
             .. "Configuration is valid. Edits stay in memory until an exact save command.\n"
@@ -10995,6 +12466,10 @@ function M.run_config_repl(composed, runtime)
 end
 
 ---Collects the exact workspace confirmation without opening a Context body.
+--@param input table Interactive Context input/output port.
+--@param preview table Verified Context continuation preview.
+--@return boolean|nil accepted Whether the operator confirmed.
+--@return string|table|nil confirmation Exact input or structured failure.
 local function confirm_context_workspace(input, preview)
     if preview.requires_workspace_confirmation ~= true then return true end
     local written, write_error = input.write("CONTINUE " .. safe_diagnostic(preview.context_hash, 16)
@@ -11015,6 +12490,11 @@ end
 
 ---Prompts only for a cross-workspace CLI continuation, restoring the terminal
 -- before the caller can open a writer or start the chat coordinator.
+--@param composed table Production runtime composition.
+--@param runtime table CLI invocation ports.
+--@param preview table Verified Context continuation preview.
+--@return table|nil choice Operator choice and optional confirmation.
+--@return table|nil err Structured input or terminal failure.
 function M.confirm_continue(composed, runtime, preview)
     if preview.requires_workspace_confirmation ~= true then return { accepted = true } end
     local input, input_error = new_model_setup_input(composed, runtime, "Context")
@@ -11036,10 +12516,11 @@ end
 -- rebuild a target. Contexts held by an active writer report bounded
 -- metadata only and never open the Context body. Connected mutations use a
 -- short-lived exact writer; uncertain publication stops the management loop.
--- @param composed table Composed runtime carrying Context services.
--- @param runtime table Admitted TTY invocation with shared CLI and stdout.
--- @return table|nil result Bounded catalog outcome or cancellation.
--- @return table|nil err Typed input, output, scan, or resolver failure.
+--@param composed table Composed runtime carrying Context services.
+--@param runtime table Admitted TTY invocation with shared CLI and stdout.
+--@param request table|nil Initial Context catalog request.
+--@return table|nil result Bounded catalog outcome or cancellation.
+--@return table|nil err Typed input, output, scan, or resolver failure.
 function M.run_context_repl(composed, runtime, request)
     if type(composed) ~= "table"
         or type(composed.backend) ~= "table"
@@ -11061,6 +12542,11 @@ function M.run_context_repl(composed, runtime, request)
     if not input then return nil, input_error end
 
     local observation, generation = false, composed.config_generation or false
+    ---Builds an immutable Context management outcome.
+    --@param outcome string Management outcome.
+    --@param state string Terminal manager state.
+    --@param extra table|nil Additional selected Context fields.
+    --@return table result Immutable Context manager result.
     local function result(outcome, state, extra)
         local value = {
             action = "context-repl", outcome = outcome, state = state,
@@ -11069,6 +12555,10 @@ function M.run_context_repl(composed, runtime, request)
         for key, item in pairs(extra or {}) do value[key] = item end
         return readonly(value, "Context REPL result")
     end
+    ---Writes a bounded Context action error.
+    --@param err table|nil Structured action failure.
+    --@return boolean|nil written Whether the message was written.
+    --@return table|nil write_error Structured output failure.
     local function show_error(err)
         return input.write("ERROR " .. safe_diagnostic(err and err.code or "ContextReplFailure", 128)
             .. ": " .. safe_diagnostic(err and err.message or "Context action failed", 512)
@@ -11077,6 +12567,9 @@ function M.run_context_repl(composed, runtime, request)
     end
 
     ---Re-observes the catalog; every listing reads this bounded snapshot.
+    --@param none No arguments.
+    --@return boolean|nil scanned Whether the catalog was observed.
+    --@return table|nil err Structured catalog failure.
     local function rescan()
         local observed, observe_error = observe_context_catalog(contexts)
         if not observed then return nil, observe_error end
@@ -11084,6 +12577,10 @@ function M.run_context_repl(composed, runtime, request)
         return true
     end
 
+    ---Formats one bounded Context catalog row.
+    --@param index integer One-based row position.
+    --@param row table Observed Context metadata row.
+    --@return string line Safe catalog display line.
     local function row_line(index, row)
         return string.format(
             "%2d %s [%-11s] %s - %s",
@@ -11095,6 +12592,14 @@ function M.run_context_repl(composed, runtime, request)
         )
     end
 
+    ---Writes a bounded Context catalog or search result page.
+    --@param heading string Page heading.
+    --@param rows table Metadata rows to show.
+    --@param total integer Total matching rows.
+    --@param truncated boolean Whether more rows exist.
+    --@param hint string Truncation guidance.
+    --@return boolean|nil written Whether the page was written.
+    --@return table|nil err Structured output failure.
     local function render_rows(heading, rows, total, truncated, hint)
         local lines = { heading }
         if #rows == 0 then
@@ -11107,6 +12612,10 @@ function M.run_context_repl(composed, runtime, request)
         return input.write(table.concat(lines, "\n") .. "\n")
     end
 
+    ---Shows the requested bounded Context catalog view.
+    --@param view string Catalog view identity.
+    --@return boolean|nil written Whether the page was written.
+    --@return table|nil err Structured output failure.
     local function list(view)
         local page = context_catalog_page(contexts, observation, generation, view)
         return render_rows(
@@ -11121,6 +12630,9 @@ function M.run_context_repl(composed, runtime, request)
     end
 
     ---Filters the current snapshot; it never rescans behind the operator.
+    --@param query string Search text.
+    --@return boolean|nil written Whether results were written.
+    --@return table|nil err Structured output failure.
     local function search(query)
         local needle = query:lower()
         local matches, total = {}, 0
@@ -11144,6 +12656,9 @@ function M.run_context_repl(composed, runtime, request)
 
     ---Resolves the selector, then reverifies the captured TargetSnapshot.
     -- The rendered row is never used to rebuild the target.
+    --@param selector string Context selector.
+    --@return boolean|nil written Whether metadata was written.
+    --@return table|nil err Structured resolve or output failure.
     local function inspect(selector)
         local selection = contexts.catalog.resolve(selector, "/")
         if type(selection) ~= "table" or type(selection.tag) ~= "string" then
@@ -11193,6 +12708,9 @@ function M.run_context_repl(composed, runtime, request)
     ---Binds one management action to the Resolver's private target snapshot.
     -- Destructive confirmation precedes a second verification of that snapshot;
     -- it never selects a replacement after the operator has seen the target.
+    --@param action table Parsed Context mutation action.
+    --@return boolean|nil handled Whether mutation and rescan completed.
+    --@return table|nil err Structured resolve, mutation, or output failure.
     local function mutate(action)
         if type(composed.config) == "table" and type(composed.config.reload_file) == "function"
             and type(composed.layout) == "table" and type(composed.layout.config_path) == "string"
@@ -11219,6 +12737,10 @@ function M.run_context_repl(composed, runtime, request)
                 type(selection) == "table" and selection.tag or "resolver-contract")
         end
         local purpose = repairing and "repair" or (deleting and "delete" or "mutation")
+        ---Reverifies the exact selected Context for this mutation purpose.
+        --@param none No arguments.
+        --@return table|nil target Verified Context target.
+        --@return table|nil err Structured stale or unavailable failure.
         local function verify()
             local target = contexts.catalog.verify_target(selection, purpose)
             if type(target) ~= "table" or target.tag ~= "Verified" then
@@ -11354,6 +12876,9 @@ function M.run_context_repl(composed, runtime, request)
     ---Imports only a file already placed at its intended Context mirror path.
     -- The read-only inspection, mapping preview and final writer all retain the
     -- original private selection; no catalog display row becomes authority.
+    --@param action table Parsed in-place import action.
+    --@return boolean|nil handled Whether import and rescan completed.
+    --@return table|nil err Structured import or output failure.
     local function import_context(action)
         local publication = composed.publication
         if type(publication) ~= "table" or type(publication.plan_import) ~= "function"
@@ -11390,6 +12915,10 @@ function M.run_context_repl(composed, runtime, request)
         if not observed then return nil, candidate end
         local selection, selection_error = contexts.catalog.capture_target(candidate)
         if not selection then return nil, selection_error end
+        ---Reverifies the captured in-place import target.
+        --@param none No arguments.
+        --@return table|nil target Verified import target.
+        --@return table|nil err Structured stale or unavailable failure.
         local function verify()
             local target = contexts.catalog.verify_target(selection, "mutation")
             if type(target) ~= "table" or target.tag ~= "Verified" then
@@ -11414,6 +12943,13 @@ function M.run_context_repl(composed, runtime, request)
         end
         local local_generation, config_error = composed.config.reload_file(composed.layout.config_path)
         if not local_generation then return nil, config_error end
+        ---Prompts for one eligible local resource mapping.
+        --@param kind string Resource kind, Model or Permission.
+        --@param previous string Imported resource name.
+        --@param order table Ordered local resource names.
+        --@param profiles table Local resources indexed by name.
+        --@return string|nil selected Eligible local resource name.
+        --@return table|nil err Structured input or selection failure.
         local function choose(kind, previous, order, profiles)
             local names = {}
             local previous_name = require("config").resolve_resource(local_generation, kind, previous)
@@ -11496,6 +13032,10 @@ function M.run_context_repl(composed, runtime, request)
         return rescan()
     end
 
+    ---Exports the selected Context as read-only Markdown.
+    --@param action table Parsed Context export action.
+    --@return boolean|nil written Whether Markdown was written.
+    --@return table|nil err Structured export or output failure.
     local function export_context(action)
         if type(composed.application) ~= "table" or type(composed.application.dispatch) ~= "function" then
             return nil, failure("ContextActionUnavailable", "read-only Context export is unavailable")
@@ -11508,6 +13048,10 @@ function M.run_context_repl(composed, runtime, request)
         return input.write(exported.markdown)
     end
 
+    ---Previews a Context and returns a confirmed continuation selection.
+    --@param action table Parsed Context selection action.
+    --@return table|boolean|nil result Selection, cancellation, or failure.
+    --@return table|nil err Structured preview or input failure.
     local function select_context(action)
         if type(composed.application) ~= "table" or type(composed.application.preview_continue) ~= "function"
             or type(composed.application.continue_preview) ~= "function"
@@ -11522,6 +13066,10 @@ function M.run_context_repl(composed, runtime, request)
         return result("success", "continue-selected", { preview = preview, confirmation = confirmation })
     end
 
+    ---Runs the bounded Context manager command loop.
+    --@param none No arguments.
+    --@return table|nil result Immutable management or selection outcome.
+    --@return table|nil err Structured manager failure.
     local function run_repl()
         local scanned, scan_error = rescan()
         if not scanned then
@@ -11609,6 +13157,11 @@ function M.run_context_repl(composed, runtime, request)
     return outcome, run_error
 end
 
+---Renders self-test checks and outcomes for text or machine output.
+--@param cli_service table CLI serialization service.
+--@param request table Parsed self-test request.
+--@param result table Self-test dispatch result.
+--@return string output Serialized self-test report.
 local function render_self_test(cli_service, request, result)
     if request.machine == true then
         local records = {}
@@ -11680,6 +13233,10 @@ local function render_self_test(cli_service, request, result)
     return table.concat(lines, "\n") .. "\n"
 end
 
+---Renders offline management summaries for non-interactive dispatch.
+--@param request table Parsed management request.
+--@param result table Management dispatch result.
+--@return string output Safe management summary.
 local function render_management(request, result)
     if result.action == "config-repl" then
         if result.state == "repair-template-created" then
@@ -11752,6 +13309,12 @@ local function render_management(request, result)
     return "The requested management action is unavailable.\n"
 end
 
+---Renders one non-interactive runtime dispatch result.
+--@param cli_service table CLI rendering service.
+--@param request table Parsed runtime request.
+--@param result table Runtime dispatch result.
+--@return string|nil output Text or machine output.
+--@return table|nil err Structured interactive-only failure.
 local function render_runtime_result(cli_service, request, result)
     if request.id == "self-test" then return render_self_test(cli_service, request, result) end
     if request.id == "export-context" then return result.markdown end
@@ -11774,6 +13337,11 @@ local function render_runtime_result(cli_service, request, result)
     )
 end
 
+---Composes and dispatches a production CLI request through its owning surface.
+--@param request table Parsed CLI request.
+--@param runtime table Admitted CLI invocation and platform ports.
+--@return table|nil result Output and optional exit value.
+--@return table|nil err Structured composition or dispatch failure.
 default_runtime_dispatch = function(request, runtime)
     local composed, composition_error = M.compose_runtime(runtime)
     if not composed then return nil, composition_error end
@@ -11786,6 +13354,20 @@ default_runtime_dispatch = function(request, runtime)
         if not choice.accepted then return { output = "" } end
         result, dispatch_error = composed.application.continue_preview(preview, choice.confirmation)
     else
+        result, dispatch_error = composed.application.dispatch(request)
+    end
+    if not result and request.id == "run-chat"
+        and dispatch_error and dispatch_error.code == "ConfigMissing"
+    then
+        local configured, setup_error = M.run_model_repl(composed, runtime)
+        if not configured then return nil, setup_error end
+        if configured.outcome ~= "success" then
+            return { output = "", exit_value = configured }
+        end
+        -- The wizard has closed its terminal and atomically published the
+        -- configuration. Recompose so the chat uses only the saved generation.
+        composed, composition_error = M.compose_runtime(runtime)
+        if not composed then return nil, composition_error end
         result, dispatch_error = composed.application.dispatch(request)
     end
     if not result then return nil, dispatch_error end

@@ -1,8 +1,25 @@
 # yaca v0.1 全程序实施计划
 
-版本：2026-09-16.1
-状态：**计划已确认 / Gate B passed / v0.1 已按 D-072 在三个实测环境通过资格并发布**
-当前主线：**v0.1 已按 D-072 发布（2026-09-19）；C32 原三硬门转为后续增强项**
+版本：2026-09-22.1
+状态：**计划已确认 / Gate B passed / 平台无关核心已实现至 M9 / 目标资格验证待完成**
+当前主线：**按通用 Agent 路线补齐可用性，再接续 C32--C34**
+
+2026-09-22 负责人明确了通用 Agent、旧设备兼容、开箱即用、内置同版本可调用 Lua
+及可选 tools 的方向；U 盘排障是典型场景，不限定产品用途。
+新增实施顺序、文件影响面与退出条件见
+[F0--F6 路线](PRODUCT-ROADMAP-2026-09-22.md)。其中 F0 对齐契约，
+F1 首先解决指定 Cygwin SSH 环境直接启动；网络、Lua/可选工具、文件/容量/恢复顺序跟进。
+架构、兼容迁移、回退和新增验收见[大改蓝图](MAJOR-REDESIGN-PLAN-2026-09-22.md)。
+按后续说明收紧：本轮延续原产品与架构，Lua/可选 tools 是明确增量，其余按已有
+承诺的缺口修补和验收推进。F0 只同步实际变更；打包改型、改默认值、拆模块及新 schema
+都不是前置条件。F0--F6 保留为工作分类，不意味着每项都要新增机制。
+D-073 指定 Lua 内嵌与每目标 clean/std/full 三档；F3 改为内嵌解释器入口及分档装配，
+full 为开发工具箱。默认版本与平台差异见[工具清单](../release/TOOL-BUNDLES.md)。
+撤回独立 Lua 文件/onedir 候选；新增 CLI 与发行契约仅在对应实现批次同步。
+本轮已落地内嵌解释器、三档装配、首次引导与 Cygwin PTY 修复，相关契约同步。
+实际证据及未完成边界见[实现记录](PORTABLE-IMPLEMENTATION-2026-09-22.md)，
+不把旧 Gate B 的通过当作新增机制已经完成目标资格的证明。
+下文 C01--C34 保留为已确认实现基线与目标资格清单，未完成的发行门不因此放宽。
 
 ## 当前实施位置
 
@@ -25,10 +42,6 @@ N6 已接通离线 Model 区域管理、引用预览和精确保存，见
 不扩展生命周期操作。2026-09-16 已完成 Model 联网测试、资源 selector 语义复核
 和在线 self-test Stage 2/3 生产组合；真实三目标完整资格仍待执行，见
 [本轮收尾记录](WINDOWS-PREVIEW-CLOSEOUT-2026-09-16.md)。
-2026-09-19 新增 win64-x86_64 候选构建路径（Win7 SP1 6.1 基线、无下游
-补丁、bcrypt 熵闭包），并在 win2008 与 Windows 11 两台测试系统完成安装
-验收，见[两测试系统验收](TWO-TARGET-ACCEPTANCE-2026-09-19.md)；
-C32 的真实 Win7 SP1/XP/CentOS 7 资格仍待执行。
 N7 已在用户新提供的 Server 2008 SP2 非 R2 环境定位并修复 ReadConsoleW 大请求失败，
 中文首次配置、隐藏输入与配置事务的源码实测通过，见
 [N7 检查点](SERVER2008-CONSOLE-2026-09-14.md)。
@@ -36,7 +49,8 @@ N7 已在用户新提供的 Server 2008 SP2 非 R2 环境定位并修复 ReadCon
 
 ## 1. 计划边界
 
-本计划只实现 D-001..D-071 已确认的 terminal-only v0.1。Web、media、remote/headless、MCP/plugin、telemetry/upload/update、通用 undo/WAL、multi-root 和 plan-state 均不进入实现。
+下文记录 D-001..D-071 的 terminal-only v0.1 实现基线；D-072 明确通用 Agent 与可用性方向，
+新增要求的机读传播由 F0 完成。Web、media、remote/headless、MCP/plugin、telemetry/upload/update、通用 undo/WAL、multi-root 和 plan-state 均不进入本轮实现。
 
 权威输入按优先级为：
 
@@ -193,7 +207,7 @@ M7 hard gate：目标进程树取消、pipe backpressure、shell dialect、files
 | Task | Files | Tests 与唯一退出条件 | Commit |
 | --- | --- | --- | --- |
 | C26 | `src/runtime.lua` | `test/golden/agentloop`, `agentloop_test.lua`；所有 state/outcome/control、call/result 配对、budget/stuck/cancel/finalization 与 durable 顺序通过 | `feat: connect typed agent loop` |
-| C27 | `src/runtime.lua`, `src/session.lua` | `review_queue_side_test.lua`；action/termination reviewer 独立，queue/steer/side 单并发与 next-turn snapshot、ask-user reply 因果唯一 | `feat: add reviews queue and side turns` |
+| C27 | `src/runtime.lua`, `src/session.lua` | `review_queue_ask_test.lua`；action/termination reviewer 独立，queue/steer/ask 单并发与 next-turn snapshot、ask-user reply 因果唯一 | `feat: add reviews queue and ask turns` |
 | C28 | `src/compact.lua` | `compact_test.lua`, `long_context_test.lua`；仅重建 model view、不删 XML、atomic groups 不拆、失败保留旧 view、阈值/cap 来自 manifest | `feat: add lossless model-view compaction` |
 
 M8 完成才得到最小端到端 Agent；在此之前 README 仍必须写“未实现”。任何 provider stop/natural-language done 都不能替代 typed control。
@@ -211,7 +225,7 @@ M8 完成才得到最小端到端 Agent；在此之前 README 仍必须写“未
 | --- | --- | --- | --- |
 | C31 | `release/manifest.lua`, `release/luainstaller.lua`, `release/dependencies.lock` | `package_layout_test.lua`, `sbom_test.lua`；luainstaller 1.3.0 pin、最小 allowlist、curl/CA final lock、license/SBOM、无历史 `bin/` 整包复制 | `build: assemble minimal target packages` |
 | C32 | `test/qualification/win32.lua`, `test/qualification/win64.lua`, `test/qualification/linux.lua` | `test/qualification/`；三目标各自原生构建、运行、全测试与 target proofs；一平台失败不能被另两平台替代 | `test: qualify all release targets` |
-| C33 | `.tools/check_zero_surface.lua`, `test/release/journeys.lua` | `clean_machine_test.lua`, `journeys.lua`；三个最终 zip 在干净机完成安装→配置→新建/恢复→退出→升级→卸载，零排除表面 | `test: prove release journeys and zero surface` |
+| C33 | `.tools/check_zero_surface.lua`, `test/release/journeys.lua` | `clean_machine_test.lua`, `journeys.lua`；按 D-073 验收三目标各 clean/std/full 的布局、配置→新建/恢复→退出→升级→卸载与工具；core/edition 分别核对允许表面 | `test: prove release journeys and zero surface` |
 | C34 | `README.md`, `README-zh.md`, `docs/`, `release/evidence/` | `.tools/check_documentation_truth.lua`；公开声明只描述已通过能力，每包 SHA-256/license/SBOM/build/test summary 齐全 | `docs: publish qualified release evidence` |
 
 C32/C33/C34 全通过后才能把 Release Gate R 从 `closed` 改为 `passed`。修改状态本身必须是独立、可审计的发布提交。

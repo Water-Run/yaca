@@ -1,13 +1,19 @@
 --[[
-File: long_context_test.lua
-Date: 2026-08-30
 Author: WaterRun
+Date: 2026-09-23
+File: long_context_test.lua
 Description: Benchmarks deterministic linear planning for a long Context.
 ]]
 
 local A = assert(loadfile(YACA_TEST_ROOT .. "/test/support/assert.lua", "t", _ENV))()
 local compact = assert(loadfile(YACA_TEST_ROOT .. "/src/compact.lua", "t", _ENV))()
 
+--Writes append event through the the current case fixture.
+--@param facts table Platform or file-descriptor facts supplied to the case.
+--@param event_type string Event kind emitted by the fake activity.
+--@param turn_id integer Agent turn identity under inspection.
+--@param fields table Field values used to construct the test document.
+--@return nil No value; the fake port or test assertion observes this callback's effects.
 local function append_event(facts, event_type, turn_id, fields)
     facts[#facts + 1] = {
         seq = #facts + 1,
@@ -20,6 +26,9 @@ local function append_event(facts, event_type, turn_id, fields)
     }
 end
 
+--Supplies long document behavior required by this suite.
+--@param turn_count integer Number of Agent turns in the fixture.
+--@return table observed Structured fixture record selected by the exercised branch.
 local function long_document(turn_count)
     local facts = {}
     for serial = 1, turn_count do
@@ -68,6 +77,9 @@ local function long_document(turn_count)
     }
 end
 
+--Supplies fast digest behavior required by this suite.
+--@param bytes string Byte chunk supplied to the fake I/O port.
+--@return any observed fast digest value observed by the scenario assertion.
 local function fast_digest(bytes)
     local first, second = 2166136261, 2246822519
     for index = 1, #bytes do
@@ -79,6 +91,9 @@ local function fast_digest(bytes)
     return string.format("perf:%08x%08x:%d", first, second, #bytes)
 end
 
+--Supplies plan signature behavior required by this suite.
+--@param plan table Proposed publication or execution plan.
+--@return any observed plan signature value observed by the scenario assertion.
 local function plan_signature(plan)
     local ranges = {}
     for index, range in ipairs(plan.tail_ranges) do
@@ -100,6 +115,9 @@ return {
     cases = {
         {
             name = "twenty thousand events rebuild deterministically without atomic splits",
+            --Verifies twenty thousand events rebuild deterministically without atomic splits.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify twenty thousand events rebuild deterministically without atomic splits.
             run = function()
                 local source = long_document(4000)
                 A.equal(#source.facts, 20000)
@@ -107,27 +125,60 @@ return {
                 local old_manifest = source.model_view.active_manifest.digest
                 local estimate_calls, digest_calls, model_calls, journal_calls = 0, 0, 0, 0
                 local service = assert(compact.new({
-                    safety = { digest = function(bytes)
+                    safety = {
+                        --Computes or records digest data for the 'twenty thousand events rebuild deterministically without atomic splits' case.
+                        --@param bytes string Byte chunk supplied to the fake I/O port.
+                        --@return any value Callback value consumed by the enclosing scenario assertion.
+                        digest = function(bytes)
                         digest_calls = digest_calls + 1
                         return fast_digest(bytes)
                     end },
-                    estimator = { estimate = function(bytes)
+                    estimator = {
+                        --Supplies estimate behavior required by the 'twenty thousand events rebuild deterministically without atomic splits' case.
+                        --@param bytes string Byte chunk supplied to the fake I/O port.
+                        --@return number value Callback value consumed by the enclosing scenario assertion.
+                        estimate = function(bytes)
                         estimate_calls = estimate_calls + 1
                         return (#bytes + 63) // 64
                     end },
-                    clock = { now = function() return 0 end },
+                    clock = {
+                        --Supplies deterministic clock behavior for the 'twenty thousand events rebuild deterministically without atomic splits' case.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return integer value Callback value consumed by the enclosing scenario assertion.
+                        now = function() return 0 end },
                     model = {
+                        --Simulates the start transition of a fake activity port for the 'twenty thousand events rebuild deterministically without atomic splits' case.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return string text Text emitted by the scenario callback.
                         start = function()
                             model_calls = model_calls + 1
                             return "unexpected"
                         end,
+                        --Simulates the cancel transition of a fake activity port for the 'twenty thousand events rebuild deterministically without atomic splits' case.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return table record Fixture record emitted by the scenario callback.
                         cancel = function() return { outcome = "cancelled" } end,
                     },
                     journal = {
+                        --Simulates the commit intent publication step for the 'twenty thousand events rebuild deterministically without atomic splits' case.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return nil No value; assertions verify twenty thousand events rebuild deterministically without atomic splits.
                         commit_intent = function() journal_calls = journal_calls + 1 end,
+                        --Simulates the commit response publication step for the 'twenty thousand events rebuild deterministically without atomic splits' case.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return nil No value; assertions verify twenty thousand events rebuild deterministically without atomic splits.
                         commit_response = function() journal_calls = journal_calls + 1 end,
+                        --Simulates the commit rejection publication step for the 'twenty thousand events rebuild deterministically without atomic splits' case.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return nil No value; assertions verify twenty thousand events rebuild deterministically without atomic splits.
                         commit_rejection = function() journal_calls = journal_calls + 1 end,
+                        --Records the publish effect observed by the 'twenty thousand events rebuild deterministically without atomic splits' case.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return nil No value; assertions verify twenty thousand events rebuild deterministically without atomic splits.
                         publish = function() journal_calls = journal_calls + 1 end,
+                        --Simulates the commit correction publication step for the 'twenty thousand events rebuild deterministically without atomic splits' case.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return nil No value; assertions verify twenty thousand events rebuild deterministically without atomic splits.
                         commit_correction = function() journal_calls = journal_calls + 1 end,
                     },
                 }, {

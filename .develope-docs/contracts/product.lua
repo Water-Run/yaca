@@ -1,10 +1,17 @@
+--[[
+Author: WaterRun
+Date: 2026-09-23
+File: product.lua
+Description: Defines general-purpose Agent scope, modes and portable product boundaries.
+]]
+
 return {
   contract_version = "0.1.0-readiness.1",
   product_version = "0.1.0",
   decision_refs = { "D-044", "D-045", "D-053", "D-056", "D-068" },
 
   product = {
-    kind = "single-agent-terminal-coding-agent",
+    kind = "single-general-purpose-terminal-agent",
     workspace_roots_per_context = 1,
     active_contexts_per_process = 1,
     durable_fact_sources = { "main-ini", "context-xml" },
@@ -26,8 +33,8 @@ return {
       minimum = "Windows XP SP3",
       executable = "yaca.exe",
       installer = "Install.cmd",
-      archive = "yaca-0.1.0-win32-x86.zip",
-      required_root_entries = { "yaca.exe", "Install.cmd", "README.txt", "LICENSE", "docs/" },
+      archive = "yaca-0.1.0-win32-x86-clean.zip",
+      required_root_entries = { "yaca.exe" },
       qualification = "independent-full-matrix",
     },
     {
@@ -37,8 +44,8 @@ return {
       minimum = "Windows 7 SP1",
       executable = "yaca.exe",
       installer = "Install.cmd",
-      archive = "yaca-0.1.0-win64-x86_64.zip",
-      required_root_entries = { "yaca.exe", "Install.cmd", "README.txt", "LICENSE", "docs/" },
+      archive = "yaca-0.1.0-win64-x86_64-clean.zip",
+      required_root_entries = { "yaca.exe" },
       qualification = "independent-full-matrix",
     },
     {
@@ -48,13 +55,20 @@ return {
       minimum = "CentOS 7 x86_64",
       executable = "yaca",
       installer = "Install.sh",
-      archive = "yaca-0.1.0-linux-x86_64.zip",
-      required_root_entries = { "yaca", "Install.sh", "README.txt", "LICENSE", "docs/" },
+      archive = "yaca-0.1.0-linux-x86_64-clean.zip",
+      required_root_entries = { "yaca" },
       qualification = "independent-full-matrix",
     },
   },
 
   package_invariants = {
+    editions = { "clean", "std", "full" },
+    clean_runtime_files = "executable-only",
+    same_core_for_all_editions = true,
+    tools_required = false,
+    lua_interpreter_entry = "--lua",
+    lua_agent_tool = "lua",
+    notices_delivery = "companion-archive",
     runtime = "embedded-lua-5.5",
     system_lua_dependency = false,
     data_root = "executable-directory/__yaca__",
@@ -69,7 +83,7 @@ return {
     {
       id = "download-install-bootstrap",
       entry = "extracted-package",
-      steps = { "verify-package-shape", "run-thin-installer-or-direct", "locate-adjacent-data-root", "load-safe-bootstrap" },
+      steps = { "verify-package-shape", "run-executable-directly", "locate-adjacent-data-root", "load-safe-bootstrap" },
       terminal_results = { "ready", "action-required", "error" },
     },
     {

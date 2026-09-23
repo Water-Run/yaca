@@ -1,8 +1,15 @@
+--[[
+Author: WaterRun
+Date: 2026-09-23
+File: tui.lua
+Description: Defines terminal capabilities, input surfaces and transcript rendering rules.
+]]
+
 return {
   contract_version = "0.1.0-readiness.1",
   decision_refs = { "D-054", "D-064", "D-066" },
 
-  product_slogan = "yaca: Yet Another Coding Agent.",
+  product_slogan = "yaca: General-purpose terminal agent.",
   prompts = {
     chat = { text = ">>", color = "dim-neutral" },
     approval = { text = "??", color = "yellow" },
@@ -17,7 +24,7 @@ return {
     { intent = "submit-or-queue", key = "Enter", fallback_action = "queue-add" },
     { intent = "steer", key = "Ctrl+Enter", fallback_action = "steer" },
     { intent = "newline", key = "Shift+Enter", fallback_action = "multiline" },
-    { intent = "side", key = "Alt+Enter", fallback_action = "side" },
+    { intent = "ask", key = "Alt+Enter", fallback_action = "ask" },
     { intent = "cancel", key = "Esc", fallback_action = "cancel" },
   },
 
@@ -75,7 +82,7 @@ return {
   },
 
   transcript_blocks = {
-    "USER", "ASSISTANT", "TOOL ID", "SIDE ID", "STATUS", "QUEUE ID",
+    "USER", "ASSISTANT", "TOOL ID", "ASK ID", "STATUS", "QUEUE ID",
     "STEER ID", "NOTICE", "WARNING", "ERROR ID", "RECOVERY ID",
     "DETAILS ID", "ACTION ID",
   },

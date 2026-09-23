@@ -1,7 +1,7 @@
 --[[
-File: cli.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-09-23
+File: cli.lua
 Description: Generates CLI projections from the frozen semantic action registry.
 ]]
 
@@ -10,36 +10,74 @@ local text = require("text")
 
 local M = {}
 
+-- Construct a structured diagnostic without throwing or formatting its optional fields.
+--@param code string Stable diagnostic code used by callers to choose recovery behavior.
+--@param message string Human-readable summary supplied by the failing operation.
+--@param extra table|nil Additional diagnostic fields copied after code/message and allowed to override them.
+--@return table New diagnostic record; optional non-nil fields are retained without deep copying.
 local function failure(code, message, extra)
     local result = { code = code, message = message }
     for key, value in pairs(extra or {}) do result[key] = value end
     return result
 end
 
+-- Describe one semantic action argument and its optional projection metadata.
+--@param name string Internal argument field name.
+--@param type_name string Validation grammar or scalar type.
+--@param required boolean Whether callers must supply it.
+--@param extra table|nil Defaults, spelling, or other registry fields.
+--@return table Argument descriptor retaining extra fields by reference.
 local function argument(name, type_name, required, extra)
     local value = { name = name, type = type_name, required = required }
     for key, item in pairs(extra or {}) do value[key] = item end
     return value
 end
 
+-- Describe an action's argv aliases and positional behavior.
+--@param long string|boolean Long option or false.
+--@param short string|boolean Short option or false.
+--@param slash string|boolean Windows slash alias or false.
+--@param extra table|nil Positional/default-action metadata.
+--@return table Argv projection descriptor.
 local function argv(long, short, slash, extra)
     local value = { kind = "argv", long = long, short = short, slash = slash }
     for key, item in pairs(extra or {}) do value[key] = item end
     return value
 end
 
+-- Describe a chat-line command and optional keyboard shortcut.
+--@param command string Display grammar for the chat command.
+--@param key string|boolean Shortcut label or false.
+--@param extra table|nil Parse priority or other projection metadata.
+--@return table Chat-line projection descriptor.
 local function chat(command, key, extra)
     local value = { kind = "chat-line", command = command, key = key }
     for field, item in pairs(extra or {}) do value[field] = item end
     return value
 end
 
+-- Describe one Context REPL command projection.
+--@param command string Display grammar for the REPL command.
+--@param extra table|nil Required-argument override or other metadata.
+--@return table Context REPL projection descriptor.
 local function context_repl(command, extra)
     local value = { kind = "context-repl-line", command = command }
     for field, item in pairs(extra or {}) do value[field] = item end
     return value
 end
 
+-- Register one semantic action across input, state, confirmation, and result surfaces.
+--@param id string Stable action identity.
+--@param surface string Top, chat, both, or Context REPL surface.
+--@param args table Ordered argument specifications.
+--@param projections table Argv or line command projections.
+--@param tty string Terminal requirement marker.
+--@param confirm string Confirmation policy marker.
+--@param states table Allowed lifecycle state names.
+--@param results table Possible public outcome names.
+--@param summary string Human-readable action purpose.
+--@param extra table|nil Additional help or contract metadata.
+--@return table Action registry descriptor.
 local function action(id, surface, args, projections, tty, confirm, states, results,
         summary, extra)
     local value = {
@@ -219,13 +257,13 @@ local ACTIONS = {
     }, "tty-required", "none", CHAT_BUSY,
     { "accepted", "cancel-pending", "unknown-side-effect", "error" },
     "Steer the current active work at its next safe boundary."),
-    action("side", "chat", {
+    action("ask", "chat", {
         argument("message", "bounded-utf8-text", true),
     }, {
-        chat(".side <message>", "Alt+Enter"),
+        chat(".ask <message>", "Alt+Enter"),
     }, "tty-required", "none", CHAT_ACTIVE,
-    { "accepted", "side-busy", "error" },
-    "Start one bounded read-only side question."),
+    { "accepted", "ask-busy", "error" },
+    "Ask a question without tools or changing the current task."),
     action("multiline", "chat", {}, {
         chat(".multiline", "Shift+Enter"),
     }, "tty-required", "none", CHAT_ACTIVE,
@@ -542,7 +580,7 @@ local OUTCOME_EXIT_CLASS = {
     error = "general_error",
     ["queue-full"] = "general_error",
     ["unknown-side-effect"] = "general_error",
-    ["side-busy"] = "general_error",
+    ["ask-busy"] = "general_error",
     ["not-cancellable"] = "general_error",
     ["destination-exists"] = "general_error",
     ["target-changed"] = "general_error",
@@ -566,6 +604,10 @@ for _, id in ipairs(REGISTRY.machine_output.supported_actions) do
     MACHINE_SUPPORTED[id] = true
 end
 
+-- Copy registry tables recursively while preserving shared references and cycles.
+--@param value any Registry value to copy.
+--@param seen table|nil Original-to-copy map for table identity.
+--@return any Deep copy for tables or unchanged scalar.
 local function deep_copy(value, seen)
     if type(value) ~= "table" then return value end
     seen = seen or {}
@@ -576,12 +618,32 @@ local function deep_copy(value, seen)
     return result
 end
 
+-- Create a shallow read-only view without copying the backing table.
+--@param values table Backing fields retained by reference; the caller owns their stability.
+--@param label string|nil Diagnostic label; defaults to "readonly value".
+--@return table Empty proxy exposing the backing fields through its locked metatable.
+--@ownership Retains values by reference; nested values and the backing table are not frozen.
 local function readonly(values, label)
+    --@metatable readonly_proxy Forwards reads and iteration; ordinary assignments raise an error.
+    --@field __index table Backing values used for missing-key reads.
+    --@field __newindex function Rejects ordinary assignments without changing the backing values.
+    --@field __pairs function Enumerates the backing table with next.
+    --@field __metatable string Hides this metatable behind the fixed "locked" marker.
     return setmetatable({}, {
         __index = values,
+        -- Reject a write through the proxy before it can create an ordinary field.
+        --@param _ table Proxy receiving the assignment; its contents are not consulted.
+        --@param key any Attempted field name included in the diagnostic.
+        --@return nil Does not return normally.
+        --@error Always raises a read-only assignment error at the caller frame.
         __newindex = function(_, key)
             error((label or "readonly value") .. " cannot be modified: " .. tostring(key), 2)
         end,
+        -- Iterate the backing fields instead of the empty proxy table.
+        --@param none The proxy argument supplied by pairs is ignored.
+        --@return function The standard next iterator.
+        --@return table Backing values used as iterator state.
+        --@return nil Initial key used to start iteration.
         __pairs = function()
             return next, values, nil
         end,
@@ -595,6 +657,9 @@ local ARGV_SHORT = {}
 local ARGV_SLASH = {}
 local LINE_PROJECTIONS = { ["chat-line"] = {}, ["context-repl-line"] = {} }
 
+-- Extract the fixed prefix before a command's first placeholder.
+--@param command string Display grammar with optional angle/square placeholders.
+--@return string Literal command prefix without trailing spaces.
 local function line_literal(command)
     local angle = command:find("<", 1, true)
     local square = command:find("[", 1, true)
@@ -604,6 +669,13 @@ local function line_literal(command)
     return command:sub(1, marker - 1):gsub("%s+$", "")
 end
 
+-- Bind one nonfalse alias to an action, rejecting duplicates.
+--@param index table Alias-to-action map being built.
+--@param token string|boolean Alias spelling or disabled sentinel.
+--@param descriptor table Semantic action descriptor.
+--@return nil No return value.
+--@error Raises for a duplicate alias in the static registry.
+--@effect Inserts a new alias into index.
 local function index_alias(index, token, descriptor)
     if token == false or token == nil then return end
     if index[token] then error("duplicate CLI alias: " .. token) end
@@ -633,6 +705,10 @@ end
 if #ACTIONS ~= 39 then error("semantic action registry must contain exactly 39 actions") end
 
 for _, projections in pairs(LINE_PROJECTIONS) do
+    -- Order line projections by priority, longest literal, then stable action ID.
+    --@param left table First indexed line projection.
+    --@param right table Second indexed line projection.
+    --@return boolean True when left has higher parse precedence.
     table.sort(projections, function(left, right)
         local left_priority = left.projection.parse_priority or 50
         local right_priority = right.projection.parse_priority or 50
@@ -642,12 +718,19 @@ for _, projections in pairs(LINE_PROJECTIONS) do
     end)
 end
 
+-- Require a strict UTF-8 string without an embedded NUL scalar.
+--@param value any Candidate argument.
+--@return boolean True for accepted text.
 local function valid_utf8_string(value)
     if type(value) ~= "string" then return false end
     local valid, metadata = text.validate_utf8(value)
     return valid == true and metadata.contains_nul == false
 end
 
+-- Validate argv as a dense one-based array of strict UTF-8 strings.
+--@param values any Candidate argv table.
+--@return table|nil Copied argument array.
+--@return table|nil Usage error for malformed argv.
 local function dense_string_array(values)
     if type(values) ~= "table" then
         return nil, failure("UsageError", "argv must be a dense array of UTF-8 strings")
@@ -669,6 +752,9 @@ local function dense_string_array(values)
     return result
 end
 
+-- Expand an enum type descriptor into an allowed-value set.
+--@param type_name string Argument type string.
+--@return table|nil Enum value set, or nil for a non-enum type.
 local function enum_values(type_name)
     local source = type_name:match("^enum:(.+)$")
     if not source then return nil end
@@ -677,6 +763,11 @@ local function enum_values(type_name)
     return values
 end
 
+-- Validate one textual CLI argument against its declared scalar grammar.
+--@param specification table Argument descriptor.
+--@param value any Candidate argv or line token.
+--@return any|nil Normalized enum, boolean, or original string value.
+--@return string|nil Validation explanation on failure.
 local function validate_scalar(specification, value)
     if type(value) ~= "string" or value == "" then
         return nil, "value is empty"
@@ -704,6 +795,11 @@ local function validate_scalar(specification, value)
     return value
 end
 
+-- Create a UsageError with optional action and argument bindings.
+--@param message string Human-readable grammar failure.
+--@param action_id string|nil Action identity when known.
+--@param argument_name string|nil Invalid argument name when known.
+--@return table Structured UsageError.
 local function usage(message, action_id, argument_name)
     local extra = {}
     if action_id then extra.action = action_id end
@@ -711,6 +807,11 @@ local function usage(message, action_id, argument_name)
     return failure("UsageError", message, extra)
 end
 
+-- Apply copied registry defaults only to absent request fields.
+--@param descriptor table Semantic action descriptor.
+--@param request table Mutable parsed request.
+--@return nil No return value.
+--@effect Adds default values to request.
 local function apply_defaults(descriptor, request)
     for _, specification in ipairs(descriptor.args) do
         if request[specification.name] == nil and specification.default ~= nil then
@@ -719,6 +820,9 @@ local function apply_defaults(descriptor, request)
     end
 end
 
+-- Index the arguments that have an explicit option spelling.
+--@param descriptor table Semantic action descriptor.
+--@return table Option-spelling to argument descriptor map.
 local function named_argument_map(descriptor)
     local result = {}
     for _, specification in ipairs(descriptor.args) do
@@ -727,6 +831,9 @@ local function named_argument_map(descriptor)
     return result
 end
 
+-- Select positional arguments in their declared order.
+--@param descriptor table Semantic action descriptor.
+--@return table Positional specification array.
 local function positional_arguments(descriptor)
     local result = {}
     for _, specification in ipairs(descriptor.args) do
@@ -735,6 +842,14 @@ local function positional_arguments(descriptor)
     return result
 end
 
+-- Validate positional tokens, apply defaults, and enforce required arguments.
+--@param descriptor table Semantic action descriptor.
+--@param request table Mutable parsed request.
+--@param values table Positional text tokens.
+--@param required_overrides table|nil Projection-specific required field set.
+--@return table|nil Populated request.
+--@return table|nil Structured UsageError on failure.
+--@effect Adds validated positional and default fields to request.
 local function assign_positionals(descriptor, request, values, required_overrides)
     local specifications = positional_arguments(descriptor)
     if #values > #specifications then
@@ -767,6 +882,11 @@ local function assign_positionals(descriptor, request, values, required_override
     return request
 end
 
+-- Normalize explicit stdin/stdout/stderr TTY facts for the parsed action.
+--@param facts any Candidate fd fact record or tty shorthand.
+--@param request table Parsed semantic action with machine modifier.
+--@return table|nil Explicit three-descriptor TTY fact record.
+--@return table|nil InvalidCliFacts error on failure.
 local function normalize_facts(facts, request)
     if facts == nil then
         return nil, failure("InvalidCliFacts", "file descriptor facts are required")
@@ -819,6 +939,11 @@ local function normalize_facts(facts, request)
     }
 end
 
+-- Select human interactive, human text, or machine output from action and fds.
+--@param request table Parsed semantic action.
+--@param facts table Explicit TTY facts or shorthand.
+--@return string|nil Output mode for the action.
+--@return table|nil Usage, consent, or TTY requirement error.
 local function fd_mode(request, facts)
     if type(request) ~= "table" or type(request.id) ~= "string" then
         return nil, usage("a semantic action is required")
@@ -858,6 +983,10 @@ local function fd_mode(request, facts)
     return "human-interactive"
 end
 
+-- Resolve a long, short, or Windows slash argv alias.
+--@param token string Raw option token.
+--@param platform string Windows or POSIX selector.
+--@return table|nil Registered action descriptor for the alias.
 local function argv_alias(token, platform)
     local descriptor = ARGV_LONG[token] or ARGV_SHORT[token]
     if descriptor then return descriptor end
@@ -865,12 +994,22 @@ local function argv_alias(token, platform)
     return nil
 end
 
+-- Distinguish a possible option from a positional path token.
+--@param token string Raw argv token.
+--@param platform string Windows or POSIX selector.
+--@return boolean True for a dash prefix or registered Windows slash alias.
 local function starts_option(token, platform)
     if token:sub(1, 1) == "-" then return true end
     if platform == "windows" and ARGV_SLASH[token] then return true end
     return false
 end
 
+-- Parse one primary argv action, modifiers, options, and positional arguments.
+--@param platform string Windows or POSIX alias policy.
+--@param values table Candidate argv strings.
+--@param facts table|nil Optional TTY facts to validate output mode immediately.
+--@return table|nil Parsed semantic request.
+--@return table|nil Usage, argument, or fd-mode error.
 local function parse_argv(platform, values, facts)
     local tokens, tokens_error = dense_string_array(values)
     if not tokens then return nil, tokens_error end
@@ -985,6 +1124,10 @@ local function parse_argv(platform, values, facts)
     return request
 end
 
+-- Advance over ASCII space and tab characters in a command line.
+--@param source string Input line.
+--@param index integer One-based starting byte index.
+--@return integer First non-space byte index or one past the end.
 local function skip_space(source, index)
     while index <= #source do
         local byte = source:byte(index)
@@ -994,6 +1137,12 @@ local function skip_space(source, index)
     return index
 end
 
+-- Read one unquoted or single/double-quoted line token.
+--@param source string Input line.
+--@param index integer One-based starting byte index.
+--@return string|nil Parsed token, nil at end or on unterminated quote.
+--@return integer Next byte index.
+--@return string|nil Unterminated-quote explanation when malformed.
 local function read_token(source, index)
     index = skip_space(source, index)
     if index > #source then return nil, index end
@@ -1029,10 +1178,17 @@ local function read_token(source, index)
     return nil, index, "unterminated quoted value"
 end
 
+-- Remove ASCII space and tab from both ends of a line fragment.
+--@param value string Line fragment.
+--@return string Trimmed fragment.
 local function trim_line(value)
     return value:gsub("^[ \t]+", ""):gsub("[ \t]+$", "")
 end
 
+-- Match a command literal only at a token boundary.
+--@param source string Trimmed input line.
+--@param literal string Fixed projection prefix.
+--@return boolean True when source begins with literal and then ends or has space.
 local function line_matches(source, literal)
     if source:sub(1, #literal) ~= literal then return false end
     if #source == #literal then return true end
@@ -1040,6 +1196,12 @@ local function line_matches(source, literal)
     return byte == 0x20 or byte == 0x09
 end
 
+-- Recognize a boolean named token only at the end of a line command.
+--@param rest string Remainder after the command literal.
+--@param specification table Boolean argument with explicit spelling.
+--@return string Remainder with final token removed when found.
+--@return boolean Whether the final token was found.
+--@return boolean|nil True when the token was misplaced before other text.
 local function remove_named_boolean(rest, specification)
     local spelling = specification.spelling
     local cursor = 1
@@ -1061,6 +1223,11 @@ local function remove_named_boolean(rest, specification)
     return rest, false
 end
 
+-- Parse one matched line projection into positional and named action fields.
+--@param indexed table Action, projection, and fixed literal.
+--@param rest string Raw line bytes after the matched literal.
+--@return table|nil Parsed semantic request.
+--@return table|nil Usage error on malformed line arguments.
 local function parse_line_values(indexed, rest)
     local descriptor = indexed.action
     local request = { id = descriptor.id }
@@ -1121,6 +1288,12 @@ local function parse_line_values(indexed, rest)
     )
 end
 
+-- Match one chat or Context REPL command and enforce terminal facts.
+--@param kind string Registered line projection kind.
+--@param source string Candidate one-line UTF-8 command.
+--@param facts table|nil Optional fd facts.
+--@return table|nil Parsed semantic request.
+--@return table|nil Usage, TTY, or confirmation error.
 local function parse_projected_line(kind, source, facts)
     if not valid_utf8_string(source) or source:find("[\r\n]", 1) then
         return nil, usage("command line must be one UTF-8 line")
@@ -1164,7 +1337,15 @@ local function parse_projected_line(kind, source, facts)
     return nil, usage("unknown command line")
 end
 
+-- Suggest the nearest stable help topic, breaking ties lexically.
+--@param topic string Unknown requested topic.
+--@param topics table Candidate topic names.
+--@return string|nil Closest candidate or nil when none exist.
 local function closest_topic(topic, topics)
+    -- Compute byte-wise Levenshtein distance between topic IDs.
+    --@param left string Unknown topic.
+    --@param right string Candidate topic.
+    --@return integer Edit distance.
     local function distance(left, right)
         local previous = {}
         for column = 0, #right do previous[column] = column end
@@ -1194,6 +1375,9 @@ local function closest_topic(topic, topics)
     return best
 end
 
+-- Find an action's argv projection, if it has one.
+--@param descriptor table Semantic action descriptor.
+--@return table|nil First argv projection.
 local function argv_projection(descriptor)
     for _, projection in ipairs(descriptor.projections) do
         if projection.kind == "argv" then return projection end
@@ -1201,6 +1385,9 @@ local function argv_projection(descriptor)
     return nil
 end
 
+-- Collect displayed usage strings for all projections of an action.
+--@param descriptor table Semantic action descriptor.
+--@return table Ordered usage lines.
 local function action_usage(descriptor)
     local values = {}
     for _, projection in ipairs(descriptor.projections) do
@@ -1213,6 +1400,9 @@ local function action_usage(descriptor)
     return values
 end
 
+-- Render an action's cross-platform argv aliases for help.
+--@param descriptor table Semantic action descriptor.
+--@return string Alias list or default-positional explanation.
 local function aliases_text(descriptor)
     local projection = argv_projection(descriptor)
     if not projection or projection.long == false then return "default positional action" end
@@ -1223,9 +1413,12 @@ local function aliases_text(descriptor)
     }, ", ")
 end
 
+-- Generate top-level help from the semantic registry and embedded Lua contract.
+--@param product_name string Display name for the product.
+--@return string Newline-terminated overview text.
 local function render_overview(product_name)
     local lines = {
-        product_name .. ": Yet Another Coding Agent.",
+        product_name .. ": General-purpose terminal agent.",
         "",
         "Usage:",
     }
@@ -1248,6 +1441,13 @@ local function render_overview(product_name)
             ):gsub(" +$", "")
         end
     end
+    lines[#lines + 1] = ""
+    lines[#lines + 1] = "Embedded Lua (handled before application startup):"
+    lines[#lines + 1] = "  yaca --lua [Lua options] [script [args]]"
+    lines[#lines + 1] = "  yaca --lua -v                 Show the linked Lua version."
+    lines[#lines + 1] = "  yaca --lua -E -e <code>       Run code without Lua environment initialization."
+    lines[#lines + 1] = "  yaca --lua -E -               Read a script from standard input."
+    lines[#lines + 1] = "  No configuration or Model is needed; ordinary exec permissions still apply."
     lines[#lines + 1] = ""
     lines[#lines + 1] = "Self-test options:"
     local self_test = ACTION_BY_ID["self-test"]
@@ -1273,6 +1473,10 @@ local function render_overview(product_name)
     return table.concat(lines, "\n") .. "\n"
 end
 
+-- List all commands for one line-input surface.
+--@param kind string Chat-line or Context REPL projection kind.
+--@param title string Heading shown to the user.
+--@return string Newline-terminated command list.
 local function render_surface(kind, title)
     local lines = { title, "" }
     for _, descriptor in ipairs(ACTIONS) do
@@ -1289,6 +1493,9 @@ local function render_surface(kind, title)
     return table.concat(lines, "\n") .. "\n"
 end
 
+-- Render keyboard shortcuts alongside their text fallbacks.
+--@param none No parameters.
+--@return string Newline-terminated input-binding help.
 local function render_input_help()
     local rows = {}
     for _, descriptor in ipairs(ACTIONS) do
@@ -1302,6 +1509,10 @@ local function render_input_help()
             end
         end
     end
+    -- Sort shortcut rows by their displayed key names.
+    --@param left table First binding row.
+    --@param right table Second binding row.
+    --@return boolean True when left key sorts first.
     table.sort(rows, function(left, right) return left.key < right.key end)
     local lines = { "Input bindings and text fallbacks", "" }
     for _, row in ipairs(rows) do
@@ -1317,6 +1528,9 @@ local function render_input_help()
     return table.concat(lines, "\n") .. "\n"
 end
 
+-- Render detailed grammar and policy for one semantic action.
+--@param descriptor table Registered action descriptor.
+--@return string Newline-terminated action help.
 local function render_action_help(descriptor)
     local lines = {
         "Action: " .. descriptor.id,
@@ -1387,6 +1601,12 @@ local function render_action_help(descriptor)
     return table.concat(lines, "\n") .. "\n"
 end
 
+-- Dispatch overview, surface, action, or unknown-topic help.
+--@param product_name string Display product name.
+--@param topic string|nil Requested topic; nil selects overview.
+--@return string|nil Rendered help text.
+--@return table|nil Usage error for an invalid or unknown topic.
+--@return string|nil Closest topic suggestion for an unknown topic.
 local function render_help(product_name, topic)
     if topic == nil or topic == "" or topic == "top" then
         return render_overview(product_name)
@@ -1420,6 +1640,11 @@ local function render_help(product_name, topic)
     return nil, usage("unknown help topic", nil, nil), suggestion
 end
 
+-- Validate a lowercase ASCII token for machine output identity fields.
+--@param value any Candidate token.
+--@param field string Field name included in errors.
+--@return string|nil Accepted token.
+--@return table|nil InvalidMachineValue error.
 local function stable_machine_token(value, field)
     if type(value) ~= "string" or not value:match("^[a-z][a-z0-9%-]*$") then
         return nil, failure(
@@ -1430,11 +1655,18 @@ local function stable_machine_token(value, field)
     return value
 end
 
+-- Validate the versioned schema token grammar.
+--@param value any Candidate schema version.
+--@return boolean True for a lowercase ASCII schema token.
 local function stable_schema_token(value)
     return type(value) == "string"
         and value:match("^[a-z][a-z0-9._%-]*$") ~= nil
 end
 
+-- Classify a plain Lua table as dense array, string-keyed object, or ambiguous.
+--@param value table Candidate machine payload table.
+--@return string|nil Array or object kind, nil when mixed or invalid.
+--@return integer|nil Entry count for accepted kinds.
 local function table_shape(value)
     local count, maximum, string_keys = 0, 0, false
     for key in pairs(value) do
@@ -1453,6 +1685,13 @@ local function table_shape(value)
     return nil
 end
 
+-- Convert a bounded Lua value into explicit JSON-compatible tagged values.
+--@param value any Candidate machine payload value.
+--@param seen table Recursion stack for cycle detection.
+--@param depth integer Current table nesting depth.
+--@param maximum_depth integer Maximum accepted table depth.
+--@return any|nil JSON scalar, array, or object wrapper.
+--@return table|nil InvalidMachineValue error.
 local function machine_json_value(value, seen, depth, maximum_depth)
     local kind = json.kind(value)
     if kind and kind ~= "array" and kind ~= "object" then return value end
@@ -1524,6 +1763,13 @@ local function machine_json_value(value, seen, depth, maximum_depth)
     return nil, failure("InvalidMachineValue", "machine table shape is ambiguous")
 end
 
+-- Copy additional machine fields without allowing reserved envelope keys.
+--@param target table Mutable output envelope.
+--@param fields table|nil Extra payload fields.
+--@param reserved table Set of forbidden envelope keys.
+--@return boolean|nil True after copying.
+--@return table|nil InvalidMachineValue error on failure.
+--@effect Adds accepted fields to target; may have added earlier fields before failure.
 local function add_machine_fields(target, fields, reserved)
     if fields == nil then return true end
     if type(fields) ~= "table" then
@@ -1538,6 +1784,12 @@ local function add_machine_fields(target, fields, reserved)
     return true
 end
 
+-- Validate a machine payload and encode one RFC 8259 object.
+--@param codec table|nil Injected bounded JSON writer.
+--@param maximum_depth integer Maximum nested JSON table depth.
+--@param value table Machine result or stream record.
+--@return string|nil Encoded JSON bytes.
+--@return table|nil Codec, payload, or encoding error.
 local function encode_machine(codec, maximum_depth, value)
     if not codec then
         return nil, failure("MachineCodecUnavailable", "a bounded JSON codec is required")
@@ -1554,6 +1806,12 @@ local function encode_machine(codec, maximum_depth, value)
     return encoded
 end
 
+-- Collect stable command completions from the semantic registry.
+--@param surface string Top, chat, or Context REPL surface.
+--@param prefix string|nil UTF-8 prefix to match.
+--@param platform string Windows or POSIX alias policy.
+--@return table|nil Sorted unique completion strings.
+--@return table|nil Invalid prefix or surface UsageError.
 local function completion(surface, prefix, platform)
     prefix = prefix or ""
     if type(prefix) ~= "string" or not valid_utf8_string(prefix) then
@@ -1589,18 +1847,17 @@ local function completion(surface, prefix, platform)
     return result
 end
 
----Returns a detached copy of the complete semantic action registry.
--- @return table registry Mutable copy safe for inspection by adapters/tests.
+-- Return a detached copy of the complete semantic action registry.
+--@param none No parameters.
+--@return table Mutable copy safe for inspection by adapters and tests.
 function M.registry()
     return deep_copy(REGISTRY)
 end
 
----Creates a CLI projection service for one release-platform parser.
--- Parsing and human help do not require the optional JSON codec. Machine
--- rendering fails closed until a bounded codec is injected.
--- @param options table Platform, product identity, schema, and optional codec.
--- @return table|nil service Immutable CLI adapter.
--- @return table|nil err Structured construction failure.
+-- Create a CLI projection service for one release-platform parser.
+--@param options table Platform, product identity, schema, and optional JSON codec.
+--@return table|nil Read-only CLI adapter.
+--@return table|nil Structured construction error.
 function M.new(options)
     options = options or {}
     if type(options) ~= "table" then
@@ -1649,28 +1906,37 @@ function M.new(options)
     local maximum_depth = codec and codec.limits.maximum_depth or 0
     local service = {}
 
-    ---Returns a detached registry copy.
+    -- Return a detached semantic registry copy.
+    --@param none No parameters.
+    --@return table Mutable copy of the registry.
     function service.registry()
         return M.registry()
     end
 
-    ---Returns one detached semantic action descriptor.
+    -- Return one detached semantic action descriptor by stable ID.
+    --@param id string Candidate action identity.
+    --@return table|nil Mutable copy of the descriptor.
+    --@return table|nil UsageError for an unknown ID.
     function service.action(id)
         local descriptor = ACTION_BY_ID[id]
         if not descriptor then return nil, usage("unknown semantic action", id) end
         return deep_copy(descriptor)
     end
 
-    ---Parses argv into one normalized semantic request and applies fd gates.
-    -- @param values table Dense argv strings excluding the executable name.
-    -- @param facts table|nil Independent stdin/stdout/stderr TTY facts.
-    -- @return table|nil request Normalized semantic action request.
-    -- @return table|nil err Structured grammar/admission failure.
+    -- Parse argv into one semantic request and apply optional fd gates.
+    --@param values table Dense argv strings excluding the executable name.
+    --@param facts table|nil Independent stdin/stdout/stderr TTY facts.
+    --@return table|nil Normalized semantic action request.
+    --@return table|nil Structured grammar or admission failure.
     function service.parse_argv(values, facts)
         return parse_argv(platform, values, facts)
     end
 
-    ---Parses one chat line into the same semantic action vocabulary.
+    -- Parse a chat command or treat ordinary text as a queue-add message.
+    --@param source string Candidate UTF-8 chat submission.
+    --@param facts table|nil Optional fd facts for interactive admission.
+    --@return table|nil Semantic chat request.
+    --@return table|nil TTY, text, or command grammar error.
     function service.parse_chat(source, facts)
         if valid_utf8_string(source) then
             local normalized = trim_line(source)
@@ -1697,12 +1963,11 @@ function M.new(options)
         return parse_projected_line("chat-line", source, facts)
     end
 
-    ---Parses directives inside the already-admitted Prompt edit action.
-    -- They do not create a top-level or headless action surface.
-    -- @param source string Complete UTF-8 input submission, with literal whitespace.
-    -- @param editor_id string Exact current prompt-edit-N transaction identity.
-    -- @return table|nil command Editor directive or literal append payload.
-    -- @return table|nil err Invalid text or stale save identity.
+    -- Parse directives inside an already-admitted Prompt edit transaction.
+    --@param source string Complete UTF-8 input submission, with literal whitespace.
+    --@param editor_id string Exact current prompt-edit-N transaction identity.
+    --@return table|nil Editor directive or literal append payload.
+    --@return table|nil Invalid text or stale save identity.
     function service.parse_prompt_editor(source, editor_id)
         if not valid_utf8_string(source) then
             return nil, failure("InvalidPromptDraft", "Prompt input must be NUL-free UTF-8")
@@ -1733,13 +1998,11 @@ function M.new(options)
         return { operation = "append", text = source }
     end
 
-    ---Parses directives inside the already-admitted offline config editor.
-    -- Values are never accepted on the command line; a separate typed input
-    -- handles secrets without echo. Quoted selectors reuse the shared tokenizer.
-    -- @param source string Complete NUL-free UTF-8 command line.
-    -- @param editor_id string Exact current config-edit-N draft revision.
-    -- @return table|nil command Directive with exact section/key or page fields.
-    -- @return table|nil err Invalid grammar or stale save identity.
+    -- Parse offline configuration editor directives without value bytes.
+    --@param source string Complete NUL-free UTF-8 command line.
+    --@param editor_id string Exact current config-edit-N draft revision.
+    --@return table|nil Directive with exact section/key or page fields.
+    --@return table|nil Invalid grammar or stale save identity.
     function service.parse_config_editor(source, editor_id)
         if not valid_utf8_string(source) or #source > 16384 or source:find("[\r\n]") then
             return nil, failure("ConfigEditorInput", "enter one bounded UTF-8 command line")
@@ -1783,7 +2046,11 @@ function M.new(options)
         return { operation = operation }
     end
 
-    ---Parses Model management without accepting field values on the command line.
+    -- Parse Model editor commands without accepting field values on this line.
+    --@param source string Complete bounded UTF-8 command line.
+    --@param editor_id string Current model-edit-N draft identity.
+    --@return table|nil Model editor directive and row/position fields.
+    --@return table|nil Grammar or stale editor error.
     function service.parse_model_editor(source, editor_id)
         if not valid_utf8_string(source) or #source > 16384 or source:find("[\r\n]") then
             return nil, failure("ModelEditorInput", "enter one bounded UTF-8 command line")
@@ -1842,8 +2109,11 @@ function M.new(options)
         return { operation = operation }
     end
 
-    ---Parses bounded invalid-file repair directives; raw source is accepted
-    -- only by the separate hidden input, never as a command argument.
+    -- Parse bounded invalid-file repair directives without raw source bytes.
+    --@param source string Complete bounded UTF-8 command line.
+    --@param repair_id string Exact current config-repair-N transaction identity.
+    --@return table|nil Repair directive with page or line number.
+    --@return table|nil Grammar or stale repair error.
     function service.parse_config_repair(source, repair_id)
         if not valid_utf8_string(source) or #source > 16384 or source:find("[\r\n]") then
             return nil, failure("ConfigEditorInput", "enter one bounded UTF-8 command line")
@@ -1878,29 +2148,49 @@ function M.new(options)
         return nil, failure("ConfigEditorInput", "unknown repair command or invalid arguments; enter help")
     end
 
-    ---Parses one Context REPL command line into a semantic request.
+    -- Parse one Context REPL command line into a semantic request.
+    --@param source string Candidate UTF-8 line.
+    --@param facts table|nil Optional fd and confirmation facts.
+    --@return table|nil Parsed Context action request.
+    --@return table|nil Grammar, TTY, or confirmation error.
     function service.parse_context_repl(source, facts)
         return parse_projected_line("context-repl-line", source, facts)
     end
 
-    ---Returns the renderer mode or a typed fd/action admission failure.
+    -- Return renderer mode or typed fd/action admission failure.
+    --@param request table Parsed semantic request.
+    --@param facts table Current stdin/stdout/stderr TTY facts.
+    --@return string|nil Human or machine renderer mode.
+    --@return table|nil Admission error.
     function service.fd_mode(request, facts)
         return fd_mode(request, facts)
     end
 
-    ---Renders overview, surface, input, or action help from the registry.
+    -- Render overview, surface, input, or action help from the registry.
+    --@param topic string|nil Requested help topic.
+    --@return string|nil Rendered help text.
+    --@return table|nil Usage error with optional suggestion.
     function service.render_help(topic)
         local rendered, render_error, suggestion = render_help(product_name, topic)
         if not rendered and suggestion then render_error.suggestion = suggestion end
         return rendered, render_error
     end
 
-    ---Returns deterministic registry-derived completion candidates.
+    -- Return deterministic registry-derived completion candidates.
+    --@param surface string Top, chat, or Context surface.
+    --@param prefix string|nil Candidate prefix.
+    --@return table|nil Sorted unique matching commands.
+    --@return table|nil Usage error for invalid completion request.
     function service.complete(surface, prefix)
         return completion(surface, prefix, platform)
     end
 
-    ---Renders one complete versioned RFC 8259 machine result.
+    -- Render one complete versioned RFC 8259 machine result.
+    --@param kind string Stable result kind.
+    --@param outcome string Stable outcome token.
+    --@param fields table|nil Additional nonreserved machine fields.
+    --@return string|nil One JSON object followed by newline.
+    --@return table|nil Validation or codec error.
     function service.machine_result(kind, outcome, fields)
         local admitted_kind, kind_error = stable_machine_token(kind, "kind")
         if not admitted_kind then return nil, kind_error end
@@ -1920,7 +2210,11 @@ function M.new(options)
         return encoded .. "\n"
     end
 
-    ---Renders a contiguous JSONL stream; the last record must carry outcome.
+    -- Render a contiguous JSONL stream whose last record carries outcome.
+    --@param kind string Stable stream kind.
+    --@param records table Dense record sequence.
+    --@return string|nil Newline-terminated JSONL payload.
+    --@return table|nil Shape, identity, or codec error.
     function service.machine_stream(kind, records)
         local admitted_kind, kind_error = stable_machine_token(kind, "kind")
         if not admitted_kind then return nil, kind_error end
@@ -1978,7 +2272,12 @@ function M.new(options)
         return table.concat(lines, "\n") .. "\n"
     end
 
-    ---Writes an already-rendered payload and converts broken stdout to failure.
+    -- Write an already-rendered payload and convert broken stdout to failure.
+    --@param writer function|table Output function or object with write method.
+    --@param bytes string Exact payload bytes.
+    --@return boolean|nil True after writer acceptance.
+    --@return table|nil InvalidOutput or BrokenStdout error.
+    --@effect Invokes the output writer once.
     function service.emit(writer, bytes)
         if type(bytes) ~= "string" then
             return nil, failure("InvalidOutput", "output bytes must be a string")
@@ -2001,7 +2300,9 @@ function M.new(options)
         return true
     end
 
-    ---Maps a typed error/result to the stable registry exit class code.
+    -- Map a typed error or result to a stable process exit code.
+    --@param value any Error identity, outcome identity, or structured record.
+    --@return integer Exit code; unknown values use general error.
     function service.exit_code(value)
         if value == nil then return REGISTRY.exit_classes.general_error end
         if type(value) == "string" then

@@ -1,0 +1,30 @@
+--- a/src/builtin.c
++++ b/src/builtin.c
+@@ -1548,6 +1548,27 @@
+   if (t == (time_t)-1)
+     return t;
+   return t + tm->__tm_gmtoff;
++#elif defined(WIN32) && defined(_WIN32_WINNT) && _WIN32_WINNT < 0x0600
++  /* XP msvcrt has no _mkgmtime64. Compute UTC directly without changing TZ.
++   * This helper's caller only consumes the timestamp, not normalized tm fields.
++   * Every input field is an int, so the intermediate arithmetic fits int64. */
++  static const int month_days[] = {0,31,59,90,120,151,181,212,243,273,304,334};
++  static const int divisor[] = {4,100,400};
++  long long year = (long long)tm->tm_year + 1900 + tm->tm_mon / 12;
++  int month = tm->tm_mon % 12;
++  if (month < 0) { month += 12; year--; }
++  long long days = (year - 1970) * 365 - 477;
++  for (int i = 0; i < 3; i++) {
++    long long leap_years = (year - 1) / divisor[i];
++    if ((year - 1) % divisor[i] < 0) leap_years--;
++    days += i == 1 ? -leap_years : leap_years;
++  }
++  days += month_days[month] + (long long)tm->tm_mday - 1;
++  if (month > 1 && year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)) days++;
++  long long seconds = days * 86400 + (long long)tm->tm_hour * 3600
++    + (long long)tm->tm_min * 60 + tm->tm_sec;
++  time_t result = (time_t)seconds;
++  return (long long)result == seconds ? result : (time_t)-1;
+ #elif WIN32
+   return _mkgmtime(tm);
+ #else

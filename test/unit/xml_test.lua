@@ -1,19 +1,29 @@
 --[[
-File: xml_test.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-09-23
+File: xml_test.lua
 Description: Verifies bounded XML streaming, security callbacks, and byte carriers.
 ]]
 
 local A = assert(loadfile(YACA_TEST_ROOT .. "/test/support/assert.lua", "t", _ENV))()
 
+--Loads a source module into an isolated per-case environment.
+--@param name string Module, Model, or resource name selected by the case.
+--@param cache table Per-case module cache preserving isolated imports.
+--@return any module Module export loaded in the isolated source environment.
 local function load_module(name, cache)
     cache = cache or {}
     if cache[name] then return cache[name] end
-    local environment = { require = function(dependency)
+    local environment = {
+        --Resolves an imported Lua module through the isolated test loader.
+        --@param dependency string Source module requested from the isolated loader.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
+        require = function(dependency)
         return load_module(dependency, cache)
     end }
     environment._G = environment
+    --@metatable environment Test-owned lookup and mutation contract for the current case.
+    --@field __index any Fallback table or function used for missing fixture keys.
     setmetatable(environment, { __index = _ENV })
     local chunk, load_error = loadfile(
         YACA_TEST_ROOT .. "/src/" .. name .. ".lua",
@@ -26,6 +36,9 @@ local function load_module(name, cache)
     return value
 end
 
+--Loads a repository Lua module as a test support value.
+--@param relative_path string Repository-relative Lua source path to load.
+--@return any module Test support module export loaded from the repository.
 local function load_table(relative_path)
     local chunk, load_error = loadfile(YACA_TEST_ROOT .. "/" .. relative_path, "t", _ENV)
     A.truthy(chunk, load_error)
@@ -36,6 +49,14 @@ local xml = load_module("xml")
 local fake_lxp = load_table("test/support/fake_lxp.lua")
 local fixtures = load_table(".develope-docs/contracts/fixtures/formats.lua")
 
+--Supplies scripted dispatch behavior required by this suite.
+--@param document table Parsed Context or configuration document under test.
+--@param callbacks table Callbacks supplied to the fake service.
+--@return boolean accepted Whether scripted dispatch succeeds in the fixture.
+--@return string|nil secondary2 Fixture text "mismatched tag".
+--@return integer|nil secondary3 Fixture numeric value 2.
+--@return integer|nil secondary4 Fixture numeric value 7.
+--@return integer|nil secondary5 Fixture numeric value 19.
 local function scripted_dispatch(document, callbacks)
     if document == "simple" then
         callbacks.XmlDecl(nil, "1.0", "UTF-8")
@@ -92,6 +113,11 @@ local function scripted_dispatch(document, callbacks)
     return true
 end
 
+--Builds validated options for this suite's component fixture.
+--@param dispatch function Dispatch callback supplied to the fake runtime.
+--@param overrides table|nil Per-case overrides of default fixture behavior.
+--@return any options options used to configure the component under test.
+--@return any secondary2 Luaexpat parser port returned by the fixture.
 local function options(dispatch, overrides)
     local lxp = fake_lxp(dispatch or scripted_dispatch)
     local result = {
@@ -111,6 +137,11 @@ local function options(dispatch, overrides)
     return result, lxp
 end
 
+--Constructs the codec service used by this suite.
+--@param overrides table|nil Per-case overrides of default fixture behavior.
+--@param dispatch function Dispatch callback supplied to the fake runtime.
+--@return any fixture Constructed codec service used by this suite.
+--@return any secondary2 Luaexpat parser port returned by the fixture.
 local function codec(overrides, dispatch)
     local candidate, lxp = options(dispatch, overrides)
     return assert(xml.new(candidate)), lxp
@@ -121,6 +152,9 @@ return {
     cases = {
         {
             name = "format fixtures select lossless text base64 and missing carriers",
+            --Verifies format fixtures select lossless text base64 and missing carriers.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify format fixtures select lossless text base64 and missing carriers.
             run = function()
                 local service = codec()
                 for _, case in ipairs(fixtures.xml_text_cases) do
@@ -153,6 +187,9 @@ return {
         },
         {
             name = "base64 decoder is strict canonical and byte-count aware",
+            --Verifies base64 decoder is strict canonical and byte-count aware.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify base64 decoder is strict canonical and byte-count aware.
             run = function()
                 local service = codec()
                 local valid = assert(service.decode_carrier("base64", "AAECAw==", 4))
@@ -178,16 +215,32 @@ return {
         },
         {
             name = "reader merges native text callbacks and reports stable element paths",
+            --Verifies reader merges native text callbacks and reports stable element paths.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify reader merges native text callbacks and reports stable element paths.
             run = function()
                 local service, lxp = codec()
                 local events = {}
                 local reader = assert(service.new_reader({
+                    --Supplies start element behavior required by the 'reader merges native text callbacks and reports stable element paths' case.
+                    --@param name string Module, Model, or resource name selected by the case.
+                    --@param attributes table Attributes supplied to the fake filesystem.
+                    --@param path string File or Context path exercised by the case.
+                    --@return nil No value; assertions verify reader merges native text callbacks and reports stable element paths.
                     start_element = function(name, attributes, path)
                         events[#events + 1] = "start:" .. path .. ":" .. (attributes.id or "")
                     end,
+                    --Supplies text behavior required by the 'reader merges native text callbacks and reports stable element paths' case.
+                    --@param value any Candidate whose acceptance or transformation the test checks.
+                    --@param path string File or Context path exercised by the case.
+                    --@return nil No value; assertions verify reader merges native text callbacks and reports stable element paths.
                     text = function(value, path)
                         events[#events + 1] = "text:" .. path .. ":" .. value
                     end,
+                    --Supplies end element behavior required by the 'reader merges native text callbacks and reports stable element paths' case.
+                    --@param _ any Unused callback argument supplied by the port.
+                    --@param path string File or Context path exercised by the case.
+                    --@return nil No value; assertions verify reader merges native text callbacks and reports stable element paths.
                     end_element = function(_, path)
                         events[#events + 1] = "end:" .. path
                     end,
@@ -213,6 +266,9 @@ return {
         },
         {
             name = "DTD entities external reads processing instructions and encodings reject",
+            --Verifies dTD entities external reads processing instructions and encodings reject.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify dTD entities external reads processing instructions and encodings reject.
             run = function()
                 local service = codec()
                 local cases = {
@@ -233,6 +289,9 @@ return {
         },
         {
             name = "reader enforces every structural and byte release limit",
+            --Verifies dTD entities external reads processing instructions and encodings reject.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify dTD entities external reads processing instructions and encodings reject.
             run = function()
                 local cases = {
                     { "deep", { maximum_depth = 4 }, "depth" },
@@ -262,6 +321,9 @@ return {
         },
         {
             name = "well-formed and consumer failures keep typed positions",
+            --Verifies well-formed and consumer failures keep typed positions.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify well-formed and consumer failures keep typed positions.
             run = function()
                 local service = codec()
                 local stats, parse_error = service.parse("syntax")
@@ -273,6 +335,10 @@ return {
                 A.equal(parse_error.offset, 19)
 
                 local consumed, consumer_error = service.parse("simple", {
+                    --Supplies start element behavior required by the 'well-formed and consumer failures keep typed positions' case.
+                    --@param none No arguments; this closure uses its captured fixture state.
+                    --@return boolean accepted Whether the fake callback accepts this scenario.
+                    --@return string secondary2 Fixture text "schema rejected element".
                     start_element = function() return false, "schema rejected element" end,
                 })
                 A.falsy(consumed)
@@ -282,9 +348,15 @@ return {
         },
         {
             name = "writer emits fixed names ordered attributes escapes and typed carriers",
+            --Verifies well-formed and consumer failures keep typed positions.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify well-formed and consumer failures keep typed positions.
             run = function()
                 local service = codec()
                 local output = {}
+                --Constructs new writer for the writer emits fixed names ordered attributes escapes and typed carriers scenario.
+                --@param bytes string Byte chunk supplied to the fake I/O port.
+                --@return nil No value; the fake port or test assertion observes this callback's effects.
                 local writer = assert(service.new_writer(function(bytes)
                     output[#output + 1] = bytes
                 end))
@@ -319,8 +391,14 @@ return {
         },
         {
             name = "writer rejects ambiguous names text sequences attributes and sink failures",
+            --Verifies writer rejects ambiguous names text sequences attributes and sink failures.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify writer rejects ambiguous names text sequences attributes and sink failures.
             run = function()
                 local service = codec()
+                --Constructs new writer for the writer rejects ambiguous names text sequences attributes and sink failures scenario.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; the fake port or test assertion observes this callback's effects.
                 local writer = assert(service.new_writer(function() end))
                 A.falsy(writer.start_element("Root"))
                 A.truthy(writer.declaration())
@@ -339,6 +417,10 @@ return {
                 A.truthy(writer.finish())
                 A.falsy(writer.empty_element("Later"))
 
+                --Constructs new writer for the writer rejects ambiguous names text sequences attributes and sink failures scenario.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return boolean accepted Whether the fake callback accepts this scenario.
+                --@return string secondary2 Fixture text "disk full".
                 local sink_writer = assert(service.new_writer(function()
                     return false, "disk full"
                 end))
@@ -350,6 +432,9 @@ return {
         },
         {
             name = "dependency identity options carrier caps and services fail closed",
+            --Verifies dependency identity options carrier caps and services fail closed.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify dependency identity options carrier caps and services fail closed.
             run = function()
                 local candidate = options()
                 candidate.lxp._EXPAT_VERSION = "expat_2.8.1"
@@ -367,8 +452,15 @@ return {
                 local carrier, carrier_error = bounded.decode_carrier("base64", "YWJj", 3)
                 A.falsy(carrier)
                 A.equal(carrier_error.reason, "carrier")
+                --Executes the action expected to raise in the 'dependency identity options carrier caps and services fail closed' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify dependency identity options carrier caps and services fail closed.
                 A.raises(function() bounded.limits.maximum_depth = 99 end, "cannot be modified")
-                A.falsy(bounded.new_reader({ unknown = function() end }))
+                A.falsy(bounded.new_reader({
+                    --Supplies unknown behavior required by the 'dependency identity options carrier caps and services fail closed' case.
+                    --@param none No arguments; this closure uses its captured fixture state.
+                    --@return nil No value; assertions verify dependency identity options carrier caps and services fail closed.
+                    unknown = function() end }))
                 A.falsy(bounded.new_writer({}))
             end,
         },

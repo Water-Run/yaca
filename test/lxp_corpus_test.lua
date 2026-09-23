@@ -1,19 +1,29 @@
 --[[
-File: lxp_corpus_test.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-09-23
+File: lxp_corpus_test.lua
 Description: Locks the pinned parser build and Context reference-reader corpus.
 ]]
 
 local A = assert(loadfile(YACA_TEST_ROOT .. "/test/support/assert.lua", "t", _ENV))()
 
+--Loads a source module into an isolated per-case environment.
+--@param name string Module, Model, or resource name selected by the case.
+--@param cache table Per-case module cache preserving isolated imports.
+--@return any module Module export loaded in the isolated source environment.
 local function load_module(name, cache)
     cache = cache or {}
     if cache[name] then return cache[name] end
-    local environment = { require = function(dependency)
+    local environment = {
+        --Resolves an imported Lua module through the isolated test loader.
+        --@param dependency string Source module requested from the isolated loader.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
+        require = function(dependency)
         return load_module(dependency, cache)
     end }
     environment._G = environment
+    --@metatable environment Test-owned lookup and mutation contract for the current case.
+    --@field __index any Fallback table or function used for missing fixture keys.
     setmetatable(environment, { __index = _ENV })
     local chunk, load_error = loadfile(
         YACA_TEST_ROOT .. "/src/" .. name .. ".lua",
@@ -26,12 +36,18 @@ local function load_module(name, cache)
     return value
 end
 
+--Loads a repository Lua module as a test support value.
+--@param relative_path string Repository-relative Lua source path to load.
+--@return any module Test support module export loaded from the repository.
 local function load_table(relative_path)
     local chunk, load_error = loadfile(YACA_TEST_ROOT .. "/" .. relative_path, "t", _ENV)
     A.truthy(chunk, load_error)
     return chunk()
 end
 
+--Reads read all for this test scenario.
+--@param relative_path string Repository-relative Lua source path to load.
+--@return any bytes Complete bytes read from the selected fixture file.
 local function read_all(relative_path)
     local handle, open_error = io.open(YACA_TEST_ROOT .. "/" .. relative_path, "rb")
     A.truthy(handle, open_error)
@@ -48,16 +64,30 @@ local proof = load_table(".develope-docs/proofs/modern-2026-08-29/manifest.lua")
 local fixture = read_all(".develope-docs/contracts/fixtures/context-minimal.xml")
 local rng = read_all(".develope-docs/contracts/context.rng")
 
+--Writes emit leaf through the the current case fixture.
+--@param callbacks table Callbacks supplied to the fake service.
+--@param name string Module, Model, or resource name selected by the case.
+--@param value any Candidate whose acceptance or transformation the test checks.
+--@param attributes table Attributes supplied to the fake filesystem.
+--@return nil No value; the fake port or test assertion observes this callback's effects.
 local function emit_leaf(callbacks, name, value, attributes)
     callbacks.StartElement(nil, name, attributes or {})
     if value ~= nil and value ~= "" then callbacks.CharacterData(nil, value) end
     callbacks.EndElement(nil, name)
 end
 
+--Writes emit field through the the current case fixture.
+--@param callbacks table Callbacks supplied to the fake service.
+--@param name string Module, Model, or resource name selected by the case.
+--@param value any Candidate whose acceptance or transformation the test checks.
+--@return nil No value; the fake port or test assertion observes this callback's effects.
 local function emit_field(callbacks, name, value)
     emit_leaf(callbacks, "Field", value, { name = name })
 end
 
+--Writes emit fixture through the the current case fixture.
+--@param callbacks table Callbacks supplied to the fake service.
+--@return nil No value; the fake port or test assertion observes this callback's effects.
 local function emit_fixture(callbacks)
     callbacks.XmlDecl(nil, "1.0", "UTF-8")
     callbacks.StartElement(nil, "YacaContext", {
@@ -123,6 +153,14 @@ local function emit_fixture(callbacks)
     callbacks.EndElement(nil, "YacaContext")
 end
 
+--Supplies reference dispatch behavior required by the 'Std' case.
+--@param document table Parsed Context or configuration document under test.
+--@param callbacks table Callbacks supplied to the fake service.
+--@return boolean accepted Whether reference dispatch succeeds in the fixture.
+--@return string|nil secondary2 Fixture text "reference fixture mismatch".
+--@return integer|nil secondary3 Fixture numeric value 1.
+--@return integer|nil secondary4 Fixture numeric value 1.
+--@return integer|nil secondary5 Fixture numeric value 1.
 local function reference_dispatch(document, callbacks)
     if document == fixture then
         emit_fixture(callbacks)
@@ -138,6 +176,10 @@ local function reference_dispatch(document, callbacks)
     return false, "reference fixture mismatch", 1, 1, 1
 end
 
+--Supplies reference codec behavior required by the 'Std' case.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return any observed reference codec value observed by the scenario assertion.
+--@return any secondary2 Luaexpat parser port returned by the fixture.
 local function reference_codec()
     local lxp = fake_lxp(reference_dispatch)
     local service = assert(xml.new({
@@ -156,6 +198,9 @@ local function reference_codec()
     return service, lxp
 end
 
+--Supplies allowed rng elements behavior required by the 'Std' case.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return any observed allowed rng elements value observed by the scenario assertion.
 local function allowed_rng_elements()
     local allowed = {}
     for name in rng:gmatch('<element name="([^"]+)">') do allowed[name] = true end
@@ -167,6 +212,9 @@ return {
     cases = {
         {
             name = "build recipe and runtime identity match every pinned manifest",
+            --Verifies build recipe and runtime identity match every pinned manifest.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify build recipe and runtime identity match every pinned manifest.
             run = function()
                 for _, name in ipairs({ "lua", "expat", "luaexpat" }) do
                     A.equal(build.lock[name].version, release.dependencies[name].version)
@@ -209,6 +257,9 @@ return {
         },
         {
             name = "reference reader admits the RNG vocabulary and ordered root children",
+            --Verifies reference reader admits the RNG vocabulary and ordered root children.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify reference reader admits the RNG vocabulary and ordered root children.
             run = function()
                 local service = reference_codec()
                 local allowed = allowed_rng_elements()
@@ -216,6 +267,12 @@ return {
                 local root_children = {}
                 local root_attributes
                 local stats = assert(service.parse(fixture, {
+                    --Supplies start element behavior required by the 'reference reader admits the RNG vocabulary and ordered root children' case.
+                    --@param name string Module, Model, or resource name selected by the case.
+                    --@param attributes table Attributes supplied to the fake filesystem.
+                    --@param path string File or Context path exercised by the case.
+                    --@return boolean accepted Whether the fake callback accepts this scenario.
+                    --@return string secondary2 Fixture text "RNG unknown element: " .. name.
                     start_element = function(name, attributes, path)
                         if not allowed[name] then return false, "RNG unknown element: " .. name end
                         counts[name] = (counts[name] or 0) + 1
@@ -236,6 +293,10 @@ return {
                 A.equal(stats.external_entity_opens, 0)
 
                 local rejected, reference_error = service.parse("unknown-element", {
+                    --Supplies start element behavior required by the 'reference reader admits the RNG vocabulary and ordered root children' case.
+                    --@param name string Module, Model, or resource name selected by the case.
+                    --@return boolean accepted Whether the fake callback accepts this scenario.
+                    --@return string secondary2 Fixture text "RNG unknown element".
                     start_element = function(name)
                         if not allowed[name] then return false, "RNG unknown element" end
                     end,
@@ -246,6 +307,9 @@ return {
         },
         {
             name = "every fixture split position preserves the same bounded parse",
+            --Verifies every fixture split position preserves the same bounded parse.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify every fixture split position preserves the same bounded parse.
             run = function()
                 local service, lxp = reference_codec()
                 for position = 0, #fixture do
@@ -263,6 +327,9 @@ return {
         },
         {
             name = "modern native corpus evidence stays explicit about target gaps",
+            --Verifies every fixture split position preserves the same bounded parse.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify every fixture split position preserves the same bounded parse.
             run = function()
                 local selected
                 for _, candidate in ipairs(proof.proofs) do
@@ -278,8 +345,8 @@ return {
                     "CentOS 7 runtime",
                     "target resource limits",
                 })
-                A.truthy(proof.conclusions.target_qualification_complete)
-                A.truthy(proof.conclusions.release_gate_open)
+                A.falsy(proof.conclusions.target_qualification_complete)
+                A.falsy(proof.conclusions.release_gate_open)
             end,
         },
     },

@@ -1,7 +1,7 @@
 --[[
-File: model.lua
-Date: 2026-08-30
 Author: WaterRun
+Date: 2026-09-23
+File: model.lua
 Description: Maps bounded OpenAI Chat and Anthropic Messages wire data to canonical model events.
 ]]
 
@@ -14,7 +14,7 @@ local M = {}
 
 local PURPOSES = {
     main = true,
-    side = true,
+    ask = true,
     ["action-review"] = true,
     ["termination-review"] = true,
     compaction = true,
@@ -38,6 +38,7 @@ local DIRECT_TOOL_NAMES = {
     rename = true,
     delete = true,
     exec = true,
+    lua = true,
 }
 
 local REQUIRED_REQUEST_FIELDS = {
@@ -61,6 +62,9 @@ local FORBIDDEN_REQUEST_FIELDS = {
     private_source_digest = true,
 }
 
+-- Reject credential and private-source fields at the public request boundary.
+--@param key any Candidate request field name.
+--@return boolean True when the field is explicitly forbidden, ignoring ASCII case.
 local function forbidden_request_field(key)
     return type(key) == "string" and FORBIDDEN_REQUEST_FIELDS[key:lower()] == true
 end
@@ -85,24 +89,60 @@ local OPTION_NAMES = {
     "maximum_events",
 }
 
+-- Construct a structured diagnostic without throwing or formatting its optional fields.
+--@param code string Stable diagnostic code used by callers to choose recovery behavior.
+--@param message string Human-readable summary supplied by the failing operation.
+--@param detail any|nil Optional underlying cause or contextual diagnostic data; retained as supplied.
+--@return table New diagnostic record; optional non-nil fields are retained without deep copying.
 local function failure(code, message, detail)
     local result = { code = code, message = message }
     if detail ~= nil then result.detail = detail end
     return result
 end
 
+-- Create a shallow read-only view without copying the backing table.
+--@param values table Backing fields retained by reference; the caller owns their stability.
+--@param label string|nil Diagnostic label; defaults to "readonly value".
+--@return table Empty proxy exposing the backing fields through its locked metatable.
+--@ownership Retains values by reference; nested values and the backing table are not frozen.
 local function readonly(values, label)
+    --@metatable readonly_proxy Forwards reads and iteration; ordinary assignments raise an error.
+    --@field __index table Backing values used for missing-key reads.
+    --@field __newindex function Rejects ordinary assignments without changing the backing values.
+    --@field __pairs function Enumerates the backing table with next.
+    --@field __len function Reports the backing table sequence length.
+    --@field __metatable string Hides this metatable behind the fixed "locked" marker.
     return setmetatable({}, {
         __index = values,
+        -- Reject a write through the proxy before it can create an ordinary field.
+        --@param _ table Proxy receiving the assignment; its contents are not consulted.
+        --@param key any Attempted field name included in the diagnostic.
+        --@return nil Does not return normally.
+        --@error Always raises a read-only assignment error at the caller frame.
         __newindex = function(_, key)
             error((label or "readonly value") .. " cannot be modified: " .. tostring(key), 2)
         end,
-        __pairs = function() return next, values, nil end,
-        __len = function() return #values end,
+        -- Iterate the backing fields instead of the empty proxy table.
+        --@param none The proxy argument supplied by pairs is ignored.
+        --@return function The standard next iterator.
+        --@return table Backing values used as iterator state.
+        --@return nil Initial key used to start iteration.
+        __pairs = function()
+            return next, values, nil
+        end,
+        -- Forward sequence-length queries to the backing table.
+        --@param none The proxy operand supplied by Lua is ignored.
+        --@return integer Length of the backing sequence under the Lua length operator.
+        __len = function()
+            return #values
+        end,
         __metatable = "locked",
     })
 end
 
+-- Count a dense one-based array while rejecting holes and extra key kinds.
+--@param values any Candidate table; every key must belong to the sequence 1 through count.
+--@return integer|nil Sequence length, including zero for an empty table; nil for an invalid shape.
 local function dense_count(values)
     if type(values) ~= "table" then return nil end
     local count = 0
@@ -116,10 +156,18 @@ local function dense_count(values)
     return count
 end
 
+-- Check the Lua integer subtype and the caller's inclusive lower bound.
+--@param value any Candidate value; floats and non-numeric values are rejected.
+--@param minimum integer Inclusive minimum accepted by this check.
+--@return boolean True only for an integer at least minimum.
 local function valid_integer(value, minimum)
     return math.type(value) == "integer" and value >= minimum
 end
 
+-- Validate a bounded nonempty token without NUL or line breaks.
+--@param value any Candidate identifier or header token.
+--@param maximum integer Inclusive byte cap.
+--@return boolean True only for bounded one-line text.
 local function valid_token(value, maximum)
     return type(value) == "string"
         and value ~= ""
@@ -127,6 +175,9 @@ local function valid_token(value, maximum)
         and not value:find("[%z\r\n]")
 end
 
+-- Admit an absolute HTTP(S) endpoint without fragment or user information.
+--@param value any Candidate provider endpoint URL.
+--@return boolean True for a supported nonempty network authority.
 local function valid_endpoint(value)
     if type(value) ~= "string" or value == "" or value:find("[%z\r\n]")
         or value:find("#", 1, true)
@@ -140,6 +191,12 @@ local function valid_endpoint(value)
         and not authority:find("@", 1, true)
 end
 
+-- Recursively copy public data into read-only proxies while rejecting cycles.
+--@param value any Value to freeze.
+--@param label string Read-only diagnostic label.
+--@param seen table|nil Recursion stack for cycle detection.
+--@return any Frozen recursive copy or unchanged scalar.
+--@error Raises on cyclic table input.
 local function freeze(value, label, seen)
     if type(value) ~= "table" then return value end
     seen = seen or {}
@@ -151,6 +208,13 @@ local function freeze(value, label, seen)
     return readonly(copy, label)
 end
 
+-- Copy normalized request data under JSON node, depth, byte, and UTF-8 limits.
+--@param value any Candidate request subtree.
+--@param options table Hard structural and byte caps.
+--@param state table|nil Shared traversal counters.
+--@param depth integer|nil Current recursion depth.
+--@return any|nil Detached bounded copy.
+--@return table|nil Invalid value, UTF-8, or RequestLimit error.
 local function copy_bounded(value, options, state, depth)
     state = state or { nodes = 0, bytes = 0 }
     depth = depth or 1
@@ -195,6 +259,9 @@ local function copy_bounded(value, options, state, depth)
     return result
 end
 
+-- Convert typed JSON values to plain Lua data, retaining number lexemes.
+--@param value any Typed JSON value.
+--@return any Plain scalar or recursively converted table.
 local function json_plain(value)
     local kind = json.kind(value)
     if kind == "null" then return nil end
@@ -216,6 +283,11 @@ local ARRAY_KEYS = {
     content = true,
 }
 
+-- Convert Lua request data into typed JSON with explicit empty-array hints.
+--@param value any Lua scalar or table to encode.
+--@param hint string|nil array for known empty array fields.
+--@return any|nil Typed JSON value.
+--@return table|nil InvalidWireValue diagnostic.
 local function to_json_value(value, hint)
     if json.kind(value) then return value end
     local value_type = type(value)
@@ -252,6 +324,12 @@ local function to_json_value(value, hint)
     return json.object(items)
 end
 
+-- Encode one typed JSON value, including a scalar without its wrapper.
+--@param codec table Bounded JSON codec.
+--@param value any Lua request value.
+--@param hint string|nil Empty-array hint.
+--@return string|nil Canonical wire JSON fragment.
+--@return table|nil Conversion or encoding error.
 local function encode_value(codec, value, hint)
     local converted, convert_error = to_json_value(value, hint)
     if converted == nil then return nil, convert_error end
@@ -263,11 +341,20 @@ local function encode_value(codec, value, hint)
     return encoded:sub(6, -2)
 end
 
+-- Serialize a dense Provider message array under the wire byte cap.
+--@param codec table Bounded JSON codec.
+--@param messages table Ordered role/content message records.
+--@return string|nil Encoded JSON array.
+--@return table|nil InvalidPromptBundle or WireRequestLimit error.
 local function encode_message_array(codec, messages)
     if dense_count(messages) == nil then
         return nil, failure("InvalidPromptBundle", "prompt messages must be a dense array")
     end
     local result, byte_count = { "[" }, 1
+    -- Append one encoded message fragment within the codec's byte limit.
+    --@param bytes string Canonical JSON fragment.
+    --@return boolean|nil True after append.
+    --@return table|nil WireRequestLimit diagnostic.
     local function add(bytes)
         byte_count = byte_count + #bytes
         if byte_count > codec.limits.maximum_bytes then
@@ -303,6 +390,9 @@ local function encode_message_array(codec, messages)
     return table.concat(result)
 end
 
+-- Wrap a durable Model view as explicitly quoted user data with provenance.
+--@param manifest table Active view digest, range, and optional body.
+--@return table|nil Provider user message, or nil when the view has no body.
 local function model_view_message(manifest)
     if manifest.body == nil then return nil end
     return {
@@ -319,6 +409,14 @@ local function model_view_message(manifest)
     }
 end
 
+-- Project Prompt and durable view into OpenAI or Anthropic message fields.
+--@param codec table Bounded JSON codec.
+--@param bundle table Assembled Prompt messages and optional system text.
+--@param manifest table Durable Model view manifest and body.
+--@param protocol string openai-chat or anthropic-messages.
+--@return string|nil Encoded provider messages.
+--@return string|nil Encoded Anthropic system blocks when needed.
+--@return table|nil Prompt or encoding error.
 local function encode_messages(codec, bundle, manifest, protocol)
     local messages = bundle.messages
     if dense_count(messages) == nil then
@@ -397,6 +495,10 @@ local function encode_messages(codec, bundle, manifest, protocol)
     return encoded_messages, encoded_system
 end
 
+-- Validate all Model codec and response caps and their ordering constraints.
+--@param options any Candidate release limits.
+--@return table|nil Detached normalized limit map.
+--@return table|nil InvalidModelOptions diagnostic.
 local function validate_options(options)
     if type(options) ~= "table" then
         return nil, failure("InvalidModelOptions", "model release limits are required")
@@ -427,6 +529,11 @@ local function validate_options(options)
     return result
 end
 
+-- Admit a versioned closed direct-tool registry and build its name lookup.
+--@param registry any Candidate model-visible Tool registry.
+--@param options table Model limit map retained for shared validation interface.
+--@return table|nil Public registry, lookup, and ordered names.
+--@return table|nil InvalidToolRegistry diagnostic.
 local function normalize_registry(registry, options)
     if type(registry) ~= "table" or not valid_token(registry.version, 128)
         or not valid_token(registry.digest, 256)
@@ -452,6 +559,11 @@ local function normalize_registry(registry, options)
     return { public = registry, lookup = lookup, names = names }
 end
 
+-- Validate purpose-bound control schema and map wire names to canonical controls.
+--@param controls table Prompt-provided control schema.
+--@param purpose string Request purpose.
+--@return table|nil Public controls and canonical lookup.
+--@return table|nil Schema validation error.
 local function normalize_controls(controls, purpose)
     local valid, validation_error = prompt.validate_controls_schema(controls, purpose)
     if not valid then return nil, validation_error end
@@ -467,6 +579,11 @@ local function normalize_controls(controls, purpose)
     return { public = controls, lookup = lookup }
 end
 
+-- Validate active Model view digest, range, and optional quoted-data body.
+--@param manifest any Candidate durable view manifest.
+--@param options table Model byte limits.
+--@return table|nil Original validated manifest.
+--@return table|nil InvalidModelViewManifest or UTF-8 error.
 local function normalize_model_view(manifest, options)
     if type(manifest) ~= "table" then
         return nil, failure("InvalidModelViewManifest", "model view manifest is required")
@@ -520,6 +637,11 @@ local function normalize_model_view(manifest, options)
     return manifest
 end
 
+-- Admit a complete request while excluding credentials and caller-owned mutable authority.
+--@param spec any Candidate normalized Model request.
+--@param options table Hard request, JSON, and text limits.
+--@return table|nil Detached request with rebuilt Tool and control lookups.
+--@return table|nil Shape, secret, Prompt, or limit error.
 local function validate_request_shape(spec, options)
     if type(spec) ~= "table" then
         return nil, failure("InvalidRequest", "normalized request must be a table")
@@ -610,6 +732,9 @@ local function validate_request_shape(spec, options)
     return { public = copy, registry = registry, controls = controls }
 end
 
+-- Read an exact nonnegative integer from a typed JSON number token.
+--@param value any Typed JSON value.
+--@return integer|nil Parsed integer, or nil for noncanonical/out-of-range values.
 local function nonnegative_json_integer(value)
     if json.kind(value) ~= "number" then return nil end
     local lexeme = assert(json.number_lexeme(value))
@@ -619,6 +744,10 @@ local function nonnegative_json_integer(value)
     return number
 end
 
+-- Compare a typed JSON scalar to one Lua schema enum candidate.
+--@param value any Typed JSON scalar.
+--@param expected any Schema enum candidate.
+--@return boolean True when values match under number-lexeme semantics.
 local function schema_scalar_equal(value, expected)
     local kind = json.kind(value)
     if kind == "number" and type(expected) == "number" then
@@ -631,6 +760,13 @@ local function schema_scalar_equal(value, expected)
     return value == expected
 end
 
+-- Validate the bounded JSON Schema subset used by direct Tool arguments.
+--@param value any Typed JSON value.
+--@param schema table JSON Schema subset node.
+--@param path string|nil Diagnostic path rooted at $.
+--@param depth integer|nil Current schema recursion depth.
+--@return boolean|nil True when value matches.
+--@return string|nil Failing path or invalid-schema reason.
 local function validate_schema(value, schema, path, depth)
     path, depth = path or "$", depth or 1
     if depth > 32 or type(schema) ~= "table" then return nil, "invalid-schema" end
@@ -695,6 +831,11 @@ local function validate_schema(value, schema, path, depth)
     return true
 end
 
+-- Require exact JSON object fields for finish, ask-user, or refuse controls.
+--@param control string Canonical control name.
+--@param payload any Typed JSON object from provider arguments.
+--@return boolean|nil True when valid.
+--@return string|nil Payload validation reason.
 local function validate_control_payload(control, payload)
     if json.kind(payload) ~= "object" then return nil, "payload-type" end
     local allowed, required = {}, nil
@@ -715,6 +856,9 @@ local function validate_control_payload(control, payload)
     return true
 end
 
+-- Map an OpenAI finish reason into the canonical Model finish classes.
+--@param value string Provider finish reason.
+--@return string|nil Canonical finish class.
 local function map_openai_finish(value)
     local mapping = {
         stop = "stop",
@@ -727,6 +871,9 @@ local function map_openai_finish(value)
     return mapping[value]
 end
 
+-- Map an Anthropic stop reason into the canonical Model finish classes.
+--@param value string Provider stop reason.
+--@return string|nil Canonical finish class.
 local function map_anthropic_finish(value)
     local mapping = {
         end_turn = "stop",
@@ -738,14 +885,30 @@ local function map_anthropic_finish(value)
     return mapping[value]
 end
 
+-- Freeze a canonical Model event with its request provenance.
+--@param request_id string Admitted Model request ID.
+--@param kind string Canonical event kind.
+--@param fields table|nil Additional event fields.
+--@return table Deep-frozen Model event.
 local function make_event(request_id, kind, fields)
     local event = { kind = kind, request_id = request_id }
     for key, value in pairs(fields or {}) do event[key] = value end
     return freeze(event, "model event")
 end
 
+-- Project registered direct tools and purpose controls into provider wire schemas.
+--@param codec table Bounded JSON codec.
+--@param request_data table Admitted request and exact Tool/control registries.
+--@param protocol string OpenAI Chat or Anthropic Messages protocol.
+--@return string|nil Encoded tools array, or nil when no tools are exposed.
+--@return table|nil Wire encoding error.
 local function encode_tools(codec, request_data, protocol)
     local projected = {}
+    -- Append one protocol-specific function/tool schema to the wire projection.
+    --@param name string Wire tool name.
+    --@param description string Model-visible tool description.
+    --@param schema table Tool argument JSON Schema.
+    --@return nil Adds an entry to the projection.
     local function add(name, description, schema)
         if protocol == "openai-chat" then
             projected[#projected + 1] = {
@@ -774,6 +937,12 @@ local function encode_tools(codec, request_data, protocol)
     return encode_value(codec, projected, "array")
 end
 
+-- Encode a complete bounded OpenAI or Anthropic request body.
+--@param codec table Bounded JSON codec.
+--@param request_data table Admitted normalized request.
+--@param streaming boolean Whether the provider request asks for streaming events.
+--@return string|nil Canonical provider request body.
+--@return table|nil Prompt, Tool, limit, or wire encoding error.
 local function encode_request(codec, request_data, streaming)
     local model_ref = request_data.model_ref
     local protocol = model_ref.protocol
@@ -870,6 +1039,14 @@ local function encode_request(codec, request_data, streaming)
     }, "provider request")
 end
 
+-- Create one bounded Provider response parser with canonical event emission.
+--@param codec table Bounded JSON codec.
+--@param options table Response, SSE, Tool, and event caps.
+--@param request_data table Admitted request identity and protocol.
+--@param registry table Direct-tool lookup bound to the request.
+--@param controls table Purpose-bound control lookup.
+--@param streaming boolean Whether bytes are SSE frames.
+--@return table Read-only response session with push, finish, and terminal methods.
 local function new_response_session(codec, options, request_data, registry, controls, streaming)
     local request_id = request_data.request_id
     local protocol = request_data.model_ref.protocol
@@ -901,6 +1078,12 @@ local function new_response_session(codec, options, request_data, registry, cont
     local usage
     local terminal_response
 
+    -- Emit a bounded canonical event, deferring ordinary data behind a control barrier.
+    --@param kind string Canonical Model event kind.
+    --@param fields table|nil Event payload fields.
+    --@param bypass_barrier boolean|nil Allow control event publication before deferred data.
+    --@return boolean|nil True after emission or deferral.
+    --@return string|nil event-limit reason.
     local function append_event(kind, fields, bypass_barrier)
         if event_count >= options.maximum_events then return nil, "event-limit" end
         local terminal = kind == "protocol_error"
@@ -919,12 +1102,19 @@ local function new_response_session(codec, options, request_data, registry, cont
         return true
     end
 
+    -- Release buffered ordinary events after a control's arguments are validated.
+    --@param none This closure takes no arguments.
+    --@return nil Appends deferred events to the current public batch.
     local function release_deferred_events()
         control_barrier = false
         for _, event in ipairs(deferred_events) do batch[#batch + 1] = event end
         deferred_events = {}
     end
 
+    -- Freeze the terminal response from validated blocks, calls, and usage.
+    --@param finish_class string Canonical finish classification.
+    --@param reason string|nil Incomplete reason.
+    --@return table Immutable normalized response, reused after first construction.
     local function build_response(finish_class, reason)
         if terminal_response then return terminal_response end
         local frozen_blocks, frozen_calls = {}, {}
@@ -947,6 +1137,10 @@ local function new_response_session(codec, options, request_data, registry, cont
         return terminal_response
     end
 
+    -- Close the parser as incomplete after malformed or over-limit Provider data.
+    --@param error_id string Canonical protocol failure identifier.
+    --@param start_openai boolean|nil Emit an OpenAI start event if none was seen.
+    --@return nil Sets failed state and terminal response.
     local function protocol_fail(error_id, start_openai)
         if state ~= "open" then return end
         if start_openai and protocol == "openai-chat" and not started then
@@ -961,6 +1155,9 @@ local function new_response_session(codec, options, request_data, registry, cont
         build_response("incomplete", error_id)
     end
 
+    -- Bind the Provider response ID exactly once and emit response_start.
+    --@param provider_id string Claimed provider response ID.
+    --@return boolean|nil True after a stable start, nil after protocol failure.
     local function emit_start(provider_id)
         if started then
             if provider_id and provider_id ~= "" and provider_response_id ~= ""
@@ -983,6 +1180,9 @@ local function new_response_session(codec, options, request_data, registry, cont
         return true
     end
 
+    -- Append a response content block within the hard block count cap.
+    --@param block table Text, Tool, or pending-control block.
+    --@return integer|nil One-based block index, or nil after limit failure.
     local function add_content_block(block)
         if #content_blocks >= options.maximum_content_blocks then
             protocol_fail("content-block-limit")
@@ -992,6 +1192,10 @@ local function new_response_session(codec, options, request_data, registry, cont
         return #content_blocks
     end
 
+    -- Emit and collect bounded visible text or reasoning summary deltas.
+    --@param value any Provider delta text.
+    --@param reasoning boolean Whether this is a reasoning summary.
+    --@return boolean|nil True when accepted, nil after limit failure.
     local function append_text_delta(value, reasoning)
         if type(value) ~= "string" or value == "" then return true end
         local running = reasoning and reasoning_bytes or text_bytes
@@ -1015,6 +1219,12 @@ local function new_response_session(codec, options, request_data, registry, cont
         return true
     end
 
+    -- Bind a Provider Tool call index, ID, and registered name before arguments.
+    --@param index integer One-based Provider Tool position.
+    --@param provider_id string Provider Tool call ID.
+    --@param name string Registered Tool or control wire name.
+    --@param initial_arguments string|nil Complete nonstream arguments when supplied.
+    --@return table|nil Private Tool assembly state, or nil after protocol failure.
     local function start_tool(index, provider_id, name, initial_arguments)
         if tools_by_index[index] then
             local existing = tools_by_index[index]
@@ -1072,6 +1282,10 @@ local function new_response_session(codec, options, request_data, registry, cont
         return state == "open" and tool or nil
     end
 
+    -- Accumulate bounded Tool argument bytes and emit ordinary Tool deltas.
+    --@param tool table Private Tool assembly state.
+    --@param bytes string Provider argument fragment.
+    --@return boolean|nil True when accepted, nil after protocol failure.
     local function append_tool_arguments(tool, bytes)
         if type(bytes) ~= "string" or bytes == "" then return true end
         if not tool.control then
@@ -1095,11 +1309,18 @@ local function new_response_session(codec, options, request_data, registry, cont
         return true
     end
 
+    -- Choose streamed arguments when any delta arrived, else initial arguments.
+    --@param tool table Private Tool assembly state.
+    --@return string Exact assembled argument bytes.
     local function arguments_for(tool)
         if tool.saw_delta then return tool.arguments end
         return tool.initial_arguments or ""
     end
 
+    -- Canonicalize and validate complete Tool or control JSON arguments.
+    --@param tool table Bound Provider Tool call state.
+    --@return table|nil Parsed typed object and canonical JSON bytes.
+    --@return string|nil Parse or schema failure reason.
     local function parse_tool_arguments(tool)
         local source = arguments_for(tool)
         if source == "" then source = "{}" end
@@ -1120,6 +1341,9 @@ local function new_response_session(codec, options, request_data, registry, cont
         return { parsed = parsed, canonical = canonical }
     end
 
+    -- Validate all Tool calls together, then publish controls or executable calls.
+    --@param none This closure takes no arguments.
+    --@return boolean|nil True after complete canonical Tool events, nil on conflict.
     local function finalize_tools()
         local parsed = {}
         local control_count, executable_count = 0, 0
@@ -1169,6 +1393,10 @@ local function new_response_session(codec, options, request_data, registry, cont
         return true
     end
 
+    -- Normalize available Provider usage counters into one canonical event.
+    --@param source table|nil Provider usage object.
+    --@param anthropic boolean Whether to use Anthropic counter names.
+    --@return boolean|nil True after accepting or omitting usage, nil on event limit.
     local function emit_usage(source, anthropic)
         if type(source) ~= "table" then return true end
         local input = nonnegative_json_integer(source[anthropic and "input_tokens" or "prompt_tokens"])
@@ -1184,6 +1412,9 @@ local function new_response_session(codec, options, request_data, registry, cont
         return true
     end
 
+    -- Finish only after Provider start and complete Tool call validation.
+    --@param finish_class string|nil Canonical Provider finish class.
+    --@return boolean|nil True after terminal response, nil on protocol failure.
     local function finish_response(finish_class)
         if state ~= "open" then return nil end
         if not finish_class then protocol_fail("finish-reason") return nil end
@@ -1202,6 +1433,9 @@ local function new_response_session(codec, options, request_data, registry, cont
         return true
     end
 
+    -- Apply indexed OpenAI Tool call deltas without permitting identity changes.
+    --@param values any Typed JSON array of Tool deltas.
+    --@return boolean|nil True after all fragments, nil on protocol failure.
     local function parse_openai_tool_deltas(values)
         if json.kind(values) ~= "array" then protocol_fail("openai-tool-calls") return nil end
         for _, item in ipairs(values) do
@@ -1236,6 +1470,9 @@ local function new_response_session(codec, options, request_data, registry, cont
         return true
     end
 
+    -- Parse one OpenAI streaming JSON event into canonical response events.
+    --@param source string Complete SSE data field.
+    --@return boolean|nil True when accepted, nil on protocol failure.
     local function handle_openai_json(source)
         local document, parse_error = codec.parse(source)
         if not document or json.kind(document) ~= "object" then
@@ -1270,6 +1507,9 @@ local function new_response_session(codec, options, request_data, registry, cont
         return true
     end
 
+    -- Parse one complete OpenAI Chat JSON response and finish it.
+    --@param source string Complete HTTP response body.
+    --@return boolean|nil True when complete, nil on protocol failure.
     local function handle_openai_nonstream(source)
         local document, parse_error = codec.parse(source)
         if not document or json.kind(document) ~= "object" then
@@ -1311,6 +1551,10 @@ local function new_response_session(codec, options, request_data, registry, cont
         return finish_response(map_openai_finish(choice.finish_reason))
     end
 
+    -- Start an Anthropic tool_use block with canonicalized initial input.
+    --@param index integer One-based content block position.
+    --@param block table Typed Provider tool_use content block.
+    --@return table|nil Bound Tool state, or nil after protocol failure.
     local function anthropic_start_tool(index, block)
         local provider_id, name = block.id, block.name
         local initial
@@ -1323,6 +1567,10 @@ local function new_response_session(codec, options, request_data, registry, cont
         return start_tool(index, provider_id, name, initial)
     end
 
+    -- Parse one Anthropic SSE event and enforce event-name/body agreement.
+    --@param event_name string SSE event name.
+    --@param source string Complete SSE data field.
+    --@return boolean|nil True when accepted, nil on protocol failure.
     local function handle_anthropic_event(event_name, source)
         local document, parse_error = codec.parse(source)
         if not document or json.kind(document) ~= "object" then
@@ -1394,6 +1642,9 @@ local function new_response_session(codec, options, request_data, registry, cont
         return nil
     end
 
+    -- Parse one complete Anthropic Messages JSON response and finish it.
+    --@param source string Complete HTTP response body.
+    --@return boolean|nil True when complete, nil on protocol failure.
     local function handle_anthropic_nonstream(source)
         local document, parse_error = codec.parse(source)
         if not document or json.kind(document) ~= "object" then
@@ -1419,6 +1670,11 @@ local function new_response_session(codec, options, request_data, registry, cont
 
     local session = {}
 
+    -- Feed bounded response bytes and emit only completed canonical events.
+    --@param self table Response session.
+    --@param bytes string New HTTP body bytes.
+    --@return table|nil Immutable event batch.
+    --@return table|nil Closed-session or invalid-byte error.
     function session:push(bytes)
         if state ~= "open" then return nil, failure("ModelState", "response session is closed") end
         if type(bytes) ~= "string" then
@@ -1455,6 +1711,10 @@ local function new_response_session(codec, options, request_data, registry, cont
         return freeze(batch, "model event batch")
     end
 
+    -- Finalize SSE or nonstream parsing after the HTTP body ends.
+    --@param self table Response session.
+    --@return table Immutable final event batch.
+    --@return table|nil Terminal normalized response.
     function session:finish()
         batch = {}
         if state ~= "open" then
@@ -1491,6 +1751,11 @@ local function new_response_session(codec, options, request_data, registry, cont
         return freeze(batch, "model event batch"), terminal_response
     end
 
+    -- Terminalize an open response as cancelled with nonretryable transport evidence.
+    --@param self table Response session.
+    --@param error_id string|nil Cancellation reason identifier.
+    --@return table|nil Immutable terminal event batch.
+    --@return table|nil Terminal response on success, or ModelState error.
     function session:cancel(error_id)
         if state ~= "open" then return nil, failure("ModelState", "response session is closed") end
         batch = {}
@@ -1503,6 +1768,13 @@ local function new_response_session(codec, options, request_data, registry, cont
         return freeze(batch, "model event batch"), terminal_response
     end
 
+    -- Classify a failed HTTP status without trusting caller-supplied retryability.
+    --@param self table Response session.
+    --@param status integer HTTP status from 100 through 599.
+    --@param error_id string|nil Diagnostic ID; defaults from status.
+    --@param retryable boolean|nil Ignored override; classification uses status alone.
+    --@return table|nil Immutable transport-error event batch.
+    --@return table|nil Terminal response on success, or status/state error.
     function session:http_error(status, error_id, retryable)
         if state ~= "open" then return nil, failure("ModelState", "response session is closed") end
         if not valid_integer(status, 100) or status > 599 then
@@ -1524,6 +1796,11 @@ local function new_response_session(codec, options, request_data, registry, cont
         return freeze(batch, "model event batch"), terminal_response
     end
 
+    -- Terminalize an open response after a non-HTTP transport failure.
+    --@param self table Response session.
+    --@param error_id string|nil Transport failure identifier.
+    --@return table|nil Immutable transport-error event batch.
+    --@return table|nil Terminal response on success, or ModelState error.
     function session:transport_error(error_id)
         if state ~= "open" then return nil, failure("ModelState", "response session is closed") end
         batch = {}
@@ -1538,10 +1815,18 @@ local function new_response_session(codec, options, request_data, registry, cont
         return freeze(batch, "model event batch"), terminal_response
     end
 
+    -- Read the terminal normalized response without changing parser state.
+    --@param self table Response session.
+    --@return table|nil Terminal response, or nil while open.
     function session:response()
         return terminal_response
     end
 
+    -- Report parser state and bounded byte/event counters.
+    --@param self table Response session.
+    --@return string Current parser state.
+    --@return integer Total accepted response bytes.
+    --@return integer Emitted canonical event count.
     function session:status()
         return state, response_bytes, event_count
     end
@@ -1550,9 +1835,9 @@ local function new_response_session(codec, options, request_data, registry, cont
 end
 
 ---Creates the canonical dual-provider model adapter service.
--- @param options table Immutable release hard-cap snapshot.
--- @return table|nil service Model request/response adapter.
--- @return table|nil err Structured constructor failure.
+--@param options table Immutable release hard-cap snapshot.
+--@return table|nil service Model request/response adapter.
+--@return table|nil err Structured constructor failure.
 function M.new(options)
     local limits, limit_error = validate_options(options)
     if not limits then return nil, limit_error end
@@ -1564,9 +1849,16 @@ function M.new(options)
         maximum_number_bytes = limits.maximum_number_bytes,
     })
     if not codec then return nil, codec_error end
+    --@metatable normalized Associates normalized request proxies with their private provider request inputs.
+    --@field __mode string Fixed k mode: keys are weak; entries remain mutable within their owning module.
     local normalized = setmetatable({}, { __mode = "k" })
     local service = {}
 
+    -- Detach and freeze a complete request before any Provider attempt.
+    --@param self table Model adapter service.
+    --@param spec table Candidate request fields and snapshots.
+    --@return table|nil Immutable admitted request.
+    --@return table|nil Shape, secret, or limit error.
     function service:normalize_request(spec)
         local admitted, admission_error = validate_request_shape(spec, limits)
         if not admitted then return nil, admission_error end
@@ -1579,6 +1871,10 @@ function M.new(options)
         return public
     end
 
+    -- Resolve this service's private state for an immutable admitted request.
+    --@param request table Public normalized request proxy.
+    --@return table|nil Private request, registry, and control lookups.
+    --@return table|nil InvalidRequest diagnostic for foreign proxies.
     local function request_state(request)
         local state_value = normalized[request]
         if not state_value then
@@ -1587,6 +1883,11 @@ function M.new(options)
         return state_value
     end
 
+    -- Apply the request's force, try, or off streaming policy to one attempt.
+    --@param admitted table Private admitted request state.
+    --@param streaming_override boolean|nil Per-attempt fallback choice.
+    --@return boolean|nil Effective streaming setting.
+    --@return table|nil Forbidden or invalid override error.
     local function resolve_streaming(admitted, streaming_override)
         local mode = admitted.public.streaming
         local streaming
@@ -1606,6 +1907,12 @@ function M.new(options)
         return streaming
     end
 
+    -- Encode one Provider attempt from an immutable admitted request.
+    --@param self table Model adapter service.
+    --@param request table Normalized request proxy from this service.
+    --@param streaming_override boolean|nil Per-attempt mode.
+    --@return table|nil Frozen Provider request with body and secret references.
+    --@return table|nil Request, streaming, or encoding error.
     function service:encode(request, streaming_override)
         local admitted, request_error = request_state(request)
         if not admitted then return nil, request_error end
@@ -1614,6 +1921,12 @@ function M.new(options)
         return encode_request(codec, admitted.public, streaming)
     end
 
+    -- Create a response parser bound to one admitted Provider attempt.
+    --@param self table Model adapter service.
+    --@param request table Normalized request proxy.
+    --@param streaming_override boolean|nil Per-attempt mode.
+    --@return table|nil Read-only response session.
+    --@return table|nil Request or streaming-policy error.
     function service:new_response(request, streaming_override)
         local admitted, request_error = request_state(request)
         if not admitted then return nil, request_error end
@@ -1629,6 +1942,13 @@ function M.new(options)
         )
     end
 
+    -- Permit at most one try-mode fallback before any canonical event is seen.
+    --@param self table Model adapter service.
+    --@param request table Normalized request proxy.
+    --@param canonical_event_seen boolean Whether the attempt emitted canonical data.
+    --@param prior_fallbacks integer Number of earlier fallback attempts.
+    --@return table|nil Frozen fallback decision.
+    --@return table|nil Invalid request or observation error.
     function service:streaming_fallback(request, canonical_event_seen, prior_fallbacks)
         local admitted, request_error = request_state(request)
         if not admitted then return nil, request_error end
@@ -1647,6 +1967,12 @@ function M.new(options)
         }, "streaming fallback decision")
     end
 
+    -- Emit a protocol error if the observed Tool registry differs from the request.
+    --@param self table Model adapter service.
+    --@param request table Normalized request proxy.
+    --@param observed_digest string Runtime-observed registry digest.
+    --@return table|nil Immutable empty or one-error event batch.
+    --@return table|nil Invalid request or digest-field error.
     function service:registry_digest_event(request, observed_digest)
         local admitted, request_error = request_state(request)
         if not admitted then return nil, request_error end
@@ -1661,6 +1987,11 @@ function M.new(options)
         ) }, "model event batch")
     end
 
+    -- Return the canonical Prompt control schema for a request purpose.
+    --@param self table Model adapter service.
+    --@param purpose string main, ask, review, compaction, or self-test purpose.
+    --@return table|nil Purpose-bound control schema.
+    --@return table|nil Prompt schema error.
     function service:controls_schema(purpose)
         return prompt.control_schema(purpose)
     end
@@ -1684,6 +2015,10 @@ function M.new(options)
     return readonly(service, "model service")
 end
 
+-- Check that an activity record contains only named allowed fields.
+--@param value any Candidate record.
+--@param allowed table Set of permitted string keys.
+--@return boolean True for a table without unknown keys.
 local function exact_activity_fields(value, allowed)
     if type(value) ~= "table" then return false end
     for key in pairs(value) do
@@ -1692,6 +2027,11 @@ local function exact_activity_fields(value, allowed)
     return true
 end
 
+-- Encode acyclic response data with type and key-order markers for hashing.
+--@param value any Plain canonical response value.
+--@param visiting table|nil Recursion stack for cycle detection.
+--@return string|nil Deterministic byte encoding.
+--@return table|nil InvalidCanonicalResponse diagnostic.
 local function canonical_value(value, visiting)
     local value_type = type(value)
     if value == nil then return "n;" end
@@ -1742,6 +2082,9 @@ local function canonical_value(value, visiting)
     return table.concat(parts)
 end
 
+-- Extract visible assistant text or a control's explicit text field.
+--@param response table Terminal normalized Provider response.
+--@return string Concatenated visible body, possibly empty.
 local function response_body(response)
     local parts = {}
     for _, block in ipairs(response.content_blocks or {}) do
@@ -1760,15 +2103,27 @@ local function response_body(response)
     return table.concat(parts)
 end
 
+-- Apply Gregorian leap-year rules for UTC timestamp validation.
+--@param year integer Calendar year.
+--@return boolean True for a leap year.
 local function leap_year(year)
     return year % 4 == 0 and (year % 100 ~= 0 or year % 400 == 0)
 end
 
+-- Report the Gregorian day count for one month.
+--@param year integer Calendar year.
+--@param month integer One-based month.
+--@return integer|nil Days in the month, nil for an invalid month.
 local function days_in_month(year, month)
     local lengths = { 31, leap_year(year) and 29 or 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 }
     return lengths[month]
 end
 
+-- Convert a validated civil date to days since the Unix epoch.
+--@param year integer Gregorian year.
+--@param month integer One-based month.
+--@param day integer One-based day of month.
+--@return integer Signed day offset from 1970-01-01.
 local function days_from_civil(year, month, day)
     year = year - (month <= 2 and 1 or 0)
     local era = year >= 0 and year // 400 or (year - 399) // 400
@@ -1780,6 +2135,9 @@ local function days_from_civil(year, month, day)
     return era * 146097 + day_of_era - 719468
 end
 
+-- Parse a strict UTC timestamp into whole Unix-epoch seconds.
+--@param value any Candidate YYYY-MM-DDTHH:MM:SSZ timestamp.
+--@return integer|nil Epoch seconds, or nil for invalid/unsupported dates.
 local function utc_epoch(value)
     if type(value) ~= "string" then return nil end
     local year, month, day, hour, minute, second = value:match(
@@ -1823,6 +2181,10 @@ local RETRY_MANIFEST_FIELDS = {
     deterministic_jitter_permille = true,
 }
 
+-- Validate the Model transport's event, time, header, and retry hard bounds.
+--@param options any Candidate activity options and retry manifest.
+--@return table|nil Original admitted options.
+--@return table|nil InvalidModelActivityOptions diagnostic.
 local function validate_activity_options(options)
     if not exact_activity_fields(options, ACTIVITY_OPTION_FIELDS)
         or not valid_token(options.identity_namespace, 128)
@@ -1855,6 +2217,10 @@ local function validate_activity_options(options)
     return options
 end
 
+-- Require the Model adapter, transport, safety, clock, and request-builder ports.
+--@param ports any Candidate activity dependency bundle.
+--@return table|nil Original admitted ports.
+--@return table|nil InvalidModelActivityPorts diagnostic.
 local function validate_activity_ports(ports)
     local allowed = {
         adapter = true,
@@ -1905,6 +2271,10 @@ local PREPARED_REQUEST_FIELDS = {
     total_timeout_ms = true,
 }
 
+-- Validate the exact Runtime start identity and continuation shape.
+--@param spec any Candidate Model activity start record.
+--@return table|nil Original admitted start record.
+--@return table|nil InvalidModelActivity diagnostic.
 local function validate_activity_start(spec)
     if not exact_activity_fields(spec, ACTIVITY_START_FIELDS)
         or not valid_token(spec.request_id, 128)
@@ -1919,6 +2289,11 @@ local function validate_activity_start(spec)
     return spec
 end
 
+-- Bind a prepared Provider request and transport policy to its Runtime start.
+--@param prepared any Builder output with request, secrets, proxy, and timeouts.
+--@param spec table Validated Runtime start record.
+--@return table|nil Original admitted preparation.
+--@return table|nil InvalidPreparedModelRequest diagnostic.
 local function validate_prepared_request(prepared, spec)
     local request = type(prepared) == "table" and prepared.request or nil
     local policy = type(request) == "table" and request.retry_policy or nil
@@ -1958,6 +2333,11 @@ local REQUEST_BUILDER_OPTION_FIELDS = {
     default_max_output_tokens = true,
 }
 
+-- Validate a main-turn builder's frozen config, Tool registry, and Prompt snapshots.
+--@param ports table Adapter, Prompt, view, config, and registry dependencies.
+--@param options table Selected Model, Permission, digests, text, and defaults.
+--@return table|nil Admitted builder dependencies and selected config records.
+--@return table|nil InvalidModelRequestBuilder diagnostic.
 local function validate_request_builder(ports, options)
     local port_fields = {
         adapter = true,
@@ -2028,6 +2408,10 @@ end
 ---Builds exact adapter and transport snapshots for a session's frozen main
 -- Model. Secret values remain in ConfigGeneration and are referenced only by
 -- their typed carrier identities.
+--@param ports table Model adapter, Prompt, view, config, and registry services.
+--@param options table Frozen main-turn selection and network defaults.
+--@return table|nil Main request builder with prepare method.
+--@return table|nil Invalid builder error.
 function M.new_request_builder(ports, options)
     local admitted, admission_error = validate_request_builder(ports, options)
     if not admitted then return nil, admission_error end
@@ -2036,11 +2420,17 @@ function M.new_request_builder(ports, options)
     local permission_ref = admitted.permission
     local service = {}
 
+    -- Select initial user text or the fixed continuation instruction.
+    --@param spec table Validated start with continuation marker.
+    --@return string User input for Prompt assembly.
     local function prompt_input(spec)
         if spec.continuation == false then return admitted.options.initial_message end
         return admitted.options.continuation_instruction
     end
 
+    -- Project only the configured proxy route or secret reference.
+    --@param none This closure reads the frozen network generation.
+    --@return table Off or explicit proxy policy without revealing a secret value.
     local function proxy_snapshot()
         local configured = generation.network
         if configured.follow_proxy ~= true then return { mode = "off" } end
@@ -2062,6 +2452,10 @@ function M.new_request_builder(ports, options)
         return { mode = "off" }
     end
 
+    -- Build the exact main Provider request and transport policy for one attempt.
+    --@param spec table Validated Runtime start and durable view reference.
+    --@return table|nil Normalized request and bounded secret/proxy/CA policy.
+    --@return table|nil Stale view, Prompt, config, or normalization error.
     function service.prepare(spec)
         local start, start_error = validate_activity_start(spec)
         if not start then return nil, start_error end
@@ -2183,7 +2577,7 @@ function M.new_request_builder(ports, options)
     return readonly(service, "model request builder")
 end
 
-local SIDE_REQUEST_BUILDER_OPTION_FIELDS = {
+local ASK_REQUEST_BUILDER_OPTION_FIELDS = {
     model_name = true,
     permission_name = true,
     model_snapshot = true,
@@ -2198,7 +2592,12 @@ local SIDE_REQUEST_BUILDER_OPTION_FIELDS = {
     maximum_output_tokens = true,
 }
 
-local function validate_side_request_builder(ports, options)
+-- Validate an ask builder's independently reloaded config and no-tool prerequisites.
+--@param ports table Adapter, Prompt, view, config, registry, and safety ports.
+--@param options table Frozen ask selectors, digests, input, and caps.
+--@return table|nil Admitted builder dependencies and selected records.
+--@return table|nil InvalidAskRequestBuilder diagnostic.
+local function validate_ask_request_builder(ports, options)
     local port_fields = {
         adapter = true,
         prompt = true,
@@ -2221,7 +2620,7 @@ local function validate_side_request_builder(ports, options)
         or type(ports.tool_registry) ~= "table"
         or type(ports.safety) ~= "table"
         or type(ports.safety.digest) ~= "function"
-        or not exact_activity_fields(options, SIDE_REQUEST_BUILDER_OPTION_FIELDS)
+        or not exact_activity_fields(options, ASK_REQUEST_BUILDER_OPTION_FIELDS)
         or not valid_token(options.model_name, 128)
         or not valid_token(options.permission_name, 128)
         or not valid_token(options.model_snapshot, 256)
@@ -2237,8 +2636,8 @@ local function validate_side_request_builder(ports, options)
         or not valid_integer(options.maximum_output_tokens, 1)
     then
         return nil, failure(
-            "InvalidSideRequestBuilder",
-            "side request builder is incomplete"
+            "InvalidAskRequestBuilder",
+            "ask request builder is incomplete"
         )
     end
     local generation = ports.generation
@@ -2254,7 +2653,7 @@ local function validate_side_request_builder(ports, options)
         or ports.tool_registry.digest ~= options.tool_registry_snapshot
     then
         return nil, failure(
-            "InvalidSideRequestBuilder",
+            "InvalidAskRequestBuilder",
             "configuration, Model, Permission, or tool snapshot is unavailable"
         )
     end
@@ -2267,11 +2666,15 @@ local function validate_side_request_builder(ports, options)
     }
 end
 
----Builds one frozen, no-tool side request from its independently reloaded
+---Builds one frozen, no-tool ask request from its independently reloaded
 -- Config generation. The full Tool registry digest is admitted only as a
 -- snapshot binding; the provider receives a distinct canonical empty registry.
-function M.new_side_request_builder(ports, options)
-    local admitted, admission_error = validate_side_request_builder(ports, options)
+--@param ports table Adapter, Prompt, view, config, registry, and safety ports.
+--@param options table Frozen ask input, selectors, digests, and time limits.
+--@return table|nil Ask request builder with no-tool prepare method.
+--@return table|nil Invalid builder or empty-registry digest error.
+function M.new_ask_request_builder(ports, options)
+    local admitted, admission_error = validate_ask_request_builder(ports, options)
     if not admitted then return nil, admission_error end
     local generation = admitted.generation
     local model_ref = admitted.model
@@ -2284,9 +2687,12 @@ function M.new_side_request_builder(ports, options)
         version = "yaca-empty-tool-registry-v1",
         digest = empty_digest,
         tools = {},
-    }, "empty side tool registry"))
+    }, "empty ask tool registry"))
     local service = {}
 
+    -- Project the ask request's frozen proxy route without exposing secrets.
+    --@param none This closure reads the frozen network generation.
+    --@return table Off or explicit proxy policy.
     local function proxy_snapshot()
         local configured = generation.network
         if configured.follow_proxy ~= true then return { mode = "off" } end
@@ -2308,13 +2714,17 @@ function M.new_side_request_builder(ports, options)
         return { mode = "off" }
     end
 
+    -- Build one purpose-bound ask request with an empty transmitted Tool registry.
+    --@param spec table Runtime start and exact durable Model view reference.
+    --@return table|nil Normalized no-tool request and transport policy.
+    --@return table|nil Purpose, view, Prompt, or normalization error.
     function service.prepare(spec)
         local start, start_error = validate_activity_start(spec)
         if not start then return nil, start_error end
-        if start.purpose ~= "side" or start.continuation ~= false then
+        if start.purpose ~= "ask" or start.continuation ~= false then
             return nil, failure(
                 "InvalidModelPurpose",
-                "side request builder received another purpose or a continuation"
+                "ask request builder received another purpose or a continuation"
             )
         end
         local called, view, view_error = pcall(
@@ -2329,10 +2739,10 @@ function M.new_side_request_builder(ports, options)
             or type(view.body) ~= "string"
         then
             return nil, called and view_error
-                or failure("ModelViewUnavailable", "durable side view could not be resolved")
+                or failure("ModelViewUnavailable", "durable ask view could not be resolved")
         end
         local bundle, bundle_error = admitted.ports.prompt:assemble({
-            purpose = "side",
+            purpose = "ask",
             config_generation = generation.id,
             layers = {
                 global = {
@@ -2364,7 +2774,7 @@ function M.new_side_request_builder(ports, options)
         if bundle.digest ~= admitted.options.prompt_snapshot then
             return nil, failure(
                 "PromptSnapshotMismatch",
-                "side Model request does not reproduce the durable Prompt snapshot"
+                "ask Model request does not reproduce the durable Prompt snapshot"
             )
         end
         local public_model_ref = {
@@ -2386,7 +2796,7 @@ function M.new_side_request_builder(ports, options)
             or admitted.options.default_retry_base_delay_ms
         local normalized, normalize_error = admitted.ports.adapter:normalize_request({
             request_id = start.request_id,
-            purpose = "side",
+            purpose = "ask",
             model_ref = public_model_ref,
             config_generation = generation.id,
             prompt_bundle = bundle,
@@ -2421,11 +2831,11 @@ function M.new_side_request_builder(ports, options)
         return readonly({
             request = normalized,
             secret_source = generation,
-            proxy = freeze(proxy_snapshot(), "side model proxy snapshot"),
+            proxy = freeze(proxy_snapshot(), "ask model proxy snapshot"),
             ca_bundle_path = generation.network.ca_bundle_path,
             connect_timeout_ms = connect_timeout,
             total_timeout_ms = total_timeout,
-        }, "prepared side model request")
+        }, "prepared ask model request")
     end
 
     service.snapshots = freeze({
@@ -2435,8 +2845,8 @@ function M.new_side_request_builder(ports, options)
         prompt = admitted.options.prompt_snapshot,
         tools = admitted.options.tool_registry_snapshot,
         transmitted_tools = empty_registry.digest,
-    }, "side model request builder snapshots")
-    return readonly(service, "side model request builder")
+    }, "ask model request builder snapshots")
+    return readonly(service, "ask model request builder")
 end
 
 local SELF_TEST_BUILDER_OPTION_FIELDS = {
@@ -2451,6 +2861,11 @@ local SELF_TEST_BUILDER_OPTION_FIELDS = {
     default_max_output_tokens = true,
 }
 
+-- Validate one isolated Model self-test builder and its synthetic observation.
+--@param ports table Adapter, Prompt, config, registry, and safety dependencies.
+--@param options table Self-test phase, tool set, observation, Model, and caps.
+--@return table|nil Admitted builder inputs.
+--@return table|nil InvalidSelfTestRequestBuilder diagnostic.
 local function validate_self_test_request_builder(ports, options)
     local port_fields = {
         adapter = true,
@@ -2515,6 +2930,10 @@ end
 ---Builds one frozen self-test Model request from a freshly reloaded Config
 ---generation. The synthetic observation is quoted data; Tools travel in the
 ---inert registry only, and no durable Context view is bound.
+--@param ports table Adapter, Prompt, config, registry, and safety dependencies.
+--@param options table Self-test phase, tool set, observation, and transport caps.
+--@return table|nil Self-test request builder with prepare method.
+--@return table|nil Validation or digest error.
 function M.new_self_test_request_builder(ports, options)
     local admitted, admission_error = validate_self_test_request_builder(ports, options)
     if not admitted then return nil, admission_error end
@@ -2543,6 +2962,9 @@ function M.new_self_test_request_builder(ports, options)
     if not capabilities_digest then return nil, capability_error end
     local service = {}
 
+    -- Project the self-test request's frozen proxy route without exposing secrets.
+    --@param none This closure reads the frozen network generation.
+    --@return table Off or explicit proxy policy.
     local function proxy_snapshot()
         local configured = generation.network
         if configured.follow_proxy ~= true then return { mode = "off" } end
@@ -2564,6 +2986,10 @@ function M.new_self_test_request_builder(ports, options)
         return { mode = "off" }
     end
 
+    -- Prepare one isolated self-test Provider request with synthetic quoted data.
+    --@param start table Self-test activity start and synthetic view identity.
+    --@return table|nil Normalized request and transport policy.
+    --@return table|nil Purpose, Prompt, or normalization error.
     function service.prepare(start)
         local start_admitted, start_error = validate_activity_start(start)
         if not start_admitted then return nil, start_error end
@@ -2716,6 +3142,11 @@ local TERMINATION_REVIEW_BINDING_FIELDS = {
     message_id = true,
 }
 
+-- Select a dedicated review Model or fall back to the bound main Model.
+--@param generation table Current config generation.
+--@param options table Review builder's main Model name.
+--@param purpose string action-review or termination-review.
+--@return string Selected review Model name.
 local function review_model_name(generation, options, purpose)
     local configured = purpose == "action-review"
         and generation.agent.action_review_model
@@ -2724,6 +3155,11 @@ local function review_model_name(generation, options, purpose)
     return configured
 end
 
+-- Convert acyclic review binding data to typed JSON for canonical encoding.
+--@param value any Review binding subtree.
+--@param visiting table|nil Recursion stack for cycle detection.
+--@return any|nil Typed JSON value.
+--@return table|nil InvalidReviewBinding diagnostic.
 local function json_data(value, visiting)
     local value_type = type(value)
     if value_type == "string" or value_type == "boolean" then return value end
@@ -2765,6 +3201,11 @@ local function json_data(value, visiting)
     return result
 end
 
+-- Validate the review builder's config, codec, view, Prompt, and safety ports.
+--@param ports table Review request dependencies.
+--@param options table Frozen review Model selection, limits, and context fields.
+--@return table|nil Admitted review builder state.
+--@return table|nil InvalidReviewRequestBuilder diagnostic.
 local function validate_review_builder(ports, options)
     local port_fields = {
         adapter = true,
@@ -2845,6 +3286,11 @@ local function validate_review_builder(ports, options)
     }
 end
 
+-- Bind a Runtime review request to exact action/report JSON and a digest.
+--@param spec any Candidate action or termination review request.
+--@param admitted table Validated review builder state.
+--@return table|nil Frozen specification, canonical binding JSON, and digest.
+--@return table|nil Invalid shape, excessive binding, or digest error.
 local function validate_runtime_review(spec, admitted)
     if not exact_activity_fields(spec, REVIEW_START_FIELDS)
         or not valid_token(spec.request_id, 128)
@@ -2909,6 +3355,10 @@ end
 ---Builds exact no-tool action/termination review requests from Runtime bindings.
 -- Runtime-supplied reviewer IDs or verdict bindings are never accepted here;
 -- only the later local review adapter may mint them.
+--@param ports table Adapter, Prompt, view, config, codec, and safety ports.
+--@param options table Frozen review selector, context text, and transport limits.
+--@return table|nil No-tool review request builder with single active binding.
+--@return table|nil Builder validation or empty-registry digest error.
 function M.new_review_request_builder(ports, options)
     local admitted, admission_error = validate_review_builder(ports, options)
     if not admitted then return nil, admission_error end
@@ -2927,6 +3377,9 @@ function M.new_review_request_builder(ports, options)
     local model_digests = {}
     local service = {}
 
+    -- Project the review request's frozen proxy route without exposing secrets.
+    --@param none This closure reads the frozen network generation.
+    --@return table Off or explicit proxy policy.
     local function proxy_snapshot()
         local configured = generation.network
         if configured.follow_proxy ~= true then return { mode = "off" } end
@@ -2948,6 +3401,11 @@ function M.new_review_request_builder(ports, options)
         return { mode = "off" }
     end
 
+    -- Bind one selected reviewer Model to its complete config snapshot.
+    --@param name string Reviewer Model name.
+    --@param model_ref table Selected Model definition.
+    --@return string|nil Cached model-snapshot digest.
+    --@return table|nil Canonicalization or digest error.
     local function model_digest(name, model_ref)
         if model_digests[name] then return model_digests[name] end
         local encoded, encode_error = canonical_value({
@@ -2964,6 +3422,10 @@ function M.new_review_request_builder(ports, options)
         return digest
     end
 
+    -- Admit a single exact Runtime review binding before transport preparation.
+    --@param spec table Runtime action or termination review specification.
+    --@return table|nil Frozen Model activity start bound to review digest.
+    --@return table|nil Busy or invalid binding error.
     function service.bind(spec)
         if active_count ~= 0 then
             return nil, failure("ReviewRequestBusy", "a review request is already bound")
@@ -2982,6 +3444,10 @@ function M.new_review_request_builder(ports, options)
         }, "review model activity specification")
     end
 
+    -- Prepare the bound review request with empty Tool registry and durable view.
+    --@param spec table Review Model activity start from bind.
+    --@return table|nil Normalized request and transport policy.
+    --@return table|nil Stale binding, view, Prompt, or Model error.
     function service.prepare(spec)
         local start, start_error = validate_activity_start(spec)
         if not start then return nil, start_error end
@@ -3115,10 +3581,16 @@ function M.new_review_request_builder(ports, options)
         }, "prepared review request")
     end
 
+    -- Inspect the current private review binding by its request ID.
+    --@param request_id string Review Model request ID.
+    --@return table|boolean Bound review state, or false when absent.
     function service.binding(request_id)
         return bound[request_id] or false
     end
 
+    -- Release the sole review request binding after terminal settlement.
+    --@param request_id string Bound review Model request ID.
+    --@return boolean True when a binding was removed.
     function service.release(request_id)
         if not bound[request_id] then return false end
         bound[request_id] = nil
@@ -3177,6 +3649,11 @@ local COMPACTION_MODEL_START_FIELDS = {
     maximum_summary_bytes = true,
 }
 
+-- Admit bounded NUL-free UTF-8 in compaction prompts, summaries, and corrections.
+--@param value any Candidate text.
+--@param maximum integer Inclusive byte limit.
+--@param allow_empty boolean Whether an empty value is valid.
+--@return boolean True only for permitted text.
 local function valid_compaction_text(value, maximum, allow_empty)
     if type(value) ~= "string" or #value > maximum
         or value:find("\0", 1, true)
@@ -3187,6 +3664,9 @@ local function valid_compaction_text(value, maximum, allow_empty)
     return text.validate_utf8(value) == true
 end
 
+-- Require the fixed summary slot order used by the compaction contract.
+--@param values any Candidate slot name array.
+--@return boolean True for the exact ordered slot list.
 local function compaction_slots_equal(values)
     if dense_count(values) ~= #COMPACTION_SUMMARY_SLOTS then return false end
     for index, name in ipairs(COMPACTION_SUMMARY_SLOTS) do
@@ -3195,6 +3675,11 @@ local function compaction_slots_equal(values)
     return true
 end
 
+-- Validate the compaction builder's Model, Prompt, codec, safety, and size caps.
+--@param ports table Adapter, Prompt, config, codec, and safety dependencies.
+--@param options table Frozen compaction selectors, digests, context, and limits.
+--@return table|nil Admitted builder state.
+--@return table|nil InvalidCompactionRequestBuilder diagnostic.
 local function validate_compaction_builder(ports, options)
     if not exact_activity_fields(ports, {
         adapter = true,
@@ -3264,6 +3749,11 @@ local function validate_compaction_builder(ports, options)
     }
 end
 
+-- Validate a frozen compaction source, summary contract, and correction set.
+--@param spec any Candidate compaction Model start specification.
+--@param admitted table Validated builder state and hard limits.
+--@return table|nil Frozen admitted specification.
+--@return table|nil Stale binding, invalid field, or correction-limit error.
 local function validate_compaction_model_start(spec, admitted)
     if not exact_activity_fields(spec, COMPACTION_MODEL_START_FIELDS)
         or not valid_token(spec.request_id, 128)
@@ -3362,6 +3852,9 @@ local function validate_compaction_model_start(spec, admitted)
     return copy
 end
 
+-- Encode the fixed summary schema and correction guidance as JSON prompt data.
+--@param specification table Validated compaction source and correction records.
+--@return table Typed JSON input object without the source body.
 local function compaction_prompt_document(specification)
     local correction_values = {}
     for index, correction in ipairs(specification.corrections) do
@@ -3396,6 +3889,10 @@ end
 ---Builds one exact no-tool compaction request from compact.lua's frozen source.
 -- The source prefix is carried once as a quoted Model-view body; the purpose
 -- Prompt carries only schema, source identity, and durable corrections.
+--@param ports table Adapter, Prompt, config, codec, and safety ports.
+--@param options table Frozen compaction selectors, digests, and size limits.
+--@return table|nil No-tool compaction request builder.
+--@return table|nil Builder validation or empty-registry digest error.
 function M.new_compaction_request_builder(ports, options)
     local admitted, admission_error = validate_compaction_builder(ports, options)
     if not admitted then return nil, admission_error end
@@ -3414,6 +3911,9 @@ function M.new_compaction_request_builder(ports, options)
     }, "empty compaction tool registry"))
     local service = {}
 
+    -- Project the compaction request's frozen proxy route without exposing secrets.
+    --@param none This closure reads the frozen network generation.
+    --@return table Off or explicit proxy policy.
     local function proxy_snapshot()
         local configured = generation.network
         if configured.follow_proxy ~= true then return { mode = "off" } end
@@ -3435,6 +3935,10 @@ function M.new_compaction_request_builder(ports, options)
         return { mode = "off" }
     end
 
+    -- Bind one digest-verified compaction source to a single Model request.
+    --@param specification table Frozen source range, bytes, corrections, and model snapshot.
+    --@return table|nil Immutable Model activity start with binding identity.
+    --@return table|nil Busy, invalid, or source-digest error.
     function service.bind(specification)
         if active_count ~= 0 then
             return nil, failure(
@@ -3493,6 +3997,10 @@ function M.new_compaction_request_builder(ports, options)
         }, "compaction model activity specification")
     end
 
+    -- Prepare the bound no-tool compaction request with source as quoted view data.
+    --@param specification table Model activity start returned by bind.
+    --@return table|nil Normalized Provider request and transport policy.
+    --@return table|nil Stale binding, Prompt, or normalization error.
     function service.prepare(specification)
         local start, start_error = validate_activity_start(specification)
         if not start then return nil, start_error end
@@ -3590,10 +4098,16 @@ function M.new_compaction_request_builder(ports, options)
         }, "prepared compaction request")
     end
 
+    -- Inspect the currently bound compaction request by ID.
+    --@param request_id string Compaction Model request ID.
+    --@return table|boolean Private binding, or false when absent.
     function service.binding(request_id)
         return bound[request_id] or false
     end
 
+    -- Release the sole compaction binding after terminal settlement.
+    --@param request_id string Bound compaction request ID.
+    --@return boolean True when a binding was removed.
     function service.release(request_id)
         if not bound[request_id] then return false end
         bound[request_id] = nil
@@ -3623,6 +4137,9 @@ local TLS_VERIFICATION_EXIT_CODES = {
     [91] = true, -- certificate status
 }
 
+-- Classify a terminal native HTTP attempt conservatively from its body and exit facts.
+--@param result any Native transport result with exit, headers, body, and descendant proof.
+--@return string completed, cancel, DNS/connect/TLS, or outcome-unknown class.
 local function transport_category(result)
     if type(result) ~= "table"
         or type(result.response_body) ~= "string"
@@ -3665,6 +4182,10 @@ end
 ---Creates the single-active logical Model request coordinator used by
 -- AgentLoop. Provider bytes remain behind the HTTP status barrier; only the
 -- final canonical adapter response can cross back into Runtime.
+--@param ports table Adapter, transport, safety, clock, and request-builder ports.
+--@param options table Activity event/time limits and immutable retry manifest.
+--@return table|nil Single-active Model activity coordinator.
+--@return table|nil Invalid port or option error.
 function M.new_activity(ports, options)
     local admitted_ports, ports_error = validate_activity_ports(ports)
     if not admitted_ports then return nil, ports_error end
@@ -3675,6 +4196,10 @@ function M.new_activity(ports, options)
     local last_now
     local service = {}
 
+    -- Read a nonregressing monotonic tick for all request deadlines.
+    --@param none This closure reads the injected clock.
+    --@return integer|nil Monotonic milliseconds.
+    --@return table|nil MonotonicClockDegraded diagnostic.
     local function now()
         local called, value, clock_error = pcall(admitted_ports.clock.monotonic_now)
         if not called or not valid_integer(value, 0) or last_now and value < last_now then
@@ -3687,6 +4212,11 @@ function M.new_activity(ports, options)
         return value
     end
 
+    -- Queue one immutable Runtime event within the activity output cap.
+    --@param activity table Current logical Model request.
+    --@param value table Event payload to freeze.
+    --@return boolean|nil True after queueing.
+    --@return table|nil ModelActivityQueueLimit diagnostic.
     local function append_output(activity, value)
         if #activity.output >= admitted.maximum_queued_events then
             return nil, failure("ModelActivityQueueLimit", "model activity output queue is full")
@@ -3695,6 +4225,11 @@ function M.new_activity(ports, options)
         return true
     end
 
+    -- Wrap canonical adapter events with the current request identity.
+    --@param activity table Current logical Model request.
+    --@param events table|nil Canonical response event batch.
+    --@return boolean|nil True after all events are queued.
+    --@return table|nil Queue-cap error.
     local function append_adapter_events(activity, events)
         for _, event in ipairs(events or {}) do
             local appended, append_error = append_output(activity, {
@@ -3707,6 +4242,11 @@ function M.new_activity(ports, options)
         return true
     end
 
+    -- Bind one terminal response to a canonical digest and visible body cap.
+    --@param activity table Current logical Model request.
+    --@param response table Terminal normalized adapter response.
+    --@return table|nil Frozen Runtime response wrapper.
+    --@return table|nil Body-limit, canonicalization, or digest error.
     local function canonical_wrapper(activity, response)
         local body = response_body(response)
         if #body > admitted.maximum_canonical_body_bytes then
@@ -3733,6 +4273,13 @@ function M.new_activity(ports, options)
         }, "canonical model response")
     end
 
+    -- Publish canonical observation, adapter events, and one terminal response.
+    --@param activity table Current logical Model request.
+    --@param events table Canonical adapter event batch.
+    --@param response table Terminal normalized response.
+    --@param canonical_seen boolean Whether a canonical event was observed.
+    --@return boolean|nil True after terminal queueing.
+    --@return table|nil Clock, retry, queue, or digest error.
     local function finish_response(activity, events, response, canonical_seen)
         if canonical_seen and not activity.canonical_emitted then
             local observed_now, clock_error = now()
@@ -3763,6 +4310,11 @@ function M.new_activity(ports, options)
         return true
     end
 
+    -- Turn a transport failure into a canonical incomplete terminal response.
+    --@param activity table Current logical Model request.
+    --@param error_id string Transport failure identifier.
+    --@return boolean|nil True after terminal response queueing.
+    --@return table|nil Adapter or queue error.
     local function terminal_transport_error(activity, error_id)
         local response_session = activity.response_session
         if not response_session then
@@ -3779,6 +4331,11 @@ function M.new_activity(ports, options)
         return finish_response(activity, events, response, false)
     end
 
+    -- Turn a cancellation into a canonical cancelled terminal response.
+    --@param activity table Current logical Model request.
+    --@param error_id string Cancellation identifier.
+    --@return boolean|nil True after terminal response queueing.
+    --@return table|nil Adapter or queue error.
     local function terminal_cancel(activity, error_id)
         local response_session = activity.response_session
         if not response_session then
@@ -3795,6 +4352,11 @@ function M.new_activity(ports, options)
         return finish_response(activity, events, response, false)
     end
 
+    -- Close the current native transport attempt before retry or terminal return.
+    --@param activity table Current logical Model request.
+    --@return boolean|nil True when no attempt remains open.
+    --@return table|nil ModelTransportClose diagnostic.
+    --@effect Releases the native network attempt.
     local function close_attempt(activity)
         if not activity.attempt then return true end
         local attempt = activity.attempt
@@ -3806,6 +4368,12 @@ function M.new_activity(ports, options)
         return true
     end
 
+    -- Advance the immutable retry controller after one transport observation.
+    --@param activity table Current logical Model request.
+    --@param observation table Status/category/redirect classification.
+    --@param observed_now integer Monotonic observation time.
+    --@return table|nil Retry decision, including optional wait deadline.
+    --@return table|nil Retry controller error.
     local function finish_retry(activity, observation, observed_now)
         local decision, decision_error = activity.retry:finish_attempt(
             activity.attempt_id,
@@ -3822,6 +4390,12 @@ function M.new_activity(ports, options)
         return decision
     end
 
+    -- Start one deadline-bound native POST attempt with frozen wire and credentials.
+    --@param activity table Current logical Model request and retry state.
+    --@param observed_now integer Monotonic attempt start time.
+    --@return boolean|nil True after start or terminalized unknown-start result.
+    --@return table|nil Admission, encoding, network, or deadline error.
+    --@effect May open a network attempt; no Provider bytes cross the status barrier here.
     local function start_attempt(activity, observed_now)
         activity.attempt_serial = activity.attempt_serial + 1
         local attempt_id = "model_" .. activity.identity
@@ -3881,6 +4455,11 @@ function M.new_activity(ports, options)
         return true
     end
 
+    -- Separate canonical data from protocol and Provider transport-error events.
+    --@param events table Canonical adapter event batch.
+    --@return boolean Whether canonical data was seen.
+    --@return boolean Whether a protocol error was seen.
+    --@return boolean Whether a Provider transport error was seen.
     local function canonical_observation(events)
         local canonical, protocol_error, provider_error = false, false, false
         for _, event in ipairs(events) do
@@ -3895,6 +4474,12 @@ function M.new_activity(ports, options)
         return canonical, protocol_error, provider_error
     end
 
+    -- Parse an accepted HTTP body, decide a single fallback, and queue terminal truth.
+    --@param activity table Current logical Model request.
+    --@param body string Complete accepted Provider body.
+    --@param observed_now integer Monotonic observation time.
+    --@return string|nil terminal or fallback result.
+    --@return table|nil Parse, retry, queue, or digest error.
     local function parse_provider_response(activity, body, observed_now)
         local events = {}
         local pushed, push_error = activity.response_session:push(body)
@@ -3966,6 +4551,12 @@ function M.new_activity(ports, options)
         return "terminal"
     end
 
+    -- Parse a unique Retry-After header against trusted UTC and runtime cap.
+    --@param activity table Current logical Model request.
+    --@param response table Parsed HTTP response headers.
+    --@param observed_now integer Monotonic observation time retained for retry context.
+    --@return integer|nil Delay in milliseconds, or nil when header absent.
+    --@return table|nil Ambiguous header, clock, or parsing error.
     local function retry_after(activity, response, observed_now)
         local value, header_error = admitted_ports.transport.single_header(response, "Retry-After")
         if header_error then return nil, header_error end
@@ -3985,6 +4576,12 @@ function M.new_activity(ports, options)
         )
     end
 
+    -- Classify a complete HTTP attempt before exposing Provider body bytes.
+    --@param activity table Current logical Model request.
+    --@param result table Native transport response and body.
+    --@param observed_now integer Monotonic completion time.
+    --@return string|boolean|nil Wait/terminal status or successful settlement marker.
+    --@return table|nil Header, retry, adapter, or queue error.
     local function process_http(activity, result, observed_now)
         local response, header_error = admitted_ports.transport.parse_http_headers(
             result.response_headers,
@@ -4078,6 +4675,12 @@ function M.new_activity(ports, options)
         return parse_provider_response(activity, result.response_body, observed_now)
     end
 
+    -- Join a terminal native attempt and settle HTTP, retry, cancel, or unknown truth.
+    --@param activity table Current logical Model request.
+    --@param observed_now integer Monotonic terminal time.
+    --@return string|boolean|nil Wait or terminal result.
+    --@return table|nil Transport, retry, or adapter error.
+    --@effect Closes the native attempt before exposing terminal response evidence.
     local function process_terminal(activity, observed_now)
         local attempt = activity.attempt
         local called, result = pcall(attempt.join, attempt, observed_now)
@@ -4110,6 +4713,11 @@ function M.new_activity(ports, options)
         return terminal_transport_error(activity, decision.code)
     end
 
+    -- Admit one logical Model request and start its first transport attempt.
+    --@param spec table Runtime Model activity start record.
+    --@return table|nil Opaque active request handle.
+    --@return table|nil Busy, builder, retry, clock, or network error.
+    --@effect May initiate one bounded network POST attempt.
     function service.start(spec)
         if active then return nil, failure("ModelActivityBusy", "a Model request is already active") end
         local start, start_error = validate_activity_start(spec)
@@ -4138,6 +4746,9 @@ function M.new_activity(ports, options)
                 "Model activity identity digest is invalid"
             )
         end
+        -- Add a bounded duration to the observed monotonic start tick.
+        --@param duration integer Milliseconds to add.
+        --@return integer|nil Absolute deadline, or nil on integer overflow.
         local function deadline(duration)
             if duration > math.maxinteger - observed_now then return nil end
             return observed_now + duration
@@ -4187,6 +4798,11 @@ function M.new_activity(ports, options)
         return handle
     end
 
+    -- Request cancellation of the exact active logical Model request.
+    --@param handle table Opaque handle returned by start.
+    --@param reason string Cancellation reason identifier.
+    --@return table cancelled, pending, or unknown cancellation outcome.
+    --@effect May signal the active native network attempt.
     function service.cancel(handle, reason)
         if not active or handle ~= active.handle then
             return { outcome = "unknown" }
@@ -4206,6 +4822,10 @@ function M.new_activity(ports, options)
         return { outcome = decision and "pending" or "unknown" }
     end
 
+    -- Remove up to budget queued Runtime events in their original order.
+    --@param activity table Current logical Model request.
+    --@param budget integer Maximum events to drain.
+    --@return table Drained event array.
     local function drain(activity, budget)
         local result = {}
         while #result < budget and activity.output_cursor <= #activity.output do
@@ -4219,6 +4839,11 @@ function M.new_activity(ports, options)
         return result
     end
 
+    -- Advance at most one network attempt and return bounded public events.
+    --@param budget integer Maximum events to return on this poll.
+    --@return table|nil Immutable event batch.
+    --@return table|nil Invalid poll or clock error.
+    --@effect May start a retry, join a terminal attempt, or release an idle activity.
     function service.poll(budget)
         if not valid_integer(budget, 0) or budget > admitted.maximum_poll_events then
             return nil, failure("InvalidModelPoll", "model poll budget is invalid")
@@ -4275,6 +4900,9 @@ function M.new_activity(ports, options)
         return freeze(output, "model activity batch")
     end
 
+    -- Snapshot the active Model attempt and fallback state.
+    --@param none This service method takes no arguments.
+    --@return table Immutable idle or active status projection.
     function service.status()
         if not active then return freeze({ state = "idle" }, "model activity status") end
         return freeze({
@@ -4304,6 +4932,11 @@ local REVIEW_PORT_OPTION_FIELDS = {
     maximum_gap_bytes = true,
 }
 
+-- Validate the isolated review port's activity, builder, codec, and limits.
+--@param ports table Model activity, review builder, safety, and codec services.
+--@param options table Poll, reason, and gap byte caps.
+--@return table|nil Admitted port/options bundle.
+--@return table|nil InvalidReviewPort diagnostic.
 local function validate_review_port(ports, options)
     if not exact_activity_fields(ports, {
         activity = true,
@@ -4333,6 +4966,11 @@ local function validate_review_port(ports, options)
     return { ports = ports, options = options }
 end
 
+-- Admit bounded NUL-free UTF-8 review verdict text.
+--@param value any Candidate reason or gap text.
+--@param maximum integer Inclusive byte cap.
+--@param allow_empty boolean Whether empty text is valid.
+--@return boolean True only for valid review text.
 local function valid_review_text(value, maximum, allow_empty)
     if type(value) ~= "string" or #value > maximum or value:find("\0", 1, true)
         or (not allow_empty and value == "")
@@ -4342,6 +4980,11 @@ local function valid_review_text(value, maximum, allow_empty)
     return text.validate_utf8(value) == true
 end
 
+-- Validate an exact action or termination review JSON verdict.
+--@param document any Typed JSON review object.
+--@param purpose string action-review or termination-review.
+--@param options table Review text caps.
+--@return table|nil Canonical verdict, gap, and reason, or nil when invalid.
 local function parsed_review(document, purpose, options)
     if json.kind(document) ~= "object" then return nil end
     if purpose == "action-review" then
@@ -4378,12 +5021,19 @@ end
 ---Adapts one canonical Model activity to Runtime's isolated review port.
 -- Model text may choose only the bounded verdict fields. Review identity and
 -- the exact request/response binding are always computed locally.
+--@param ports table Model activity, review builder, safety, and codec ports.
+--@param options table Poll and review text byte limits.
+--@return table|nil Runtime review port.
+--@return table|nil InvalidReviewPort diagnostic.
 function M.new_review_port(ports, options)
     local admitted, admission_error = validate_review_port(ports, options)
     if not admitted then return nil, admission_error end
     local active
     local service = {}
 
+    -- Release the single active review builder binding after settlement.
+    --@param none This closure takes no arguments.
+    --@return boolean True when an active review was released.
     local function release()
         if not active then return false end
         admitted.ports.builder.release(active.specification.request_id)
@@ -4391,6 +5041,10 @@ function M.new_review_port(ports, options)
         return true
     end
 
+    -- Parse a canonical review response and mint its local binding digest.
+    --@param wrapper table Terminal Model response wrapper.
+    --@return table|nil Locally bound review verdict.
+    --@return table|nil Unbound response or digest error.
     local function verdict_from(wrapper)
         local binding = admitted.ports.builder.binding(active.specification.request_id)
         if type(binding) ~= "table"
@@ -4449,6 +5103,11 @@ function M.new_review_port(ports, options)
         return freeze(result, "bound review verdict")
     end
 
+    -- Bind and start one isolated action or termination review Model activity.
+    --@param specification table Exact Runtime review binding.
+    --@return table|nil Opaque public review handle.
+    --@return table|nil Busy, binding, or activity-start error.
+    --@effect Starts one no-tool review Provider request.
     function service.start(specification)
         if active then return nil, failure("ReviewPortBusy", "a review is already active") end
         local activity_spec, binding_error = admitted.ports.builder.bind(specification)
@@ -4475,6 +5134,11 @@ function M.new_review_port(ports, options)
         return public_handle
     end
 
+    -- Cancel the exact active review and release a settled binding.
+    --@param handle table Opaque review handle from start.
+    --@param reason string Cancellation reason identifier.
+    --@return table cancelled, pending, or unknown outcome.
+    --@effect May cancel the underlying Model activity.
     function service.cancel(handle, reason)
         if not active or handle ~= active.handle or not valid_token(reason, 128) then
             return { outcome = "unknown" }
@@ -4494,6 +5158,10 @@ function M.new_review_port(ports, options)
         return result
     end
 
+    -- Poll the review activity and emit only a locally bound verdict.
+    --@param budget integer Maximum underlying activity events.
+    --@return table|nil Immutable verdict event batch.
+    --@return table|nil Invalid budget, activity, or binding error.
     function service.poll(budget)
         if not valid_integer(budget, 0) or budget > admitted.options.maximum_poll_events then
             return nil, failure("InvalidReviewPoll", "review poll budget is invalid")
@@ -4519,6 +5187,9 @@ function M.new_review_port(ports, options)
         return freeze(output, "review poll batch")
     end
 
+    -- Snapshot whether a review is idle or currently bound.
+    --@param none This service method takes no arguments.
+    --@return table Immutable review status.
     function service.status()
         if not active then return freeze({ state = "idle" }, "review port status") end
         return freeze({
@@ -4543,6 +5214,11 @@ local COMPACTION_PORT_OPTION_FIELDS = {
     maximum_summary_bytes = true,
 }
 
+-- Validate the isolated compaction port's activity, builder, and summary codec.
+--@param ports table Activity, builder, safety, JSON, and summary services.
+--@param options table Poll and summary byte limits.
+--@return table|nil Admitted port/options bundle.
+--@return table|nil InvalidCompactionPort diagnostic.
 local function validate_compaction_port(ports, options)
     if not exact_activity_fields(ports, {
         activity = true,
@@ -4578,6 +5254,11 @@ local function validate_compaction_port(ports, options)
     return { ports = ports, options = options }
 end
 
+-- Check an exact structured summary against its source and seven required slots.
+--@param document any Typed JSON Provider summary.
+--@param binding table Frozen compaction request binding.
+--@param options table Summary byte cap.
+--@return table|nil Canonical summary data, or nil when malformed.
 local function parsed_compaction_summary(document, binding, options)
     local expected = {
         schema_version = true,
@@ -4627,12 +5308,19 @@ end
 -- Malformed, incomplete, tool-bearing, or controlled output is still returned
 -- as a bound response so compact.lua can durably reject it and apply its one
 -- correction attempt; it can never cross the publication validator as valid.
+--@param ports table Activity, compaction builder, safety, JSON, and summary ports.
+--@param options table Poll and canonical summary limits.
+--@return table|nil Isolated compaction Model port.
+--@return table|nil InvalidCompactionPort diagnostic.
 function M.new_compaction_port(ports, options)
     local admitted, admission_error = validate_compaction_port(ports, options)
     if not admitted then return nil, admission_error end
     local active
     local service = {}
 
+    -- Release the single compaction builder binding after terminal settlement.
+    --@param none This closure takes no arguments.
+    --@return boolean True when an active compaction was released.
     local function release()
         if not active then return false end
         admitted.ports.builder.release(active.specification.request_id)
@@ -4640,6 +5328,10 @@ function M.new_compaction_port(ports, options)
         return true
     end
 
+    -- Bind a terminal Model response to its source and structured summary evidence.
+    --@param wrapper table Canonical Model response wrapper.
+    --@return table|nil Frozen compaction response for durable validation.
+    --@return table|nil Unbound response, encoding, or digest error.
     local function response_from(wrapper)
         local binding = admitted.ports.builder.binding(active.specification.request_id)
         if type(binding) ~= "table"
@@ -4737,6 +5429,11 @@ function M.new_compaction_port(ports, options)
         }, "bound compaction response")
     end
 
+    -- Bind and start one isolated compaction Model activity.
+    --@param specification table Exact frozen compaction source request.
+    --@return table|nil Opaque public compaction handle.
+    --@return table|nil Busy, binding, or activity-start error.
+    --@effect Starts one no-tool compaction Provider request.
     function service.start(specification)
         if active then
             return nil, failure(
@@ -4772,6 +5469,11 @@ function M.new_compaction_port(ports, options)
         return public_handle
     end
 
+    -- Cancel the exact active compaction and retain pending cancellation state.
+    --@param handle table Opaque compaction handle from start.
+    --@param reason string Cancellation reason identifier.
+    --@return table cancelled, pending, or unknown outcome.
+    --@effect May cancel the underlying Model activity.
     function service.cancel(handle, reason)
         if not active or handle ~= active.handle or not valid_token(reason, 128) then
             return { outcome = "unknown" }
@@ -4795,6 +5497,10 @@ function M.new_compaction_port(ports, options)
         return result
     end
 
+    -- Poll compaction activity and emit a source-bound response or cancel settlement.
+    --@param budget integer Maximum underlying activity events.
+    --@return table|nil Immutable compaction response event batch.
+    --@return table|nil Invalid budget, activity, or binding error.
     function service.poll(budget)
         if not valid_integer(budget, 0)
             or budget > admitted.options.maximum_poll_events
@@ -4840,6 +5546,9 @@ function M.new_compaction_port(ports, options)
         return freeze(output, "compaction poll batch")
     end
 
+    -- Snapshot compaction state including a pending cancellation.
+    --@param none This service method takes no arguments.
+    --@return table Immutable idle, active, or cancelling status.
     function service.status()
         if not active then
             return freeze({ state = "idle" }, "compaction port status")

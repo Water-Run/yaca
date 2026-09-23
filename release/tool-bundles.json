@@ -1,0 +1,128 @@
+{
+  "schema": "yaca-tool-catalog-v1",
+  "status": "candidate-versions-not-qualified-artifacts",
+  "editions": {
+    "clean": [],
+    "std": [
+      "python2",
+      "ssh",
+      "curl",
+      "archive"
+    ],
+    "full": [
+      "python2",
+      "ssh",
+      "curl",
+      "archive",
+      "git",
+      "python3",
+      "sqlite",
+      "jq",
+      "busybox",
+      "compiler"
+    ]
+  },
+  "tools": {
+    "python2": {
+      "version": "2.7.18",
+      "directory": "python2",
+      "purpose": "Python 2 interpreter and standard library; no pip or automatic downloads.",
+      "source_url": "https://www.python.org/downloads/release/python-2718/"
+    },
+    "ssh": {
+      "version": "0.85",
+      "directory": "ssh",
+      "purpose": "PuTTY plink, pscp and psftp. Use explicit verified host keys and portable command-line options; no saved registry sessions.",
+      "source_url": "https://www.chiark.greenend.org.uk/~sgtatham/putty/releases/0.85.html"
+    },
+    "curl": {
+      "version": "8.21.0",
+      "directory": "curl",
+      "purpose": "HTTP/HTTPS CLI with its own CA bundle. Pass --cacert tools/curl/cacert.pem using the absolute package path.",
+      "source_url": "https://curl.se/download/curl-8.21.0.tar.xz"
+    },
+    "archive": {
+      "version": "26.03",
+      "directory": "7zip",
+      "purpose": "7-Zip command-line archiver; no shell extensions.",
+      "source_url": "https://www.7-zip.org/download.html"
+    },
+    "git": {
+      "directory": "git",
+      "purpose": "Portable Git with its complete helper, script and TLS dependencies.",
+      "source_url": "https://git-scm.com/downloads"
+    },
+    "python3": {
+      "directory": "python3",
+      "purpose": "Python 3 interpreter and standard library, built for this target.",
+      "source_url": "https://www.python.org/downloads/"
+    },
+    "sqlite": {
+      "version": "3.53.4",
+      "directory": "sqlite",
+      "purpose": "sqlite3 and sqldiff command-line tools; not the yaca data store.",
+      "source_url": "https://www.sqlite.org/download.html"
+    },
+    "jq": {
+      "version": "1.8.2",
+      "directory": "jq",
+      "purpose": "JSON command-line processing.",
+      "source_url": "https://github.com/jqlang/jq/releases/tag/jq-1.8.2"
+    },
+    "busybox": {
+      "directory": "busybox",
+      "purpose": "Text and shell utilities; invoke the executable followed by an applet name.",
+      "source_url": "https://busybox.net/"
+    },
+    "compiler": {
+      "directory": "compiler",
+      "purpose": "Relocatable C/C++ development tools including compiler, linker, headers, libraries and Make.",
+      "source_url": "https://github.com/skeeto/w64devkit/releases/tag/v2.9.0"
+    }
+  },
+  "targets": {
+    "win32-x86": {
+      "minimum": "Windows XP SP3",
+      "executable": "yaca.exe",
+      "versions": {
+        "git": "2.10.0",
+        "python3": "3.4.10",
+        "busybox": "FRP-6075-g169694ebd",
+        "compiler": "w64devkit-2.9.0-x86"
+      },
+      "notes": [
+        "Core retains its XP baseline. The compiler requires SSE2.",
+        "Exclude CMake, Ninja and ccache from the XP compiler subset. C11 threads are unavailable on XP.",
+        "Python 3.4.10 requires a source build; never relabel an older installer."
+      ]
+    },
+    "win64-x86_64": {
+      "minimum": "Windows 7 SP1",
+      "executable": "yaca.exe",
+      "versions": {
+        "git": "2.46.2",
+        "python3": "3.8.20",
+        "busybox": "FRP-6075-g169694ebd",
+        "compiler": "w64devkit-2.9.0-x64"
+      },
+      "notes": [
+        "Python 3.8.20 requires a source build. Qualify CRT and KB2533623 requirements on an unpatched target.",
+        "Test compiler and Git Unicode paths on Windows 7; newer-host results are insufficient."
+      ]
+    },
+    "linux-x86_64": {
+      "minimum": "CentOS 7 x86_64 / glibc 2.17",
+      "executable": "yaca",
+      "versions": {
+        "git": "2.55.0",
+        "python3": "3.14.7",
+        "busybox": "1.37.0",
+        "compiler": "GCC-13.5.0_Binutils-2.47_Make-4.4.1"
+      },
+      "notes": [
+        "All programs must run against glibc 2.17.",
+        "Compiler payload includes a relocatable sysroot; do not depend on the build host toolchain."
+      ]
+    }
+  }
+}

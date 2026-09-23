@@ -1,7 +1,7 @@
 --[[
-File: rp001_resource_overlay.lua
-Date: 2026-08-30
 Author: WaterRun
+Date: 2026-09-23
+File: rp001_resource_overlay.lua
 Description: Exercises the pinned luainstaller resource-overlay patch on a modern host.
 ]]
 
@@ -115,6 +115,10 @@ local onefile_ok, onefile_output = process.outputCommand(onefile.executable, {})
 assert(onefile_ok, onefile_output)
 assert(onefile_output:find("resource%-overlay%-runtime=PASS"))
 
+--Computes rejected in rp001 resource overlay.
+--@param output any The output supplied to this scenario's fixture operation.
+--@param expected_type any The expected type supplied to this scenario's fixture operation.
+--@return nil No value; assertions or fixture effects define this case.
 local function rejected(output, expected_type)
     assert(not output.ok)
     assert(output.error.type == expected_type, output.error.type)

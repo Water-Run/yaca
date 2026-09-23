@@ -1,7 +1,7 @@
 --[[
-File: ini.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-09-23
+File: ini.lua
 Description: Parses and writes schema-bound INI while preserving safe concrete syntax.
 ]]
 
@@ -9,11 +9,22 @@ local text = require("text")
 
 local M = {}
 
+--@metatable semantic_values Associates typed INI wrappers with their exact semantic kind and value.
+--@field __mode string Fixed k mode: keys are weak; entries remain mutable within their owning module.
 local semantic_values = setmetatable({}, { __mode = "k" })
+--@metatable document_states Associates parsed INI documents with their private concrete syntax and editing state.
+--@field __mode string Fixed k mode: keys are weak; entries remain mutable within their owning module.
 local document_states = setmetatable({}, { __mode = "k" })
 
 local UTF8_BOM = "\239\187\191"
 
+-- Construct a structured diagnostic without throwing or formatting its optional fields.
+--@param code string Stable diagnostic code used by callers to choose recovery behavior.
+--@param message string Human-readable summary supplied by the failing operation.
+--@param line integer|nil Parser-reported source line; omitted when no source location is available.
+--@param column integer|nil Parser-reported column in that parser's coordinate convention.
+--@param reason string|nil Optional machine-readable cause or validation rule.
+--@return table New diagnostic record; optional non-nil fields are retained without deep copying.
 local function failure(code, message, line, column, reason)
     local result = { code = code, message = message }
     if line ~= nil then result.line = line end
@@ -22,12 +33,32 @@ local function failure(code, message, line, column, reason)
     return result
 end
 
+-- Create a shallow read-only view without copying the backing table.
+--@param values table Backing fields retained by reference; the caller owns their stability.
+--@param label string|nil Diagnostic label; defaults to "readonly value".
+--@return table Empty proxy exposing the backing fields through its locked metatable.
+--@ownership Retains values by reference; nested values and the backing table are not frozen.
 local function readonly(values, label)
+    --@metatable readonly_proxy Forwards reads and iteration; ordinary assignments raise an error.
+    --@field __index table Backing values used for missing-key reads.
+    --@field __newindex function Rejects ordinary assignments without changing the backing values.
+    --@field __pairs function Enumerates the backing table with next.
+    --@field __metatable string Hides this metatable behind the fixed "locked" marker.
     return setmetatable({}, {
         __index = values,
+        -- Reject a write through the proxy before it can create an ordinary field.
+        --@param _ table Proxy receiving the assignment; its contents are not consulted.
+        --@param key any Attempted field name included in the diagnostic.
+        --@return nil Does not return normally.
+        --@error Always raises a read-only assignment error at the caller frame.
         __newindex = function(_, key)
             error((label or "readonly value") .. " cannot be modified: " .. tostring(key), 2)
         end,
+        -- Iterate the backing fields instead of the empty proxy table.
+        --@param none The proxy argument supplied by pairs is ignored.
+        --@return function The standard next iterator.
+        --@return table Backing values used as iterator state.
+        --@return nil Initial key used to start iteration.
         __pairs = function()
             return next, values, nil
         end,
@@ -39,10 +70,17 @@ end
 -- It is never a semantic INI value and cannot be serialized as a scalar.
 M.unset = readonly({}, "INI unset sentinel")
 
+-- Check the Lua integer subtype and the caller's inclusive lower bound.
+--@param value any Candidate value; floats and non-numeric values are rejected.
+--@param minimum integer Inclusive minimum accepted by this check.
+--@return boolean True only for an integer at least minimum.
 local function valid_integer(value, minimum)
     return math.type(value) == "integer" and value >= minimum
 end
 
+-- Count a dense positive-integer sequence while rejecting holes and map keys.
+--@param values any Candidate Lua sequence.
+--@return integer|nil count Sequence length, or nil for a non-dense table.
 local function is_dense_array(values)
     if type(values) ~= "table" then return nil end
     local count = 0
@@ -56,6 +94,10 @@ local function is_dense_array(values)
     return count
 end
 
+-- Admit text bytes through the shared strict UTF-8 and NUL-free carrier.
+--@param value any Candidate semantic INI text.
+--@return boolean|nil valid True for an admissible text value.
+--@return table|nil err Structured type or text-carrier failure.
 local function validate_text_bytes(value)
     if type(value) ~= "string" then
         return nil, failure("InvalidIniValue", "INI text value must be a byte string")
@@ -65,6 +107,9 @@ local function validate_text_bytes(value)
     return true
 end
 
+-- Check an unquoted INI token against the printable ASCII grammar.
+--@param value any Candidate non-empty token.
+--@return boolean valid Whether every byte is allowed unquoted.
 local function valid_token_bytes(value)
     if type(value) ~= "string" or value == "" then return false end
     for index = 1, #value do
@@ -82,6 +127,11 @@ local function valid_token_bytes(value)
     return true
 end
 
+-- Register an immutable text or token wrapper with private exact bytes.
+--@param kind string Admitted semantic form, text or token.
+--@param value string Exact decoded semantic bytes.
+--@return table wrapper Read-only typed INI value.
+--@effect Adds the wrapper to the private weak-key semantic registry.
 local function new_semantic_value(kind, value)
     local wrapper = readonly({ kind = kind, value = value }, "INI " .. kind)
     semantic_values[wrapper] = { kind = kind, value = value }
@@ -89,9 +139,9 @@ local function new_semantic_value(kind, value)
 end
 
 ---Creates an immutable quoted-text INI value.
--- @param value string Strict UTF-8 text; NUL is forbidden.
--- @return table|nil wrapped Typed semantic value.
--- @return table|nil err Structured text failure.
+--@param value string Strict UTF-8 text; NUL is forbidden.
+--@return table|nil wrapped Typed semantic value.
+--@return table|nil err Structured text failure.
 function M.text(value)
     local valid, validation_error = validate_text_bytes(value)
     if not valid then return nil, validation_error end
@@ -99,9 +149,9 @@ function M.text(value)
 end
 
 ---Creates an immutable unquoted ASCII INI scalar token.
--- @param value string Non-empty token bytes.
--- @return table|nil wrapped Typed semantic value.
--- @return table|nil err Structured token failure.
+--@param value string Non-empty token bytes.
+--@return table|nil wrapped Typed semantic value.
+--@return table|nil err Structured token failure.
 function M.token(value)
     if not valid_token_bytes(value) then
         return nil, failure("InvalidIniValue", "INI token contains forbidden bytes")
@@ -110,17 +160,17 @@ function M.token(value)
 end
 
 ---Returns the explicit kind of an INI semantic value.
--- @param value any Candidate wrapper.
--- @return string|nil kind Either text or token.
+--@param value any Candidate wrapper.
+--@return string|nil kind Either text or token.
 function M.kind(value)
     local state = semantic_values[value]
     return state and state.kind or nil
 end
 
 ---Returns the decoded bytes of an INI semantic value.
--- @param value table Candidate wrapper.
--- @return string|nil bytes Exact decoded text or token bytes.
--- @return table|nil err Structured type failure.
+--@param value table Candidate wrapper.
+--@return string|nil bytes Exact decoded text or token bytes.
+--@return table|nil err Structured type failure.
 function M.value(value)
     local state = semantic_values[value]
     if not state then
@@ -129,10 +179,17 @@ function M.value(value)
     return state.value
 end
 
+-- Check the schema's ASCII key-name grammar.
+--@param value any Candidate key spelling.
+--@return boolean valid Whether the spelling starts with a letter and continues with alnum/underscore.
 local function valid_key_name(value)
     return type(value) == "string" and value:match("^[A-Za-z][A-Za-z0-9_]*$") ~= nil
 end
 
+-- Admit one strict UTF-8 section name or family prefix without controls.
+--@param value any Candidate section spelling.
+--@param allow_trailing_dot boolean Whether a family-prefix trailing dot is permitted.
+--@return boolean valid Whether the section spelling is admissible.
 local function valid_section_fragment(value, allow_trailing_dot)
     if type(value) ~= "string" or value == "" then return false end
     if not allow_trailing_dot and value:sub(-1) == "." then return false end
@@ -151,6 +208,10 @@ local function valid_section_fragment(value, allow_trailing_dot)
     return text.validate_utf8(value)
 end
 
+-- Validate the complete bounded INI schema and disjoint section families.
+--@param options table Limits and ordered exact/family section declarations.
+--@return table|nil admitted Independent limits and normalized schema tables.
+--@return table|nil err Structured invalid-limit, field, or overlapping-schema failure.
 local function validate_options(options)
     if type(options) ~= "table" then
         return nil, failure("InvalidIniSchema", "INI codec options are required")
@@ -271,6 +332,10 @@ local function validate_options(options)
     return { limits = limits, schema = schema }
 end
 
+-- Select an exact section declaration or one matching prefix family.
+--@param schema table Validated disjoint exact and prefix declarations.
+--@param name string Exact candidate section name.
+--@return table|nil declaration Matching normalized declaration, or nil.
 local function match_section(schema, name)
     local exact = schema.exact[name]
     if exact then return exact end
@@ -284,14 +349,30 @@ local function match_section(schema, name)
     return nil
 end
 
+-- Create a located INI syntax failure.
+--@param reason string Machine-readable grammar rejection.
+--@param line integer Source line number.
+--@param column integer One-based byte column.
+--@return table err New IniSyntax diagnostic.
 local function syntax_failure(reason, line, column)
     return failure("IniSyntax", "INI input is invalid", line, column, reason)
 end
 
+-- Create an INI limit failure with optional location.
+--@param reason string Limit category such as lines or value-bytes.
+--@param line integer|nil Source line if available.
+--@param column integer|nil One-based byte column if available.
+--@return table err New IniLimit diagnostic.
 local function limit_failure(reason, line, column)
     return failure("IniLimit", "INI input exceeds an injected limit", line, column, reason)
 end
 
+-- Trim horizontal ASCII whitespace from a byte-indexed substring boundary.
+--@param value string Source line bytes.
+--@param first integer Inclusive starting byte index.
+--@param last integer Inclusive ending byte index.
+--@return integer first_trimmed First non-space position, possibly beyond last.
+--@return integer last_trimmed Last non-space position, possibly before first.
 local function trim_bounds(value, first, last)
     while first <= last do
         local byte = value:byte(first)
@@ -304,6 +385,12 @@ local function trim_bounds(value, first, last)
     return first, last
 end
 
+-- Split physical INI lines while retaining exact LF/CRLF endings and offsets.
+--@param source string Complete admitted UTF-8 INI bytes.
+--@param body_start integer First byte after an optional BOM.
+--@param limits table Validated total-line and per-line byte limits.
+--@return table|nil lines Mutable ordered physical line records.
+--@return table|nil err Structured line-ending or size failure.
 local function split_lines(source, body_start, limits)
     local lines = {}
     local index = body_start
@@ -342,6 +429,9 @@ local function split_lines(source, body_start, limits)
     return lines
 end
 
+-- Find the first byte after horizontal leading whitespace.
+--@param content string One physical line without its ending.
+--@return integer index One-based first non-space position, possibly past the end.
 local function first_nonspace(content)
     local index = 1
     while content:byte(index) == 0x20 or content:byte(index) == 0x09 do
@@ -350,6 +440,13 @@ local function first_nonspace(content)
     return index
 end
 
+-- Decode one quoted INI value with the fixed backslash escape set.
+--@param content string Source line without its ending.
+--@param start_index integer Index of the opening quote.
+--@param line integer Source line number for diagnostics.
+--@param maximum_value_bytes integer Inclusive decoded-value byte cap.
+--@return table|nil wrapped Immutable decoded text value.
+--@return integer|table finish_or_err Closing-quote index or structured failure.
 local function parse_quoted(content, start_index, line, maximum_value_bytes)
     local parts = {}
     local decoded_bytes = 0
@@ -394,6 +491,12 @@ local function parse_quoted(content, start_index, line, maximum_value_bytes)
     return nil, syntax_failure("unterminated-quote", line, start_index)
 end
 
+-- Admit trailing spaces and an optional inline comment after a value/header.
+--@param content string Source line without its ending.
+--@param index integer First byte after the parsed value or closing bracket.
+--@param line integer Source line number for diagnostics.
+--@return boolean|nil valid True when only whitespace or a comment remains.
+--@return table|nil err Structured trailing-data failure.
 local function comment_or_end(content, index, line)
     while content:byte(index) == 0x20 or content:byte(index) == 0x09 do
         index = index + 1
@@ -403,6 +506,13 @@ local function comment_or_end(content, index, line)
     return nil, syntax_failure("trailing-data", line, index)
 end
 
+-- Parse one schema-bound assignment and retain its concrete prefix/suffix.
+--@param record table Mutable physical line record.
+--@param current_section table Mutable semantic section and its declaration.
+--@param limits table Validated INI byte caps.
+--@return boolean|nil assigned True when a new field has been admitted.
+--@return table|nil err Structured syntax, duplicate, form, or limit failure.
+--@effect Adds the wrapped value to current_section and annotates record on success.
 local function parse_assignment(record, current_section, limits)
     local content = record.content
     local start_index = first_nonspace(content)
@@ -470,6 +580,12 @@ local function parse_assignment(record, current_section, limits)
     return true
 end
 
+-- Parse a section header and bind it to one validated declaration.
+--@param record table Mutable physical line record.
+--@param schema table Validated exact/family section schema.
+--@return table|nil selected Section name and matching declaration.
+--@return table|nil err Structured syntax or unknown-section failure.
+--@effect Annotates record with section kind and name on success.
 local function parse_section(record, schema)
     local content = record.content
     local start_index = first_nonspace(content)
@@ -491,12 +607,21 @@ local function parse_section(record, schema)
     return { name = name, declaration = declaration }
 end
 
+-- Create an opaque document handle for private semantic and concrete state.
+--@param state table Owned parsed or built INI document state.
+--@return table document Read-only public handle.
+--@ownership Retains state in the private weak-key document registry.
 local function new_document(state)
     local document = readonly({}, "INI document")
     document_states[document] = state
     return document
 end
 
+-- Parse a complete bounded INI generation into semantic and physical records.
+--@param source any Candidate exact source bytes with optional single UTF-8 BOM.
+--@param admitted table Validated schema, limits, and codec owner token.
+--@return table|nil document Opaque handle retaining exact concrete syntax.
+--@return table|nil err Structured type, UTF-8, schema, syntax, or limit failure.
 local function parse_source(source, admitted)
     local limits, schema = admitted.limits, admitted.schema
     if type(source) ~= "string" then
@@ -556,6 +681,12 @@ local function parse_source(source, admitted)
     return new_document(state)
 end
 
+-- Admit a typed semantic value for one declared INI field.
+--@param field table Normalized field declaration and accepted form.
+--@param wrapped table Candidate wrapper from this module.
+--@param limits table Validated decoded-value byte cap.
+--@return boolean|nil valid True when form and size match the declaration.
+--@return table|nil err Structured wrapper, form, or size failure.
 local function validate_wrapper(field, wrapped, limits)
     local value = semantic_values[wrapped]
     if not value then
@@ -570,6 +701,10 @@ local function validate_wrapper(field, wrapped, limits)
     return true
 end
 
+-- Copy semantic sections and dirty marks while sharing immutable source records.
+--@param state table Private document state to copy for an edit transaction.
+--@return table clone New mutable semantic state with shared physical source.
+--@ownership Section/value maps are copied; declarations, wrappers, and physical records are shared.
 local function clone_state(state)
     local result = {
         owner = state.owner,
@@ -596,6 +731,11 @@ local function clone_state(state)
     return result
 end
 
+-- Build a schema-bound document from ordered typed semantic sections.
+--@param section_inputs table Dense ordered name/values section records.
+--@param admitted table Validated schema, limits, and codec owner token.
+--@return table|nil document Opaque document handle with no concrete source syntax.
+--@return table|nil err Structured section, field, or wrapper failure.
 local function build_document(section_inputs, admitted)
     local section_count = is_dense_array(section_inputs)
     if section_count == nil then
@@ -648,6 +788,13 @@ local function build_document(section_inputs, admitted)
     return new_document(state)
 end
 
+-- Apply distinct validated field edits to a copied semantic document state.
+--@param document table Opaque document owned by the supplied codec.
+--@param changes table Dense section/key/value edits; ini.unset removes a value.
+--@param admitted table Validated schema, limits, and codec owner token.
+--@return table|nil edited New opaque document handle.
+--@return table|nil err Structured foreign-owner, change-shape, or value failure.
+--@ownership Original document state remains unchanged; the new state shares source records.
 local function edit_document(document, changes, admitted)
     local state = document_states[document]
     if not state or state.owner ~= admitted.owner then
@@ -707,6 +854,10 @@ local function edit_document(document, changes, admitted)
     return new_document(result)
 end
 
+-- Encode one validated typed value using canonical INI escaping.
+--@param wrapped table Registered semantic text or token wrapper.
+--@return string encoded Unquoted token or quoted escaped text.
+--@error Raises if wrapped is not registered; callers validate wrappers earlier.
 local function encode_value(wrapped)
     local state = assert(semantic_values[wrapped])
     if state.kind == "token" then return state.value end
@@ -734,6 +885,14 @@ local function encode_value(wrapped)
     return table.concat(output)
 end
 
+-- Append bytes to a writer while enforcing total and optional line caps.
+--@param writer table Mutable parts and total-byte state.
+--@param bytes string Encoded output bytes.
+--@param limits table Validated INI byte caps.
+--@param line_bytes integer|nil Optional physical content length without ending.
+--@return boolean|nil appended True after bytes are retained.
+--@return table|nil err Structured line or total-byte limit failure.
+--@effect Updates writer.bytes and writer.parts only after both checks pass.
 local function append_bounded(writer, bytes, limits, line_bytes)
     if line_bytes and line_bytes > limits.maximum_line_bytes then
         return nil, limit_failure("line-bytes")
@@ -746,6 +905,11 @@ local function append_bounded(writer, bytes, limits, line_bytes)
     return true
 end
 
+-- Group semantic sections by schema order and retain their original order within families.
+--@param state table Private document semantic section state.
+--@param schema table Validated ordered exact/family declarations.
+--@return table sections New ordered sequence of existing section references.
+--@ownership The result copies only its outer sequence; section records remain shared.
 local function ordered_sections(state, schema)
     local buckets = {}
     for index = 1, #schema.sections do buckets[index] = {} end
@@ -755,12 +919,21 @@ local function ordered_sections(state, schema)
     end
     local result = {}
     for _, bucket in ipairs(buckets) do
+        -- Preserve the original section order within one declared schema family.
+        --@param left table First section record with its order field.
+        --@param right table Second section record with its order field.
+        --@return boolean before Whether left appeared earlier in the document.
         table.sort(bucket, function(left, right) return left.order < right.order end)
         for _, section in ipairs(bucket) do result[#result + 1] = section end
     end
     return result
 end
 
+-- Serialize semantic fields in schema order with canonical LF layout.
+--@param state table Private semantic document state.
+--@param admitted table Validated schema and output limits.
+--@return string|nil source Complete canonical INI bytes.
+--@return table metadata_or_err Read-only mode metadata or structured limit failure.
 local function write_canonical(state, admitted)
     local writer = { parts = {}, bytes = 0, lines = 0 }
     local sections = ordered_sections(state, admitted.schema)
@@ -804,6 +977,11 @@ local function write_canonical(state, admitted)
     return table.concat(writer.parts), readonly({ mode = "canonical" }, "INI write metadata")
 end
 
+-- Preserve source layout while applying dirty field changes and new sections.
+--@param state table Private semantic state with optional physical source records.
+--@param admitted table Validated schema and output limits.
+--@return string|boolean|nil source Preserved bytes, false on limit failure, or nil if unavailable.
+--@return table|nil metadata_or_err Mode metadata on success or structured limit failure.
 local function write_concrete(state, admitted)
     if not state.concrete_safe or not state.physical then return nil end
     local writer = { parts = {}, bytes = 0 }
@@ -822,6 +1000,12 @@ local function write_concrete(state, admitted)
         end
     end
     local line_count, previous_ended = 0, true
+    -- Append one physical line, inserting a separator after an unterminated prior line.
+    --@param content string Line content without ending.
+    --@param ending string Exact retained or selected LF/CRLF ending.
+    --@return boolean|nil appended True after the complete line is retained.
+    --@return table|nil err Structured line-count or byte-limit failure.
+    --@effect Updates writer and physical line count on success; a separator may precede failure.
     local function append_line(content, ending)
         if #content > admitted.limits.maximum_line_bytes then return nil, limit_failure("line-bytes") end
         if line_count >= admitted.limits.maximum_lines then return nil, limit_failure("lines") end
@@ -834,6 +1018,11 @@ local function write_concrete(state, admitted)
         line_count, previous_ended = line_count + 1, ending ~= ""
         return true
     end
+    -- Emit schema-ordered semantic fields absent from the original physical syntax.
+    --@param section table Current semantic section with typed values.
+    --@return boolean|nil appended True after all new fields are emitted.
+    --@return table|nil err Structured line-count or byte-limit failure.
+    --@effect Appends new assignment lines to the concrete writer.
     local function append_new_fields(section)
         for _, field in ipairs(section.declaration.fields) do
             local wrapped = section.values[field.key]
@@ -885,9 +1074,9 @@ end
 ---Creates a bounded, schema-bound INI codec.
 -- The schema owns the only accepted sections, fields, value forms, and their
 -- canonical order. All numeric or enum interpretation remains with config.lua.
--- @param options table Required limits and ordered section declarations.
--- @return table|nil codec Immutable INI service.
--- @return table|nil err Structured schema failure.
+--@param options table Required limits and ordered section declarations.
+--@return table|nil codec Immutable INI service.
+--@return table|nil err Structured schema failure.
 function M.new(options)
     local admitted, options_error = validate_options(options)
     if not admitted then return nil, options_error end
@@ -895,25 +1084,25 @@ function M.new(options)
     local service = {}
 
     ---Parses one complete INI generation and rejects unknown or duplicate fields.
-    -- @param source string Exact INI bytes with an optional single UTF-8 BOM.
-    -- @return table|nil document Immutable semantic/concrete document handle.
-    -- @return table|nil err Structured syntax, schema, UTF-8, or limit failure.
+    --@param source string Exact INI bytes with an optional single UTF-8 BOM.
+    --@return table|nil document Immutable semantic/concrete document handle.
+    --@return table|nil err Structured syntax, schema, UTF-8, or limit failure.
     function service.parse(source)
         return parse_source(source, admitted)
     end
 
     ---Builds an INI document from ordered semantic sections.
-    -- @param sections table Dense array of name/values section records.
-    -- @return table|nil document Immutable document handle.
-    -- @return table|nil err Structured shape, schema, or value failure.
+    --@param sections table Dense array of name/values section records.
+    --@return table|nil document Immutable document handle.
+    --@return table|nil err Structured shape, schema, or value failure.
     function service.build(sections)
         return build_document(sections, admitted)
     end
 
     ---Returns section names in their admitted physical or construction order.
-    -- @param document table Document returned by this codec.
-    -- @return table|nil names Dense copied name array.
-    -- @return table|nil err Structured document failure.
+    --@param document table Document returned by this codec.
+    --@return table|nil names Dense copied name array.
+    --@return table|nil err Structured document failure.
     function service.sections(document)
         local state = document_states[document]
         if not state or state.owner ~= admitted.owner then
@@ -925,11 +1114,11 @@ function M.new(options)
     end
 
     ---Looks up a typed semantic field without inventing a missing value.
-    -- @param document table Document returned by this codec.
-    -- @param section string Exact admitted section name.
-    -- @param key string Exact admitted field name.
-    -- @return table|nil value Typed INI value, or nil when absent.
-    -- @return table|nil err Structured document or selector failure.
+    --@param document table Document returned by this codec.
+    --@param section string Exact admitted section name.
+    --@param key string Exact admitted field name.
+    --@return table|nil value Typed INI value, or nil when absent.
+    --@return table|nil err Structured document or selector failure.
     function service.get(document, section, key)
         local state = document_states[document]
         if not state or state.owner ~= admitted.owner then
@@ -945,19 +1134,19 @@ function M.new(options)
     ---Returns a new document with a validated set of semantic field changes.
     -- Concrete writing retains existing records across additions and removals;
     -- use ini.unset as the explicit value when removing a schema-known field.
-    -- @param document table Source document.
-    -- @param changes table Dense section/key/value change records.
-    -- @return table|nil edited New immutable document handle.
-    -- @return table|nil err Structured edit failure.
+    --@param document table Source document.
+    --@param changes table Dense section/key/value change records.
+    --@return table|nil edited New immutable document handle.
+    --@return table|nil err Structured edit failure.
     function service.edit(document, changes)
         return edit_document(document, changes, admitted)
     end
 
     ---Writes semantic canonical INI or preserves safe source syntax on request.
-    -- @param document table Document returned by this codec.
-    -- @param write_options table|nil Supports preserve_concrete=true only.
-    -- @return string|nil source Complete INI bytes.
-    -- @return table|nil metadata_or_err Write mode metadata or structured failure.
+    --@param document table Document returned by this codec.
+    --@param write_options table|nil Supports preserve_concrete=true only.
+    --@return string|nil source Complete INI bytes.
+    --@return table|nil metadata_or_err Write mode metadata or structured failure.
     function service.write(document, write_options)
         local state = document_states[document]
         if not state or state.owner ~= admitted.owner then
@@ -991,6 +1180,10 @@ function M.new(options)
     ---Changes section names, removes one section, or applies an exact section
     -- permutation. Existing fields and comments travel as concrete blocks;
     -- the file preamble stays in place and the complete result is reparsed.
+    --@param document table Opaque document owned by this codec.
+    --@param request table Rename, delete, or exact reorder operation record.
+    --@return table|nil restructured New validated document with rebuilt concrete syntax.
+    --@return table|nil err Structured owner, operation, schema, or parse failure.
     function service.restructure(document, request)
         if type(request) ~= "table" then
             return nil, failure("InvalidIniEdit", "section edit requires a typed request")
@@ -1071,6 +1264,10 @@ function M.new(options)
         end
         local parts = { state.has_bom and UTF8_BOM or "" }
         local ended = true
+        -- Append a preamble or section block while retaining its original line endings.
+        --@param records table Ordered physical content/ending records.
+        --@return nil No result; output parts and ending state are updated.
+        --@effect Mutates parts and ended; adds a separator after an unterminated prior block.
         local function append(records)
             for _, record in ipairs(records) do
                 if not ended then parts[#parts + 1] = newline end

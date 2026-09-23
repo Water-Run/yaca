@@ -1,12 +1,15 @@
 --[[
-File: documentation_truth_test.lua
-Date: 2026-09-19
 Author: WaterRun
+Date: 2026-09-23
+File: documentation_truth_test.lua
 Description: Verifies the documentation-truth guard decision table.
 ]]
 
 local A = assert(loadfile(YACA_TEST_ROOT .. "/test/support/assert.lua", "t", _ENV))()
 
+--Reads load value for this test scenario.
+--@param relative_path string Repository-relative Lua source path to load.
+--@return any module Lua module value loaded for this case.
 local function load_value(relative_path)
     local chunk, load_error = loadfile(YACA_TEST_ROOT .. "/" .. relative_path, "t", _ENV)
     A.truthy(chunk, load_error)
@@ -17,6 +20,9 @@ end
 
 local truth = load_value(".tools/check_documentation_truth.lua")
 
+--Supplies signals behavior required by this suite.
+--@param overrides table|nil Per-case overrides of default fixture behavior.
+--@return any observed signals value observed by the scenario assertion.
 local function signals(overrides)
     local base = {
         gate_r_closed = true,
@@ -34,6 +40,9 @@ return {
     cases = {
         {
             name = "honest readme and quickstart texts produce no findings",
+            --Verifies honest readme and quickstart texts produce no findings.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify honest readme and quickstart texts produce no findings.
             run = function()
                 A.equal(#truth.document_findings("README.md",
                     "> **status: target qualification pending.** Gate R closed.",
@@ -48,6 +57,9 @@ return {
         },
         {
             name = "forbidden release claims are rejected in either language",
+            --Verifies honest readme and quickstart texts produce no findings.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify honest readme and quickstart texts produce no findings.
             run = function()
                 for _, text in ipairs({
                     "Release Gate R is passed today.",
@@ -65,6 +77,9 @@ return {
         },
         {
             name = "missing pending markers on readme and quickstarts are rejected",
+            --Verifies forbidden release claims are rejected in either language.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify forbidden release claims are rejected in either language.
             run = function()
                 local findings = truth.document_findings("README.md",
                     "yaca is a coding agent.", signals())
@@ -84,16 +99,21 @@ return {
         },
         {
             name = "signals derive from readiness and manifest shapes",
+            --Verifies signals derive from readiness and manifest shapes.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify signals derive from readiness and manifest shapes.
             run = function()
                 local readiness = load_value(
                     ".develope-docs/contracts/readiness.lua")
                 local manifest = load_value("release/manifest.lua")
                 local value = truth.signals(readiness, manifest)
-                A.equal(value.phase, "released")
-                A.falsy(value.gate_r_closed)
-                A.falsy(value.release_not_authorized)
-                A.truthy(value.all_targets_passed)
-                A.equal(#value.pending_targets, 0)
+                A.equal(value.phase, "implemented-unqualified")
+                A.truthy(value.gate_r_closed)
+                A.truthy(value.release_not_authorized)
+                A.falsy(value.all_targets_passed)
+                A.deep_equal(value.pending_targets, {
+                    "win32-x86", "win64-x86_64", "linux-x86_64",
+                })
                 local passed_manifest = {
                     targets = {
                         { id = "a", qualification = "passed" },

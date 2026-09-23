@@ -1,7 +1,7 @@
 --[[
-File: json.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-09-23
+File: json.lua
 Description: Parses and writes a bounded strict RFC 8259 JSON subset.
 ]]
 
@@ -9,15 +9,32 @@ local text = require("text")
 
 local M = {}
 
+--@metatable array_values Marks module-admitted JSON arrays independently of their Lua table shape.
+--@field __mode string Fixed k mode: keys are weak; entries remain mutable within their owning module.
 local array_values = setmetatable({}, { __mode = "k" })
+--@metatable object_values Marks module-admitted JSON objects independently of their Lua table shape.
+--@field __mode string Fixed k mode: keys are weak; entries remain mutable within their owning module.
 local object_values = setmetatable({}, { __mode = "k" })
+--@metatable number_values Associates lossless JSON number proxies with their original validated numeric lexemes.
+--@field __mode string Fixed k mode: keys are weak; entries remain mutable within their owning module.
 local number_values = setmetatable({}, { __mode = "k" })
 
+--@metatable JSON_NULL Unique JSON null sentinel; ordinary writes are rejected and its metatable is hidden.
+--@field __newindex function Rejects every ordinary assignment to the sentinel.
+--@field __metatable string Fixed locked marker returned by getmetatable.
+--@field __tostring function Returns json.null without exposing the underlying table address.
 local JSON_NULL = setmetatable({}, {
+    -- Refuse mutation of the shared JSON null sentinel.
+    --@param none Lua's assignment operands are deliberately ignored.
+    --@return nil Does not return normally.
+    --@error Always raises JSON null cannot be modified at the caller frame.
     __newindex = function()
         error("JSON null cannot be modified", 2)
     end,
     __metatable = "locked",
+    -- Give the sentinel a stable diagnostic representation.
+    --@param none Lua's sentinel operand is deliberately ignored.
+    --@return string The fixed json.null label.
     __tostring = function()
         return "json.null"
     end,
@@ -25,6 +42,12 @@ local JSON_NULL = setmetatable({}, {
 
 M.null = JSON_NULL
 
+-- Construct a structured diagnostic without throwing or formatting its optional fields.
+--@param code string Stable diagnostic code used by callers to choose recovery behavior.
+--@param message string Human-readable summary supplied by the failing operation.
+--@param offset integer|nil Source byte position in the reporting parser's coordinate convention.
+--@param reason string|nil Optional machine-readable cause or validation rule.
+--@return table New diagnostic record; optional non-nil fields are retained without deep copying.
 local function failure(code, message, offset, reason)
     local result = { code = code, message = message }
     if offset ~= nil then result.offset = offset end
@@ -32,12 +55,32 @@ local function failure(code, message, offset, reason)
     return result
 end
 
+-- Create a shallow read-only view without copying the backing table.
+--@param values table Backing fields retained by reference; the caller owns their stability.
+--@param label string|nil Diagnostic label; defaults to "readonly value".
+--@return table Empty proxy exposing the backing fields through its locked metatable.
+--@ownership Retains values by reference; nested values and the backing table are not frozen.
 local function readonly(values, label)
+    --@metatable readonly_proxy Forwards reads and iteration; ordinary assignments raise an error.
+    --@field __index table Backing values used for missing-key reads.
+    --@field __newindex function Rejects ordinary assignments without changing the backing values.
+    --@field __pairs function Enumerates the backing table with next.
+    --@field __metatable string Hides this metatable behind the fixed "locked" marker.
     return setmetatable({}, {
         __index = values,
+        -- Reject a write through the proxy before it can create an ordinary field.
+        --@param _ table Proxy receiving the assignment; its contents are not consulted.
+        --@param key any Attempted field name included in the diagnostic.
+        --@return nil Does not return normally.
+        --@error Always raises a read-only assignment error at the caller frame.
         __newindex = function(_, key)
             error((label or "readonly value") .. " cannot be modified: " .. tostring(key), 2)
         end,
+        -- Iterate the backing fields instead of the empty proxy table.
+        --@param none The proxy argument supplied by pairs is ignored.
+        --@return function The standard next iterator.
+        --@return table Backing values used as iterator state.
+        --@return nil Initial key used to start iteration.
         __pairs = function()
             return next, values, nil
         end,
@@ -45,10 +88,18 @@ local function readonly(values, label)
     })
 end
 
+-- Check the Lua integer subtype and the caller's inclusive lower bound.
+--@param value any Candidate value; floats and non-numeric values are rejected.
+--@param minimum integer Inclusive minimum accepted by this check.
+--@return boolean True only for an integer at least minimum.
 local function valid_integer(value, minimum)
     return math.type(value) == "integer" and value >= minimum
 end
 
+-- Scan one RFC 8259 number lexeme and reject leading zeroes or incomplete parts.
+--@param value string Source bytes containing a candidate number.
+--@param start_index integer One-based index of its first byte.
+--@return integer|nil finish Exclusive byte index after the lexeme, or nil for invalid grammar.
 local function number_end(value, start_index)
     local index = start_index
     local length = #value
@@ -91,22 +142,39 @@ local function number_end(value, start_index)
     return index
 end
 
+-- Bind an already validated number lexeme to an immutable JSON number proxy.
+--@param lexeme string Exact validated number bytes.
+--@return table number Read-only number wrapper retaining the lexeme privately.
+--@effect Adds the proxy-to-lexeme binding to the weak-key registry.
 local function new_number(lexeme)
     local proxy = readonly({ lexeme = lexeme }, "JSON number")
     number_values[proxy] = lexeme
     return proxy
 end
 
+-- Mark a Lua table as an admitted JSON array without changing its contents.
+--@param value table Mutable array table owned by the caller or parser.
+--@return table array The same table with a private JSON array tag.
+--@effect Adds the table to the weak-key array registry.
 local function tag_array(value)
     array_values[value] = true
     return value
 end
 
+-- Mark a Lua table as an admitted JSON object without changing its contents.
+--@param value table Mutable string-keyed table owned by the caller or parser.
+--@return table object The same table with a private JSON object tag.
+--@effect Adds the table to the weak-key object registry.
 local function tag_object(value)
     object_values[value] = true
     return value
 end
 
+-- Validate a dense one-based Lua sequence and tag its shallow copy as JSON.
+--@param values any Candidate source sequence.
+--@return table|nil array New tagged mutable JSON array.
+--@return table|nil err Structured invalid-key or sparse-array failure.
+--@ownership Copies the outer table; nested element references remain shared.
 local function copy_dense_array(values)
     if type(values) ~= "table" then
         return nil, failure("InvalidJsonArray", "JSON array source must be a table")
@@ -128,6 +196,11 @@ local function copy_dense_array(values)
     return tag_array(result)
 end
 
+-- Validate UTF-8 string keys and tag a shallow object copy as JSON.
+--@param values any Candidate string-keyed source map.
+--@return table|nil object New tagged mutable JSON object.
+--@return table|nil err Structured key-type or UTF-8 failure.
+--@ownership Copies the outer table; nested member references remain shared.
 local function copy_string_object(values)
     if type(values) ~= "table" then
         return nil, failure("InvalidJsonObject", "JSON object source must be a table")
@@ -145,25 +218,25 @@ local function copy_string_object(values)
 end
 
 ---Creates an explicitly typed JSON array from a dense Lua array.
--- @param values table Dense source array.
--- @return table|nil array Tagged mutable JSON array copy.
--- @return table|nil err Structured shape failure.
+--@param values table Dense source array.
+--@return table|nil array Tagged mutable JSON array copy.
+--@return table|nil err Structured shape failure.
 function M.array(values)
     return copy_dense_array(values)
 end
 
 ---Creates an explicitly typed JSON object from a string-keyed Lua table.
--- @param values table String-keyed source map.
--- @return table|nil object Tagged mutable JSON object copy.
--- @return table|nil err Structured shape or UTF-8 failure.
+--@param values table String-keyed source map.
+--@return table|nil object Tagged mutable JSON object copy.
+--@return table|nil err Structured shape or UTF-8 failure.
 function M.object(values)
     return copy_string_object(values)
 end
 
 ---Creates a JSON number that preserves its exact RFC 8259 lexeme.
--- @param lexeme string Exact number bytes.
--- @return table|nil number Immutable number wrapper.
--- @return table|nil err Structured grammar failure.
+--@param lexeme string Exact number bytes.
+--@return table|nil number Immutable number wrapper.
+--@return table|nil err Structured grammar failure.
 function M.number(lexeme)
     if type(lexeme) ~= "string"
         or number_end(lexeme, 1) ~= #lexeme + 1
@@ -174,8 +247,8 @@ function M.number(lexeme)
 end
 
 ---Returns the explicit JSON kind of a codec value.
--- @param value any Candidate JSON value.
--- @return string|nil kind JSON kind, or nil for an untyped value.
+--@param value any Candidate JSON value.
+--@return string|nil kind JSON kind, or nil for an untyped value.
 function M.kind(value)
     if value == JSON_NULL then return "null" end
     if number_values[value] then return "number" end
@@ -187,9 +260,9 @@ function M.kind(value)
 end
 
 ---Returns the exact preserved number lexeme.
--- @param value table Number wrapper returned by this module.
--- @return string|nil lexeme Exact number bytes.
--- @return table|nil err Structured type failure.
+--@param value table Number wrapper returned by this module.
+--@return string|nil lexeme Exact number bytes.
+--@return table|nil err Structured type failure.
 function M.number_lexeme(value)
     local lexeme = number_values[value]
     if not lexeme then
@@ -198,6 +271,10 @@ function M.number_lexeme(value)
     return lexeme
 end
 
+-- Validate and copy the five required JSON parser/writer hard limits.
+--@param options table Candidate positive integer limits with no extra fields.
+--@return table|nil limits Independent admitted limit record.
+--@return table|nil err Structured limit-shape or inconsistency failure.
 local function validate_limits(options)
     if type(options) ~= "table" then
         return nil, failure("InvalidJsonLimits", "JSON codec limits are required")
@@ -231,10 +308,18 @@ local function validate_limits(options)
     return limits
 end
 
+-- Create a syntax diagnostic at an exact one-based source byte position.
+--@param reason string Machine-readable JSON grammar failure.
+--@param offset integer One-based source byte position.
+--@return table err New JsonSyntax diagnostic.
 local function parser_failure(reason, offset)
     return failure("JsonSyntax", "JSON input is invalid", offset, reason)
 end
 
+-- Create a single-use bounded recursive parser over admitted UTF-8 bytes.
+--@param source string Strict UTF-8 JSON source without BOM.
+--@param limits table Validated byte, depth, node, and token limits.
+--@return table parser Stateful parser with one parse method.
 local function new_parser(source, limits)
     local parser = {
         source = source,
@@ -243,6 +328,10 @@ local function new_parser(source, limits)
         nodes = 0,
     }
 
+    -- Advance past the four RFC 8259 whitespace bytes.
+    --@param none Source and cursor are captured from the enclosing parser.
+    --@return nil Stops at the first non-whitespace byte or end of input.
+    --@effect Advances parser.index.
     local function skip_whitespace()
         while true do
             local byte = source:byte(parser.index)
@@ -254,6 +343,14 @@ local function new_parser(source, limits)
         end
     end
 
+    -- Append one decoded string fragment subject to its byte cap.
+    --@param parts table Mutable decoded fragment sequence.
+    --@param bytes string Newly decoded UTF-8 bytes.
+    --@param current_length integer Total decoded bytes before this fragment.
+    --@param start_offset integer Source offset used for a limit diagnostic.
+    --@return integer|nil next_length Updated decoded byte count.
+    --@return table|nil err Structured decoded-string limit failure.
+    --@effect Appends to parts only when the byte cap admits the fragment.
     local function append_string(parts, bytes, current_length, start_offset)
         local next_length = current_length + #bytes
         if next_length > limits.maximum_string_bytes then
@@ -268,6 +365,9 @@ local function new_parser(source, limits)
         return next_length
     end
 
+    -- Decode one ASCII hexadecimal digit used by a Unicode escape.
+    --@param byte integer Candidate source byte or negative missing-byte marker.
+    --@return integer|nil value Digit value from zero to fifteen, or nil.
     local function hex_value(byte)
         if byte >= 0x30 and byte <= 0x39 then return byte - 0x30 end
         if byte >= 0x41 and byte <= 0x46 then return byte - 0x41 + 10 end
@@ -275,6 +375,10 @@ local function new_parser(source, limits)
         return nil
     end
 
+    -- Parse four source hex digits into one UTF-16 code unit.
+    --@param offset integer One-based position of the first hex digit.
+    --@return integer|nil unit Decoded 16-bit code unit.
+    --@return table|nil err Structured malformed-escape diagnostic.
     local function parse_hex_quad(offset)
         local value = 0
         for step = 0, 3 do
@@ -287,6 +391,11 @@ local function new_parser(source, limits)
         return value
     end
 
+    -- Decode a JSON string, including surrogate pairs, with an exact byte cap.
+    --@param none Reads source at parser.index, expected to point at a quote.
+    --@return string|nil decoded Strict UTF-8 decoded string.
+    --@return table|nil err Structured syntax or decoded-byte limit failure.
+    --@effect Advances parser.index across the consumed string or failure prefix.
     local function parse_string()
         local start_offset = parser.index
         parser.index = parser.index + 1
@@ -370,6 +479,11 @@ local function new_parser(source, limits)
 
     local parse_value
 
+    -- Charge one parsed JSON value against the node limit.
+    --@param offset integer Source byte offset for a possible limit failure.
+    --@return boolean|nil admitted True while under the node cap.
+    --@return table|nil err Structured node-limit failure.
+    --@effect Increments parser.nodes before the limit check.
     local function admit_node(offset)
         parser.nodes = parser.nodes + 1
         if parser.nodes > limits.maximum_nodes then
@@ -383,6 +497,11 @@ local function new_parser(source, limits)
         return true
     end
 
+    -- Parse a bracketed JSON array with bounded nesting and dense order.
+    --@param depth integer Current value depth with top level equal to one.
+    --@return table|nil array Mutable tagged JSON array.
+    --@return table|nil err Structured depth, syntax, or child-value failure.
+    --@effect Advances parser.index and charges child nodes.
     local function parse_array(depth)
         if depth > limits.maximum_depth then
             return nil, failure(
@@ -417,6 +536,11 @@ local function new_parser(source, limits)
         end
     end
 
+    -- Parse a JSON object while rejecting duplicate decoded keys.
+    --@param depth integer Current value depth with top level equal to one.
+    --@return table|nil object Mutable tagged JSON object.
+    --@return table|nil err Structured depth, duplicate-key, syntax, or child failure.
+    --@effect Advances parser.index and charges child nodes.
     local function parse_object(depth)
         if depth > limits.maximum_depth then
             return nil, failure(
@@ -467,6 +591,11 @@ local function new_parser(source, limits)
         end
     end
 
+    -- Capture one grammatical JSON number as an exact lexeme wrapper.
+    --@param none Reads source at parser.index, expected to begin a number.
+    --@return table|nil number Immutable exact-lexeme number wrapper.
+    --@return table|nil err Structured grammar or number-byte limit failure.
+    --@effect Advances parser.index on success.
     local function parse_number()
         local start_offset = parser.index
         local finish = number_end(source, start_offset)
@@ -486,6 +615,11 @@ local function new_parser(source, limits)
         return new_number(lexeme)
     end
 
+    -- Dispatch one bounded JSON scalar or container at the current cursor.
+    --@param depth integer Current value depth with top level equal to one.
+    --@return any value Tagged container, string, boolean, number wrapper, or null sentinel.
+    --@return table|nil err Structured syntax or limit failure when value is nil.
+    --@effect Advances parser.index and charges a node before dispatch.
     function parse_value(depth)
         skip_whitespace()
         local offset = parser.index
@@ -519,6 +653,11 @@ local function new_parser(source, limits)
         return nil, parser_failure("unexpected-token", offset)
     end
 
+    -- Parse one complete top-level object or array with no trailing data.
+    --@param none Uses this parser's captured source and limits.
+    --@return table|nil value Tagged top-level JSON object or array.
+    --@return table|nil err Structured syntax, top-level, or limit failure.
+    --@effect Advances parser.index and node count; this parser is single-use.
     function parser.parse()
         skip_whitespace()
         local result, parse_error = parse_value(1)
@@ -536,6 +675,9 @@ local function new_parser(source, limits)
     return parser
 end
 
+-- Create single-use bounded canonical JSON writer state.
+--@param limits table Validated byte, depth, node, and string/number limits.
+--@return table writer Stateful writer with one write method.
 local function new_writer(limits)
     local writer = {
         parts = {},
@@ -544,6 +686,11 @@ local function new_writer(limits)
         active = {},
     }
 
+    -- Append exact output bytes without exceeding the total encoded byte cap.
+    --@param bytes string Encoded JSON fragment to append.
+    --@return boolean|nil appended True after the fragment is retained.
+    --@return table|nil err Structured total-byte limit failure.
+    --@effect Increments writer.byte_count and appends to writer.parts on success.
     local function append(bytes)
         if writer.byte_count > limits.maximum_bytes - #bytes then
             return nil, failure("JsonLimit", "encoded JSON exceeds maximum_bytes", nil, "bytes")
@@ -553,6 +700,11 @@ local function new_writer(limits)
         return true
     end
 
+    -- Encode a strict UTF-8 string with only necessary JSON escapes.
+    --@param value string Candidate JSON string or object key.
+    --@return boolean|nil written True after the closing quote is appended.
+    --@return table|nil err Structured UTF-8, string, or total-byte failure.
+    --@effect May append a prefix to writer.parts before a later failure.
     local function append_escaped_string(value)
         local valid, validation_error = text.validate_utf8(value)
         if not valid then return nil, validation_error end
@@ -593,6 +745,11 @@ local function new_writer(limits)
 
     local write_value
 
+    -- Charge one emitted JSON value against the writer node cap.
+    --@param none Uses the captured writer and limits.
+    --@return boolean|nil admitted True while under the node cap.
+    --@return table|nil err Structured node-limit failure.
+    --@effect Increments writer.nodes before the limit check.
     local function admit_node()
         writer.nodes = writer.nodes + 1
         if writer.nodes > limits.maximum_nodes then
@@ -601,6 +758,12 @@ local function new_writer(limits)
         return true
     end
 
+    -- Encode a tagged dense JSON array without cycles or excess nesting.
+    --@param value table Tagged JSON array to inspect.
+    --@param depth integer Current container depth.
+    --@return boolean|nil written True after the closing bracket is appended.
+    --@return table|nil err Structured cycle, shape, depth, or output failure.
+    --@effect Appends encoded bytes and temporarily marks value active.
     local function write_array(value, depth)
         if depth > limits.maximum_depth then
             return nil, failure("JsonLimit", "encoded JSON exceeds maximum_depth")
@@ -637,6 +800,12 @@ local function new_writer(limits)
         return append("]")
     end
 
+    -- Encode a tagged JSON object in sorted UTF-8 byte key order.
+    --@param value table Tagged string-keyed JSON object.
+    --@param depth integer Current container depth.
+    --@return boolean|nil written True after the closing brace is appended.
+    --@return table|nil err Structured cycle, key, depth, or output failure.
+    --@effect Appends encoded bytes and temporarily marks value active.
     local function write_object(value, depth)
         if depth > limits.maximum_depth then
             return nil, failure("JsonLimit", "encoded JSON exceeds maximum_depth")
@@ -672,6 +841,12 @@ local function new_writer(limits)
         return append("}")
     end
 
+    -- Encode one tagged JSON value after charging its node budget.
+    --@param value any Candidate JSON scalar, wrapper, or tagged container.
+    --@param depth integer Current value depth.
+    --@return boolean|nil written True after complete encoding.
+    --@return table|nil err Structured type, limit, cycle, or output failure.
+    --@effect Appends encoded bytes or a partial prefix on failure.
     function write_value(value, depth)
         local admitted, node_error = admit_node()
         if not admitted then return nil, node_error end
@@ -694,6 +869,11 @@ local function new_writer(limits)
         )
     end
 
+    -- Serialize one tagged top-level object or array from fresh writer state.
+    --@param value table Tagged JSON object or array.
+    --@return string|nil encoded Compact canonical JSON bytes.
+    --@return table|nil err Structured top-level, shape, cycle, or limit failure.
+    --@effect Consumes this writer's output state; callers create a new writer for each call.
     function writer.write(value)
         if not object_values[value] and not array_values[value] then
             return nil, failure("JsonTopLevel", "JSON top level must be an object or array")
@@ -709,18 +889,18 @@ end
 ---Creates a bounded JSON codec using release-manifest limits.
 -- Numbers remain exact lexeme wrappers until a schema performs bounded numeric
 -- conversion. The parser and writer accept only object or array top levels.
--- @param options table Required byte, depth, node, string, and number limits.
--- @return table|nil codec Immutable parser/writer service.
--- @return table|nil err Structured limit failure.
+--@param options table Required byte, depth, node, string, and number limits.
+--@return table|nil codec Immutable parser/writer service.
+--@return table|nil err Structured limit failure.
 function M.new(options)
     local limits, limits_error = validate_limits(options)
     if not limits then return nil, limits_error end
     local service = {}
 
     ---Parses strict UTF-8 JSON into explicitly typed Lua values.
-    -- @param source string Exact JSON bytes without a BOM.
-    -- @return table|nil value Tagged top-level object or array.
-    -- @return table|nil err Structured syntax, UTF-8, or limit failure.
+    --@param source string Exact JSON bytes without a BOM.
+    --@return table|nil value Tagged top-level object or array.
+    --@return table|nil err Structured syntax, UTF-8, or limit failure.
     function service.parse(source)
         if type(source) ~= "string" then
             return nil, failure("InvalidJsonType", "JSON source must be a byte string")
@@ -739,9 +919,9 @@ function M.new(options)
     ---Writes a tagged JSON object or array in deterministic canonical form.
     -- Object keys use UTF-8 byte order, whitespace is omitted, and only required
     -- string bytes are escaped. Number wrappers retain their admitted lexemes.
-    -- @param value table Tagged JSON object or array.
-    -- @return string|nil source Canonical JSON bytes.
-    -- @return table|nil err Structured shape, UTF-8, cycle, or limit failure.
+    --@param value table Tagged JSON object or array.
+    --@return string|nil source Canonical JSON bytes.
+    --@return table|nil err Structured shape, UTF-8, cycle, or limit failure.
     function service.write(value)
         return new_writer(limits).write(value)
     end

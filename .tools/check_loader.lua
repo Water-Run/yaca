@@ -1,12 +1,15 @@
 --[[
-File: check_loader.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-09-23
+File: check_loader.lua
 Description: Validates and constructs the manifest-only secure module loader.
 ]]
 
 local M = {}
 
+--Computes normalize in check loader.
+--@param path string File or Context path exercised by the case.
+--@return any observed normalize value observed by the scenario assertion.
 local function normalize(path)
     path = tostring(path or ""):gsub("\\", "/")
     path = path:gsub("/%./", "/"):gsub("/%.$", "")
@@ -14,11 +17,19 @@ local function normalize(path)
     return path
 end
 
+--Computes is absolute in check loader.
+--@param path string File or Context path exercised by the case.
+--@return number matches Whether is absolute satisfies the tested condition.
 local function is_absolute(path)
     path = normalize(path)
     return path:sub(1, 1) == "/" or path:match("^[A-Za-z]:/") ~= nil or path:match("^//[^/]+/[^/]+") ~= nil
 end
 
+--Computes as set in check loader.
+--@param values table Candidate values supplied to the fixture operation.
+--@param label any The label supplied to this scenario's fixture operation.
+--@return any|nil observed as set value observed by the scenario assertion.
+--@return string|any|nil secondary2 Additional status or structured error from the fixture operation.
 local function as_set(values, label)
     if type(values) ~= "table" then return nil, label .. " must be a table" end
     local result = {}
@@ -33,9 +44,9 @@ local function as_set(values, label)
 end
 
 --- Validates the security-relevant release manifest fields.
--- @param manifest table Candidate manifest.
--- @return boolean|nil True when valid.
--- @return string|nil Validation error.
+--@param manifest table Candidate manifest.
+--@return boolean|nil True when valid.
+--@return string|nil Validation error.
 function M.validate_manifest(manifest)
     if type(manifest) ~= "table" then return nil, "manifest must be a table" end
     if manifest.schema_version ~= "yaca-release-manifest-v0.1.0" then return nil, "unexpected manifest schema" end
@@ -88,11 +99,11 @@ function M.validate_manifest(manifest)
 end
 
 --- Constructs a loader that uses only absolute allowlisted paths.
--- @param manifest table Validated release manifest.
--- @param release_root string Normalized absolute release root.
--- @param options table|nil Injected load functions and target identity.
--- @return table|nil Secure loader.
--- @return string|nil Construction error.
+--@param manifest table Validated release manifest.
+--@param release_root string Normalized absolute release root.
+--@param options table|nil Injected load functions and target identity.
+--@return table|nil Secure loader.
+--@return string|nil Construction error.
 function M.new(manifest, release_root, options)
     local valid, validation_error = M.validate_manifest(manifest)
     if not valid then return nil, validation_error end
@@ -124,20 +135,22 @@ function M.new(manifest, release_root, options)
     local loader = {}
     local root_prefix = release_root:sub(-1) == "/" and release_root or release_root .. "/"
 
-    --- Resolves an allowlisted Lua module.
-    -- @param name string Canonical module name.
-    -- @return string|nil Absolute source path.
-    -- @return string|nil Resolution error.
+    ---Resolves an allowlisted Lua module beneath the trusted release root.
+    --@param self table Secure loader instance.
+    --@param name string Canonical Lua module name.
+    --@return string|nil path Absolute source path.
+    --@return string|nil err Resolution error for a disallowed name.
     function loader:resolve_lua(name)
         if type(name) ~= "string" or not lua_allowed[name] then return nil, "module is not allowlisted: " .. tostring(name) end
         return root_prefix .. lua_directory .. "/" .. name .. ".lua"
     end
 
-    --- Resolves an allowlisted native module for one target.
-    -- @param name string Canonical native module name.
-    -- @param target_id string Release target ID.
-    -- @return string|nil Absolute native path.
-    -- @return string|nil Resolution error.
+    ---Resolves an allowlisted native module for one exact target.
+    --@param self table Secure loader instance.
+    --@param name string Canonical native module name.
+    --@param target_id string Release target ID.
+    --@return string|nil path Absolute native module path.
+    --@return string|nil err Unknown module or target detail.
     function loader:resolve_native(name, target_id)
         if type(name) ~= "string" or not native_allowed[name] then return nil, "native module is not allowlisted: " .. tostring(name) end
         local target = native_filenames[target_id]
@@ -145,23 +158,34 @@ function M.new(manifest, release_root, options)
         return root_prefix .. native_directory .. "/" .. target[name]
     end
 
-    --- Loads and caches an allowlisted Lua module.
-    -- @param name string Canonical module name.
-    -- @return any Module return value.
+    ---Loads and caches a Lua module in its isolated dependency environment.
+    --@param self table Secure loader instance.
+    --@param name string Canonical Lua module name.
+    --@return any value Module export, or true for a nil export.
+    --@error Raises on a disallowed name, cycle, failed load, or module exception.
     function loader:require_lua(name)
         if loaded_present[name] then return loaded[name] end
         local path, path_error = self:resolve_lua(name)
         if not path then error(path_error, 2) end
         if loading[name] then error("cyclic secure module load: " .. name, 2) end
         loading[name] = true
-        local environment = { require = function(dependency) return self:require(dependency) end }
+        local environment = {
+            ---Resolves a nested module request through the same allowlist.
+            --@param dependency string Nested module name requested by the loaded chunk.
+            --@return any value Loaded dependency export.
+            require = function(dependency) return self:require(dependency) end }
         environment._G = environment
+        --@metatable environment Isolated module globals with read fallback to the admitted base environment.
+        --@field __index table Base environment used only for missing global reads.
         setmetatable(environment, { __index = base_environment })
         local chunk, load_error = loadfile_function(path, "t", environment)
         if not chunk then
             loading[name] = nil
             error("cannot load allowlisted module " .. name .. ": " .. tostring(load_error), 2)
         end
+        ---Formats a protected module exception with its Lua traceback.
+        --@param message any Error object raised by the loaded module.
+        --@return string traceback Diagnostic traceback for the failure.
         local ok, value = xpcall(chunk, function(message) return debug.traceback(tostring(message), 2) end)
         loading[name] = nil
         if not ok then error("allowlisted module " .. name .. " failed: " .. tostring(value), 2) end
@@ -170,11 +194,12 @@ function M.new(manifest, release_root, options)
         return value
     end
 
-    --- Loads and caches an allowlisted native module.
-    -- @param name string Canonical native module name.
-    -- @param target_id string Release target ID.
-    -- @return any Module return value.
-    -- @return string|nil Native loading error.
+    ---Loads and caches an allowlisted native module for the selected target.
+    --@param self table Secure loader instance.
+    --@param name string Canonical native module name.
+    --@param target_id string Release target ID.
+    --@return any|nil value Native module export, or true for a nil export.
+    --@return string|nil err Native resolution or loading detail.
     function loader:load_native(name, target_id)
         local cache_key = "native:" .. tostring(target_id) .. ":" .. tostring(name)
         if loaded_present[cache_key] then return loaded[cache_key] end
@@ -190,9 +215,11 @@ function M.new(manifest, release_root, options)
         return value
     end
 
-    --- Loads an allowlisted Lua or native module.
-    -- @param name string Canonical module name.
-    -- @return any Module return value.
+    ---Routes a module request through the Lua or target-bound native allowlist.
+    --@param self table Secure loader instance.
+    --@param name string Canonical module name.
+    --@return any value Loaded module export.
+    --@error Raises for disallowed modules or a missing native target.
     function loader:require(name)
         if lua_allowed[name] then return self:require_lua(name) end
         if native_allowed[name] then
@@ -207,6 +234,9 @@ function M.new(manifest, release_root, options)
     return loader
 end
 
+--Computes root from script in check loader.
+--@param script any The script supplied to this scenario's fixture operation.
+--@return any observed root from script value observed by the scenario assertion.
 local function root_from_script(script)
     local normalized = normalize(script)
     local root = normalized:match("^(.*)/%.tools/check_loader%.lua$")
@@ -219,8 +249,8 @@ local function root_from_script(script)
 end
 
 --- Runs manifest and path validation as a command-line tool.
--- @param arguments table Lua argument array.
--- @return integer Stable process exit code.
+--@param arguments table Lua argument array.
+--@return integer Stable process exit code.
 function M.main(arguments)
     local root = root_from_script(arguments[0] or ".tools/check_loader.lua")
     local manifest_chunk, load_error = loadfile(root .. "/release/manifest.lua", "t", {})

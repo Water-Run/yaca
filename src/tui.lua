@@ -1,7 +1,7 @@
 --[[
-File: tui.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-09-23
+File: tui.lua
 Description: Renders bounded append-only semantic transcript blocks.
 ]]
 
@@ -11,18 +11,43 @@ local text = require("text")
 
 local M = {}
 
+-- Construct a structured diagnostic without throwing or formatting its optional fields.
+--@param code string Stable diagnostic code used by callers to choose recovery behavior.
+--@param message string Human-readable summary supplied by the failing operation.
+--@param extra table|nil Additional diagnostic fields copied after code/message and allowed to override them.
+--@return table New diagnostic record; optional non-nil fields are retained without deep copying.
 local function failure(code, message, extra)
     local result = { code = code, message = message }
     for key, value in pairs(extra or {}) do result[key] = value end
     return result
 end
 
+-- Create a shallow read-only view without copying the backing table.
+--@param values table Backing fields retained by reference; the caller owns their stability.
+--@param label string|nil Diagnostic label; defaults to "readonly value".
+--@return table Empty proxy exposing the backing fields through its locked metatable.
+--@ownership Retains values by reference; nested values and the backing table are not frozen.
 local function readonly(values, label)
+    --@metatable readonly_proxy Forwards reads and iteration; ordinary assignments raise an error.
+    --@field __index table Backing values used for missing-key reads.
+    --@field __newindex function Rejects ordinary assignments without changing the backing values.
+    --@field __pairs function Enumerates the backing table with next.
+    --@field __metatable string Hides this metatable behind the fixed "locked" marker.
     return setmetatable({}, {
         __index = values,
+        -- Reject a write through the proxy before it can create an ordinary field.
+        --@param _ table Proxy receiving the assignment; its contents are not consulted.
+        --@param key any Attempted field name included in the diagnostic.
+        --@return nil Does not return normally.
+        --@error Always raises a read-only assignment error at the caller frame.
         __newindex = function(_, key)
             error((label or "readonly value") .. " cannot be modified: " .. tostring(key), 2)
         end,
+        -- Iterate the backing fields instead of the empty proxy table.
+        --@param none The proxy argument supplied by pairs is ignored.
+        --@return function The standard next iterator.
+        --@return table Backing values used as iterator state.
+        --@return nil Initial key used to start iteration.
         __pairs = function()
             return next, values, nil
         end,
@@ -30,6 +55,10 @@ local function readonly(values, label)
     })
 end
 
+-- Copy nested registry tables while preserving repeated references and cycles.
+--@param value any Registry value or table to detach.
+--@param seen table|nil Recursion map of original tables to their copies.
+--@return any copy Detached table graph or unchanged scalar.
 local function deep_copy(value, seen)
     if type(value) ~= "table" then return value end
     seen = seen or {}
@@ -41,7 +70,7 @@ local function deep_copy(value, seen)
 end
 
 local BLOCK_ORDER = {
-    "user", "assistant", "tool", "side", "status", "queue", "steer",
+    "user", "assistant", "tool", "ask", "status", "queue", "steer",
     "notice", "warning", "error", "recovery", "details", "action",
 }
 
@@ -49,7 +78,7 @@ local BLOCK_KINDS = {
     user = { label = "USER", id = false, color = "bright-white" },
     assistant = { label = "ASSISTANT", id = false, color = "cyan" },
     tool = { label = "TOOL", id = true, color = "cyan" },
-    side = { label = "SIDE", id = true, color = "magenta" },
+    ask = { label = "ASK", id = true, color = "magenta" },
     status = { label = "STATUS", id = false, color = "dim-neutral" },
     queue = { label = "QUEUE", id = true, color = "cyan" },
     steer = { label = "STEER", id = true, color = "yellow" },
@@ -81,14 +110,14 @@ local INPUT_BINDINGS = {
     { intent = "submit-or-queue", key = "Enter", fallback_action = "queue-add" },
     { intent = "steer", key = "Ctrl+Enter", fallback_action = "steer" },
     { intent = "newline", key = "Shift+Enter", fallback_action = "multiline" },
-    { intent = "side", key = "Alt+Enter", fallback_action = "side" },
+    { intent = "ask", key = "Alt+Enter", fallback_action = "ask" },
     { intent = "cancel", key = "Esc", fallback_action = "cancel" },
 }
 
 local TUI_REGISTRY = {
     contract_version = "0.1.0-readiness.1",
     decision_refs = { "D-054", "D-064", "D-066" },
-    product_slogan = "yaca: Yet Another Coding Agent.",
+    product_slogan = "yaca: General-purpose terminal agent.",
     prompts = PROMPTS,
     plain_text_uses_same_prompt_text = true,
     input_bindings = INPUT_BINDINGS,
@@ -201,6 +230,9 @@ local STARTUP_FIELDS = {
 local STARTUP_FIELD_BY_ID = {}
 for _, field in ipairs(STARTUP_FIELDS) do STARTUP_FIELD_BY_ID[field.id] = field end
 
+-- Require visible ASCII-only text for renderer-owned labels and prompts.
+--@param value any Candidate program chrome string.
+--@return boolean valid Whether every byte is printable ASCII.
 local function ascii_chrome(value)
     if type(value) ~= "string" or value == "" then return false end
     for index = 1, #value do
@@ -218,10 +250,17 @@ for _, prompt in pairs(PROMPTS) do
     if not ascii_chrome(prompt.text) then error("TUI prompt must be ASCII") end
 end
 
+-- Check the Lua integer subtype and the caller's inclusive lower bound.
+--@param value any Candidate value; floats and non-numeric values are rejected.
+--@param minimum integer Inclusive minimum accepted by this check.
+--@return boolean True only for an integer at least minimum.
 local function valid_integer(value, minimum)
     return math.type(value) == "integer" and value >= minimum
 end
 
+-- Prefix untrusted text that could impersonate a transcript block or prompt.
+--@param line string Already escaped single display line.
+--@return string protected Literal line, backslash-prefixed when it resembles chrome.
 local function protect_chrome(line)
     if line:match("^%[[A-Z][^%]]*%]") then return "\\" .. line end
     for _, prompt in pairs(PROMPTS) do
@@ -242,6 +281,9 @@ local function protect_chrome(line)
     return line
 end
 
+-- Identify Unicode format and directional controls that must be visible.
+--@param codepoint integer Decoded Unicode scalar value.
+--@return boolean control Whether this scalar is in a hidden-control range.
 local function is_unicode_control(codepoint)
     return (codepoint >= 0x200B and codepoint <= 0x200F)
         or (codepoint >= 0x2028 and codepoint <= 0x202E)
@@ -249,6 +291,11 @@ local function is_unicode_control(codepoint)
         or codepoint == 0xFEFF
 end
 
+-- Render strict UTF-8 content on one safe line with control and chrome escaping.
+--@param source any Candidate untrusted display text.
+--@param ascii_only boolean Whether non-ASCII scalars use visible escape syntax.
+--@return string|nil escaped Safe single-line display bytes.
+--@return table|nil err Structured type or UTF-8 failure with source offset.
 local function escape_inline(source, ascii_only)
     if type(source) ~= "string" then
         return nil, failure("InvalidViewText", "view text must be a string")
@@ -283,6 +330,9 @@ local function escape_inline(source, ascii_only)
     return protect_chrome(table.concat(parts))
 end
 
+-- Split semantic block content on LF while preserving empty trailing lines.
+--@param source string Exact block text bytes.
+--@return table lines Ordered source-line strings without LF bytes.
 local function split_text(source)
     local lines = {}
     local start_index = 1
@@ -298,6 +348,10 @@ local function split_text(source)
     return lines
 end
 
+-- Validate and copy a dense string sequence used as block content.
+--@param values any Candidate line sequence.
+--@return table|nil lines Independent ordered string sequence.
+--@return table|nil err Structured sparse, key, or element-type failure.
 local function dense_lines(values)
     if type(values) ~= "table" then
         return nil, failure("InvalidViewBlock", "block lines must be a dense array")
@@ -323,6 +377,10 @@ local function dense_lines(values)
     return result
 end
 
+-- Admit a bounded canonical transcript identifier in one fixed ASCII form.
+--@param value any Candidate block identifier.
+--@param maximum_bytes integer Inclusive ID byte cap.
+--@return boolean valid Whether the ID can appear in program chrome.
 local function valid_id(value, maximum_bytes)
     if type(value) ~= "string" or value == "" or #value > maximum_bytes then return false end
     if value:match("^#[1-9][0-9]*$") then return true end
@@ -333,11 +391,20 @@ local function valid_id(value, maximum_bytes)
     return false
 end
 
+-- Wrap trusted renderer-owned text in a fixed ANSI color sequence when enabled.
+--@param enabled boolean Whether ANSI color output is allowed.
+--@param color string Fixed semantic color key from ANSI_CODES.
+--@param value string Trusted block label or prompt bytes.
+--@return string styled Colored or unchanged text.
 local function colorize(enabled, color, value)
     if not enabled then return value end
     return "\27[" .. ANSI_CODES[color] .. "m" .. value .. "\27[0m"
 end
 
+-- Snapshot terminal color, Unicode, and fixed key facts from the backend.
+--@param value any Candidate terminal capability record.
+--@return table|nil capabilities Independent admitted fact table.
+--@return table|nil err Structured missing, unknown, or ill-typed fact failure.
 local function validate_capabilities(value)
     if type(value) ~= "table" then
         return nil, failure("InvalidTuiCapabilities", "terminal capabilities are required")
@@ -388,6 +455,10 @@ local function validate_capabilities(value)
     }
 end
 
+-- Copy and cross-check the three renderer hard byte limits.
+--@param options table Validated constructor options with positive limit fields.
+--@return table|nil limits Independent renderer limit table.
+--@return table|nil err Structured missing or inconsistent limit failure.
 local function validate_limits(options)
     local names = { "maximum_block_bytes", "maximum_line_bytes", "maximum_id_bytes" }
     local result = {}
@@ -406,6 +477,12 @@ local function validate_limits(options)
     return result
 end
 
+-- Reject any already rendered line or block above its byte cap.
+--@param lines table Sequence of complete rendered lines without LF separators.
+--@param rendered string Complete block bytes including final newline when present.
+--@param limits table Validated line and block byte caps.
+--@return string|nil admitted Exact rendered bytes on success.
+--@return table|nil err Structured line or block limit failure.
 local function check_render_limits(lines, rendered, limits)
     for _, line in ipairs(lines) do
         if #line > limits.maximum_line_bytes then
@@ -418,6 +495,12 @@ local function check_render_limits(lines, rendered, limits)
     return rendered
 end
 
+-- Render one validated semantic block as escaped append-only transcript bytes.
+--@param block table Candidate kind, ID, sequence, and text/lines carrier.
+--@param capabilities table Snapshot of ANSI/color and Unicode display facts.
+--@param limits table Validated ID, line, and block byte caps.
+--@return string|nil rendered Complete block bytes with trailing newline.
+--@return table|nil err Structured shape, text, ID, or size failure.
 local function render_block(block, capabilities, limits)
     if type(block) ~= "table" then
         return nil, failure("InvalidViewBlock", "semantic block must be a table")
@@ -492,6 +575,11 @@ local function render_block(block, capabilities, limits)
     return check_render_limits(rendered_lines, rendered, limits)
 end
 
+-- Admit independent startup values and visibility flags for every fixed field.
+--@param snapshot table Candidate startup value map.
+--@param visibility table Required boolean visibility map.
+--@return table|nil admitted_snapshot Independent value map.
+--@return table|nil visibility_or_err Independent flag map or structured failure.
 local function validate_startup(snapshot, visibility)
     if type(snapshot) ~= "table" or type(visibility) ~= "table" then
         return nil, failure("InvalidStartupView", "startup snapshot and visibility are required")
@@ -532,6 +620,10 @@ local function validate_startup(snapshot, visibility)
     return admitted_snapshot, admitted_visibility
 end
 
+-- Format and validate one startup value for its fixed field role.
+--@param field table Fixed startup field descriptor.
+--@param value any Candidate value from the startup snapshot.
+--@return string|nil formatted Display value, or nil when invalid.
 local function startup_value(field, value)
     if field.id == "double_check" then
         if type(value) == "boolean" then return value and "on" or "off" end
@@ -546,6 +638,12 @@ local function startup_value(field, value)
     return value
 end
 
+-- Write one complete transcript block through an optional injected writer.
+--@param writer function|table|nil Callback or object with write method; nil discards output.
+--@param bytes string Complete validated block bytes.
+--@return boolean|nil written True after full acceptance or when no writer is set.
+--@return table|nil err BrokenStdout with output_unknown on partial/exception failure.
+--@effect Calls the writer, which may have externally visible partial output.
 local function write_chunk(writer, bytes)
     if not writer then return true end
     local called, result, writer_error
@@ -565,14 +663,16 @@ local function write_chunk(writer, bytes)
 end
 
 ---Returns a detached copy of the TUI semantic projection registry.
+--@param none No arguments.
+--@return table registry Deep copy of fixed TUI action and rendering metadata.
 function M.registry()
     return deep_copy(TUI_REGISTRY)
 end
 
 ---Creates a bounded renderer from explicit terminal facts and hard limits.
--- @param options table Width, capabilities, limits, and optional append writer.
--- @return table|nil renderer Immutable renderer facade.
--- @return table|nil err Structured construction failure.
+--@param options table Width, capabilities, limits, and optional append writer.
+--@return table|nil renderer Immutable renderer facade.
+--@return table|nil err Structured construction failure.
 function M.new(options)
     if type(options) ~= "table" then
         return nil, failure("InvalidTuiOptions", "TUI options are required")
@@ -610,21 +710,33 @@ function M.new(options)
     local service = {}
 
     ---Returns a detached registry copy.
+    --@param none No arguments; uses the fixed module registry.
+    --@return table registry Deep copy of semantic TUI metadata.
     function service.registry()
         return M.registry()
     end
 
     ---Escapes strict UTF-8 user/model/tool text for safe single-line display.
+    --@param source string Candidate untrusted display text.
+    --@return string|nil escaped Safe single-line text for this terminal profile.
+    --@return table|nil err Structured type or UTF-8 failure.
     function service.escape(source)
         return escape_inline(source, not capabilities.unicode)
     end
 
     ---Renders one semantic block without mutating append state.
+    --@param block table Candidate semantic transcript block.
+    --@return string|nil rendered Complete escaped block bytes.
+    --@return table|nil err Structured block or limit failure.
     function service.render_block(block)
         return render_block(block, capabilities, limits)
     end
 
     ---Appends exactly one complete semantic block to the configured writer.
+    --@param block table Candidate semantic block with optional increasing sequence.
+    --@return string|nil rendered Complete block bytes after a successful append.
+    --@return table|nil err Structured render, ordering, or output failure.
+    --@effect Writes to the configured output, advances the sequence, or faults on uncertain output.
     function service.append(block)
         if state ~= "open" then
             return nil, failure("RendererClosed", "transcript renderer is " .. state)
@@ -651,6 +763,11 @@ function M.new(options)
     ---Creates a draft-safe editor whose output always uses this renderer.
     -- The returned facade does not expose the byte-level publish method, so an
     -- asynchronous producer can append only validated semantic blocks.
+    --@param display table Terminal display port owned by the caller.
+    --@param editor_options table Mode, focus, draft, backlog, and input caps.
+    --@return table|nil facade Read-only semantic line editor facade.
+    --@return table|nil err Structured options, prompt, renderer, or editor failure.
+    --@ownership The facade retains the underlying editor and display until close.
     function service.new_line_editor(display, editor_options)
         if type(editor_options) ~= "table" then
             return nil, failure("InvalidLineEditor", "TUI line-editor options are required")
@@ -689,6 +806,10 @@ function M.new(options)
             maximum_pending_blocks = editor_options.maximum_pending_blocks,
             initial_draft = editor_options.initial_draft,
             initial_cursor_byte = editor_options.initial_cursor_byte,
+            -- Render the fixed focus prompt and the backend-owned draft safely.
+            --@param draft string|boolean Backend draft, with false meaning no owned draft.
+            --@return string|nil rendered Complete prompt line.
+            --@return table|nil err Structured escaping or limit failure.
             render_prompt = function(draft)
                 if draft == false or draft == "" then return service.render_prompt(focus) end
                 return service.render_prompt(focus, draft)
@@ -700,43 +821,94 @@ function M.new(options)
         local editor_sequence = 0
         local facade = {}
 
+        -- Show the first prompt through the underlying terminal editor.
+        --@param none Uses the captured editor instance.
+        --@return boolean|nil shown True after the prompt is visible.
+        --@return table|nil err Structured editor or display failure.
+        --@effect May write or redraw the terminal prompt.
         function facade.show()
             return line_editor.show()
         end
 
+        -- Replace the owned UTF-8 draft at a valid byte cursor.
+        --@param value string Exact next draft bytes.
+        --@param cursor_byte integer|nil Optional zero-based UTF-8 byte boundary.
+        --@return table|nil snapshot Updated immutable editor facts.
+        --@return table|nil err Structured edit or display failure.
+        --@effect May redraw the owned terminal draft.
         function facade.set_draft(value, cursor_byte)
             return line_editor.set_draft(value, cursor_byte)
         end
 
+        -- Insert strict UTF-8 text at the owned draft cursor.
+        --@param value string Text bytes to insert.
+        --@return table|nil snapshot Updated immutable editor facts.
+        --@return table|nil err Structured edit or display failure.
+        --@effect May redraw the owned terminal draft.
         function facade.insert(value)
             return line_editor.insert(value)
         end
 
+        -- Delete one Unicode scalar before the owned cursor.
+        --@param none Uses the captured editor draft and cursor.
+        --@return table|nil snapshot Updated immutable editor facts.
+        --@return table|nil err Structured edit or display failure.
+        --@effect May redraw the owned terminal draft.
         function facade.backspace()
             return line_editor.backspace()
         end
 
+        -- Delete one Unicode scalar after the owned cursor.
+        --@param none Uses the captured editor draft and cursor.
+        --@return table|nil snapshot Updated immutable editor facts.
+        --@return table|nil err Structured edit or display failure.
+        --@effect May redraw the owned terminal draft.
         function facade.delete_forward()
             return line_editor.delete_forward()
         end
 
+        -- Move the owned cursor by scalar or to a draft boundary.
+        --@param direction string left, right, home, or end.
+        --@return table|nil snapshot Updated immutable editor facts.
+        --@return table|nil err Structured gesture or display failure.
+        --@effect May redraw the terminal draft at the new cursor.
         function facade.move(direction)
             return line_editor.move(direction)
         end
 
+        -- Apply one normalized terminal input event without executing its action.
+        --@param event table Normalized user_action event from the terminal port.
+        --@return table|nil result Editor snapshot, submission, or cancel intent.
+        --@return table|nil err Structured input or display failure.
+        --@effect Updates the owned draft or pending submission state.
         function facade.consume(event)
             return line_editor.consume(event)
         end
 
+        -- Lease the exact current draft for a semantic submission intent.
+        --@param intent string Registered submission action.
+        --@return table|nil submission Immutable draft and generation lease.
+        --@return table|nil err Structured editor or intent failure.
+        --@effect Records one active submission without clearing the draft.
         function facade.prepare_submission(intent)
             return line_editor.prepare_submission(intent)
         end
 
+        -- Resolve an exact submission lease, retaining rejected draft bytes.
+        --@param submission_generation integer Generation from prepare_submission.
+        --@param accepted boolean Whether the domain accepted the submission.
+        --@return table|nil snapshot Updated immutable editor facts.
+        --@return table|nil err Structured stale, result, or display failure.
+        --@effect Clears the lease; accepted submissions clear the draft.
         function facade.resolve_submission(submission_generation, accepted)
             return line_editor.resolve_submission(submission_generation, accepted)
         end
 
         ---Renders and publishes one increasing semantic block.
+        --@param block table Candidate semantic transcript block.
+        --@return table|nil receipt Immutable sequence, queue, byte, and rendered facts.
+        --@return table|nil err Structured render, ordering, or display failure.
+        --@effect Publishes or queues one full block and advances editor_sequence on success.
         function facade.publish(block)
             local rendered, render_error = render_block(block, capabilities, limits)
             if not rendered then return nil, render_error end
@@ -758,14 +930,27 @@ function M.new(options)
             }, "line-editor published block")
         end
 
+        -- Flush queued cooked-mode output at a safe line boundary.
+        --@param none Uses the captured terminal editor.
+        --@return string|nil bytes Flushed output bytes, possibly empty.
+        --@return table|nil err Structured editor or display failure.
+        --@effect Writes complete queued blocks and clears the cooked backlog.
         function facade.flush_cooked()
             return line_editor.flush_cooked()
         end
 
+        -- Resume cooked-mode input after its output backlog is empty.
+        --@param none Uses the captured terminal editor.
+        --@return boolean|nil resumed True after the next prompt is visible.
+        --@return table|nil err Structured mode, backlog, or display failure.
+        --@effect May write the next cooked prompt.
         function facade.resume_cooked()
             return line_editor.resume_cooked()
         end
 
+        -- Project editor facts together with the semantic block sequence.
+        --@param none Uses the captured terminal editor and sequence.
+        --@return table snapshot Immutable current editor and sequence facts.
         function facade.snapshot()
             local snapshot = line_editor.snapshot()
             local values = { last_sequence = editor_sequence }
@@ -773,6 +958,11 @@ function M.new(options)
             return readonly(values, "TUI line-editor snapshot")
         end
 
+        -- Close the editor after all queued output and submissions are resolved.
+        --@param none Uses the captured terminal editor.
+        --@return boolean|nil closed True when editor state is closed.
+        --@return table|nil err Structured pending or uncertain-display failure.
+        --@effect Closes the underlying editor on success.
         function facade.close()
             return line_editor.close()
         end
@@ -781,6 +971,11 @@ function M.new(options)
     end
 
     ---Renders independently visible startup fields in their fixed order.
+    --@param snapshot table Candidate startup field values.
+    --@param visibility table Required independent visibility flags.
+    --@param focus string|nil Optional prompt focus appended after visible fields.
+    --@return string|nil rendered Complete escaped startup bytes.
+    --@return table|nil err Structured shape, value, prompt, or limit failure.
     function service.render_startup(snapshot, visibility, focus)
         local admitted, admitted_visibility_or_error = validate_startup(
             snapshot,
@@ -826,6 +1021,10 @@ function M.new(options)
     end
 
     ---Renders one focus prompt and optional exact draft as a complete line.
+    --@param focus string Fixed prompt focus identifier.
+    --@param draft string|nil Optional untrusted draft bytes to display safely.
+    --@return string|nil rendered Complete prompt line with trailing newline.
+    --@return table|nil err Structured focus, text, or limit failure.
     function service.render_prompt(focus, draft)
         local prompt = PROMPTS[focus]
         if not prompt then return nil, failure("InvalidPrompt", "prompt focus is unknown") end
@@ -843,6 +1042,9 @@ function M.new(options)
     end
 
     ---Projects a fixed input intent through the shared CLI action registry.
+    --@param intent string Registered input gesture intent.
+    --@return table|nil binding Fixed key, availability, action, and text fallback.
+    --@return table|nil err Structured unknown-intent failure.
     function service.input_binding(intent)
         local binding = INPUT_BY_INTENT[intent]
         if not binding then
@@ -858,6 +1060,8 @@ function M.new(options)
     end
 
     ---Returns current append-only renderer state without transcript retention.
+    --@param none Uses the captured renderer state.
+    --@return table status Immutable state, sequence, width, and display capability facts.
     function service.status()
         return readonly({
             state = state,
@@ -870,6 +1074,10 @@ function M.new(options)
     end
 
     ---Closes the append facade without writing terminal control sequences.
+    --@param none Uses the captured renderer state.
+    --@return boolean|nil closed True after clean close or if already closed.
+    --@return table|nil err BrokenStdout when earlier output remains uncertain.
+    --@effect Marks an open renderer closed; does not write terminal bytes.
     function service.close()
         if state == "closed" then return true end
         if state == "faulted" then

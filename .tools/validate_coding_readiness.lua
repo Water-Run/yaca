@@ -1,6 +1,18 @@
+--[[
+Author: WaterRun
+Date: 2026-09-23
+File: validate_coding_readiness.lua
+Description: Checks source-start gates and required evidence against the executable readiness contract.
+]]
+
 local failures = {}
 local assertions = 0
 
+-- Record one contract assertion while collecting every independent failure.
+--@param value any Truthy value when the invariant holds.
+--@param message string Finding to report when the invariant fails.
+--@return nil No result; updates the audit counters.
+--@effect Increments assertions and appends a failure message when falsey.
 local function check(value, message)
   assertions = assertions + 1
   if not value then failures[#failures + 1] = message end
@@ -10,6 +22,10 @@ local script = (arg[0] or ""):gsub("\\", "/")
 local root = script:match("^(.*)/%.tools/[^/]+$")
 if not root or root == "" then root = "." end
 
+-- Load and execute one repository-owned Lua contract table.
+--@param path string Absolute or repository-relative contract file path.
+--@return table Loaded contract, or an empty table after a recorded failure.
+--@effect Reads and executes the file; records load and shape failures.
 local function load_table(path)
   local chunk, load_error = loadfile(path)
   check(chunk ~= nil, "cannot load " .. path .. ": " .. tostring(load_error))
@@ -20,6 +36,10 @@ local function load_table(path)
   return value
 end
 
+-- Read all bytes of an expected design or public document.
+--@param path string Absolute or repository-relative document path.
+--@return string File bytes, or empty bytes after a recorded open failure.
+--@effect Reads the file and records an open failure when necessary.
 local function read_all(path)
   local handle, open_error = io.open(path, "rb")
   check(handle ~= nil, "cannot read " .. path .. ": " .. tostring(open_error))
@@ -29,10 +49,18 @@ local function read_all(path)
   return bytes
 end
 
+-- Quote one POSIX shell argument used by the local find invocation.
+--@param value string Directory or pattern bytes passed as one shell word.
+--@return string quoted Single-quoted POSIX shell word.
 local function shell_quote(value)
   return "'" .. value:gsub("'", "'\\''") .. "'"
 end
 
+-- Enumerate matching direct child files for a fixed repository directory.
+--@param directory string Directory passed to the local find command.
+--@param pattern string Glob passed as one argument to find -name.
+--@return table names Sorted matching basenames, or empty on start failure.
+--@effect Starts find, reads its output, and records a start failure.
 local function list_files(directory, pattern)
   local pipe = io.popen("find " .. shell_quote(directory) .. " -maxdepth 1 -type f -name " .. shell_quote(pattern) .. " -printf '%f\\n' 2>/dev/null", "r")
   check(pipe ~= nil, "cannot enumerate " .. directory)
@@ -44,6 +72,11 @@ local function list_files(directory, pattern)
   return result
 end
 
+-- Validate a string sequence and return a membership map for later checks.
+--@param values table|nil String sequence; nil is treated as empty.
+--@param label string Context included in invalid or duplicate findings.
+--@return table set Membership map of the observed strings.
+--@effect Records invalid-value and duplicate-value failures.
 local function as_set(values, label)
   local result = {}
   for _, value in ipairs(values or {}) do
@@ -67,12 +100,12 @@ local public_zh = read_all(root .. "/README-zh.md")
 -- Phase truth must be explicit and non-circular.
 check(readiness.gates and readiness.gates.A and readiness.gates.A.status == "passed", "Gate A is not passed")
 check(readiness.gates and readiness.gates.B and readiness.gates.B.status == "passed", "Gate B is not passed")
-check(readiness.gates and readiness.gates.R and readiness.gates.R.status == "passed", "Release Gate R must have passed")
-check(readiness.gates and readiness.gates.R and readiness.gates.R.release_authorized == true, "release must be authorized")
-check(readiness.gates.R.decision == "D-072" and readiness.gates.R.decision_date == "2026-09-19", "Gate R pass must cite its owner decision")
-check(#(readiness.gates.R.pending_targets or {1}) == 0, "Gate R must not pass with pending targets")
-check(proof.conclusions and proof.conclusions.target_qualification_complete == true and proof.conclusions.release_gate_open == true, "modern proof manifest does not reflect the opened release gate")
-check(audit:find("Gate A 通过；Gate B 通过；Release Gate R 通过", 1, true) ~= nil, "gate audit conclusion drifted")
+check(readiness.gates and readiness.gates.R and readiness.gates.R.status == "closed", "Release Gate R must remain closed before edition qualification")
+check(readiness.gates and readiness.gates.R and readiness.gates.R.release_authorized == false, "release must remain unauthorized")
+check(readiness.gates.R.decision == "D-073" and readiness.gates.R.decision_date == "2026-09-22", "Gate R must cite the three-edition owner decision")
+check(#(readiness.gates.R.pending_targets or {}) == 3, "Gate R must enumerate three pending targets")
+check(proof.conclusions and proof.conclusions.target_qualification_complete == false and proof.conclusions.release_gate_open == false, "modern proof manifest must not authorize the new editions")
+check(audit:find("Gate A 通过；Gate B 通过", 1, true) ~= nil, "gate audit conclusion drifted")
 check(plan:find("Gate B passed", 1, true) ~= nil, "implementation plan no longer reports Gate B passed")
 check(not plan:find("任选", 1, true) and not plan:find("视情况", 1, true) and not plan:find("TBD", 1, true) and not plan:find("TODO", 1, true), "implementation plan contains an unresolved choice marker")
 
@@ -123,6 +156,8 @@ local source_files = list_files(root .. "/src", "*.lua")
 local phase = readiness.source_start and readiness.source_start.implementation_phase
 local phase_set = as_set(readiness.source_start and readiness.source_start.allowed_implementation_phases or {}, "implementation phases")
 check(phase_set[phase], "invalid implementation phase")
+check(phase == "implemented-unqualified", "new editions remain implemented but unqualified")
+check(readiness.source_start.release_is_not_authorized == true, "source phase must withhold release authority")
 check(readiness.source_start and readiness.source_start.source_is_currently_skeleton_only == (phase == "pre-coding"), "skeleton flag disagrees with implementation phase")
 local planned_sources = {}
 for _, module_id in ipairs(release.planned_lua_modules or {}) do planned_sources[module_id .. ".lua"] = true end
@@ -158,4 +193,4 @@ if #failures > 0 then
   os.exit(1)
 end
 
-io.stdout:write(string.format("coding-readiness validation PASS: %d assertions; Gate A/B passed, Release Gate R passed per D-072\n", assertions))
+io.stdout:write(string.format("coding-readiness validation PASS: %d assertions; Gate A/B passed, Release Gate R closed per D-073\n", assertions))

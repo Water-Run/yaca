@@ -1,0 +1,44 @@
+{
+  "schema": "yaca-tool-sources-v1",
+  "target": "win32-x86",
+  "edition": "std",
+  "qualification": "pending",
+  "sources": [
+    {
+      "file": "python-2.7.18.msi",
+      "url": "https://www.python.org/ftp/python/2.7.18/python-2.7.18.msi",
+      "sha256": "d901802e90026e9bad76b8a81f8dd7e43c7d7e8269d9281c9e9df7a9c40480a9"
+    },
+    {
+      "file": "Python-2.7.18.tar.xz",
+      "url": "https://www.python.org/ftp/python/2.7.18/Python-2.7.18.tar.xz",
+      "sha256": "b62c0e7937551d0cc02b8fd5cb0f544f9405bafc9a54d3808ed4594812edef43"
+    },
+    {
+      "file": "bsddb-4.7.25.0.tar.gz",
+      "url": "https://codeload.github.com/python/cpython-source-deps/tar.gz/refs/tags/bsddb-4.7.25.0",
+      "sha256": "35275219b31084fd9df1a83134c262996fc3ecf42f91b2d6a705d12b9cc245fa"
+    },
+    {
+      "file": "7z2603-extra.7z",
+      "url": "https://github.com/ip7z/7zip/releases/download/26.03/7z2603-extra.7z",
+      "sha256": "191894e6acb3647ffb69ce630479ff318523b2e2b9890aa7f05c1127c2e59b8f"
+    },
+    {
+      "file": "7z2603-src.tar.xz",
+      "url": "https://github.com/ip7z/7zip/releases/download/26.03/7z2603-src.tar.xz",
+      "sha256": "9cbde5099c6deb73691b0579063da5827522ccbbcba3f0020fd04e8c8c16c0d4"
+    },
+    {
+      "file": "putty-0.85.tar.gz",
+      "url": "https://the.earth.li/~sgtatham/putty/0.85/putty-0.85.tar.gz",
+      "sha256": "13fd4db2936d03b73812a7bcc2a658e4dd29cc776a56c3670a7fc6f1a0ee8af8"
+    }
+  ],
+  "patches": [
+    {
+      "file": "release/patches/putty-0.85-portable.patch",
+      "sha256": "c9b1dc513066f69964e2889cd760749cdd602329924dd4f94ccd2dcbb18c8448"
+    }
+  ]
+}

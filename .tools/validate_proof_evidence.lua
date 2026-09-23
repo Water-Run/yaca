@@ -1,6 +1,17 @@
+--[[
+Author: WaterRun
+Date: 2026-09-23
+File: validate_proof_evidence.lua
+Description: Checks proof manifests, declared artifacts and evidence admission requirements.
+]]
+
 local failures = {}
 local assertions = 0
 
+-- Records a failed proof invariant while retaining all findings for one report.
+--@param value any Truthy when the invariant holds.
+--@param message string Diagnostic recorded when value is false.
+--@return nil No return value; increments the assertion count and may append a finding.
 local function check(value, message)
   assertions = assertions + 1
   if not value then failures[#failures + 1] = message end
@@ -18,10 +29,16 @@ if chunk then ok, manifest = pcall(chunk) end
 check(ok and type(manifest) == "table", "proof manifest must return a table")
 if not ok or type(manifest) ~= "table" then manifest = {} end
 
+-- Quotes a path for the sha256sum command without admitting shell substitutions.
+--@param value string Path passed to the command shell.
+--@return string quoted Argument quoted for the selected command shell.
 local function shell_quote(value)
   return "'" .. value:gsub("'", "'\\''") .. "'"
 end
 
+-- Reads the SHA-256 digest of one proof source file.
+--@param path string Absolute or repository-relative proof source path.
+--@return string|nil digest Lowercase hexadecimal digest, or nil if the command cannot read it.
 local function sha256(path)
   local pipe = io.popen("sha256sum " .. shell_quote(path), "r")
   if not pipe then return nil end
@@ -33,34 +50,38 @@ end
 local expected = {
   ["TP-003"] = {
     files = {
-      [root .. "/.tools/proofs/tp003_event_pump.lua"] = "2133be3a0cfb4e489d5268d2c11beec875f4558c638a9672a9321ba5d914a418",
+      [root .. "/.tools/proofs/tp003_event_pump.lua"] = "8a7ead513c41dea5463555602f7dc5e3c04959133ebc9c3cfaaa4c2f993d44db",
     },
-    recorded = "2133be3a0cfb4e489d5268d2c11beec875f4558c638a9672a9321ba5d914a418",
+    recorded = "8a7ead513c41dea5463555602f7dc5e3c04959133ebc9c3cfaaa4c2f993d44db",
   },
   ["TP-006"] = {
     files = {
-      [root .. "/.tools/proofs/tp006_curl_carrier.py"] = "8103e6e0d902526f2fc6068a8baef828a121611538d8b577ca876388109241ff",
+      [root .. "/.tools/proofs/tp006_curl_carrier.py"] = "ca9d36a85f3f4cc8fde3e75a5f2572114da18e2251b9df6926769d87575dba78",
     },
-    recorded = "8103e6e0d902526f2fc6068a8baef828a121611538d8b577ca876388109241ff",
+    recorded = "ca9d36a85f3f4cc8fde3e75a5f2572114da18e2251b9df6926769d87575dba78",
   },
   ["TP-008"] = {
     files = {
-      [root .. "/.tools/proofs/tp008_xml_commit.py"] = "a7e4db216d3ed15625eca76dbba0b3119d51158e2ac1478aa51c2c6d9a597566",
+      [root .. "/.tools/proofs/tp008_xml_commit.py"] = "cabd182deb12b606566d4d8d56e33404049ef8fb644944ff4228026cb7d8c407",
     },
-    recorded = "a7e4db216d3ed15625eca76dbba0b3119d51158e2ac1478aa51c2c6d9a597566",
+    recorded = "cabd182deb12b606566d4d8d56e33404049ef8fb644944ff4228026cb7d8c407",
   },
   ["TP-010"] = {
     files = {
-      [root .. "/.tools/proofs/tp010_build.sh"] = "e88df094009b11f073ec077d402ae848502413d56cadedb4677982fef1fa56f3",
-      [root .. "/.tools/proofs/tp010_xml.lua"] = "11e5ad1953193fa7477401bd197a8ef807ca713ca3944323a043be9fc5f557e2",
+      [root .. "/.tools/proofs/tp010_build.sh"] = "8199ac07ea85ee5c404d6b97515ea94252239301cc981d701cda9016546de5c3",
+      [root .. "/.tools/proofs/tp010_xml.lua"] = "b31f2d3747df5244ba11e90f77572e35125932573b89b6a66a033becff0f8dd1",
     },
     recorded = {
-      build = "7751ced36de3f6bd7a8278767d919603248fa0a8bd4f4d977213fcf4979163be",
-      corpus = "11e5ad1953193fa7477401bd197a8ef807ca713ca3944323a043be9fc5f557e2",
+      build = "8199ac07ea85ee5c404d6b97515ea94252239301cc981d701cda9016546de5c3",
+      corpus = "b31f2d3747df5244ba11e90f77572e35125932573b89b6a66a033becff0f8dd1",
     },
   },
 }
 
+-- Compares either scalar digests or keyed digest maps without ignoring extra keys.
+--@param actual string|table Digest or digest map loaded from the manifest.
+--@param wanted string|table Independently pinned digest or digest map.
+--@return boolean matches True only when the digest values and map keys match exactly.
 local function same_digest_record(actual, wanted)
   if type(wanted) == "string" then return actual == wanted end
   if type(actual) ~= "table" or type(wanted) ~= "table" then return false end
@@ -102,8 +123,8 @@ for name, pin in pairs(manifest.source_pins or {}) do
   check(type(pin.url) == "string" and pin.url:match("^https://"), name .. " source URL must be HTTPS")
 end
 check(manifest.source_pins and manifest.source_pins.lua and manifest.source_pins.expat and manifest.source_pins.luaexpat, "proof manifest must pin all three TP-010 sources")
-check(manifest.conclusions and manifest.conclusions.target_qualification_complete == true, "modern proof must reflect the D-072 target qualification")
-check(manifest.conclusions and manifest.conclusions.release_gate_open == true, "modern proof must reflect the opened release gate")
+check(manifest.conclusions and manifest.conclusions.target_qualification_complete == false, "modern proofs do not qualify the release targets")
+check(manifest.conclusions and manifest.conclusions.release_gate_open == false, "modern proofs must retain the closed release gate")
 check(manifest.conclusions and manifest.conclusions.product_source_written == true, "proof milestone must record written product source")
 
 if #failures > 0 then

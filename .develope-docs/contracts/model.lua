@@ -1,3 +1,10 @@
+--[[
+Author: WaterRun
+Date: 2026-09-23
+File: model.lua
+Description: Defines canonical model requests, stream events and provider adapters.
+]]
+
 return {
   contract_version = "0.1.0-readiness.1",
   schema_version = "0.1.0",
@@ -22,7 +29,7 @@ return {
 
   purposes = {
     "main",
-    "side",
+    "ask",
     "action-review",
     "termination-review",
     "compaction",

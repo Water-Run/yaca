@@ -1,19 +1,29 @@
 --[[
-File: json_test.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-09-23
+File: json_test.lua
 Description: Verifies strict bounded JSON parsing and deterministic writing.
 ]]
 
 local A = assert(loadfile(YACA_TEST_ROOT .. "/test/support/assert.lua", "t", _ENV))()
 
+--Loads a source module into an isolated per-case environment.
+--@param name string Module, Model, or resource name selected by the case.
+--@param cache table Per-case module cache preserving isolated imports.
+--@return any module Module export loaded in the isolated source environment.
 local function load_module(name, cache)
     cache = cache or {}
     if cache[name] then return cache[name] end
-    local environment = { require = function(dependency)
+    local environment = {
+        --Resolves an imported Lua module through the isolated test loader.
+        --@param dependency string Source module requested from the isolated loader.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
+        require = function(dependency)
         return load_module(dependency, cache)
     end }
     environment._G = environment
+    --@metatable environment Test-owned lookup and mutation contract for the current case.
+    --@field __index any Fallback table or function used for missing fixture keys.
     setmetatable(environment, { __index = _ENV })
     local chunk, load_error = loadfile(
         YACA_TEST_ROOT .. "/src/" .. name .. ".lua",
@@ -26,6 +36,9 @@ local function load_module(name, cache)
     return value
 end
 
+--Loads a repository Lua module as a test support value.
+--@param relative_path string Repository-relative Lua source path to load.
+--@return any module Test support module export loaded from the repository.
 local function load_table(relative_path)
     local chunk, load_error = loadfile(YACA_TEST_ROOT .. "/" .. relative_path, "t", _ENV)
     A.truthy(chunk, load_error)
@@ -35,6 +48,9 @@ end
 local json = load_module("json")
 local fixtures = load_table(".develope-docs/contracts/fixtures/formats.lua")
 
+--Builds the limits values used by this suite.
+--@param overrides table|nil Per-case overrides of default fixture behavior.
+--@return any options limits used to configure the component under test.
 local function limits(overrides)
     local result = {
         maximum_bytes = 4096,
@@ -47,6 +63,9 @@ local function limits(overrides)
     return result
 end
 
+--Constructs the codec service used by this suite.
+--@param overrides table|nil Per-case overrides of default fixture behavior.
+--@return any fixture Constructed codec service used by this suite.
 local function codec(overrides)
     return assert(json.new(limits(overrides)))
 end
@@ -56,6 +75,9 @@ return {
     cases = {
         {
             name = "contract fixtures distinguish every accepted and rejected profile",
+            --Verifies contract fixtures distinguish every accepted and rejected profile.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify contract fixtures distinguish every accepted and rejected profile.
             run = function()
                 local service = codec()
                 local expected_reason = {
@@ -80,6 +102,9 @@ return {
         },
         {
             name = "objects arrays null and numbers retain explicit unambiguous kinds",
+            --Verifies objects arrays null and numbers retain explicit unambiguous kinds.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify objects arrays null and numbers retain explicit unambiguous kinds.
             run = function()
                 local service = codec()
                 local value = assert(service.parse(
@@ -100,6 +125,9 @@ return {
         },
         {
             name = "number grammar rejects prefixes nonfinite values and incomplete forms",
+            --Verifies number grammar rejects prefixes nonfinite values and incomplete forms.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify number grammar rejects prefixes nonfinite values and incomplete forms.
             run = function()
                 local service = codec()
                 local valid = {
@@ -140,6 +168,9 @@ return {
         },
         {
             name = "strings enforce controls escapes and paired surrogate decoding",
+            --Verifies strings enforce controls escapes and paired surrogate decoding.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify strings enforce controls escapes and paired surrogate decoding.
             run = function()
                 local service = codec()
                 local value = assert(service.parse(
@@ -170,6 +201,9 @@ return {
         },
         {
             name = "writer sorts UTF-8 keys and emits only required lowercase escapes",
+            --Verifies writer sorts UTF-8 keys and emits only required lowercase escapes.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify writer sorts UTF-8 keys and emits only required lowercase escapes.
             run = function()
                 local service = codec()
                 local object = assert(json.object({
@@ -191,6 +225,9 @@ return {
         },
         {
             name = "parser and writer enforce every injected hard limit",
+            --Verifies writer sorts UTF-8 keys and emits only required lowercase escapes.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify writer sorts UTF-8 keys and emits only required lowercase escapes.
             run = function()
                 local too_many_bytes = codec({ maximum_bytes = 8, maximum_string_bytes = 8,
                     maximum_number_bytes = 8 })
@@ -226,11 +263,17 @@ return {
                 local output, output_error = depth_codec.write(nested)
                 A.falsy(output)
                 A.equal(output_error.code, "JsonLimit")
+                --Executes the action expected to raise in the 'parser and writer enforce every injected hard limit' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify writer sorts UTF-8 keys and emits only required lowercase escapes.
                 A.raises(function() depth_codec.limits.maximum_depth = 99 end, "cannot be modified")
             end,
         },
         {
             name = "writer rejects ambiguous Lua values cycles and malformed containers",
+            --Verifies writer rejects ambiguous Lua values cycles and malformed containers.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify writer rejects ambiguous Lua values cycles and malformed containers.
             run = function()
                 local service = codec()
                 local raw_number = assert(json.object({ n = 1 / 0 }))
@@ -268,6 +311,9 @@ return {
         },
         {
             name = "codec rejects BOM invalid UTF-8 trailing data and unknown limit fields",
+            --Verifies codec rejects BOM invalid UTF-8 trailing data and unknown limit fields.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify codec rejects BOM invalid UTF-8 trailing data and unknown limit fields.
             run = function()
                 local service = codec()
                 local bom, bom_error = service.parse("\239\187\191{}")

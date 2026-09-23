@@ -1,7 +1,7 @@
 --[[
-File: runtime.lua
-Date: 2026-08-30
 Author: WaterRun
+Date: 2026-09-23
+File: runtime.lua
 Description: Owns the bounded single-threaded event pump and runtime primitives.
 ]]
 
@@ -87,7 +87,7 @@ local TOOL_RESULT_KINDS = {
     ["skipped-stuck-escape"] = "skipped",
 }
 local SIDE_EFFECTING_TOOLS = {
-    write = true, patch = true, rename = true, delete = true, exec = true,
+    write = true, patch = true, rename = true, delete = true, exec = true, lua = true,
 }
 local PAUSED_AGENT_STATES = {
     Idle = true,
@@ -138,28 +138,70 @@ local AGENT_TRANSITIONS = {
     Closing = {},
 }
 
+---Checks whether a value is an integer at or above a hard lower bound.
+--@param value any Candidate integer.
+--@param minimum integer Inclusive lower bound.
+--@return boolean valid Whether the value satisfies the bound.
 local function integer_at_least(value, minimum)
     return math.type(value) == "integer" and value >= minimum
 end
 
+-- Construct a structured diagnostic without throwing or formatting its optional fields.
+--@param code string Stable diagnostic code used by callers to choose recovery behavior.
+--@param message string Human-readable summary supplied by the failing operation.
+--@param detail any|nil Optional underlying cause or contextual diagnostic data; retained as supplied.
+--@return table New diagnostic record; optional non-nil fields are retained without deep copying.
 local function failure(code, message, detail)
     local result = { code = code, message = message }
     if detail ~= nil then result.detail = detail end
     return result
 end
 
+-- Create a shallow read-only view without copying the backing table.
+--@param values table Backing fields retained by reference; the caller owns their stability.
+--@param label string|nil Diagnostic label; defaults to "readonly value".
+--@return table Empty proxy exposing the backing fields through its locked metatable.
+--@ownership Retains values by reference; nested values and the backing table are not frozen.
 local function readonly(values, label)
+    --@metatable readonly_proxy Forwards reads and iteration; ordinary assignments raise an error.
+    --@field __index table Backing values used for missing-key reads.
+    --@field __newindex function Rejects ordinary assignments without changing the backing values.
+    --@field __pairs function Enumerates the backing table with next.
+    --@field __len function Reports the backing table sequence length.
+    --@field __metatable string Hides this metatable behind the fixed "locked" marker.
     return setmetatable({}, {
         __index = values,
+        -- Reject a write through the proxy before it can create an ordinary field.
+        --@param _ table Proxy receiving the assignment; its contents are not consulted.
+        --@param key any Attempted field name included in the diagnostic.
+        --@return nil Does not return normally.
+        --@error Always raises a read-only assignment error at the caller frame.
         __newindex = function(_, key)
             error((label or "readonly value") .. " cannot be modified: " .. tostring(key), 2)
         end,
-        __pairs = function() return next, values, nil end,
-        __len = function() return #values end,
+        -- Iterate the backing fields instead of the empty proxy table.
+        --@param none The proxy argument supplied by pairs is ignored.
+        --@return function The standard next iterator.
+        --@return table Backing values used as iterator state.
+        --@return nil Initial key used to start iteration.
+        __pairs = function()
+            return next, values, nil
+        end,
+        -- Forward sequence-length queries to the backing table.
+        --@param none The proxy operand supplied by Lua is ignored.
+        --@return integer Length of the backing sequence under the Lua length operator.
+        __len = function()
+            return #values
+        end,
         __metatable = "locked",
     })
 end
 
+---Copies nested runtime state into read-only proxies while rejecting cycles.
+--@param value any Value to freeze.
+--@param visiting table|nil Ancestor set for recursive calls.
+--@param label string|nil Read-only proxy diagnostic label.
+--@return any|nil frozen Read-only copy, or nil for a cyclic table.
 local function freeze(value, visiting, label)
     if type(value) ~= "table" then return value end
     visiting = visiting or {}
@@ -178,12 +220,19 @@ local function freeze(value, visiting, label)
     return readonly(copy, label)
 end
 
+-- Copy the contiguous array prefix while retaining element references.
+--@param values table|nil Sequence copied with ipairs; nil is treated as empty.
+--@return table New sequence containing the original element values through the first hole.
+--@ownership Copies the outer table only; nested objects retain their original owners.
 local function copy_array(values)
     local result = {}
     for index, value in ipairs(values or {}) do result[index] = value end
     return result
 end
 
+-- Count a dense one-based array while rejecting holes and extra key kinds.
+--@param values any Candidate table; every key must belong to the sequence 1 through count.
+--@return integer|nil Sequence length, including zero for an empty table; nil for an invalid shape.
 local function dense_count(values)
     if type(values) ~= "table" then return nil end
     local count = 0
@@ -195,6 +244,10 @@ local function dense_count(values)
     return count
 end
 
+---Rejects unknown or non-string keys in a typed runtime record.
+--@param value any Candidate record.
+--@param allowed table Set of admitted string field names.
+--@return boolean exact Whether every field belongs to the allowed set.
 local function exact_fields(value, allowed)
     if type(value) ~= "table" then return false end
     for key in pairs(value) do
@@ -203,6 +256,11 @@ local function exact_fields(value, allowed)
     return true
 end
 
+---Checks bounded NUL-free runtime text and the empty-string policy.
+--@param value any Candidate text.
+--@param maximum integer Maximum encoded byte length.
+--@param empty boolean Whether empty text is allowed.
+--@return boolean valid Whether the text meets runtime bounds.
 local function valid_runtime_text(value, maximum, empty)
     return type(value) == "string"
         and (empty or value ~= "")
@@ -210,15 +268,27 @@ local function valid_runtime_text(value, maximum, empty)
         and not value:find("\0", 1, true)
 end
 
+---Checks a bounded canonical runtime identifier.
+--@param value any Candidate identifier.
+--@param maximum integer Maximum encoded byte length.
+--@return boolean valid Whether the identifier is accepted.
 local function valid_runtime_id(value, maximum)
     return valid_runtime_text(value, maximum, false)
         and value:match("^[A-Za-z0-9][A-Za-z0-9._:-]*$") ~= nil
 end
 
+---Formats an event-pump callback failure with its Lua stack.
+--@param message any Thrown callback value.
+--@return string trace Failure text with caller stack.
 local function traceback(message)
     return debug.traceback(tostring(message), 2)
 end
 
+---Validates a port event and binds its source to the registered port.
+--@param port_id string Registered AsyncPort identifier.
+--@param event table Candidate event emitted by that port.
+--@return table event Validated shallow copy with canonical source.
+--@error Raises for malformed, spoofed, or contradictory port events.
 local function validate_event(port_id, event)
     if type(event) ~= "table" then error("AsyncPort " .. port_id .. " emitted a non-table event", 3) end
     if event.source ~= nil and event.source ~= port_id then error("AsyncPort " .. port_id .. " spoofed event source", 3) end
@@ -235,6 +305,9 @@ local function validate_event(port_id, event)
     return copy
 end
 
+---Initializes a bounded priority event queue and admission counters.
+--@param capacity integer Maximum queued event count.
+--@return table queue Mutable queue owned by its pump.
 local function new_queue(capacity)
     return {
         capacity = capacity,
@@ -245,10 +318,16 @@ local function new_queue(capacity)
     }
 end
 
+---Builds a collision-free source/kind/key identity for coalescible events.
+--@param event table Progress or timer event with source and key.
+--@return string key Composite queue identity.
 local function event_key(event)
     return event.source .. "\0" .. event.kind .. "\0" .. event.key
 end
 
+---Evicts the oldest progress event to admit a non-droppable event.
+--@param queue table Mutable bounded event queue.
+--@return boolean removed Whether a progress event was evicted.
 local function remove_first_progress(queue)
     for index, event in ipairs(queue.items) do
         if event.kind == "io_progress" then
@@ -260,6 +339,11 @@ local function remove_first_progress(queue)
     return false
 end
 
+---Admits an event, coalescing progress or refusing low-priority overflow.
+--@param queue table Mutable bounded event queue.
+--@param event table Validated port event.
+--@return boolean accepted Whether the event entered or replaced a queue slot.
+--@return string|nil reason Coalesced, rejected, or drain-required reason.
 local function queue_push(queue, event)
     if event.kind == "io_progress" or event.kind == "timer" then
         local key = event_key(event)
@@ -289,6 +373,9 @@ local function queue_push(queue, event)
     return true
 end
 
+---Removes the highest-priority pending event, preserving ties by arrival.
+--@param queue table Mutable bounded event queue.
+--@return table|nil event Next event or nil when empty.
 local function queue_pop(queue)
     local selected_index, selected_priority
     for index, event in ipairs(queue.items) do
@@ -302,9 +389,9 @@ local function queue_pop(queue)
 end
 
 ---Creates a bounded, single-threaded AsyncPort event pump.
--- @param options table Queue capacity, poll budget, and reducer callback.
--- @return table|nil pump Event-pump instance when options are valid.
--- @return string|nil err Configuration error when construction fails.
+--@param options table Queue capacity, poll budget, and reducer callback.
+--@return table|nil pump Event-pump instance when options are valid.
+--@return string|nil err Configuration error when construction fails.
 function M.new_event_pump(options)
     options = options or {}
     local capacity = options.capacity
@@ -325,10 +412,18 @@ function M.new_event_pump(options)
     local dispatched, forced_dispatches, cancel_requests = 0, 0, 0
     local pump = {}
 
+    ---Requires the pump to be in one exact lifecycle state.
+    --@param expected string Required lifecycle state.
+    --@return nil Returns only while the state matches.
+    --@error Raises on a lifecycle mismatch.
     local function require_lifecycle(expected)
         if lifecycle ~= expected then error("event pump lifecycle is " .. lifecycle .. ", expected " .. expected, 3) end
     end
 
+    ---Forwards reducer-admitted cancellation to one unfinished AsyncPort.
+    --@param port_id string Registered port identifier.
+    --@return boolean cancelled Port cancellation acknowledgement.
+    --@error Raises outside dispatch or on port contract failure.
     local function cancel_port(port_id)
         if not inside_dispatch then error("port cancellation must be admitted by the event reducer", 3) end
         local registration = port_by_id[port_id]
@@ -342,18 +437,38 @@ function M.new_event_pump(options)
 
     local reducer_context_values = {
         cancel = cancel_port,
+        -- Expose the current pump tick to the reducer without probing the clock again.
+        --@param none No arguments; reads the tick already captured by the pump.
+        --@return integer|nil Current tick, or nil before the first clock observation.
         now = function() return current_now end,
     }
+    --@metatable reducer_context Read-only reducer access to admitted cancellation and the current pump tick.
+    --@field __index table Captured cancel and now functions; their state remains owned by the pump.
+    --@field __newindex function Rejects ordinary writes to the reducer facade.
+    --@field __metatable string Fixed locked marker hiding the actual metatable.
     local reducer_context = setmetatable({}, {
         __index = reducer_context_values,
-        __newindex = function(_, key) error("event reducer context cannot be modified: " .. tostring(key), 2) end,
+        -- Reject attempts to alter the reducer's admitted control surface.
+        --@param _ table Reducer facade receiving the write; its contents are not consulted.
+        --@param key any Attempted field name included in the diagnostic.
+        --@return nil Does not return normally.
+        --@error Always raises a reducer-context mutation error at the caller frame.
+        __newindex = function(_, key)
+            error("event reducer context cannot be modified: " .. tostring(key), 2)
+        end,
         __metatable = "locked",
     })
 
+    ---Dispatches one queued event through the reducer with guarded state.
+    --@param none No arguments.
+    --@return boolean dispatched Whether an event was available and delivered.
     local function dispatch_one()
         local event = queue_pop(queue)
         if not event then return false end
         inside_dispatch = true
+        ---Invokes the reducer with its read-only cancellation context.
+        --@param none No callback arguments; captures the selected event.
+        --@return nil Reducer side effects are handled by the enclosing pump.
         local ok, dispatch_error = xpcall(function() on_event(event, reducer_context) end, traceback)
         inside_dispatch = false
         if not ok then error("event reducer failed: " .. tostring(dispatch_error), 3) end
@@ -361,6 +476,10 @@ function M.new_event_pump(options)
         return true
     end
 
+    ---Admits a non-droppable event by dispatching queued work if necessary.
+    --@param event table Validated event to enqueue.
+    --@return boolean accepted Whether the event entered the queue.
+    --@return string|nil reason Coalesced or rejected reason when applicable.
     local function enqueue(event)
         while true do
             local accepted, reason = queue_push(queue, event)
@@ -371,9 +490,10 @@ function M.new_event_pump(options)
     end
 
     ---Registers one five-method AsyncPort before the pump starts.
-    -- @param port_id string Stable event source identifier.
-    -- @param port table AsyncPort implementation.
-    -- @return boolean registered True when registration succeeds.
+    --@param self table Event pump instance.
+    --@param port_id string Stable event source identifier.
+    --@param port table AsyncPort implementation.
+    --@return boolean registered True when registration succeeds.
     function pump:register(port_id, port)
         require_lifecycle("created")
         if type(port_id) ~= "string" or port_id == "" or port_id:find("\0", 1, true) then error("AsyncPort id must be a nonempty NUL-free string", 2) end
@@ -389,8 +509,9 @@ function M.new_event_pump(options)
     end
 
     ---Starts all registered ports in registration order.
-    -- @param now integer Current monotonic tick.
-    -- @return boolean started True after every port starts.
+    --@param self table Event pump instance.
+    --@param now integer Current monotonic tick.
+    --@return boolean started True after every port starts.
     function pump:start(now)
         require_lifecycle("created")
         if not integer_at_least(now, 0) then error("event pump time must be a nonnegative integer", 2) end
@@ -410,9 +531,10 @@ function M.new_event_pump(options)
     end
 
     ---Polls each live port once and dispatches a bounded number of events.
-    -- @param now integer Current monotonic tick.
-    -- @param dispatch_budget integer|nil Maximum normal dispatches this tick.
-    -- @return integer consumed Number of normally dispatched events.
+    --@param self table Event pump instance.
+    --@param now integer Current monotonic tick.
+    --@param dispatch_budget integer|nil Maximum normal dispatches this tick.
+    --@return integer consumed Number of normally dispatched events.
     function pump:tick(now, dispatch_budget)
         require_lifecycle("started")
         if inside_tick then error("event pump tick is not reentrant", 2) end
@@ -420,6 +542,9 @@ function M.new_event_pump(options)
         dispatch_budget = dispatch_budget == nil and capacity or dispatch_budget
         if not integer_at_least(dispatch_budget, 0) then error("dispatch budget must be a nonnegative integer", 2) end
         inside_tick, current_now, last_now = true, now, now
+        ---Polls ports, validates their events, and drains the dispatch budget.
+        --@param none No arguments; captures the current tick and budget.
+        --@return integer consumed Number of normally dispatched events.
         local ok, result = xpcall(function()
             for _, registration in ipairs(ports) do
                 if not terminal_seen[registration.id] then
@@ -461,8 +586,9 @@ function M.new_event_pump(options)
     end
 
     ---Dispatches already queued events without polling ports.
-    -- @param limit integer|nil Maximum events, or nil to empty the queue.
-    -- @return integer consumed Number of dispatched events.
+    --@param self table Event pump instance.
+    --@param limit integer|nil Maximum events, or nil to empty the queue.
+    --@return integer consumed Number of dispatched events.
     function pump:drain(limit)
         require_lifecycle("started")
         if inside_tick then error("event pump drain is not reentrant", 2) end
@@ -473,8 +599,9 @@ function M.new_event_pump(options)
     end
 
     ---Joins every port and validates its terminal outcome.
-    -- @param deadline integer|nil Native-port deadline representation.
-    -- @return table outcomes Terminal outcome keyed by port identifier.
+    --@param self table Event pump instance.
+    --@param deadline integer|nil Native-port deadline representation.
+    --@return table outcomes Terminal outcome keyed by port identifier.
     function pump:join(deadline)
         require_lifecycle("started")
         local outcomes = {}
@@ -493,7 +620,8 @@ function M.new_event_pump(options)
     end
 
     ---Closes all ports in reverse registration order.
-    -- @return boolean closed True after all close calls succeed.
+    --@param self table Event pump instance.
+    --@return boolean closed True after all close calls succeed.
     function pump:close()
         if lifecycle ~= "started" and lifecycle ~= "joined" then error("event pump lifecycle is " .. lifecycle .. ", expected started or joined", 2) end
         local first_error
@@ -508,7 +636,8 @@ function M.new_event_pump(options)
     end
 
     ---Returns a snapshot of queue, lifecycle, and admission counters.
-    -- @return table stats Mutable snapshot detached from pump state.
+    --@param self table Event pump instance.
+    --@return table stats Mutable snapshot detached from pump state.
     function pump:stats()
         return {
             lifecycle = lifecycle,
@@ -546,9 +675,9 @@ local STUCK_FIELDS = {
 }
 local LANE_FIELDS = {
     queue_maximum = true,
-    side_active_time_ms = true,
-    side_response_bytes = true,
-    side_snapshot_id = true,
+    ask_active_time_ms = true,
+    ask_response_bytes = true,
+    ask_snapshot_id = true,
 }
 local INITIAL_SERIAL_FIELDS = {
     turn = true,
@@ -558,9 +687,13 @@ local INITIAL_SERIAL_FIELDS = {
     operation = true,
     queue = true,
     queue_display = true,
-    side = true,
+    ask = true,
 }
 
+---Validates and snapshots AgentLoop caps, serials, lanes, and stuck thresholds.
+--@param options table Candidate runtime options and durable startup waterlines.
+--@return table|nil options Normalized immutable-by-convention runtime options.
+--@return table|nil err Structured option failure.
 local function validate_agent_options(options)
     if type(options) ~= "table" then
         return nil, failure("InvalidAgentOptions", "AgentLoop limits are required")
@@ -604,10 +737,10 @@ local function validate_agent_options(options)
         end
     end
     if not integer_at_least(options.lanes.queue_maximum, 1)
-        or not integer_at_least(options.lanes.side_active_time_ms, 1)
-        or not integer_at_least(options.lanes.side_response_bytes, 1)
+        or not integer_at_least(options.lanes.ask_active_time_ms, 1)
+        or not integer_at_least(options.lanes.ask_response_bytes, 1)
         or not valid_runtime_id(
-            options.lanes.side_snapshot_id,
+            options.lanes.ask_snapshot_id,
             options.maximum_identifier_bytes
         )
     then
@@ -670,9 +803,9 @@ local function validate_agent_options(options)
     }) do
         runtime_snapshot[#runtime_snapshot + 1] = name .. "=" .. tostring(copy.stuck[name])
     end
-    runtime_snapshot[#runtime_snapshot + 1] = "lanes=" .. copy.lanes.side_snapshot_id
+    runtime_snapshot[#runtime_snapshot + 1] = "lanes=" .. copy.lanes.ask_snapshot_id
     for _, name in ipairs({
-        "queue_maximum", "side_active_time_ms", "side_response_bytes",
+        "queue_maximum", "ask_active_time_ms", "ask_response_bytes",
     }) do
         runtime_snapshot[#runtime_snapshot + 1] = name .. "=" .. tostring(copy.lanes[name])
     end
@@ -688,10 +821,14 @@ local function validate_agent_options(options)
     return copy
 end
 
+---Checks each required AgentLoop I/O port and optional lane contract.
+--@param ports table Candidate clock, journal, Model, Tool, review, and view ports.
+--@return table|nil ports Admitted port record.
+--@return table|nil err Structured missing-port failure.
 local function validate_agent_ports(ports)
     if type(ports) ~= "table" or not exact_fields(ports, {
         clock = true, journal = true, model = true, tools = true, reviews = true,
-        snapshots = true, side = true, views = true,
+        snapshots = true, ask = true, views = true,
     }) then
         return nil, failure("InvalidAgentPorts", "AgentLoop ports are required and unambiguous")
     end
@@ -713,10 +850,10 @@ local function validate_agent_ports(ports)
             type(ports.snapshots) ~= "table"
             or type(ports.snapshots.capture) ~= "function"
         ))
-        or (ports.side ~= false and (
-            type(ports.side) ~= "table"
-            or type(ports.side.start) ~= "function"
-            or type(ports.side.cancel) ~= "function"
+        or (ports.ask ~= false and (
+            type(ports.ask) ~= "table"
+            or type(ports.ask.start) ~= "function"
+            or type(ports.ask.cancel) ~= "function"
         ))
         or (ports.views ~= false and (
             type(ports.views) ~= "table"
@@ -728,6 +865,11 @@ local function validate_agent_ports(ports)
     return ports
 end
 
+---Validates a main-turn input and its frozen configuration snapshots.
+--@param input table Candidate user message and selection snapshots.
+--@param limits table Admitted runtime hard caps and identifier bounds.
+--@return table|nil admitted Detached input record.
+--@return table|nil err Structured turn-input failure.
 local function validate_turn_input(input, limits)
     local allowed = {
         text = true, source = true, config_generation = true,
@@ -762,6 +904,11 @@ local function validate_turn_input(input, limits)
     return admitted
 end
 
+---Checks typed finish, ask-user, or refuse Model control payloads.
+--@param control table Candidate normalized Model control envelope.
+--@param maximum integer Maximum payload text bytes.
+--@return boolean|nil valid True when the envelope is coherent.
+--@return string|nil reason Invalid envelope or payload class.
 local function validate_control(control, maximum)
     if not exact_fields(control, { control = true, payload = true })
         or not CONTROL_NAMES[control.control]
@@ -786,6 +933,11 @@ local function validate_control(control, maximum)
     return true
 end
 
+---Checks a canonical Model response and executable tool-call batch.
+--@param wrapper table Canonical response, digest, progress identity, and normalized body.
+--@param limits table Runtime hard caps and identifier bounds.
+--@return table|nil response Validated original response wrapper.
+--@return table|nil err Structured shape or contradiction failure.
 local function validate_model_response(wrapper, limits)
     if not exact_fields(wrapper, {
         request_id = true, canonical_body = true, canonical_digest = true,
@@ -854,6 +1006,11 @@ local function validate_model_response(wrapper, limits)
     return wrapper
 end
 
+---Checks a canonical Tool outcome and its byte/effect evidence.
+--@param result table Candidate normalized Tool result.
+--@param limits table Runtime result and identifier limits.
+--@return table|nil result Validated original Tool result.
+--@return table|nil err Structured shape or contradiction failure.
 local function validate_tool_result(result, limits)
     if not exact_fields(result, {
         kind = true, body = true, truncated = true, raw_bytes = true,
@@ -889,13 +1046,23 @@ local function validate_tool_result(result, limits)
     return result
 end
 
+---Builds a bounded local Tool result for an admission or policy refusal.
+--@param kind string Canonical synthetic outcome kind.
+--@param reason any Refusal reason embedded in bounded text.
+--@return table result Normalized Tool result without external effects.
 local function synthetic_result(kind, reason)
     local body = "synthetic:" .. kind .. ":" .. tostring(reason or "")
+    local raw_bytes = #body
+    if #body > 2048 then
+        body = body:sub(1, 2048)
+        -- Reasons are UTF-8 text; keep the bounded synthetic body valid.
+        while utf8.len(body) == nil do body = body:sub(1, -2) end
+    end
     return {
         kind = kind,
         body = body,
-        truncated = false,
-        raw_bytes = #body,
+        truncated = #body < raw_bytes,
+        raw_bytes = raw_bytes,
         digest = false,
         error_id = false,
         external_effects_unsettled = false,
@@ -906,10 +1073,10 @@ end
 ---Creates the typed, single-owner AgentLoop state machine.
 -- Ports perform only narrow I/O. The loop will not start a Model, reviewer, or
 -- tool effect until the causal Context batch receives an exact durable receipt.
--- @param ports table Monotonic clock, Context journal, Model, Tool, review ports.
--- @param options table Versioned hard-cap and stuck-threshold snapshots.
--- @return table|nil loop AgentLoop facade.
--- @return table|nil err Structured construction failure.
+--@param ports table Monotonic clock, Context journal, Model, Tool, review ports.
+--@param options table Versioned hard-cap and stuck-threshold snapshots.
+--@return table|nil loop AgentLoop facade.
+--@return table|nil err Structured construction failure.
 function M.new_agent_loop(ports, options)
     local admitted_ports, ports_error = validate_agent_ports(ports)
     if not admitted_ports then return nil, ports_error end
@@ -940,10 +1107,10 @@ function M.new_agent_loop(ports, options)
     local current_queue_limit = limits.lanes.queue_maximum
     local queue_serial = limits.initial_serials.queue
     local queue_display_serial = limits.initial_serials.queue_display
-    local side_serial = limits.initial_serials.side
+    local ask_serial = limits.initial_serials.ask
     local restored_view_manifest_ref = limits.initial_view_manifest_ref
-    local side
-    local side_history = {}
+    local ask
+    local ask_history = {}
     local compaction_gate
     local compaction_preflight_serial = 0
     local pending_model_preflight
@@ -958,16 +1125,26 @@ function M.new_agent_loop(ports, options)
     local auto_start_queue
     local inject_steer
 
+    ---Returns the active or most recently completed turn trace.
+    --@param none No arguments.
+    --@return table|nil trace Current or last turn trace.
     local function current_trace()
         return turn and turn.trace or (last_turn and last_turn.trace)
     end
 
+    ---Returns the active Model-view manifest reference across turn boundaries.
+    --@param none No arguments.
+    --@return string|false ref Current or restored manifest reference.
     local function current_manifest_ref()
         local current = turn or last_turn
         return current and current.active_view_manifest_ref
             or restored_view_manifest_ref
     end
 
+    ---Advances the AgentLoop only along an admitted state-machine edge.
+    --@param next_state string Destination Agent state.
+    --@return nil Records the transition in the active trace.
+    --@error Raises for an illegal transition.
     local function transition(next_state)
         if not AGENT_STATES[next_state] or not AGENT_TRANSITIONS[state][next_state] then
             error("illegal AgentLoop transition " .. state .. " -> " .. tostring(next_state), 3)
@@ -976,6 +1153,10 @@ function M.new_agent_loop(ports, options)
         if turn then turn.trace.states[#turn.trace.states + 1] = next_state end
     end
 
+    ---Reads a monotonic tick and charges active turn time outside paused states.
+    --@param none No arguments.
+    --@return integer|nil now Current monotonic tick.
+    --@return table|nil err Structured clock failure.
     local function clock_now()
         local called, value = pcall(admitted_ports.clock.now)
         if not called or not integer_at_least(value, 0)
@@ -990,6 +1171,11 @@ function M.new_agent_loop(ports, options)
         return value
     end
 
+    ---Halts the loop after loss of an exact durable Context barrier.
+    --@param reason string Internal barrier failure identity.
+    --@param detail any|nil Underlying receipt or port failure.
+    --@return nil No new activity is admitted.
+    --@return table err Persistent durability failure.
     local function durability_failure(reason, detail)
         halted = true
         halt_error = failure(
@@ -1007,6 +1193,10 @@ function M.new_agent_loop(ports, options)
         return nil, halt_error
     end
 
+    ---Commits a sequenced Fact batch and verifies the exact journal receipt.
+    --@param events table Dense semantic event batch.
+    --@return table|nil receipt Exact durable Context receipt.
+    --@return table|nil err Capacity refusal or fail-stop durability error.
     local function commit_events(events)
         if halted then return nil, halt_error end
         local count = dense_count(events)
@@ -1049,6 +1239,11 @@ function M.new_agent_loop(ports, options)
         }, nil, "durable AgentLoop batch")
         if not batch then return durability_failure("cyclic-event") end
         local called, committed, receipt = pcall(admitted_ports.journal.commit, batch)
+        if called and committed ~= true and type(receipt) == "table"
+            and receipt.code == "ContextCapacity" and receipt.publication_started == false
+        then
+            return nil, receipt
+        end
         if not called or committed ~= true or type(receipt) ~= "table"
             or receipt.barrier_id ~= barrier_id
             or receipt.first_sequence ~= first_sequence
@@ -1076,6 +1271,12 @@ function M.new_agent_loop(ports, options)
     -- inside tools.start so it can prove intent durability before the actual
     -- side effect. Adopt that exact publication receipt into AgentLoop's local
     -- waterline; no event is replayed and no second Context writer exists.
+    --@param receipt table External operation journal receipt.
+    --@param expected_count integer Expected number of exact Facts.
+    --@param validator function Checks each bound Fact against active call state.
+    --@param failure_domain string|nil Domain prefix for fail-stop diagnostics.
+    --@return boolean|nil adopted True after local waterline advances.
+    --@return table|nil err Persistent durability failure.
     local function adopt_external_receipt(
         receipt,
         expected_count,
@@ -1123,11 +1324,19 @@ function M.new_agent_loop(ports, options)
         return true
     end
 
+    ---Adopts a side-effecting Tool's durable intent before execution resumes.
+    --@param call table Active Tool call and operation identity.
+    --@param receipt table|false|nil Optional exact intent receipt.
+    --@return boolean|nil adopted True when no receipt or one exact intent is accepted.
+    --@return table|nil err Persistent durability failure.
     local function adopt_operation_intent(call, receipt)
         if receipt == nil or receipt == false then return true end
         if not call.side_effecting then
             return durability_failure("unexpected-operation-intent")
         end
+        ---Checks the external intent Fact against the admitted Tool call.
+        --@param event table Durable operation-intent Fact.
+        --@return boolean matches Whether the Fact binds the active call exactly.
         return adopt_external_receipt(receipt, 1, function(event)
             local fields = event.fields
             return event.type == "operation_intent"
@@ -1152,10 +1361,17 @@ function M.new_agent_loop(ports, options)
         end)
     end
 
+    ---Returns the active turn identity used by busy-lane observations.
+    --@param none No arguments.
+    --@return string|false turn_id Active turn ID or false when idle.
     local function observed_turn_id()
         return turn and turn.id or false
     end
 
+    ---Rejects stale queue, Ask, or steer actions against current Context/turn state.
+    --@param candidate table Busy-lane action with observed generation and turn.
+    --@return boolean|nil valid True when both observations match.
+    --@return table|nil err Structured invalid or stale observation.
     local function validate_lane_observation(candidate)
         if not integer_at_least(candidate.expected_context_generation, 1)
             or (candidate.expected_turn_id ~= false
@@ -1184,6 +1400,13 @@ function M.new_agent_loop(ports, options)
         return true
     end
 
+    ---Captures a fresh immutable top-level turn configuration snapshot.
+    --@param kind string Main or queued turn kind.
+    --@param text_value string Accepted user text.
+    --@param source string User input source identity.
+    --@param cause string|false|nil Queue or Ask continuation cause.
+    --@return table|nil snapshot Validated current-generation snapshot.
+    --@return table|nil err Structured port or binding failure.
     local function capture_snapshot(kind, text_value, source, cause)
         if admitted_ports.snapshots == false then
             return nil, failure(
@@ -1223,6 +1446,10 @@ function M.new_agent_loop(ports, options)
         return snapshot
     end
 
+    ---Finds a queued user item by durable item ID.
+    --@param queue_item_id string Durable queue item identity.
+    --@return integer|nil index One-based queue index.
+    --@return table|nil item Matching mutable queue item.
     local function queue_index(queue_item_id)
         for index, item in ipairs(queue_items) do
             if item.id == queue_item_id then return index, item end
@@ -1230,20 +1457,31 @@ function M.new_agent_loop(ports, options)
         return nil
     end
 
+    ---Resets human display numbering after the durable queue empties.
+    --@param none No arguments.
+    --@return nil Updates the display serial when the queue is empty.
     local function reset_queue_display_if_empty()
         if #queue_items == 0 then queue_display_serial = 0 end
     end
 
+    ---Projects a queue item into a detached public status record.
+    --@param item table Internal queued user item.
+    --@return table public_item Public ID, display number, text, and source.
     local function public_queue_item(item)
         return {
             queue_item_id = item.id,
             display_id = item.display_id,
             text = item.text,
             source = item.source,
-            side_id = item.side_id or false,
+            ask_id = item.ask_id or false,
         }
     end
 
+    ---Builds the durable Fact for one queue mutation.
+    --@param item table Internal queued user item.
+    --@param action string Enqueue, edit, reorder, drop, or clear action.
+    --@param extra table|nil Optional destination or reason fields.
+    --@return table event Semantic queue-item Fact ready for commit.
     local function queue_event(item, action, extra)
         local fields = {
             queueItemId = item.id,
@@ -1251,7 +1489,7 @@ function M.new_agent_loop(ports, options)
             action = action,
             text = item.text,
         }
-        if item.side_id then fields.sideId = item.side_id end
+        if item.ask_id then fields.askId = item.ask_id end
         if extra then
             if extra.before_queue_item_id then
                 fields.beforeQueueItemId = extra.before_queue_item_id
@@ -1261,6 +1499,9 @@ function M.new_agent_loop(ports, options)
         return { type = "queue_item", fields = fields, turn_id = false }
     end
 
+    ---Marks one terminal outcome and snapshots its final counters and trace.
+    --@param outcome string Durable turn terminal outcome.
+    --@return table snapshot Final turn identity, counters, trace, and view.
     local function final_snapshot(outcome)
         turn.outcome = outcome
         turn.reported_outcome = outcome
@@ -1275,6 +1516,12 @@ function M.new_agent_loop(ports, options)
         }
     end
 
+    ---Commits a unique terminal turn Fact and starts queued work when allowed.
+    --@param outcome string Terminal outcome class.
+    --@param reason string|nil Bounded human-readable terminal reason.
+    --@param error_id string|nil Structured error identity.
+    --@return table|nil result Immutable final turn outcome.
+    --@return table|nil err Structured validation, capacity, or durability failure.
     local function finalize(outcome, reason, error_id)
         if not TURN_OUTCOMES[outcome] or outcome == "waiting_user" then
             return nil, failure("InvalidTurnOutcome", "turn terminal outcome is invalid")
@@ -1320,6 +1567,23 @@ function M.new_agent_loop(ports, options)
         return assert(freeze(result, nil, "turn outcome"))
     end
 
+    ---Converts a pre-publication capacity refusal into a durable terminal turn.
+    --@param error_value table Original event or view preparation failure.
+    --@return table|nil result Budget-exhausted turn outcome.
+    --@return table|nil err Original or settlement failure.
+    local function capacity_exhausted(error_value)
+        if not error_value or error_value.code ~= "ContextCapacity" then return nil, error_value end
+        if turn.call_cursor <= #turn.calls then
+            local skipped, skip_error = skip_remaining("skipped-after-failure", "ContextCapacity")
+            if not skipped then return nil, skip_error end
+        end
+        return finalize("budget_exhausted", "Context capacity exhausted; start a new Context",
+            "ContextCapacity")
+    end
+
+    ---Finds the first hard-cap limit that would block the next activity.
+    --@param prospective string Model or review activity kind.
+    --@return string|nil reason Exhausted budget dimension, if any.
     local function budget_reason(prospective)
         if turn.counters.active_time_ms >= limits.hard_caps.active_time_ms then
             return "active-time"
@@ -1339,6 +1603,13 @@ function M.new_agent_loop(ports, options)
         return nil
     end
 
+    ---Starts an external activity through a guarded port call.
+    --@param port table Model, Tool, or review port.
+    --@param method string Port method to invoke.
+    --@param specification table Immutable activity request.
+    --@param label string Failure-domain label.
+    --@return any|nil handle Started activity handle.
+    --@return table|nil err Structured start failure.
     local function start_effect(port, method, specification, label)
         local called, handle, start_error = pcall(port[method], specification)
         if not called or handle == nil or handle == false then
@@ -1351,6 +1622,10 @@ function M.new_agent_loop(ports, options)
         return handle
     end
 
+    ---Prepares and durably publishes the exact Model view before a request.
+    --@param none No arguments.
+    --@return string|nil manifest_ref Current published view digest.
+    --@return table|nil err Capacity or durability failure.
     local function prepare_model_view()
         if admitted_ports.views == false then return turn.active_view_manifest_ref end
         local observation = freeze({
@@ -1362,6 +1637,12 @@ function M.new_agent_loop(ports, options)
             admitted_ports.views.prepare,
             observation
         )
+        if called and not prepared and type(prepare_error) == "table"
+            and prepare_error.code == "ModelViewLimit"
+        then
+            return nil, { code = "ContextCapacity", publication_started = false,
+                message = "Context model view exceeds its byte limit; start a new Context" }
+        end
         if not called or not exact_fields(prepared, {
             digest = true,
             first_sequence = true,
@@ -1433,6 +1714,12 @@ function M.new_agent_loop(ports, options)
         return prepared.digest
     end
 
+    ---Creates an automatic-compaction preflight for a pending Model request.
+    --@param kind string Deferred request kind.
+    --@param purpose string Model request purpose.
+    --@param payload table|nil Frozen continuation data.
+    --@return table|nil admission Immutable preflight admission.
+    --@return table|nil err Structured duplicate or invalid binding failure.
     local function defer_model_request(kind, purpose, payload)
         if pending_model_preflight then
             return nil, failure(
@@ -1465,6 +1752,11 @@ function M.new_agent_loop(ports, options)
         }, "automatic compaction preflight admission")
     end
 
+    ---Commits a Model request and starts its external activity after view publication.
+    --@param purpose string Main, escape, or continuation request purpose.
+    --@param continuation table|false|nil Continuation evidence for the Model port.
+    --@return table|nil admission Immutable active-request admission or terminal outcome.
+    --@return table|nil err Structured capacity, start, or durability failure.
     start_model_request = function(purpose, continuation)
         if compaction_gate then
             return nil, failure(
@@ -1477,14 +1769,14 @@ function M.new_agent_loop(ports, options)
         request_serial = request_serial + 1
         local request_id = turn.id .. ":request:" .. tostring(request_serial)
         local view_manifest_ref, view_error = prepare_model_view()
-        if not view_manifest_ref then return nil, view_error end
+        if not view_manifest_ref then return capacity_exhausted(view_error) end
         local fields = {
             requestId = request_id,
             purpose = purpose,
             viewManifestRef = view_manifest_ref,
         }
         local receipt, commit_error = commit_events({ { type = "model_request", fields = fields } })
-        if not receipt then return nil, commit_error end
+        if not receipt then return capacity_exhausted(commit_error) end
         turn.counters.model_requests = turn.counters.model_requests + 1
         turn.counters.steps = turn.counters.steps + 1
         turn.trace.purposes[#turn.trace.purposes + 1] = purpose
@@ -1511,6 +1803,11 @@ function M.new_agent_loop(ports, options)
         return readonly({ state = state, request_id = request_id }, "model admission")
     end
 
+    ---Checks Model budget and optionally defers admission for compaction preflight.
+    --@param purpose string Main or escape request purpose.
+    --@param continuation table|false|nil Continuation evidence.
+    --@return table|nil admission Model request, preflight, or terminal outcome.
+    --@return table|nil err Structured admission failure.
     request_model = function(purpose, continuation)
         local reason = budget_reason("model")
         if reason then return finalize("budget_exhausted", reason, "AgentBudgetExhausted") end
@@ -1523,6 +1820,11 @@ function M.new_agent_loop(ports, options)
         return start_model_request(purpose, continuation)
     end
 
+    ---Commits and starts one no-tool action or termination review request.
+    --@param kind string Action or termination review kind.
+    --@param binding table Exact action or finish binding.
+    --@return table|nil admission Review request or waiting-user outcome.
+    --@return table|nil err Structured capacity, start, or durability failure.
     start_review_request = function(kind, binding)
         if compaction_gate then
             return nil, failure(
@@ -1547,7 +1849,7 @@ function M.new_agent_loop(ports, options)
         local request_id = turn.id .. ":request:" .. tostring(request_serial)
         local purpose = kind == "termination" and "termination-review" or "action-review"
         local view_manifest_ref, view_error = prepare_model_view()
-        if not view_manifest_ref then return nil, view_error end
+        if not view_manifest_ref then return capacity_exhausted(view_error) end
         local receipt, commit_error = commit_events({ {
             type = "model_request",
             fields = {
@@ -1556,7 +1858,7 @@ function M.new_agent_loop(ports, options)
                 viewManifestRef = view_manifest_ref,
             },
         } })
-        if not receipt then return nil, commit_error end
+        if not receipt then return capacity_exhausted(commit_error) end
         turn.counters.model_requests = turn.counters.model_requests + 1
         turn.counters.reviews = turn.counters.reviews + 1
         turn.counters.steps = turn.counters.steps + 1
@@ -1582,6 +1884,11 @@ function M.new_agent_loop(ports, options)
         return readonly({ state = state, request_id = request_id }, "review admission")
     end
 
+    ---Routes review admission through availability, budget, and compaction checks.
+    --@param kind string Action or termination review kind.
+    --@param binding table Exact action or finish binding.
+    --@return table|nil admission Review, preflight, or waiting-user outcome.
+    --@return table|nil err Structured admission failure.
     local function begin_review(kind, binding)
         if admitted_ports.reviews == false then
             transition("WaitingUser")
@@ -1606,6 +1913,12 @@ function M.new_agent_loop(ports, options)
         return start_review_request(kind, binding)
     end
 
+    ---Tracks repeated actions/errors and emits one durable stuck warning before escape.
+    --@param signature string Canonical action or error signature.
+    --@param error_signature string|false|nil Error identity when relevant.
+    --@param progress_identity string Canonical progress identity.
+    --@return string|nil action Continue, escape, or stuck decision.
+    --@return string|table|nil detail Trigger identity or structured commit failure.
     local function record_detector(signature, error_signature, progress_identity)
         local detector = turn.detector
         local same = detector.last_signature == signature
@@ -1671,6 +1984,9 @@ function M.new_agent_loop(ports, options)
         return "escape", triggered
     end
 
+    ---Decides whether a post-escape response made semantic progress.
+    --@param progress_identity string New canonical progress identity.
+    --@return boolean still_stuck Whether the escape remained on the same progress state.
     local function detector_after_escape(progress_identity)
         local detector = turn.detector
         if not detector.escape_active then return false end
@@ -1688,6 +2004,12 @@ function M.new_agent_loop(ports, options)
         return true
     end
 
+    ---Pairs one accepted Tool call with exactly one durable result Fact.
+    --@param call table Accepted Tool call state.
+    --@param result table Canonical Tool result.
+    --@param external_receipt table|false|nil Optional operation/result journal receipt.
+    --@return boolean|nil paired True after exact result publication.
+    --@return table|nil err Structured duplicate, invalid, or durability failure.
     local function pair_result(call, result, external_receipt)
         if call.result ~= nil then
             return nil, failure("DuplicateToolResult", "accepted tool call already has a result")
@@ -1712,6 +2034,10 @@ function M.new_agent_loop(ports, options)
             local adopted, adopt_error = adopt_external_receipt(
                 external_receipt,
                 2,
+                ---Checks the two external operation/result Facts against the active Tool call.
+                --@param event table Durable operation or Tool result Fact.
+                --@param index integer One-based position within the paired receipt.
+                --@return boolean matches Whether the Fact exactly binds the Tool outcome.
                 function(event, index)
                     local durable = event.fields
                     if event.turn_id ~= turn.id then return false end
@@ -1762,6 +2088,11 @@ function M.new_agent_loop(ports, options)
         return true
     end
 
+    ---Publishes synthetic results for every unstarted Tool call in the batch.
+    --@param kind string Synthetic skip outcome kind.
+    --@param reason string Skip cause recorded in each result.
+    --@return boolean|nil skipped True after all remaining calls are settled.
+    --@return table|nil err Structured result or durability failure.
     skip_remaining = function(kind, reason)
         for index = turn.call_cursor, #turn.calls do
             local call = turn.calls[index]
@@ -1774,6 +2105,10 @@ function M.new_agent_loop(ports, options)
         return true
     end
 
+    ---Clears active Tool state and requests a follow-up Model response.
+    --@param after_failure string|false|nil Failure identity for continuation.
+    --@return table|nil admission Next Model request or terminal outcome.
+    --@return table|nil err Structured settlement or request failure.
     local function complete_batch(after_failure)
         active_tool, pending = nil, nil
         if after_failure then
@@ -1783,6 +2118,10 @@ function M.new_agent_loop(ports, options)
         return request_model("main", after_failure and { tool_failure = after_failure } or nil)
     end
 
+    ---Injects a durable user steer after any active external activity settles.
+    --@param none No arguments.
+    --@return table|nil admission New Model request or terminal outcome.
+    --@return table|nil err Structured pending-activity or durability failure.
     inject_steer = function()
         if not pending_steer or not turn then
             return nil, failure("NoPendingSteer", "no durable steer awaits injection")
@@ -1805,10 +2144,15 @@ function M.new_agent_loop(ports, options)
         if state ~= "Preparing" then transition("Preparing") end
         return request_model("main", {
             steer_message_id = steering.message_id,
-            side_id = steering.side_id or false,
+            ask_id = steering.ask_id or false,
         })
     end
 
+    ---Accepts a Tool outcome, settles remaining calls, and advances the turn.
+    --@param result table Canonical Tool result.
+    --@param external_receipt table|false|nil Optional paired operation receipt.
+    --@return table|nil result Next activity admission or terminal outcome.
+    --@return table|nil err Structured result or durability failure.
     accept_result = function(result, external_receipt)
         if state ~= "ExecutingTool" or not active_tool then
             return nil, failure("NoExecutingTool", "no foreground tool awaits a result")
@@ -1914,6 +2258,11 @@ function M.new_agent_loop(ports, options)
         return complete_batch(false)
     end
 
+    ---Starts one admitted Tool call and handles immediate or asynchronous results.
+    --@param call table Accepted Tool call state.
+    --@param admission table Permission and capability decision.
+    --@return table|nil activity Active Tool admission or immediate next outcome.
+    --@return table|nil err Structured start or durability failure.
     local function start_tool(call, admission)
         transition("ExecutingTool")
         local specification = freeze({
@@ -1970,6 +2319,10 @@ function M.new_agent_loop(ports, options)
         return readonly({ state = state, tool_call_id = call.id }, "tool activity")
     end
 
+    ---Admits the next unpaired Tool call through permission and review policy.
+    --@param none No arguments.
+    --@return table|nil activity Tool, approval, review, or next Model admission.
+    --@return table|nil err Structured policy or durability failure.
     dispatch_next = function()
         while turn.call_cursor <= #turn.calls do
             local call = turn.calls[turn.call_cursor]
@@ -2063,6 +2416,10 @@ function M.new_agent_loop(ports, options)
         return complete_batch(false)
     end
 
+    ---Assigns durable local IDs to a validated Model Tool-call batch.
+    --@param response table Canonical validated Model response wrapper.
+    --@return table calls Mutable accepted Tool call states.
+    --@return table events Durable tool_call Facts for the batch.
     local function register_calls(response)
         local calls = {}
         local events = {}
@@ -2101,6 +2458,12 @@ function M.new_agent_loop(ports, options)
         return calls, events
     end
 
+    ---Builds Model message, Tool-call, and control/yield Facts atomically.
+    --@param wrapper table Canonical Model response wrapper.
+    --@param message_id string New durable assistant message identity.
+    --@param calls table Accepted Tool call states.
+    --@param call_events table Tool-call Facts from registration.
+    --@return table events Semantic response Fact batch.
     local function response_events(wrapper, message_id, calls, call_events)
         local normalized = wrapper.normalized
         local events = { {
@@ -2134,6 +2497,12 @@ function M.new_agent_loop(ports, options)
         return events
     end
 
+    ---Applies a typed finish, ask-user, or refuse control after publication.
+    --@param control table Validated Model control envelope.
+    --@param request_id string Durable Model request identity.
+    --@param message_id string Durable assistant message identity.
+    --@return table|nil outcome Terminal or waiting/review admission.
+    --@return table|nil err Structured review or durability failure.
     local function process_control(control, request_id, message_id)
         turn.trace.controls[#turn.trace.controls + 1] = control.control
         if control.control == "finish" then
@@ -2171,6 +2540,10 @@ function M.new_agent_loop(ports, options)
         return finalize("refused", control.payload.reason)
     end
 
+    ---Creates private counters, trace, detector, and view for a main turn.
+    --@param snapshot table Captured immutable turn configuration.
+    --@param turn_id string New durable turn identity.
+    --@return table turn Mutable active AgentLoop turn state.
     local function initialize_main_turn(snapshot, turn_id)
         return {
             id = turn_id,
@@ -2214,6 +2587,11 @@ function M.new_agent_loop(ports, options)
         }
     end
 
+    ---Publishes a new user turn and starts its first Model request.
+    --@param input table Captured main-turn input and configuration snapshot.
+    --@param cause table|false|nil Queue or Ask continuation cause.
+    --@return table|nil admission First Model request or terminal outcome.
+    --@return table|nil err Structured stale, capacity, or durability failure.
     start_main = function(input, cause)
         if halted then return nil, halt_error end
         if compaction_gate then
@@ -2273,7 +2651,10 @@ function M.new_agent_loop(ports, options)
             fields = { messageId = message_id, text = snapshot.text, source = snapshot.source },
         }
         local receipt, commit_error = commit_events(events)
-        if not receipt then return nil, commit_error end
+        if not receipt then
+            if commit_error and commit_error.code == "ContextCapacity" then turn = nil end
+            return nil, commit_error
+        end
         if cause and cause.queue_item then
             local index = queue_index(cause.queue_item.id)
             if not index then
@@ -2290,7 +2671,7 @@ function M.new_agent_loop(ports, options)
         } or nil)
         if not admitted then return nil, request_error end
         return assert(freeze({
-            state = admitted.state,
+            state = admitted.state or state,
             request_id = admitted.request_id or false,
             turn_id = turn_id,
             queue_item_id = cause and cause.queue_item and cause.queue_item.id or false,
@@ -2300,6 +2681,11 @@ function M.new_agent_loop(ports, options)
     ---Adopts one already-durable Session override and its matching Model-view
     -- publication. The turn snapshot remains immutable; only the Runtime
     -- waterline and the view used by later Model requests advance.
+    --@param self table AgentLoop instance.
+    --@param record table Session override identity and new view binding.
+    --@param receipt table Exact external Context publication receipt.
+    --@return table|nil status Adopted Runtime waterline.
+    --@return table|nil err Persistent durability or binding failure.
     function loop:adopt_session_override(record, receipt)
         if halted then return nil, halt_error end
         if closing or state == "Closing" or compaction_gate
@@ -2357,6 +2743,10 @@ function M.new_agent_loop(ports, options)
         local batch = type(receipt) == "table" and receipt.binding or nil
         local first_sequence = type(receipt) == "table"
             and receipt.first_sequence or nil
+        ---Matches Session override and Model-view Facts to the external record.
+        --@param event table One published Fact.
+        --@param index integer One-based position in the external batch.
+        --@return boolean matches Whether the Fact is exact for this Session change.
         local function matches(event, index)
             if event.turn_id ~= false then return false end
             local fields = event.fields
@@ -2425,6 +2815,9 @@ function M.new_agent_loop(ports, options)
 
     ---Stops admission after the owned Context file fails revalidation.
     -- This never records a new event against the stale file or changes paths.
+    --@param self table AgentLoop instance.
+    --@return nil No further Agent activity is admitted.
+    --@return table err Persistent Context durability failure.
     function loop:fail_context_observation()
         if halted then return nil, halt_error end
         return durability_failure("active-context-stale")
@@ -2432,6 +2825,10 @@ function M.new_agent_loop(ports, options)
 
     ---Halts the Runtime when the Session writer returned an ambiguous outcome
     -- or receipt adoption raised after publication may have crossed storage.
+    --@param self table AgentLoop instance.
+    --@param reason string Stable ambiguity identity.
+    --@return nil Runtime remains halted.
+    --@return table err Structured fail-stop durability failure.
     function loop:fail_session_override_barrier(reason)
         if halted then return nil, halt_error end
         if not valid_runtime_id(reason, limits.maximum_identifier_bytes) then
@@ -2446,6 +2843,10 @@ function M.new_agent_loop(ports, options)
     ---Opens the exclusive external compaction lane at the exact Runtime
     -- waterline. Journal receipts may advance that waterline only while this
     -- gate is active; ordinary Agent effects remain unavailable until finish.
+    --@param self table AgentLoop instance.
+    --@param command table Mode, preflight ID, and exact waterline observation.
+    --@return table|nil admission Immutable compaction lane admission.
+    --@return table|nil err Structured busy or stale-binding failure.
     function loop:begin_compaction(command)
         if halted then return nil, halt_error end
         if not exact_fields(command, {
@@ -2486,7 +2887,7 @@ function M.new_agent_loop(ports, options)
             or active_request ~= nil
             or active_review ~= nil
             or active_tool ~= nil
-            or side ~= nil
+            or ask ~= nil
         then
             return nil, failure(
                 command.mode == "manual"
@@ -2530,6 +2931,11 @@ function M.new_agent_loop(ports, options)
     ---Adopts one exact Context replacement committed by the compaction
     -- journal. This is the same external-receipt pattern used for Tool
     -- operation intent/result, but only compaction event shapes are admitted.
+    --@param self table AgentLoop instance.
+    --@param record table Typed compaction journal operation.
+    --@param receipt table Exact external Context publication receipt.
+    --@return table|nil status Adopted waterline and manifest.
+    --@return table|nil err Structured admission or durability failure.
     function loop:adopt_compaction_receipt(record, receipt)
         if halted then return nil, halt_error end
         if not compaction_gate or type(record) ~= "table" then
@@ -2620,6 +3026,10 @@ function M.new_agent_loop(ports, options)
             return durability_failure("external-compaction-receipt-count")
         end
         local prior_manifest = current_manifest_ref()
+        ---Checks a compaction Fact against the active phase and journal record.
+        --@param event table One externally committed Fact.
+        --@param index integer One-based Fact position in the batch.
+        --@return boolean matches Whether the Fact matches the active compaction.
         local function matches(event, index)
             if event.turn_id ~= nil and event.turn_id ~= false then return false end
             local fields = event.fields
@@ -2781,6 +3191,10 @@ function M.new_agent_loop(ports, options)
     -- its attempted durable barrier was accepted. Continuing would let the
     -- in-memory waterline diverge from Context, so this path is intentionally
     -- fail-stop and cannot be cleared by a normal compaction settlement.
+    --@param self table AgentLoop instance.
+    --@param reason string Stable compaction ambiguity identity.
+    --@return nil Runtime remains halted.
+    --@return table err Structured fail-stop durability failure.
     function loop:fail_compaction_barrier(reason)
         if halted then return nil, halt_error end
         if not compaction_gate
@@ -2797,6 +3211,10 @@ function M.new_agent_loop(ports, options)
     ---Closes the external compaction lane only after its owner proves the
     -- current Runtime waterline and active manifest. No outcome is inferred
     -- from rendered STATUS text.
+    --@param self table AgentLoop instance.
+    --@param command table Exact compaction settlement and observed waterline.
+    --@return table|nil settlement Immutable closed-lane outcome.
+    --@return table|nil err Structured mismatch or durability failure.
     function loop:finish_compaction(command)
         if halted then return nil, halt_error end
         local outcomes = {
@@ -2901,6 +3319,11 @@ function M.new_agent_loop(ports, options)
     ---Resolves exactly one deferred main/review request after the automatic
     -- compaction owner has either settled its Runtime lane or proved that the
     -- configured automatic path is disabled and the existing view may proceed.
+    ---Resolves a deferred Model or review request after compaction settles.
+    --@param self table AgentLoop instance.
+    --@param command table Preflight outcome and exact settled waterline.
+    --@return table|nil admission Model/review request or waiting-user outcome.
+    --@return table|nil err Structured stale or mismatched settlement.
     function loop:resolve_compaction_preflight(command)
         if halted then return nil, halt_error end
         if compaction_gate or not pending_model_preflight then
@@ -3011,6 +3434,10 @@ function M.new_agent_loop(ports, options)
     end
 
     ---Accepts a new main message only after its complete turn snapshot validates.
+    --@param self table AgentLoop instance.
+    --@param input table Main input and immutable selection snapshots.
+    --@return table|nil admission New turn and Model request admission.
+    --@return table|nil err Structured input, capacity, or durability failure.
     function loop:begin_main(input)
         return start_main(input, nil)
     end
@@ -3018,6 +3445,10 @@ function M.new_agent_loop(ports, options)
     ---Adopts the first turn already committed by session publication. This
     -- starts with the next model_request barrier and never duplicates the
     -- durable turn_started or user_message Facts.
+    --@param self table Fresh idle AgentLoop instance.
+    --@param handoff table Published turn binding and captured input.
+    --@return table|nil admission First Model request for the published turn.
+    --@return table|nil err Structured stale or invalid handoff failure.
     function loop:resume_published_main(handoff)
         if halted then return nil, halt_error end
         if state ~= "Idle" or turn ~= nil or last_turn ~= nil
@@ -3098,6 +3529,10 @@ function M.new_agent_loop(ports, options)
     end
 
     ---Captures and admits a fresh main snapshot from an exact idle observation.
+    --@param self table AgentLoop instance.
+    --@param command table User text, source, and observed Context/turn state.
+    --@return table|nil admission New turn and Model request admission.
+    --@return table|nil err Structured stale or capture failure.
     function loop:submit_main(command)
         if halted then return nil, halt_error end
         if not exact_fields(command, {
@@ -3124,6 +3559,11 @@ function M.new_agent_loop(ports, options)
         return start_main(snapshot, nil)
     end
 
+    ---Checks queue action fields and its exact busy-lane observation.
+    --@param command table Candidate queue mutation.
+    --@param allowed table Set of admitted action fields.
+    --@return boolean|nil valid True when shape and observation match.
+    --@return table|nil err Structured invalid or stale action failure.
     local function validate_queue_mutation(command, allowed)
         if not exact_fields(command, allowed) then
             return nil, failure("InvalidQueueAction", "queue action contains unknown fields")
@@ -3132,20 +3572,24 @@ function M.new_agent_loop(ports, options)
     end
 
     ---Durably enqueues one bounded future main input without freezing its turn snapshot.
+    --@param self table AgentLoop instance.
+    --@param command table Text, source, and exact Context/turn observation.
+    --@return table|nil admission New durable queue item identity.
+    --@return table|nil err Structured capacity, stale, or durability failure.
     function loop:enqueue(command)
         if halted then return nil, halt_error end
         if closing or state == "Closing" then
             return nil, failure("SessionClosing", "queue admission is closed")
         end
         local valid, valid_error = validate_queue_mutation(command, {
-            text = true, source = true, side_id = true,
+            text = true, source = true, ask_id = true,
             expected_context_generation = true, expected_turn_id = true,
         })
         if not valid then return nil, valid_error end
         if not valid_runtime_text(command.text, limits.hard_caps.message_bytes, false)
             or not valid_runtime_id(command.source, limits.maximum_identifier_bytes)
-            or (command.side_id ~= nil
-                and not valid_runtime_id(command.side_id, limits.maximum_identifier_bytes))
+            or (command.ask_id ~= nil
+                and not valid_runtime_id(command.ask_id, limits.maximum_identifier_bytes))
         then
             return nil, failure("InvalidQueueAction", "queued input is invalid")
         end
@@ -3163,7 +3607,7 @@ function M.new_agent_loop(ports, options)
             display_id = "#" .. tostring(queue_display_serial),
             text = command.text,
             source = command.source,
-            side_id = command.side_id,
+            ask_id = command.ask_id,
         }
         local receipt, commit_error = commit_events({ queue_event(item, "enqueue") })
         if not receipt then return nil, commit_error end
@@ -3179,6 +3623,8 @@ function M.new_agent_loop(ports, options)
     end
 
     ---Returns the ordered queue projection without changing Context state.
+    --@param self table AgentLoop instance.
+    --@return table projection Immutable ordered queue status.
     function loop:list_queue()
         local items = {}
         for index, item in ipairs(queue_items) do
@@ -3194,6 +3640,10 @@ function M.new_agent_loop(ports, options)
     end
 
     ---Appends a queue tombstone and removes only the exactly observed item.
+    --@param self table AgentLoop instance.
+    --@param command table Queue item ID, reason, and exact observation.
+    --@return table|nil result Durable drop outcome.
+    --@return table|nil err Structured stale or durability failure.
     function loop:drop_queue(command)
         if halted then return nil, halt_error end
         local valid, valid_error = validate_queue_mutation(command, {
@@ -3222,6 +3672,10 @@ function M.new_agent_loop(ports, options)
     end
 
     ---Appends an amendment while preserving the queue-item identity and position.
+    --@param self table AgentLoop instance.
+    --@param command table Queue item ID, replacement text, and observation.
+    --@return table|nil result Durable edit outcome.
+    --@return table|nil err Structured stale or durability failure.
     function loop:edit_queue(command)
         if halted then return nil, halt_error end
         local valid, valid_error = validate_queue_mutation(command, {
@@ -3238,7 +3692,7 @@ function M.new_agent_loop(ports, options)
         if not index then return nil, failure("QueueItemMissing", "queue item is not active") end
         local amended = {
             id = item.id, display_id = item.display_id, text = command.text,
-            source = item.source, side_id = item.side_id,
+            source = item.source, ask_id = item.ask_id,
         }
         local receipt, commit_error = commit_events({ queue_event(amended, "edit") })
         if not receipt then return nil, commit_error end
@@ -3251,6 +3705,10 @@ function M.new_agent_loop(ports, options)
     end
 
     ---Appends a reorder amendment and moves the item before another item or to the end.
+    --@param self table AgentLoop instance.
+    --@param command table Item ID, destination ID, and exact observation.
+    --@return table|nil result Durable reorder outcome.
+    --@return table|nil err Structured stale or durability failure.
     function loop:reorder_queue(command)
         if halted then return nil, halt_error end
         local valid, valid_error = validate_queue_mutation(command, {
@@ -3295,6 +3753,10 @@ function M.new_agent_loop(ports, options)
     end
 
     ---Appends one tombstone per active item and clears the bounded queue atomically.
+    --@param self table AgentLoop instance.
+    --@param command table Clear reason and exact Context/turn observation.
+    --@return table|nil result Durable clear outcome.
+    --@return table|nil err Structured stale or durability failure.
     function loop:clear_queue(command)
         if halted then return nil, halt_error end
         local valid, valid_error = validate_queue_mutation(command, {
@@ -3327,6 +3789,10 @@ function M.new_agent_loop(ports, options)
         }, nil, "queue clear"))
     end
 
+    ---Captures a fresh snapshot and starts the oldest queue item while idle.
+    --@param none No arguments.
+    --@return table|false|nil admission Started queue item, false if unavailable.
+    --@return table|nil err Structured snapshot or start failure.
     auto_start_queue = function()
         if halted then return nil, halt_error end
         if state ~= "Idle" or closing or #queue_items == 0 then return false end
@@ -3348,6 +3814,10 @@ function M.new_agent_loop(ports, options)
     end
 
     ---Explicitly consumes the oldest queue item from a durable idle observation.
+    --@param self table AgentLoop instance.
+    --@param command table Exact Context/turn observation.
+    --@return table|nil admission Started queued main turn.
+    --@return table|nil err Structured stale or capture failure.
     function loop:run_next(command)
         if halted then return nil, halt_error end
         if not exact_fields(command, {
@@ -3362,8 +3832,15 @@ function M.new_agent_loop(ports, options)
         return auto_start_queue()
     end
 
-    local function finish_side(outcome, reason, error_id, response)
-        if not side then return nil, failure("NoSideTurn", "no side turn is active") end
+    ---Commits the terminal Fact for one no-tool Ask and retains its result.
+    --@param outcome string Ask terminal outcome.
+    --@param reason string|nil Human-readable terminal reason.
+    --@param error_id string|nil Structured Ask error identity.
+    --@param response table|nil Canonical direct response to retain.
+    --@return table|nil result Immutable Ask outcome.
+    --@return table|nil err Structured commit or missing-Ask failure.
+    local function finish_ask(outcome, reason, error_id, response)
+        if not ask then return nil, failure("NoAskTurn", "no ask turn is active") end
         local fields = { outcome = outcome }
         if valid_runtime_text(reason, limits.hard_caps.message_bytes, false) then
             fields.reason = reason
@@ -3371,73 +3848,77 @@ function M.new_agent_loop(ports, options)
         if error_id then fields.errorId = error_id end
         local receipt, commit_error = commit_events({ {
             type = "turn_ended",
-            turn_id = side.id,
+            turn_id = ask.id,
             fields = fields,
         } })
         if not receipt then return nil, commit_error end
-        local completed = side
+        local completed = ask
         completed.outcome = outcome
         completed.reason = reason or false
         completed.error_id = error_id or false
         completed.response = response or false
         completed.handle = false
-        side_history[completed.id] = completed
-        side = nil
+        ask_history[completed.id] = completed
+        ask = nil
         return assert(freeze({
-            side_id = completed.id,
+            ask_id = completed.id,
             outcome = outcome,
             response_id = response and response.message_id or false,
             context_generation = context_generation,
-        }, nil, "side turn outcome"))
+        }, nil, "ask turn outcome"))
     end
 
-    ---Starts one no-tool side turn from a fresh durable snapshot.
-    function loop:start_side(command)
+    ---Starts one no-tool ask turn from a fresh durable snapshot.
+    --@param self table AgentLoop instance.
+    --@param command table Ask text, source, and exact busy-lane observation.
+    --@return table|nil admission Active Ask request or terminal outcome.
+    --@return table|nil err Structured snapshot, start, or durability failure.
+    function loop:start_ask(command)
         if halted then return nil, halt_error end
         if closing or state == "Closing" then
-            return nil, failure("SessionClosing", "side admission is closed")
+            return nil, failure("SessionClosing", "ask admission is closed")
         end
-        if admitted_ports.side == false then
-            return nil, failure("SideUnavailable", "side request transport is unavailable")
+        if admitted_ports.ask == false then
+            return nil, failure("AskUnavailable", "ask request transport is unavailable")
         end
         if not exact_fields(command, {
             text = true, source = true,
             expected_context_generation = true, expected_turn_id = true,
         }) then
-            return nil, failure("InvalidSideAction", "side action is ambiguous")
+            return nil, failure("InvalidAskAction", "ask action is ambiguous")
         end
         local observed, observation_error = validate_lane_observation(command)
         if not observed then return nil, observation_error end
-        if not valid_runtime_text(command.text, limits.lanes.side_response_bytes, false)
+        if not valid_runtime_text(command.text, limits.lanes.ask_response_bytes, false)
             or not valid_runtime_id(command.source, limits.maximum_identifier_bytes)
         then
-            return nil, failure("InvalidSideAction", "side input is invalid")
+            return nil, failure("InvalidAskAction", "ask input is invalid")
         end
-        if side then
+        if ask then
             return nil, failure(
-                "SideBusy",
-                "one side turn is already active; the new draft was not consumed",
-                { preserved_text = command.text, active_side_id = side.id }
+                "AskBusy",
+                "one ask turn is already active; the new draft was not consumed",
+                { preserved_text = command.text, active_ask_id = ask.id }
             )
         end
         local snapshot, snapshot_error = capture_snapshot(
-            "side",
+            "ask",
             command.text,
             command.source,
-            { kind = "side" }
+            { kind = "ask" }
         )
         if not snapshot then return nil, snapshot_error end
         local now, clock_error = clock_now()
         if not now then return nil, clock_error end
-        side_serial = side_serial + 1
+        ask_serial = ask_serial + 1
         turn_serial = turn_serial + 1
         message_serial = message_serial + 1
         request_serial = request_serial + 1
-        local side_id = "side-" .. tostring(side_serial)
-        local message_id = side_id .. ":message:" .. tostring(message_serial)
-        local request_id = side_id .. ":request:" .. tostring(request_serial)
+        local ask_id = "ask-" .. tostring(ask_serial)
+        local message_id = ask_id .. ":message:" .. tostring(message_serial)
+        local request_id = ask_id .. ":request:" .. tostring(request_serial)
         local candidate = {
-            id = side_id,
+            id = ask_id,
             snapshot = snapshot,
             message_id = message_id,
             request_id = request_id,
@@ -3449,9 +3930,9 @@ function M.new_agent_loop(ports, options)
         local receipt, commit_error = commit_events({
             {
                 type = "turn_started",
-                turn_id = side_id,
+                turn_id = ask_id,
                 fields = {
-                    kind = "side",
+                    kind = "ask",
                     configGeneration = snapshot.config_generation,
                     modelSnapshot = snapshot.model_snapshot,
                     permissionSnapshot = snapshot.permission_snapshot,
@@ -3463,7 +3944,7 @@ function M.new_agent_loop(ports, options)
             },
             {
                 type = "user_message",
-                turn_id = side_id,
+                turn_id = ask_id,
                 fields = {
                     messageId = message_id,
                     text = snapshot.text,
@@ -3472,104 +3953,114 @@ function M.new_agent_loop(ports, options)
             },
             {
                 type = "model_request",
-                turn_id = side_id,
+                turn_id = ask_id,
                 fields = {
                     requestId = request_id,
-                    purpose = "side",
+                    purpose = "ask",
                     viewManifestRef = snapshot.view_manifest_ref,
                 },
             },
         })
         if not receipt then return nil, commit_error end
-        side = candidate
+        ask = candidate
         local specification = freeze({
-            side_id = side_id,
-            turn_id = side_id,
+            ask_id = ask_id,
+            turn_id = ask_id,
             request_id = request_id,
-            purpose = "side",
+            purpose = "ask",
             view_manifest_ref = snapshot.view_manifest_ref,
             no_tools = true,
-            active_time_cap_ms = limits.lanes.side_active_time_ms,
-            response_byte_cap = limits.lanes.side_response_bytes,
-            budget_snapshot_id = limits.lanes.side_snapshot_id,
-        }, nil, "side request")
+            active_time_cap_ms = limits.lanes.ask_active_time_ms,
+            response_byte_cap = limits.lanes.ask_response_bytes,
+            budget_snapshot_id = limits.lanes.ask_snapshot_id,
+        }, nil, "ask request")
         local handle, start_error = start_effect(
-            admitted_ports.side,
+            admitted_ports.ask,
             "start",
             specification,
-            "Side"
+            "Ask"
         )
         if not handle then
-            return finish_side("error", start_error.message, start_error.code)
+            return finish_ask("error", start_error.message, start_error.code)
         end
-        side.handle = handle
+        ask.handle = handle
         return assert(freeze({
             state = "active",
-            side_id = side_id,
+            ask_id = ask_id,
             request_id = request_id,
             context_generation = context_generation,
-        }, nil, "side admission"))
+        }, nil, "ask admission"))
     end
 
-    ---Marks a canonical provider event for the independently active side request.
-    function loop:accept_side_event(side_id, request_id)
+    ---Marks a canonical provider event for the independently active ask request.
+    --@param self table AgentLoop instance.
+    --@param ask_id string Active Ask turn identity.
+    --@param request_id string Active Ask Model request identity.
+    --@return table|nil status Canonical event observation.
+    --@return table|nil err Structured stale or clock failure.
+    function loop:accept_ask_event(ask_id, request_id)
         if halted then return nil, halt_error end
-        if not side or side.id ~= side_id or side.request_id ~= request_id then
-            return nil, failure("StaleSideResponse", "side provider event is stale")
+        if not ask or ask.id ~= ask_id or ask.request_id ~= request_id then
+            return nil, failure("StaleAskResponse", "ask provider event is stale")
         end
         local now, clock_error = clock_now()
         if not now then return nil, clock_error end
-        side.canonical_event_seen = true
+        ask.canonical_event_seen = true
         return assert(freeze({
-            side_id = side.id,
-            request_id = side.request_id,
+            ask_id = ask.id,
+            request_id = ask.request_id,
             canonical_event_seen = true,
             automatic_replay = false,
-        }, nil, "canonical side event"))
+        }, nil, "canonical ask event"))
     end
 
-    ---Accepts one bounded canonical direct response and terminates the side turn.
-    function loop:accept_side_response(side_id, wrapper)
+    ---Accepts one bounded canonical direct response and terminates the ask turn.
+    --@param self table AgentLoop instance.
+    --@param ask_id string Active Ask turn identity.
+    --@param wrapper table Canonical Model response wrapper.
+    --@return table|nil outcome Immutable completed or error Ask result.
+    --@return table|nil err Structured stale, clock, or durability failure.
+    function loop:accept_ask_response(ask_id, wrapper)
         if halted then return nil, halt_error end
-        if not side or side.id ~= side_id then
-            return nil, failure("StaleSideResponse", "side response is stale")
+        if not ask or ask.id ~= ask_id then
+            return nil, failure("StaleAskResponse", "ask response is stale")
         end
         local now, clock_error = clock_now()
         if not now then return nil, clock_error end
-        if now - side.started_at >= limits.lanes.side_active_time_ms then
-            return finish_side("budget_exhausted", "side-active-time", "SideBudgetExhausted")
+        if now - ask.started_at >= limits.lanes.ask_active_time_ms then
+            return finish_ask("budget_exhausted", "ask-active-time", "AskBudgetExhausted")
         end
         local admitted, response_error = validate_model_response(wrapper, limits)
         if not admitted then
-            return finish_side("error", response_error.message, response_error.code)
+            return finish_ask("error", response_error.message, response_error.code)
         end
-        if wrapper.request_id ~= side.request_id then
-            return nil, failure("StaleSideResponse", "side response request binding is stale")
+        if wrapper.request_id ~= ask.request_id then
+            return nil, failure("StaleAskResponse", "ask response request binding is stale")
         end
-        if #wrapper.canonical_body > limits.lanes.side_response_bytes
+        if #wrapper.canonical_body > limits.lanes.ask_response_bytes
             or #wrapper.normalized.tool_calls ~= 0
             or wrapper.normalized.control ~= nil
         then
-            return finish_side(
+            return finish_ask(
                 "error",
-                "side response violated its no-tool direct-response envelope",
-                "InvalidSideResponse"
+                "ask response violated its no-tool direct-response envelope",
+                "InvalidAskResponse"
             )
         end
         message_serial = message_serial + 1
-        local response_message_id = side.id .. ":message:" .. tostring(message_serial)
+        local response_message_id = ask.id .. ":message:" .. tostring(message_serial)
         local outcome = "completed"
         local error_id
         if wrapper.normalized.incomplete then
             outcome = wrapper.normalized.finish_class == "cancelled" and "cancelled" or "error"
-            error_id = outcome == "cancelled" and "SideCancelled" or "SideResponseIncomplete"
+            error_id = outcome == "cancelled" and "AskCancelled" or "AskResponseIncomplete"
         end
         local receipt, commit_error = commit_events({ {
             type = "model_message",
-            turn_id = side.id,
+            turn_id = ask.id,
             fields = {
                 messageId = response_message_id,
-                requestId = side.request_id,
+                requestId = ask.request_id,
                 role = "assistant",
                 status = wrapper.normalized.incomplete and "interrupted" or "complete",
                 body = wrapper.canonical_body,
@@ -3578,9 +4069,9 @@ function M.new_agent_loop(ports, options)
             },
         } })
         if not receipt then return nil, commit_error end
-        return finish_side(
+        return finish_ask(
             outcome,
-            wrapper.normalized.incomplete_reason or "side-response",
+            wrapper.normalized.incomplete_reason or "ask-response",
             error_id,
             {
                 message_id = response_message_id,
@@ -3590,42 +4081,46 @@ function M.new_agent_loop(ports, options)
         )
     end
 
-    ---Cancels the exact active side without redirecting a stale command.
-    function loop:cancel_side(command)
+    ---Cancels the exact active ask without redirecting a stale command.
+    --@param self table AgentLoop instance.
+    --@param command table Ask ID, reason, and exact busy-lane observation.
+    --@return table|nil result Pending cancellation or terminal Ask outcome.
+    --@return table|nil err Structured stale or durability failure.
+    function loop:cancel_ask(command)
         if halted then return nil, halt_error end
         if not exact_fields(command, {
-            side_id = true, reason = true,
+            ask_id = true, reason = true,
             expected_context_generation = true, expected_turn_id = true,
         }) then
-            return nil, failure("InvalidSideAction", "side cancellation is ambiguous")
+            return nil, failure("InvalidAskAction", "ask cancellation is ambiguous")
         end
         local observed, observation_error = validate_lane_observation(command)
         if not observed then return nil, observation_error end
-        if not valid_runtime_id(command.side_id, limits.maximum_identifier_bytes)
+        if not valid_runtime_id(command.ask_id, limits.maximum_identifier_bytes)
             or not valid_runtime_text(command.reason, limits.hard_caps.message_bytes, false)
         then
-            return nil, failure("InvalidSideAction", "side cancellation binding is invalid")
+            return nil, failure("InvalidAskAction", "ask cancellation binding is invalid")
         end
-        if not side or side.id ~= command.side_id then
-            return nil, failure("NoSideTurn", "the observed side turn is not active")
+        if not ask or ask.id ~= command.ask_id then
+            return nil, failure("NoAskTurn", "the observed ask turn is not active")
         end
         local receipt, commit_error = commit_events({ {
             type = "cancel",
-            turn_id = side.id,
+            turn_id = ask.id,
             fields = {
                 targetKind = "LogicalRequest",
-                targetId = side.request_id,
+                targetId = ask.request_id,
                 reason = command.reason,
                 result = "requested",
             },
         } })
         if not receipt then
-            pcall(admitted_ports.side.cancel, side.handle, command.reason)
+            pcall(admitted_ports.ask.cancel, ask.handle, command.reason)
             return nil, commit_error
         end
         local called, result = pcall(
-            admitted_ports.side.cancel,
-            side.handle,
+            admitted_ports.ask.cancel,
+            ask.handle,
             command.reason
         )
         if not called or type(result) ~= "table"
@@ -3633,82 +4128,94 @@ function M.new_agent_loop(ports, options)
                 and result.outcome ~= "pending"
                 and result.outcome ~= "unknown")
         then
-            return finish_side("error", "side cancel result is unknown", "SideCancelUnknown")
+            return finish_ask("error", "ask cancel result is unknown", "AskCancelUnknown")
         end
         if result.result ~= nil then
-            return self:accept_side_response(side.id, result.result)
+            return self:accept_ask_response(ask.id, result.result)
         end
         if result.outcome == "pending" then
-            side.cancel_pending = true
-            side.cancel_reason = command.reason
+            ask.cancel_pending = true
+            ask.cancel_reason = command.reason
             return assert(freeze({
-                side_id = side.id,
+                ask_id = ask.id,
                 cancel_pending = true,
                 context_generation = context_generation,
-            }, nil, "pending side cancellation"))
+            }, nil, "pending ask cancellation"))
         end
         if result.outcome == "unknown" then
-            return finish_side("error", "side cancel result is unknown", "SideCancelUnknown")
+            return finish_ask("error", "ask cancel result is unknown", "AskCancelUnknown")
         end
-        return finish_side("cancelled", command.reason, "SideCancelled")
+        return finish_ask("cancelled", command.reason, "AskCancelled")
     end
 
-    ---Settles the terminal fact of an asynchronously cancelled side request.
-    function loop:settle_side_cancel(settlement)
+    ---Settles the terminal fact of an asynchronously cancelled ask request.
+    --@param self table AgentLoop instance.
+    --@param settlement table Exact Ask/request IDs and observed cancel outcome.
+    --@return table|nil outcome Terminal Ask result.
+    --@return table|nil err Structured stale or invalid settlement.
+    function loop:settle_ask_cancel(settlement)
         if halted then return nil, halt_error end
-        if not side or not side.cancel_pending then
-            return nil, failure("NoPendingSideCancel", "no side cancellation awaits settlement")
+        if not ask or not ask.cancel_pending then
+            return nil, failure("NoPendingAskCancel", "no ask cancellation awaits settlement")
         end
         if not exact_fields(settlement, {
-            side_id = true, request_id = true, outcome = true, response = true,
+            ask_id = true, request_id = true, outcome = true, response = true,
         })
-            or settlement.side_id ~= side.id
-            or settlement.request_id ~= side.request_id
+            or settlement.ask_id ~= ask.id
+            or settlement.request_id ~= ask.request_id
             or (settlement.response ~= nil and type(settlement.response) ~= "table")
             or (settlement.outcome ~= "cancelled"
                 and settlement.outcome ~= "unknown"
                 and settlement.outcome ~= "completed")
         then
-            return nil, failure("InvalidSideSettlement", "side settlement binding is invalid")
+            return nil, failure("InvalidAskSettlement", "ask settlement binding is invalid")
         end
         if settlement.response ~= nil then
-            return self:accept_side_response(side.id, settlement.response)
+            return self:accept_ask_response(ask.id, settlement.response)
         end
         if settlement.outcome == "completed" then
             return nil, failure(
-                "InvalidSideSettlement",
-                "completed side settlement requires its canonical response"
+                "InvalidAskSettlement",
+                "completed ask settlement requires its canonical response"
             )
         end
         if settlement.outcome == "unknown" then
-            return finish_side("error", "side cancel result is unknown", "SideCancelUnknown")
+            return finish_ask("error", "ask cancel result is unknown", "AskCancelUnknown")
         end
-        return finish_side(
+        return finish_ask(
             "cancelled",
-            side.cancel_reason or "side-cancelled",
-            "SideCancelled"
+            ask.cancel_reason or "ask-cancelled",
+            "AskCancelled"
         )
     end
 
-    ---Returns a retained completed side result for an explicit side-use action.
-    function loop:side_result(side_id)
-        if not valid_runtime_id(side_id, limits.maximum_identifier_bytes) then
-            return nil, failure("InvalidSideAction", "side identity is invalid")
+    ---Returns a retained completed ask result for an explicit ask-use action.
+    --@param self table AgentLoop instance.
+    --@param ask_id string Completed Ask turn identity.
+    --@return table|nil result Immutable retained Ask outcome and response.
+    --@return table|nil err Structured missing or invalid Ask identity.
+    function loop:ask_result(ask_id)
+        if not valid_runtime_id(ask_id, limits.maximum_identifier_bytes) then
+            return nil, failure("InvalidAskAction", "ask identity is invalid")
         end
-        local completed = side_history[side_id]
-        if not completed then return nil, failure("SideResultMissing", "side result is unavailable") end
+        local completed = ask_history[ask_id]
+        if not completed then return nil, failure("AskResultMissing", "ask result is unavailable") end
         return assert(freeze({
-            side_id = completed.id,
+            ask_id = completed.id,
             outcome = completed.outcome,
             response = completed.response,
-        }, nil, "retained side result"))
+        }, nil, "retained ask result"))
     end
 
     ---Durably steers the active main turn and preempts only at a factual safe point.
+    --@param self table AgentLoop instance.
+    --@param command table User steer text, source, and exact lane observation.
+    --@return table|nil result Pending cancel or next Model admission.
+    --@return table|nil err Structured stale, cancel, or durability failure.
     function loop:steer(command)
         if halted then return nil, halt_error end
         if not exact_fields(command, {
-            text = true, source = true, side_id = true,
+            text = true, source = true, ask_id = true,
             expected_context_generation = true, expected_turn_id = true,
         }) then
             return nil, failure("InvalidSteer", "steer action is ambiguous")
@@ -3723,11 +4230,11 @@ function M.new_agent_loop(ports, options)
         end
         if not valid_runtime_text(command.text, limits.hard_caps.message_bytes, false)
             or not valid_runtime_id(command.source, limits.maximum_identifier_bytes)
-            or (command.side_id ~= nil
-                and not valid_runtime_id(command.side_id, limits.maximum_identifier_bytes))
-            or (command.side_id ~= nil and not side_history[command.side_id])
+            or (command.ask_id ~= nil
+                and not valid_runtime_id(command.ask_id, limits.maximum_identifier_bytes))
+            or (command.ask_id ~= nil and not ask_history[command.ask_id])
         then
-            return nil, failure("InvalidSteer", "steer input or side reference is invalid")
+            return nil, failure("InvalidSteer", "steer input or ask reference is invalid")
         end
         local now, clock_error = clock_now()
         if not now then return nil, clock_error end
@@ -3738,7 +4245,7 @@ function M.new_agent_loop(ports, options)
             targetTurnId = turn.id,
             summary = command.text,
         }
-        if command.side_id then steer_fields.sideId = command.side_id end
+        if command.ask_id then steer_fields.askId = command.ask_id end
         local events = { {
             type = "steer",
             fields = steer_fields,
@@ -3768,7 +4275,7 @@ function M.new_agent_loop(ports, options)
             message_id = message_id,
             text = command.text,
             source = command.source,
-            side_id = command.side_id,
+            ask_id = command.ask_id,
             activity_id = target_id or false,
         }
 
@@ -3822,6 +4329,10 @@ function M.new_agent_loop(ports, options)
     end
 
     ---Settles a provider-confirmed request/review cancellation for a pending steer.
+    --@param self table AgentLoop instance.
+    --@param settlement table Activity ID and confirmed cancellation outcome.
+    --@return table|nil admission Injected steer Model request.
+    --@return table|nil err Structured stale or invalid settlement.
     function loop:settle_steer_cancel(settlement)
         if halted then return nil, halt_error end
         if not pending_steer or active_tool
@@ -3839,34 +4350,38 @@ function M.new_agent_loop(ports, options)
         return inject_steer()
     end
 
-    ---Explicitly authorizes one completed side result into queue or steer.
-    function loop:use_side(command)
+    ---Explicitly authorizes one completed ask result into queue or steer.
+    --@param self table AgentLoop instance.
+    --@param command table Ask ID, target lane, and exact Context observation.
+    --@return table|nil result Durable queue or steer result.
+    --@return table|nil err Structured invalid or stale Ask use.
+    function loop:use_ask(command)
         if halted then return nil, halt_error end
         if not exact_fields(command, {
-            side_id = true, lane = true,
+            ask_id = true, lane = true,
             expected_context_generation = true, expected_turn_id = true,
         }) then
-            return nil, failure("InvalidSideUse", "side-use action is ambiguous")
+            return nil, failure("InvalidAskUse", "ask-use action is ambiguous")
         end
         local observed, observation_error = validate_lane_observation(command)
         if not observed then return nil, observation_error end
-        if not valid_runtime_id(command.side_id, limits.maximum_identifier_bytes)
+        if not valid_runtime_id(command.ask_id, limits.maximum_identifier_bytes)
             or (command.lane ~= "queue" and command.lane ~= "steer")
         then
-            return nil, failure("InvalidSideUse", "side-use binding or target lane is invalid")
+            return nil, failure("InvalidAskUse", "ask-use binding or target lane is invalid")
         end
-        local completed = side_history[command.side_id]
+        local completed = ask_history[command.ask_id]
         if not completed or completed.outcome ~= "completed" or not completed.response then
-            return nil, failure("SideResultMissing", "only a completed side response can be used")
+            return nil, failure("AskResultMissing", "only a completed ask response can be used")
         end
         local body = completed.response.body
         if not valid_runtime_text(body, limits.hard_caps.message_bytes, false) then
-            return nil, failure("SideResultLimit", "side result exceeds the main-message limit")
+            return nil, failure("AskResultLimit", "ask result exceeds the main-message limit")
         end
         local action = {
             text = body,
-            source = "side-use",
-            side_id = command.side_id,
+            source = "ask-use",
+            ask_id = command.ask_id,
             expected_context_generation = command.expected_context_generation,
             expected_turn_id = command.expected_turn_id,
         }
@@ -3875,6 +4390,10 @@ function M.new_agent_loop(ports, options)
     end
 
     ---Closes a complete model-yield and creates an explicitly causal new turn.
+    --@param self table AgentLoop instance.
+    --@param command table Yield ID, action, new input, and exact observation.
+    --@return table|nil result Old partial outcome and new turn admission.
+    --@return table|nil err Structured stale, capture, or durability failure.
     function loop:resolve_yield(command)
         if halted then return nil, halt_error end
         if not exact_fields(command, {
@@ -3948,6 +4467,10 @@ function M.new_agent_loop(ports, options)
     end
 
     ---Accepts one complete canonical adapter response for the active request.
+    --@param self table AgentLoop instance.
+    --@param wrapper table Canonical response bound to the active Model request.
+    --@return table|nil result Tool/review/Model admission or turn outcome.
+    --@return table|nil err Structured stale, invalid, or durability failure.
     function loop:accept_model_response(wrapper)
         if halted then return nil, halt_error end
         if state ~= "RequestingModel" and state ~= "Streaming" then
@@ -4097,6 +4620,10 @@ function M.new_agent_loop(ports, options)
     ---Marks the first canonical provider event without treating a delta as a message.
     -- This transition is deliberately transient, but it permanently forbids a
     -- coordinator from classifying the active request as pre-canonical retryable.
+    --@param self table AgentLoop instance.
+    --@param request_id string Active Model request identity.
+    --@return table|nil status Canonical-event observation.
+    --@return table|nil err Structured stale or clock failure.
     function loop:accept_model_event(request_id)
         if halted then return nil, halt_error end
         if state ~= "RequestingModel" and state ~= "Streaming" then
@@ -4118,6 +4645,11 @@ function M.new_agent_loop(ports, options)
     end
 
     ---Accepts the terminal result of an asynchronous foreground tool.
+    --@param self table AgentLoop instance.
+    --@param result table Canonical Tool result.
+    --@param external_receipt table|false|nil Optional paired operation receipt.
+    --@return table|nil transition Next activity or terminal outcome.
+    --@return table|nil err Structured clock, result, or durability failure.
     function loop:accept_tool_result(result, external_receipt)
         if halted then return nil, halt_error end
         local now, clock_error = clock_now()
@@ -4126,6 +4658,10 @@ function M.new_agent_loop(ports, options)
     end
 
     ---Resolves the exact pending approval without granting a broader action.
+    --@param self table AgentLoop instance.
+    --@param decision table Typed approval, rejection, or deferral binding.
+    --@return table|nil transition Tool, Model, or waiting-user admission.
+    --@return table|nil err Structured invalid, stale, or durability failure.
     function loop:resolve_approval(decision)
         if halted then return nil, halt_error end
         if (state ~= "AwaitingApproval" and state ~= "WaitingUser")
@@ -4193,6 +4729,10 @@ function M.new_agent_loop(ports, options)
     end
 
     ---Applies a durable action-review verdict; reviewers can only pass or tighten.
+    --@param self table AgentLoop instance.
+    --@param verdict table Typed action review bound to the exact Tool call.
+    --@return table|nil transition Tool, approval, Model, or waiting-user result.
+    --@return table|nil err Structured invalid or durability failure.
     function loop:resolve_action_review(verdict)
         if halted then return nil, halt_error end
         if (state ~= "EvaluatingAction" and state ~= "WaitingUser")
@@ -4261,6 +4801,10 @@ function M.new_agent_loop(ports, options)
     end
 
     ---Applies a durable typed termination-review verdict.
+    --@param self table AgentLoop instance.
+    --@param verdict table Typed finish review and optional gap evidence.
+    --@return table|nil transition Completed, follow-up Model, or waiting-user result.
+    --@return table|nil err Structured invalid or durability failure.
     function loop:resolve_termination_review(verdict)
         if halted then return nil, halt_error end
         if (state ~= "EvaluatingTermination" and state ~= "WaitingUser")
@@ -4325,6 +4869,11 @@ function M.new_agent_loop(ports, options)
     end
 
     ---Durably attaches a user answer to an ask-user or uncertain-review slot.
+    --@param self table AgentLoop instance.
+    --@param text_value string User reply text.
+    --@param source string User input source identity.
+    --@return table|nil admission Follow-up Model request.
+    --@return table|nil err Structured invalid state or durability failure.
     function loop:reply(text_value, source)
         if halted then return nil, halt_error end
         if state ~= "WaitingUser" or not pending then
@@ -4365,6 +4914,10 @@ function M.new_agent_loop(ports, options)
         return request_model("main", { user_reply = message_id })
     end
 
+    ---Requests cancellation from the innermost active external activity.
+    --@param reason string Durable cancellation reason.
+    --@return string outcome Cancelled, pending, or unknown.
+    --@return table|nil result Canonical terminal Tool result if supplied.
     local function cancel_activity(reason)
         local port, handle
         if active_tool then
@@ -4385,6 +4938,10 @@ function M.new_agent_loop(ports, options)
     end
 
     ---Cancels the innermost activity; accepted calls remain exactly paired.
+    --@param self table AgentLoop instance.
+    --@param reason string Bounded cancellation reason.
+    --@return table|nil outcome Pending cancellation or terminal turn result.
+    --@return table|nil err Structured state, clock, or durability failure.
     function loop:cancel(reason)
         if halted then return nil, halt_error end
         if compaction_gate then
@@ -4480,6 +5037,12 @@ function M.new_agent_loop(ports, options)
     end
 
     ---Terminates on a typed Runtime fact; completed/refused remain control-only.
+    --@param self table AgentLoop instance.
+    --@param outcome string Admitted runtime-abort outcome.
+    --@param reason string|nil Human-readable terminal reason.
+    --@param error_id string|nil Structured error identity.
+    --@return table|nil result Durable terminal turn outcome.
+    --@return table|nil err Structured invalid or durability failure.
     function loop:abort(outcome, reason, error_id)
         if halted then return nil, halt_error end
         if not turn or not RUNTIME_ABORT_OUTCOMES[outcome] then
@@ -4497,16 +5060,19 @@ function M.new_agent_loop(ports, options)
     end
 
     ---Checks the active-time hard cap without admitting another activity.
+    --@param self table AgentLoop instance.
+    --@return table|nil status Tick snapshot or terminal outcome.
+    --@return table|nil err Structured clock or cancellation failure.
     function loop:tick()
         if halted then return nil, halt_error end
         local now, clock_error = clock_now()
         if not now then return nil, clock_error end
-        if side and not side.cancel_pending
-            and now - side.started_at >= limits.lanes.side_active_time_ms
+        if ask and not ask.cancel_pending
+            and now - ask.started_at >= limits.lanes.ask_active_time_ms
         then
-            local cancelled, cancel_error = self:cancel_side({
-                side_id = side.id,
-                reason = "side-active-time-budget",
+            local cancelled, cancel_error = self:cancel_ask({
+                ask_id = ask.id,
+                reason = "ask-active-time-budget",
                 expected_context_generation = context_generation,
                 expected_turn_id = observed_turn_id(),
             })
@@ -4525,6 +5091,10 @@ function M.new_agent_loop(ports, options)
     end
 
     ---Closes admission and uses the same cancellation/finalization path.
+    --@param self table AgentLoop instance.
+    --@param reason string|nil Close and cancellation reason.
+    --@return boolean|nil closed True after closing, false when already closed.
+    --@return table|nil err Structured pending compaction or settlement failure.
     function loop:close(reason)
         if state == "Closing" then return false end
         if compaction_gate then
@@ -4535,9 +5105,9 @@ function M.new_agent_loop(ports, options)
         end
         closing = true
         reason = reason or "close"
-        if side then
-            local cancelled, cancel_error = self:cancel_side({
-                side_id = side.id,
+        if ask then
+            local cancelled, cancel_error = self:cancel_ask({
+                ask_id = ask.id,
                 reason = reason,
                 expected_context_generation = context_generation,
                 expected_turn_id = observed_turn_id(),
@@ -4566,6 +5136,8 @@ function M.new_agent_loop(ports, options)
     end
 
     ---Returns a detached immutable projection; waiting is reportable, not terminal.
+    --@param self table AgentLoop instance.
+    --@return table status Immutable counters, lanes, queue, Ask, and trace snapshot.
     function loop:status()
         local active_turn = turn
         local counters = active_turn and active_turn.counters
@@ -4593,13 +5165,15 @@ function M.new_agent_loop(ports, options)
             queue_projection[index] = public_queue_item(item)
             queue_projection[index].position = index
         end
-        local side_history_count = 0
-        for _ in pairs(side_history) do side_history_count = side_history_count + 1 end
+        local ask_history_count = 0
+        for _ in pairs(ask_history) do ask_history_count = ask_history_count + 1 end
         return assert(freeze({
             state = state,
             turn_id = active_turn and active_turn.id or false,
             active_request_id = active_request and active_request.id or false,
             active_tool_call_id = active_tool and active_tool.call.id or false,
+            active_tool_adapter_call_id = active_tool
+                and active_tool.call.public.adapter_call_id or false,
             pending_kind = pending and pending.kind or false,
             pending_tool_call_id = pending and pending.kind == "approval"
                 and pending.call.id or false,
@@ -4648,11 +5222,11 @@ function M.new_agent_loop(ports, options)
             queue_count = #queue_projection,
             queue_maximum = current_queue_limit,
             pending_steer_message_id = pending_steer and pending_steer.message_id or false,
-            side_state = side and (side.cancel_pending and "cancelling" or "active") or "idle",
-            active_side_id = side and side.id or false,
-            active_side_request_id = side and side.request_id or false,
-            side_history_count = side_history_count,
-            side_budget_snapshot_id = limits.lanes.side_snapshot_id,
+            ask_state = ask and (ask.cancel_pending and "cancelling" or "active") or "idle",
+            active_ask_id = ask and ask.id or false,
+            active_ask_request_id = ask and ask.request_id or false,
+            ask_history_count = ask_history_count,
+            ask_budget_snapshot_id = limits.lanes.ask_snapshot_id,
         }, nil, "AgentLoop status"))
     end
 
@@ -4674,9 +5248,9 @@ function M.new_agent_loop(ports, options)
         },
         queue_autostart_outcome = "completed",
         steer_same_turn = true,
-        side_concurrency_maximum = 1,
-        side_tools = false,
-        side_use_lanes = { queue = true, steer = true },
+        ask_concurrency_maximum = 1,
+        ask_tools = false,
+        ask_use_lanes = { queue = true, steer = true },
         external_session_override_receipts = true,
         external_session_override_fail_stop = true,
         external_compaction_receipts = true,
@@ -4692,13 +5266,18 @@ local DRIVER_OPTION_FIELDS = {
     maximum_output_events = true,
 }
 
+---Validates activity-driver ports and bounded per-step poll/output limits.
+--@param ports table AgentLoop and Model/Tool/review/Ask activity ports.
+--@param options table Poll event and output event limits.
+--@return table|nil admitted Validated driver dependencies.
+--@return table|nil err Structured driver contract failure.
 local function validate_agent_driver(ports, options)
     if type(ports) ~= "table" or not exact_fields(ports, {
         loop = true,
         model = true,
         tools = true,
         reviews = true,
-        side = true,
+        ask = true,
         clock = true,
     })
         or type(ports.loop) ~= "table"
@@ -4709,9 +5288,9 @@ local function validate_agent_driver(ports, options)
         or type(ports.loop.accept_tool_result) ~= "function"
         or type(ports.loop.resolve_action_review) ~= "function"
         or type(ports.loop.resolve_termination_review) ~= "function"
-        or (ports.side ~= false and (
-            type(ports.loop.accept_side_event) ~= "function"
-            or type(ports.loop.accept_side_response) ~= "function"
+        or (ports.ask ~= false and (
+            type(ports.loop.accept_ask_event) ~= "function"
+            or type(ports.loop.accept_ask_response) ~= "function"
         ))
         or type(ports.model) ~= "table"
         or type(ports.model.poll) ~= "function"
@@ -4721,9 +5300,9 @@ local function validate_agent_driver(ports, options)
             type(ports.reviews) ~= "table"
             or type(ports.reviews.poll) ~= "function"
         ))
-        or (ports.side ~= false and (
-            type(ports.side) ~= "table"
-            or type(ports.side.poll) ~= "function"
+        or (ports.ask ~= false and (
+            type(ports.ask) ~= "table"
+            or type(ports.ask.poll) ~= "function"
         ))
         or type(ports.clock) ~= "table"
         or type(ports.clock.now) ~= "function"
@@ -4737,7 +5316,7 @@ local function validate_agent_driver(ports, options)
             options.model_poll_events,
             options.tool_poll_events + 1,
             options.review_poll_events
-        ) + (ports.side == false and 0 or options.model_poll_events)
+        ) + (ports.ask == false and 0 or options.model_poll_events)
     then
         return nil, failure(
             "InvalidAgentDriver",
@@ -4747,6 +5326,12 @@ local function validate_agent_driver(ports, options)
     return { ports = ports, options = options }
 end
 
+---Calls a typed AgentLoop reducer and normalizes failures from exceptions.
+--@param target table AgentLoop facade.
+--@param method string Reducer method name.
+--@param ... any Method arguments after the implicit receiver.
+--@return any|nil result Accepted reducer transition.
+--@return table|nil err Structured rejection or exception failure.
 local function driver_call(target, method, ...)
     local called, result, call_error = pcall(target[method], target, ...)
     if not called then
@@ -4766,10 +5351,14 @@ local function driver_call(target, method, ...)
     return result
 end
 
----Drives canonical main Model, side Model, Tool, and review activities into one
+---Drives canonical main Model, ask Model, Tool, and review activities into one
 -- AgentLoop owner.
 -- The driver never interprets Model text or operation effects; it only maps
 -- already-normalized activity facts to the corresponding typed Runtime method.
+--@param ports table AgentLoop and normalized activity ports.
+--@param options table Bounded poll and output event limits.
+--@return table|nil service Read-only activity driver.
+--@return table|nil err Structured port or option failure.
 function M.new_agent_activity_driver(ports, options)
     local admitted, admission_error = validate_agent_driver(ports, options)
     if not admitted then return nil, admission_error end
@@ -4777,6 +5366,10 @@ function M.new_agent_activity_driver(ports, options)
     local steps = 0
     local service = {}
 
+    ---Reads a monotonic driver tick before polling Tool activity.
+    --@param none No arguments.
+    --@return integer|nil now Current monotonic tick.
+    --@return table|nil err Structured clock failure.
     local function now()
         local called, value = pcall(admitted.ports.clock.now)
         if not called or not integer_at_least(value, 0)
@@ -4791,6 +5384,11 @@ function M.new_agent_activity_driver(ports, options)
         return value
     end
 
+    ---Appends one visible activity event within the driver output cap.
+    --@param output table Mutable per-step event array.
+    --@param event table Normalized activity or Runtime transition event.
+    --@return boolean|nil appended True when output remains bounded.
+    --@return table|nil err Structured output-limit failure.
     local function append(output, event)
         if #output >= admitted.options.maximum_output_events then
             return nil, failure(
@@ -4802,6 +5400,10 @@ function M.new_agent_activity_driver(ports, options)
         return true
     end
 
+    ---Polls main Model events and reduces canonical facts into AgentLoop.
+    --@param output table Mutable per-step visible event array.
+    --@return boolean|nil progressed Whether the Model emitted any events.
+    --@return table|nil err Structured port or reducer failure.
     local function model_step(output)
         local batch, poll_error = admitted.ports.model.poll(
             admitted.options.model_poll_events
@@ -4856,34 +5458,39 @@ function M.new_agent_activity_driver(ports, options)
         return #batch > 0
     end
 
-    local function side_step(output, observed)
-        local batch, poll_error = admitted.ports.side.poll(
+    ---Polls the independent no-tool Ask Model lane and reduces its facts.
+    --@param output table Mutable per-step visible event array.
+    --@param observed table Pre-step AgentLoop status with active Ask ID.
+    --@return boolean|nil progressed Whether Ask emitted any events.
+    --@return table|nil err Structured port or reducer failure.
+    local function ask_step(output, observed)
+        local batch, poll_error = admitted.ports.ask.poll(
             admitted.options.model_poll_events
         )
         if dense_count(batch) == nil then
             return nil, poll_error or failure(
-                "SideActivityContract",
-                "side Model activity returned an invalid batch"
+                "AskActivityContract",
+                "ask Model activity returned an invalid batch"
             )
         end
         for _, event in ipairs(batch) do
             if type(event) ~= "table" or type(event.kind) ~= "string" then
                 return nil, failure(
-                    "SideActivityContract",
-                    "side Model activity event is invalid"
+                    "AskActivityContract",
+                    "ask Model activity event is invalid"
                 )
             elseif event.kind == "canonical-event" then
                 local reduced, reduce_error = driver_call(
                     admitted.ports.loop,
-                    "accept_side_event",
-                    observed.active_side_id,
+                    "accept_ask_event",
+                    observed.active_ask_id,
                     event.request_id
                 )
                 if not reduced then return nil, reduce_error end
             elseif event.kind == "adapter-event" then
                 local appended, append_error = append(output, {
-                    kind = "side-model-event",
-                    side_id = observed.active_side_id,
+                    kind = "ask-model-event",
+                    ask_id = observed.active_ask_id,
                     request_id = event.request_id,
                     event = event.event,
                 })
@@ -4891,32 +5498,37 @@ function M.new_agent_activity_driver(ports, options)
             elseif event.kind == "response" then
                 local reduced, reduce_error = driver_call(
                     admitted.ports.loop,
-                    "accept_side_response",
-                    observed.active_side_id,
+                    "accept_ask_response",
+                    observed.active_ask_id,
                     event.wrapper
                 )
                 if not reduced then return nil, reduce_error end
                 local appended, append_error = append(output, {
                     kind = "runtime-transition",
-                    cause = "side-response",
-                    side_id = observed.active_side_id,
+                    cause = "ask-response",
+                    ask_id = observed.active_ask_id,
                     request_id = event.request_id,
                     result = reduced,
                 })
                 if not appended then return nil, append_error end
             else
                 return nil, failure(
-                    "SideActivityContract",
-                    "side Model activity returned an unknown event"
+                    "AskActivityContract",
+                    "ask Model activity returned an unknown event"
                 )
             end
         end
         return #batch > 0
     end
 
+    ---Polls foreground Tool progress and accepts its terminal settlement.
+    --@param output table Mutable per-step visible event array.
+    --@return boolean|nil progressed Whether Tool progress or settlement appeared.
+    --@return table|nil err Structured port or reducer failure.
     local function tool_step(output)
         local observed_now, clock_error = now()
         if not observed_now then return nil, clock_error end
+        local observed = admitted.ports.loop:status()
         local events, settlement = admitted.ports.tools.poll(
             observed_now,
             admitted.options.tool_poll_events
@@ -4931,6 +5543,8 @@ function M.new_agent_activity_driver(ports, options)
         for _, event in ipairs(events) do
             local appended, append_error = append(output, {
                 kind = "tool-event",
+                tool_call_id = observed.active_tool_call_id,
+                adapter_call_id = observed.active_tool_adapter_call_id,
                 event = event,
             })
             if not appended then return nil, append_error end
@@ -4962,6 +5576,10 @@ function M.new_agent_activity_driver(ports, options)
         return #events > 0 or settlement ~= false
     end
 
+    ---Polls action/termination review verdicts and applies typed reductions.
+    --@param output table Mutable per-step visible event array.
+    --@return boolean|nil progressed Whether review emitted a verdict.
+    --@return table|nil err Structured port or reducer failure.
     local function review_step(output)
         if admitted.ports.reviews == false then
             return nil, failure(
@@ -5009,6 +5627,10 @@ function M.new_agent_activity_driver(ports, options)
         return #batch > 0
     end
 
+    ---Advances one bounded Agent activity tick across foreground and Ask lanes.
+    --@param none No arguments.
+    --@return table|nil result Immutable event, status, progress, and step snapshot.
+    --@return table|nil err Structured activity or reducer failure.
     function service.step()
         local ticked, tick_error = driver_call(admitted.ports.loop, "tick")
         if not ticked then return nil, tick_error end
@@ -5034,12 +5656,12 @@ function M.new_agent_activity_driver(ports, options)
         end
         if lane_progress == nil then return nil, lane_error end
         progressed = lane_progress
-        if admitted.ports.side ~= false
-            and (before.side_state == "active" or before.side_state == "cancelling")
+        if admitted.ports.ask ~= false
+            and (before.ask_state == "active" or before.ask_state == "cancelling")
         then
-            local side_progress, side_error = side_step(output, before)
-            if side_progress == nil then return nil, side_error end
-            progressed = progressed or side_progress
+            local ask_progress, ask_error = ask_step(output, before)
+            if ask_progress == nil then return nil, ask_error end
+            progressed = progressed or ask_progress
         end
         steps = steps + 1
         local after = admitted.ports.loop:status()
@@ -5051,6 +5673,9 @@ function M.new_agent_activity_driver(ports, options)
         }, nil, "Agent activity driver step"))
     end
 
+    ---Returns the driver step counter and current AgentLoop projection.
+    --@param none No arguments.
+    --@return table status Immutable driver and AgentLoop status.
     function service.status()
         return assert(freeze({
             steps = steps,

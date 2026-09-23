@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# Author: WaterRun
+# Date: 2026-09-23
+# File: windows_package.py
+# Description: Audit and assemble a Windows preview without asserting real-target qualification.
+
 """Audit and assemble a Windows preview without asserting real-target qualification."""
 
 import hashlib
@@ -12,47 +17,74 @@ import tarfile
 import zipfile
 
 
+# Computes the SHA-256 digest of one input file.
+#@param path Path|str Input file or package path under inspection.
+#@return str digest Lowercase SHA-256 digest of the input file.
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+# Runs the windows package command and reports its status.
+#@param none No arguments.
+#@return None result No value; writes the verified Windows edition ZIP.
 def main():
-    repo, output, cache = (pathlib.Path(value).resolve() for value in sys.argv[1:])
+    if len(sys.argv) not in (4, 5):
+        raise ValueError("usage: windows_package.py REPO BUILD SOURCE_CACHE [TARGET]")
+    repo, output, cache = (pathlib.Path(value).resolve() for value in sys.argv[1:4])
+    target = sys.argv[4] if len(sys.argv) == 5 else "win32-x86"
+    profiles = {
+        "win32-x86": ("i686-w64-mingw32", "pei-i386", 5, "Windows XP SP3", "32-bit"),
+        "win64-x86_64": ("x86_64-w64-mingw32", "pei-x86-64", 6, "Windows 7 SP1", "64-bit"),
+    }
+    cross, pe_format, subsystem, minimum, bits = profiles[target]
+    artifact_prefix = "yaca-0.1.0-preview-" + target
     package = output / "package"
-    docs = package / "docs"
+    companion = output / "companion"
+    docs = companion / "docs"
+    docs.mkdir(parents=True, exist_ok=True)
     licenses = docs / "licenses"
     licenses.mkdir(exist_ok=True)
     allowed_dlls = {"kernel32.dll", "msvcrt.dll", "advapi32.dll", "ws2_32.dll", "lua55.dll"}
-    banned = re.compile(
+    xp_banned = (
         r"BCrypt|InitializeCriticalSectionEx|SRWLock|ConditionVariable|GetTickCount64|"
         r"CancelIoEx|GetFileInformationByHandleEx|SetFileInformationByHandle|"
-        r"CreateSymbolicLink|GetFinalPathNameByHandle|api-ms-win-crt|ucrtbase|"
-        r"freopen_s|wfreopen_s|mbstowcs_s|wcstombs_s|wcscpy_s|wcsncpy_s|vsnprintf_s",
-        re.I,
+        r"CreateSymbolicLink|GetFinalPathNameByHandle|"
+        r"freopen_s|wfreopen_s|mbstowcs_s|wcstombs_s|wcscpy_s|wcsncpy_s|vsnprintf_s|"
     )
+    banned = re.compile((xp_banned if target == "win32-x86" else "") +
+        r"api-ms-win-crt|ucrtbase|GetSystemTimePreciseAsFileTime|GetCurrentThreadStackLimits|"
+        r"WaitOnAddress|WakeByAddress|CreateFile2", re.I)
     artifacts = [package / "yaca.exe"] + sorted(
         path for path in (output / "onedir").rglob("*") if path.suffix in (".exe", ".dll")
     )
     inventory = []
     for path in artifacts:
         report = subprocess.check_output(
-            ["i686-w64-mingw32-objdump", "-p", str(path)], text=True
+            [cross + "-objdump", "-p", str(path)], text=True
         )
-        assert "file format pei-i386" in report, f"wrong architecture: {path}"
-        assert re.search(r"^MajorSubsystemVersion\s+5$", report, re.M), path
+        assert "file format " + pe_format in report, f"wrong architecture: {path}"
+        assert re.search(r"^MajorSubsystemVersion\s+" + str(subsystem) + "$", report, re.M), path
         assert re.search(r"^MinorSubsystemVersion\s+1$", report, re.M), path
         imports = re.findall(r"DLL Name: (\S+)", report)
-        assert {name.lower() for name in imports} <= allowed_dlls, (path, imports)
+        # The inner entry decodes Unicode argv with CommandLineToArgvW, which
+        # is available on XP. Keep that dependency scoped to this entry.
+        artifact_dlls = allowed_dlls | (
+            {"shell32.dll"} if path == output / "onedir/inner.exe" else set()
+        )
+        if target == "win64-x86_64" and path == output / "onedir/.luai/components/curl.exe":
+            # if_nametoindex in Iphlpapi is available since Vista (IPv6).
+            artifact_dlls |= {"bcrypt.dll", "iphlpapi.dll"}
+        assert {name.lower() for name in imports} <= artifact_dlls, (path, imports)
         # Inspect import tables only: export names and debug strings are not imports.
         import_report = report.split("The Export Tables")[0]
-        assert not banned.search(import_report), f"post-XP import: {path}"
+        assert not banned.search(import_report), f"post-baseline import: {path}"
         (output / "logs" / (path.name + "-imports.txt")).write_text(report)
         inventory.append({
             "path": str(path.relative_to(output)), "sha256": digest(path),
             "bytes": path.stat().st_size, "imports": imports,
         })
 
-    shutil.copyfile(repo / "LICENSE", package / "LICENSE")
+    shutil.copyfile(repo / "LICENSE", companion / "LICENSE")
     shutil.copyfile(repo / "release/WINDOWS-QUICKSTART.md", docs / "WINDOWS-QUICKSTART.md")
     notices = {
         "Lua-MIT.html": output / "work/lua-5.5.1/doc/readme.html",
@@ -73,12 +105,12 @@ def main():
         "curl 8.21.0: curl license; Mbed TLS 3.6.7: Apache-2.0\n"
         "Mozilla CA store 2026-08-13: MPL-2.0\n"
         "Exact sources, patches and generated relinking sources accompany this zip\n"
-        "in yaca-0.1.0-preview-win32-x86-source.tar.gz.\n"
+        "in " + artifact_prefix + "-source.tar.gz.\n"
         "Cross-built with MinGW; runtime DLLs are bundled inside yaca.exe.\n",
         encoding="ascii",
     )
-    (package / "README.txt").write_bytes(
-        b"yaca 0.1.0 Windows preview (32-bit, XP API baseline)\r\n"
+    (companion / "README.txt").write_bytes(
+        ("yaca 0.1.0 Windows preview (" + bits + ", " + minimum + ")\r\n").encode("ascii") +
         b"Extract the complete zip to C:\\yaca, then open cmd.exe:\r\n"
         b"  C:\\yaca\\yaca.exe --version\r\n"
         b"  C:\\yaca\\yaca.exe --model-repl\r\n"
@@ -86,11 +118,11 @@ def main():
         b"Use the complete provider request URL, remote model ID and API key.\r\n"
         b"Data is stored in __yaca__ beside yaca.exe. Keep that directory on upgrades.\r\n"
         b"See docs\\WINDOWS-QUICKSTART.md for setup and verification.\r\n"
-        b"This is a preview. Real XP / Server 2008 qualification is pending.\r\n"
+        b"This is a preview. Real-target qualification is pending.\r\n"
     )
     # Session-only PATH avoids setx's legacy length limit and persistent registry
     # expansion. Users run this from the CMD window they intend to use.
-    (package / "Install.cmd").write_bytes(
+    (companion / "Install.cmd").write_bytes(
         b"@echo off\r\n"
         b"rem Run from your existing CMD window. No administrator rights required.\r\n"
         b'set "PATH=%~dp0;%PATH%"\r\n'
@@ -99,12 +131,12 @@ def main():
     )
     summary = {
         "schema": "yaca-windows-preview-v1", "status": "cross-build-passed",
-        "target": "win32-x86", "intended_deployment": "Windows Server 2008 (non-R2)",
-        "image_subsystem": "5.01", "lua": "5.5.1", "build_jobs": 1,
+        "target": target, "intended_deployment": minimum,
+        "image_subsystem": str(subsystem) + ".01", "lua": "5.5.1", "build_jobs": 1,
         "base_revision": (output / "logs/base-revision.txt").read_text().strip(),
         "source_snapshot_sha256": digest(output / "yaca-source.tar.gz"),
         "compiler": subprocess.check_output(
-            ["i686-w64-mingw32-gcc", "--version"], text=True
+            [cross + "-gcc", "--version"], text=True
         ).splitlines()[0],
         "release_authorized": False, "target_qualification_complete": False,
         "runtime_evidence": "See separately recorded smoke results; real targets pending.",
@@ -145,7 +177,7 @@ def main():
     }
     (docs / "SBOM.spdx.json").write_text(json.dumps(sbom, indent=2) + "\n")
 
-    source_output = output / "yaca-0.1.0-preview-win32-x86-source.tar.gz"
+    source_output = output / (artifact_prefix + "-source.tar.gz")
     with tarfile.open(source_output, "w:gz") as archive:
         archive.add(output / "yaca-source.tar.gz", arcname="yaca-source.tar.gz")
         archive.add(output / "generated", arcname="generated")
@@ -157,20 +189,19 @@ def main():
             "luainstaller-97192d1.tar.gz", "cacert-2026-08-13.pem",
         ):
             archive.add(cache / name, arcname="dependencies/" + name)
-    # The shipped archive pre-creates the empty data root so a
-    # first --self-test passes on a clean machine.
-    (package / "__yaca__").mkdir(exist_ok=True)
-    zip_output = output / "yaca-0.1.0-preview-win32-x86.zip"
+    zip_output = output / (artifact_prefix + "-clean.zip")
+    assert sorted(path.name for path in package.iterdir()) == ["yaca.exe"], "clean must contain only yaca.exe"
     with zipfile.ZipFile(zip_output, "w", zipfile.ZIP_DEFLATED) as archive:
         for path in sorted(package.rglob("*")):
-            if path.is_dir() and path.name == "__yaca__":
-                info = zipfile.ZipInfo(str(path.relative_to(package)) + "/")
-                info.external_attr = (0o755 << 16) | 0x10
-                archive.writestr(info, b"")
             if path.is_file():
                 archive.write(path, str(path.relative_to(package)))
+    notices_output = output / (artifact_prefix + "-clean-notices.zip")
+    with zipfile.ZipFile(notices_output, "w", zipfile.ZIP_DEFLATED) as archive:
+        for path in sorted(companion.rglob("*")):
+            if path.is_file():
+                archive.write(path, str(path.relative_to(companion)))
     (output / "SHA256SUMS.txt").write_text(
-        "".join(f"{digest(path)}  {path.name}\n" for path in (zip_output, source_output))
+        "".join(f"{digest(path)}  {path.name}\n" for path in (zip_output, source_output, notices_output))
     )
 
 

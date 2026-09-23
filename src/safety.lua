@@ -1,31 +1,64 @@
 --[[
-File: safety.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-08-29
+File: safety.lua
 Description: Provides immutable snapshots, private digests, and typed secret registries.
 ]]
 
 local M = {}
 
+-- Construct a structured diagnostic without throwing or formatting its optional fields.
+--@param code string Stable diagnostic code used by callers to choose recovery behavior.
+--@param message string Human-readable summary supplied by the failing operation.
+--@param reason string|nil Optional machine-readable cause or validation rule.
+--@return table New diagnostic record; optional non-nil fields are retained without deep copying.
 local function failure(code, message, reason)
     local result = { code = code, message = message }
     if reason ~= nil then result.reason = reason end
     return result
 end
 
+-- Check the Lua integer subtype and the caller's inclusive lower bound.
+--@param value any Candidate value; floats and non-numeric values are rejected.
+--@param minimum integer Inclusive minimum accepted by this check.
+--@return boolean True only for an integer at least minimum.
 local function valid_integer(value, minimum)
     return math.type(value) == "integer" and value >= minimum
 end
 
+-- Create a shallow read-only view without copying the backing table.
+--@param values table Backing fields retained by reference; the caller owns their stability.
+--@param label string|nil Diagnostic label; defaults to "readonly value".
+--@return table Empty proxy exposing the backing fields through its locked metatable.
+--@ownership Retains values by reference; nested values and the backing table are not frozen.
 local function readonly(values, label)
+    --@metatable readonly_proxy Forwards reads and iteration; ordinary assignments raise an error.
+    --@field __index table Backing values used for missing-key reads.
+    --@field __newindex function Rejects ordinary assignments without changing the backing values.
+    --@field __pairs function Enumerates the backing table with next.
+    --@field __len function Reports the backing table sequence length.
+    --@field __metatable string Hides this metatable behind the fixed "locked" marker.
     return setmetatable({}, {
         __index = values,
+        -- Reject a write through the proxy before it can create an ordinary field.
+        --@param _ table Proxy receiving the assignment; its contents are not consulted.
+        --@param key any Attempted field name included in the diagnostic.
+        --@return nil Does not return normally.
+        --@error Always raises a read-only assignment error at the caller frame.
         __newindex = function(_, key)
             error((label or "readonly value") .. " cannot be modified: " .. tostring(key), 2)
         end,
+        -- Iterate the backing fields instead of the empty proxy table.
+        --@param none The proxy argument supplied by pairs is ignored.
+        --@return function The standard next iterator.
+        --@return table Backing values used as iterator state.
+        --@return nil Initial key used to start iteration.
         __pairs = function()
             return next, values, nil
         end,
+        -- Forward sequence-length queries to the backing table.
+        --@param none The proxy operand supplied by Lua is ignored.
+        --@return integer Length of the backing sequence under the Lua length operator.
         __len = function()
             return #values
         end,
@@ -33,6 +66,9 @@ local function readonly(values, label)
     })
 end
 
+-- Count a dense one-based array while rejecting holes and extra key kinds.
+--@param values any Candidate table; every key must belong to the sequence 1 through count.
+--@return integer|nil Sequence length, including zero for an empty table; nil for an invalid shape.
 local function dense_count(values)
     if type(values) ~= "table" then return nil end
     local count = 0
@@ -46,6 +82,14 @@ local function dense_count(values)
     return count
 end
 
+-- Copy table values recursively behind read-only proxies, rejecting cycles and unsupported keys.
+--@param value any Acyclic value graph; non-table values are returned unchanged.
+--@param visiting table Tables on the current recursion path, used to detect cycles.
+--@param label string|nil Diagnostic label applied to every proxy created by this traversal.
+--@return any Copied table proxy or original non-table value; nil when validation fails.
+--@return table|nil InvalidImmutableValue diagnostic for cycles or unsupported key types.
+--@effect Temporarily marks visiting entries and removes them on all explicit return paths.
+--@ownership Table contents are copied; non-table objects retain their original identity and ownership.
 local function freeze_value(value, visiting, label)
     if type(value) ~= "table" then return value end
     if visiting[value] then
@@ -73,6 +117,10 @@ local function freeze_value(value, visiting, label)
     return readonly(copied, label)
 end
 
+-- Capture the four required streaming SHA-256 functions from an injected port.
+--@param port any Candidate native-style hash port.
+--@return table|nil Fresh table of function references, or nil when a required function is missing.
+--@return table|nil InvalidHashPort diagnostic on failure.
 local function validate_hash_port(port)
     if type(port) ~= "table" then
         return nil, failure("InvalidHashPort", "a streaming SHA-256 port is required")
@@ -89,6 +137,13 @@ local function validate_hash_port(port)
     return result
 end
 
+-- Hash exact bytes in bounded updates and close the native digest handle before returning.
+--@param port table Validated streaming SHA-256 function references.
+--@param value any Candidate byte string; non-string inputs return InvalidDigestInput.
+--@param maximum_chunk_bytes integer Positive maximum byte count passed to each update call.
+--@return string|nil Lowercase 64-character SHA-256 digest, or nil on input/native failure.
+--@return table|nil Structured input or NativeHash diagnostic without secret input bytes.
+--@ownership Acquires one native digest handle and attempts to close it on each post-acquisition exit path.
 local function digest(port, value, maximum_chunk_bytes)
     if type(value) ~= "string" then
         return nil, failure("InvalidDigestInput", "digest input must be a byte string")
@@ -97,6 +152,11 @@ local function digest(port, value, maximum_chunk_bytes)
     if not started or handle == nil or handle == false then
         return nil, failure("NativeHash", "native SHA-256 start failed")
     end
+    -- Release the captured digest handle while converting native exceptions into pcall results.
+    --@param none No arguments; closes the handle acquired by this digest call.
+    --@return boolean Whether the native close function returned without raising.
+    --@return any... Native return values on success, or the raised error value on failure.
+    --@ownership Attempts to release the captured native hash handle.
     local function close()
         return pcall(port.sha256_close, handle)
     end
@@ -119,11 +179,19 @@ local function digest(port, value, maximum_chunk_bytes)
     if not closed or close_result ~= true then
         return nil, failure("NativeHash", "native SHA-256 close failed")
     end
+    -- Render one raw digest byte as two lowercase hexadecimal digits.
+    --@param byte string One-byte match supplied by string.gsub.
+    --@return string Exactly two hexadecimal digits preserving that byte's value.
     return (bytes:gsub(".", function(byte)
         return string.format("%02x", byte:byte())
     end))
 end
 
+-- Validate secret identifiers and destination sets while copying registry structure.
+--@param entries any Dense id/class/value/destinations records; ids and per-entry destinations must be unique.
+--@return table|nil Private records indexed by id, or nil when an entry is invalid.
+--@return table Records in source order on success, or an InvalidSecretRegistry diagnostic on failure.
+--@ownership Copies entry and destination tables; immutable secret byte strings are retained in private records.
 local function validate_secret_entries(entries)
     local count = dense_count(entries)
     if count == nil then
@@ -179,10 +247,10 @@ end
 ---Creates safety primitives around an injected streaming SHA-256 implementation.
 -- Secret values remain in closure-owned state and are revealed only to their
 -- exact registered destination. Descriptors and scan results never carry bytes.
--- @param hash_port table Native-style streaming SHA-256 methods.
--- @param options table Hash chunk and ordinary-content scan limits.
--- @return table|nil service Immutable safety service.
--- @return table|nil err Structured construction failure.
+--@param hash_port table Native-style streaming SHA-256 methods.
+--@param options table Hash chunk and ordinary-content scan limits.
+--@return table|nil service Immutable safety service.
+--@return table|nil err Structured construction failure.
 function M.new(hash_port, options)
     local port, port_error = validate_hash_port(hash_port)
     if not port then return nil, port_error end
@@ -206,19 +274,19 @@ function M.new(hash_port, options)
 
     local service = {}
 
-    ---Copies a value graph into recursively immutable proxy tables.
-    -- @param value any Acyclic value graph.
-    -- @param label string|nil Mutation error label.
-    -- @return any frozen Immutable copy or original scalar.
-    -- @return table|nil err Cycle or key failure.
+    ---Copies an acyclic table graph into read-only proxies, retaining non-table values unchanged.
+    --@param value any Acyclic value graph.
+    --@param label string|nil Mutation error label.
+    --@return any frozen Immutable copy or original scalar.
+    --@return table|nil err Cycle or key failure.
     function service.freeze(value, label)
         return freeze_value(value, {}, label or "immutable value")
     end
 
     ---Returns a lowercase private SHA-256 digest of exact bytes.
-    -- @param value string Exact byte input.
-    -- @return string|nil hex Lowercase full digest.
-    -- @return table|nil err Structured native hash failure.
+    --@param value string Exact byte input.
+    --@return string|nil hex Lowercase full digest.
+    --@return table|nil err Structured native hash failure.
     function service.digest(value)
         return digest(port, value, options.maximum_hash_chunk_bytes)
     end
@@ -226,10 +294,10 @@ function M.new(hash_port, options)
     ---Hashes an ordered, typed public binding without ambiguous concatenation.
     -- Field order is part of the contract. Values are exact strings, booleans,
     -- or integers; secrets must never be supplied by callers.
-    -- @param domain string Stable ASCII/UTF-8 binding domain.
-    -- @param fields table Dense ordered { name, value } records.
-    -- @return string|nil hex Lowercase SHA-256 binding digest.
-    -- @return table|nil err Structured shape or native hash failure.
+    --@param domain string Stable ASCII/UTF-8 binding domain.
+    --@param fields table Dense ordered { name, value } records.
+    --@return string|nil hex Lowercase SHA-256 binding digest.
+    --@return table|nil err Structured shape or native hash failure.
     function service.binding_digest(domain, fields)
         if type(domain) ~= "string" or domain == "" or domain:find("\0", 1, true) then
             return nil, failure("InvalidBinding", "binding domain is invalid")
@@ -287,9 +355,9 @@ function M.new(hash_port, options)
     service.binding_version = "yaca-public-binding-v1"
 
     ---Creates a closure-backed typed registry for one configuration generation.
-    -- @param entries table Dense id/class/value/destinations entries.
-    -- @return table|nil registry Immutable registry facade.
-    -- @return table|nil err Structured registry failure.
+    --@param entries table Dense id/class/value/destinations entries.
+    --@return table|nil registry Immutable registry facade.
+    --@return table|nil err Structured registry failure.
     function service.secret_registry(entries)
         local by_id, ordered_or_error = validate_secret_entries(entries)
         if not by_id then return nil, ordered_or_error end
@@ -303,7 +371,8 @@ function M.new(hash_port, options)
         local registry = {}
 
         ---Lists non-secret registry metadata in deterministic source order.
-        -- @return table descriptors Immutable id/class/scan-eligibility records.
+        --@param none No arguments; enumerates this registry's captured entries.
+        --@return table descriptors Immutable id/class/scan-eligibility records.
         function registry.descriptors()
             local descriptors = {}
             for index, entry in ipairs(ordered) do
@@ -317,10 +386,10 @@ function M.new(hash_port, options)
         end
 
         ---Reveals a secret only to the exact consumer registered at construction.
-        -- @param id string Stable typed secret identity.
-        -- @param destination string Exact private carrier destination.
-        -- @return string|nil value Secret bytes for the admitted consumer.
-        -- @return table|nil err Unknown identity or destination failure.
+        --@param id string Stable typed secret identity.
+        --@param destination string Exact private carrier destination.
+        --@return string|nil value Secret bytes for the admitted consumer.
+        --@return table|nil err Unknown identity or destination failure.
         function registry.reveal(id, destination)
             local entry = type(id) == "string" and by_id[id] or nil
             if not entry then
@@ -337,9 +406,9 @@ function M.new(hash_port, options)
 
         ---Scans exact ordinary bytes for eligible registered values.
         -- Short values are deliberately excluded by the release guarantee.
-        -- @param bytes string Bounded ordinary-content bytes.
-        -- @return table|nil hits Immutable non-secret match descriptors.
-        -- @return table|nil err Type failure.
+        --@param bytes string Bounded ordinary-content bytes.
+        --@return table|nil hits Immutable non-secret match descriptors.
+        --@return table|nil err Type failure.
         function registry.scan(bytes)
             if type(bytes) ~= "string" then
                 return nil, failure("InvalidSecretScan", "secret scan input must be bytes")
@@ -365,6 +434,9 @@ function M.new(hash_port, options)
         -- Only the longest-pattern overlap is retained.  Match values and the
         -- overlap length stay closure-private so public diagnostics cannot use
         -- the scanner as a secret-length oracle.
+        --@param none No arguments; uses this registry's eligible patterns and scan threshold.
+        --@return table Read-only scanner facade exposing push and finish over private stream state.
+        --@ownership Each scanner owns its overlap buffer until finish clears it or the scanner is collected.
         function registry.new_stream_scanner()
             local tail = ""
             local observed = 0
@@ -372,6 +444,11 @@ function M.new(hash_port, options)
             local finished = false
             local scanner = {}
 
+            -- Find newly completed matches, including overlapping and cross-chunk occurrences.
+            --@param bytes string Next exact stream chunk; empty chunks are allowed before finish.
+            --@return table|nil Read-only match descriptors with one-based absolute offsets; nil for invalid or closed input.
+            --@return table|nil InvalidSecretScan or SecretScannerClosed diagnostic on failure.
+            --@effect Advances the observed byte count, bounded overlap buffer and cumulative match count.
             function scanner.push(bytes)
                 if finished then
                     return nil, failure("SecretScannerClosed", "secret stream scanner is closed")
@@ -415,6 +492,11 @@ function M.new(hash_port, options)
                 return assert(freeze_value(hits, {}, "secret stream scan results"))
             end
 
+            -- Close the scanner and discard its retained overlap bytes.
+            --@param none No arguments; may be called once per scanner.
+            --@return table|nil Read-only observed-byte, match-count and redacted receipt; nil after an earlier finish.
+            --@return table|nil SecretScannerClosed diagnostic when finish was already called.
+            --@effect Clears the private tail and rejects all future push and finish calls.
             function scanner.finish()
                 if finished then
                     return nil, failure("SecretScannerClosed", "secret stream scanner is closed")

@@ -1,9 +1,9 @@
---[=[
-File: agentloop_test.lua
-Date: 2026-08-29
+--[[
 Author: WaterRun
-Description: Verifies typed AgentLoop traces, durable ordering, caps, and fail-stop.
-]=]
+Date: 2026-09-23
+File: agentloop_test.lua
+Description: Verifies typed AgentLoop traces, durable ordering, caps, and fail-stop behavior.
+]]
 
 local A = assert(loadfile(YACA_TEST_ROOT .. "/test/support/assert.lua", "t", _ENV))()
 local runtime = assert(loadfile(YACA_TEST_ROOT .. "/src/runtime.lua", "t", _ENV))()
@@ -13,6 +13,9 @@ local golden = assert(loadfile(
     _ENV
 ))()
 
+--Clones test data before it is handed to the exercised service.
+--@param value any Candidate whose acceptance or transformation the test checks.
+--@return any clone Independent clone of the source fixture value.
 local function clone(value)
     if type(value) ~= "table" then return value end
     local result = {}
@@ -20,6 +23,9 @@ local function clone(value)
     return result
 end
 
+--Builds validated options for this suite's component fixture.
+--@param overrides table|nil Per-case overrides of default fixture behavior.
+--@return any options options used to configure the component under test.
 local function options(overrides)
     overrides = overrides or {}
     local result = {
@@ -45,16 +51,16 @@ local function options(overrides)
         initial_view_manifest_ref = false,
         initial_serials = {
             turn = 0, message = 0, request = 0, tool = 0,
-            operation = 0, queue = 0, queue_display = 0, side = 0,
+            operation = 0, queue = 0, queue_display = 0, ask = 0,
         },
         automatic_compaction = false,
         maximum_identifier_bytes = 128,
         hard_cap_snapshot_id = "manifest-hard-caps-v1",
         lanes = {
             queue_maximum = 9,
-            side_active_time_ms = 1000,
-            side_response_bytes = 4096,
-            side_snapshot_id = "manifest-side-v1",
+            ask_active_time_ms = 1000,
+            ask_response_bytes = 4096,
+            ask_snapshot_id = "manifest-ask-v1",
         },
     }
     for key, value in pairs(overrides.hard_caps or {}) do result.hard_caps[key] = value end
@@ -75,6 +81,10 @@ local function options(overrides)
     return result
 end
 
+--Supplies tool result behavior required by this suite.
+--@param kind string Kind of event or resource under test.
+--@param settings table|nil Fixture settings and scenario overrides.
+--@return table observed Structured fixture record selected by the exercised branch.
 local function tool_result(kind, settings)
     settings = settings or {}
     local body = settings.body or kind
@@ -90,6 +100,10 @@ local function tool_result(kind, settings)
     }
 end
 
+--Constructs the suite's isolated runtime fixture and observation ports.
+--@param settings table|nil Fixture settings and scenario overrides.
+--@param option_overrides table|nil Per-case overrides of default options.
+--@return table fixture Constructed fixture service used by this suite.
 local function fixture(settings, option_overrides)
     settings = settings or {}
     local now = 0
@@ -100,6 +114,10 @@ local function fixture(settings, option_overrides)
         and option_overrides.initial_context_generation or 1
     local journal = {}
 
+    --Simulates the commit publication step for this suite.
+    --@param batch any The batch supplied to the fake service for this scenario.
+    --@return boolean accepted Whether commit succeeds in the fixture.
+    --@return table secondary2 Structured fixture record selected by the exercised branch.
     function journal.commit(batch)
         local previous_context_generation = context_generation
         batches[#batches + 1] = batch
@@ -107,6 +125,9 @@ local function fixture(settings, option_overrides)
             log[#log + 1] = "durable:" .. event.type
             if settings.fail_event == event.type then
                 return false, { code = "DiskFull", event = event.type }
+            end
+            if settings.capacity_event == event.type then
+                return false, { code = "ContextCapacity", publication_started = false }
             end
         end
         if settings.bad_binding_at == #batches then
@@ -131,6 +152,10 @@ local function fixture(settings, option_overrides)
         }
     end
 
+    --Supplies external commit behavior required by this suite.
+    --@param events table Recorded event batch delivered to the consumer.
+    --@param barrier_id any The barrier id supplied to the fake service for this scenario.
+    --@return table observed Structured fixture record selected by the exercised branch.
     local function external_commit(events, barrier_id)
         local first_sequence = #durable_events + 1
         local batch = {
@@ -160,18 +185,29 @@ local function fixture(settings, option_overrides)
     end
 
     local model = {}
+    --Simulates the start transition of a fake activity port for this suite.
+    --@param spec table Test specification or request under evaluation.
+    --@return string|nil observed Fixture text "model-handle:" .. spec.request_id; nil on alternate branches.
+    --@return table|nil secondary2 Typed error record with code NoModel.
     function model.start(spec)
         log[#log + 1] = "effect:model:" .. spec.request_id
         model_starts[#model_starts + 1] = spec
         if settings.model_start_failure then return nil, { code = "NoModel" } end
         return "model-handle:" .. spec.request_id
     end
+    --Simulates the cancel transition of a fake activity port for this suite.
+    --@param handle table|integer Fake resource handle whose state is inspected.
+    --@param reason string Failure or close reason supplied to the port.
+    --@return table observed Structured fixture record with outcome.
     function model.cancel(handle, reason)
         log[#log + 1] = "cancel:model:" .. handle
         return { outcome = settings.model_cancel_outcome or "cancelled" }
     end
 
     local tools = {}
+    --Simulates the admit port for this suite.
+    --@param call table|integer Recorded call or call ordinal under inspection.
+    --@return any observed admit value observed by the scenario assertion.
     function tools.admit(call)
         log[#log + 1] = "admit:" .. call.tool_call_id
         local admission = settings.admit and settings.admit(call) or nil
@@ -185,6 +221,9 @@ local function fixture(settings, option_overrides)
         }
         return admission
     end
+    --Simulates the start transition of a fake activity port for this suite.
+    --@param spec table Test specification or request under evaluation.
+    --@return table|any observed start value observed by the scenario assertion.
     function tools.start(spec)
         log[#log + 1] = "effect:tool:" .. spec.call.tool_call_id
         tool_starts[#tool_starts + 1] = spec
@@ -196,6 +235,10 @@ local function fixture(settings, option_overrides)
         if candidate then return candidate end
         return { kind = "complete", result = tool_result("real-success") }
     end
+    --Simulates the cancel transition of a fake activity port for this suite.
+    --@param handle table|integer Fake resource handle whose state is inspected.
+    --@param reason string Failure or close reason supplied to the port.
+    --@return table|any observed cancel value observed by the scenario assertion.
     function tools.cancel(handle, reason)
         log[#log + 1] = "cancel:tool:" .. tostring(handle)
         if settings.tool_cancel_result then return settings.tool_cancel_result end
@@ -203,11 +246,18 @@ local function fixture(settings, option_overrides)
     end
 
     local reviews = {}
+    --Simulates the start transition of a fake activity port for this suite.
+    --@param spec table Test specification or request under evaluation.
+    --@return string observed Fixture text "review-handle:" .. spec.request_id.
     function reviews.start(spec)
         log[#log + 1] = "effect:review:" .. spec.request_id
         review_starts[#review_starts + 1] = spec
         return "review-handle:" .. spec.request_id
     end
+    --Simulates the cancel transition of a fake activity port for this suite.
+    --@param handle table|integer Fake resource handle whose state is inspected.
+    --@param reason string Failure or close reason supplied to the port.
+    --@return table observed Outcome record with status cancelled.
     function reviews.cancel(handle, reason)
         log[#log + 1] = "cancel:review:" .. handle
         return { outcome = "cancelled" }
@@ -219,6 +269,9 @@ local function fixture(settings, option_overrides)
     if view_port ~= false then
         local original_prepare = view_port.prepare
         view_port = {
+            --Supplies prepare behavior required by this suite.
+            --@param observation table Observed state supplied to the assertion.
+            --@return any value Callback value consumed by the enclosing scenario assertion.
             prepare = function(observation)
                 view_prepares[#view_prepares + 1] = observation
                 return original_prepare(observation, #view_prepares)
@@ -226,13 +279,17 @@ local function fixture(settings, option_overrides)
         }
     end
     local loop, loop_error = runtime.new_agent_loop({
-        clock = { now = function() return now end },
+        clock = {
+            --Supplies deterministic clock behavior for this suite.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return any value Callback value consumed by the enclosing scenario assertion.
+            now = function() return now end },
         journal = journal,
         model = model,
         tools = tools,
         reviews = review_port,
         snapshots = false,
-        side = false,
+        ask = false,
         views = view_port,
     }, options(option_overrides))
     A.truthy(loop, loop_error and loop_error.code)
@@ -246,10 +303,17 @@ local function fixture(settings, option_overrides)
         review_starts = review_starts,
         view_prepares = view_prepares,
         external_commit = external_commit,
+        --Supplies advance behavior required by this suite.
+        --@param delta integer Clock or count increment for this step.
+        --@return nil No value; the fake port or test assertion observes this callback's effects.
         advance = function(delta) now = now + delta end,
     }
 end
 
+--Supplies input behavior required by this suite.
+--@param double_check any The double check supplied to the fake service for this scenario.
+--@param context_generation any The context generation supplied to the fake service for this scenario.
+--@return table observed Structured fixture record selected by the exercised branch.
 local function input(double_check, context_generation)
     return {
         text = "Implement the task",
@@ -268,6 +332,9 @@ local function input(double_check, context_generation)
     }
 end
 
+--Supplies published handoff behavior required by this suite.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return table observed Structured fixture record selected by the exercised branch.
 local function published_handoff()
     local first = input(false, 1)
     return {
@@ -293,6 +360,11 @@ local function published_handoff()
     }
 end
 
+--Simulates the call port for this suite.
+--@param name string Module, Model, or resource name selected by the case.
+--@param serial integer Sequence number assigned by the fake port.
+--@param arguments table Argument vector delivered to the fake process.
+--@return table observed Structured fixture record with local_tool_call_id, name, canonical_arguments, provider_tool_call_id.
 local function call(name, serial, arguments)
     return {
         local_tool_call_id = "adapter-call-" .. tostring(serial),
@@ -302,6 +374,10 @@ local function call(name, serial, arguments)
     }
 end
 
+--Simulates the response port for this suite.
+--@param loop table Agent loop instance exercised by the case.
+--@param settings table|nil Fixture settings and scenario overrides.
+--@return table observed Structured fixture record selected by the exercised branch.
 local function response(loop, settings)
     settings = settings or {}
     local calls = settings.calls or {}
@@ -325,6 +401,11 @@ local function response(loop, settings)
     }
 end
 
+--Simulates the finish transition of a fake activity port for this suite.
+--@param loop table Agent loop instance exercised by the case.
+--@param summary any The summary supplied to the fake service for this scenario.
+--@param settings table|nil Fixture settings and scenario overrides.
+--@return any observed finish value observed by the scenario assertion.
 local function finish(loop, summary, settings)
     settings = settings or {}
     settings.control = { control = "finish", payload = { summary = summary or "done" } }
@@ -332,6 +413,10 @@ local function finish(loop, summary, settings)
     return response(loop, settings)
 end
 
+--Supplies ask user behavior required by this suite.
+--@param loop table Agent loop instance exercised by the case.
+--@param question any The question supplied to the fake service for this scenario.
+--@return any observed ask user value observed by the scenario assertion.
 local function ask_user(loop, question)
     return response(loop, {
         tag = "ask",
@@ -339,6 +424,10 @@ local function ask_user(loop, question)
     })
 end
 
+--Supplies refuse behavior required by this suite.
+--@param loop table Agent loop instance exercised by the case.
+--@param reason string Failure or close reason supplied to the port.
+--@return any observed refuse value observed by the scenario assertion.
 local function refuse(loop, reason)
     return response(loop, {
         tag = "refuse",
@@ -346,10 +435,17 @@ local function refuse(loop, reason)
     })
 end
 
+--Supplies trace behavior required by this suite.
+--@param loop table Agent loop instance exercised by the case.
+--@return any observed trace value observed by the scenario assertion.
 local function trace(loop)
     return clone(loop:status().trace)
 end
 
+--Checks assert golden against this test expectation.
+--@param loop table Agent loop instance exercised by the case.
+--@param id string|integer Identity selected for the fake operation.
+--@return nil No value; the fake port or test assertion observes this callback's effects.
 local function assert_golden(loop, id)
     local expected = golden.traces[id]
     local actual = trace(loop)
@@ -367,6 +463,12 @@ local function assert_golden(loop, id)
     end
 end
 
+--Supplies settle successful compaction behavior required by this suite.
+--@param f any The f supplied to the fake service for this scenario.
+--@param opened any The opened supplied to the fake service for this scenario.
+--@param compaction_id any The compaction id supplied to the fake service for this scenario.
+--@param manifest_digest any The manifest digest supplied to the fake service for this scenario.
+--@return any observed settle successful compaction value observed by the scenario assertion.
 local function settle_successful_compaction(f, opened, compaction_id, manifest_digest)
     local request_record = {
         kind = "compaction-request",
@@ -478,6 +580,10 @@ local function settle_successful_compaction(f, opened, compaction_id, manifest_d
     }))
 end
 
+--Supplies review verdict behavior required by this suite.
+--@param kind string Kind of event or resource under test.
+--@param serial integer Sequence number assigned by the fake port.
+--@return table observed Structured fixture record selected by the exercised branch.
 local function review_verdict(kind, serial)
     return {
         verdict = kind,
@@ -488,6 +594,11 @@ local function review_verdict(kind, serial)
     }
 end
 
+--Supplies index of behavior required by this suite.
+--@param log any The log supplied to the fake service for this scenario.
+--@param prefix string Prefix added to the generated fixture value.
+--@param occurrence any The occurrence supplied to the fake service for this scenario.
+--@return any|nil observed index of value observed by the scenario assertion.
 local function index_of(log, prefix, occurrence)
     occurrence = occurrence or 1
     local seen = 0
@@ -504,7 +615,56 @@ return {
     name = "fault/agentloop",
     cases = {
         {
+            name = "bounded model view exhaustion closes the turn without a durability failure",
+            --Verifies bounded model view exhaustion closes the turn without a durability failure.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify bounded model view exhaustion closes the turn without a durability failure.
+            run = function()
+                local f = fixture({ views = {
+                    --Supplies prepare behavior required by the 'bounded model view exhaustion closes the turn without a durability failure' case.
+                    --@param none No arguments; this closure uses its captured fixture state.
+                    --@return nil rejected Explicit rejection from the scenario callback.
+                    --@return table secondary2 Typed error record with code ModelViewLimit.
+                    prepare = function()
+                    return nil, { code = "ModelViewLimit", message = "view byte limit" }
+                end } })
+                local admitted = assert(f.loop:begin_main(input(false)))
+                A.equal(admitted.state, "Idle")
+                A.equal(f.loop:status().last_outcome, "budget_exhausted")
+                A.equal(#f.model_starts, 0)
+                A.equal(f.events[#f.events].type, "turn_ended")
+                assert(f.loop:begin_main(input(false, f.loop:status().context_generation)))
+                A.equal(f.loop:status().state, "Idle")
+            end,
+        },
+        {
+            name = "capacity admission does not halt the journal and closes an admitted turn before any model effect",
+            --Verifies bounded model view exhaustion closes the turn without a durability failure.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify bounded model view exhaustion closes the turn without a durability failure.
+            run = function()
+                local settings = { capacity_event = "turn_started" }
+                local f = fixture(settings)
+                local rejected, err = f.loop:begin_main(input(false))
+                A.falsy(rejected); A.equal(err.code, "ContextCapacity")
+                A.equal(f.loop:status().state, "Idle")
+                A.equal(#f.events, 0); A.equal(#f.model_starts, 0)
+                settings.capacity_event = "model_request"
+                assert(f.loop:begin_main(input(false)))
+                A.equal(f.loop:status().last_outcome, "budget_exhausted")
+                A.equal(f.loop:status().state, "Idle")
+                A.equal(#f.model_starts, 0)
+                A.equal(f.events[#f.events].type, "turn_ended")
+                settings.capacity_event = nil
+                assert(f.loop:begin_main(input(false, f.loop:status().context_generation)))
+                A.equal(#f.model_starts, 1)
+            end,
+        },
+        {
             name = "restored serial and manifest waterlines prevent reopened Context collisions",
+            --Verifies restored serial and manifest waterlines prevent reopened Context collisions.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify restored serial and manifest waterlines prevent reopened Context collisions.
             run = function()
                 local f = fixture({}, {
                     initial_sequence = 41,
@@ -518,7 +678,7 @@ return {
                         operation = 7,
                         queue = 9,
                         queue_display = 3,
-                        side = 4,
+                        ask = 4,
                     },
                 })
                 local restored = f.loop:status()
@@ -559,6 +719,9 @@ return {
         },
         {
             name = "precommitted first turn starts at model request without duplicate Facts",
+            --Verifies precommitted first turn starts at model request without duplicate Facts.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify precommitted first turn starts at model request without duplicate Facts.
             run = function()
                 local f = fixture({}, { initial_sequence = 2 })
                 local admitted = assert(f.loop:resume_published_main(published_handoff()))
@@ -585,8 +748,15 @@ return {
         },
         {
             name = "every later model request publishes its exact durable fact view first",
+            --Verifies every later model request publishes its exact durable fact view first.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify every later model request publishes its exact durable fact view first.
             run = function()
                 local views = {}
+                --Supplies prepare behavior required by the 'every later model request publishes its exact durable fact view first' case.
+                --@param observation table Observed state supplied to the assertion.
+                --@param call_number any The call number supplied to the fake service for this scenario.
+                --@return table observed Structured fixture record selected by the exercised branch.
                 function views.prepare(observation, call_number)
                     if call_number == 1 then
                         return {
@@ -632,6 +802,9 @@ return {
                     < index_of(f.log, "effect:model:turn-1:request:2"))
 
                 local malformed_views = {
+                    --Supplies prepare behavior required by the 'every later model request publishes its exact durable fact view first' case.
+                    --@param observation table Observed state supplied to the assertion.
+                    --@return table record Fixture record emitted by the scenario callback.
                     prepare = function(observation)
                         return {
                             digest = "unbound-view",
@@ -657,6 +830,9 @@ return {
         },
         {
             name = "typed finish is the only no-review completion path",
+            --Verifies typed finish is the only no-review completion path.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify typed finish is the only no-review completion path.
             run = function()
                 local f = fixture()
                 assert(f.loop:begin_main(input(false)))
@@ -681,6 +857,9 @@ return {
         },
         {
             name = "finish review pass and explicit gap preserve typed same-turn causality",
+            --Verifies finish review pass and explicit gap preserve typed same-turn causality.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify finish review pass and explicit gap preserve typed same-turn causality.
             run = function()
                 local passed = fixture()
                 assert(passed.loop:begin_main(input(true)))
@@ -706,6 +885,9 @@ return {
         },
         {
             name = "ask-user reply is durable in the same turn and refuse is exact",
+            --Verifies ask-user reply is durable in the same turn and refuse is exact.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify ask-user reply is durable in the same turn and refuse is exact.
             run = function()
                 local asked = fixture()
                 assert(asked.loop:begin_main(input(false)))
@@ -726,8 +908,14 @@ return {
         },
         {
             name = "permission denial and approval rejection produce one durable synthetic result",
+            --Verifies permission denial and approval rejection produce one durable synthetic result.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify permission denial and approval rejection produce one durable synthetic result.
             run = function()
                 local denied = fixture({
+                    --Simulates the admit port for the 'permission denial and approval rejection produce one durable synthetic result' case.
+                    --@param call_value any The call value supplied to the fake service for this scenario.
+                    --@return table record Fixture record emitted by the scenario callback.
                     admit = function(call_value)
                         return {
                             decision = "deny",
@@ -749,6 +937,9 @@ return {
                 assert_golden(denied.loop, "permission-deny")
 
                 local rejected = fixture({
+                    --Simulates the admit port for the 'permission denial and approval rejection produce one durable synthetic result' case.
+                    --@param none No arguments; this closure uses its captured fixture state.
+                    --@return table record Fixture record emitted by the scenario callback.
                     admit = function()
                         return {
                             decision = "confirm",
@@ -779,6 +970,9 @@ return {
         },
         {
             name = "tools execute serially and first failure stably skips every unstarted call",
+            --Verifies tools execute serially and first failure stably skips every unstarted call.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify tools execute serially and first failure stably skips every unstarted call.
             run = function()
                 local f = fixture({
                     tool_starts = {
@@ -822,8 +1016,15 @@ return {
         },
         {
             name = "externally durable operation receipts advance the AgentLoop waterline once",
+            --Verifies externally durable operation receipts advance the AgentLoop waterline once.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify externally durable operation receipts advance the AgentLoop waterline once.
             run = function()
                 local f = fixture({
+                    --Supplies tool start behavior required by the 'externally durable operation receipts advance the AgentLoop waterline once' case.
+                    --@param spec table Test specification or request under evaluation.
+                    --@param commit_external any The commit external supplied to the fake service for this scenario.
+                    --@return table record Fixture record emitted by the scenario callback.
                     tool_start = function(spec, commit_external)
                         local call_value = spec.call
                         local intent_receipt = commit_external({ {
@@ -896,11 +1097,17 @@ return {
         },
         {
             name = "automatic compaction preflight pauses and exactly resumes main and review requests",
+            --Verifies automatic compaction preflight pauses and exactly resumes main and review requests.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify automatic compaction preflight pauses and exactly resumes main and review requests.
             run = function()
                 local f = fixture({}, { automatic_compaction = true })
                 local admitted = assert(f.loop:begin_main(input(true)))
                 A.equal(admitted.request_id, false)
                 A.equal(#f.model_starts, 0)
+                --Supplies an assertion callback for the automatic compaction preflight pauses and exactly resumes main and review requests scenario.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return any value Callback value consumed by the enclosing scenario assertion.
                 A.deep_equal((function()
                     local types = {}
                     for _, event in ipairs(f.events) do types[#types + 1] = event.type end
@@ -996,6 +1203,9 @@ return {
         },
         {
             name = "automatic compaction failure blocks instead of leaking the deferred request",
+            --Verifies automatic compaction failure blocks instead of leaking the deferred request.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify automatic compaction failure blocks instead of leaking the deferred request.
             run = function()
                 local f = fixture({}, { automatic_compaction = true })
                 assert(f.loop:begin_main(input(false)))
@@ -1033,6 +1243,9 @@ return {
                 A.equal(f.loop:status().last_outcome, "cancelled")
 
                 local reviewed = fixture({
+                    --Simulates the admit port for the 'automatic compaction failure blocks instead of leaking the deferred request' case.
+                    --@param call_value any The call value supplied to the fake service for this scenario.
+                    --@return table record Fixture record emitted by the scenario callback.
                     admit = function(call_value)
                         return {
                             decision = "review",
@@ -1110,6 +1323,9 @@ return {
         },
         {
             name = "session override advances the Runtime receipt without changing the active turn snapshot",
+            --Verifies session override advances the Runtime receipt without changing the active turn snapshot.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify session override advances the Runtime receipt without changing the active turn snapshot.
             run = function()
                 local f = fixture()
                 assert(f.loop:begin_main(input(true)))
@@ -1219,6 +1435,9 @@ return {
         },
         {
             name = "compaction owns one exact Runtime lane and publishes one bound manifest",
+            --Verifies compaction owns one exact Runtime lane and publishes one bound manifest.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify compaction owns one exact Runtime lane and publishes one bound manifest.
             run = function()
                 local f = fixture()
                 assert(f.loop:begin_main(input(false)))
@@ -1383,6 +1602,9 @@ return {
         },
         {
             name = "out-of-order compaction persistence is fail-stop and cannot settle",
+            --Verifies out-of-order compaction persistence is fail-stop and cannot settle.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify out-of-order compaction persistence is fail-stop and cannot settle.
             run = function()
                 local f = fixture()
                 assert(f.loop:begin_main(input(false)))
@@ -1451,6 +1673,9 @@ return {
         },
         {
             name = "stream cancel and unknown side effect retain their real typed outcomes",
+            --Verifies stream cancel and unknown side effect retain their real typed outcomes.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify stream cancel and unknown side effect retain their real typed outcomes.
             run = function()
                 local cancelled = fixture()
                 assert(cancelled.loop:begin_main(input(false)))
@@ -1479,6 +1704,9 @@ return {
         },
         {
             name = "tool and request caps pair accepted calls before budget exhaustion",
+            --Verifies tool and request caps pair accepted calls before budget exhaustion.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify tool and request caps pair accepted calls before budget exhaustion.
             run = function()
                 local capped = fixture({}, { hard_caps = { steps = 8 } })
                 local capped_input = input(false)
@@ -1504,6 +1732,9 @@ return {
         },
         {
             name = "stuck warning is durable once and permits exactly one bounded escape request",
+            --Verifies stuck warning is durable once and permits exactly one bounded escape request.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify stuck warning is durable once and permits exactly one bounded escape request.
             run = function()
                 local f = fixture({}, {
                     stuck = {
@@ -1544,6 +1775,9 @@ return {
         },
         {
             name = "same-error ABAB and semantic no-progress consume canonical identities only",
+            --Verifies same-error ABAB and semantic no-progress consume canonical identities only.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify same-error ABAB and semantic no-progress consume canonical identities only.
             run = function()
                 local same_error = fixture({
                     tool_starts = {
@@ -1609,8 +1843,14 @@ return {
         },
         {
             name = "action review and deferred approval cannot widen or bypass the exact call binding",
+            --Verifies action review and deferred approval cannot widen or bypass the exact call binding.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify action review and deferred approval cannot widen or bypass the exact call binding.
             run = function()
                 local f = fixture({
+                    --Simulates the admit port for the 'action review and deferred approval cannot widen or bypass the exact call binding' case.
+                    --@param call_value any The call value supplied to the fake service for this scenario.
+                    --@return table record Fixture record emitted by the scenario callback.
                     admit = function(call_value)
                         return {
                             decision = "review",
@@ -1671,6 +1911,9 @@ return {
 
                 local unavailable = fixture({
                     reviews_false = true,
+                    --Simulates the admit port for the 'action review and deferred approval cannot widen or bypass the exact call binding' case.
+                    --@param none No arguments; this closure uses its captured fixture state.
+                    --@return table record Fixture record emitted by the scenario callback.
                     admit = function()
                         return {
                             decision = "review",
@@ -1697,6 +1940,9 @@ return {
         },
         {
             name = "pending cancellation suppresses late calls and active-tool time cap stays budget typed",
+            --Verifies pending cancellation suppresses late calls and active-tool time cap stays budget typed.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify pending cancellation suppresses late calls and active-tool time cap stays budget typed.
             run = function()
                 local late = fixture({ model_cancel_outcome = "pending" })
                 assert(late.loop:begin_main(input(false)))
@@ -1728,6 +1974,9 @@ return {
         },
         {
             name = "stale Context observation stops every later admission without another event",
+            --Verifies stale Context observation stops every later admission without another event.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify stale Context observation stops every later admission without another event.
             run = function()
                 for _, started in ipairs({ false, true }) do
                     local f = fixture()
@@ -1751,6 +2000,9 @@ return {
         },
         {
             name = "result durability loss is fail-stop and suppresses every later effect and report",
+            --Verifies result durability loss is fail-stop and suppresses every later effect and report.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify result durability loss is fail-stop and suppresses every later effect and report.
             run = function()
                 local f = fixture({ fail_event = "tool_result" })
                 assert(f.loop:begin_main(input(false)))
@@ -1780,6 +2032,9 @@ return {
         },
         {
             name = "all remaining typed outcomes and closing state share one finalization gate",
+            --Verifies all remaining typed outcomes and closing state share one finalization gate.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify all remaining typed outcomes and closing state share one finalization gate.
             run = function()
                 local partial = fixture()
                 assert(partial.loop:begin_main(input(false)))
@@ -1805,6 +2060,9 @@ return {
                 A.falsy(capability.provider_stop_means_completed)
                 A.falsy(capability.natural_language_done_means_finish)
                 A.equal(capability.accepted_call_results, "exactly-one-real-or-synthetic")
+                --Executes the action expected to raise in the 'all remaining typed outcomes and closing state share one finalization gate' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify all remaining typed outcomes and closing state share one finalization gate.
                 A.raises(function() capability.single_owner = false end, "cannot be modified")
 
                 local repeated = fixture()
@@ -1826,21 +2084,49 @@ return {
         },
         {
             name = "constructor rejects missing hard caps unversioned stuck data and ambiguous ports",
+            --Verifies constructor rejects missing hard caps unversioned stuck data and ambiguous ports.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify constructor rejects missing hard caps unversioned stuck data and ambiguous ports.
             run = function()
                 local bad_options = options()
                 bad_options.stuck.exact_repeat = 0
                 local loop, option_error = runtime.new_agent_loop({
-                    clock = { now = function() return 0 end },
-                    journal = { commit = function() end },
-                    model = { start = function() end, cancel = function() end },
-                    tools = {
-                        admit = function() end,
+                    clock = {
+                        --Supplies deterministic clock behavior for the 'constructor rejects missing hard caps unversioned stuck data and ambiguous ports' case.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return integer value Callback value consumed by the enclosing scenario assertion.
+                        now = function() return 0 end },
+                    journal = {
+                        --Simulates the commit publication step for the 'constructor rejects missing hard caps unversioned stuck data and ambiguous ports' case.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return nil No value; assertions verify constructor rejects missing hard caps unversioned stuck data and ambiguous ports.
+                        commit = function() end },
+                    model = {
+                        --Simulates the start transition of a fake activity port for the 'constructor rejects missing hard caps unversioned stuck data and ambiguous ports' case.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return nil No value; assertions verify constructor rejects missing hard caps unversioned stuck data and ambiguous ports.
                         start = function() end,
+                        --Simulates the cancel transition of a fake activity port for the 'constructor rejects missing hard caps unversioned stuck data and ambiguous ports' case.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return nil No value; assertions verify constructor rejects missing hard caps unversioned stuck data and ambiguous ports.
+                        cancel = function() end },
+                    tools = {
+                        --Simulates the admit port for the 'constructor rejects missing hard caps unversioned stuck data and ambiguous ports' case.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return nil No value; assertions verify constructor rejects missing hard caps unversioned stuck data and ambiguous ports.
+                        admit = function() end,
+                        --Simulates the start transition of a fake activity port for the 'constructor rejects missing hard caps unversioned stuck data and ambiguous ports' case.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return nil No value; assertions verify constructor rejects missing hard caps unversioned stuck data and ambiguous ports.
+                        start = function() end,
+                        --Simulates the cancel transition of a fake activity port for the 'constructor rejects missing hard caps unversioned stuck data and ambiguous ports' case.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return nil No value; assertions verify constructor rejects missing hard caps unversioned stuck data and ambiguous ports.
                         cancel = function() end,
                     },
                     reviews = false,
                     snapshots = false,
-                    side = false,
+                    ask = false,
                     views = false,
                 }, bad_options)
                 A.falsy(loop)
@@ -1856,6 +2142,9 @@ return {
                     f.events[1].fields.runtimeSnapshot,
                     status.runtime_snapshot
                 )
+                --Executes the action expected to raise in the 'constructor rejects missing hard caps unversioned stuck data and ambiguous ports' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify constructor rejects missing hard caps unversioned stuck data and ambiguous ports.
                 A.raises(function() status.state = "Streaming" end, "cannot be modified")
             end,
         },

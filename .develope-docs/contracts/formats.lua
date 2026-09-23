@@ -1,3 +1,10 @@
+--[[
+Author: WaterRun
+Date: 2026-09-23
+File: formats.lua
+Description: Defines strict text, JSON, XML and INI representation boundaries.
+]]
+
 return {
   contract_version = "0.1.0-readiness.1",
   decision_refs = { "D-003", "D-023", "D-052", "D-053", "D-059", "D-068", "D-070" },

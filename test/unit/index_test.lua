@@ -1,19 +1,29 @@
 --[[
-File: index_test.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-09-23
+File: index_test.lua
 Description: Verifies bounded real-time Context ring resolution and stable outcomes.
 ]]
 
 local A = assert(loadfile(YACA_TEST_ROOT .. "/test/support/assert.lua", "t", _ENV))()
 
+--Loads a source module into an isolated per-case environment.
+--@param name string Module, Model, or resource name selected by the case.
+--@param cache table Per-case module cache preserving isolated imports.
+--@return any module Module export loaded in the isolated source environment.
 local function load_module(name, cache)
     cache = cache or {}
     if cache[name] then return cache[name] end
-    local environment = { require = function(dependency)
+    local environment = {
+        --Resolves an imported Lua module through the isolated test loader.
+        --@param dependency string Source module requested from the isolated loader.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
+        require = function(dependency)
         return load_module(dependency, cache)
     end }
     environment._G = environment
+    --@metatable environment Test-owned lookup and mutation contract for the current case.
+    --@field __index any Fallback table or function used for missing fixture keys.
     setmetatable(environment, { __index = _ENV })
     local chunk, load_error = loadfile(
         YACA_TEST_ROOT .. "/src/" .. name .. ".lua",
@@ -26,12 +36,18 @@ local function load_module(name, cache)
     return value
 end
 
+--Loads a repository Lua module as a test support value.
+--@param relative_path string Repository-relative Lua source path to load.
+--@return any module Test support module export loaded from the repository.
 local function load_table(relative_path)
     local chunk, load_error = loadfile(YACA_TEST_ROOT .. "/" .. relative_path, "t", _ENV)
     A.truthy(chunk, load_error)
     return chunk()
 end
 
+--Reads read file for this test scenario.
+--@param relative_path string Repository-relative Lua source path to load.
+--@return any bytes Bytes read from the selected fixture file.
 local function read_file(relative_path)
     local handle, open_error = io.open(YACA_TEST_ROOT .. "/" .. relative_path, "rb")
     A.truthy(handle, open_error)
@@ -54,21 +70,37 @@ local PATH_METHODS = {
     "context_hash",
 }
 
+--Constructs an incremental SHA-256 port backed by the reference digest.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return any port Incremental SHA-256 fixture port.
 local function hash_port()
     local port = {}
+    --Starts a fake incremental SHA-256 handle.
+    --@param none No arguments; this closure uses its captured fixture state.
+    --@return table handle New incremental SHA-256 fixture handle.
     function port.sha256_start()
         return { parts = {}, finished = false, closed = false }
     end
+    --Adds bytes to the fake incremental SHA-256 handle.
+    --@param handle table|integer Fake resource handle whose state is inspected.
+    --@param bytes string Byte chunk supplied to the fake I/O port.
+    --@return boolean accepted Whether the fixture accepted the byte chunk.
     function port.sha256_update(handle, bytes)
         assert(not handle.finished and not handle.closed)
         handle.parts[#handle.parts + 1] = bytes
         return true
     end
+    --Finalizes the fake SHA-256 handle using the reference digest.
+    --@param handle table|integer Fake resource handle whose state is inspected.
+    --@return any digest Hexadecimal digest of the accumulated fixture bytes.
     function port.sha256_finish(handle)
         assert(not handle.finished and not handle.closed)
         handle.finished = true
         return sha256.digest(table.concat(handle.parts))
     end
+    --Closes the fake SHA-256 handle and records its state.
+    --@param handle table|integer Fake resource handle whose state is inspected.
+    --@return boolean closed Whether the fixture handle was closed.
     function port.sha256_close(handle)
         assert(not handle.closed)
         handle.closed = true
@@ -77,6 +109,11 @@ local function hash_port()
     return port
 end
 
+--Constructs the path service service used by this suite.
+--@param hash_override any The hash override supplied to the fake service for this scenario.
+--@return any observed path service value observed by the scenario assertion.
+--@return any secondary2 Recorded call count returned by the fixture.
+--@return any secondary3 Additional status or structured error from the fixture operation.
 local function path_service(hash_override)
     local base = assert(path.new(hash_port(), {
         maximum_path_bytes = 2048,
@@ -88,6 +125,9 @@ local function path_service(hash_override)
     local wrapped = {}
     for _, method in ipairs(PATH_METHODS) do
         if method == "context_hash" then
+            --Supplies context hash behavior required by this suite.
+            --@param logical any The logical supplied to the fake service for this scenario.
+            --@return any observed context hash value observed by the scenario assertion.
             function wrapped.context_hash(logical)
                 calls.hashes = calls.hashes + 1
                 calls.paths[#calls.paths + 1] = logical
@@ -104,6 +144,11 @@ local function path_service(hash_override)
     return wrapped, calls, base
 end
 
+--Supplies candidate behavior required by this suite.
+--@param logical_path string Logical Context path supplied to the fixture.
+--@param state table|string Current state observed by the fixture.
+--@param changes table Proposed changes exercised by the case.
+--@return any observed Selected fixture value returned by the fixture.
 local function candidate(logical_path, state, changes)
     local name = assert(logical_path:match("/([^/]+)%.xml$"))
     local value = {
@@ -121,12 +166,21 @@ local function candidate(logical_path, state, changes)
     return value
 end
 
+--Supplies ring behavior required by this suite.
+--@param scope any The scope supplied to the fake service for this scenario.
+--@param candidates any The candidates supplied to the fake service for this scenario.
+--@param changes table Proposed changes exercised by the case.
+--@return any observed Selected fixture value returned by the fixture.
 local function ring(scope, candidates, changes)
     local value = { scope = scope, complete = true, candidates = candidates or {} }
     for key, item in pairs(changes or {}) do value[key] = item end
     return value
 end
 
+--Returns the scanner observation prepared for this suite.
+--@param initial_rings any The initial rings supplied to the fake service for this scenario.
+--@return any observed scanner value observed by the scenario assertion.
+--@return any secondary2 Configured control actions returned by the fixture.
 local function scanner(initial_rings)
     local controls = {
         rings = initial_rings or {},
@@ -139,6 +193,11 @@ local function scanner(initial_rings)
         fail_close = false,
     }
     local port = {}
+    --Simulates begin in this test fixture.
+    --@param origin string Original workspace or request origin.
+    --@param limits any The limits supplied to the fake service for this scenario.
+    --@return boolean accepted Whether begin succeeds in the fixture.
+    --@return table secondary2 Structured fixture record selected by the exercised branch.
     function port.begin(origin, limits)
         controls.begins = controls.begins + 1
         controls.last_origin = origin
@@ -146,6 +205,10 @@ local function scanner(initial_rings)
         if controls.fail_begin then return false, { code = "OpenDenied" } end
         return true, { rings = controls.rings, next = 1, closed = false }
     end
+    --Simulates next ring in this test fixture.
+    --@param handle table|integer Fake resource handle whose state is inspected.
+    --@return boolean accepted Whether next ring succeeds in the fixture.
+    --@return table|any secondary2 Additional status or structured error from the fixture operation.
     function port.next_ring(handle)
         assert(not handle.closed)
         controls.nexts = controls.nexts + 1
@@ -160,6 +223,10 @@ local function scanner(initial_rings)
         end
         return true, current
     end
+    --Simulates close in this test fixture.
+    --@param handle table|integer Fake resource handle whose state is inspected.
+    --@return boolean accepted Whether close succeeds in the fixture.
+    --@return table|nil secondary2 Typed error record with code CloseFailed.
     function port.close(handle)
         assert(not handle.closed)
         handle.closed = true
@@ -170,6 +237,9 @@ local function scanner(initial_rings)
     return port, controls
 end
 
+--Builds validated options for this suite's component fixture.
+--@param changes table Proposed changes exercised by the case.
+--@return any options options used to configure the component under test.
 local function options(changes)
     local value = {
         maximum_scan_candidates = 32,
@@ -181,6 +251,13 @@ local function options(changes)
     return value
 end
 
+--Supplies resolver behavior required by this suite.
+--@param rings any The rings supplied to the fake service for this scenario.
+--@param settings table|nil Fixture settings and scenario overrides.
+--@return any observed resolver value observed by the scenario assertion.
+--@return any secondary2 Additional status or structured error from the fixture operation.
+--@return any secondary3 Additional status or structured error from the fixture operation.
+--@return any secondary4 Additional status or structured error from the fixture operation.
 local function resolver(rings, settings)
     settings = settings or {}
     local path_port, hash_calls, base = path_service(settings.hash_override)
@@ -190,6 +267,11 @@ local function resolver(rings, settings)
     return service, scanner_calls, hash_calls, base
 end
 
+--Supplies catalog snapshot behavior required by this suite.
+--@param physical_path string Physical file path supplied to the fixture.
+--@param kind string Kind of event or resource under test.
+--@param object any The object supplied to the fake service for this scenario.
+--@return table observed Structured fixture record selected by the exercised branch.
 local function catalog_snapshot(physical_path, kind, object)
     return {
         requested_path = physical_path,
@@ -231,6 +313,12 @@ local function catalog_snapshot(physical_path, kind, object)
     }
 end
 
+--Supplies filesystem catalog behavior required by this suite.
+--@param settings table|nil Fixture settings and scenario overrides.
+--@return any observed filesystem catalog value observed by the scenario assertion.
+--@return any secondary2 Additional status or structured error from the fixture operation.
+--@return any secondary3 Additional status or structured error from the fixture operation.
+--@return any secondary4 Configured control actions returned by the fixture.
 local function filesystem_catalog(settings)
     settings = settings or {}
     local root = "/release/__yaca__/CONTEXT"
@@ -271,6 +359,10 @@ local function filesystem_catalog(settings)
         unstable = settings.unstable,
     }
     local filesystem = {}
+    --Supplies the direct inspect observation used by this suite.
+    --@param physical_path string Physical file path supplied to the fixture.
+    --@return boolean accepted Whether direct inspect succeeds in the fixture.
+    --@return table|any secondary2 Additional status or structured error from the fixture operation.
     function filesystem.direct_inspect(physical_path)
         if settings.previous_only and physical_path == root .. "/C/work/Task.xml" then
             local snapshot = catalog_snapshot(physical_path, "file")
@@ -291,9 +383,19 @@ local function filesystem_catalog(settings)
         end
         return false, { code = "NotFound" }
     end
+    --Supplies the direct reverify observation used by this suite.
+    --@param snapshot table Captured immutable state under inspection.
+    --@return boolean accepted Whether direct reverify succeeds in the fixture.
+    --@return any secondary2 Captured snapshot returned by the fixture.
     function filesystem.direct_reverify(snapshot)
         return true, snapshot
     end
+    --Supplies direct walk behavior required by this suite.
+    --@param snapshot table Captured immutable state under inspection.
+    --@param depth integer Current nesting depth of the synthetic value.
+    --@param maximum integer Maximum allowed count or byte length.
+    --@return boolean accepted Whether direct walk succeeds in the fixture.
+    --@return table secondary2 Structured fixture record with generation, entries, complete, partial_reason.
     function filesystem.direct_walk(snapshot, depth, maximum)
         controls.walks = controls.walks + 1
         local entries = {}
@@ -314,6 +416,10 @@ local function filesystem_catalog(settings)
                 end
             end
         end
+        --Supplies an assertion callback for this test scenario.
+        --@param left any First value in the comparison.
+        --@param right any Second value in the comparison.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
         table.sort(entries, function(left, right)
             return left.relative_path < right.relative_path
         end)
@@ -331,6 +437,9 @@ local function filesystem_catalog(settings)
         }
     end
     local store = {}
+    --Supplies inspect writer behavior required by this suite.
+    --@param physical_path string Physical file path supplied to the fixture.
+    --@return table observed Structured fixture record selected by the exercised branch.
     function store.inspect_writer(physical_path)
         if physical_path:sub(-9) == "/Busy.xml" then
             return {
@@ -341,6 +450,10 @@ local function filesystem_catalog(settings)
         end
         return { busy = false, pid = "unknown", metadata_state = "absent" }
     end
+    --Supplies inspect catalog header behavior required by this suite.
+    --@param physical_path string Physical file path supplied to the fixture.
+    --@return table|nil observed Structured fixture record with name, created_at, updated_at; nil on alternate branches.
+    --@return table secondary2 Structured fixture record selected by the exercised branch.
     function store.inspect_catalog_header(physical_path)
         controls.header_paths[#controls.header_paths + 1] = physical_path
         if physical_path:sub(-11) == "/Broken.xml" then
@@ -371,6 +484,10 @@ local function filesystem_catalog(settings)
     return scanner_port, verifier_port, path_port, controls
 end
 
+--Supplies outcome line behavior required by this suite.
+--@param id string|integer Identity selected for the fake operation.
+--@param outcome string Expected terminal outcome.
+--@return any observed outcome line value observed by the scenario assertion.
 local function outcome_line(id, outcome)
     if outcome.tag == "Unique" then
         return table.concat({ id, outcome.tag, outcome.logical_path, outcome.hash }, "\t")
@@ -401,6 +518,9 @@ return {
     cases = {
         {
             name = "construction snapshots narrow ports and mandatory hard limits",
+            --Verifies construction snapshots narrow ports and mandatory hard limits.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify construction snapshots narrow ports and mandatory hard limits.
             run = function()
                 local path_port = path_service()
                 local scanner_port = scanner({})
@@ -409,6 +529,9 @@ return {
                 A.equal(service.capabilities.persistent_index, false)
                 A.equal(service.capabilities.real_time_scan, true)
                 A.equal(service.limits.maximum_scan_candidates, 32)
+                --Executes the action expected to raise in the 'construction snapshots narrow ports and mandatory hard limits' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify construction snapshots narrow ports and mandatory hard limits.
                 A.raises(function() service.limits.maximum_scan_candidates = 100 end,
                     "cannot be modified")
                 A.falsy(index.new({}, options()))
@@ -422,6 +545,9 @@ return {
         },
         {
             name = "path service admits official XML only and compares exact bytes",
+            --Verifies path service admits official XML only and compares exact bytes.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify path service admits official XML only and compares exact bytes.
             run = function()
                 local _, _, base = path_service()
                 local details = assert(base.context_file("/C/工作/任务.xml"))
@@ -440,6 +566,9 @@ return {
         },
         {
             name = "invalid selector and origin fail before any catalog enumeration",
+            --Verifies invalid selector and origin fail before any catalog enumeration.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify invalid selector and origin fail before any catalog enumeration.
             run = function()
                 local service, scan = resolver({})
                 local empty = service.resolve("", "/C/work")
@@ -456,6 +585,9 @@ return {
         },
         {
             name = "name resolution uses nearest ring then byte-stable logical order",
+            --Verifies invalid selector and origin fail before any catalog enumeration.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify invalid selector and origin fail before any catalog enumeration.
             run = function()
                 local rings = {
                     ring("/C/work", {}),
@@ -478,12 +610,18 @@ return {
                 for logical, count in pairs(scan.yielded) do
                     A.equal(count, 1, logical)
                 end
+                --Executes the action expected to raise in the 'name resolution uses nearest ring then byte-stable logical order' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify invalid selector and origin fail before any catalog enumeration.
                 A.raises(function() outcome.logical_path = "/changed.xml" end,
                     "cannot be modified")
             end,
         },
         {
             name = "first damaged name is fail-stop and incomplete ring has precedence",
+            --Verifies first damaged name is fail-stop and incomplete ring has precedence.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify first damaged name is fail-stop and incomplete ring has precedence.
             run = function()
                 local service, scan, hashes = resolver({
                     ring("/C/work", {}),
@@ -516,6 +654,9 @@ return {
         },
         {
             name = "hash scans the complete nearest ring and farther rings cannot overturn it",
+            --Verifies hash scans the complete nearest ring and farther rings cannot overturn it.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify hash scans the complete nearest ring and farther rings cannot overturn it.
             run = function()
                 local target_hash = "1111111111111111"
                 local service, scan, hashes = resolver({
@@ -529,6 +670,9 @@ return {
                         candidate("/D/two.xml"),
                     }),
                 }, {
+                    --Supplies deterministic hash override bytes for the 'hash scans the complete nearest ring and farther rings cannot overturn it' case.
+                    --@param logical any The logical supplied to the fake service for this scenario.
+                    --@return any value Callback value consumed by the enclosing scenario assertion.
                     hash_override = function(logical)
                         if logical == "/C/work/target.xml"
                             or logical == "/D/one.xml"
@@ -551,6 +695,9 @@ return {
         },
         {
             name = "hash collision is bounded and emitted in stable logical order",
+            --Verifies hash collision is bounded and emitted in stable logical order.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify hash collision is bounded and emitted in stable logical order.
             run = function()
                 local collision = "AAAAAAAAAAAAAAAA"
                 local service = resolver({
@@ -560,6 +707,9 @@ return {
                         candidate("/C/work/m.xml"),
                     }),
                 }, {
+                    --Supplies deterministic hash override bytes for the 'hash collision is bounded and emitted in stable logical order' case.
+                    --@param none No arguments; this closure uses its captured fixture state.
+                    --@return any value Callback value consumed by the enclosing scenario assertion.
                     hash_override = function() return collision end,
                     options = { maximum_collision_candidates = 2 },
                 })
@@ -570,17 +720,27 @@ return {
                     outcome.candidates[1].logical_path,
                     outcome.candidates[2].logical_path,
                 }, { "/C/work/a.xml", "/C/work/m.xml" })
+                --Executes the action expected to raise in the 'hash collision is bounded and emitted in stable logical order' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify hash collision is bounded and emitted in stable logical order.
                 A.raises(function() outcome.candidates[1].hash = "changed" end,
                     "cannot be modified")
             end,
         },
         {
             name = "delete resolver includes corrupt targets in collision checks without granting open authority",
+            --Verifies delete resolver includes corrupt targets in collision checks without granting open authority.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify delete resolver includes corrupt targets in collision checks without granting open authority.
             run = function()
                 local collision = "CCCCCCCCCCCCCCCC"
                 local service = resolver({ ring("/C/work", {
                     candidate("/C/work/Good.xml"), candidate("/C/work/Bad.xml", "corrupt"),
-                }) }, { hash_override = function() return collision end })
+                }) }, {
+                    --Supplies deterministic hash override bytes for the 'delete resolver includes corrupt targets in collision checks without granting open authority' case.
+                    --@param none No arguments; this closure uses its captured fixture state.
+                    --@return any value Callback value consumed by the enclosing scenario assertion.
+                    hash_override = function() return collision end })
                 A.equal(service.resolve(collision, "/C/work").tag, "Unique")
                 A.equal(service.resolve_for_delete(collision, "/C/work").tag, "HashCollision")
                 A.equal(service.resolve("Bad", "/C/work").tag, "MatchedUnavailable")
@@ -593,8 +753,14 @@ return {
         },
         {
             name = "hash unavailable mixtures follow usable-count rules",
+            --Verifies hash unavailable mixtures follow usable-count rules.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify hash unavailable mixtures follow usable-count rules.
             run = function()
                 local target_hash = "BBBBBBBBBBBBBBBB"
+                --Supplies collision path behavior required by the 'hash unavailable mixtures follow usable-count rules' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return any observed collision path value observed by the scenario assertion.
                 local function collision_path() return target_hash end
                 local unavailable_service = resolver({
                     ring("/C/work", {
@@ -619,6 +785,9 @@ return {
         },
         {
             name = "not found performs no name hashes and fresh scans observe live changes",
+            --Verifies not found performs no name hashes and fresh scans observe live changes.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify not found performs no name hashes and fresh scans observe live changes.
             run = function()
                 local service, scan, hashes = resolver({
                     ring("/C/work", { candidate("/C/work/Other.xml") }),
@@ -640,6 +809,9 @@ return {
         },
         {
             name = "caps duplicates malformed candidates and scanner faults fail closed",
+            --Verifies caps duplicates malformed candidates and scanner faults fail closed.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify caps duplicates malformed candidates and scanner faults fail closed.
             run = function()
                 local capped = resolver({
                     ring("/C/work", {
@@ -676,6 +848,9 @@ return {
         },
         {
             name = "status hashes the bound logical path without opening a scanner",
+            --Verifies status hashes the bound logical path without opening a scanner.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify status hashes the bound logical path without opening a scanner.
             run = function()
                 local service, scan, hashes = resolver({
                     ring("/", { candidate("/C/work/Alpha.xml") }),
@@ -689,6 +864,9 @@ return {
         },
         {
             name = "previous-only files are discoverable for repair without becoming ordinary Contexts",
+            --Verifies status hashes the bound logical path without opening a scanner.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify status hashes the bound logical path without opening a scanner.
             run = function()
                 local scan, verifier, path_port, controls = filesystem_catalog({ previous_only = true })
                 local catalog = assert(index.new({ path = path_port, scanner = scan, verifier = verifier }, options()))
@@ -712,6 +890,9 @@ return {
         },
         {
             name = "filesystem scanner yields stable incremental rings without reading locks",
+            --Verifies filesystem scanner yields stable incremental rings without reading locks.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify filesystem scanner yields stable incremental rings without reading locks.
             run = function()
                 local scanner_port, verifier_port, path_port, controls = filesystem_catalog()
                 local began, handle = scanner_port.begin("/C/work", {
@@ -773,6 +954,9 @@ return {
         },
         {
             name = "filesystem scanner rejects a directory generation change",
+            --Verifies filesystem scanner rejects a directory generation change.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify filesystem scanner rejects a directory generation change.
             run = function()
                 local scanner_port = filesystem_catalog({ unstable = true })
                 local _, handle = scanner_port.begin("/C/work", {
@@ -791,6 +975,9 @@ return {
         },
         {
             name = "farther ring fails when an already-scanned nearer ring changes",
+            --Verifies filesystem scanner rejects a directory generation change.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify filesystem scanner rejects a directory generation change.
             run = function()
                 local scanner_port, _, _, controls = filesystem_catalog()
                 local _, handle = scanner_port.begin("/C/work", {
@@ -809,6 +996,9 @@ return {
         },
         {
             name = "catalog-root origin covers every nested Context in one ring",
+            --Verifies farther ring fails when an already-scanned nearer ring changes.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify farther ring fails when an already-scanned nearer ring changes.
             run = function()
                 local scanner_port = filesystem_catalog()
                 local _, handle = scanner_port.begin("/", {
@@ -830,6 +1020,9 @@ return {
         },
         {
             name = "resolver outcome corpus matches the deterministic golden file",
+            --Verifies resolver outcome corpus matches the deterministic golden file.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify resolver outcome corpus matches the deterministic golden file.
             run = function()
                 local lines = {}
                 local name_service = resolver({
@@ -854,7 +1047,11 @@ return {
                         candidate("/C/work/z.xml"),
                         candidate("/C/work/a.xml"),
                     }),
-                }, { hash_override = function() return collision end })
+                }, {
+                    --Supplies deterministic hash override bytes for the 'resolver outcome corpus matches the deterministic golden file' case.
+                    --@param none No arguments; this closure uses its captured fixture state.
+                    --@return any value Callback value consumed by the enclosing scenario assertion.
+                    hash_override = function() return collision end })
                 lines[#lines + 1] = outcome_line(
                     "hash-collision",
                     collision_service.resolve(collision, "/C/work")

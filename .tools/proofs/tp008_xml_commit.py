@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# Author: WaterRun
+# Date: 2026-09-23
+# File: tp008_xml_commit.py
+# Description: TP-008 modern-host proof for full-XML publication and recovery.
+
 """TP-008 modern-host proof for full-XML publication and recovery.
 
 The proof injects real process exits at publication boundaries. It exercises
@@ -25,6 +30,10 @@ CRASH_EXIT = 91
 LOCK_CONFLICT_EXIT = 73
 
 
+# Raises on a failed proof assertion with a scenario-specific message.
+#@param value object Candidate value under validation.
+#@param message str Assertion or diagnostic message.
+#@return None No value; the operation updates proof state or raises on failure.
 def check(value: bool, message: str) -> None:
     global ASSERTIONS
     ASSERTIONS += 1
@@ -32,10 +41,19 @@ def check(value: bool, message: str) -> None:
         raise AssertionError(f"assertion {ASSERTIONS} failed: {message}")
 
 
+# Asserts that an observed value equals its expected proof value.
+#@param actual object Observed value or fault point.
+#@param expected object Expected observation or child exit state.
+#@param message str Assertion or diagnostic message.
+#@return None No value; the operation updates proof state or raises on failure.
 def equal(actual, expected, message: str) -> None:
     check(actual == expected, f"{message} (expected={expected!r} actual={actual!r})")
 
 
+# Validates the candidate Context XML against its Relax NG schema.
+#@param path Path|str Input file or package path under inspection.
+#@param rng Path Relax NG schema file path.
+#@return bool valid Whether XML validates against the selected schema.
 def validate_xml(path: Path, rng: Path) -> bool:
     result = subprocess.run(
         ["xmllint", "--nonet", "--noout", "--relaxng", str(rng), str(path)],
@@ -45,6 +63,10 @@ def validate_xml(path: Path, rng: Path) -> bool:
     return result.returncode == 0
 
 
+# Writes a complete payload to the selected file descriptor.
+#@param descriptor int Open file descriptor receiving the payload.
+#@param payload bytes Complete staged Context XML bytes.
+#@return None No value; the operation updates proof state or raises on failure.
 def write_all(descriptor: int, payload: bytes) -> None:
     view = memoryview(payload)
     while view:
@@ -54,6 +76,9 @@ def write_all(descriptor: int, payload: bytes) -> None:
         view = view[written:]
 
 
+# Flushes the containing directory after a publication change.
+#@param path Path|str Input file or package path under inspection.
+#@return None No value; the operation updates proof state or raises on failure.
 def fsync_directory(path: Path) -> None:
     descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
     try:
@@ -62,23 +87,39 @@ def fsync_directory(path: Path) -> None:
         os.close(descriptor)
 
 
+# Exits a child process at the selected durability fault point.
+#@param actual object Observed value or fault point.
+#@param selected str Fault point selected for child termination.
+#@return None result No value; exits the child at the selected fault point.
 def crash_if(actual: str, selected: str) -> None:
     if actual == selected:
         os._exit(CRASH_EXIT)
 
 
+# Derives the lock-file path for an official Context XML.
+#@param official Path Official Context XML path.
+#@return Path path Lock path corresponding to the official Context.
 def lock_path_for(official: Path) -> Path:
     return official.with_name(official.name + ".yaca-lock")
 
 
+# Derives a unique staged-file path for a Context publication.
+#@param official Path Official Context XML path.
+#@return Path path Unique staging path for the Context publication.
 def temp_path_for(official: Path) -> Path:
     return official.with_name(official.name + ".yaca-tmp-proof")
 
 
+# Derives the previous-file recovery path for a Context XML.
+#@param official Path Official Context XML path.
+#@return Path path Recovery path corresponding to the official Context.
 def previous_path_for(official: Path) -> Path:
     return official.with_name(official.name + ".yaca-prev")
 
 
+# Acquires the exclusive Context publication lock.
+#@param path Path|str Input file or package path under inspection.
+#@return int descriptor Open descriptor holding the exclusive Context lock.
 def acquire_lock(path: Path) -> int:
     descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
     try:
@@ -89,6 +130,12 @@ def acquire_lock(path: Path) -> int:
     return descriptor
 
 
+# Runs one crash-injectable Context commit in a child process.
+#@param official Path Official Context XML path.
+#@param payload bytes Complete staged Context XML bytes.
+#@param rng Path Relax NG schema file path.
+#@param fault str|None Injected durability fault point, if any.
+#@return None result No value; stages and publishes one Context revision or exits at a fault hook.
 def child_commit(official: Path, payload: Path, rng: Path, fault: str) -> None:
     lock = lock_path_for(official)
     temporary = temp_path_for(official)
@@ -128,6 +175,10 @@ def child_commit(official: Path, payload: Path, rng: Path, fault: str) -> None:
     os.close(lock_descriptor)
 
 
+# Publishes a staged Context only when no destination exists.
+#@param staged Path Fully written staging file.
+#@param target str|dict Selected release target or destination.
+#@return None result No value; links the staged file only when the destination is absent.
 def publish_new_no_replace(staged: Path, target: Path) -> None:
     # link(2) is an atomic no-replace name publication on this same-filesystem
     # modern-host proof. Target adapters must prove their own primitive.
@@ -135,6 +186,13 @@ def publish_new_no_replace(staged: Path, target: Path) -> None:
     staged.unlink()
 
 
+# Runs one crash-injectable Context move across mirror paths.
+#@param old_official Path Original official Context path.
+#@param new_official Path Replacement official Context path.
+#@param payload bytes Complete staged Context XML bytes.
+#@param rng Path Relax NG schema file path.
+#@param fault str|None Injected durability fault point, if any.
+#@return None result No value; moves the Context or exits at the injected durability hook.
 def child_move(old_official: Path, new_official: Path, payload: Path, rng: Path, fault: str) -> None:
     lock = lock_path_for(old_official)
     temporary = temp_path_for(new_official)
@@ -182,6 +240,9 @@ def child_move(old_official: Path, new_official: Path, payload: Path, rng: Path,
     os.close(lock_descriptor)
 
 
+# Removes known temporary and previous files for a Context fixture.
+#@param official Path Official Context XML path.
+#@return None result No value; removes known lock, staging, and previous-file fixtures.
 def remove_auxiliary(official: Path) -> None:
     for path in (temp_path_for(official), previous_path_for(official), lock_path_for(official)):
         try:
@@ -190,6 +251,10 @@ def remove_auxiliary(official: Path) -> None:
             pass
 
 
+# Recovers a Context after an interrupted same-path commit.
+#@param official Path Official Context XML path.
+#@param rng Path Relax NG schema file path.
+#@return str state Recovery action selected for an interrupted commit.
 def recover_commit(official: Path, rng: Path) -> str:
     temporary = temp_path_for(official)
     previous = previous_path_for(official)
@@ -206,6 +271,11 @@ def recover_commit(official: Path, rng: Path) -> str:
     return result
 
 
+# Recovers a Context after an interrupted move.
+#@param old_official Path Original official Context path.
+#@param new_official Path Replacement official Context path.
+#@param rng Path Relax NG schema file path.
+#@return str state Recovery action selected for an interrupted move.
 def recover_move(old_official: Path, new_official: Path, rng: Path) -> str:
     previous = previous_path_for(old_official)
     new_temporary = temp_path_for(new_official)
@@ -241,11 +311,26 @@ def recover_move(old_official: Path, new_official: Path, rng: Path) -> str:
     return result
 
 
+# Replaces one exact XML fragment while preserving other bytes.
+#@param data bytes|str Input bytes or text under examination.
+#@param old object The old supplied to this proof operation.
+#@param new object The new supplied to this proof operation.
+#@param message str Assertion or diagnostic message.
+#@return bytes updated Source bytes with one required XML fragment replaced.
 def replace_once(data: bytes, old: bytes, new: bytes, message: str) -> bytes:
     equal(data.count(old), 1, message + " source occurs once")
     return data.replace(old, new, 1)
 
 
+# Builds a mutated Context XML variant for fault injection.
+#@param source str|Path Source file or URL being inspected.
+#@param generation int Context generation number encoded in XML.
+#@param updated_at str Context update timestamp encoded in XML.
+#@param event_type str Context history event kind.
+#@param fields dict Fields encoded in the generated Context event.
+#@param name str Selected fixture, component, or tool name.
+#@param marker str Unique event marker used by recovery assertions.
+#@return bytes xml Context XML bytes containing the selected generation and event.
 def variant(
     source: bytes,
     *,
@@ -295,6 +380,10 @@ def variant(
     return replace_once(data, b"  </Facts>", event + b"  </Facts>", "Facts close")
 
 
+# Runs a fault-injection child and checks its expected exit.
+#@param arguments list[str] Argument vector for the child command.
+#@param expected object Expected observation or child exit state.
+#@return int status Exit status of the fault-injection child process.
 def run_child(arguments: list[str], expected=(0, CRASH_EXIT)) -> int:
     result = subprocess.run(
         [sys.executable, str(Path(__file__).resolve()), "--child", *arguments],
@@ -305,10 +394,16 @@ def run_child(arguments: list[str], expected=(0, CRASH_EXIT)) -> int:
     return result.returncode
 
 
+# Computes a SHA-256 digest for the proof payload.
+#@param data bytes|str Input bytes or text under examination.
+#@return str digest Hexadecimal SHA-256 digest of the supplied data.
 def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+# Reads verified Context header values from an XML file.
+#@param path Path|str Input file or package path under inspection.
+#@return dict header Generation and name parsed from the Context header.
 def parse_header(path: Path) -> dict[str, str | None]:
     root = ET.parse(path).getroot()
     header = root.find("Header")
@@ -323,16 +418,28 @@ def parse_header(path: Path) -> dict[str, str | None]:
     }
 
 
+# Enumerates Context files found beneath the fixture directory.
+#@param directory Path Directory whose Context entries are listed.
+#@return list[str] names Sorted Context XML filenames in the fixture directory.
 def catalog(directory: Path) -> list[str]:
     return sorted(path.name for path in directory.glob("*.xml") if path.is_file())
 
 
+# Checks that publication left no temporary or previous files.
+#@param official Path Official Context XML path.
+#@return None result No value; asserts the absence of transaction sidecars.
 def assert_no_auxiliary(official: Path) -> None:
     check(not temp_path_for(official).exists(), "temporary generation is cleaned")
     check(not previous_path_for(official).exists(), "previous generation is cleaned")
     check(not lock_path_for(official).exists(), "proof lock artifact is cleaned")
 
 
+# Exercises all same-path Context commit fault points.
+#@param root Path Isolated proof or staging root.
+#@param old object The old supplied to this proof operation.
+#@param new object The new supplied to this proof operation.
+#@param rng Path Relax NG schema file path.
+#@return tuple evidence Fault-hook count and digest of the committed Context.
 def commit_fault_matrix(root: Path, old: bytes, new: bytes, rng: Path) -> tuple[int, str]:
     hooks = [
         "after-lock",
@@ -370,6 +477,14 @@ def commit_fault_matrix(root: Path, old: bytes, new: bytes, rng: Path) -> tuple[
     return len(hooks), new_digest
 
 
+# Exercises Context move faults, including cross-directory behavior.
+#@param root Path Isolated proof or staging root.
+#@param label str Scenario label used in diagnostics.
+#@param old object The old supplied to this proof operation.
+#@param new object The new supplied to this proof operation.
+#@param rng Path Relax NG schema file path.
+#@param cross_directory object The cross directory supplied to this proof operation.
+#@return int count Number of Context move fault hooks exercised.
 def move_fault_matrix(
     root: Path,
     label: str,
@@ -427,6 +542,9 @@ def move_fault_matrix(
     return len(hooks)
 
 
+# Checks mutual exclusion around a live Context writer.
+#@param root Path Isolated proof or staging root.
+#@return None result No value; assertions verify writer lock exclusion.
 def lock_scenario(root: Path) -> None:
     lock = root / "lock" / "Context.xml.yaca-lock"
     lock.parent.mkdir()
@@ -438,6 +556,11 @@ def lock_scenario(root: Path) -> None:
     lock.unlink()
 
 
+# Checks malformed Context and failed-publication rejection.
+#@param root Path Isolated proof or staging root.
+#@param old object The old supplied to this proof operation.
+#@param rng Path Relax NG schema file path.
+#@return tuple counts Rejected unknown outcomes and auto-replayed operations.
 def negative_scenario(root: Path, old: bytes, rng: Path) -> tuple[int, int]:
     case = root / "negative"
     case.mkdir()
@@ -481,6 +604,9 @@ def negative_scenario(root: Path, old: bytes, rng: Path) -> tuple[int, int]:
     return len(unknown), len(auto_replayed)
 
 
+# Checks cleanup of deleted Context transaction files.
+#@param root Path Isolated proof or staging root.
+#@return int count Number of deleted Context files observed by the catalog.
 def deletion_scenario(root: Path) -> int:
     case = root / "delete"
     case.mkdir()
@@ -497,6 +623,9 @@ def deletion_scenario(root: Path) -> int:
     return len(enumerated)
 
 
+# Checks Context move refusal across filesystem devices.
+#@param root Path Isolated proof or staging root.
+#@return str outcome EXDEV refusal or explicit host-unobservable state.
 def cross_device_scenario(root: Path) -> str:
     shared_memory = Path("/dev/shm")
     if not shared_memory.is_dir() or root.stat().st_dev == shared_memory.stat().st_dev:
@@ -515,6 +644,12 @@ def cross_device_scenario(root: Path) -> str:
     return "EXDEV"
 
 
+# Checks recovered Context identities and event history.
+#@param old_path object The old path supplied to this proof operation.
+#@param manual_path object The manual path supplied to this proof operation.
+#@param auto_path object The auto path supplied to this proof operation.
+#@param rebind_path object The rebind path supplied to this proof operation.
+#@return None result No value; asserts recovered identity and history semantics.
 def inspect_semantics(old_path: Path, manual_path: Path, auto_path: Path, rebind_path: Path) -> None:
     old = parse_header(old_path)
     manual = parse_header(manual_path)
@@ -533,6 +668,10 @@ def inspect_semantics(old_path: Path, manual_path: Path, auto_path: Path, rebind
     check(rebind["updated"] != old["updated"], "successful rebind advances UpdatedAt")
 
 
+# Runs the parent process's Context commit proof matrix.
+#@param fixture object The fixture supplied to this proof operation.
+#@param rng Path Relax NG schema file path.
+#@return None result No value; prints the Context fault-matrix evidence.
 def parent_main(fixture: Path, rng: Path) -> None:
     check(shutil.which("xmllint") is not None, "xmllint is installed")
     check(fixture.is_file(), "context fixture exists")
@@ -630,6 +769,9 @@ def parent_main(fixture: Path, rng: Path) -> None:
     print("status=PASS")
 
 
+# Dispatches one fault-injection child operation.
+#@param arguments list[str] Argument vector for the child command.
+#@return None result No value; dispatches a child fault operation by argv.
 def child_main(arguments: list[str]) -> None:
     mode = arguments[0]
     if mode == "commit":

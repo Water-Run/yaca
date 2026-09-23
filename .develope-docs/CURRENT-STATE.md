@@ -1,23 +1,48 @@
 # 当前状态分析
 
-更新日期：2026-09-19（发布）
+更新日期：2026-09-23
 
-**v0.1 已按 D-072 发布**：Release Gate R = passed（2026-09-19），
-release_authorized = true，机读 phase = `released`。资格基线为三个实测
-环境（Server 2008 实机 / Windows 11 实机 / CentOS 7.9 容器），各有资格
-构建、全测试、真实服务商在线验收与干净机旅程证据；XP SP3、Win7 SP1、
-裸机 CentOS 7 为后续增强项。完整 Lua suite 591/591；validators
-7614/56/557 + documentation-truth；TP-003/006/008/010 与 RP-001 PASS。
+## 当前方向与复核
 
-2026-09-19：C33/C34 工具收尾（Linux zip 装配、旅程驱动、文档真源
-守卫、三包干净机试跑全过、首跑缺陷修复、套件 591/591）。
-三目标各有完整基本可用+在线验收——win2008（win32-x86）、
-evader-admin/Windows 11（win64-x86_64 首次实机旅程）、CentOS 7.9.2009
-容器（linux-x86_64 锁定工具链资格构建 full_tests=575/575 + 安装验收）。
-新增 `win64-x86_64` 构建路径与 C33 零表面检查器，完整 suite 584/584。两台机器的 Stage 1/2/3、工具/审批/恢复
-旅程与产物哈希见
-[两测试系统验收](TWO-TARGET-ACCEPTANCE-2026-09-19.md)。Win11 不等于
-Win7 SP1，三目标资格与 Gate R 状态不变。
+负责人明确定位为通用 Agent，重视老设备兼容、便携和开箱即用；U 盘排障为典型场景。
+内置同版本、可被 Agent 调用的 Lua；可选 `tools/` 按环境携带 Python、SSH 等，
+只说明可用能力，不作为核心依赖。另要求研究 MiniMax Code、ZCode 和 DeepSeek Harness。
+定位、包结构建议、网络/终端边界及 F0--F6 顺序见
+[通用 Agent 路线](PRODUCT-ROADMAP-2026-09-22.md)；原话归档见 D-072。
+[改动范围与实施候选](MAJOR-REDESIGN-PLAN-2026-09-22.md)已按负责人再次说明收紧：
+产品定位和主体架构延续原版；明确增量为可调用 Lua 与可选 tools 说明，其他工作按
+兼容性缺口修补/验收。exec 新 schema、改默认审查、拆模块、数据格式迁移
+均非本轮前置条件，只有实际问题需要时才采用。
+
+D-073 进一步明确：Lua 解释器仍内嵌 yaca；每目标 clean/std/full 三档，clean 仅 yaca，
+std 附 Python 2.x/SSH 等，full 为 Git/Python 3/编译工具等开发工具箱。
+同平台三档核心相同；独立 Lua 文件/onedir 候选撤回。
+[默认工具清单](../release/TOOL-BUNDLES.md)已按平台给出候选版本，正式资格尚待完成。
+
+本轮已实现内嵌 `--lua`、可选 tools 信息、首次启动向导、Cygwin PTY 输入与输出
+修复、clean/std/full 装配程序和默认版本目录；产品、Prompt、TUI、发行机读契约同步更新。
+CentOS 7.9 完整 suite **581/581** 通过，单文件内嵌解释器已运行。
+指定 Server 2008 的 PTY 探针 **11 项**、隐藏输入和终端恢复通过。
+详见[本轮实现记录](PORTABLE-IMPLEMENTATION-2026-09-22.md)。
+
+D-074 已补为正式内置 `lua` 工具（同版本内嵌解释器，Shell 权限与原执行生命周期），
+并将 `.side` 改为 `.ask` 纯问答入口。最新源码完整 suite **584/584** 通过；N16
+发行候选的旧证据与本次源码状态分开记录，正在重建指定服务器候选。
+
+2026-09-23 的当前源码已把 clean 包检查器限定为仅含主程序，依赖锁、readiness、
+中英文 README 和 quickstart 均明确三目标三档资格待完成。完整 Lua suite **632/632**，
+readiness **559 条断言**与公开文档真值检查 **5 项**通过；这些只证明当前源码回归，
+不证明九个发行包已经建成或目标资格已通过。D-076 新增全仓代码注释规范，
+见[编码规范](CODING-STANDARD.md)及[Review 记录](CODE-REVIEW-2026-09-22.md)。
+当前结构检查仍报告 **11030 条缺项**，因此注释验收尚未通过。R21 的 FAT32
+关闭后时间戳竞争与 R22 的替换清理竞争已修复并有定向回归，重建目标产物后的复验仍待做。
+
+[最初复核](BASELINE-REVIEW-2026-09-22.md)记录的是历史 N13，不能代表新候选。
+[上游源码对照](references/agent-loop-source-review-2026-09-22.md)已固定三个提交。
+后续重点为各目标工具闭包、文件/编码/容量与恢复，以及 C32--C34。
+`implemented-unqualified` 与 Gate R closed 保持不变；下文旧日期条目保留为历史证据。
+
+## 2026-09-16 实现基线
 
 本轮接续 ZCode 的 N8 在线自检实现，完成 Model 管理器显式联网测试、
 Stage 1 实际文件发布探针、在线 Stage 2/3 的生产组合，以及 M05-57
@@ -160,7 +185,10 @@ Linux 包依赖构建环境中的匹配 Lua 5.5 头文件与共享库。为了�
 
 依赖随包 curl 等工具有利于旧系统兼容，但必须定义：工具查找顺序、版本契约、输出编码、超时、退出码、证书路径以及用户自行替换工具后的支持边界。
 
-### Context 管理交互的入口现状（2026-09-14 复核）
+### Context 管理交互的历史入口缺口（2026-09-14 实现前复核）
+
+以下为实现前的历史观察，已经由 N2--N4 及 2026-09-16 的管理器验收取代，
+不代表当前 controller 状态。
 
 `--context-repl` 仍不是交互回路。`management_service`（`src/main.lua:4043`）
 对该动作只做一次目录快照并返回行集；`default_runtime_dispatch`

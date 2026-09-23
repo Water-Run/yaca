@@ -1,7 +1,7 @@
 --[[
-File: permission_test.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-09-23
+File: permission_test.lua
 Description: Verifies deterministic tool Permission and stale one-action approvals.
 ]]
 
@@ -12,13 +12,22 @@ local SHA = assert(loadfile(
     _ENV
 ))()
 
+--Loads a source module into an isolated per-case environment.
+--@param name string Module, Model, or resource name selected by the case.
+--@param cache table Per-case module cache preserving isolated imports.
+--@return any module Module export loaded in the isolated source environment.
 local function load_module(name, cache)
     cache = cache or {}
     if cache[name] then return cache[name] end
     local environment = {}
     for key, value in pairs(_ENV) do environment[key] = value end
+    --Resolves an imported Lua module through the isolated test loader.
+    --@param dependency string Source module requested from the isolated loader.
+    --@return any value Callback value consumed by the enclosing scenario assertion.
     environment.require = function(dependency) return load_module(dependency, cache) end
     environment._G = environment
+    --@metatable environment Test-owned lookup and mutation contract for the current case.
+    --@field __index any Fallback table or function used for missing fixture keys.
     setmetatable(environment, { __index = _ENV })
     local chunk, load_error = loadfile(YACA_TEST_ROOT .. "/src/" .. name .. ".lua", "t", environment)
     A.truthy(chunk, load_error)
@@ -27,18 +36,34 @@ local function load_module(name, cache)
     return result
 end
 
+--Constructs an incremental SHA-256 port backed by the reference digest.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return table port Incremental SHA-256 fixture port.
 local function hash_port()
     return {
+        --Computes or records sha256 start data for this suite.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return table record Fixture record emitted by the scenario callback.
         sha256_start = function() return { parts = {}, closed = false } end,
+        --Computes or records sha256 update data for this suite.
+        --@param handle table|integer Fake resource handle whose state is inspected.
+        --@param bytes string Byte chunk supplied to the fake I/O port.
+        --@return boolean accepted Whether the fake callback accepts this scenario.
         sha256_update = function(handle, bytes)
             if handle.closed then return false end
             handle.parts[#handle.parts + 1] = bytes
             return true
         end,
+        --Computes or records sha256 finish data for this suite.
+        --@param handle table|integer Fake resource handle whose state is inspected.
+        --@return any|nil value Callback value consumed by the enclosing scenario assertion.
         sha256_finish = function(handle)
             if handle.closed then return nil end
             return SHA.digest(table.concat(handle.parts))
         end,
+        --Computes or records sha256 close data for this suite.
+        --@param handle table|integer Fake resource handle whose state is inspected.
+        --@return boolean accepted Whether the fake callback accepts this scenario.
         sha256_close = function(handle)
             if handle.closed then return false end
             handle.closed = true
@@ -47,6 +72,9 @@ local function hash_port()
     }
 end
 
+--Supplies permission options behavior required by this suite.
+--@param overrides table|nil Per-case overrides of default fixture behavior.
+--@return any observed permission options value observed by the scenario assertion.
 local function permission_options(overrides)
     local result = {
         maximum_name_bytes = 128,
@@ -60,6 +88,10 @@ local function permission_options(overrides)
     return result
 end
 
+--Supplies services behavior required by this suite.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return any observed services value observed by the scenario assertion.
+--@return any secondary2 Additional status or structured error from the fixture operation.
 local function services()
     local cache = {}
     local safety_module = load_module("safety", cache)
@@ -72,6 +104,9 @@ local function services()
     return permission, safety
 end
 
+--Supplies matrix behavior required by this suite.
+--@param values table Candidate values supplied to the fixture operation.
+--@return any observed matrix value observed by the scenario assertion.
 local function matrix(values)
     local result = {}
     for key, value in pairs(values) do result[key] = value end
@@ -94,6 +129,13 @@ local READONLY = {
     OutsideWorkspace = "deny",
 }
 
+--Builds the profile values used by this suite.
+--@param service table Service port exercised by the case.
+--@param name string Module, Model, or resource name selected by the case.
+--@param values table Candidate values supplied to the fixture operation.
+--@param generation table Validated configuration generation.
+--@param system_prompt any The system prompt supplied to the fake service for this scenario.
+--@return any observed profile value observed by the scenario assertion.
 local function profile(service, name, values, generation, system_prompt)
     return assert(service:profile({
         name = name,
@@ -104,6 +146,12 @@ local function profile(service, name, values, generation, system_prompt)
     }))
 end
 
+--Simulates the evaluate port for this suite.
+--@param service table Service port exercised by the case.
+--@param permission_profile any The permission profile supplied to the fake service for this scenario.
+--@param tool table|string Tool selected for this scenario.
+--@param overrides table|nil Per-case overrides of default fixture behavior.
+--@return any observed evaluate value observed by the scenario assertion.
 local function evaluate(service, permission_profile, tool, overrides)
     local action = {
         tool = tool,
@@ -116,6 +164,9 @@ local function evaluate(service, permission_profile, tool, overrides)
     return assert(service:evaluate(permission_profile, action))
 end
 
+--Supplies approval binding behavior required by this suite.
+--@param overrides table|nil Per-case overrides of default fixture behavior.
+--@return any observed approval binding value observed by the scenario assertion.
 local function approval_binding(overrides)
     local result = {
         schema_version = "tool-write-v1",
@@ -132,6 +183,9 @@ local function approval_binding(overrides)
     return result
 end
 
+--Supplies decision rank behavior required by this suite.
+--@param value any Candidate whose acceptance or transformation the test checks.
+--@return any observed decision rank value observed by the scenario assertion.
 local function decision_rank(value)
     return ({ allow = 0, confirm = 1, deny = 2 })[value]
 end
@@ -140,7 +194,10 @@ return {
     name = "unit/permission",
     cases = {
         {
-            name = "eight tools and five capabilities exactly project the machine contract",
+            name = "nine tools and five capabilities exactly project the machine contract",
+            --Verifies nine tools and five capabilities exactly project the machine contract.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify nine tools and five capabilities exactly project the machine contract.
             run = function()
                 local service = services()
                 local contract = assert(loadfile(
@@ -174,6 +231,9 @@ return {
         },
         {
             name = "frozen permission fixture covers inside outside rename and opaque exec",
+            --Verifies frozen permission fixture covers inside outside rename and opaque exec.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify frozen permission fixture covers inside outside rename and opaque exec.
             run = function()
                 local service = services()
                 local profiles = {
@@ -190,7 +250,7 @@ return {
                         outside_workspace = fixture.outside,
                     })
                     A.equal(observed.decision, fixture.expected, fixture.id)
-                    if fixture.tool == "exec" then
+                    if fixture.tool == "exec" or fixture.tool == "lua" then
                         A.deep_equal(observed.required_capabilities, { "Shell" })
                         A.equal(observed.outside_workspace_effective, false)
                         A.equal(observed.shell_scope, "opaque-uncontained")
@@ -205,6 +265,9 @@ return {
         },
         {
             name = "outside direct targets fold stricter while shell and provider implications stay honest",
+            --Verifies outside direct targets fold stricter while shell and provider implications stay honest.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify outside direct targets fold stricter while shell and provider implications stay honest.
             run = function()
                 local service = services()
                 local custom = profile(service, "Custom", {
@@ -229,6 +292,14 @@ return {
                 A.equal(service.capabilities.direct_network, false)
                 A.equal(service.capabilities.shell_outside_workspace_containment, false)
 
+                local lua = evaluate(service, custom, "lua", { outside_workspace = true })
+                A.equal(lua.decision, "allow")
+                A.equal(lua.target_kind, "opaque-code")
+                A.deep_equal(lua.required_capabilities, { "Shell" })
+                A.equal(lua.outside_workspace_effective, false)
+                A.equal(lua.shell_scope, "opaque-uncontained")
+                A.equal(evaluate(service, profile(service, "ReadonlyLua", READONLY), "lua").decision, "deny")
+
                 local reserved = evaluate(service, custom, "read", { reserved_tree = true })
                 A.equal(reserved.decision, "deny")
                 A.equal(reserved.hard_denial, "ReservedTree")
@@ -236,6 +307,9 @@ return {
         },
         {
             name = "profile names descriptions prompts and caller mutation never authorize",
+            --Verifies profile names descriptions prompts and caller mutation never authorize.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify profile names descriptions prompts and caller mutation never authorize.
             run = function()
                 local service = services()
                 local caller_matrix = matrix(READONLY)
@@ -260,11 +334,17 @@ return {
                 }, "config-1", "Never write")
                 A.equal(evaluate(service, named_readonly, "write").decision, "allow")
                 A.equal(evaluate(service, named_readonly, "exec").decision, "allow")
+                --Executes the action expected to raise in the 'Trusted' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify profile names descriptions prompts and caller mutation never authorize.
                 A.raises(function() misleading.matrix.Write = "allow" end, "cannot be modified")
             end,
         },
         {
             name = "DoubleCheck review can only maintain tighten or block deterministic Permission",
+            --Verifies doubleCheck review can only maintain tighten or block deterministic Permission.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify doubleCheck review can only maintain tighten or block deterministic Permission.
             run = function()
                 local service = services()
                 local std = profile(service, "Std", STD)
@@ -310,6 +390,9 @@ return {
         },
         {
             name = "approval digest binds every safety input and any change is stale",
+            --Verifies approval digest binds every safety input and any change is stale.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify approval digest binds every safety input and any change is stale.
             run = function()
                 local service = services()
                 local std = profile(service, "Std", STD)
@@ -369,11 +452,17 @@ return {
                     original_binding
                 ))
                 A.falsy(changed_double_snapshot.snapshot_digest == original.snapshot_digest)
+                --Executes the action expected to raise in the 'approval digest binds every safety input and any change is stale' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify approval digest binds every safety input and any change is stale.
                 A.raises(function() original.canonical_target = "b" end, "cannot be modified")
             end,
         },
         {
             name = "approval is current-process one-action evidence and cannot persist or replay",
+            --Verifies approval is current-process one-action evidence and cannot persist or replay.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify approval is current-process one-action evidence and cannot persist or replay.
             run = function()
                 local service = services()
                 local std = profile(service, "Std", STD)
@@ -416,6 +505,9 @@ return {
         },
         {
             name = "public binding digest is typed ordered immutable and unambiguous",
+            --Verifies public binding digest is typed ordered immutable and unambiguous.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify public binding digest is typed ordered immutable and unambiguous.
             run = function()
                 local _, safety = services()
                 local first = assert(safety.binding_digest("domain", {
@@ -450,6 +542,9 @@ return {
         },
         {
             name = "constructors profiles actions and approval carriers reject ambiguity and caps",
+            --Verifies constructors profiles actions and approval carriers reject ambiguity and caps.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify constructors profiles actions and approval carriers reject ambiguity and caps.
             run = function()
                 local cache = {}
                 local safety_module = load_module("safety", cache)

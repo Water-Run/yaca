@@ -1,19 +1,29 @@
 --[[
-File: context_reader_test.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-09-23
+File: context_reader_test.lua
 Description: Verifies the independent SAX reader and Context transfer projection.
 ]]
 
 local A = assert(loadfile(YACA_TEST_ROOT .. "/test/support/assert.lua", "t", _ENV))()
 
+--Loads a source module into an isolated per-case environment.
+--@param name string Module, Model, or resource name selected by the case.
+--@param cache table Per-case module cache preserving isolated imports.
+--@return any module Module export loaded in the isolated source environment.
 local function load_module(name, cache)
     cache = cache or {}
     if cache[name] then return cache[name] end
-    local environment = { require = function(dependency)
+    local environment = {
+        --Resolves an imported Lua module through the isolated test loader.
+        --@param dependency string Source module requested from the isolated loader.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
+        require = function(dependency)
         return load_module(dependency, cache)
     end }
     environment._G = environment
+    --@metatable environment Test-owned lookup and mutation contract for the current case.
+    --@field __index any Fallback table or function used for missing fixture keys.
     setmetatable(environment, { __index = _ENV })
     local chunk, load_error = loadfile(
         YACA_TEST_ROOT .. "/src/" .. name .. ".lua",
@@ -26,12 +36,18 @@ local function load_module(name, cache)
     return value
 end
 
+--Loads a repository Lua module as a test support value.
+--@param relative_path string Repository-relative Lua source path to load.
+--@return any module Test support module export loaded from the repository.
 local function load_table(relative_path)
     local chunk, load_error = loadfile(YACA_TEST_ROOT .. "/" .. relative_path, "t", _ENV)
     A.truthy(chunk, load_error)
     return chunk()
 end
 
+--Reads read file for this test scenario.
+--@param relative_path string Repository-relative Lua source path to load.
+--@return any bytes Bytes read from the selected fixture file.
 local function read_file(relative_path)
     local handle, open_error = io.open(YACA_TEST_ROOT .. "/" .. relative_path, "rb")
     A.truthy(handle, open_error)
@@ -47,6 +63,9 @@ local fake_lxp = load_table("test/support/fake_lxp.lua")
 local sha256 = load_table("test/support/sha256_reference.lua")
 local fixture = read_file(".develope-docs/contracts/fixtures/context-minimal.xml")
 
+--Supplies minimal behavior required by this suite.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return table observed Structured fixture record selected by the exercised branch.
 local function minimal()
     return {
         schema_version = "0.1.0",
@@ -102,6 +121,9 @@ local function minimal()
     }
 end
 
+--Copies test data so a mutation cannot affect the original fixture.
+--@param value any Candidate whose acceptance or transformation the test checks.
+--@return any copy Independent copy of the source fixture value.
 local function copy(value)
     if type(value) ~= "table" then return value end
     local result = {}
@@ -109,6 +131,11 @@ local function copy(value)
     return result
 end
 
+--Records the append effect observed by the 'Std' case.
+--@param candidate table|any Candidate state or value being validated.
+--@param type_name string Type label selected for serialization.
+--@param fields table Field values used to construct the test document.
+--@return nil No value; the fake port or test assertion observes this callback's effects.
 local function append(candidate, type_name, fields)
     candidate.facts[#candidate.facts + 1] = {
         seq = #candidate.facts + 1,
@@ -120,6 +147,9 @@ local function append(candidate, type_name, fields)
     candidate.model_view.active_manifest.last_event_seq = #candidate.facts
 end
 
+--Supplies rich behavior required by the 'Std' case.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return any observed rich value observed by the scenario assertion.
 local function rich()
     local candidate = minimal()
     append(candidate, "model_request", {
@@ -143,12 +173,24 @@ local function rich()
     return candidate
 end
 
+--Writes emit leaf through the Std fixture.
+--@param callbacks table Callbacks supplied to the fake service.
+--@param name string Module, Model, or resource name selected by the case.
+--@param value any Candidate whose acceptance or transformation the test checks.
+--@param attributes table Attributes supplied to the fake filesystem.
+--@return nil No value; the fake port or test assertion observes this callback's effects.
 local function emit_leaf(callbacks, name, value, attributes)
     callbacks.StartElement(nil, name, attributes or {})
     if value ~= nil and value ~= "" then callbacks.CharacterData(nil, value) end
     callbacks.EndElement(nil, name)
 end
 
+--Writes emit candidate through the Std fixture.
+--@param callbacks table Callbacks supplied to the fake service.
+--@param candidate table|any Candidate state or value being validated.
+--@param service table Service port exercised by the case.
+--@param settings table|nil Fixture settings and scenario overrides.
+--@return nil No value; the fake port or test assertion observes this callback's effects.
 local function emit_candidate(callbacks, candidate, service, settings)
     settings = settings or {}
     callbacks.XmlDecl(nil, "1.0", "UTF-8")
@@ -219,7 +261,7 @@ local function emit_candidate(callbacks, candidate, service, settings)
             if encoded ~= "" then callbacks.CharacterData(nil, encoded) end
             callbacks.EndElement(nil, "Field")
             if settings.duplicate_field and name == "kind" then
-                emit_leaf(callbacks, "Field", "side", { name = "kind" })
+                emit_leaf(callbacks, "Field", "ask", { name = "kind" })
             end
         end
         callbacks.EndElement(nil, "Event")
@@ -247,9 +289,22 @@ local function emit_candidate(callbacks, candidate, service, settings)
     callbacks.EndElement(nil, "YacaContext")
 end
 
+--Constructs the harness service used by the 'Std' case.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return any fixture Constructed harness service used by this suite.
+--@return any secondary2 Luaexpat parser port returned by the fixture.
+--@return any secondary3 Additional status or structured error from the fixture operation.
 local function harness()
     local documents = {}
     local service
+    --Constructs the fake lxp service used by the 'Std' case.
+    --@param document table Parsed Context or configuration document under test.
+    --@param callbacks table Callbacks supplied to the fake service.
+    --@return boolean accepted Whether the fake callback accepts this scenario.
+    --@return string|nil secondary2 Fixture text "reference Context mismatch".
+    --@return integer|nil secondary3 Fixture numeric value 1.
+    --@return integer|nil secondary4 Fixture numeric value 1.
+    --@return integer|nil secondary5 Fixture numeric value 1.
     local lxp = fake_lxp(function(document, callbacks)
         local entry = documents[document]
         if entry then
@@ -305,6 +360,9 @@ return {
     cases = {
         {
             name = "minimal RNG fixture reads and writer output reads to the same facts",
+            --Verifies minimal RNG fixture reads and writer output reads to the same facts.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify minimal RNG fixture reads and writer output reads to the same facts.
             run = function()
                 local service, lxp, documents = harness()
                 local document, stats = assert(service.read(fixture))
@@ -333,6 +391,9 @@ return {
         },
         {
             name = "base64 fields and present-empty optional fields survive reader roundtrip",
+            --Verifies base64 fields and present-empty optional fields survive reader roundtrip.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify base64 fields and present-empty optional fields survive reader roundtrip.
             run = function()
                 local service, _, documents = harness()
                 local candidate = rich()
@@ -357,6 +418,9 @@ return {
         },
         {
             name = "unknown structure order duplicate fields and digest corruption reject typed",
+            --Verifies unknown structure order duplicate fields and digest corruption reject typed.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify unknown structure order duplicate fields and digest corruption reject typed.
             run = function()
                 local service, _, documents = harness()
                 local invalid, read_error = service.read("unknown-element")
@@ -388,6 +452,9 @@ return {
         },
         {
             name = "stale imported ModelView is explicit and cannot flow back to publication",
+            --Verifies stale imported ModelView is explicit and cannot flow back to publication.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify stale imported ModelView is explicit and cannot flow back to publication.
             run = function()
                 local service, _, documents = harness()
                 local candidate = minimal()
@@ -405,6 +472,9 @@ return {
         },
         {
             name = "export makes markup and controls visible and propagates bounded sink failure",
+            --Verifies export makes markup and controls visible and propagates bounded sink failure.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify export makes markup and controls visible and propagates bounded sink failure.
             run = function()
                 local service = harness()
                 local candidate = minimal()
@@ -417,6 +487,10 @@ return {
                 A.falsy(exported:find("\n# forged", 1, true))
 
                 local calls = 0
+                --Supplies an assertion callback for the export makes markup and controls visible and propagates bounded sink failure scenario.
+                --@param bytes string Byte chunk supplied to the fake I/O port.
+                --@return boolean|any value Callback value consumed by the enclosing scenario assertion.
+                --@return string|nil secondary2 Fixture text "broken export".
                 local written, sink_error = service.export(document, function(bytes)
                     calls = calls + 1
                     if calls == 2 then return false, "broken export" end
@@ -429,6 +503,9 @@ return {
         },
         {
             name = "XML parser security and byte limits remain authoritative below Context schema",
+            --Verifies xML parser security and byte limits remain authoritative below Context schema.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify xML parser security and byte limits remain authoritative below Context schema.
             run = function()
                 local service = harness()
                 local malformed, syntax_error = service.read("not registered")

@@ -1,3 +1,16 @@
+--[[
+Author: WaterRun
+Date: 2026-09-23
+File: context.lua
+Description: Defines durable Context events, canonical schemas and publication barriers.
+]]
+
+-- Describe a durable Context event and the fields admitted by its schema.
+--@param id string Stable event type identifier.
+--@param required table|nil Required field-name array; defaults to a new empty array.
+--@param optional table|nil Optional field-name array; defaults to a new empty array.
+--@param barrier string|nil Publication barrier assigned to the event, when one is required.
+--@return table Event descriptor retaining supplied field arrays by reference.
 local function event(id, required, optional, barrier)
   return {
     id = id,
@@ -58,7 +71,7 @@ return {
   event_types = {
     event("turn_started", { "kind", "configGeneration", "modelSnapshot", "permissionSnapshot", "promptSnapshot", "toolRegistrySnapshot" }, { "runtimeSnapshot", "contextDocumentGeneration", "queueItemId", "continuesResponseId", "supersedesResponseId" }, "after-admission-before-model"),
     event("user_message", { "messageId", "text", "source" }, { "replyToMessageId" }, "before-model-request"),
-    event("queue_item", { "queueItemId", "displayId", "action", "text" }, { "beforeQueueItemId", "sideId", "reason" }, "before-queue-report-or-consume"),
+    event("queue_item", { "queueItemId", "displayId", "action", "text" }, { "beforeQueueItemId", "askId", "reason" }, "before-queue-report-or-consume"),
     event("model_request", { "requestId", "purpose", "viewManifestRef" }, { "attemptId", "compactionId", "compactionMode", "sourceFirstSeq", "sourceLastSeq", "sourceDigest", "sourceEventCount", "configSnapshot", "modelSnapshot", "promptSnapshot", "manifestSnapshot", "viewContextGeneration" }, "request-intent"),
     event("model_message", { "messageId", "requestId", "role", "status", "body" }, { "representation", "rawBytes", "digest" }, "before-interpretation"),
     event("model_control", { "requestId", "control", "payload" }, {}, "before-interpretation"),
@@ -73,7 +86,7 @@ return {
     event("termination_review", { "reviewId", "requestId", "verdict", "bindingDigest" }, { "gap", "reason" }, "before-verdict-effect"),
     event("turn_ended", { "outcome" }, { "reason", "errorId" }, "before-external-report"),
     event("cancel", { "targetKind", "targetId", "reason" }, { "result" }, "cancel-fact"),
-    event("steer", { "messageId", "targetTurnId", "summary" }, { "sideId" }, "before-steered-request"),
+    event("steer", { "messageId", "targetTurnId", "summary" }, { "askId" }, "before-steered-request"),
     event("compaction", { "compactionId", "sourceFirstSeq", "sourceLastSeq", "sourceDigest", "status" }, { "summary", "errorId", "sourceEventCount", "summaryDigest", "manifestDigest", "builderAlgorithm", "modelSnapshot", "promptSnapshot", "viewContextGeneration", "requestId", "attemptId", "compactionMode", "automaticFailure" }, "before-view-publish"),
     event("model_view_published", { "manifestDigest", "firstEventSeq", "lastEventSeq" }, { "replacesManifestDigest", "compactionId", "viewContextGeneration" }, "before-model-use"),
     event("session_override", { "name", "oldValueDigest", "newValueDigest" }, { "effectiveAt" }, "before-next-turn"),

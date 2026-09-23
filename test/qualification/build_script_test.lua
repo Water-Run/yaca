@@ -1,12 +1,15 @@
 --[[
-File: build_script_test.lua
-Date: 2026-09-07
 Author: WaterRun
+Date: 2026-09-23
+File: build_script_test.lua
 Description: Checks Linux build admission and rejects incomplete test evidence.
 ]]
 
 local A = assert(loadfile(YACA_TEST_ROOT .. "/test/support/assert.lua", "t", _ENV))()
 
+--Reads read file for this test scenario.
+--@param path string File or Context path exercised by the case.
+--@return any bytes Bytes read from the selected fixture file.
 local function read_file(path)
     local file = assert(io.open(YACA_TEST_ROOT .. "/" .. path, "rb"))
     local source = assert(file:read("a"))
@@ -19,6 +22,9 @@ return {
     cases = {
         {
             name = "Linux builder admits serial work with its own five GiB guard floor",
+            --Verifies linux builder admits serial work with its own five GiB guard floor.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify linux builder admits serial work with its own five GiB guard floor.
             run = function()
                 local source = read_file(".tools/qualification/build_linux_x86_64.sh")
                 A.contains(source, "BUILD_MINIMUM_AVAILABLE_MIB=5120")
@@ -44,6 +50,9 @@ return {
         },
         {
             name = "test evidence accepts one positive complete summary with dynamic counts",
+            --Verifies test evidence accepts one positive complete summary with dynamic counts.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify test evidence accepts one positive complete summary with dynamic counts.
             run = function()
                 local summary = assert(loadfile(
                     YACA_TEST_ROOT .. "/.tools/qualification/test_summary.lua", "t", _ENV
@@ -62,6 +71,9 @@ return {
         },
         {
             name = "test evidence rejects missing duplicate malformed zero or failed summaries",
+            --Verifies test evidence accepts one positive complete summary with dynamic counts.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify test evidence accepts one positive complete summary with dynamic counts.
             run = function()
                 local summary = assert(loadfile(
                     YACA_TEST_ROOT .. "/.tools/qualification/test_summary.lua", "t", _ENV

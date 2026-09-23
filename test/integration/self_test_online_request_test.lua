@@ -1,7 +1,7 @@
 --[[
-File: self_test_online_request_test.lua
-Date: 2026-09-16
 Author: WaterRun
+Date: 2026-09-23
+File: self_test_online_request_test.lua
 Description: Verifies the purpose=self-test request builder and the online
 Stage 2 plumbing through a scripted transport. No real network is used.
 ]]
@@ -13,13 +13,22 @@ local sha256 = assert(loadfile(
     _ENV
 ))()
 
+--Loads a source module into an isolated per-case environment.
+--@param name string Module, Model, or resource name selected by the case.
+--@param cache table Per-case module cache preserving isolated imports.
+--@return any module Module export loaded in the isolated source environment.
 local function load_module(name, cache)
     cache = cache or {}
     if cache[name] then return cache[name] end
     local environment = {}
     for key, value in pairs(_ENV) do environment[key] = value end
+    --Resolves an imported Lua module through the isolated test loader.
+    --@param dependency string Source module requested from the isolated loader.
+    --@return any value Callback value consumed by the enclosing scenario assertion.
     environment.require = function(dependency) return load_module(dependency, cache) end
     environment._G = environment
+    --@metatable environment Test-owned lookup and mutation contract for the current case.
+    --@field __index any Fallback table or function used for missing fixture keys.
     setmetatable(environment, { __index = _ENV })
     local chunk = assert(loadfile(
         YACA_TEST_ROOT .. "/src/" .. name .. ".lua",
@@ -36,6 +45,9 @@ local model = load_module("model", cache)
 local network = load_module("network", cache)
 local prompt = load_module("prompt", cache)
 
+--Supplies adapter limits behavior required by this suite.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return table observed Structured fixture record selected by the exercised branch.
 local function adapter_limits()
     return {
         maximum_json_bytes = 65536,
@@ -58,6 +70,9 @@ local function adapter_limits()
     }
 end
 
+--Constructs the prompt service service used by this suite.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return any observed prompt service value observed by the scenario assertion.
 local function prompt_service()
     return assert(prompt.new({ digest = sha256.hex }, {
         maximum_component_bytes = 32768,
@@ -70,6 +85,9 @@ local function prompt_service()
     }))
 end
 
+--Supplies registry behavior required by this suite.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return table observed Structured fixture record with version, digest, tools.
 local function registry()
     local tools = {}
     for _, name in ipairs({ "list", "read", "search", "write", "patch", "rename", "delete", "exec" }) do
@@ -82,6 +100,9 @@ local function registry()
     return { version = "tools-v1", digest = "registry-1", tools = tools }
 end
 
+--Builds the generation values used by this suite.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return any observed generation value observed by the scenario assertion.
 local function generation()
     local result = {
         id = "config-generation-1",
@@ -109,13 +130,25 @@ local function generation()
             },
         },
         permissions = { Std = { system_prompt = "permission" } },
+        --Simulates the reveal secret boundary for this suite.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return string text Text emitted by the scenario callback.
         reveal_secret = function() return "never-in-request" end,
+        --Supplies secret descriptors behavior required by this suite.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return table record Fixture record emitted by the scenario callback.
         secret_descriptors = function() return {} end,
+        --Simulates the scan registered secrets boundary for this suite.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return table record Fixture record emitted by the scenario callback.
         scan_registered_secrets = function() return {} end,
     }
     return result
 end
 
+--Supplies builder behavior required by this suite.
+--@param settings table|nil Fixture settings and scenario overrides.
+--@return any observed builder value observed by the scenario assertion.
 local function builder(settings)
     settings = settings or {}
     return assert(model.new_self_test_request_builder({
@@ -138,6 +171,9 @@ local function builder(settings)
     }))
 end
 
+--Supplies start spec behavior required by this suite.
+--@param view table|string Selected catalog or transcript view.
+--@return table observed Structured fixture record selected by the exercised branch.
 local function start_spec(view)
     return {
         request_id = "selftest-st2-model-wire",
@@ -149,6 +185,10 @@ local function start_spec(view)
     }
 end
 
+--Supplies scripted transport behavior required by this suite.
+--@param scripts table Script inputs supplied to the fake process.
+--@param observed table|any State observed after the exercised operation.
+--@return any observed scripted transport value observed by the scenario assertion.
 local function scripted_transport(scripts, observed)
     local cursor = 0
     local service = {
@@ -157,6 +197,10 @@ local function scripted_transport(scripts, observed)
         single_header = network.single_header,
         parse_retry_after = network.parse_retry_after,
     }
+    --Constructs new attempt for this test scenario.
+    --@param spec table Test specification or request under evaluation.
+    --@return any|nil observed new attempt value observed by the scenario assertion.
+    --@return table|nil secondary2 Typed error record with code UnexpectedAttempt.
     function service.new_attempt(spec)
         cursor = cursor + 1
         local script = scripts[cursor]
@@ -164,10 +208,16 @@ local function scripted_transport(scripts, observed)
         observed[#observed + 1] = spec
         local started, emitted, cancelled = false, false, false
         local port = {}
+        --Simulates the start transition of a fake activity port for this suite.
+        --@param self table Fixture or port instance receiving this call.
+        --@return boolean accepted Whether start succeeds in the fixture.
         function port:start()
             started = true
             return true
         end
+        --Simulates the poll transition of a fake activity port for this suite.
+        --@param self table Fixture or port instance receiving this call.
+        --@return table observed Structured fixture record selected by the exercised branch.
         function port:poll()
             A.truthy(started)
             if emitted then return {} end
@@ -179,10 +229,16 @@ local function scripted_transport(scripts, observed)
                 },
             }
         end
+        --Simulates the cancel transition of a fake activity port for this suite.
+        --@param self table Fixture or port instance receiving this call.
+        --@return boolean accepted Whether cancel succeeds in the fixture.
         function port:cancel()
             cancelled = true
             return true
         end
+        --Simulates the join transition of a fake activity port for this suite.
+        --@param self table Fixture or port instance receiving this call.
+        --@return table|any observed join value observed by the scenario assertion.
         function port:join()
             if cancelled then
                 return {
@@ -197,12 +253,18 @@ local function scripted_transport(scripts, observed)
             end
             return script.result
         end
+        --Simulates the close transition of a fake activity port for this suite.
+        --@param self table Fixture or port instance receiving this call.
+        --@return boolean accepted Whether close succeeds in the fixture.
         function port:close() return true end
         return port
     end
     return service
 end
 
+--Supplies http result behavior required by this suite.
+--@param body string Model or transport response body.
+--@return table observed Outcome record with status completed.
 local function http_result(body)
     return {
         outcome = "completed",
@@ -215,6 +277,9 @@ local function http_result(body)
     }
 end
 
+--Supplies self test activity behavior required by this suite.
+--@param settings table|nil Fixture settings and scenario overrides.
+--@return table observed Structured fixture record selected by the exercised branch.
 local function self_test_activity(settings)
     local scripts = settings.scripts
     local observed = {}
@@ -232,7 +297,13 @@ local function self_test_activity(settings)
         transport = scripted_transport(scripts, observed),
         safety = { digest = sha256.hex },
         clock = {
+            --Supplies deterministic clock behavior for this suite.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return any value Callback value consumed by the enclosing scenario assertion.
             monotonic_now = function() return tick end,
+            --Supplies deterministic clock behavior for this suite.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return string text Text emitted by the scenario callback.
             utc_now = function() return "2026-09-16T00:00:00Z" end,
         },
         requests = value,
@@ -280,6 +351,9 @@ return {
     cases = {
         {
             name = "advisory reviews cannot report malformed or incomplete JSON as no issue",
+            --Verifies advisory reviews cannot report malformed or incomplete JSON as no issue.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify advisory reviews cannot report malformed or incomplete JSON as no issue.
             run = function()
                 local main = load_module("main", cache)
                 local observation = { events = {}, online_requests = 1,
@@ -298,11 +372,17 @@ return {
         },
         {
             name = "control probe accepts only the exact complete validated inert call",
+            --Verifies control probe accepts only the exact complete validated inert call.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify control probe accepts only the exact complete validated inert call.
             run = function()
                 local main = load_module("main", cache)
                 local normalized = { finish_class = "tool_calls", tool_calls_validated = true,
                     tool_calls = { { name = "list", canonical_arguments = '{"depth":1,"page_size":1,"path":"."}' } } }
                 local observation = { events = {}, response = { normalized = normalized } }
+                --Supplies outcome behavior required by the 'control probe accepts only the exact complete validated inert call' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return any observed outcome value observed by the scenario assertion.
                 local function outcome()
                     return main.evaluate_self_test_check("ST2-MODEL-CONTROL", observation, {}).outcome
                 end
@@ -318,6 +398,9 @@ return {
         },
         {
             name = "an explicitly cancelled probe is a cancellation success rather than a transport failure",
+            --Verifies an explicitly cancelled probe is a cancellation success rather than a transport failure.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify an explicitly cancelled probe is a cancellation success rather than a transport failure.
             run = function()
                 local main = load_module("main", cache)
                 local observation = { cancel_requested = true, online_requests = 1,
@@ -335,12 +418,19 @@ return {
         },
         {
             name = "online production probe rejects a changed generation before transport starts",
+            --Verifies online production probe rejects a changed generation before transport starts.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify online production probe rejects a changed generation before transport starts.
             run = function()
                 local main = load_module("main", cache)
                 local saved, changed = generation(), generation()
                 changed.id = "config-generation-2"
                 local composed = {
-                    config = { reload_file = function() return changed end },
+                    config = {
+                        --Supplies reload file behavior required by the 'online production probe rejects a changed generation before transport starts' case.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return any value Callback value consumed by the enclosing scenario assertion.
+                        reload_file = function() return changed end },
                     layout = { config_path = "/data/config.ini" },
                     model_adapter = {}, network = {},
                     contexts = { safety = {}, prompt = {}, tool_registry = {} },
@@ -353,6 +443,9 @@ return {
         },
         {
             name = "self-test builder binds the synthetic view and hides secrets",
+            --Verifies self-test builder binds the synthetic view and hides secrets.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify self-test builder binds the synthetic view and hides secrets.
             run = function()
                 local value = builder({ observation = "Reply with READY." })
                 local prepared = assert(value.prepare(start_spec(value.snapshots.view)))
@@ -394,6 +487,9 @@ return {
         },
         {
             name = "tool_set production transmits the inert registry on the wire",
+            --Verifies tool_set production transmits the inert registry on the wire.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify tool_set production transmits the inert registry on the wire.
             run = function()
                 local adapter = assert(model.new(adapter_limits()))
                 local value = builder({ adapter = adapter, tool_set = "production" })
@@ -415,10 +511,13 @@ return {
         },
         {
             name = "builder rejects foreign purposes, stale views, and invalid options",
+            --Verifies builder rejects foreign purposes, stale views, and invalid options.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify builder rejects foreign purposes, stale views, and invalid options.
             run = function()
                 local value = builder({})
                 local spec = start_spec(value.snapshots.view)
-                spec.purpose = "side"
+                spec.purpose = "ask"
                 local wrong_purpose, purpose_error = value.prepare(spec)
                 A.falsy(wrong_purpose)
                 A.equal(purpose_error.code, "InvalidModelPurpose")
@@ -479,6 +578,9 @@ return {
         },
         {
             name = "a scripted provider response completes the self-test request",
+            --Verifies a scripted provider response completes the self-test request.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify a scripted provider response completes the self-test request.
             run = function()
                 local fixture = self_test_activity({
                     scripts = { { result = http_result(
@@ -499,6 +601,9 @@ return {
         },
         {
             name = "a provider tool call round-trips with schema-validated arguments",
+            --Verifies a provider tool call round-trips with schema-validated arguments.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify a provider tool call round-trips with schema-validated arguments.
             run = function()
                 local fixture = self_test_activity({
                     tool_set = "production",

@@ -2,12 +2,24 @@
 
 此目录用于追踪 yaca 的分析、讨论、设计、编码计划、验证和决策。
 
+**编码约束：**[编码规范与注释约束](CODING-STANDARD.md)适用于全部自有代码，要求固定文件头，
+函数、回调、元表及类型完整注释，不得遗漏；当前正在补全已有实现并建立全量检查。
+
+**2026-09-22 当前入口：**[通用 Agent 定位与路线](PRODUCT-ROADMAP-2026-09-22.md)、
+[大改实施蓝图](MAJOR-REDESIGN-PLAN-2026-09-22.md)、
+[三档发行与默认工具清单](../release/TOOL-BUNDLES.md)、
+[本轮实现与验收](PORTABLE-IMPLEMENTATION-2026-09-22.md)、
+[MiniMax Code / ZCode / DeepSeek 源码对照](references/agent-loop-source-review-2026-09-22.md)、
+[指定服务器复核](BASELINE-REVIEW-2026-09-22.md)。负责人方向归档为 D-072 / D-073。
+内嵌 Lua、可选工具信息、首次引导、PTY 修复与三档装配已经落地，机读契约同步；
+继续完成目标工具闭包与 C32--C34，Gate R 仍关闭。
+
 ## 目录性质
 
 - 本目录是项目正式的设计与开发追踪资料，纳入 Git 版本控制。
-- 设计资料直接在 `main` 分支维护并按完整批次提交；D-071 已授权本轮核心节点推送 `main`。
+- 设计资料按完整批次维护；D-071 的推送授权属于当时任务，本次 D-072 不新增远端写授权。
 - 这里可以持续修订；项目源码和公开用户文档只有在相关设计确认后才修改。
-- Gate A/B 已在 2026-08-29 通过；首版核心/controller 已闭合，Server 2008 与真实服务商已验收，主线进入 C32--C34。未完成的 target qualification 继续阻止 Gate R/发布，现代机 proof 不能替代目标证据。
+- Gate A/B 已在 2026-08-29 通过；首版核心/controller 已闭合，Server 2008 控制台与真实服务商已有验收。当前先推进通用 Agent 路线，再接续 C32--C34。未完成的 target qualification 继续阻止 Gate R/发布，现代机 proof 不能替代目标证据。
 
 ## 工作方式
 
@@ -17,7 +29,7 @@
 4. 默认每次深入一个决策主题；项目负责人要求集中盘点时，可以先给出带依赖顺序的综合决策包，再把回复逐项归档。
 5. 每个子系统依次完成：现状分析、方案比较、设计确认、验收标准。
 6. 全部关键设计确认后编写并机器校验实施计划；当前这一步已完成。
-7. 实施阶段按 C01--C34 逐项完成，不并行铺开半成品。
+7. 实施阶段按当前路线逐项完成，不并行铺开半成品；保留 C01--C34 的历史实现与发行资格边界。
 
 ## 文件索引
 
@@ -25,7 +37,7 @@
 - [2026-09-16 基本可用验收](BASIC-USABILITY-ACCEPTANCE-2026-09-16.md)：N13 交付、575 项测试及真实代码修复与两次恢复审批。
 - [2026-09-16 Windows 收尾记录](WINDOWS-PREVIEW-CLOSEOUT-2026-09-16.md)：N11 包、源码哈希和 Server 2008 / DeepSeek 真实验收。
 - `HANDOFF-AUTO-2026-08-10.md`：2026-08-10 离线自动规格硬化交接笔记（D-070）。
-- `DECISIONS.md` D-071：2026-08-29 编码就绪收尾、modern proof 与核心节点推送 `main` 的现行授权。
+- `DECISIONS.md` D-071：2026-08-29 编码就绪收尾、modern proof 与当时核心节点推送授权；本次方向及边界见 D-072。
 - `OWNER-QUESTIONS-01.md`：已经回答并冻结的负责人集中问卷；保留 29 题收到回复时的候选语境。
 - `DECISION-PROJECTION-BATCH-06.md`：把集中答复确定展开为 248 个 atomic `PR-006-*` 传播记录。
 - `CURRENT-STATE.md`：仓库与打包基础设施现状。
@@ -82,7 +94,7 @@
 
 ## 当前阅读入口
 
-当前先读 [`TRACKING.md`](TRACKING.md)、[`CURRENT-STATE.md`](CURRENT-STATE.md)、[`IMPLEMENTATION-PLAN.md`](IMPLEMENTATION-PLAN.md) 与 [`contracts/README.md`](contracts/README.md)；阶段门见 [`GATE-AUDIT-2026-08-29.md`](GATE-AUDIT-2026-08-29.md)，历史选择恢复再读 `DECISION-REGISTER.md`/`DECISIONS.md`。`OWNER-QUESTIONS-01.md` 的 29 题已经全部答复，现行 `decision-inventory-v9` 为 `unanswered=0`；270 组、384 个 checklist ID、`AQ-001..AQ-437`、`CV-001..CV-076` 和 49 个旧批次继续保留为审计证据。核心实现已推进至 M9，目标平台证明仍只在对应 milestone/Gate R 通过后成立。
+当前先读[通用 Agent 路线](PRODUCT-ROADMAP-2026-09-22.md)、[`TRACKING.md`](TRACKING.md)、[`CURRENT-STATE.md`](CURRENT-STATE.md)、[`IMPLEMENTATION-PLAN.md`](IMPLEMENTATION-PLAN.md) 与 [`contracts/README.md`](contracts/README.md)；阶段门见 [`GATE-AUDIT-2026-08-29.md`](GATE-AUDIT-2026-08-29.md)，历史选择恢复再读 `DECISION-REGISTER.md`/`DECISIONS.md`。`OWNER-QUESTIONS-01.md` 的 29 题已经全部答复，原 `decision-inventory-v9` 为 `unanswered=0`；270 组、384 个 checklist ID、`AQ-001..AQ-437`、`CV-001..CV-076` 和 49 个旧批次继续保留为审计证据。这不代表 2026-09-22 新增要求已经完成机读传播。核心实现已推进至 M9，目标平台证明仍只在对应 milestone/Gate R 通过后成立。
 
 本轮新增拆分把 composer 输入召回、配置秘密文件权限、raw shell 继承环境、完整 model-yield 后续接、direct 文件属性、ignore/隐藏项、`exec` cwd、输出解码与 canonical 保留、active XML 外改恢复等交给独立 owner。M05-57..59、AL06-50/51 与 TS-40 等原子组也已随 Batch 06 收口；旧 packet 中的推荐仍只是收到回复前的历史候选，现行选择只看登记表和 D-049 至 D-057。
 

@@ -1,3 +1,10 @@
+--[[
+Author: WaterRun
+Date: 2026-09-23
+File: config.lua
+Description: Supplies typed configuration examples and their expected validation outcomes.
+]]
+
 return {
   contract_version = "0.1.0-readiness.1",
   cases = {

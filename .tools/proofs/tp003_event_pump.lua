@@ -1,9 +1,21 @@
+--[[
+Author: WaterRun
+Date: 2026-09-23
+File: tp003_event_pump.lua
+Description: TP-003 modern-host proof: deterministic bounded event pump and fake ports.
+]]
+
 -- TP-003 modern-host proof: deterministic bounded event pump and fake ports.
 --
 -- This is deliberately disposable proof code, not a product implementation.
 
 local assertions = 0
 
+-- Counts one event-pump assertion and stops the proof on failure.
+--@param value any Truthy assertion result.
+--@param message string Explanation included in the numbered failure.
+--@return nil No value; increments the assertion count.
+--@error Raises when value is false.
 local function check(value, message)
   assertions = assertions + 1
   if not value then
@@ -11,6 +23,12 @@ local function check(value, message)
   end
 end
 
+--Asserts that observed and expected values agree in tp003 event pump.
+--@param actual any Observed value compared by the assertion.
+--@param expected any Expected value used by the assertion.
+--@param message string Explanation included in the mismatch report.
+--@return nil No value; checks equality and increments the assertion count.
+--@error Raises through check when actual differs from expected.
 local function equal(actual, expected, message)
   check(actual == expected, ("%s (expected=%s actual=%s)"):format(
     message,
@@ -27,10 +45,18 @@ local TERMINAL = {
   unknown = true,
 }
 
+--@metatable FakePort Mutable fake activity whose instance methods resolve from FakePort.
+--@field __index table Resolves the five activity methods on each fake instance.
 local FakePort = {}
 FakePort.__index = FakePort
 
+-- Creates a fake activity with a timed event schedule and terminal outcome.
+--@param name string Activity source name emitted in events.
+--@param schedule table Ordered event fixtures with due ticks.
+--@param cancel_truth string|nil Terminal outcome emitted after cancellation; defaults to cancelled.
+--@return table port Mutable fake activity implementing start, poll, cancel, join, and close.
 function FakePort.new(name, schedule, cancel_truth)
+  --@metatable FakePort Instance methods resolve through FakePort; scenario state remains mutable.
   return setmetatable({
     name = name,
     schedule = schedule,
@@ -45,6 +71,11 @@ function FakePort.new(name, schedule, cancel_truth)
   }, FakePort)
 end
 
+-- Starts the fake activity once and records its start tick.
+--@param self table FakePort instance to start.
+--@param now integer Current deterministic tick.
+--@return boolean accepted Always true after an admitted first start.
+--@error Raises if the activity was already started.
 function FakePort:start(now)
   check(not self.started, self.name .. " starts once")
   self.started = true
@@ -52,6 +83,12 @@ function FakePort:start(now)
   return true
 end
 
+-- Emits at most budget due events, including a one-tick-later cancel outcome.
+--@param self table Started FakePort instance.
+--@param now integer Current deterministic tick.
+--@param budget integer Maximum scheduled events emitted by this poll.
+--@return table events Ordered zero-or-more event records.
+--@error Raises when polled before start or after close.
 function FakePort:poll(now, budget)
   check(self.started, self.name .. " poll after start")
   check(not self.closed, self.name .. " poll before close")
@@ -91,6 +128,10 @@ function FakePort:poll(now, budget)
   return result
 end
 
+-- Requests cancellation while preserving an already published terminal outcome.
+--@param self table Started FakePort instance.
+--@param now integer Tick at which cancellation was requested.
+--@return boolean accepted False after a terminal event, true while cancellation is pending.
 function FakePort:cancel(now)
   check(self.started, self.name .. " cancel after start")
   if self.terminal_emitted then
@@ -103,6 +144,9 @@ function FakePort:cancel(now)
   return true
 end
 
+-- Reports final terminal truth and marks the fake activity joined.
+--@param self table FakePort instance.
+--@return string outcome Cancel truth, completed, or unknown if no terminal event was emitted.
 function FakePort:join()
   self.joined = true
   if self.terminal_emitted then
@@ -111,27 +155,49 @@ function FakePort:join()
   return "unknown"
 end
 
+-- Marks the fake activity closed.
+--@param self table FakePort instance.
+--@return boolean closed Always true after setting closed.
 function FakePort:close()
   self.closed = true
   return true
 end
 
+-- Constructs a coalescible progress event due at one tick.
+--@param at integer Due tick.
+--@param value string Progress payload.
+--@param key string|nil Coalescing key shared by related progress updates.
+--@return table event Progress event fixture.
 local function progress(at, value, key)
   return { at = at, kind = "progress", value = value, key = key }
 end
 
+-- Constructs a non-droppable domain event due at one tick.
+--@param at integer Due tick.
+--@param value string Domain action or observation.
+--@return table event Domain event fixture.
 local function domain(at, value)
   return { at = at, kind = "domain", value = value }
 end
 
+-- Constructs a typed terminal event due at one tick.
+--@param at integer Due tick.
+--@param outcome string One of completed, cancelled, failed, or unknown.
+--@return table event Terminal event fixture.
 local function terminal(at, outcome)
   return { at = at, kind = "terminal", outcome = outcome }
 end
 
+--@metatable Queue Mutable bounded event queue whose instance methods resolve from Queue.
+--@field __index table Resolves push, pop, and progress-eviction methods.
 local Queue = {}
 Queue.__index = Queue
 
+-- Creates an empty bounded queue with peak and coalescing counters.
+--@param capacity integer Maximum number of pending events.
+--@return table queue Mutable queue instance with zero counters.
 function Queue.new(capacity)
+  --@metatable Queue Instance methods resolve through Queue; items and counters remain mutable.
   return setmetatable({
     capacity = capacity,
     items = {},
@@ -140,10 +206,16 @@ function Queue.new(capacity)
   }, Queue)
 end
 
+-- Builds the per-source progress key used for replacement.
+--@param event table Event containing source, kind, and optional key.
+--@return string key Source-qualified coalescing key.
 local function event_key(event)
   return event.source .. ":" .. (event.key or event.kind)
 end
 
+-- Evicts the oldest queued progress event while retaining terminal and domain events.
+--@param self table Queue instance.
+--@return boolean removed True if progress was evicted; false if none was queued.
 function Queue:_remove_first_progress()
   for i, event in ipairs(self.items) do
     if event.kind == "progress" then
@@ -155,6 +227,11 @@ function Queue:_remove_first_progress()
   return false
 end
 
+-- Adds a non-droppable event or coalesces a progress event under the capacity bound.
+--@param self table Queue instance.
+--@param event table Event to enqueue.
+--@return boolean admitted True if retained or replaced, false when progress was dropped.
+--@error Raises if a full queue has no progress slot available for a control event.
 function Queue:push(event)
   if event.kind == "progress" then
     local key = event_key(event)
@@ -183,6 +260,9 @@ function Queue:push(event)
   return true
 end
 
+-- Removes the highest-priority pending control, terminal, domain, or progress event.
+--@param self table Queue instance.
+--@return table|nil event Selected event, or nil when the queue is empty.
 function Queue:pop_control_first()
   for i, event in ipairs(self.items) do
     if event.source == "console" and event.value == "cancel-network" then
@@ -202,6 +282,10 @@ function Queue:pop_control_first()
   return table.remove(self.items, 1)
 end
 
+-- Checks whether an ordered trace contains an exact event string.
+--@param list table Trace entries to scan.
+--@param wanted string Required trace entry.
+--@return boolean found True if an entry equals wanted.
 local function contains(list, wanted)
   for _, value in ipairs(list) do
     if value == wanted then
@@ -211,6 +295,9 @@ local function contains(list, wanted)
   return false
 end
 
+-- Exercises bounded polling, progress coalescing, control priority, and cancel latency.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return table observed Structured fixture record with peak, capacity, coalesced, cancel_latency.
 local function event_pump_scenario()
   local network_schedule = {}
   for tick = 1, 24 do
@@ -258,6 +345,10 @@ local function event_pump_scenario()
   local cancel_requested_at
   local domain_owner = "pump"
 
+  -- Applies one selected event to the single domain owner and records its trace.
+  --@param event table Selected event from the bounded queue.
+  --@param owner string Claimed state owner, required to equal pump.
+  --@return nil No value; updates trace, terminal counts, or cancellation state.
   local function reduce(event, owner)
     equal(owner, domain_owner, "only pump mutates domain state")
     trace[#trace + 1] = event.source .. ":" .. (event.value or event.outcome or event.kind)
@@ -321,6 +412,9 @@ local function event_pump_scenario()
   }
 end
 
+-- Verifies that all four terminal outcomes remain distinct through fake polling.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return any observed terminal truth scenario value observed by the scenario assertion.
 local function terminal_truth_scenario()
   local expected = { "completed", "cancelled", "failed", "unknown" }
   local observed = {}
@@ -337,6 +431,9 @@ local function terminal_truth_scenario()
   return table.concat(observed, ",")
 end
 
+-- Verifies durable-waterline naming cadence, priority, cancellation, and zero-cost disablement.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return table observed Structured fixture record with started, cancelled, disabled_cost, joined_on_exit.
 local function context_name_scenario()
   local scheduler = {
     interval = 2,
@@ -352,12 +449,18 @@ local function context_name_scenario()
     priorities = { main = 1, side = 2, review = 3, ["context-name"] = 4 },
   }
 
+  -- Checks whether a new naming interval is due after the durable baseline.
+  --@param none No arguments; this closure uses its captured fixture state.
+  --@return boolean due True only when naming is enabled and the interval elapsed.
   local function due()
     return scheduler.interval > 0
       and scheduler.marker ~= true
       and scheduler.waterline - scheduler.baseline >= scheduler.interval
   end
 
+  -- Advances the durable main-task waterline and cancels in-flight naming.
+  --@param none No arguments; this closure uses its captured fixture state.
+  --@return nil No value; updates waterline, baseline, queue, and cancellation counters.
   local function commit_main()
     scheduler.waterline = scheduler.waterline + 1
     if scheduler.inflight then
@@ -369,6 +472,9 @@ local function context_name_scenario()
     end
   end
 
+  -- Changes the naming-disable marker without replaying missed intervals.
+  --@param value boolean|nil New marker value; true disables naming.
+  --@return nil No value; updates marker, baseline, queue, and in-flight state.
   local function set_marker(value)
     local was_true = scheduler.marker == true
     scheduler.marker = value
@@ -384,6 +490,9 @@ local function context_name_scenario()
     end
   end
 
+  -- Selects higher-priority ready work before queued context naming.
+  --@param ready table Readiness flags for main, side, and review.
+  --@return string|nil source Selected work source, or nil when none is queued.
   local function dispatch(ready)
     if scheduler.queued == 0 then
       return nil
@@ -452,6 +561,10 @@ local function context_name_scenario()
   }
 end
 
+-- Rejects excluded worker classes from the active event-pump registry.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return integer registered Number of admitted worker classes.
+--@return integer excluded Number of forbidden-token hits, required to be zero.
 local function zero_surface_scenario()
   local registered = {
     "console-input",

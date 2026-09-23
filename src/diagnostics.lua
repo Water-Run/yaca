@@ -1,8 +1,8 @@
 --[[
-File: diagnostics.lua
-Date: 2026-08-30
 Author: WaterRun
-Description: Projects stable secret-safe diagnostics without a log side channel.
+Date: 2026-09-23
+File: diagnostics.lua
+Description: Projects stable secret-safe diagnostics without a log ask channel.
 ]]
 
 local M = {}
@@ -18,6 +18,14 @@ local EXIT_CLASSES = {
     cancelled = 7,
 }
 
+-- Describe a public error identity and its fixed user recovery advice.
+--@param id string Stable error identity.
+--@param severity string Severity exposed with diagnostic records.
+--@param exit_class string Exit-code class defined in EXIT_CLASSES.
+--@param retryable boolean Whether a caller may offer a retry.
+--@param summary string Public, secret-free explanation.
+--@param next_action string Public recovery instruction.
+--@return table Registry entry retaining all supplied fields.
 local function definition(id, severity, exit_class, retryable, summary, next_action)
     return {
         id = id,
@@ -149,6 +157,14 @@ local ERROR_DEFINITIONS = {
 local ERROR_BY_ID = {}
 for _, item in ipairs(ERROR_DEFINITIONS) do ERROR_BY_ID[item.id] = item end
 
+-- Register one self-test check and its ordered prerequisites.
+--@param id string Stable check identity.
+--@param stage integer Stage number from one through three.
+--@param required boolean Whether a failure blocks later stages.
+--@param online boolean Whether the check may perform an online request.
+--@param dependencies table Sequence of earlier check identities.
+--@param owner string Component responsible for executing the check.
+--@return table Check descriptor with an empty dependency list when absent.
 local function check(id, stage, required, online, dependencies, owner)
     return {
         id = id,
@@ -228,16 +244,28 @@ local DETAIL_CLASSES = {
     boolean = true,
 }
 
+-- Construct a structured diagnostic without throwing or formatting its optional fields.
+--@param code string Stable diagnostic code used by callers to choose recovery behavior.
+--@param message string Human-readable summary supplied by the failing operation.
+--@param detail any|nil Optional underlying cause or contextual diagnostic data; retained as supplied.
+--@return table New diagnostic record; optional non-nil fields are retained without deep copying.
 local function failure(code, message, detail)
     local result = { code = code, message = message }
     if detail ~= nil then result.detail = detail end
     return result
 end
 
+-- Accept only a Lua integer at or above the requested bound.
+--@param value any Candidate number.
+--@param minimum integer Inclusive lower bound.
+--@return boolean True only for an integer meeting the bound.
 local function integer_at_least(value, minimum)
     return math.type(value) == "integer" and value >= minimum
 end
 
+-- Count a dense one-based array while rejecting holes and extra key kinds.
+--@param values any Candidate table; every key must belong to the sequence 1 through count.
+--@return integer|nil Sequence length, including zero for an empty table; nil for an invalid shape.
 local function dense_count(values)
     if type(values) ~= "table" then return nil end
     local count = 0
@@ -249,6 +277,10 @@ local function dense_count(values)
     return count
 end
 
+-- Reject records containing an unlisted key or a non-string key.
+--@param value any Candidate record.
+--@param allowed table Set of permitted string field names.
+--@return boolean True for a table whose keys are all permitted.
 local function exact_fields(value, allowed)
     if type(value) ~= "table" then return false end
     for key in pairs(value) do
@@ -257,6 +289,11 @@ local function exact_fields(value, allowed)
     return true
 end
 
+-- Bound text without accepting a NUL byte.
+--@param value any Candidate text.
+--@param maximum integer Maximum byte length.
+--@param empty boolean Whether an empty string is allowed.
+--@return boolean True only for a valid bounded string.
 local function valid_text(value, maximum, empty)
     return type(value) == "string"
         and (empty or value ~= "")
@@ -264,11 +301,20 @@ local function valid_text(value, maximum, empty)
         and not value:find("\0", 1, true)
 end
 
+-- Validate a bounded ASCII identifier for diagnostic fields.
+--@param value any Candidate identity.
+--@param maximum integer Maximum byte length.
+--@return boolean True when the identity matches the restricted grammar.
 local function safe_identifier(value, maximum)
     return valid_text(value, maximum, false)
         and value:match("^[A-Za-z0-9][A-Za-z0-9._:-]*$") ~= nil
 end
 
+-- Accept bounded, printable seven-bit text only.
+--@param value any Candidate text.
+--@param maximum integer Maximum byte length.
+--@param empty boolean Whether an empty string is allowed.
+--@return boolean True when all bytes are printable ASCII.
 local function printable_ascii(value, maximum, empty)
     if not valid_text(value, maximum, empty) then return false end
     for index = 1, #value do
@@ -278,18 +324,52 @@ local function printable_ascii(value, maximum, empty)
     return true
 end
 
+-- Create a shallow read-only view without copying the backing table.
+--@param values table Backing fields retained by reference; the caller owns their stability.
+--@param label string|nil Diagnostic label; defaults to "readonly value".
+--@return table Empty proxy exposing the backing fields through its locked metatable.
+--@ownership Retains values by reference; nested values and the backing table are not frozen.
 local function readonly(values, label)
+    --@metatable readonly_proxy Forwards reads and iteration; ordinary assignments raise an error.
+    --@field __index table Backing values used for missing-key reads.
+    --@field __newindex function Rejects ordinary assignments without changing the backing values.
+    --@field __pairs function Enumerates the backing table with next.
+    --@field __len function Reports the backing table sequence length.
+    --@field __metatable string Hides this metatable behind the fixed "locked" marker.
     return setmetatable({}, {
         __index = values,
+        -- Reject a write through the proxy before it can create an ordinary field.
+        --@param _ table Proxy receiving the assignment; its contents are not consulted.
+        --@param key any Attempted field name included in the diagnostic.
+        --@return nil Does not return normally.
+        --@error Always raises a read-only assignment error at the caller frame.
         __newindex = function(_, key)
             error((label or "readonly value") .. " cannot be modified: " .. tostring(key), 2)
         end,
-        __pairs = function() return next, values, nil end,
-        __len = function() return #values end,
+        -- Iterate the backing fields instead of the empty proxy table.
+        --@param none The proxy argument supplied by pairs is ignored.
+        --@return function The standard next iterator.
+        --@return table Backing values used as iterator state.
+        --@return nil Initial key used to start iteration.
+        __pairs = function()
+            return next, values, nil
+        end,
+        -- Forward sequence-length queries to the backing table.
+        --@param none The proxy operand supplied by Lua is ignored.
+        --@return integer Length of the backing sequence under the Lua length operator.
+        __len = function()
+            return #values
+        end,
         __metatable = "locked",
     })
 end
 
+-- Copy a table recursively and expose each copied level through a read-only proxy.
+--@param value any Scalar or table to freeze.
+--@param visiting table|nil Recursion stack used to reject cycles.
+--@param label string|nil Error label passed to the proxy.
+--@return any|nil Original scalar or frozen table; nil when a cycle is found.
+--@ownership Copies table contents; scalar values are returned unchanged.
 local function freeze(value, visiting, label)
     if type(value) ~= "table" then return value end
     visiting = visiting or {}
@@ -323,6 +403,10 @@ local OPTION_FIELDS = {
     initial_sequence = true,
 }
 
+-- Validate all projector limits before any diagnostic is recorded.
+--@param options any Candidate product identity and bounds.
+--@return table|nil Independent copy of the accepted options.
+--@return table|nil Structured validation error on failure.
 local function validate_options(options)
     if not exact_fields(options, OPTION_FIELDS)
         or not printable_ascii(options.product_name, 128, false)
@@ -345,11 +429,18 @@ local function validate_options(options)
     return copied
 end
 
+-- Verify that a disabled or active output port has the required shape.
+--@param candidate any False sentinel or writer port.
+--@return boolean True for false or a table with a write function.
 local function validate_writer(candidate)
     return candidate == false
         or (type(candidate) == "table" and type(candidate.write) == "function")
 end
 
+-- Admit only the projector's four explicit capability ports.
+--@param ports any Candidate secret scanner, output writers, and Context journal.
+--@return table|nil Shallow copy of admitted functions or disabled sentinels.
+--@return table|nil Structured port error on failure.
 local function validate_ports(ports)
     if not exact_fields(ports, {
         secrets = true, stdout = true, stderr = true, context = true,
@@ -381,6 +472,9 @@ local function validate_ports(ports)
     return copied
 end
 
+-- Escape control, high-bit, and backslash bytes for a diagnostic card.
+--@param value string Already validated diagnostic detail text.
+--@return string Printable ASCII representation preserving byte identity.
 local function ascii_escape(value)
     local parts = {}
     for index = 1, #value do
@@ -396,6 +490,10 @@ local function ascii_escape(value)
     return table.concat(parts)
 end
 
+-- Check scanner intervals against the input and sort them by start position.
+--@param hits any Scanner-produced hit sequence.
+--@param byte_count integer Number of bytes in the scanned suffix.
+--@return table|nil Sorted intervals or nil for malformed scanner output.
 local function validate_scan_hits(hits, byte_count)
     if dense_count(hits) == nil then return nil end
     local intervals = {}
@@ -414,6 +512,10 @@ local function validate_scan_hits(hits, byte_count)
             last = hit.offset + hit.length - 1,
         }
     end
+    -- Sort earliest offsets first, with the longest interval first at a tie.
+    --@param left table First scanner interval.
+    --@param right table Second scanner interval.
+    --@return boolean True when left precedes right in redaction order.
     table.sort(intervals, function(left, right)
         if left.first ~= right.first then return left.first < right.first end
         return left.last > right.last
@@ -421,6 +523,11 @@ local function validate_scan_hits(hits, byte_count)
     return intervals
 end
 
+-- Replace all registered-secret spans and fail closed on scanner errors.
+--@param scanner table|boolean Secret scanner port or false when unavailable.
+--@param value string Detail text to inspect from left to right.
+--@return string|nil Redacted text, or nil when scanning cannot be trusted.
+--@return boolean|string Whether a secret was replaced, or a failure reason.
 local function redact_registered(scanner, value)
     if scanner == false then return nil, "scanner-unavailable" end
     local output, offset, redacted = {}, 1, false
@@ -448,6 +555,12 @@ local function redact_registered(scanner, value)
     return table.concat(output), redacted
 end
 
+-- Convert one typed detail into a bounded public or secret-safe value.
+--@param candidate any Detail name, class, and raw value.
+--@param ports table Admitted scanner port used for string classes.
+--@param limits table Projector byte and name bounds.
+--@return table|nil Sanitized detail, with omission flags where needed.
+--@return table|nil Structured validation error for malformed input.
 local function sanitize_detail(candidate, ports, limits)
     if not exact_fields(candidate, { name = true, class = true, value = true })
         or not safe_identifier(candidate.name, limits.maximum_detail_name_bytes)
@@ -522,6 +635,9 @@ local function sanitize_detail(candidate, ports, limits)
     }
 end
 
+-- Publish immutable copies of the stable error registry.
+--@param none No parameters.
+--@return table Read-only sequence of public error descriptors.
 local function registry_snapshot()
     local result = {}
     for index, item in ipairs(ERROR_DEFINITIONS) do
@@ -545,6 +661,9 @@ local FROZEN_EXIT_CLASSES = assert(freeze(
     "diagnostic exit classes"
 ))
 
+-- Serialize the error registry in its declared order for contract checks.
+--@param none No parameters.
+--@return string Pipe-delimited, newline-terminated registry text.
 local function registry_lines()
     local lines = {}
     for _, item in ipairs(ERROR_DEFINITIONS) do
@@ -561,7 +680,11 @@ local function registry_lines()
     return table.concat(lines, "\n") .. "\n"
 end
 
----Creates a bounded stable diagnostic projector.
+-- Create a bounded diagnostic projector with explicit output ports.
+--@param ports table Secret scanner, stderr, stdout, and Context ports or false sentinels.
+--@param options table Product identity, sequence origin, and hard limits.
+--@return table|nil Read-only projector service on success.
+--@return table|nil Structured port or limit error on failure.
 function M.new(ports, options)
     local admitted_ports, ports_error = validate_ports(ports)
     if not admitted_ports then return nil, ports_error end
@@ -570,9 +693,15 @@ function M.new(ports, options)
 
     local sequence = limits.initial_sequence
     local record_count = 0
+    --@metatable record_states Associates public self-test records with their private execution and dependency state.
+    --@field __mode string Fixed k mode: keys are weak; entries remain mutable within their owning module.
     local records_by_id, record_states = {}, setmetatable({}, { __mode = "k" })
     local service = {}
 
+    -- Resolve a record only when it was minted by this projector instance.
+    --@param record any Candidate public diagnostic record.
+    --@return table|nil Private state belonging to this projector.
+    --@return table|nil Structured ownership error on failure.
     local function state_for(record)
         local state = type(record) == "table" and record_states[record] or nil
         if not state then
@@ -581,6 +710,12 @@ function M.new(ports, options)
         return state
     end
 
+    -- Validate, sanitize, and register a bounded diagnostic record.
+    --@param self table Owning projector service; private counters remain enclosed.
+    --@param input table Error identity, lifecycle state, details, optional cause and retry.
+    --@return table|nil Frozen public record on success.
+    --@return table|nil Structured validation or hard-cap error on failure.
+    --@effect Increments this projector's sequence and record count only after validation.
     function service:record(input)
         if not exact_fields(input, {
             error_id = true,
@@ -678,6 +813,12 @@ function M.new(ports, options)
         return record
     end
 
+    -- Render a public card while trimming only optional detail lines to fit the cap.
+    --@param state table Private diagnostic state owned by this projector.
+    --@param channel string Target channel name for the rendered card.
+    --@param request table Include-details flag and optional durable sequence.
+    --@return table|nil Frozen projection with exact byte count.
+    --@return table|nil Hard-cap error if even mandatory fields cannot fit.
     local function build_projection(state, channel, request)
         local lines = {
             "YACA-DIAGNOSTIC-V1",
@@ -725,6 +866,10 @@ function M.new(ports, options)
                     .. tostring(item.possibly_secret)
             end
         end
+        -- Encode the current line prefix and optional truncation marker.
+        --@param count integer Number of initial card lines to include.
+        --@param truncated boolean Whether to append the detail-truncation marker.
+        --@return string Newline-terminated diagnostic card bytes.
         local function encode(count, truncated)
             local values = {}
             for index = 1, count do values[index] = lines[index] end
@@ -753,6 +898,12 @@ function M.new(ports, options)
         }, nil, "diagnostic projection"))
     end
 
+    -- Project the primary failure to stderr; dependent causes stay suppressed.
+    --@param self table Owning projector service.
+    --@param record table Record minted by this projector.
+    --@param request table Mode, detail flag, and durable sequence selection.
+    --@return table|nil Frozen stderr projection, possibly suppressed.
+    --@return table|nil Record or request error on failure.
     function service:project_stderr(record, request)
         local state, record_error = state_for(record)
         if not state then return nil, record_error end
@@ -784,6 +935,12 @@ function M.new(ports, options)
         })
     end
 
+    -- Project a diagnostic to stdout only for an explicit caller action.
+    --@param self table Owning projector service.
+    --@param record table Record minted by this projector.
+    --@param request table Explicit flag and detail selection.
+    --@return table|nil Frozen stdout projection.
+    --@return table|nil Record or explicit-action error on failure.
     function service:project_stdout(record, request)
         local state, record_error = state_for(record)
         if not state then return nil, record_error end
@@ -801,6 +958,12 @@ function M.new(ports, options)
         })
     end
 
+    -- Form a durable warning event only for a healthy Context that requires it.
+    --@param self table Owning projector service.
+    --@param record table Record minted by this projector.
+    --@param request table Healthy and required flags for the Context.
+    --@return table|nil Frozen Context projection or intentional omission.
+    --@return table|nil Record or Context-state error on failure.
     function service:project_context(record, request)
         local state, record_error = state_for(record)
         if not state then return nil, record_error end
@@ -841,6 +1004,12 @@ function M.new(ports, options)
         }, nil, "Context diagnostic projection"))
     end
 
+    -- Write an exact card to a port and require a matching byte receipt.
+    --@param port table|boolean Writer port or false when unavailable.
+    --@param projection table Frozen stdout or stderr projection.
+    --@return table|nil Original projection after confirmed output.
+    --@return table|nil Output availability or receipt error on failure.
+    --@effect Calls the writer once unless the projection is suppressed.
     local function emit_writer(port, projection)
         if port == false then
             return nil, failure("DiagnosticOutputUnavailable", "diagnostic channel is unavailable")
@@ -858,18 +1027,39 @@ function M.new(ports, options)
         return projection
     end
 
+    -- Project and emit the primary diagnostic to stderr.
+    --@param self table Owning projector service.
+    --@param record table Record minted by this projector.
+    --@param request table Stderr mode, detail flag, and sequence selection.
+    --@return table|nil Confirmed or suppressed stderr projection.
+    --@return table|nil Projection or writer error on failure.
+    --@effect Writes the card when the record is primary and stderr is available.
     function service:emit_stderr(record, request)
         local projection, projection_error = self:project_stderr(record, request)
         if not projection then return nil, projection_error end
         return emit_writer(admitted_ports.stderr, projection)
     end
 
+    -- Project and emit a caller-requested diagnostic to stdout.
+    --@param self table Owning projector service.
+    --@param record table Record minted by this projector.
+    --@param request table Explicit-action flag and detail selection.
+    --@return table|nil Confirmed stdout projection.
+    --@return table|nil Projection or writer error on failure.
+    --@effect Writes a bounded card after explicit-action validation.
     function service:emit_stdout(record, request)
         local projection, projection_error = self:project_stdout(record, request)
         if not projection then return nil, projection_error end
         return emit_writer(admitted_ports.stdout, projection)
     end
 
+    -- Commit a required warning only after the Context reports exact durability.
+    --@param self table Owning projector service.
+    --@param record table Record minted by this projector.
+    --@param request table Context health and required flags.
+    --@return table|nil Confirmed or intentionally omitted Context projection.
+    --@return table|nil Projection or commit receipt error on failure.
+    --@effect Calls the Context journal when a durable warning is required.
     function service:emit_context(record, request)
         local projection, projection_error = self:project_context(record, request)
         if not projection then return nil, projection_error end
@@ -892,6 +1082,11 @@ function M.new(ports, options)
         return projection
     end
 
+    -- Look up a public error descriptor by its stable identity.
+    --@param self table Owning projector service.
+    --@param error_id string Candidate error identity.
+    --@return table|nil Frozen registry descriptor on success.
+    --@return table|nil Invalid or unknown identity error on failure.
     function service:descriptor(error_id)
         if not safe_identifier(error_id, limits.maximum_identifier_bytes) then
             return nil, failure("InvalidErrorIdentity", "error identity is invalid")
@@ -902,6 +1097,10 @@ function M.new(ports, options)
         return nil, failure("UnknownErrorIdentity", "error identity is not public")
     end
 
+    -- Resolve a record or public error identity to its process exit code.
+    --@param self table Owning projector service.
+    --@param value any Owned record or error identity; unknown values use general error.
+    --@return integer Exit code from the stable class registry.
     function service:exit_code(value)
         local state = type(value) == "table" and record_states[value] or nil
         if state then return state.exit_code end
@@ -910,6 +1109,9 @@ function M.new(ports, options)
             or EXIT_CLASSES.general_error
     end
 
+    -- Return the stable text form of the public error registry.
+    --@param self table Owning projector service.
+    --@return string Pipe-delimited registry lines with a final newline.
     function service:registry_lines()
         return registry_lines()
     end
@@ -939,6 +1141,10 @@ local SELF_TEST_OUTCOMES = {
     unknown = true,
 }
 
+-- Validate the complete set of self-test resource caps and copy them.
+--@param options any Candidate self-test limits.
+--@return table|nil Independent limit table on success.
+--@return table|nil Structured option error on failure.
 local function validate_self_test_options(options)
     if not exact_fields(options, {
         maximum_models = true,
@@ -981,6 +1187,10 @@ local function validate_self_test_options(options)
     return copied
 end
 
+-- Keep offline, online Model, and advisory execution capabilities separate.
+--@param ports any Candidate executor ports and their capability flags.
+--@return table|nil Accepted executor functions in a shallow copy.
+--@return table|nil Structured port error on failure.
 local function validate_self_test_ports(ports)
     if not exact_fields(ports, { offline = true, model = true, advisory = true })
         or not exact_fields(ports.offline, { online = true, run = true })
@@ -1008,6 +1218,13 @@ local function validate_self_test_ports(ports)
     }
 end
 
+-- Copy a self-test snapshot while rejecting cycles, unsafe keys, and excess bytes.
+--@param value any Snapshot scalar or nested table to copy.
+--@param limits table Node and byte caps for the full snapshot.
+--@param state table Mutable running node and byte counters.
+--@param visiting table|nil Recursion stack for cycle detection.
+--@return any|nil Safe copy of the value, or nil when invalid or over budget.
+--@effect Updates state counters even if a later branch fails validation.
 local function bounded_snapshot(value, limits, state, visiting)
     local value_type = type(value)
     if value_type == "string" then
@@ -1057,6 +1274,9 @@ local function bounded_snapshot(value, limits, state, visiting)
     return copied
 end
 
+-- Freeze the public self-test catalog in declared dependency order.
+--@param none No parameters.
+--@return table Read-only check sequence, including dependency lists.
 local function self_test_registry_snapshot()
     local result = {}
     for index, item in ipairs(SELF_TEST_CHECKS) do
@@ -1074,6 +1294,14 @@ end
 
 local FROZEN_SELF_TEST_CHECKS = self_test_registry_snapshot()
 
+-- Build a set from a bounded, unique, known-identity filter sequence.
+--@param values any Candidate array of selected or excluded identities.
+--@param maximum integer Maximum number of entries.
+--@param known table Registry keyed by permitted identities.
+--@param label string Filter name included in errors.
+--@param validator function Additional identity grammar check.
+--@return table|nil Set of accepted identities.
+--@return table|nil Structured filter error on failure.
 local function validate_filter(values, maximum, known, label, validator)
     if dense_count(values) == nil or #values > maximum then
         return nil, failure("InvalidSelfTestRequest", label .. " filter is invalid")
@@ -1088,6 +1316,12 @@ local function validate_filter(values, maximum, known, label, validator)
     return result
 end
 
+-- Verify an executor result, including network evidence and advisory downgrade.
+--@param result any Candidate result from a self-test executor port.
+--@param check_item table Registered check contract.
+--@param limits table Evidence, summary, and online-request caps.
+--@return table|nil Bounded result with copied evidence and normalized outcome.
+--@return table|nil Contract error on malformed or unsafe executor output.
 local function validate_check_result(result, check_item, limits)
     if not exact_fields(result, {
         outcome = true,
@@ -1134,7 +1368,11 @@ local function validate_check_result(result, check_item, limits)
     }
 end
 
----Creates the strict Stage 1 -> Stage 2 -> Stage 3 self-test executor.
+-- Create an ordered, bounded self-test service with isolated capability ports.
+--@param ports table Offline, online Model, and advisory executor ports.
+--@param options table Hard limits for snapshots, results, filters, and requests.
+--@return table|nil Read-only self-test service on success.
+--@return table|nil Structured port or option error on failure.
 function M.new_self_test(ports, options)
     local admitted_ports, ports_error = validate_self_test_ports(ports)
     if not admitted_ports then return nil, ports_error end
@@ -1144,6 +1382,11 @@ function M.new_self_test(ports, options)
     local running = false
     local service = {}
 
+    -- Validate the invocation and execute each requested stage in dependency order.
+    --@param request table Snapshot, Model list, check filters, stage, and online consent.
+    --@return table|nil Frozen listing or completed self-test result.
+    --@return table|nil Structured request, executor, or hard-limit error.
+    --@effect Invokes executor ports only after validation and stage gating.
     local function run_internal(request)
         if not exact_fields(request, {
             mode = true,
@@ -1210,6 +1453,9 @@ function M.new_self_test(ports, options)
             limits.maximum_filters,
             model_by_id,
             "Model exclusion",
+            -- Accept a bounded Model identity, including punctuation in configured names.
+            --@param value any Candidate Model identifier from the exclusion list.
+            --@return boolean True for a nonempty bounded string.
             function(value)
                 return valid_text(value, limits.maximum_identifier_bytes, false)
             end
@@ -1221,6 +1467,9 @@ function M.new_self_test(ports, options)
             limits.maximum_filters,
             SELF_TEST_CHECK_BY_ID,
             "check exclusion",
+            -- Require a stable check identifier in the exclusion list.
+            --@param value any Candidate self-test check identity.
+            --@return boolean True when it matches the check-ID grammar.
             function(value)
                 return safe_identifier(value, limits.maximum_identifier_bytes)
             end
@@ -1232,6 +1481,9 @@ function M.new_self_test(ports, options)
             limits.maximum_filters,
             SELF_TEST_CHECK_BY_ID,
             "check selection",
+            -- Require a stable check identifier in the selection list.
+            --@param value any Candidate self-test check identity.
+            --@return boolean True when it matches the check-ID grammar.
             function(value)
                 return safe_identifier(value, limits.maximum_identifier_bytes)
             end
@@ -1252,6 +1504,10 @@ function M.new_self_test(ports, options)
         end
 
         local selected_effective = {}
+        -- Include a selected check and all of its registered prerequisites.
+        --@param id string Registered check identity to expand.
+        --@return nil No return value.
+        --@effect Adds reachable identities to selected_effective once each.
         local function include_with_dependencies(id)
             if selected_effective[id] then return end
             selected_effective[id] = true
@@ -1285,6 +1541,15 @@ function M.new_self_test(ports, options)
         local online_requests, required_exclusions, advisories = 0, 0, 0
         local hard_failure, cancelled, partial = false, false, false
         local stage1_status, model_status = {}, {}
+        -- Append one normalized check outcome and update aggregate counters.
+        --@param check_item table Registered check descriptor.
+        --@param model_id string|boolean Model identity or false for shared checks.
+        --@param result table Validated or locally constructed check result.
+        --@param excluded boolean Whether the check was explicitly or effectively excluded.
+        --@param reason string|boolean Exclusion reason or false.
+        --@return boolean|nil True after append, nil if a hard cap is exceeded.
+        --@return table|nil Structured result or online-request cap error.
+        --@effect Adds a result and updates aggregate counters before testing the online cap.
         local function append_result(check_item, model_id, result, excluded, reason)
             if #results >= limits.maximum_results then
                 return nil, failure("SelfTestLimit", "self-test result cap reached")
@@ -1325,6 +1590,10 @@ function M.new_self_test(ports, options)
             end
             return true
         end
+        -- Construct a local zero-request outcome for a check not executed.
+        --@param check_item table Registered check descriptor; retained only for call symmetry.
+        --@param reason string Public explanation of the skip.
+        --@return table Skipped result with empty evidence.
         local function skipped(check_item, reason)
             return {
                 outcome = "skipped",
@@ -1333,6 +1602,10 @@ function M.new_self_test(ports, options)
                 online_requests = 0,
             }
         end
+        -- Allow a check only when prerequisites passed or produced a warning.
+        --@param check_item table Registered check descriptor.
+        --@param statuses table Outcomes for checks in the current Model scope.
+        --@return boolean True when every dependency permits continued execution.
         local function dependencies_pass(check_item, statuses)
             for _, dependency in ipairs(check_item.dependencies) do
                 local status = dependency:sub(1, 3) == "ST1"
@@ -1346,6 +1619,13 @@ function M.new_self_test(ports, options)
             end
             return true
         end
+        -- Isolate an executor behind a frozen request and validate its reply.
+        --@param port table Admitted offline, Model, or advisory executor.
+        --@param specification table Request including check and snapshot bindings.
+        --@param check_item table Registered check contract used to verify the reply.
+        --@return table|nil Validated bounded check result.
+        --@return table|nil Cycle, executor, or result-contract error on failure.
+        --@effect Calls the executor once with a frozen request.
         local function call_port(port, specification, check_item)
             local frozen_spec = freeze(specification, nil, "self-test check request")
             if not frozen_spec then
@@ -1389,6 +1669,9 @@ function M.new_self_test(ports, options)
                 stage1_status[check_item.id] = result.outcome
             end
         end
+        -- Resolve aggregate cancellation, failure, and partial flags by precedence.
+        --@param none No parameters.
+        --@return string Overall outcome for the work completed so far.
         local function overall_outcome()
             if cancelled then return "cancelled" end
             if hard_failure then return "error" end
@@ -1547,6 +1830,12 @@ function M.new_self_test(ports, options)
         }, nil, "Stage 3 self-test result"))
     end
 
+    -- Execute one self-test invocation with a re-entry guard and protected cleanup.
+    --@param self table Owning self-test service.
+    --@param request table Stage, snapshot, filters, Models, and consent.
+    --@return table|nil Frozen self-test report on success.
+    --@return table|nil Busy, validation, or execution contract error on failure.
+    --@effect Invokes admitted ports while marking the service busy; always clears the mark.
     function service:run(request)
         if running then return nil, failure("SelfTestBusy", "one self-test is already active") end
         running = true

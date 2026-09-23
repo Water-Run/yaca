@@ -1,7 +1,7 @@
 --[[
-File: luainstaller_patch_test.lua
-Date: 2026-08-30
 Author: WaterRun
+Date: 2026-09-23
+File: luainstaller_patch_test.lua
 Description: Verifies the exact downstream resource-overlay patch as release input.
 ]]
 
@@ -12,6 +12,9 @@ local SHA256 = assert(loadfile(
     _ENV
 ))()
 
+--Reads load value for this test scenario.
+--@param relative_path string Repository-relative Lua source path to load.
+--@return any module Lua module value loaded for this case.
 local function load_value(relative_path)
     local chunk, load_error = loadfile(YACA_TEST_ROOT .. "/" .. relative_path, "t", _ENV)
     A.truthy(chunk, load_error)
@@ -20,6 +23,9 @@ local function load_value(relative_path)
     return value
 end
 
+--Reads read bytes for this test scenario.
+--@param relative_path string Repository-relative Lua source path to load.
+--@return any bytes Bytes read from the selected fixture file.
 local function read_bytes(relative_path)
     local handle, open_error = io.open(YACA_TEST_ROOT .. "/" .. relative_path, "rb")
     A.truthy(handle, open_error)
@@ -39,6 +45,9 @@ return {
     cases = {
         {
             name = "resource overlay patch bytes and upstream bases are exactly pinned",
+            --Verifies resource overlay patch bytes and upstream bases are exactly pinned.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify resource overlay patch bytes and upstream bases are exactly pinned.
             run = function()
                 A.equal(#lock.components.luainstaller.downstream_patches, 1)
                 A.equal(patch_record.applies_to_revision, lock.components.luainstaller.revision)
@@ -60,6 +69,9 @@ return {
         },
         {
             name = "patch changes only the four audited packaging files",
+            --Verifies patch changes only the four audited packaging files.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify patch changes only the four audited packaging files.
             run = function()
                 local old_files, new_files = {}, {}
                 for line in (patch_bytes .. "\n"):gmatch("([^\n]*)\n") do
@@ -79,6 +91,9 @@ return {
         },
         {
             name = "patch binds explicit hashes through manifest onedir and onefile",
+            --Verifies patch binds explicit hashes through manifest onedir and onefile.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify patch binds explicit hashes through manifest onedir and onefile.
             run = function()
                 for _, marker in ipairs({
                     "local RESOURCE_FIELDS = {",

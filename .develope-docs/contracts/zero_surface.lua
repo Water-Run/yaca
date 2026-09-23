@@ -1,3 +1,10 @@
+--[[
+Author: WaterRun
+Date: 2026-09-23
+File: zero_surface.lua
+Description: Defines offline startup behavior and boundaries before an Agent turn begins.
+]]
+
 return {
   contract_version = "0.1.0-readiness.1",
   decision_refs = { "D-044", "D-045", "D-055", "D-056", "D-058" },

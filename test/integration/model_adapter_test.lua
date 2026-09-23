@@ -1,19 +1,28 @@
 --[[
-File: model_adapter_test.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-09-23
+File: model_adapter_test.lua
 Description: Verifies canonical dual-provider request and event adapters.
 ]]
 
 local A = assert(loadfile(YACA_TEST_ROOT .. "/test/support/assert.lua", "t", _ENV))()
 
+--Loads a source module into an isolated per-case environment.
+--@param name string Module, Model, or resource name selected by the case.
+--@param cache table Per-case module cache preserving isolated imports.
+--@return any module Module export loaded in the isolated source environment.
 local function load_module(name, cache)
     cache = cache or {}
     if cache[name] then return cache[name] end
     local environment = {}
     for key, value in pairs(_ENV) do environment[key] = value end
+    --Resolves an imported Lua module through the isolated test loader.
+    --@param dependency string Source module requested from the isolated loader.
+    --@return any value Callback value consumed by the enclosing scenario assertion.
     environment.require = function(dependency) return load_module(dependency, cache) end
     environment._G = environment
+    --@metatable environment Test-owned lookup and mutation contract for the current case.
+    --@field __index any Fallback table or function used for missing fixture keys.
     setmetatable(environment, { __index = _ENV })
     local chunk, load_error = loadfile(YACA_TEST_ROOT .. "/src/" .. name .. ".lua", "t", environment)
     A.truthy(chunk, load_error)
@@ -22,6 +31,9 @@ local function load_module(name, cache)
     return result
 end
 
+--Builds the limits values used by this suite.
+--@param overrides table|nil Per-case overrides of default fixture behavior.
+--@return any options limits used to configure the component under test.
 local function limits(overrides)
     local result = {
         maximum_json_bytes = 65536,
@@ -46,6 +58,15 @@ local function limits(overrides)
     return result
 end
 
+--Simulates the request port for this suite.
+--@param service table Service port exercised by the case.
+--@param protocol string Model wire protocol selected by the case.
+--@param streaming boolean Whether the Model stream is enabled.
+--@param suffix string Suffix appended to the fixture path or message.
+--@param surface any The surface supplied to the fake service for this scenario.
+--@param schema table Schema validator exercised by the case.
+--@param view table|string Selected catalog or transcript view.
+--@return any observed request value observed by the scenario assertion.
 local function request(service, protocol, streaming, suffix, surface, schema, view)
     local remote_model = protocol == "openai-chat" and "gpt-test" or "claude-test"
     local tools = {}
@@ -56,7 +77,7 @@ local function request(service, protocol, streaming, suffix, surface, schema, vi
             schema = schema or { type = "object", additionalProperties = true },
         }
     end
-    local purpose = surface and "main" or "side"
+    local purpose = surface and "main" or "ask"
     return assert(service:normalize_request({
         request_id = "request-" .. suffix,
         purpose = purpose,
@@ -84,16 +105,30 @@ local function request(service, protocol, streaming, suffix, surface, schema, vi
     }))
 end
 
+--Supplies kinds behavior required by the 'test' case.
+--@param events table Recorded event batch delivered to the consumer.
+--@return any observed kinds value observed by the scenario assertion.
 local function kinds(events)
     local result = {}
     for index, event in ipairs(events) do result[index] = event.kind end
     return result
 end
 
+--Records the append effect observed by the 'test' case.
+--@param target table|string Target selected for the exercised operation.
+--@param events table Recorded event batch delivered to the consumer.
+--@return nil No value; the fake port or test assertion observes this callback's effects.
 local function append(target, events)
     for _, event in ipairs(events or {}) do target[#target + 1] = event end
 end
 
+--Supplies drive behavior required by the 'test' case.
+--@param service table Service port exercised by the case.
+--@param normalized any The normalized supplied to the fake service for this scenario.
+--@param fixture table Test fixture state shared by this helper.
+--@param chunks table Data chunks queued for the fake stream.
+--@return any observed drive value observed by the scenario assertion.
+--@return any secondary2 Additional status or structured error from the fixture operation.
 local function drive(service, normalized, fixture, chunks)
     local session = assert(service:new_response(normalized))
     local events = {}
@@ -113,6 +148,9 @@ local function drive(service, normalized, fixture, chunks)
     return events, assert(session:response())
 end
 
+--Constructs fixture source for the test scenario.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return any observed fixture source value observed by the scenario assertion.
 local function fixture_source()
     return assert(loadfile(
         YACA_TEST_ROOT .. "/.develope-docs/contracts/fixtures/wire.lua",
@@ -126,6 +164,9 @@ return {
     cases = {
         {
             name = "coalesced SSE reads preserve all frames across parser batch limits",
+            --Verifies coalesced SSE reads preserve all frames across parser batch limits.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify coalesced SSE reads preserve all frames across parser batch limits.
             run = function()
                 local service = assert(load_module("model").new(limits({ maximum_sse_events_per_push = 2, maximum_events = 1024 })))
                 local normalized = request(service, "openai-chat", "force", "coalesced")
@@ -146,6 +187,9 @@ return {
         },
         {
             name = "durable model view is quoted between authority layers and current input",
+            --Verifies durable model view is quoted between authority layers and current input.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify durable model view is quoted between authority layers and current input.
             run = function()
                 local cache = {}
                 local model = load_module("model", cache)
@@ -207,7 +251,7 @@ return {
                 }
                 local rejected, view_error = service:normalize_request({
                     request_id = "request-invalid-view",
-                    purpose = "side",
+                    purpose = "ask",
                     model_ref = {
                         name = "test",
                         protocol = "openai-chat",
@@ -219,7 +263,7 @@ return {
                     prompt_bundle = { messages = { { role = "user", content = "hi" } } },
                     model_view_manifest = malformed,
                     tool_registry = { version = "tools-1", digest = "registry-1", tools = {} },
-                    controls_schema = assert(service:controls_schema("side")),
+                    controls_schema = assert(service:controls_schema("ask")),
                     streaming = "off",
                     limits = {},
                     retry_policy = { count = 0, base_delay_ms = 1 },
@@ -230,6 +274,9 @@ return {
         },
         {
             name = "every frozen OpenAI and Anthropic wire case has one canonical mapping",
+            --Verifies every frozen OpenAI and Anthropic wire case has one canonical mapping.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify every frozen OpenAI and Anthropic wire case has one canonical mapping.
             run = function()
                 local service = assert(load_module("model").new(limits()))
                 local fixture_set = fixture_source()
@@ -280,6 +327,9 @@ return {
         },
         {
             name = "synthetic archive is complete and remains explicitly non-qualifying",
+            --Verifies synthetic archive is complete and remains explicitly non-qualifying.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify synthetic archive is complete and remains explicitly non-qualifying.
             run = function()
                 local archive = assert(loadfile(
                     YACA_TEST_ROOT .. "/test/golden/provider_wire/manifest.lua",
@@ -304,6 +354,9 @@ return {
         },
         {
             name = "stream parsing is invariant under one-byte provider chunking",
+            --Verifies stream parsing is invariant under one-byte provider chunking.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify stream parsing is invariant under one-byte provider chunking.
             run = function()
                 local service = assert(load_module("model").new(limits()))
                 for _, fixture in ipairs(fixture_source().cases) do
@@ -328,6 +381,9 @@ return {
         },
         {
             name = "streaming tool arguments never complete or execute before response closure",
+            --Verifies streaming tool arguments never complete or execute before response closure.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify streaming tool arguments never complete or execute before response closure.
             run = function()
                 local service = assert(load_module("model").new(limits()))
                 local caller_schema = {
@@ -363,12 +419,21 @@ return {
                 A.equal(response.tool_calls[1].canonical_arguments, '{"path":"a"}')
                 A.equal(response.tool_calls_validated, true)
                 A.equal(response.execution_admitted, false)
+                --Executes the action expected to raise in the 'streaming tool arguments never complete or execute before response closure' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify streaming tool arguments never complete or execute before response closure.
                 A.raises(function() second[1].name = "exec" end, "cannot be modified")
+                --Executes the action expected to raise in the 'streaming tool arguments never complete or execute before response closure' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify streaming tool arguments never complete or execute before response closure.
                 A.raises(function() response.tool_calls[1].name = "exec" end, "cannot be modified")
             end,
         },
         {
             name = "schema identity controls and cross-protocol conflicts fail closed",
+            --Verifies schema identity controls and cross-protocol conflicts fail closed.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify schema identity controls and cross-protocol conflicts fail closed.
             run = function()
                 local service = assert(load_module("model").new(limits()))
                 local normalized = request(service, "openai-chat", true, "conflict", true)
@@ -411,6 +476,9 @@ return {
         },
         {
             name = "tool argument and response content caps emit bounded protocol failures",
+            --Verifies tool argument and response content caps emit bounded protocol failures.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify tool argument and response content caps emit bounded protocol failures.
             run = function()
                 local model = load_module("model")
                 local argument_service = assert(model.new(limits({ maximum_tool_argument_bytes = 16 })))
@@ -439,6 +507,9 @@ return {
         },
         {
             name = "normalized requests reject secrets ambiguity and silent force fallback",
+            --Verifies normalized requests reject secrets ambiguity and silent force fallback.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify normalized requests reject secrets ambiguity and silent force fallback.
             run = function()
                 local service = assert(load_module("model").new(limits()))
                 local base = {
@@ -474,7 +545,10 @@ return {
                 local wire, fallback_error = service:encode(admitted, false)
                 A.falsy(wire)
                 A.equal(fallback_error.code, "StreamingRequired")
-                A.raises(function() admitted.purpose = "side" end, "cannot be modified")
+                --Executes the action expected to raise in the 'test' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify normalized requests reject secrets ambiguity and silent force fallback.
+                A.raises(function() admitted.purpose = "ask" end, "cannot be modified")
 
                 base.request_id = "request-try"
                 base.streaming = "try"
@@ -501,6 +575,9 @@ return {
         },
         {
             name = "auth and cancellation map without leaking or retrying credentials",
+            --Verifies auth and cancellation map without leaking or retrying credentials.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify auth and cancellation map without leaking or retrying credentials.
             run = function()
                 local service = assert(load_module("model").new(limits()))
                 local spec = {

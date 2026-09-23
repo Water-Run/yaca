@@ -1,8 +1,8 @@
 /*
-** File: native_component_probe.c
-** Date: 2026-08-30
-** Author: WaterRun
-** Description: Emits exact argv and stdin bytes for native component qualification.
+Author: WaterRun
+Date: 2026-09-23
+File: native_component_probe.c
+Description: Emits exact argv and stdin bytes for native component qualification.
 */
 
 #include <stdio.h>
@@ -13,6 +13,11 @@
 #include <io.h>
 #endif
 
+/* Writes binary probe bytes as lowercase hexadecimal text.
+ * @param bytes const_unsigned_char* Raw byte buffer supplied to the native operation.
+ * @param length size_t Byte or wide-character length of the supplied buffer.
+ * @return void No value; appends exactly two lowercase hex digits per input byte to stdout.
+ */
 static void write_hex(const unsigned char *bytes, size_t length)
 {
   static const char digits[] = "0123456789abcdef";
@@ -26,6 +31,11 @@ static void write_hex(const unsigned char *bytes, size_t length)
   }
 }
 
+/* Runs the native component probe executable and reports its exit status.
+ * @param argc int Number of command-line arguments supplied by the host.
+ * @param argv char** Host command-line argument vector.
+ * @return int result Process exit status, zero only when all smoke checks pass.
+ */
 int main(int argc, char **argv)
 {
   unsigned char buffer[257];

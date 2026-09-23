@@ -1,7 +1,7 @@
 --[[
-File: direct_tools_test.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-09-23
+File: direct_tools_test.lua
 Description: Verifies the closed registry and all seven direct tool contracts.
 ]]
 
@@ -17,13 +17,22 @@ local direct_harness = assert(loadfile(
     _ENV
 ))()
 
+--Loads a source module into an isolated per-case environment.
+--@param name string Module, Model, or resource name selected by the case.
+--@param cache table Per-case module cache preserving isolated imports.
+--@return any module Module export loaded in the isolated source environment.
 local function load_module(name, cache)
     cache = cache or {}
     if cache[name] then return cache[name] end
     local environment = {}
     for key, value in pairs(_ENV) do environment[key] = value end
+    --Resolves an imported Lua module through the isolated test loader.
+    --@param dependency string Source module requested from the isolated loader.
+    --@return any value Callback value consumed by the enclosing scenario assertion.
     environment.require = function(dependency) return load_module(dependency, cache) end
     environment._G = environment
+    --@metatable environment Test-owned lookup and mutation contract for the current case.
+    --@field __index any Fallback table or function used for missing fixture keys.
     setmetatable(environment, { __index = _ENV })
     local chunk, load_error = loadfile(YACA_TEST_ROOT .. "/src/" .. name .. ".lua", "t", environment)
     A.truthy(chunk, load_error)
@@ -32,20 +41,34 @@ local function load_module(name, cache)
     return result
 end
 
+--@metatable fixture_view Test-owned lookup and mutation contract for the current case.
+--@field __mode any Weak-reference mode controlling fixture object retention.
 local array_marks = setmetatable({}, { __mode = "k" })
 
+--Supplies arr behavior required by this suite.
+--@param values table Candidate values supplied to the fixture operation.
+--@return any observed arr value observed by the scenario assertion.
 local function arr(values)
     array_marks[values] = true
     return values
 end
 
+--Transforms escape data used by this suite.
+--@param value any Candidate whose acceptance or transformation the test checks.
+--@return string observed escape value observed by the scenario assertion.
 local function escape(value)
+    --Supplies an assertion callback for this test scenario.
+    --@param character string Character emitted or parsed by the fixture.
+    --@return number value Callback value consumed by the enclosing scenario assertion.
     return '"' .. value:gsub("[\\\"\0-\31]", function(character)
         local mappings = { ['"'] = '\\"', ['\\'] = '\\\\', ['\n'] = '\\n', ['\r'] = '\\r', ['\t'] = '\\t' }
         return mappings[character] or string.format("\\u%04x", character:byte())
     end) .. '"'
 end
 
+--Transforms encode data used by this suite.
+--@param value any Candidate whose acceptance or transformation the test checks.
+--@return string|any observed encode value observed by the scenario assertion.
 local function encode(value)
     if type(value) == "string" then return escape(value) end
     if type(value) == "boolean" then return value and "true" or "false" end
@@ -63,18 +86,37 @@ local function encode(value)
     return "{" .. table.concat(output, ",") .. "}"
 end
 
+--Constructs an incremental SHA-256 port backed by the reference digest.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return table port Incremental SHA-256 fixture port.
 local function hash_port()
     return {
+        --Computes or records sha256 start data for this suite.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return table record Fixture record emitted by the scenario callback.
         sha256_start = function() return { parts = {}, closed = false } end,
+        --Computes or records sha256 update data for this suite.
+        --@param handle table|integer Fake resource handle whose state is inspected.
+        --@param bytes string Byte chunk supplied to the fake I/O port.
+        --@return boolean accepted Whether the fake callback accepts this scenario.
         sha256_update = function(handle, bytes)
             handle.parts[#handle.parts + 1] = bytes
             return true
         end,
+        --Computes or records sha256 finish data for this suite.
+        --@param handle table|integer Fake resource handle whose state is inspected.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
         sha256_finish = function(handle) return sha256.digest(table.concat(handle.parts)) end,
+        --Computes or records sha256 close data for this suite.
+        --@param handle table|integer Fake resource handle whose state is inspected.
+        --@return boolean accepted Whether the fake callback accepts this scenario.
         sha256_close = function(handle) handle.closed = true; return true end,
     }
 end
 
+--Builds validated options for this suite's component fixture.
+--@param overrides table|nil Per-case overrides of default fixture behavior.
+--@return any options options used to configure the component under test.
 local function options(overrides)
     local result = {
         maximum_argument_bytes = 65536,
@@ -107,6 +149,12 @@ local function options(overrides)
     return result
 end
 
+--Constructs the suite's isolated runtime fixture and observation ports.
+--@param settings table|nil Fixture settings and scenario overrides.
+--@return any fixture Constructed fixture service used by this suite.
+--@return any secondary2 Configured control actions returned by the fixture.
+--@return any secondary3 Additional status or structured error from the fixture operation.
+--@return table secondary4 Structured fixture record with modules, safety, filesystem, operations.
 local function fixture(settings)
     settings = settings or {}
     local initial = {
@@ -148,11 +196,20 @@ local function fixture(settings)
     end
     local authorization_controls = { current = true, admits = 0, reverifies = 0 }
     local authorization = {
+        --Simulates the admit port for this suite.
+        --@param call table|integer Recorded call or call ordinal under inspection.
+        --@return boolean accepted Whether the fake callback accepts this scenario.
+        --@return string|nil secondary2 Fixture text "authority-" .. call.call_digest.
         admit = function(call)
             authorization_controls.admits = authorization_controls.admits + 1
             if not authorization_controls.current then return false end
             return true, "authority-" .. call.call_digest
         end,
+        --Supplies the reverify observation used by this suite.
+        --@param call table|integer Recorded call or call ordinal under inspection.
+        --@param _ any Unused callback argument supplied by the port.
+        --@param digest string Expected or computed hexadecimal digest.
+        --@return string text Text emitted by the scenario callback.
         reverify = function(call, _, digest)
             authorization_controls.reverifies = authorization_controls.reverifies + 1
             return authorization_controls.current
@@ -161,6 +218,10 @@ local function fixture(settings)
     }
     local operation_controls = { intents = {}, results = {}, active = false }
     local operations = {
+        --Simulates the begin transition of a fake activity port for this suite.
+        --@param intent any The intent supplied to the fake service for this scenario.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
+        --@return string secondary2 Fixture text "intent-" .. intent.operation_id.
         begin = function(intent)
             A.falsy(operation_controls.active)
             local handle = {}
@@ -168,12 +229,19 @@ local function fixture(settings)
             operation_controls.intents[#operation_controls.intents + 1] = intent
             return handle, "intent-" .. intent.operation_id
         end,
+        --Simulates the finish transition of a fake activity port for this suite.
+        --@param handle table|integer Fake resource handle whose state is inspected.
+        --@param result any The result supplied to the fake service for this scenario.
+        --@return string text Text emitted by the scenario callback.
         finish = function(handle, result)
             A.equal(handle, operation_controls.active)
             operation_controls.results[#operation_controls.results + 1] = result
             operation_controls.active = false
             return "result-" .. tostring(#operation_controls.results)
         end,
+        --Simulates the status transition of a fake activity port for this suite.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return table record Fixture record emitted by the scenario callback.
         status = function()
             return { blocked = false, active_operation_id = false, auto_replay = false }
         end,
@@ -195,6 +263,12 @@ local function fixture(settings)
     }
 end
 
+--Simulates the call port for this suite.
+--@param service table Service port exercised by the case.
+--@param tool table|string Tool selected for this scenario.
+--@param arguments table Argument vector delivered to the fake process.
+--@param suffix string Suffix appended to the fixture path or message.
+--@return any observed call value observed by the scenario assertion.
 local function call(service, tool, arguments, suffix)
     suffix = suffix or tool
     return service:admit_call({
@@ -208,6 +282,10 @@ local function call(service, tool, arguments, suffix)
     })
 end
 
+--Simulates the authorize port for this suite.
+--@param service table Service port exercised by the case.
+--@param admitted any The admitted supplied to the fake service for this scenario.
+--@return any observed authorize value observed by the scenario assertion.
 local function authorize(service, admitted)
     local action = assert(service:permission_action(admitted))
     if admitted.mutates or admitted.tool == "exec" then
@@ -223,12 +301,23 @@ local function authorize(service, admitted)
     }))
 end
 
+--Supplies run behavior required by this suite.
+--@param service table Service port exercised by the case.
+--@param tool table|string Tool selected for this scenario.
+--@param arguments table Argument vector delivered to the fake process.
+--@param suffix string Suffix appended to the fixture path or message.
+--@return any observed run value observed by the scenario assertion.
+--@return any secondary2 Additional status or structured error from the fixture operation.
 local function run(service, tool, arguments, suffix)
     local admitted, admission_error = call(service, tool, arguments, suffix)
     A.truthy(admitted, admission_error and admission_error.code)
     return assert(service:execute(authorize(service, admitted))), admitted
 end
 
+--Supplies the identity observation used by this suite.
+--@param controls any The controls supplied to the fake service for this scenario.
+--@param path string File or Context path exercised by the case.
+--@return any observed identity value observed by the scenario assertion.
 local function identity(controls, path)
     return assert(controls.identity(path))
 end
@@ -237,7 +326,29 @@ return {
     name = "integration/direct-tools",
     cases = {
         {
+            name = "an oversized result envelope rejects the write before intent or filesystem effects",
+            --Verifies an oversized result envelope rejects the write before intent or filesystem effects.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify an oversized result envelope rejects the write before intent or filesystem effects.
+            run = function()
+                local service, controls, authority, dependencies = fixture({
+                    options = { maximum_result_bytes = 20000 },
+                })
+                local accepted, err = call(service, "write", {
+                    path = "/work/new.txt", mode = "create", content = string.rep("&", 10000),
+                    encoding = "utf-8", newline_policy = "preserve",
+                })
+                A.falsy(accepted); A.equal(err.code, "ResultLimit")
+                A.equal(#dependencies.operations.intents, 0)
+                A.equal(authority.admits, 0)
+                A.falsy(controls.exists("/work/new.txt"))
+            end,
+        },
+        {
             name = "relative tool paths resolve only against the bound workspace and retain reserved-root denial",
+            --Verifies an oversized result envelope rejects the write before intent or filesystem effects.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify an oversized result envelope rejects the write before intent or filesystem effects.
             run = function()
                 local service = fixture()
                 local listed = run(service, "list", { path = ".", depth = 1, page_size = 16 }, "relative-list")
@@ -251,7 +362,10 @@ return {
             end,
         },
         {
-            name = "registry is exactly eight versioned tools and non-main purposes are empty",
+            name = "registry includes embedded Lua and non-main purposes are empty",
+            --Verifies registry includes embedded Lua and non-main purposes are empty.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify registry includes embedded Lua and non-main purposes are empty.
             run = function()
                 local service = fixture()
                 local main = assert(service:registry_for("main"))
@@ -261,11 +375,14 @@ return {
                     A.equal(tool.schema.additionalProperties, false)
                 end
                 A.deep_equal(names, {
-                    "list", "read", "search", "write", "patch", "rename", "delete", "exec",
+                    "list", "read", "search", "write", "patch", "rename", "delete", "exec", "lua",
                 })
                 A.equal(main.digest, service.registry_digest)
-                A.equal(#assert(service:registry_for("side")).tools, 0)
-                A.falsy(assert(service:registry_for("side")).digest == main.digest)
+                A.equal(#assert(service:registry_for("ask")).tools, 0)
+                A.falsy(assert(service:registry_for("ask")).digest == main.digest)
+                --Executes the action expected to raise in the 'registry includes embedded Lua and non-main purposes are empty' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify registry includes embedded Lua and non-main purposes are empty.
                 A.raises(function() main.tools[1].name = "http" end, "cannot be modified")
 
                 local result = run(service, "exec", { command = "echo opaque" }, "exec")
@@ -275,6 +392,9 @@ return {
         },
         {
             name = "exact registry schemas project through both provider adapters",
+            --Verifies exact registry schemas project through both provider adapters.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify exact registry schemas project through both provider adapters.
             run = function()
                 local tools, _, _, context = fixture()
                 local prompt_module = load_module("prompt", context.modules)
@@ -354,6 +474,9 @@ return {
         },
         {
             name = "list read and search are stable bounded typed results with continuation",
+            --Verifies list read and search are stable bounded typed results with continuation.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify list read and search are stable bounded typed results with continuation.
             run = function()
                 local service, controls, _, context = fixture()
                 local inspected, snapshot = context.filesystem.direct_inspect(
@@ -361,12 +484,18 @@ return {
                 )
                 A.truthy(inspected)
                 A.equal(#snapshot.ancestors, 3)
+                --Executes the action expected to raise in the 'list read and search are stable bounded typed results with continuation' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify list read and search are stable bounded typed results with continuation.
                 A.raises(function() snapshot.ancestors[1] = false end, "cannot be modified")
                 local workspace_ok, workspace = context.filesystem.direct_inspect("/work")
                 A.truthy(workspace_ok)
                 local walked, raw_walk = context.filesystem.direct_walk(workspace, 2, 8)
                 A.truthy(walked)
                 A.equal(#raw_walk.entries, 4)
+                --Executes the action expected to raise in the 'list read and search are stable bounded typed results with continuation' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify list read and search are stable bounded typed results with continuation.
                 A.raises(function() raw_walk.entries[1] = false end, "cannot be modified")
                 local first, first_call = run(service, "list", {
                     path = "/work", depth = 2, page_size = 2,
@@ -430,6 +559,9 @@ return {
         },
         {
             name = "read preserves UTF BOM newline spans and classifies binary without body",
+            --Verifies read preserves UTF BOM newline spans and classifies binary without body.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify read preserves UTF BOM newline spans and classifies binary without body.
             run = function()
                 local utf16 = "\255\254A\0\r\0\n\0B\0"
                 local service = fixture({ initial = { ["/work/utf16.txt"] = utf16 } })
@@ -452,6 +584,9 @@ return {
         },
         {
             name = "write create and replace use no-replace expected digest and metadata-safe publish",
+            --Verifies write create and replace use no-replace expected digest and metadata-safe publish.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify write create and replace use no-replace expected digest and metadata-safe publish.
             run = function()
                 local service, controls = fixture()
                 local created = run(service, "write", {
@@ -480,6 +615,9 @@ return {
         },
         {
             name = "structured patch validates every context before one publication",
+            --Verifies structured patch validates every context before one publication.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify structured patch validates every context before one publication.
             run = function()
                 local service, controls = fixture()
                 local before = controls.bytes("/work/sub/b.txt")
@@ -521,6 +659,9 @@ return {
         },
         {
             name = "rename never clobbers or copies and delete only removes one exact target",
+            --Verifies rename never clobbers or copies and delete only removes one exact target.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify rename never clobbers or copies and delete only removes one exact target.
             run = function()
                 local service, controls = fixture()
                 controls.faults.rename = "EXDEV"
@@ -562,6 +703,9 @@ return {
         },
         {
             name = "reserved links special objects registered secrets and unknown fields fail closed",
+            --Verifies reserved links special objects registered secrets and unknown fields fail closed.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify reserved links special objects registered secrets and unknown fields fail closed.
             run = function()
                 local service, controls = fixture({ secret = "top-secret-value" })
                 controls.add("/work/link", "link", "", { link_target = "/work/a.txt" })
@@ -591,6 +735,9 @@ return {
         },
         {
             name = "prompt-shaped values cannot execute and authorization is current-process one-shot",
+            --Verifies prompt-shaped values cannot execute and authorization is current-process one-shot.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify prompt-shaped values cannot execute and authorization is current-process one-shot.
             run = function()
                 local service, _, authorization = fixture()
                 local admitted = assert(call(service, "read", {

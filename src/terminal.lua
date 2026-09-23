@@ -1,7 +1,7 @@
 --[[
-File: terminal.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-09-23
+File: terminal.lua
 Description: Wraps terminal input and restoration as a bounded AsyncPort.
 ]]
 
@@ -29,24 +29,49 @@ local INPUT_INTENTS = {
     ["submit-or-queue"] = true,
     steer = true,
     newline = true,
-    side = true,
+    ask = true,
     cancel = true,
     text = true,
     eof = true,
 }
 
+-- Construct a structured diagnostic without throwing or formatting its optional fields.
+--@param code string Stable diagnostic code used by callers to choose recovery behavior.
+--@param message string Human-readable summary supplied by the failing operation.
+--@param extra table|nil Additional diagnostic fields copied after code/message and allowed to override them.
+--@return table New diagnostic record; optional non-nil fields are retained without deep copying.
 local function failure(code, message, extra)
     local result = { code = code, message = message }
     for key, value in pairs(extra or {}) do result[key] = value end
     return result
 end
 
+-- Create a shallow read-only view without copying the backing table.
+--@param values table Backing fields retained by reference; the caller owns their stability.
+--@param label string|nil Diagnostic label; defaults to "readonly value".
+--@return table Empty proxy exposing the backing fields through its locked metatable.
+--@ownership Retains values by reference; nested values and the backing table are not frozen.
 local function readonly(values, label)
+    --@metatable readonly_proxy Forwards reads and iteration; ordinary assignments raise an error.
+    --@field __index table Backing values used for missing-key reads.
+    --@field __newindex function Rejects ordinary assignments without changing the backing values.
+    --@field __pairs function Enumerates the backing table with next.
+    --@field __metatable string Hides this metatable behind the fixed "locked" marker.
     return setmetatable({}, {
         __index = values,
+        -- Reject a write through the proxy before it can create an ordinary field.
+        --@param _ table Proxy receiving the assignment; its contents are not consulted.
+        --@param key any Attempted field name included in the diagnostic.
+        --@return nil Does not return normally.
+        --@error Always raises a read-only assignment error at the caller frame.
         __newindex = function(_, key)
             error((label or "readonly value") .. " cannot be modified: " .. tostring(key), 2)
         end,
+        -- Iterate the backing fields instead of the empty proxy table.
+        --@param none The proxy argument supplied by pairs is ignored.
+        --@return function The standard next iterator.
+        --@return table Backing values used as iterator state.
+        --@return nil Initial key used to start iteration.
         __pairs = function()
             return next, values, nil
         end,
@@ -54,10 +79,18 @@ local function readonly(values, label)
     })
 end
 
+-- Check the Lua integer subtype and the caller's inclusive lower bound.
+--@param value any Candidate value; floats and non-numeric values are rejected.
+--@param minimum integer Inclusive minimum accepted by this check.
+--@return boolean True only for an integer at least minimum.
 local function valid_integer(value, minimum)
     return math.type(value) == "integer" and value >= minimum
 end
 
+-- Preserve a valid native terminal diagnostic or replace a malformed one.
+--@param value any Error returned by a native terminal method.
+--@param operation string Native method name for fallback context.
+--@return table err Structured terminal diagnostic.
 local function typed_native_error(value, operation)
     if type(value) == "table"
         and type(value.code) == "string"
@@ -73,6 +106,13 @@ local function typed_native_error(value, operation)
     )
 end
 
+-- Invoke one native terminal method under exception and status containment.
+--@param native table Native terminal port.
+--@param method string Selected native method name.
+--@param ... any Arguments forwarded to the method in order.
+--@return boolean ok True only for a native true status.
+--@return any value Native result or structured failure.
+--@effect Invokes native terminal state or input operations.
 local function call_native(native, method, ...)
     local called, ok, value = pcall(native[method], ...)
     if not called then
@@ -83,10 +123,20 @@ local function call_native(native, method, ...)
     return false, failure("NativeContract", "native terminal returned an invalid status")
 end
 
+-- Raise a typed terminal diagnostic at the chosen public caller frame.
+--@param native_error table Diagnostic with code and message.
+--@param level integer|nil Caller-frame offset; defaults to one.
+--@return nil Does not return normally.
+--@error Always raises the formatted terminal failure.
 local function raise_native(native_error, level)
     error(native_error.code .. ": " .. native_error.message, (level or 1) + 1)
 end
 
+-- Admit one native action or terminal outcome without source provenance.
+--@param observation any Candidate native observation record.
+--@param maximum_input_bytes integer Maximum text bytes in one action.
+--@return table|nil admitted Original validated observation.
+--@return table|nil err Structured action, text, or outcome contract failure.
 local function validate_observation(observation, maximum_input_bytes)
     if type(observation) ~= "table" or observation.source ~= nil then
         return nil, failure("NativeContract", "native terminal observation is invalid")
@@ -115,10 +165,10 @@ end
 ---Creates a restorable terminal AsyncPort.
 -- The adapter never assumes ANSI support. Native capability probing selects raw
 -- or cooked input, while both modes emit the same semantic action vocabulary.
--- @param native table Native terminal implementation.
--- @param options table Terminal mode request and fixed input byte cap.
--- @return table|nil port AsyncPort with an additional restore method.
--- @return table|nil err Structured construction failure.
+--@param native table Native terminal implementation.
+--@param options table Terminal mode request and fixed input byte cap.
+--@return table|nil port AsyncPort with an additional restore method.
+--@return table|nil err Structured construction failure.
 function M.new(native, options)
     if type(native) ~= "table" then
         return nil, failure("InvalidTerminalPort", "native terminal port is required")
@@ -149,6 +199,11 @@ function M.new(native, options)
     local skip_leading_lf = false
     local port = {}
 
+    -- Validate and copy one bounded native observation batch before projection.
+    --@param observations table Candidate dense native observation sequence.
+    --@param budget integer Maximum observation count for this poll.
+    --@return table|nil copied Independent ordered action/terminal records.
+    --@return table|nil err Structured shape, budget, or event failure.
     local function copy_observations(observations, budget)
         local event_count = 0
         for key in pairs(observations) do
@@ -184,6 +239,10 @@ function M.new(native, options)
         return copied
     end
 
+    -- Begin splitting a native text action while folding a prior CRLF boundary.
+    --@param value string Exact native text action bytes.
+    --@return nil No result; pending text cursor is reset.
+    --@effect Replaces pending_text and may skip one leading LF after a prior CR.
     local function begin_pending_text(value)
         pending_text = value
         pending_text_offset = 1
@@ -193,6 +252,10 @@ function M.new(native, options)
         end
     end
 
+    -- Extract one text, submit, or cancel event from a buffered text action.
+    --@param none Uses the captured pending text and CRLF state.
+    --@return table|nil event Next semantic user_action, or nil when exhausted.
+    --@effect Advances the pending text cursor and CRLF fold flag.
     local function next_pending_text_event()
         while pending_text do
             if pending_text_offset > #pending_text then
@@ -233,6 +296,11 @@ function M.new(native, options)
         return nil
     end
 
+    -- Project buffered native observations into at most budget semantic events.
+    --@param events table Mutable event prefix from the current poll.
+    --@param budget integer Maximum total returned event count.
+    --@return table events Same sequence after pending observations are drained.
+    --@effect Advances pending text/batch state and records terminal_outcome.
     local function drain_pending(events, budget)
         while #events < budget do
             local text_event = next_pending_text_event()
@@ -270,8 +338,11 @@ function M.new(native, options)
     end
 
     ---Starts terminal input without claiming unsupported key combinations.
-    -- @param now integer Current monotonic tick.
-    -- @return boolean started True after native mode admission.
+    --@param self table Terminal AsyncPort owning the captured lifecycle state.
+    --@param now integer Current monotonic tick.
+    --@return boolean started True after native mode admission.
+    --@error Raises for invalid state/time or native start failure.
+    --@effect Starts native terminal input and takes ownership of its handle.
     function port:start(now)
         if state ~= "created" then error("terminal port is " .. state, 2) end
         if not valid_integer(now, 0) then error("terminal start time is invalid", 2) end
@@ -289,9 +360,12 @@ function M.new(native, options)
     end
 
     ---Polls a bounded array of semantic input or terminal events.
-    -- @param now integer Current monotonic tick.
-    -- @param budget integer Maximum returned observations.
-    -- @return table events AsyncPort event array.
+    --@param self table Started terminal AsyncPort.
+    --@param now integer Current monotonic tick.
+    --@param budget integer Maximum returned observations.
+    --@return table events AsyncPort event array.
+    --@error Raises for invalid state/arguments or native observation contract failure.
+    --@effect Polls native input and advances buffered text/terminal state.
     function port:poll(now, budget)
         if state ~= "started" then error("terminal port is " .. state, 2) end
         if terminal_outcome then return {} end
@@ -322,8 +396,11 @@ function M.new(native, options)
     end
 
     ---Requests input cancellation without fabricating a terminal outcome.
-    -- @param now integer Current monotonic tick.
-    -- @return boolean accepted Whether the native request was admitted.
+    --@param self table Started terminal AsyncPort.
+    --@param now integer Current monotonic tick.
+    --@return boolean accepted Whether the native request was admitted.
+    --@error Raises for invalid state/time or native cancellation failure.
+    --@effect Requests native input cancellation.
     function port:cancel(now)
         if state ~= "started" then error("terminal port is " .. state, 2) end
         if terminal_outcome then return false end
@@ -337,8 +414,11 @@ function M.new(native, options)
     end
 
     ---Joins terminal input and validates its typed terminal result.
-    -- @param deadline integer|nil Absolute monotonic deadline.
-    -- @return table result Table containing the terminal outcome.
+    --@param self table Started terminal AsyncPort.
+    --@param deadline integer|nil Absolute monotonic deadline.
+    --@return table result Table containing the terminal outcome.
+    --@error Raises for invalid state/deadline or native contract failure.
+    --@effect Waits for the terminal and transitions the port to joined.
     function port:join(deadline)
         if state ~= "started" then error("terminal port is " .. state, 2) end
         if deadline ~= nil and not valid_integer(deadline, 0) then
@@ -358,7 +438,10 @@ function M.new(native, options)
     end
 
     ---Restores input modes using an idempotent best-effort native primitive.
-    -- @return boolean restored True after native restoration succeeds.
+    --@param self table Terminal AsyncPort before close.
+    --@return boolean restored True after native restoration succeeds.
+    --@error Raises for a closed port or native restoration failure.
+    --@effect Attempts native terminal mode restoration once until successful.
     function port:restore()
         if restored then return true end
         if state == "created" then
@@ -373,7 +456,10 @@ function M.new(native, options)
     end
 
     ---Restores terminal state and then releases the native handle.
-    -- @return boolean closed True after both operations succeed.
+    --@param self table Started or joined terminal AsyncPort.
+    --@return boolean closed True after both operations succeed.
+    --@error Raises for invalid state or either native restore/close failure.
+    --@effect Attempts restoration, closes the handle, and marks state closed.
     function port:close()
         if state ~= "started" and state ~= "joined" then
             error("terminal port is " .. state, 2)
@@ -401,9 +487,14 @@ local EDITOR_MODES = { native = true, raw = true, cooked = true }
 local SUBMISSION_INTENTS = {
     ["submit-or-queue"] = true,
     steer = true,
-    side = true,
+    ask = true,
 }
 
+-- Admit a bounded strict UTF-8 draft without NUL bytes.
+--@param value any Candidate draft bytes.
+--@param maximum_bytes integer Inclusive draft byte cap.
+--@return string|nil draft Exact admitted bytes.
+--@return table|nil err Structured type, limit, or text failure.
 local function valid_draft(value, maximum_bytes)
     if type(value) ~= "string" then
         return nil, failure("InvalidDraft", "line-editor draft must be a byte string")
@@ -420,6 +511,10 @@ local function valid_draft(value, maximum_bytes)
     return value
 end
 
+-- Create a located failure for malformed streamed terminal input.
+--@param reason string Machine-readable UTF-8 rejection reason.
+--@param offset integer One-based offset in the current joined input bytes.
+--@return table err New InvalidDraft diagnostic.
 local function invalid_stream_utf8(reason, offset)
     return failure("InvalidDraft", "terminal input must be strict NUL-free UTF-8", {
         reason = reason,
@@ -430,6 +525,9 @@ end
 -- Validates every complete scalar and separates only a syntactically possible
 -- trailing partial scalar. POSIX reads may split UTF-8 at any byte boundary;
 -- incomplete bytes must never enter the canonical draft or its display form.
+--@param value string Buffered previous suffix followed by the new input bytes.
+--@return string|nil complete Prefix containing only complete valid scalars.
+--@return string|table suffix_or_err Possible trailing partial scalar, or structured failure.
 local function split_stream_utf8(value)
     local index = 1
     while index <= #value do
@@ -489,6 +587,9 @@ local function split_stream_utf8(value)
     return value, ""
 end
 
+-- Return UTF-8 scalar width from an already validated leading byte.
+--@param first integer First byte of a valid UTF-8 scalar.
+--@return integer width One through four bytes.
 local function scalar_width(first)
     if first <= 0x7F then return 1 end
     if first <= 0xDF then return 2 end
@@ -496,6 +597,10 @@ local function scalar_width(first)
     return 4
 end
 
+-- Check a zero-based draft byte cursor without splitting a UTF-8 scalar.
+--@param value string Admitted strict UTF-8 draft.
+--@param cursor any Candidate zero-based byte offset.
+--@return boolean boundary Whether the cursor is within and at a scalar boundary.
 local function cursor_is_boundary(value, cursor)
     if not valid_integer(cursor, 0) or cursor > #value then return false end
     if cursor == #value then return true end
@@ -503,6 +608,10 @@ local function cursor_is_boundary(value, cursor)
     return following < 0x80 or following > 0xBF
 end
 
+-- Find the zero-based boundary before one complete UTF-8 scalar.
+--@param value string Admitted strict UTF-8 draft.
+--@param cursor integer Current zero-based scalar boundary.
+--@return integer previous Previous boundary, or zero at the start.
 local function previous_cursor(value, cursor)
     if cursor == 0 then return 0 end
     local byte_index = cursor
@@ -514,6 +623,10 @@ local function previous_cursor(value, cursor)
     return byte_index - 1
 end
 
+-- Find the zero-based boundary after one complete UTF-8 scalar.
+--@param value string Admitted strict UTF-8 draft.
+--@param cursor integer Current zero-based scalar boundary.
+--@return integer following Next boundary, or byte length at the end.
 local function next_cursor(value, cursor)
     if cursor == #value then return cursor end
     local byte_index = cursor + 2
@@ -525,6 +638,10 @@ local function next_cursor(value, cursor)
     return byte_index - 1
 end
 
+-- Preserve a typed display error or replace a malformed one.
+--@param value any Error returned by a terminal display method.
+--@param operation string Display method name for fallback context.
+--@return table err Structured display diagnostic.
 local function typed_display_error(value, operation)
     if type(value) == "table"
         and type(value.code) == "string" and value.code ~= ""
@@ -535,6 +652,14 @@ local function typed_display_error(value, operation)
     return failure("DisplayFailure", "terminal display failed during " .. operation)
 end
 
+-- Call a display method and require complete acceptance of the payload.
+--@param display table Terminal display port.
+--@param method string Selected display method name.
+--@param payload any Draft frame, urgent receipt, or complete output bytes.
+--@param byte_count integer|nil Exact byte count accepted as a success result.
+--@return boolean|nil accepted True after full display acceptance.
+--@return table|nil err Structured exception, partial, or native display failure.
+--@effect Calls the display; output may be externally partial on failure.
 local function display_call(display, method, payload, byte_count)
     local called, result, display_error = pcall(display[method], display, payload)
     if not called then
@@ -544,6 +669,11 @@ local function display_call(display, method, payload, byte_count)
     return nil, typed_display_error(display_error, method)
 end
 
+-- Admit one owned-draft or cooked editor and its display requirements.
+--@param display table Candidate redraw/write display port.
+--@param options table Mode, byte caps, prompt callback, and optional initial draft.
+--@return table|nil admitted Independent editor configuration.
+--@return table|nil err Structured mode, display, draft, cursor, or limit failure.
 local function validate_editor_options(display, options)
     if type(display) ~= "table" then
         return nil, failure("InvalidLineEditor", "terminal display port is required")
@@ -642,10 +772,10 @@ end
 -- facts. Cooked mode never receives or reports the host line-editor draft; it
 -- queues complete output blocks and flushes them only at a caller-declared safe
 -- line after emitting one bounded backlog receipt.
--- @param display table Atomic-redraw or cooked-write display port.
--- @param options table Explicit mode, callbacks, draft, and hard limits.
--- @return table|nil editor Immutable line-editor facade.
--- @return table|nil err Structured construction failure.
+--@param display table Atomic-redraw or cooked-write display port.
+--@param options table Explicit mode, callbacks, draft, and hard limits.
+--@return table|nil editor Immutable line-editor facade.
+--@return table|nil err Structured construction failure.
 function M.new_line_editor(display, options)
     local admitted, options_error = validate_editor_options(display, options)
     if not admitted then return nil, options_error end
@@ -665,6 +795,11 @@ function M.new_line_editor(display, options)
     local pending_input = ""
     local editor = {}
 
+    -- Render the current prompt through a contained caller callback.
+    --@param none Uses the captured prompt callback and current draft.
+    --@return string|nil prompt Complete prompt bytes.
+    --@return table|nil err Structured callback or result-shape failure.
+    --@effect Invokes the injected prompt renderer.
     local function prompt_bytes()
         local called, rendered, render_error = pcall(
             admitted.render_prompt,
@@ -680,6 +815,11 @@ function M.new_line_editor(display, options)
         return rendered
     end
 
+    -- Replace an owned draft frame while atomically appending complete output.
+    --@param append_bytes string Optional complete output block, empty for edit redraw.
+    --@return boolean|nil redrawn True after the display accepts the frame.
+    --@return table|nil err Structured prompt or display failure.
+    --@effect Calls display.redraw and faults editor state on uncertain output.
     local function atomic_redraw(append_bytes)
         local prompt, prompt_error = prompt_bytes()
         if not prompt then
@@ -707,11 +847,20 @@ function M.new_line_editor(display, options)
         return true
     end
 
+    -- Redraw an already visible owned draft after its bytes or cursor change.
+    --@param none Uses current editor visibility and draft state.
+    --@return boolean|nil redrawn True when hidden or after successful redraw.
+    --@return table|nil err Structured prompt or display failure.
+    --@effect May invoke one atomic display redraw.
     local function redraw_after_edit()
         if not shown then return true end
         return atomic_redraw("")
     end
 
+    -- Guard mutations of the owned draft against pending input and submission.
+    --@param allow_pending_input boolean|nil Whether a partial UTF-8 suffix is allowed.
+    --@return boolean|nil editable True for an open owned draft without conflict.
+    --@return table|nil err Structured mode, state, submission, or encoding failure.
     local function require_editable(allow_pending_input)
         if state ~= "open" then
             return nil, failure("EditorClosed", "line editor is " .. state)
@@ -731,6 +880,12 @@ function M.new_line_editor(display, options)
         return true
     end
 
+    -- Adopt exact next draft bytes and cursor, then redraw if visible.
+    --@param next_draft string Strict UTF-8 replacement draft.
+    --@param next_cursor integer Zero-based scalar boundary in next_draft.
+    --@return table|nil snapshot Immutable editor facts after successful redraw.
+    --@return table|nil err Structured prompt or display failure.
+    --@effect Mutates draft/cursor/generation before redraw; redraw failure faults the editor.
     local function commit_draft(next_draft, next_cursor)
         draft = next_draft
         cursor = next_cursor
@@ -741,6 +896,10 @@ function M.new_line_editor(display, options)
     end
 
     ---Shows the initial prompt without inventing terminal control sequences.
+    --@param none Uses the captured editor and display.
+    --@return boolean|nil shown True after the initial prompt is visible.
+    --@return table|nil err Structured editor, renderer, or display failure.
+    --@effect Draws the first prompt and marks input active on success.
     function editor.show()
         if state ~= "open" then return nil, failure("EditorClosed", "line editor is " .. state) end
         if shown then return true end
@@ -759,6 +918,11 @@ function M.new_line_editor(display, options)
     end
 
     ---Replaces an owned draft at an exact UTF-8 byte boundary.
+    --@param value string Strict UTF-8 replacement draft.
+    --@param cursor_byte integer|nil Optional zero-based scalar boundary.
+    --@return table|nil snapshot Immutable updated editor state.
+    --@return table|nil err Structured edit, cursor, or display failure.
+    --@effect Commits and may redraw the owned draft.
     function editor.set_draft(value, cursor_byte)
         local editable, editable_error = require_editable()
         if not editable then return nil, editable_error end
@@ -773,6 +937,10 @@ function M.new_line_editor(display, options)
     end
 
     ---Inserts exact strict UTF-8 bytes at the owned cursor.
+    --@param value string Strict UTF-8 text to insert.
+    --@return table|nil snapshot Immutable updated editor state.
+    --@return table|nil err Structured edit, size, or display failure.
+    --@effect Commits and may redraw the owned draft.
     function editor.insert(value)
         local editable, editable_error = require_editable()
         if not editable then return nil, editable_error end
@@ -786,6 +954,10 @@ function M.new_line_editor(display, options)
     end
 
     ---Deletes the previous Unicode scalar without byte splitting.
+    --@param none Uses the captured draft and cursor.
+    --@return table|nil snapshot Immutable updated or unchanged editor state.
+    --@return table|nil err Structured edit or display failure.
+    --@effect May commit and redraw the owned draft.
     function editor.backspace()
         local editable, editable_error = require_editable()
         if not editable then return nil, editable_error end
@@ -796,6 +968,10 @@ function M.new_line_editor(display, options)
     end
 
     ---Deletes the following Unicode scalar without byte splitting.
+    --@param none Uses the captured draft and cursor.
+    --@return table|nil snapshot Immutable updated or unchanged editor state.
+    --@return table|nil err Structured edit or display failure.
+    --@effect May commit and redraw the owned draft.
     function editor.delete_forward()
         local editable, editable_error = require_editable()
         if not editable then return nil, editable_error end
@@ -806,6 +982,10 @@ function M.new_line_editor(display, options)
     end
 
     ---Moves the owned cursor by scalar or to a draft boundary.
+    --@param direction string left, right, home, or end.
+    --@return table|nil snapshot Immutable updated or unchanged editor state.
+    --@return table|nil err Structured gesture or display failure.
+    --@effect Updates the cursor/generation and may redraw the draft.
     function editor.move(direction)
         local editable, editable_error = require_editable()
         if not editable then return nil, editable_error end
@@ -830,6 +1010,10 @@ function M.new_line_editor(display, options)
     end
 
     ---Creates an immutable submission lease without clearing the draft.
+    --@param intent string Registered submission action.
+    --@return table|nil submission Immutable draft and generation lease.
+    --@return table|nil err Structured editor or intent failure.
+    --@effect Records one active submission pending domain resolution.
     function editor.prepare_submission(intent)
         local editable, editable_error = require_editable()
         if not editable then return nil, editable_error end
@@ -846,6 +1030,11 @@ function M.new_line_editor(display, options)
     end
 
     ---Resolves a submission lease; rejection preserves the exact draft.
+    --@param submission_generation integer Exact leased draft generation.
+    --@param accepted boolean Whether the domain accepted the submission.
+    --@return table|nil snapshot Immutable updated editor state.
+    --@return table|nil err Structured stale, result, or display failure.
+    --@effect Clears active submission; accepted submissions clear and redraw the draft.
     function editor.resolve_submission(submission_generation, accepted)
         if state ~= "open" then return nil, failure("EditorClosed", "line editor is " .. state) end
         if not active_submission or submission_generation ~= active_submission.generation then
@@ -863,6 +1052,11 @@ function M.new_line_editor(display, options)
         return editor.snapshot()
     end
 
+    -- Validate streamed UTF-8, apply text/backspace scalars, and retain a partial suffix.
+    --@param bytes string Newly received raw text action bytes.
+    --@return table|nil snapshot Immutable updated or unchanged editor state.
+    --@return table|nil err Structured encoding, size, editor, or display failure.
+    --@effect Updates pending_input and may commit/redraw the owned draft.
     local function consume_text_bytes(bytes)
         local editable, editable_error = require_editable(true)
         if not editable then return nil, editable_error end
@@ -905,6 +1099,10 @@ function M.new_line_editor(display, options)
     end
 
     ---Consumes a normalized terminal input event without executing an action.
+    --@param event table Normalized user_action event with optional text bytes.
+    --@return table|nil result Editor snapshot, submission, or cancel intent.
+    --@return table|nil err Structured input, mode, encoding, or display failure.
+    --@effect Updates owned draft or submission state, never executes the domain action.
     function editor.consume(event)
         if type(event) ~= "table" or event.kind ~= "user_action"
             or type(event.action) ~= "string"
@@ -938,6 +1136,10 @@ function M.new_line_editor(display, options)
     end
 
     ---Publishes one complete rendered block without character interleaving.
+    --@param output_bytes string Complete validated semantic block bytes.
+    --@return table|nil receipt Immutable queued flag and byte count.
+    --@return table|nil err Structured editor, backlog, or display failure.
+    --@effect Atomically redraws owned draft or queues/writes cooked output.
     function editor.publish(output_bytes)
         if state ~= "open" then return nil, failure("EditorClosed", "line editor is " .. state) end
         if type(output_bytes) ~= "string" or output_bytes == "" then
@@ -990,6 +1192,10 @@ function M.new_line_editor(display, options)
     end
 
     ---Flushes every queued cooked block after the caller declares a safe line.
+    --@param none Uses the captured cooked editor backlog.
+    --@return string|nil bytes Flushed complete blocks, possibly empty.
+    --@return table|nil err Structured mode, state, or display failure.
+    --@effect Writes and clears the cooked backlog on success.
     function editor.flush_cooked()
         if state ~= "open" then return nil, failure("EditorClosed", "line editor is " .. state) end
         if owns_draft then
@@ -1014,6 +1220,10 @@ function M.new_line_editor(display, options)
     end
 
     ---Starts the next cooked input line after a safe flush.
+    --@param none Uses the captured cooked editor state.
+    --@return boolean|nil resumed True after the prompt is visible or already active.
+    --@return table|nil err Structured mode, backlog, or display failure.
+    --@effect May write a prompt and mark input active.
     function editor.resume_cooked()
         if state ~= "open" then return nil, failure("EditorClosed", "line editor is " .. state) end
         if owns_draft then
@@ -1037,6 +1247,8 @@ function M.new_line_editor(display, options)
     end
 
     ---Returns exact ownership, cursor, and bounded backlog facts.
+    --@param none Uses the captured editor state.
+    --@return table snapshot Immutable draft ownership and backlog facts.
     function editor.snapshot()
         return readonly({
             state = state,
@@ -1056,6 +1268,10 @@ function M.new_line_editor(display, options)
     end
 
     ---Closes only after all cooked output is accounted for.
+    --@param none Uses the captured editor state.
+    --@return boolean|nil closed True after a clean close or if already closed.
+    --@return table|nil err Structured pending output/input or uncertain display failure.
+    --@effect Marks an open editor closed after all obligations are settled.
     function editor.close()
         if state == "closed" then return true end
         if state == "faulted" then

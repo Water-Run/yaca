@@ -1,7 +1,7 @@
 --[[
-File: model_compaction_port_test.lua
-Date: 2026-08-30
 Author: WaterRun
+Date: 2026-09-23
+File: model_compaction_port_test.lua
 Description: Verifies the no-tool compaction Model builder and response port.
 ]]
 
@@ -12,13 +12,22 @@ local SHA = assert(loadfile(
     _ENV
 ))()
 
+--Loads a source module into an isolated per-case environment.
+--@param name string Module, Model, or resource name selected by the case.
+--@param cache table Per-case module cache preserving isolated imports.
+--@return any module Module export loaded in the isolated source environment.
 local function load_module(name, cache)
     cache = cache or {}
     if cache[name] then return cache[name] end
     local environment = {}
     for key, value in pairs(_ENV) do environment[key] = value end
+    --Resolves an imported Lua module through the isolated test loader.
+    --@param dependency string Source module requested from the isolated loader.
+    --@return any value Callback value consumed by the enclosing scenario assertion.
     environment.require = function(dependency) return load_module(dependency, cache) end
     environment._G = environment
+    --@metatable environment Test-owned lookup and mutation contract for the current case.
+    --@field __index any Fallback table or function used for missing fixture keys.
     setmetatable(environment, { __index = _ENV })
     local chunk = assert(loadfile(
         YACA_TEST_ROOT .. "/src/" .. name .. ".lua",
@@ -48,10 +57,17 @@ local SUMMARY_SLOTS = {
 
 local safety = {}
 
+--Computes or records digest data for this suite.
+--@param bytes string Byte chunk supplied to the fake I/O port.
+--@return any observed digest value observed by the scenario assertion.
 function safety.digest(bytes)
     return SHA.hex(bytes)
 end
 
+--Computes or records binding digest data for this suite.
+--@param domain string Namespace used to classify this value.
+--@param fields table Field values used to construct the test document.
+--@return any observed binding digest value observed by the scenario assertion.
 function safety.binding_digest(domain, fields)
     local parts = { tostring(#domain), ":", domain, "\0", tostring(#fields), "\0" }
     for _, field in ipairs(fields) do
@@ -67,6 +83,9 @@ function safety.binding_digest(domain, fields)
     return SHA.hex(table.concat(parts))
 end
 
+--Constructs the codec service used by this suite.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return any fixture Constructed codec service used by this suite.
 local function codec()
     return assert(json.new({
         maximum_bytes = 65536,
@@ -77,6 +96,9 @@ local function codec()
     }))
 end
 
+--Builds the model options values used by this suite.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return table observed Structured fixture record selected by the exercised branch.
 local function model_options()
     return {
         maximum_json_bytes = 65536,
@@ -99,6 +121,9 @@ local function model_options()
     }
 end
 
+--Constructs the prompt service service used by this suite.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return any observed prompt service value observed by the scenario assertion.
 local function prompt_service()
     return assert(prompt.new({ digest = safety.digest }, {
         maximum_component_bytes = 32768,
@@ -111,6 +136,9 @@ local function prompt_service()
     }))
 end
 
+--Builds the generation values used by this suite.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return any observed Selected fixture value returned by the fixture.
 local function generation()
     local value = {
         id = "config-generation-1",
@@ -143,10 +171,17 @@ local function generation()
             Std = { system_prompt = "PERMISSION_INSTRUCTION_CANARY" },
         },
     }
+    --Simulates the reveal secret boundary for this suite.
+    --@param none No arguments; this closure uses its captured fixture state.
+    --@return nil rejected Explicit empty outcome from reveal secret.
+    --@return table secondary2 Typed error record with code NoSecret.
     function value.reveal_secret() return nil, { code = "NoSecret" } end
     return value
 end
 
+--Supplies compaction spec behavior required by this suite.
+--@param serial integer Sequence number assigned by the fake port.
+--@return table observed Structured fixture record selected by the exercised branch.
 local function compaction_spec(serial)
     local source = table.concat({
         "yaca-event-v1\n",
@@ -181,6 +216,9 @@ local function compaction_spec(serial)
     }
 end
 
+--Constructs the suite's isolated runtime fixture and observation ports.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return table fixture Constructed fixture service used by this suite.
 local function fixture()
     local adapter = assert(model.new(model_options()))
     local codec_value = codec()
@@ -212,6 +250,10 @@ local function fixture()
     }
 end
 
+--Checks valid body for this test scenario.
+--@param spec table Test specification or request under evaluation.
+--@param goals_decisions any The goals decisions supplied to the fake service for this scenario.
+--@return any matches Whether valid body satisfies the tested condition.
 local function valid_body(spec, goals_decisions)
     return table.concat({
         "{",
@@ -230,6 +272,14 @@ local function valid_body(spec, goals_decisions)
     })
 end
 
+--Supplies compaction port behavior required by this suite.
+--@param fixture_value any The fixture value supplied to the fake service for this scenario.
+--@param body string Model or transport response body.
+--@param overrides table|nil Per-case overrides of default fixture behavior.
+--@param cancel_outcome string Configured cancellation outcome.
+--@param summary_encoder any The summary encoder supplied to the fake service for this scenario.
+--@return any observed compaction port value observed by the scenario assertion.
+--@return any secondary2 Additional status or structured error from the fixture operation.
 local function compaction_port(
     fixture_value,
     body,
@@ -241,12 +291,18 @@ local function compaction_port(
     local active_handle
     local activity = {}
 
+    --Simulates the start transition of a fake activity port for this suite.
+    --@param specification table Test specification used to construct the fixture.
+    --@return any observed start value observed by the scenario assertion.
     function activity.start(specification)
         prepared[#prepared + 1] = assert(fixture_value.builder.prepare(specification))
         active_handle = { request_id = specification.request_id }
         return active_handle
     end
 
+    --Simulates the cancel transition of a fake activity port for this suite.
+    --@param handle table|integer Fake resource handle whose state is inspected.
+    --@return table observed Structured fixture record selected by the exercised branch.
     function activity.cancel(handle)
         if handle ~= active_handle then return { outcome = "unknown" } end
         local outcome = cancel_outcome or "cancelled"
@@ -254,6 +310,9 @@ local function compaction_port(
         return { outcome = outcome }
     end
 
+    --Simulates the poll transition of a fake activity port for this suite.
+    --@param none No arguments; this closure uses its captured fixture state.
+    --@return table observed Structured fixture record selected by the exercised branch.
     function activity.poll()
         if not active_handle then return {} end
         local request_id = active_handle.request_id
@@ -281,6 +340,9 @@ local function compaction_port(
         } }
     end
 
+    --Simulates the status transition of a fake activity port for this suite.
+    --@param none No arguments; this closure uses its captured fixture state.
+    --@return table observed Structured fixture record with state.
     function activity.status()
         return { state = active_handle and "active" or "idle" }
     end
@@ -303,6 +365,9 @@ return {
     cases = {
         {
             name = "builder sends one quoted source with no tools or controls",
+            --Verifies builder sends one quoted source with no tools or controls.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify builder sends one quoted source with no tools or controls.
             run = function()
                 local f = fixture()
                 local specification = compaction_spec(1)
@@ -350,6 +415,9 @@ return {
         },
         {
             name = "valid JSON becomes the exact canonical structured summary",
+            --Verifies valid JSON becomes the exact canonical structured summary.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify valid JSON becomes the exact canonical structured summary.
             run = function()
                 local f = fixture()
                 local specification = compaction_spec(1)
@@ -381,6 +449,9 @@ return {
         },
         {
             name = "malformed incomplete and tool-bearing responses remain rejectable",
+            --Verifies malformed incomplete and tool-bearing responses remain rejectable.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify malformed incomplete and tool-bearing responses remain rejectable.
             run = function()
                 local cases = {
                     {
@@ -422,6 +493,9 @@ return {
         },
         {
             name = "canonical envelope overflow remains a rejectable response",
+            --Verifies canonical envelope overflow remains a rejectable response.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify canonical envelope overflow remains a rejectable response.
             run = function()
                 local f = fixture()
                 local specification = compaction_spec(1)
@@ -437,6 +511,9 @@ return {
         },
         {
             name = "internal summary encoding failure releases terminal binding",
+            --Verifies canonical envelope overflow remains a rejectable response.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify canonical envelope overflow remains a rejectable response.
             run = function()
                 local f = fixture()
                 local specification = compaction_spec(1)
@@ -445,6 +522,9 @@ return {
                     valid_body(specification),
                     nil,
                     nil,
+                    --Supplies an assertion callback for the internal summary encoding failure releases terminal binding scenario.
+                    --@param none No arguments; this closure uses its captured fixture state.
+                    --@return nil No value; the fake port or test assertion observes this callback's effects.
                     function() error("summary-encoder-fault") end
                 )
                 assert(port.start(specification))
@@ -457,6 +537,9 @@ return {
         },
         {
             name = "cancel releases the exact binding for a later request",
+            --Verifies internal summary encoding failure releases terminal binding.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify internal summary encoding failure releases terminal binding.
             run = function()
                 local f = fixture()
                 local first = compaction_spec(1)

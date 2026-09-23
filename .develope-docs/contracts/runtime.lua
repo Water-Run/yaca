@@ -1,3 +1,10 @@
+--[[
+Author: WaterRun
+Date: 2026-09-23
+File: runtime.lua
+Description: Defines Agent states, event ordering, cancellation and durability transitions.
+]]
+
 local states = {
   "Idle",
   "Preparing",
@@ -122,7 +129,7 @@ return {
     mutable_domain_threads = 1,
     active_contexts_max = 1,
     active_main_turns_max = 1,
-    inflight_side_requests_max = 1,
+    inflight_ask_requests_max = 1,
     concurrent_tools_max = 1,
     accepted_tool_call_results = "exactly-one-real-or-synthetic",
     provider_stop_means_completed = false,

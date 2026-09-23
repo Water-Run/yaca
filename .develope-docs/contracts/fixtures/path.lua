@@ -1,3 +1,10 @@
+--[[
+Author: WaterRun
+Date: 2026-09-23
+File: path.lua
+Description: Supplies path normalization, reserved-tree and Context hash vectors.
+]]
+
 return {
   contract_version = "0.1.0-readiness.1",
   hash_vectors = {

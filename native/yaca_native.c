@@ -1,8 +1,8 @@
 /*
-** File: yaca_native.c
-** Date: 2026-08-30
-** Author: WaterRun
-** Description: Portable narrow native ports for filesystem, process, terminal, system identity, clocks, and SHA-256.
+Author: WaterRun
+Date: 2026-09-23
+File: yaca_native.c
+Description: Portable narrow native ports for filesystem, process, terminal, system identity, clocks, and SHA-256.
 */
 
 #if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
@@ -37,10 +37,16 @@
 
 #include <windows.h>
 #include <winioctl.h>
+#include "yaca_pty.h"
 
 /* SystemFunction036 is the XP-compatible Advapi32 export commonly exposed as
 ** RtlGenRandom.  Keep the import explicit so random bytes never fall back to
 ** process, clock, or C-library pseudo-random state. */
+/* Declares the XP-compatible Advapi32 cryptographic-random import.
+ * @param buffer PVOID Caller-owned buffer receiving random bytes.
+ * @param length ULONG Number of random bytes requested.
+ * @return BOOLEAN success Whether Advapi32 filled the buffer.
+ */
 extern BOOLEAN WINAPI SystemFunction036(PVOID buffer, ULONG length);
 
 #else
@@ -54,6 +60,7 @@ extern BOOLEAN WINAPI SystemFunction036(PVOID buffer, ULONG length);
 #include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
+#include "yaca_supervisor.h"
 #if defined(__linux__)
 #include <linux/fs.h>
 #include <sys/ioctl.h>
@@ -76,6 +83,13 @@ extern BOOLEAN WINAPI SystemFunction036(PVOID buffer, ULONG length);
 #endif
 #endif
 
+/* @struct yaca_identity Stable file identity captured at the native boundary.
+ * @field kind char Identity or record kind discriminator.
+ * @field volume char Filesystem volume identity component.
+ * @field object char Object identity component within its volume.
+ * @field modified char Captured modification timestamp component.
+ * @field size lua_Integer Captured file or stream length.
+ */
 typedef struct yaca_identity
 {
   char kind[16];
@@ -85,6 +99,11 @@ typedef struct yaca_identity
   lua_Integer size;
 } yaca_identity;
 
+/* @struct yaca_file Lua-owned file handle or descriptor and its close state.
+ * @field handle HANDLE Win32 handle held until close.
+ * @field descriptor int POSIX descriptor held until close.
+ * @field closed int Whether this owner has released its resources.
+ */
 typedef struct yaca_file
 {
 #if defined(_WIN32)
@@ -95,6 +114,60 @@ typedef struct yaca_file
   int closed;
 } yaca_file;
 
+#if defined(_WIN32)
+/* @struct yaca_process_input Reference-counted asynchronous stdin writer for a Windows process.
+ * @field pipe HANDLE Pipe handle used for child communication.
+ * @field thread HANDLE Worker thread handle owned by this state.
+ * @field bytes char* Owned byte buffer awaiting transfer.
+ * @field length size_t Valid byte or character length in the buffer.
+ * @field error_value DWORD Operating-system error captured by the worker.
+ * @field references volatile Outstanding owners of the asynchronous input block.
+ */
+typedef struct yaca_process_input
+{
+  HANDLE pipe;
+  HANDLE thread;
+  char *bytes;
+  size_t length;
+  DWORD error_value;
+  volatile LONG references;
+} yaca_process_input;
+
+/* Releases asynchronous process-input storage after its final reference.
+ * @param input yaca_process_input* Owned process or terminal input state.
+ * @return void result Releases the byte buffer and owner after the last asynchronous reference.
+ */
+static void release_process_input(yaca_process_input *input)
+{
+  if (InterlockedDecrement(&input->references) == 0)
+  { free(input->bytes); free(input); }
+}
+#endif
+
+/* @struct yaca_process Lua-owned process supervisor and terminal outcome state.
+ * @field process HANDLE Child process handle owned by the supervisor.
+ * @field job HANDLE Win32 job object containing the child process tree.
+ * @field stdout_read HANDLE Read end of the child's standard-output pipe.
+ * @field stderr_read HANDLE Read end of the child's standard-error pipe.
+ * @field process_id DWORD Operating-system child process identity.
+ * @field exit_code DWORD Observed child exit code.
+ * @field input_writer yaca_process_input* Asynchronous owner of child standard input.
+ * @field control_write int Control pipe used to request supervisor cancellation.
+ * @field status_read int Pipe carrying terminal supervisor status.
+ * @field status_bytes size_t Number of status bytes received so far.
+ * @field status_record yaca_supervisor_result Decoded terminal status record.
+ * @field wait_status int POSIX wait status retained after reaping.
+ * @field started_at lua_Integer Monotonic timestamp when activity began.
+ * @field finished_at lua_Integer Monotonic timestamp when terminal state was observed.
+ * @field reaped int Whether the child supervisor was waited for.
+ * @field cancel_requested int Whether cancellation has been sent to the supervisor.
+ * @field terminal_emitted int Whether a terminal event was already published.
+ * @field descendants_proven_stopped int Whether all process descendants were verified stopped.
+ * @field closed int Whether this owner has released its resources.
+ * @field outcome char Final process or terminal outcome category.
+ * @field exit_kind char Kind of observed child termination.
+ * @field signal_or_exception char Signal or exception number for abnormal termination.
+ */
 typedef struct yaca_process
 {
 #if defined(_WIN32)
@@ -104,10 +177,15 @@ typedef struct yaca_process
   HANDLE stderr_read;
   DWORD process_id;
   DWORD exit_code;
+  yaca_process_input *input_writer;
 #else
   pid_t process_id;
   int stdout_read;
   int stderr_read;
+  int control_write;
+  int status_read;
+  size_t status_bytes;
+  yaca_supervisor_result status_record;
   int wait_status;
 #endif
   lua_Integer started_at;
@@ -122,7 +200,50 @@ typedef struct yaca_process
   char signal_or_exception[32];
 } yaca_process;
 
+#if !defined(_WIN32)
+/* Declares the POSIX process-status refresh performed before polling or close.
+ * @param process yaca_process* Process owner whose child status is refreshed.
+ * @return void No value; the process owner's observed status may advance.
+ */
+static void refresh_posix_process(yaca_process *process);
+/* @struct yaca_abandoned_supervisor POSIX supervisor awaiting deferred reap after owner close.
+ * @field pid pid_t POSIX process identity awaiting reap.
+ * @field next struct_yaca_abandoned_supervisor* Next node in the deferred-reap list.
+ */
+typedef struct yaca_abandoned_supervisor
+{
+  pid_t pid;
+  struct yaca_abandoned_supervisor *next;
+} yaca_abandoned_supervisor;
+static yaca_abandoned_supervisor *abandoned_supervisors;
+
+/* Reaps POSIX supervisors detached from closed process handles.
+ * @param none No arguments.
+ * @return void result Reaps completed supervisor children and clears their tracking entries.
+ */
+static void reap_abandoned_supervisors(void)
+{
+  yaca_abandoned_supervisor **link = &abandoned_supervisors;
+  while (*link != NULL)
+  {
+    yaca_abandoned_supervisor *item = *link;
+    pid_t result = waitpid(item->pid, NULL, WNOHANG);
+    if (result == item->pid || (result < 0 && errno == ECHILD))
+    { *link = item->next; free(item); }
+    else link = &item->next;
+  }
+}
+#endif
+
 #if defined(_WIN32)
+/* @struct yaca_terminal_read Windows console reader thread and its buffered input.
+ * @field input HANDLE Terminal input handle or mode state.
+ * @field thread HANDLE Worker thread handle owned by this state.
+ * @field wide WCHAR* Owned wide-character input buffer.
+ * @field capacity DWORD Allocated element capacity of the buffer or vector.
+ * @field received volatile Number of characters received by the worker.
+ * @field error_value volatile Operating-system error captured by the worker.
+ */
 typedef struct yaca_terminal_read
 {
   HANDLE input;
@@ -134,6 +255,24 @@ typedef struct yaca_terminal_read
 } yaca_terminal_read;
 #endif
 
+/* @struct yaca_terminal Lua-owned terminal mode, input, and restoration state.
+ * @field input HANDLE Terminal input handle or mode state.
+ * @field original_mode DWORD|termios Host terminal mode captured before this session changes it.
+ * @field input_type DWORD Windows handle type used to select console or pipe input.
+ * @field pending_high_surrogate WCHAR First UTF-16 code unit awaiting its matching low surrogate.
+ * @field cooked_mode int Whether Windows console line editing is currently enabled.
+ * @field cooked_read yaca_terminal_read* Active asynchronous Windows console read, if any.
+ * @field pty yaca_pty_state Cygwin PTY mode and restoration state.
+ * @field original_flags int POSIX descriptor flags captured for restoration.
+ * @field maximum_input_bytes size_t Upper bound for one terminal input record.
+ * @field has_original_mode int Whether an original terminal mode was captured.
+ * @field has_original_flags int Whether original descriptor flags were captured.
+ * @field restored int Whether original terminal settings have been restored.
+ * @field cancelled int Whether input cancellation was requested.
+ * @field terminal_emitted int Whether a terminal event was already published.
+ * @field closed int Whether this owner has released its resources.
+ * @field outcome char Final process or terminal outcome category.
+ */
 typedef struct yaca_terminal
 {
 #if defined(_WIN32)
@@ -143,6 +282,7 @@ typedef struct yaca_terminal
   WCHAR pending_high_surrogate;
   int cooked_mode;
   yaca_terminal_read *cooked_read;
+  yaca_pty_state pty;
 #else
   int input;
   int original_flags;
@@ -158,6 +298,13 @@ typedef struct yaca_terminal
   char outcome[16];
 } yaca_terminal;
 
+/* @struct yaca_sha256 Incremental SHA-256 state and partial block buffer.
+ * @field state uint32_t[8] Current SHA-256 chaining words.
+ * @field byte_count uint64_t Total input bytes absorbed.
+ * @field buffer unsigned_char[64] Uncompressed trailing block bytes.
+ * @field buffer_length size_t Number of valid trailing bytes in buffer.
+ * @field closed int Whether this owner has released its resources.
+ */
 typedef struct yaca_sha256
 {
   uint32_t state[8];
@@ -167,19 +314,45 @@ typedef struct yaca_sha256
   int closed;
 } yaca_sha256;
 
+/* Declares initialization of one incremental SHA-256 context.
+ * @param context yaca_sha256* Hash state reset for a new digest.
+ * @return void No value; all hash state is initialized in context.
+ */
 static void sha256_initialize(yaca_sha256 *context);
+/* Declares bounded addition of bytes to an incremental SHA-256 context.
+ * @param context yaca_sha256* Hash state receiving the byte chunk.
+ * @param bytes const_unsigned_char* Chunk to hash without retaining its pointer.
+ * @param length size_t Byte length of the chunk.
+ * @return int accepted Whether the chunk fit the admitted byte count.
+ */
 static int sha256_append(
   yaca_sha256 *context,
   const unsigned char *bytes,
   size_t length);
+/* Declares finalization of the incremental SHA-256 digest.
+ * @param context yaca_sha256* Hash state to finalize.
+ * @param digest unsigned_char[32] Caller-owned output for 32 digest bytes.
+ * @return void No value; digest receives the final hash bytes.
+ */
 static void sha256_finalize(yaca_sha256 *context, unsigned char digest[32]);
 #if !defined(_WIN32)
+/* Declares lowercase hexadecimal formatting of a SHA-256 digest.
+ * @param digest const_unsigned_char[32] Complete 32-byte digest.
+ * @param output char[65] Caller-owned output including the trailing NUL.
+ * @return void No value; output receives 64 hex characters and NUL.
+ */
 static void digest_hex(const unsigned char digest[32], char output[65]);
 #endif
 
 /*
 ** Pushes the common false, structured-error return shape.
 */
+/* Pushes a typed native failure and its diagnostic onto the Lua stack.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @param code const_char* Stable native error code or Unicode code point.
+ * @param message const_char* Diagnostic text for the reported native outcome.
+ * @return int result Two Lua results: false and a typed error table.
+ */
 static int push_failure(lua_State *L, const char *code, const char *message)
 {
   lua_pushboolean(L, 0);
@@ -194,6 +367,10 @@ static int push_failure(lua_State *L, const char *code, const char *message)
 /*
 ** Pushes true before one result already on the stack.
 */
+/* Pushes a successful native-operation result onto the Lua stack.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Two Lua results: true followed by the result already on the stack.
+ */
 static int return_success(lua_State *L)
 {
   lua_pushboolean(L, 1);
@@ -201,6 +378,10 @@ static int return_success(lua_State *L)
   return 2;
 }
 
+/* Pushes the true result used by successful native calls.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Two Lua results: true and true.
+ */
 static int push_true_result(lua_State *L)
 {
   lua_pushboolean(L, 1);
@@ -208,6 +389,15 @@ static int push_true_result(lua_State *L)
   return 2;
 }
 
+/* Validates a Lua byte string and exposes its pointer and length.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @param index int Lua stack index or item position being read.
+ * @param bytes const_char** Raw byte buffer supplied to the native operation.
+ * @param length size_t* Byte or wide-character length of the supplied buffer.
+ * @param code const_char* Stable native error code or Unicode code point.
+ * @param message const_char* Diagnostic text for the reported native outcome.
+ * @return int result 1 for a nonempty NUL-free byte string; 0 after pushing a typed failure.
+ */
 static int checked_byte_string(
   lua_State *L,
   int index,
@@ -226,6 +416,10 @@ static int checked_byte_string(
 }
 
 #if !defined(_WIN32)
+/* Maps a POSIX errno value to a stable native error code.
+ * @param value int Candidate value being converted or checked.
+ * @return const_char* result Borrowed stable code for the POSIX errno value.
+ */
 static const char *errno_code(int value)
 {
   switch (value)
@@ -257,6 +451,10 @@ static const char *errno_code(int value)
 
 #if defined(_WIN32)
 
+/* Maps a Win32 error value to a stable native error code.
+ * @param value DWORD Candidate value being converted or checked.
+ * @return const_char* result Borrowed stable code for the Win32 error value.
+ */
 static const char *windows_error_code(DWORD value)
 {
   switch (value)
@@ -282,6 +480,11 @@ static const char *windows_error_code(DWORD value)
 /*
 ** Converts one strict UTF-8 string to an allocated Windows wide string.
 */
+/* Converts validated UTF-8 text into a Windows wide string.
+ * @param bytes const_char* Raw byte buffer supplied to the native operation.
+ * @param length size_t Byte or wide-character length of the supplied buffer.
+ * @return WCHAR*|NULL result New UTF-16 buffer for valid UTF-8 input; caller frees it, or NULL on failure.
+ */
 static WCHAR *utf8_to_wide(const char *bytes, size_t length)
 {
   int required;
@@ -328,6 +531,10 @@ static WCHAR *utf8_to_wide(const char *bytes, size_t length)
   return result;
 }
 
+/* Converts a Windows wide string into UTF-8 output.
+ * @param value const_WCHAR* Candidate value being converted or checked.
+ * @return char*|NULL result New UTF-8 buffer for valid UTF-16 input; caller frees it, or NULL on failure.
+ */
 static char *wide_to_utf8(const WCHAR *value)
 {
   size_t wide_length;
@@ -393,6 +600,10 @@ static char *wide_to_utf8(const WCHAR *value)
   return result;
 }
 
+/* Copies a Windows wide string into owned native storage.
+ * @param value const_WCHAR* Candidate value being converted or checked.
+ * @return WCHAR*|NULL result New copy of the UTF-16 text; caller frees it, or NULL on allocation failure.
+ */
 static WCHAR *duplicate_wide(const WCHAR *value)
 {
   size_t length = wcslen(value);
@@ -406,6 +617,10 @@ static WCHAR *duplicate_wide(const WCHAR *value)
 
 #define YACA_WINDOWS_LONG_PATH_UNITS 32768U
 
+/* Resolves a Windows path into its absolute spelling.
+ * @param value const_WCHAR* Candidate value being converted or checked.
+ * @return WCHAR*|NULL result New absolute UTF-16 path; caller frees it, or NULL on failure.
+ */
 static WCHAR *windows_full_path(const WCHAR *value)
 {
   WCHAR *result;
@@ -429,6 +644,10 @@ static WCHAR *windows_full_path(const WCHAR *value)
   return result;
 }
 
+/* Finds the selected Windows application through the admitted search path.
+ * @param value const_WCHAR* Candidate value being converted or checked.
+ * @return WCHAR*|NULL result New absolute executable path; caller frees it, or NULL when unresolved.
+ */
 static WCHAR *windows_search_application(const WCHAR *value)
 {
   WCHAR *searched;
@@ -457,6 +676,10 @@ static WCHAR *windows_search_application(const WCHAR *value)
   return absolute;
 }
 
+/* Reads the running Windows module path.
+ * @param none No arguments.
+ * @return WCHAR*|NULL result New module path; caller frees it, or NULL on failure.
+ */
 static WCHAR *windows_module_path(void)
 {
   DWORD capacity = MAX_PATH;
@@ -490,6 +713,10 @@ static WCHAR *windows_module_path(void)
   return NULL;
 }
 
+/* Removes a Windows device-path prefix for display.
+ * @param value const_WCHAR* Candidate value being converted or checked.
+ * @return WCHAR*|NULL result New path without a Win32 device prefix; caller frees it, or NULL on failure.
+ */
 static WCHAR *windows_strip_device_prefix(const WCHAR *value)
 {
   static const WCHAR unc_prefix[] = L"\\\\?\\UNC\\";
@@ -517,8 +744,21 @@ static WCHAR *windows_strip_device_prefix(const WCHAR *value)
   return duplicate_wide(value);
 }
 
+/* Obtains a canonical Windows file path from a handle.
+ * @param handle HANDLE Operating-system handle being inspected or closed.
+ * @param fallback const_WCHAR* Path used when handle-based canonicalization is unavailable.
+ * @return WCHAR*|NULL result New final path from the handle or fallback; caller frees it, or NULL on failure.
+ */
 static WCHAR *windows_final_path(HANDLE handle, const WCHAR *fallback)
 {
+  /* Queries the final canonical path of a Windows file handle.
+   * @callback yaca_get_final_path Dynamically resolved Win32 final-path query.
+   * @param arg1 HANDLE File handle whose canonical path is requested.
+   * @param arg2 LPWSTR Caller-owned wide output buffer.
+   * @param arg3 DWORD Wide-character capacity of that buffer.
+   * @param arg4 DWORD Win32 path-format flags.
+   * @return DWORD length Required or written wide-character count per Win32 API.
+   */
   typedef DWORD (WINAPI *yaca_get_final_path)(HANDLE, LPWSTR, DWORD, DWORD);
   HMODULE kernel;
   FARPROC procedure;
@@ -558,6 +798,10 @@ static WCHAR *windows_final_path(HANDLE handle, const WCHAR *fallback)
   return result;
 }
 
+/* Resolves an existing Windows file before opening it.
+ * @param value const_WCHAR* Candidate value being converted or checked.
+ * @return WCHAR*|NULL result New canonical path to an existing file; caller frees it, or NULL on failure.
+ */
 static WCHAR *windows_existing_file_path(const WCHAR *value)
 {
   HANDLE handle;
@@ -587,6 +831,10 @@ static WCHAR *windows_existing_file_path(const WCHAR *value)
   return result;
 }
 
+/* Finds the current Windows executable path.
+ * @param argv0 const_WCHAR* Original executable name from process arguments.
+ * @return WCHAR*|NULL result New absolute application path; caller frees it, or NULL on failure.
+ */
 static WCHAR *windows_application_path(const WCHAR *argv0)
 {
   WCHAR *absolute;
@@ -611,6 +859,12 @@ static WCHAR *windows_application_path(const WCHAR *argv0)
   return result;
 }
 
+/* Pushes windows failure fields onto the Lua stack.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @param value DWORD Candidate value being converted or checked.
+ * @param message const_char* Diagnostic text for the reported native outcome.
+ * @return int result Two Lua results describing the mapped Win32 failure.
+ */
 static int push_windows_failure(lua_State *L, DWORD value, const char *message)
 {
   return push_failure(L, windows_error_code(value), message);
@@ -620,6 +874,10 @@ static int push_windows_failure(lua_State *L, DWORD value, const char *message)
 
 #if !defined(_WIN32)
 
+/* Checks a POSIX executable candidate for an existing file.
+ * @param candidate const_char* Candidate path or value being validated.
+ * @return char*|NULL result New resolved executable path; caller frees it, or NULL if inadmissible.
+ */
 static char *posix_existing_executable(const char *candidate)
 {
   char *resolved;
@@ -640,6 +898,10 @@ static char *posix_existing_executable(const char *candidate)
   return resolved;
 }
 
+/* Finds the current POSIX executable path.
+ * @param argv0 const_char* Original executable name from process arguments.
+ * @return char*|NULL result New resolved application path; caller frees it, or NULL on failure.
+ */
 static char *posix_application_path(const char *argv0)
 {
   const char *path;
@@ -701,6 +963,10 @@ static char *posix_application_path(const char *argv0)
   return NULL;
 }
 
+/* Reads the runtime path used by the POSIX executable.
+ * @param none No arguments.
+ * @return char*|NULL result New resolved runtime executable path; caller frees it, or NULL on failure.
+ */
 static char *posix_runtime_path(void)
 {
   return posix_existing_executable("/proc/self/exe");
@@ -712,6 +978,10 @@ static char *posix_runtime_path(void)
 ** Lua:
 **   paths = module.executable_paths(original_argv0)
 */
+/* Implements the Lua executable paths native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_executable_paths(lua_State *L)
 {
   const char *argv0;
@@ -801,6 +1071,10 @@ static int l_executable_paths(lua_State *L)
 ** Lua:
 **   facts = module.stdio_facts()
 */
+/* Implements the Lua stdio facts native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_stdio_facts(lua_State *L)
 {
   int input_is_tty;
@@ -814,13 +1088,13 @@ static int l_stdio_facts(lua_State *L)
   HANDLE error_output = GetStdHandle(STD_ERROR_HANDLE);
   input_is_tty = input != NULL
     && input != INVALID_HANDLE_VALUE
-    && GetConsoleMode(input, &mode) != 0;
+    && (GetConsoleMode(input, &mode) != 0 || yaca_is_cygwin_pty(input));
   output_is_tty = output != NULL
     && output != INVALID_HANDLE_VALUE
-    && GetConsoleMode(output, &mode) != 0;
+    && (GetConsoleMode(output, &mode) != 0 || yaca_is_cygwin_pty(output));
   error_is_tty = error_output != NULL
     && error_output != INVALID_HANDLE_VALUE
-    && GetConsoleMode(error_output, &mode) != 0;
+    && (GetConsoleMode(error_output, &mode) != 0 || yaca_is_cygwin_pty(error_output));
 #else
   input_is_tty = isatty(STDIN_FILENO) != 0;
   output_is_tty = isatty(STDOUT_FILENO) != 0;
@@ -836,6 +1110,78 @@ static int l_stdio_facts(lua_State *L)
   return 1;
 }
 
+/* Windows consoles consume UTF-16 independently of their OEM code page.
+** Pipes/files deliberately fall back to the caller's ordinary byte writer. */
+/* Implements the Lua console write native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
+static int l_console_write(lua_State *L)
+{
+  const char *stream = luaL_checkstring(L, 1);
+  size_t length;
+  const char *bytes = luaL_checklstring(L, 2, &length);
+  if (strcmp(stream, "stdout") != 0 && strcmp(stream, "stderr") != 0)
+    return push_failure(L, "InvalidStream", "console stream must be stdout or stderr");
+#if defined(_WIN32)
+  {
+    HANDLE handle = GetStdHandle(strcmp(stream, "stdout") == 0 ? STD_OUTPUT_HANDLE : STD_ERROR_HANDLE);
+    DWORD mode;
+    WCHAR *wide, *display;
+    int count, index;
+    size_t used = 0, offset = 0;
+    if (!GetConsoleMode(handle, &mode))
+      return push_failure(L, "NotConsole", "output is a byte stream");
+    if (length == 0) return push_true_result(L);
+    if (length > 1048576U)
+      return push_failure(L, "Limit", "console write exceeds its byte limit");
+    count = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, bytes, (int)length, NULL, 0);
+    if (count <= 0) return push_windows_failure(L, GetLastError(), "invalid UTF-8 console text");
+    wide = malloc((size_t)count * sizeof(WCHAR));
+    display = malloc((size_t)count * 2U * sizeof(WCHAR));
+    if (wide == NULL || display == NULL)
+    { free(wide); free(display); return push_failure(L, "OutOfMemory", "console write allocation failed"); }
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, bytes, (int)length, wide, count) != count)
+    {
+      DWORD error_value = GetLastError();
+      free(wide); free(display);
+      return push_windows_failure(L, error_value, "UTF-8 console conversion failed");
+    }
+    for (index = 0; index < count; index++)
+    {
+      if (wide[index] == L'\n' && (index == 0 || wide[index - 1] != L'\r'))
+        display[used++] = L'\r';
+      display[used++] = wide[index];
+    }
+    free(wide);
+    while (offset < used)
+    {
+      DWORD written, chunk = (DWORD)(used - offset > 8192U ? 8192U : used - offset);
+      if (offset + chunk < used && display[offset + chunk - 1] >= 0xD800
+          && display[offset + chunk - 1] <= 0xDBFF) chunk--;
+      if (!WriteConsoleW(handle, display + offset, chunk, &written, NULL) || written == 0)
+      {
+        DWORD error_value = GetLastError();
+        free(display);
+        return push_windows_failure(L, error_value, "console output failed");
+      }
+      offset += written;
+    }
+    free(display);
+    return push_true_result(L);
+  }
+#else
+  (void)bytes;
+  (void)length;
+  return push_failure(L, "NotConsole", "output is a byte stream");
+#endif
+}
+
+/* Validates and borrows an open Lua file userdata.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @param index int Lua stack index or item position being read.
+ * @return yaca_file* result Borrowed live file userdata; raises a Lua error for wrong or closed handles.
+ */
 static yaca_file *check_file(lua_State *L, int index)
 {
   yaca_file *file;
@@ -848,6 +1194,10 @@ static yaca_file *check_file(lua_State *L, int index)
   return file;
 }
 
+/* Closes the file native owner.
+ * @param file yaca_file* The file bound to close file.
+ * @return void result Closes the native file handle owned by the Lua userdata.
+ */
 static void close_file(yaca_file *file)
 {
   if (file->closed)
@@ -870,6 +1220,10 @@ static void close_file(yaca_file *file)
   file->closed = 1;
 }
 
+/* Implements the Lua file gc native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_file_gc(lua_State *L)
 {
   yaca_file *file;
@@ -882,6 +1236,10 @@ static int l_file_gc(lua_State *L)
   return 0;
 }
 
+/* Pushes file fields onto the Lua stack.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return yaca_file* result New file userdata also pushed onto Lua stack; Lua owns its lifetime.
+ */
 static yaca_file *push_file(lua_State *L)
 {
   yaca_file *file;
@@ -893,10 +1251,17 @@ static yaca_file *push_file(lua_State *L)
 #else
   file->descriptor = -1;
 #endif
+  /* @metatable yaca_file_metatable Lua userdata binding installed for the exact native owner type.
+   */
   luaL_setmetatable(L, YACA_FILE_METATABLE);
   return file;
 }
 
+/* Pushes identity fields onto the Lua stack.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @param identity const_yaca_identity* Stable filesystem identity read or written by this call.
+ * @return void result Pushes the captured file identity as a Lua table.
+ */
 static void push_identity(lua_State *L, const yaca_identity *identity)
 {
   lua_createtable(L, 0, 5);
@@ -912,6 +1277,12 @@ static void push_identity(lua_State *L, const yaca_identity *identity)
   lua_setfield(L, -2, "modified");
 }
 
+/* Compares a captured native file identity with its Lua representation.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @param index int Lua stack index or item position being read.
+ * @param identity const_yaca_identity* Stable filesystem identity read or written by this call.
+ * @return int result 1 when the Lua identity equals the captured native identity; 0 otherwise.
+ */
 static int identity_matches_lua(lua_State *L, int index, const yaca_identity *identity)
 {
   int matches;
@@ -948,15 +1319,16 @@ static int identity_matches_lua(lua_State *L, int index, const yaca_identity *id
 
 #if defined(_WIN32)
 
-static int identity_from_handle(HANDLE handle, yaca_identity *identity)
+/* Copies volume and file-index identity from a Win32 information record.
+ * @param observed const_BY_HANDLE_FILE_INFORMATION* Operating-system observation captured for comparison.
+ * @param identity yaca_identity* Stable filesystem identity read or written by this call.
+ * @return int result 1 after copying complete Win32 file identity; 0 if unavailable.
+ */
+static int identity_from_windows_information(
+  const BY_HANDLE_FILE_INFORMATION *observed, yaca_identity *identity)
 {
-  BY_HANDLE_FILE_INFORMATION information;
+  BY_HANDLE_FILE_INFORMATION information = *observed;
   unsigned long long size;
-
-  if (!GetFileInformationByHandle(handle, &information))
-  {
-    return 0;
-  }
   strcpy(
     identity->kind,
     (information.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0
@@ -990,6 +1362,22 @@ static int identity_from_handle(HANDLE handle, yaca_identity *identity)
   return 1;
 }
 
+/* Reads file identity from an open Win32 handle.
+ * @param handle HANDLE Operating-system handle being inspected or closed.
+ * @param identity yaca_identity* Stable filesystem identity read or written by this call.
+ * @return int result 1 when handle information yields an identity; 0 on API failure.
+ */
+static int identity_from_handle(HANDLE handle, yaca_identity *identity)
+{
+  BY_HANDLE_FILE_INFORMATION information;
+  return GetFileInformationByHandle(handle, &information)
+    && identity_from_windows_information(&information, identity);
+}
+
+/* Opens a path for attribute-only identity checks.
+ * @param path const_WCHAR* Filesystem path selected for this operation.
+ * @return HANDLE result Open attribute handle owned by caller, or INVALID_HANDLE_VALUE on failure.
+ */
 static HANDLE open_identity_path(const WCHAR *path)
 {
   return CreateFileW(
@@ -1004,6 +1392,11 @@ static HANDLE open_identity_path(const WCHAR *path)
 
 #else
 
+/* Copies stable device and inode identity from a POSIX stat record.
+ * @param information const_struct_stat* Operating-system stat or file-information record.
+ * @param identity yaca_identity* Stable filesystem identity read or written by this call.
+ * @return int result 1 after copying a stable POSIX identity; 0 if unavailable.
+ */
 static int identity_from_stat(const struct stat *information, yaca_identity *identity)
 {
   unsigned long long size;
@@ -1053,6 +1446,11 @@ static int identity_from_stat(const struct stat *information, yaca_identity *ide
   return 1;
 }
 
+/* Reads stable identity from an open POSIX descriptor.
+ * @param descriptor int POSIX file descriptor under inspection.
+ * @param identity yaca_identity* Stable filesystem identity read or written by this call.
+ * @return int result 1 when fstat yields a stable identity; 0 on failure.
+ */
 static int identity_from_descriptor(int descriptor, yaca_identity *identity)
 {
   struct stat information;
@@ -1070,6 +1468,10 @@ static int identity_from_descriptor(int descriptor, yaca_identity *identity)
 ** Lua:
 **   workspace = module.workspace_inspect(requested_path)
 */
+/* Implements the Lua workspace inspect native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_workspace_inspect(lua_State *L)
 {
   const char *path;
@@ -1174,6 +1576,10 @@ static int l_workspace_inspect(lua_State *L)
 ** Lua:
 **   ok, value_or_error = module.fs_make_directory(absolute_path, permissions)
 */
+/* Implements the Lua fs make directory native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_fs_make_directory(lua_State *L)
 {
   const char *path;
@@ -1255,6 +1661,10 @@ static int l_fs_make_directory(lua_State *L)
 ** Lua:
 **   ok, handle_or_error = module.fs_open_read(absolute_path)
 */
+/* Implements the Lua fs open read native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_fs_open_read(lua_State *L)
 {
   const char *path;
@@ -1321,6 +1731,10 @@ static int l_fs_open_read(lua_State *L)
 ** Lua:
 **   ok, handle_or_error = module.fs_create_new(absolute_path, permissions)
 */
+/* Implements the Lua fs create new native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_fs_create_new(lua_State *L)
 {
   const char *path;
@@ -1393,6 +1807,10 @@ static int l_fs_create_new(lua_State *L)
 ** Lua:
 **   ok, identity_or_error = module.fs_stat_identity(handle_or_path)
 */
+/* Implements the Lua fs stat identity native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_fs_stat_identity(lua_State *L)
 {
   yaca_identity identity;
@@ -1478,6 +1896,10 @@ static int l_fs_stat_identity(lua_State *L)
 ** Lua:
 **   ok, { bytes = string, eof = boolean } = module.fs_read(handle, maximum)
 */
+/* Implements the Lua fs read native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_fs_read(lua_State *L)
 {
   yaca_file *file;
@@ -1547,6 +1969,10 @@ static int l_fs_read(lua_State *L)
 ** Lua:
 **   ok, byte_count_or_error = module.fs_write(handle, bytes)
 */
+/* Implements the Lua fs write native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_fs_write(lua_State *L)
 {
   yaca_file *file;
@@ -1590,6 +2016,10 @@ static int l_fs_write(lua_State *L)
   return return_success(L);
 }
 
+/* Implements the Lua fs flush file native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_fs_flush_file(lua_State *L)
 {
   yaca_file *file;
@@ -1609,6 +2039,10 @@ static int l_fs_flush_file(lua_State *L)
   return push_true_result(L);
 }
 
+/* Implements the Lua fs flush directory native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_fs_flush_directory(lua_State *L)
 {
   const char *path;
@@ -1682,6 +2116,10 @@ static int l_fs_flush_directory(lua_State *L)
   return push_true_result(L);
 }
 
+/* Implements the Lua fs replace native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_fs_replace(lua_State *L)
 {
   const char *temporary_path;
@@ -1756,6 +2194,10 @@ static int l_fs_replace(lua_State *L)
   return push_true_result(L);
 }
 
+/* Implements the Lua fs rename no replace native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_fs_rename_no_replace(lua_State *L)
 {
   const char *source_path;
@@ -1827,6 +2269,10 @@ static int l_fs_rename_no_replace(lua_State *L)
   return push_true_result(L);
 }
 
+/* Implements the Lua fs delete verified native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_fs_delete_verified(lua_State *L)
 {
   const char *path;
@@ -1909,6 +2355,10 @@ static int l_fs_delete_verified(lua_State *L)
   return push_true_result(L);
 }
 
+/* Implements the Lua fs close native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_fs_close(lua_State *L)
 {
   yaca_file *file;
@@ -1928,6 +2378,12 @@ static int l_fs_close(lua_State *L)
 #define YACA_WINDOWS_MAX_ANCESTORS 1024U
 #define YACA_WINDOWS_MAX_STREAMS 1024U
 
+/* @struct yaca_windows_metadata_state Captured Windows attributes and security metadata for exact comparison.
+ * @field attributes DWORD Captured Windows file attribute flags.
+ * @field security_descriptor unsigned_char* Owned Windows security descriptor bytes.
+ * @field security_descriptor_length DWORD Valid security-descriptor byte length.
+ * @field proven int Whether all requested metadata was captured with sufficient evidence.
+ */
 typedef struct yaca_windows_metadata_state
 {
   DWORD attributes;
@@ -1936,12 +2392,30 @@ typedef struct yaca_windows_metadata_state
   int proven;
 } yaca_windows_metadata_state;
 
+/* @struct yaca_windows_ancestor One verified ancestor path and file identity.
+ * @field path WCHAR* Owned path spelling for the captured object.
+ * @field identity yaca_identity File identity pinned for this ancestor.
+ */
 typedef struct yaca_windows_ancestor
 {
   WCHAR *path;
   yaca_identity identity;
 } yaca_windows_ancestor;
 
+/* @struct yaca_windows_snapshot Pinned Windows target, parent, and ancestry evidence.
+ * @field canonical_path WCHAR* Canonical path bound to the captured target.
+ * @field parent_path WCHAR* Canonical path bound to the target's parent.
+ * @field target_handle HANDLE Open handle pinning the target object.
+ * @field parent_handle HANDLE Open handle pinning the parent directory.
+ * @field target_information BY_HANDLE_FILE_INFORMATION File identity and attributes read from target_handle.
+ * @field parent_information BY_HANDLE_FILE_INFORMATION File identity and attributes read from parent_handle.
+ * @field ancestors yaca_windows_ancestor* Captured ancestor identities and paths.
+ * @field ancestor_count size_t Number of captured ancestors.
+ * @field exists int Whether the target existed at capture time.
+ * @field reparse int Captured reparse-point metadata.
+ * @field link_target char* Decoded symbolic-link target spelling.
+ * @field metadata yaca_windows_metadata_state Exact target metadata captured for later comparison.
+ */
 typedef struct yaca_windows_snapshot
 {
   WCHAR *canonical_path;
@@ -1958,6 +2432,14 @@ typedef struct yaca_windows_snapshot
   yaca_windows_metadata_state metadata;
 } yaca_windows_snapshot;
 
+/* @struct yaca_windows_path_vector Bounded vector of Windows walk results.
+ * @field items char* Owned array of collected entries.
+ * @field count size_t Number of valid entries in the array.
+ * @field capacity size_t Allocated element capacity of the buffer or vector.
+ * @field maximum size_t Maximum admitted entries for this collection.
+ * @field truncated int Whether enumeration exceeded the collection bound.
+ * @field conservative_ignore int Whether uncertain entries were omitted conservatively.
+ */
 typedef struct yaca_windows_path_vector
 {
   char **items;
@@ -1968,12 +2450,20 @@ typedef struct yaca_windows_path_vector
   int conservative_ignore;
 } yaca_windows_path_vector;
 
+/* Releases owned windows metadata state storage.
+ * @param state yaca_windows_metadata_state* Captured native state updated or compared by the operation.
+ * @return void result Releases the security descriptor and resets captured metadata.
+ */
 static void free_windows_metadata_state(yaca_windows_metadata_state *state)
 {
   free(state->security_descriptor);
   memset(state, 0, sizeof(*state));
 }
 
+/* Rejects alternate data streams on a pinned Windows handle.
+ * @param handle HANDLE Operating-system handle being inspected or closed.
+ * @return int result 1 when the handle exposes only its ordinary data stream; 0 otherwise.
+ */
 static int windows_streams_are_plain(HANDLE handle)
 {
   LPVOID context = NULL;
@@ -2076,16 +2566,38 @@ static int windows_streams_are_plain(HANDLE handle)
   return result;
 }
 
+/* @struct yaca_windows_stream_data One alternate-stream name and length from Windows metadata.
+ * @field size LARGE_INTEGER Captured file or stream length.
+ * @field name WCHAR Owned entry or attribute name.
+ */
 typedef struct yaca_windows_stream_data
 {
   LARGE_INTEGER size;
   WCHAR name[MAX_PATH + 36];
 } yaca_windows_stream_data;
 
+/* Rejects alternate data streams found by Windows path enumeration.
+ * @param path const_WCHAR* Filesystem path selected for this operation.
+ * @return int result 1 when the path exposes only its ordinary data stream; 0 otherwise.
+ */
 static int windows_streams_are_plain_by_path(const WCHAR *path)
 {
+  /* Opens enumeration of alternate streams for one Windows path.
+   * @callback yaca_find_first_stream Dynamically resolved Win32 stream enumerator.
+   * @param arg1 LPCWSTR Path whose alternate streams are inspected.
+   * @param arg2 int Win32 stream-information level.
+   * @param arg3 LPVOID Caller-owned first-stream information buffer.
+   * @param arg4 DWORD Reserved Win32 enumeration flags.
+   * @return HANDLE search Enumeration handle, or INVALID_HANDLE_VALUE on failure.
+   */
   typedef HANDLE (WINAPI *yaca_find_first_stream)(
     LPCWSTR, int, LPVOID, DWORD);
+  /* Advances enumeration to the next Windows stream record.
+   * @callback yaca_find_next_stream Dynamically resolved Win32 stream iterator.
+   * @param arg1 HANDLE Enumeration handle returned by the first-stream call.
+   * @param arg2 LPVOID Caller-owned next-stream information buffer.
+   * @return BOOL found Whether another stream record was written.
+   */
   typedef BOOL (WINAPI *yaca_find_next_stream)(HANDLE, LPVOID);
   HMODULE kernel = GetModuleHandleW(L"kernel32.dll");
   FARPROC first_procedure;
@@ -2137,6 +2649,14 @@ static int windows_streams_are_plain_by_path(const WCHAR *path)
   return result;
 }
 
+/* Captures exact Win32 attributes, security descriptor, and stream evidence.
+ * @param handle HANDLE Operating-system handle being inspected or closed.
+ * @param information const_BY_HANDLE_FILE_INFORMATION* Operating-system stat or file-information record.
+ * @param path const_WCHAR* Filesystem path selected for this operation.
+ * @param require_plain_streams int Whether alternate data streams must be rejected.
+ * @param state yaca_windows_metadata_state* Captured native state updated or compared by the operation.
+ * @return int result 1 for complete metadata, 0 for unsupported evidence, -1 on capture error.
+ */
 static int capture_windows_metadata(
   HANDLE handle,
   const BY_HANDLE_FILE_INFORMATION *information,
@@ -2195,6 +2715,11 @@ static int capture_windows_metadata(
   return 1;
 }
 
+/* Compares captured Windows attributes and security descriptors.
+ * @param left const_yaca_windows_metadata_state* First identity, path, or metadata value in the comparison.
+ * @param right const_yaca_windows_metadata_state* Second identity, path, or metadata value in the comparison.
+ * @return int result 1 when captured Windows metadata agrees exactly; 0 otherwise.
+ */
 static int windows_metadata_states_equal(
   const yaca_windows_metadata_state *left,
   const yaca_windows_metadata_state *right)
@@ -2208,6 +2733,11 @@ static int windows_metadata_states_equal(
       left->security_descriptor_length) == 0;
 }
 
+/* Formats a bounded digest of Windows behavior metadata.
+ * @param state const_yaca_windows_metadata_state* Captured native state updated or compared by the operation.
+ * @param output char_[96] Caller-provided output buffer or result destination.
+ * @return int result 1 after writing the bounded digest text; 0 on encoding failure.
+ */
 static int windows_behavior_digest(
   const yaca_windows_metadata_state *state,
   char output[96])
@@ -2254,6 +2784,11 @@ static int windows_behavior_digest(
   return written > 0 && written < 96;
 }
 
+/* Allocates a UTF-16 child path beneath a verified parent.
+ * @param parent const_WCHAR* Verified parent path or parent object.
+ * @param name const_WCHAR* Selected file, module, or resource name.
+ * @return WCHAR*|NULL result New joined UTF-16 path; caller frees it, or NULL on failure.
+ */
 static WCHAR *windows_join_path(const WCHAR *parent, const WCHAR *name)
 {
   size_t parent_length = wcslen(parent);
@@ -2284,6 +2819,11 @@ static WCHAR *windows_join_path(const WCHAR *parent, const WCHAR *name)
   return result;
 }
 
+/* Recognizes reserved Win32 device-name components.
+ * @param component const_WCHAR* One path component examined for safety.
+ * @param length size_t Byte or wide-character length of the supplied buffer.
+ * @return int result 1 if the path component is a reserved Win32 device name; 0 otherwise.
+ */
 static int windows_reserved_component(const WCHAR *component, size_t length)
 {
   WCHAR folded[16];
@@ -2320,6 +2860,10 @@ static int windows_reserved_component(const WCHAR *component, size_t length)
     && folded[3] <= L'9';
 }
 
+/* Measures the drive or UNC root prefix of a Windows path.
+ * @param path const_WCHAR* Filesystem path selected for this operation.
+ * @return size_t result Byte count, offset, or numeric value for windows path root length.
+ */
 static size_t windows_path_root_length(const WCHAR *path)
 {
   size_t length = wcslen(path);
@@ -2351,6 +2895,10 @@ static size_t windows_path_root_length(const WCHAR *path)
   return separators == 1 ? length : 0U;
 }
 
+/* Checks validate windows direct wide path against the admitted native state.
+ * @param path WCHAR* Filesystem path selected for this operation.
+ * @return int result 1 for an admitted direct Windows path; 0 for invalid or unsafe spelling.
+ */
 static int validate_windows_direct_wide_path(WCHAR *path)
 {
   size_t length = wcslen(path);
@@ -2420,6 +2968,10 @@ static int validate_windows_direct_wide_path(WCHAR *path)
   return 1;
 }
 
+/* Resolves an existing path to its long Win32 spelling.
+ * @param value const_WCHAR* Candidate value being converted or checked.
+ * @return WCHAR*|NULL result New long-path spelling; caller frees it, or NULL on failure.
+ */
 static WCHAR *windows_long_path(const WCHAR *value)
 {
   DWORD required = GetLongPathNameW(value, NULL, 0);
@@ -2443,6 +2995,12 @@ static WCHAR *windows_long_path(const WCHAR *value)
   return result;
 }
 
+/* Splits an admitted Windows path into parent and basename.
+ * @param path const_WCHAR* Filesystem path selected for this operation.
+ * @param parent WCHAR** Verified parent path or parent object.
+ * @param name WCHAR** Selected file, module, or resource name.
+ * @return int result 1 after splitting the parent and basename; 0 if the path is inadmissible.
+ */
 static int windows_parent_and_name(
   const WCHAR *path,
   WCHAR **parent,
@@ -2479,6 +3037,11 @@ static int windows_parent_and_name(
   return 1;
 }
 
+/* Opens a direct Windows path without following unsafe naming assumptions.
+ * @param path const_WCHAR* Filesystem path selected for this operation.
+ * @param access DWORD Requested Win32 handle access rights.
+ * @return HANDLE result Open direct-path handle owned by caller, or INVALID_HANDLE_VALUE on failure.
+ */
 static HANDLE open_windows_direct_path(const WCHAR *path, DWORD access)
 {
   const WCHAR *opened_path = path;
@@ -2517,6 +3080,11 @@ static HANDLE open_windows_direct_path(const WCHAR *path, DWORD access)
   return handle;
 }
 
+/* Compares volume and file index across Win32 information records.
+ * @param left const_BY_HANDLE_FILE_INFORMATION* First identity, path, or metadata value in the comparison.
+ * @param right const_BY_HANDLE_FILE_INFORMATION* Second identity, path, or metadata value in the comparison.
+ * @return int result 1 when both Win32 information records identify the same object; 0 otherwise.
+ */
 static int windows_same_object(
   const BY_HANDLE_FILE_INFORMATION *left,
   const BY_HANDLE_FILE_INFORMATION *right)
@@ -2528,6 +3096,10 @@ static int windows_same_object(
       == ((right->dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0);
 }
 
+/* Releases owned windows snapshot storage.
+ * @param snapshot yaca_windows_snapshot* Pinned target snapshot owned by this operation.
+ * @return void result Releases every owned path, ancestor, metadata block, and handle.
+ */
 static void free_windows_snapshot(yaca_windows_snapshot *snapshot)
 {
   size_t index;
@@ -2555,6 +3127,10 @@ static void free_windows_snapshot(yaca_windows_snapshot *snapshot)
   snapshot->parent_handle = INVALID_HANDLE_VALUE;
 }
 
+/* Closes the windows snapshot handles native owner.
+ * @param snapshot yaca_windows_snapshot* Pinned target snapshot owned by this operation.
+ * @return void result Closes target and parent handles held by the snapshot.
+ */
 static void close_windows_snapshot_handles(yaca_windows_snapshot *snapshot)
 {
   if (snapshot->target_handle != NULL
@@ -2571,6 +3147,12 @@ static void close_windows_snapshot_handles(yaca_windows_snapshot *snapshot)
   }
 }
 
+/* Appends one verified ancestor to the bounded Windows snapshot.
+ * @param snapshot yaca_windows_snapshot* Pinned target snapshot owned by this operation.
+ * @param path const_WCHAR* Filesystem path selected for this operation.
+ * @param handle HANDLE Operating-system handle being inspected or closed.
+ * @return int result 1 after appending a verified ancestor; 0 on allocation or identity failure.
+ */
 static int append_windows_ancestor(
   yaca_windows_snapshot *snapshot,
   const WCHAR *path,
@@ -2611,6 +3193,11 @@ static int append_windows_ancestor(
   return 1;
 }
 
+/* Captures the verified ancestor chain of a Windows path.
+ * @param snapshot yaca_windows_snapshot* Pinned target snapshot owned by this operation.
+ * @param parent const_WCHAR* Verified parent path or parent object.
+ * @return int result 1 with at least one verified ancestor; 0 on incomplete ancestry.
+ */
 static int build_windows_ancestry(
   yaca_windows_snapshot *snapshot,
   const WCHAR *parent)
@@ -2677,13 +3264,31 @@ static int build_windows_ancestry(
 #define SYMLINK_FLAG_RELATIVE 1UL
 #endif
 
+/* @struct yaca_reparse_buffer Raw Windows reparse payload with bounded target offsets.
+ * @field tag DWORD Windows reparse tag identifying payload layout.
+ * @field data_length WORD Valid reparse payload byte length.
+ * @field reserved WORD Reserved Win32 reparse header field.
+ * @field value union Symbolic-link or mount-point target layout selected by tag.
+ */
 typedef struct yaca_reparse_buffer
 {
   DWORD tag;
   WORD data_length;
   WORD reserved;
+  /* @struct reparse_layout Tag-selected Windows symbolic-link or mount-point payload.
+   * @field symbolic_link struct Symbolic-link target offsets, flags, and path bytes.
+   * @field mount_point struct Mount-point target offsets and path bytes.
+   */
   union
   {
+    /* @struct symbolic_link Windows symbolic-link target offsets and relative-path flag.
+     * @field substitute_offset WORD Offset of the substitute-name field.
+     * @field substitute_length WORD Length of the substitute-name field.
+     * @field print_offset WORD Offset of the display-name field.
+     * @field print_length WORD Length of the display-name field.
+     * @field flags DWORD Includes SYMLINK_FLAG_RELATIVE when target path is relative.
+     * @field path WCHAR Owned path spelling for the captured object.
+     */
     struct
     {
       WORD substitute_offset;
@@ -2693,6 +3298,13 @@ typedef struct yaca_reparse_buffer
       DWORD flags;
       WCHAR path[1];
     } symbolic_link;
+    /* @struct mount_point Windows mount-point target offsets and path bytes.
+     * @field substitute_offset WORD Offset of the substitute-name field.
+     * @field substitute_length WORD Length of the substitute-name field.
+     * @field print_offset WORD Offset of the display-name field.
+     * @field print_length WORD Length of the display-name field.
+     * @field path WCHAR Owned path spelling for the captured object.
+     */
     struct
     {
       WORD substitute_offset;
@@ -2704,6 +3316,12 @@ typedef struct yaca_reparse_buffer
   } value;
 } yaca_reparse_buffer;
 
+/* Normalizes a reparse target against the admitted path.
+ * @param parent const_WCHAR* Verified parent path or parent object.
+ * @param target const_WCHAR* Destination path or target object under inspection.
+ * @param relative int Path relative to the admitted workspace root.
+ * @return WCHAR*|NULL result New normalized reparse target; caller frees it, or NULL on failure.
+ */
 static WCHAR *normalize_windows_reparse_target(
   const WCHAR *parent,
   const WCHAR *target,
@@ -2743,6 +3361,11 @@ static WCHAR *normalize_windows_reparse_target(
   return absolute;
 }
 
+/* Decodes the target of a Windows symbolic link or mount point.
+ * @param handle HANDLE Operating-system handle being inspected or closed.
+ * @param parent const_WCHAR* Verified parent path or parent object.
+ * @return char*|NULL result New UTF-8 reparse target; caller frees it, or NULL on failure.
+ */
 static char *windows_reparse_target(
   HANDLE handle,
   const WCHAR *parent)
@@ -2836,6 +3459,14 @@ static char *windows_reparse_target(
   return utf8;
 }
 
+/* Captures inspect windows path from the operating system.
+ * @param requested const_char* Path or byte count requested by the caller.
+ * @param requested_length size_t Length of the requested path in bytes or wide characters.
+ * @param snapshot yaca_windows_snapshot* Pinned target snapshot owned by this operation.
+ * @param code const_char** Stable native error code or Unicode code point.
+ * @param message const_char** Diagnostic text for the reported native outcome.
+ * @return int result 1 after capturing a pinned snapshot; 0 on inspection failure.
+ */
 static int inspect_windows_path(
   const char *requested,
   size_t requested_length,
@@ -3050,6 +3681,14 @@ fail:
   return 0;
 }
 
+/* Pushes windows direct snapshot fields onto the Lua stack.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @param requested const_char* Path or byte count requested by the caller.
+ * @param requested_length size_t Length of the requested path in bytes or wide characters.
+ * @param code const_char** Stable native error code or Unicode code point.
+ * @param message const_char** Diagnostic text for the reported native outcome.
+ * @return int result 1 after pushing the snapshot into Lua; 0 on encoding failure.
+ */
 static int push_windows_direct_snapshot(
   lua_State *L,
   const char *requested,
@@ -3188,6 +3827,10 @@ fail:
   return 0;
 }
 
+/* Implements the Lua fs inspect direct native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_fs_inspect_direct(lua_State *L)
 {
   const char *path;
@@ -3211,6 +3854,12 @@ static int l_fs_inspect_direct(lua_State *L)
   return return_success(L);
 }
 
+/* Compares an open Windows handle with the Lua identity fields.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @param index int Lua stack index or item position being read.
+ * @param handle HANDLE Operating-system handle being inspected or closed.
+ * @return int result 1 when the open handle matches the Lua identity; 0 otherwise.
+ */
 static int windows_handle_matches_lua(lua_State *L, int index, HANDLE handle)
 {
   yaca_identity identity;
@@ -3219,6 +3868,10 @@ static int windows_handle_matches_lua(lua_State *L, int index, HANDLE handle)
     && identity_matches_lua(L, index, &identity);
 }
 
+/* Implements the Lua fs open read verified native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_fs_open_read_verified(lua_State *L)
 {
   const char *path;
@@ -3264,6 +3917,10 @@ static int l_fs_open_read_verified(lua_State *L)
   return return_success(L);
 }
 
+/* Implements the Lua fs create new verified native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_fs_create_new_verified(lua_State *L)
 {
   const char *path;
@@ -3319,6 +3976,13 @@ static int l_fs_create_new_verified(lua_State *L)
   return return_success(L);
 }
 
+/* Updates synchronize windows candidate metadata within its ownership boundary.
+ * @param path const_WCHAR* Filesystem path selected for this operation.
+ * @param handle HANDLE Operating-system handle being inspected or closed.
+ * @param current const_yaca_windows_metadata_state* Current observed metadata or object state.
+ * @param required const_yaca_windows_metadata_state* Previously admitted metadata or state to preserve.
+ * @return int result 1 after the candidate matches source metadata; 0 on failure.
+ */
 static int synchronize_windows_candidate_metadata(
   const WCHAR *path,
   HANDLE handle,
@@ -3386,6 +4050,10 @@ static int synchronize_windows_candidate_metadata(
   return 1;
 }
 
+/* Allocates the backup name for a direct Windows replacement.
+ * @param temporary const_WCHAR* Staged file used for atomic publication.
+ * @return WCHAR*|NULL result New unique backup path for replacement; caller frees it, or NULL on failure.
+ */
 static WCHAR *windows_replacement_backup_path(const WCHAR *temporary)
 {
   static const WCHAR suffix[] = L".yaca-previous";
@@ -3411,6 +4079,12 @@ static WCHAR *windows_replacement_backup_path(const WCHAR *temporary)
   return result;
 }
 
+/* Compares a pinned Windows snapshot with Lua identity fields.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @param index int Lua stack index or item position being read.
+ * @param snapshot const_yaca_windows_snapshot* Pinned target snapshot owned by this operation.
+ * @return int result 1 when the snapshot matches the Lua identity; 0 otherwise.
+ */
 static int windows_snapshot_matches_lua(
   lua_State *L,
   int index,
@@ -3420,9 +4094,79 @@ static int windows_snapshot_matches_lua(
     && windows_handle_matches_lua(L, index, snapshot->target_handle);
 }
 
+/* FAT file IDs can change on rename. Keep an attribute-only handle to the
+** admitted object throughout publication and compare its current identity.
+** Data handles cannot remain open: ReplaceFile opens the candidate without
+** sharing. Attribute-only handles are compatible with that operation on XP. */
+/* Opens an attribute handle to pin the admitted target object.
+ * @param snapshot const_yaca_windows_snapshot* Pinned target snapshot owned by this operation.
+ * @return HANDLE result Attribute handle pinning the admitted object, or INVALID_HANDLE_VALUE; caller closes it.
+ */
+static HANDLE windows_pin_snapshot(const yaca_windows_snapshot *snapshot)
+{
+  HANDLE pin = open_windows_direct_path(snapshot->canonical_path, FILE_READ_ATTRIBUTES);
+  BY_HANDLE_FILE_INFORMATION information;
+  if (pin != INVALID_HANDLE_VALUE
+      && (!GetFileInformationByHandle(pin, &information)
+        || !windows_same_object(&information, &snapshot->target_information)
+        || information.nFileSizeHigh != snapshot->target_information.nFileSizeHigh
+        || information.nFileSizeLow != snapshot->target_information.nFileSizeLow
+        || CompareFileTime(&information.ftLastWriteTime,
+          &snapshot->target_information.ftLastWriteTime) != 0))
+  {
+    CloseHandle(pin);
+    SetLastError(ERROR_RETRY);
+    pin = INVALID_HANDLE_VALUE;
+  }
+  return pin;
+}
+
+/* Verifies that a Windows handle still names the pinned object.
+ * @param current HANDLE Current observed metadata or object state.
+ * @param pin HANDLE Previously admitted handle or snapshot identity.
+ * @param admitted const_BY_HANDLE_FILE_INFORMATION* Output flag recording whether the identity remains admitted.
+ * @return int result 1 when the handle still identifies the pinned object; 0 otherwise.
+ */
+static int windows_handle_follows_pin(
+  HANDLE current, HANDLE pin, const BY_HANDLE_FILE_INFORMATION *admitted)
+{
+  BY_HANDLE_FILE_INFORMATION anchored, observed;
+  return pin != INVALID_HANDLE_VALUE
+    && GetFileInformationByHandle(pin, &anchored)
+    && GetFileInformationByHandle(current, &observed)
+    && windows_same_object(&anchored, &observed)
+    && ((observed.dwFileAttributes ^ admitted->dwFileAttributes)
+      & FILE_ATTRIBUTE_DIRECTORY) == 0
+    && observed.nFileSizeHigh == admitted->nFileSizeHigh
+    && observed.nFileSizeLow == admitted->nFileSizeLow
+    && CompareFileTime(&observed.ftLastWriteTime, &admitted->ftLastWriteTime) == 0
+    && anchored.nFileSizeHigh == observed.nFileSizeHigh
+    && anchored.nFileSizeLow == observed.nFileSizeLow
+    && CompareFileTime(&anchored.ftLastWriteTime, &observed.ftLastWriteTime) == 0;
+}
+
+/* Verifies that a Windows snapshot still names the pinned object.
+ * @param current const_yaca_windows_snapshot* Current observed metadata or object state.
+ * @param pin HANDLE Previously admitted handle or snapshot identity.
+ * @param admitted const_yaca_windows_snapshot* Output flag recording whether the identity remains admitted.
+ * @return int result 1 when the captured snapshot still follows the pinned object; 0 otherwise.
+ */
+static int windows_snapshot_follows_pin(
+  const yaca_windows_snapshot *current, HANDLE pin,
+  const yaca_windows_snapshot *admitted)
+{
+  return current->exists && !current->reparse
+    && windows_handle_follows_pin(current->target_handle, pin, &admitted->target_information);
+}
+
 /* ReplaceFileW may mark matching legacy ACEs as inherited. Admit only that
 ** inheritance-model conversion for restoration, never changed principals,
 ** access masks, ACE ordering, attributes, or descriptor components. */
+/* Detects only the ACL inheritance change added by Windows.
+ * @param original const_yaca_windows_metadata_state* Original metadata retained across publication.
+ * @param current const_yaca_windows_metadata_state* Current observed metadata or object state.
+ * @return int result 1 when the only security change is automatic inherited ACLs; 0 otherwise.
+ */
 static int windows_metadata_added_auto_inheritance(
   const yaca_windows_metadata_state *original,
   const yaca_windows_metadata_state *current)
@@ -3483,6 +4227,10 @@ done:
   return equal;
 }
 
+/* Implements the Lua fs replace verified native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_fs_replace_verified(lua_State *L)
 {
   const char *temporary_path;
@@ -3499,7 +4247,10 @@ static int l_fs_replace_verified(lua_State *L)
   const char *code = "Storage";
   const char *message = "direct Windows replacement failed";
   HANDLE candidate_handle = INVALID_HANDLE_VALUE;
+  HANDLE temporary_pin = INVALID_HANDLE_VALUE;
+  HANDLE target_pin = INVALID_HANDLE_VALUE;
   BY_HANDLE_FILE_INFORMATION candidate_information;
+  yaca_identity published_identity;
   yaca_windows_metadata_state candidate_metadata;
   WCHAR *backup_path = NULL;
   char *backup_utf8 = NULL;
@@ -3658,6 +4409,14 @@ static int l_fs_replace_verified(lua_State *L)
     message = "direct Windows recovery path is not strict UTF-8";
     goto failed;
   }
+  temporary_pin = windows_pin_snapshot(&temporary);
+  target_pin = windows_pin_snapshot(&target);
+  if (temporary_pin == INVALID_HANDLE_VALUE || target_pin == INVALID_HANDLE_VALUE)
+  {
+    code = "TargetChanged";
+    message = "direct Windows replacement identity could not be pinned";
+    goto failed;
+  }
   CloseHandle(candidate_handle);
   candidate_handle = INVALID_HANDLE_VALUE;
   close_windows_snapshot_handles(&temporary);
@@ -3696,8 +4455,8 @@ static int l_fs_replace_verified(lua_State *L)
     message = "direct Windows replacement postcondition is unknown";
     goto failed;
   }
-  if (windows_snapshot_matches_lua(L, 3, &published)
-      && windows_snapshot_matches_lua(L, 4, &displaced)
+  if (windows_snapshot_follows_pin(&published, temporary_pin, &temporary)
+      && windows_snapshot_follows_pin(&displaced, target_pin, &target)
       && windows_metadata_states_equal(&target.metadata, &displaced.metadata)
       && windows_metadata_added_auto_inheritance(&target.metadata, &published.metadata))
   {
@@ -3708,7 +4467,7 @@ static int l_fs_replace_verified(lua_State *L)
       NULL, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, NULL);
     free_windows_metadata_state(&candidate_metadata);
     if (candidate_handle == INVALID_HANDLE_VALUE
-        || !windows_handle_matches_lua(L, 3, candidate_handle)
+        || !windows_handle_follows_pin(candidate_handle, temporary_pin, &temporary.target_information)
         || !GetFileInformationByHandle(candidate_handle, &candidate_information)
         || capture_windows_metadata(candidate_handle, &candidate_information,
           published.canonical_path, 1, &candidate_metadata) != 1
@@ -3731,18 +4490,24 @@ static int l_fs_replace_verified(lua_State *L)
       goto failed;
     }
   }
-  if (windows_snapshot_matches_lua(L, 3, &published)
+  if (windows_snapshot_follows_pin(&published, temporary_pin, &temporary)
       && published.metadata.proven
       && windows_behavior_digest(&published.metadata, behavior)
       && strlen(behavior) == expected_behavior_length
       && memcmp(behavior, expected_behavior, expected_behavior_length) == 0
-      && windows_snapshot_matches_lua(L, 4, &displaced)
+      && windows_snapshot_follows_pin(&displaced, target_pin, &target)
       && displaced.metadata.proven
       && windows_behavior_digest(&displaced.metadata, behavior)
       && strlen(behavior) == expected_behavior_length
       && memcmp(behavior, expected_behavior, expected_behavior_length) == 0)
   {
     DWORD attributes = displaced.target_information.dwFileAttributes;
+    if (!identity_from_windows_information(&published.target_information, &published_identity))
+    {
+      code = "Unknown";
+      message = "direct Windows replacement receipt is unavailable";
+      goto failed;
+    }
     free_windows_snapshot(&published);
     free_windows_snapshot(&displaced);
     if ((attributes & FILE_ATTRIBUTE_READONLY) != 0
@@ -3767,9 +4532,12 @@ static int l_fs_replace_verified(lua_State *L)
     free_windows_snapshot(&target);
     free(backup_utf8);
     free(backup_path);
-    return push_true_result(L);
+    CloseHandle(temporary_pin);
+    CloseHandle(target_pin);
+    push_identity(L, &published_identity);
+    return return_success(L);
   }
-  if (windows_snapshot_matches_lua(L, 3, &published)
+  if (windows_snapshot_follows_pin(&published, temporary_pin, &temporary)
       && displaced.exists)
   {
     free_windows_snapshot(&published);
@@ -3787,7 +4555,7 @@ static int l_fs_replace_verified(lua_State *L)
           &restored,
           &code,
           &message)
-        && windows_snapshot_matches_lua(L, 4, &restored)
+        && windows_snapshot_follows_pin(&restored, target_pin, &target)
         && windows_metadata_states_equal(&target.metadata, &restored.metadata))
     {
       rollback_succeeded = 1;
@@ -3800,6 +4568,8 @@ static int l_fs_replace_verified(lua_State *L)
 
 failed:
   if (candidate_handle != INVALID_HANDLE_VALUE) CloseHandle(candidate_handle);
+  if (temporary_pin != INVALID_HANDLE_VALUE) CloseHandle(temporary_pin);
+  if (target_pin != INVALID_HANDLE_VALUE) CloseHandle(target_pin);
   free_windows_metadata_state(&candidate_metadata);
   free_windows_snapshot(&temporary);
   free_windows_snapshot(&target);
@@ -3811,6 +4581,10 @@ failed:
   return push_failure(L, code, message);
 }
 
+/* Implements the Lua fs rename no replace verified native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_fs_rename_no_replace_verified(lua_State *L)
 {
   const char *source_path;
@@ -3825,6 +4599,9 @@ static int l_fs_rename_no_replace_verified(lua_State *L)
   const char *message = "direct Windows rename failed";
   DWORD error_value;
   int rolled_back = 0;
+  HANDLE source_pin = INVALID_HANDLE_VALUE;
+  HANDLE rollback_pin = INVALID_HANDLE_VALUE;
+  yaca_identity published_identity;
 
   memset(&source, 0, sizeof(source));
   memset(&target, 0, sizeof(target));
@@ -3878,6 +4655,13 @@ static int l_fs_rename_no_replace_verified(lua_State *L)
     message = "direct Windows rename binding changed";
     goto failed;
   }
+  source_pin = windows_pin_snapshot(&source);
+  if (source_pin == INVALID_HANDLE_VALUE)
+  {
+    code = "TargetChanged";
+    message = "direct Windows rename identity could not be pinned";
+    goto failed;
+  }
   close_windows_snapshot_handles(&source);
   close_windows_snapshot_handles(&target);
   if (!MoveFileExW(
@@ -3907,20 +4691,29 @@ static int l_fs_rename_no_replace_verified(lua_State *L)
     message = "direct Windows rename postcondition is unknown";
     goto failed;
   }
-  if (windows_snapshot_matches_lua(L, 3, &moved) && !source_after.exists)
+  if (windows_snapshot_follows_pin(&moved, source_pin, &source) && !source_after.exists)
   {
+    if (!identity_from_windows_information(&moved.target_information, &published_identity))
+    {
+      code = "Unknown";
+      message = "direct Windows rename receipt is unavailable";
+      goto failed;
+    }
     free_windows_snapshot(&source);
     free_windows_snapshot(&target);
     free_windows_snapshot(&moved);
     free_windows_snapshot(&source_after);
-    return push_true_result(L);
+    CloseHandle(source_pin);
+    push_identity(L, &published_identity);
+    return return_success(L);
   }
   if (moved.exists && !source_after.exists)
   {
     BY_HANDLE_FILE_INFORMATION moved_information = moved.target_information;
+    rollback_pin = windows_pin_snapshot(&moved);
     free_windows_snapshot(&moved);
     free_windows_snapshot(&source_after);
-    if (MoveFileExW(
+    if (rollback_pin != INVALID_HANDLE_VALUE && MoveFileExW(
         target.canonical_path,
         source.canonical_path,
         MOVEFILE_WRITE_THROUGH)
@@ -3931,9 +4724,8 @@ static int l_fs_rename_no_replace_verified(lua_State *L)
           &code,
           &message)
         && source_after.exists
-        && windows_same_object(
-          &moved_information,
-          &source_after.target_information))
+        && windows_handle_follows_pin(
+          source_after.target_handle, rollback_pin, &moved_information))
     {
       rolled_back = 1;
     }
@@ -3944,6 +4736,8 @@ static int l_fs_rename_no_replace_verified(lua_State *L)
     : "direct Windows rename recovery is unknown";
 
 failed:
+  if (source_pin != INVALID_HANDLE_VALUE) CloseHandle(source_pin);
+  if (rollback_pin != INVALID_HANDLE_VALUE) CloseHandle(rollback_pin);
   free_windows_snapshot(&source);
   free_windows_snapshot(&target);
   free_windows_snapshot(&moved);
@@ -3951,6 +4745,10 @@ failed:
   return push_failure(L, code, message);
 }
 
+/* Allocates a recovery name for a direct Windows deletion.
+ * @param path const_WCHAR* Filesystem path selected for this operation.
+ * @return WCHAR*|NULL result New recovery path for deletion; caller frees it, or NULL on failure.
+ */
 static WCHAR *windows_delete_recovery_path(const WCHAR *path)
 {
   static const WCHAR suffix[] = L".yaca-delete";
@@ -3976,6 +4774,10 @@ static WCHAR *windows_delete_recovery_path(const WCHAR *path)
   return result;
 }
 
+/* Implements the Lua fs delete direct verified native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_fs_delete_direct_verified(lua_State *L)
 {
   const char *path;
@@ -3989,6 +4791,8 @@ static int l_fs_delete_direct_verified(lua_State *L)
   DWORD error_value;
   int is_directory;
   int rollback_succeeded = 0;
+  HANDLE target_pin = INVALID_HANDLE_VALUE;
+  HANDLE rollback_pin = INVALID_HANDLE_VALUE;
 
   memset(&target, 0, sizeof(target));
   memset(&moved, 0, sizeof(moved));
@@ -4043,6 +4847,13 @@ static int l_fs_delete_direct_verified(lua_State *L)
     message = "direct Windows delete recovery path is not strict UTF-8";
     goto failed;
   }
+  target_pin = windows_pin_snapshot(&target);
+  if (target_pin == INVALID_HANDLE_VALUE)
+  {
+    code = "TargetChanged";
+    message = "direct Windows delete identity could not be pinned";
+    goto failed;
+  }
   close_windows_snapshot_handles(&target);
   if (!MoveFileExW(
       target.canonical_path,
@@ -4065,11 +4876,13 @@ static int l_fs_delete_direct_verified(lua_State *L)
     message = "direct Windows delete isolation is unknown";
     goto failed;
   }
-  if (!windows_snapshot_matches_lua(L, 2, &moved))
+  if (!windows_snapshot_follows_pin(&moved, target_pin, &target))
   {
     BY_HANDLE_FILE_INFORMATION moved_information = moved.target_information;
+    rollback_pin = windows_pin_snapshot(&moved);
     free_windows_snapshot(&moved);
-    if (MoveFileExW(recovery, target.canonical_path, MOVEFILE_WRITE_THROUGH)
+    if (rollback_pin != INVALID_HANDLE_VALUE
+        && MoveFileExW(recovery, target.canonical_path, MOVEFILE_WRITE_THROUGH)
         && inspect_windows_path(
           path,
           length,
@@ -4077,9 +4890,7 @@ static int l_fs_delete_direct_verified(lua_State *L)
           &code,
           &message)
         && moved.exists
-        && windows_same_object(
-          &moved_information,
-          &moved.target_information))
+        && windows_handle_follows_pin(moved.target_handle, rollback_pin, &moved_information))
     {
       rollback_succeeded = 1;
     }
@@ -4109,9 +4920,12 @@ static int l_fs_delete_direct_verified(lua_State *L)
   free_windows_snapshot(&target);
   free(recovery_utf8);
   free(recovery);
+  CloseHandle(target_pin);
   return push_true_result(L);
 
 failed:
+  if (target_pin != INVALID_HANDLE_VALUE) CloseHandle(target_pin);
+  if (rollback_pin != INVALID_HANDLE_VALUE) CloseHandle(rollback_pin);
   free_windows_snapshot(&target);
   free_windows_snapshot(&moved);
   free(recovery_utf8);
@@ -4119,6 +4933,10 @@ failed:
   return push_failure(L, code, message);
 }
 
+/* Releases owned windows path vector storage.
+ * @param vector yaca_windows_path_vector* Bounded vector collecting walk results.
+ * @return void result Frees each collected Windows path and the vector storage.
+ */
 static void free_windows_path_vector(yaca_windows_path_vector *vector)
 {
   size_t index;
@@ -4130,6 +4948,11 @@ static void free_windows_path_vector(yaca_windows_path_vector *vector)
   memset(vector, 0, sizeof(*vector));
 }
 
+/* Appends one path to the bounded Windows walk vector.
+ * @param vector yaca_windows_path_vector* Bounded vector collecting walk results.
+ * @param path const_char* Filesystem path selected for this operation.
+ * @return int result 1 after adding a bounded walk path; 0 when the bound or allocation fails.
+ */
 static int append_windows_path(
   yaca_windows_path_vector *vector,
   const char *path)
@@ -4165,6 +4988,11 @@ static int append_windows_path(
   return 1;
 }
 
+/* Orders two UTF-8 Windows walk paths lexically.
+ * @param left const_void* First identity, path, or metadata value in the comparison.
+ * @param right const_void* Second identity, path, or metadata value in the comparison.
+ * @return int result Negative, zero, or positive lexical ordering of the two UTF-8 paths.
+ */
 static int compare_windows_paths(const void *left, const void *right)
 {
   const char *const *left_path = (const char *const *)left;
@@ -4172,6 +5000,11 @@ static int compare_windows_paths(const void *left, const void *right)
   return strcmp(*left_path, *right_path);
 }
 
+/* Joins UTF-8 relative walk components beneath a Windows parent.
+ * @param parent const_char* Verified parent path or parent object.
+ * @param name const_char* Selected file, module, or resource name.
+ * @return char*|NULL result New UTF-8 relative path; caller frees it, or NULL on failure.
+ */
 static char *windows_relative_join(const char *parent, const char *name)
 {
   size_t parent_length = strlen(parent);
@@ -4195,6 +5028,11 @@ static char *windows_relative_join(const char *parent, const char *name)
   return result;
 }
 
+/* Converts a UTF-8 relative entry to an absolute UTF-16 path.
+ * @param root const_WCHAR* Admitted workspace or filesystem traversal root.
+ * @param relative const_char* Path relative to the admitted workspace root.
+ * @return WCHAR*|NULL result New absolute path from a relative walk entry; caller frees it, or NULL on failure.
+ */
 static WCHAR *windows_path_from_relative(
   const WCHAR *root,
   const char *relative)
@@ -4221,6 +5059,16 @@ static WCHAR *windows_path_from_relative(
   return result;
 }
 
+/* Enumerates a Windows directory under explicit bounds and identity checks.
+ * @param root const_WCHAR* Admitted workspace or filesystem traversal root.
+ * @param relative const_char* Path relative to the admitted workspace root.
+ * @param level lua_Integer Current directory traversal depth.
+ * @param maximum_level lua_Integer Maximum admitted traversal depth.
+ * @param vector yaca_windows_path_vector* Bounded vector collecting walk results.
+ * @param code const_char** Stable native error code or Unicode code point.
+ * @param message const_char** Diagnostic text for the reported native outcome.
+ * @return int result 1 after a complete bounded walk; 0 on an unverified entry or failure.
+ */
 static int walk_windows_directory(
   const WCHAR *root,
   const char *relative,
@@ -4402,6 +5250,13 @@ fail:
   return 0;
 }
 
+/* Hashes Lua-provided Windows walk generation fields.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @param snapshot_index int The snapshot index bound to append windows walk generation from lua.
+ * @param relative const_char* Path relative to the admitted workspace root.
+ * @param hash yaca_sha256* Incremental digest state receiving the next field.
+ * @return int result 1 after hashing the admitted generation fields; 0 on invalid input.
+ */
 static int append_windows_walk_generation_from_lua(
   lua_State *L,
   int snapshot_index,
@@ -4478,6 +5333,10 @@ static int append_windows_walk_generation_from_lua(
   return 1;
 }
 
+/* Implements the Lua fs walk direct native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_fs_walk_direct(lua_State *L)
 {
   const char *root;
@@ -4630,6 +5489,13 @@ static int l_fs_walk_direct(lua_State *L)
 
 #if !defined(_WIN32)
 
+/* @struct yaca_posix_snapshot Pinned POSIX target, parent, and metadata evidence.
+ * @field canonical_path char* Canonical path bound to the captured target.
+ * @field parent_path char* Canonical path bound to the target's parent.
+ * @field exists int Whether the target existed at capture time.
+ * @field target struct_stat Target stat result at capture time, when exists is true.
+ * @field parent struct_stat Parent-directory stat result at capture time.
+ */
 typedef struct yaca_posix_snapshot
 {
   char *canonical_path;
@@ -4639,6 +5505,14 @@ typedef struct yaca_posix_snapshot
   struct stat parent;
 } yaca_posix_snapshot;
 
+/* @struct yaca_path_vector Bounded vector of POSIX walk results.
+ * @field items char* Owned array of collected entries.
+ * @field count size_t Number of valid entries in the array.
+ * @field capacity size_t Allocated element capacity of the buffer or vector.
+ * @field maximum size_t Maximum admitted entries for this collection.
+ * @field truncated int Whether enumeration exceeded the collection bound.
+ * @field conservative_ignore int Whether uncertain entries were omitted conservatively.
+ */
 typedef struct yaca_path_vector
 {
   char **items;
@@ -4653,6 +5527,11 @@ typedef struct yaca_path_vector
 #define YACA_XATTR_MAX_BYTES (1024U * 1024U)
 #define YACA_LINK_TARGET_MAX_BYTES (1024U * 1024U)
 
+/* @struct yaca_xattr One POSIX extended-attribute name and value.
+ * @field name char* Owned entry or attribute name.
+ * @field value unsigned_char* Owned attribute or reparse payload value.
+ * @field length size_t Valid byte or character length in the buffer.
+ */
 typedef struct yaca_xattr
 {
   char *name;
@@ -4660,6 +5539,11 @@ typedef struct yaca_xattr
   size_t length;
 } yaca_xattr;
 
+/* @struct yaca_xattr_set Collected POSIX extended attributes with a byte bound.
+ * @field items yaca_xattr* Owned array of collected entries.
+ * @field count size_t Number of valid entries in the array.
+ * @field total_bytes size_t Total value bytes retained in the attribute set.
+ */
 typedef struct yaca_xattr_set
 {
   yaca_xattr *items;
@@ -4667,6 +5551,14 @@ typedef struct yaca_xattr_set
   size_t total_bytes;
 } yaca_xattr_set;
 
+/* @struct yaca_posix_metadata_state Captured POSIX mode, ownership, flags, and attributes.
+ * @field mode mode_t Captured POSIX mode bits.
+ * @field uid uid_t Captured POSIX owner user identity.
+ * @field gid gid_t Captured POSIX owner group identity.
+ * @field filesystem_flags unsigned_int Filesystem-specific immutable and append-only flag bits.
+ * @field xattrs yaca_xattr_set Captured extended attributes for exact comparison.
+ * @field proven int Whether mode, ownership, flags, and attributes were fully captured.
+ */
 typedef struct yaca_posix_metadata_state
 {
   mode_t mode;
@@ -4677,6 +5569,11 @@ typedef struct yaca_posix_metadata_state
   int proven;
 } yaca_posix_metadata_state;
 
+/* @enum yaca_metadata_capture Distinguishes capture errors, unsupported metadata, and complete evidence.
+ * @field YACA_METADATA_ERROR value Metadata retrieval failed.
+ * @field YACA_METADATA_UNSUPPORTED value Host filesystem cannot supply required metadata.
+ * @field YACA_METADATA_PROVEN value All required metadata was captured.
+ */
 enum yaca_metadata_capture
 {
   YACA_METADATA_ERROR = -1,
@@ -4684,6 +5581,10 @@ enum yaca_metadata_capture
   YACA_METADATA_PROVEN = 1
 };
 
+/* Releases owned xattr set storage.
+ * @param set yaca_xattr_set* Extended-attribute set being collected or compared.
+ * @return void result Releases names, values, and vector storage for captured attributes.
+ */
 static void free_xattr_set(yaca_xattr_set *set)
 {
   size_t index;
@@ -4696,12 +5597,21 @@ static void free_xattr_set(yaca_xattr_set *set)
   memset(set, 0, sizeof(*set));
 }
 
+/* Releases owned posix metadata state storage.
+ * @param state yaca_posix_metadata_state* Captured native state updated or compared by the operation.
+ * @return void result Releases captured xattrs and clears the metadata state.
+ */
 static void free_posix_metadata_state(yaca_posix_metadata_state *state)
 {
   free_xattr_set(&state->xattrs);
   memset(state, 0, sizeof(*state));
 }
 
+/* Orders two POSIX extended attributes by name.
+ * @param left const_void* First identity, path, or metadata value in the comparison.
+ * @param right const_void* Second identity, path, or metadata value in the comparison.
+ * @return int result Negative, zero, or positive ordering of two extended-attribute names.
+ */
 static int compare_xattrs(const void *left, const void *right)
 {
   const yaca_xattr *left_attribute = (const yaca_xattr *)left;
@@ -4709,6 +5619,11 @@ static int compare_xattrs(const void *left, const void *right)
   return strcmp(left_attribute->name, right_attribute->name);
 }
 
+/* Compares all stat fields used to bind a POSIX observation.
+ * @param left const_struct_stat* First identity, path, or metadata value in the comparison.
+ * @param right const_struct_stat* Second identity, path, or metadata value in the comparison.
+ * @return int result 1 if identity, type, size, link count, and times agree; 0 otherwise.
+ */
 static int same_stat_observation(
   const struct stat *left,
   const struct stat *right)
@@ -4726,6 +5641,11 @@ static int same_stat_observation(
 
 #if defined(__linux__)
 
+/* Captures load descriptor xattrs from the operating system.
+ * @param descriptor int POSIX file descriptor under inspection.
+ * @param set yaca_xattr_set* Extended-attribute set being collected or compared.
+ * @return int result PROVEN for complete xattrs, UNSUPPORTED when unavailable, ERROR on failure.
+ */
 static int load_descriptor_xattrs(int descriptor, yaca_xattr_set *set)
 {
   ssize_t listed;
@@ -4871,6 +5791,12 @@ static int load_descriptor_xattrs(int descriptor, yaca_xattr_set *set)
 
 #endif
 
+/* Captures POSIX mode, ownership, flags, and extended attributes.
+ * @param descriptor int POSIX file descriptor under inspection.
+ * @param information const_struct_stat* Operating-system stat or file-information record.
+ * @param state yaca_posix_metadata_state* Captured native state updated or compared by the operation.
+ * @return int result PROVEN for complete metadata, UNSUPPORTED when unavailable, ERROR on failure.
+ */
 static int capture_posix_metadata(
   int descriptor,
   const struct stat *information,
@@ -4908,6 +5834,12 @@ static int capture_posix_metadata(
 #endif
 }
 
+/* Adds one length-prefixed field to an incremental SHA-256 digest.
+ * @param hash yaca_sha256* Incremental digest state receiving the next field.
+ * @param bytes const_void* Raw byte buffer supplied to the native operation.
+ * @param length size_t Byte or wide-character length of the supplied buffer.
+ * @return int result 1 after hashing a bounded field; 0 on overflow or hash failure.
+ */
 static int append_digest_field(
   yaca_sha256 *hash,
   const void *bytes,
@@ -4921,6 +5853,11 @@ static int append_digest_field(
     && sha256_append(hash, (const unsigned char *)bytes, length);
 }
 
+/* Formats a bounded digest of POSIX behavior metadata.
+ * @param state const_yaca_posix_metadata_state* Captured native state updated or compared by the operation.
+ * @param output char_[96] Caller-provided output buffer or result destination.
+ * @return int result 1 after writing the bounded digest text; 0 on encoding failure.
+ */
 static int posix_behavior_digest(
   const yaca_posix_metadata_state *state,
   char output[96])
@@ -4976,6 +5913,11 @@ static int posix_behavior_digest(
   return written > 0 && written < 96;
 }
 
+/* Compares extended-attribute names and values exactly.
+ * @param left const_yaca_xattr_set* First identity, path, or metadata value in the comparison.
+ * @param right const_yaca_xattr_set* Second identity, path, or metadata value in the comparison.
+ * @return int result 1 when names and values match exactly; 0 otherwise.
+ */
 static int xattr_sets_equal(
   const yaca_xattr_set *left,
   const yaca_xattr_set *right)
@@ -5001,6 +5943,11 @@ static int xattr_sets_equal(
   return 1;
 }
 
+/* Compares captured POSIX ownership, mode, flags, and xattrs.
+ * @param left const_yaca_posix_metadata_state* First identity, path, or metadata value in the comparison.
+ * @param right const_yaca_posix_metadata_state* Second identity, path, or metadata value in the comparison.
+ * @return int result 1 when captured POSIX metadata agrees exactly; 0 otherwise.
+ */
 static int posix_metadata_states_equal(
   const yaca_posix_metadata_state *left,
   const yaca_posix_metadata_state *right)
@@ -5014,6 +5961,12 @@ static int posix_metadata_states_equal(
 }
 
 #if defined(__linux__)
+/* Updates synchronize descriptor xattrs within its ownership boundary.
+ * @param descriptor int POSIX file descriptor under inspection.
+ * @param current const_yaca_xattr_set* Current observed metadata or object state.
+ * @param required const_yaca_xattr_set* Previously admitted metadata or state to preserve.
+ * @return int result 1 after copying source xattrs to the candidate; 0 on failure.
+ */
 static int synchronize_descriptor_xattrs(
   int descriptor,
   const yaca_xattr_set *current,
@@ -5085,6 +6038,13 @@ static int synchronize_descriptor_xattrs(
 }
 #endif
 
+/* Pushes a typed direct-filesystem failure onto the Lua stack.
+ * @param code const_char** Stable native error code or Unicode code point.
+ * @param message const_char** Diagnostic text for the reported native outcome.
+ * @param next_code const_char* The next code bound to direct error.
+ * @param next_message const_char* The next message bound to direct error.
+ * @return void result Pushes a direct-path failure with its stable code onto the Lua stack.
+ */
 static void direct_error(
   const char **code,
   const char **message,
@@ -5095,6 +6055,11 @@ static void direct_error(
   *message = next_message;
 }
 
+/* Allocates a POSIX child path beneath a verified parent.
+ * @param parent const_char* Verified parent path or parent object.
+ * @param name const_char* Selected file, module, or resource name.
+ * @return char*|NULL result New joined POSIX path; caller frees it, or NULL on failure.
+ */
 static char *posix_join_path(const char *parent, const char *name)
 {
   size_t parent_length = strlen(parent);
@@ -5123,6 +6088,14 @@ static char *posix_join_path(const char *parent, const char *name)
   return result;
 }
 
+/* Splits and opens the parent of an admitted POSIX path.
+ * @param path const_char* Filesystem path selected for this operation.
+ * @param parent char** Verified parent path or parent object.
+ * @param name char** Selected file, module, or resource name.
+ * @param code const_char** Stable native error code or Unicode code point.
+ * @param message const_char** Diagnostic text for the reported native outcome.
+ * @return int result 1 after splitting and opening the parent; 0 on invalid path or failure.
+ */
 static int posix_parent_and_name(
   const char *path,
   char **parent,
@@ -5163,6 +6136,10 @@ static int posix_parent_and_name(
   return 1;
 }
 
+/* Releases owned posix snapshot storage.
+ * @param snapshot yaca_posix_snapshot* Pinned target snapshot owned by this operation.
+ * @return void result Releases canonical paths and clears the pinned POSIX snapshot.
+ */
 static void free_posix_snapshot(yaca_posix_snapshot *snapshot)
 {
   free(snapshot->canonical_path);
@@ -5170,6 +6147,13 @@ static void free_posix_snapshot(yaca_posix_snapshot *snapshot)
   memset(snapshot, 0, sizeof(*snapshot));
 }
 
+/* Captures inspect posix path from the operating system.
+ * @param path const_char* Filesystem path selected for this operation.
+ * @param snapshot yaca_posix_snapshot* Pinned target snapshot owned by this operation.
+ * @param code const_char** Stable native error code or Unicode code point.
+ * @param message const_char** Diagnostic text for the reported native outcome.
+ * @return int result 1 after capturing target and parent facts; 0 on inspection failure.
+ */
 static int inspect_posix_path(
   const char *path,
   yaca_posix_snapshot *snapshot,
@@ -5255,6 +6239,13 @@ static int inspect_posix_path(
   return 1;
 }
 
+/* Pushes posix ancestor fields onto the Lua stack.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @param path const_char* Filesystem path selected for this operation.
+ * @param information const_struct_stat* Operating-system stat or file-information record.
+ * @param index lua_Integer Lua stack index or item position being read.
+ * @return int result 1 after pushing one verified ancestor record; 0 on failure.
+ */
 static int push_posix_ancestor(
   lua_State *L,
   const char *path,
@@ -5277,6 +6268,13 @@ static int push_posix_ancestor(
   return 1;
 }
 
+/* Pushes posix ancestors fields onto the Lua stack.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @param parent_path const_char* Canonical path of the selected parent directory.
+ * @param code const_char** Stable native error code or Unicode code point.
+ * @param message const_char** Diagnostic text for the reported native outcome.
+ * @return int result 1 after pushing the complete verified ancestry; 0 on failure.
+ */
 static int push_posix_ancestors(
   lua_State *L,
   const char *parent_path,
@@ -5327,6 +6325,13 @@ static int push_posix_ancestors(
   return 1;
 }
 
+/* Pushes posix metadata fields onto the Lua stack.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @param snapshot const_yaca_posix_snapshot* Pinned target snapshot owned by this operation.
+ * @param code const_char** Stable native error code or Unicode code point.
+ * @param message const_char** Diagnostic text for the reported native outcome.
+ * @return int result 1 after pushing captured POSIX metadata; 0 on conversion failure.
+ */
 static int push_posix_metadata(
   lua_State *L,
   const yaca_posix_snapshot *snapshot,
@@ -5468,6 +6473,13 @@ static int push_posix_metadata(
   return 1;
 }
 
+/* Pushes posix direct snapshot fields onto the Lua stack.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @param requested_path const_char* Untrusted path supplied by the Lua caller.
+ * @param code const_char** Stable native error code or Unicode code point.
+ * @param message const_char** Diagnostic text for the reported native outcome.
+ * @return int result 1 after pushing captured direct-path facts; 0 on failure.
+ */
 static int push_posix_direct_snapshot(
   lua_State *L,
   const char *requested_path,
@@ -5536,6 +6548,10 @@ fail:
   return 0;
 }
 
+/* Implements the Lua fs inspect direct native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_fs_inspect_direct(lua_State *L)
 {
   const char *path;
@@ -5556,6 +6572,10 @@ static int l_fs_inspect_direct(lua_State *L)
   return return_success(L);
 }
 
+/* Releases owned path vector storage.
+ * @param vector yaca_path_vector* Bounded vector collecting walk results.
+ * @return void result Frees collected walk paths and the vector storage.
+ */
 static void free_path_vector(yaca_path_vector *vector)
 {
   size_t index;
@@ -5567,6 +6587,11 @@ static void free_path_vector(yaca_path_vector *vector)
   memset(vector, 0, sizeof(*vector));
 }
 
+/* Appends one path to the bounded POSIX walk vector.
+ * @param vector yaca_path_vector* Bounded vector collecting walk results.
+ * @param path const_char* Filesystem path selected for this operation.
+ * @return int result 1 after appending a bounded path; 0 on capacity or allocation failure.
+ */
 static int append_path(yaca_path_vector *vector, const char *path)
 {
   char **next;
@@ -5601,6 +6626,11 @@ static int append_path(yaca_path_vector *vector, const char *path)
   return 1;
 }
 
+/* Orders two POSIX walk paths lexically.
+ * @param left const_void* First identity, path, or metadata value in the comparison.
+ * @param right const_void* Second identity, path, or metadata value in the comparison.
+ * @return int result Negative, zero, or positive lexical ordering of the two POSIX paths.
+ */
 static int compare_paths(const void *left, const void *right)
 {
   const char *const *left_path = (const char *const *)left;
@@ -5608,6 +6638,11 @@ static int compare_paths(const void *left, const void *right)
   return strcmp(*left_path, *right_path);
 }
 
+/* Allocates a relative child path for directory traversal.
+ * @param parent const_char* Verified parent path or parent object.
+ * @param name const_char* Selected file, module, or resource name.
+ * @return char*|NULL result New relative path for the walked entry; caller frees it, or NULL on failure.
+ */
 static char *relative_join(const char *parent, const char *name)
 {
   size_t parent_length = strlen(parent);
@@ -5633,6 +6668,16 @@ static char *relative_join(const char *parent, const char *name)
   return result;
 }
 
+/* Enumerates a POSIX directory under explicit bounds and identity checks.
+ * @param root const_char* Admitted workspace or filesystem traversal root.
+ * @param relative const_char* Path relative to the admitted workspace root.
+ * @param level lua_Integer Current directory traversal depth.
+ * @param maximum_level lua_Integer Maximum admitted traversal depth.
+ * @param vector yaca_path_vector* Bounded vector collecting walk results.
+ * @param code const_char** Stable native error code or Unicode code point.
+ * @param message const_char** Diagnostic text for the reported native outcome.
+ * @return int result 1 after a complete bounded walk; 0 on an unverified entry or failure.
+ */
 static int walk_posix_directory(
   const char *root,
   const char *relative,
@@ -5773,6 +6818,12 @@ static int walk_posix_directory(
   return 1;
 }
 
+/* Hashes POSIX walk identity and metadata fields.
+ * @param hash yaca_sha256* Incremental digest state receiving the next field.
+ * @param relative const_char* Path relative to the admitted workspace root.
+ * @param information const_struct_stat* Operating-system stat or file-information record.
+ * @return int result 1 after hashing all walk identity fields; 0 on invalid data or hash failure.
+ */
 static int append_walk_generation(
   yaca_sha256 *hash,
   const char *relative,
@@ -5782,6 +6833,10 @@ static int append_walk_generation(
   char header[96];
   int length;
 
+/* Adds a length-prefixed walk field to the active SHA-256 state.
+ * @param value const_char* NUL-terminated field bytes to hash.
+ * @return nil No direct result; returns 0 from append_walk_generation on failure.
+ */
 #define APPEND_WALK_FIELD(value) do { \
     size_t field_length__ = strlen(value); \
     length = snprintf(header, sizeof(header), "%zu:", field_length__); \
@@ -5817,6 +6872,11 @@ static int append_walk_generation(
   return 1;
 }
 
+/* Encodes a complete SHA-256 digest as lowercase hexadecimal.
+ * @param digest const_unsigned_char_[32] SHA-256 digest bytes used for comparison or formatting.
+ * @param output char_[65] Caller-provided output buffer or result destination.
+ * @return void result Writes the 64-byte lowercase hex digest followed by a NUL to output.
+ */
 static void digest_hex(const unsigned char digest[32], char output[65])
 {
   static const char hexadecimal[] = "0123456789abcdef";
@@ -5829,6 +6889,10 @@ static void digest_hex(const unsigned char digest[32], char output[65])
   output[64] = '\0';
 }
 
+/* Implements the Lua fs walk direct native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_fs_walk_direct(lua_State *L)
 {
   const char *root;
@@ -5947,6 +7011,15 @@ static int l_fs_walk_direct(lua_State *L)
   return return_success(L);
 }
 
+/* Opens and validates the parent of a POSIX target path.
+ * @param path const_char* Filesystem path selected for this operation.
+ * @param descriptor int* POSIX file descriptor under inspection.
+ * @param parent char** Verified parent path or parent object.
+ * @param name char** Selected file, module, or resource name.
+ * @param code const_char** Stable native error code or Unicode code point.
+ * @param message const_char** Diagnostic text for the reported native outcome.
+ * @return int result 1 after opening and validating the parent directory; 0 on failure.
+ */
 static int open_posix_parent(
   const char *path,
   int *descriptor,
@@ -5973,6 +7046,12 @@ static int open_posix_parent(
   return 1;
 }
 
+/* Compares an open POSIX descriptor with Lua identity fields.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @param index int Lua stack index or item position being read.
+ * @param descriptor int POSIX file descriptor under inspection.
+ * @return int result 1 when descriptor identity matches the Lua value; 0 otherwise.
+ */
 static int descriptor_matches_lua(lua_State *L, int index, int descriptor)
 {
   struct stat information;
@@ -5983,6 +7062,14 @@ static int descriptor_matches_lua(lua_State *L, int index, int descriptor)
     && identity_matches_lua(L, index, &identity);
 }
 
+/* Compares a relative stat result with Lua identity fields.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @param index int Lua stack index or item position being read.
+ * @param parent int Verified parent path or parent object.
+ * @param name const_char* Selected file, module, or resource name.
+ * @param information struct_stat* Operating-system stat or file-information record.
+ * @return int result 1 when the relative stat identity matches the Lua value; 0 otherwise.
+ */
 static int stat_at_matches_lua(
   lua_State *L,
   int index,
@@ -5997,6 +7084,10 @@ static int stat_at_matches_lua(
     && identity_matches_lua(L, index, &identity);
 }
 
+/* Implements the Lua fs open read verified native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_fs_open_read_verified(lua_State *L)
 {
   const char *path;
@@ -6035,6 +7126,10 @@ static int l_fs_open_read_verified(lua_State *L)
   return return_success(L);
 }
 
+/* Implements the Lua fs create new verified native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_fs_create_new_verified(lua_State *L)
 {
   const char *path;
@@ -6092,6 +7187,11 @@ static int l_fs_create_new_verified(lua_State *L)
   return return_success(L);
 }
 
+/* Compares POSIX device and inode identity.
+ * @param left const_struct_stat* First identity, path, or metadata value in the comparison.
+ * @param right const_struct_stat* Second identity, path, or metadata value in the comparison.
+ * @return int result 1 when both stat records identify the same POSIX object; 0 otherwise.
+ */
 static int same_posix_object(const struct stat *left, const struct stat *right)
 {
   return left->st_dev == right->st_dev
@@ -6099,6 +7199,11 @@ static int same_posix_object(const struct stat *left, const struct stat *right)
     && ((left->st_mode & S_IFMT) == (right->st_mode & S_IFMT));
 }
 
+/* Compares the stat facts published to the caller with a fresh observation.
+ * @param left const_struct_stat* First identity, path, or metadata value in the comparison.
+ * @param right const_struct_stat* Second identity, path, or metadata value in the comparison.
+ * @return int result 1 when all published stat facts still agree; 0 otherwise.
+ */
 static int same_posix_published_facts(
   const struct stat *left,
   const struct stat *right)
@@ -6113,6 +7218,13 @@ static int same_posix_published_facts(
     && left->st_mtim.tv_nsec == right->st_mtim.tv_nsec;
 }
 
+/* Atomically exchanges two POSIX directory entries when supported.
+ * @param left_parent int The left parent bound to exchange posix names.
+ * @param left_name const_char* The left name bound to exchange posix names.
+ * @param right_parent int The right parent bound to exchange posix names.
+ * @param right_name const_char* The right name bound to exchange posix names.
+ * @return int result 0 when atomic name exchange succeeds; -1 with errno on failure.
+ */
 static int exchange_posix_names(
   int left_parent,
   const char *left_name,
@@ -6137,6 +7249,13 @@ static int exchange_posix_names(
 #endif
 }
 
+/* Renames a POSIX entry only when the destination is absent.
+ * @param source_parent int The source parent bound to rename posix no replace.
+ * @param source_name const_char* The source name bound to rename posix no replace.
+ * @param target_parent int The target parent bound to rename posix no replace.
+ * @param target_name const_char* The target name bound to rename posix no replace.
+ * @return int result 0 when rename without replacement succeeds; -1 with errno on failure.
+ */
 static int rename_posix_no_replace(
   int source_parent,
   const char *source_name,
@@ -6161,6 +7280,10 @@ static int rename_posix_no_replace(
 #endif
 }
 
+/* Allocates a recovery basename for direct POSIX deletion.
+ * @param name const_char* Selected file, module, or resource name.
+ * @return char*|NULL result New recovery basename for deletion; caller frees it, or NULL on failure.
+ */
 static char *posix_delete_recovery_name(const char *name)
 {
   static const char suffix[] = ".yaca-delete";
@@ -6184,6 +7307,10 @@ static char *posix_delete_recovery_name(const char *name)
   return result;
 }
 
+/* Implements the Lua fs replace verified native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_fs_replace_verified(lua_State *L)
 {
   const char *temporary_path;
@@ -6209,6 +7336,7 @@ static int l_fs_replace_verified(lua_State *L)
   struct stat target_current_information;
   struct stat published_information;
   struct stat displaced_information;
+  yaca_identity published_identity;
   yaca_posix_metadata_state target_metadata;
   yaca_posix_metadata_state check_metadata;
   yaca_posix_metadata_state temporary_metadata;
@@ -6217,6 +7345,11 @@ static int l_fs_replace_verified(lua_State *L)
   int published_observed = 0;
   int result = 0;
 
+/* Records a typed replace failure and enters the common cleanup path.
+ * @param next_code const_char* Stable code assigned to the failure response.
+ * @param next_message const_char* Human-readable reason assigned to the failure response.
+ * @return nil No direct result; control jumps to the containing function's cleanup label.
+ */
 #define REPLACE_FAIL(next_code, next_message) do { \
     failure_code = (next_code); \
     failure_message = (next_message); \
@@ -6470,6 +7603,10 @@ static int l_fs_replace_verified(lua_State *L)
   {
     REPLACE_FAIL("Unknown", "direct replacement cleanup is unknown");
   }
+  if (!identity_from_stat(&published_information, &published_identity))
+  {
+    REPLACE_FAIL("Unknown", "direct replacement receipt is unavailable");
+  }
   result = 1;
 
 cleanup:
@@ -6484,11 +7621,15 @@ cleanup:
   free(target_parent);
   free(target_name);
 #undef REPLACE_FAIL
-  return result
-    ? push_true_result(L)
-    : push_failure(L, failure_code, failure_message);
+  if (!result) return push_failure(L, failure_code, failure_message);
+  push_identity(L, &published_identity);
+  return return_success(L);
 }
 
+/* Implements the Lua fs rename no replace verified native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_fs_rename_no_replace_verified(lua_State *L)
 {
   const char *source_path;
@@ -6509,11 +7650,17 @@ static int l_fs_rename_no_replace_verified(lua_State *L)
   struct stat target_information;
   struct stat moved_information;
   struct stat source_after_information;
+  yaca_identity published_identity;
   int error_value;
   int target_observed;
   int source_absent;
   int result = 0;
 
+/* Records a typed rename failure and enters the common cleanup path.
+ * @param next_code const_char* Stable code assigned to the failure response.
+ * @param next_message const_char* Human-readable reason assigned to the failure response.
+ * @return nil No direct result; control jumps to the containing function's cleanup label.
+ */
 #define RENAME_FAIL(next_code, next_message) do { \
     failure_code = (next_code); \
     failure_message = (next_message); \
@@ -6606,6 +7753,10 @@ static int l_fs_rename_no_replace_verified(lua_State *L)
         &source_information,
         &moved_information))
   {
+    if (!identity_from_stat(&moved_information, &published_identity))
+    {
+      RENAME_FAIL("Unknown", "direct rename receipt is unavailable");
+    }
     result = 1;
     goto cleanup;
   }
@@ -6644,11 +7795,15 @@ cleanup:
   free(target_parent);
   free(target_name);
 #undef RENAME_FAIL
-  return result
-    ? push_true_result(L)
-    : push_failure(L, failure_code, failure_message);
+  if (!result) return push_failure(L, failure_code, failure_message);
+  push_identity(L, &published_identity);
+  return return_success(L);
 }
 
+/* Implements the Lua fs delete direct verified native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_fs_delete_direct_verified(lua_State *L)
 {
   const char *path;
@@ -6674,6 +7829,11 @@ static int l_fs_delete_direct_verified(lua_State *L)
   int source_absent;
   int result = 0;
 
+/* Records a typed delete failure and enters the common cleanup path.
+ * @param next_code const_char* Stable code assigned to the failure response.
+ * @param next_message const_char* Human-readable reason assigned to the failure response.
+ * @return nil No direct result; control jumps to the containing function's cleanup label.
+ */
 #define DELETE_FAIL(next_code, next_message) do { \
     failure_code = (next_code); \
     failure_message = (next_message); \
@@ -6874,6 +8034,10 @@ cleanup:
 
 #endif
 
+/* Reads the host monotonic clock in milliseconds.
+ * @param none No arguments.
+ * @return lua_Integer result Byte count, offset, or numeric value for native monotonic milliseconds.
+ */
 static lua_Integer native_monotonic_milliseconds(void)
 {
 #if defined(_WIN32)
@@ -6925,6 +8089,11 @@ static lua_Integer native_monotonic_milliseconds(void)
 #endif
 }
 
+/* Validates and borrows an open Lua process userdata.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @param index int Lua stack index or item position being read.
+ * @return yaca_process* result Borrowed live process userdata; raises a Lua error for wrong or closed handles.
+ */
 static yaca_process *check_process(lua_State *L, int index)
 {
   yaca_process *process;
@@ -6937,6 +8106,10 @@ static yaca_process *check_process(lua_State *L, int index)
   return process;
 }
 
+/* Closes the process streams native owner.
+ * @param process yaca_process* Process owner or supervisor being advanced.
+ * @return void result Closes all process standard-stream handles owned by the supervisor.
+ */
 static void close_process_streams(yaca_process *process)
 {
 #if defined(_WIN32)
@@ -6964,6 +8137,10 @@ static void close_process_streams(yaca_process *process)
 #endif
 }
 
+/* Closes the process handles native owner.
+ * @param process yaca_process* Process owner or supervisor being advanced.
+ * @return void result Closes the process and job handles owned by the supervisor.
+ */
 static void close_process_handles(yaca_process *process)
 {
   close_process_streams(process);
@@ -6978,10 +8155,25 @@ static void close_process_handles(yaca_process *process)
     CloseHandle(process->job);
     process->job = INVALID_HANDLE_VALUE;
   }
+  if (process->input_writer != NULL)
+  {
+    CloseHandle(process->input_writer->thread);
+    release_process_input(process->input_writer);
+    process->input_writer = NULL;
+  }
+#else
+  if (process->control_write >= 0)
+  { close(process->control_write); process->control_write = -1; }
+  if (process->status_read >= 0)
+  { close(process->status_read); process->status_read = -1; }
 #endif
   process->closed = 1;
 }
 
+/* Implements the Lua process gc native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_process_gc(lua_State *L)
 {
   yaca_process *process;
@@ -6991,7 +8183,7 @@ static int l_process_gc(lua_State *L)
   {
     return 0;
   }
-  if (!process->reaped)
+  if (process->outcome[0] == '\0')
   {
 #if defined(_WIN32)
     if (process->job != NULL && process->job != INVALID_HANDLE_VALUE)
@@ -7001,8 +8193,25 @@ static int l_process_gc(lua_State *L)
 #else
     if (process->process_id > 0)
     {
-      kill(-process->process_id, SIGKILL);
-      waitpid(process->process_id, NULL, WNOHANG);
+      int attempt;
+      const struct timespec pause_time = { 0, 10000000L };
+      if (process->control_write >= 0)
+      { close(process->control_write); process->control_write = -1; }
+      for (attempt = 0; attempt < 100 && !process->reaped; attempt++)
+      {
+        refresh_posix_process(process);
+        if (!process->reaped) nanosleep(&pause_time, NULL);
+      }
+      if (!process->reaped)
+      {
+        yaca_abandoned_supervisor *item = malloc(sizeof(*item));
+        if (item != NULL)
+        {
+          item->pid = process->process_id;
+          item->next = abandoned_supervisors;
+          abandoned_supervisors = item;
+        }
+      }
     }
 #endif
   }
@@ -7010,6 +8219,10 @@ static int l_process_gc(lua_State *L)
   return 0;
 }
 
+/* Pushes process fields onto the Lua stack.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return yaca_process* result New process userdata also pushed onto Lua stack; Lua owns its lifetime.
+ */
 static yaca_process *push_process(lua_State *L)
 {
   yaca_process *process;
@@ -7025,11 +8238,25 @@ static yaca_process *push_process(lua_State *L)
   process->process_id = -1;
   process->stdout_read = -1;
   process->stderr_read = -1;
+  process->control_write = -1;
+  process->status_read = -1;
+  reap_abandoned_supervisors();
 #endif
+  /* @metatable yaca_process_metatable Lua userdata binding installed for the exact native owner type.
+   */
   luaL_setmetatable(L, YACA_PROCESS_METATABLE);
   return process;
 }
 
+/* Reads and validates a string field from the process request.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @param index int Lua stack index or item position being read.
+ * @param field const_char* Digest field or metadata field being appended.
+ * @param value const_char** Candidate value being converted or checked.
+ * @param length size_t* Byte or wide-character length of the supplied buffer.
+ * @param optional int Whether the field may be absent.
+ * @return int result 1 after reading an admitted string or allowed absence; 0 for invalid input.
+ */
 static int request_string_field(
   lua_State *L,
   int index,
@@ -7064,6 +8291,12 @@ static int request_string_field(
   return 1;
 }
 
+/* Parses the requested process invocation mode.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @param request_index int Lua stack index of the request table.
+ * @param argv_mode int* The argv mode bound to request process mode.
+ * @return int result 1 for default or argv mode, 0 for an invalid mode; writes argv_mode.
+ */
 static int request_process_mode(lua_State *L, int request_index, int *argv_mode)
 {
   int request_absolute;
@@ -7089,6 +8322,13 @@ static int request_process_mode(lua_State *L, int request_index, int *argv_mode)
   return *argv_mode;
 }
 
+/* Validates the stdin payload for a component request.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @param request_index int Lua stack index of the request table.
+ * @param bytes const_char** Raw byte buffer supplied to the native operation.
+ * @param length size_t* Byte or wide-character length of the supplied buffer.
+ * @return int result 1 after validating stdin bytes; 0 for invalid component input.
+ */
 static int request_component_stdin(
   lua_State *L,
   int request_index,
@@ -7143,6 +8383,12 @@ static int request_component_stdin(
   return 1;
 }
 
+/* Checks the bounded argument count of a component request.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @param request_index int Lua stack index of the request table.
+ * @param count size_t* Number of values to inspect or emit.
+ * @return int result 1 after validating argument count; 0 if outside the bound.
+ */
 static int request_component_argument_count(
   lua_State *L,
   int request_index,
@@ -7205,6 +8451,11 @@ static int request_component_argument_count(
 
 #if defined(_WIN32)
 
+/* @struct yaca_wide_arguments Owned wide arguments used for Windows process creation.
+ * @field items WCHAR* Owned array of collected entries.
+ * @field count size_t Number of valid entries in the array.
+ * @field command_line WCHAR* Owned wide command line for process creation.
+ */
 typedef struct yaca_wide_arguments
 {
   WCHAR **items;
@@ -7212,6 +8463,11 @@ typedef struct yaca_wide_arguments
   WCHAR *command_line;
 } yaca_wide_arguments;
 
+/* @struct yaca_wide_environment Owned wide environment block used for Windows process creation.
+ * @field items WCHAR* Owned array of collected entries.
+ * @field count size_t Number of valid entries in the array.
+ * @field block WCHAR* Owned Windows environment block.
+ */
 typedef struct yaca_wide_environment
 {
   WCHAR **items;
@@ -7219,6 +8475,10 @@ typedef struct yaca_wide_environment
   WCHAR *block;
 } yaca_wide_environment;
 
+/* Releases owned wide arguments storage.
+ * @param arguments yaca_wide_arguments* Child-process argument vector or owned argument storage.
+ * @return void result Releases each converted UTF-16 argument and its vector.
+ */
 static void free_wide_arguments(yaca_wide_arguments *arguments)
 {
   size_t index;
@@ -7235,6 +8495,11 @@ static void free_wide_arguments(yaca_wide_arguments *arguments)
   memset(arguments, 0, sizeof(*arguments));
 }
 
+/* Counts the UTF-16 units needed to quote a Windows argument.
+ * @param value const_WCHAR* Candidate value being converted or checked.
+ * @param length size_t* Byte or wide-character length of the supplied buffer.
+ * @return int result 1 after computing the quoted length; 0 on overflow.
+ */
 static int quoted_windows_argument_length(const WCHAR *value, size_t *length)
 {
   size_t total;
@@ -7297,6 +8562,11 @@ static int quoted_windows_argument_length(const WCHAR *value, size_t *length)
   return 1;
 }
 
+/* Quotes and appends one Windows argument to the output buffer.
+ * @param output WCHAR* Caller-provided output buffer or result destination.
+ * @param value const_WCHAR* Candidate value being converted or checked.
+ * @return WCHAR* result Pointer just past the quoted argument appended to caller-owned output.
+ */
 static WCHAR *append_quoted_windows_argument(WCHAR *output, const WCHAR *value)
 {
   const WCHAR *cursor;
@@ -7335,6 +8605,14 @@ static WCHAR *append_quoted_windows_argument(WCHAR *output, const WCHAR *value)
   return output;
 }
 
+/* Builds the quoted UTF-16 command line for a Windows child.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @param request_index int Lua stack index of the request table.
+ * @param executable const_char* Selected executable path or process image.
+ * @param executable_length size_t The executable length bound to build wide arguments.
+ * @param arguments yaca_wide_arguments* Child-process argument vector or owned argument storage.
+ * @return int result 1 after building the UTF-16 command line; 0 on failure.
+ */
 static int build_wide_arguments(
   lua_State *L,
   int request_index,
@@ -7432,6 +8710,12 @@ static int build_wide_arguments(
   return 1;
 }
 
+/* Updates write windows pipe within its ownership boundary.
+ * @param handle HANDLE Operating-system handle being inspected or closed.
+ * @param bytes const_char* Raw byte buffer supplied to the native operation.
+ * @param length size_t Byte or wide-character length of the supplied buffer.
+ * @return int result 1 when all bytes are written or the peer closed normally; 0 on other failure.
+ */
 static int write_windows_pipe(HANDLE handle, const char *bytes, size_t length)
 {
   size_t offset;
@@ -7447,7 +8731,10 @@ static int write_windows_pipe(HANDLE handle, const char *bytes, size_t length)
       : (DWORD)(length - offset);
     if (!WriteFile(handle, bytes + offset, requested, &written, NULL))
     {
-      return GetLastError() == ERROR_BROKEN_PIPE ? 1 : 0;
+      DWORD error_value = GetLastError();
+      /* XP can report ERROR_NO_DATA while cancellation closes the reader.
+      ** Both values mean the child stopped accepting input, not failed IO. */
+      return error_value == ERROR_BROKEN_PIPE || error_value == ERROR_NO_DATA;
     }
     if (written == 0U)
     {
@@ -7459,6 +8746,52 @@ static int write_windows_pipe(HANDLE handle, const char *bytes, size_t length)
   return 1;
 }
 
+/* Updates write process input within its ownership boundary.
+ * @param opaque LPVOID Opaque pointer retained by the callback owner.
+ * @return DWORD result Worker thread exit code 0; write failure is recorded in its shared input state.
+ */
+static DWORD WINAPI write_process_input(LPVOID opaque)
+{
+  yaca_process_input *input = (yaca_process_input *)opaque;
+  if (!write_windows_pipe(input->pipe, input->bytes, input->length))
+    input->error_value = GetLastError();
+  CloseHandle(input->pipe);
+  release_process_input(input);
+  return 0;
+}
+
+/* Starts a worker that writes bounded stdin bytes to the child.
+ * @param pipe HANDLE Interprocess communication pipe or its handle.
+ * @param bytes const_char* Raw byte buffer supplied to the native operation.
+ * @param length size_t Byte or wide-character length of the supplied buffer.
+ * @return yaca_process_input*|NULL result New asynchronous input owner shared with its worker, or NULL on failure.
+ */
+static yaca_process_input *start_process_input(HANDLE pipe, const char *bytes, size_t length)
+{
+  yaca_process_input *input = calloc(1, sizeof(*input));
+  if (input == NULL) { SetLastError(ERROR_NOT_ENOUGH_MEMORY); return NULL; }
+  input->bytes = malloc(length);
+  if (input->bytes == NULL)
+  { free(input); SetLastError(ERROR_NOT_ENOUGH_MEMORY); return NULL; }
+  memcpy(input->bytes, bytes, length);
+  input->pipe = pipe;
+  input->length = length;
+  input->references = 2; /* process owner + writer thread */
+  input->thread = CreateThread(NULL, 0, write_process_input, input, 0, NULL);
+  if (input->thread == NULL)
+  {
+    DWORD error_value = GetLastError();
+    free(input->bytes); free(input); SetLastError(error_value);
+    return NULL;
+  }
+  return input;
+}
+
+/* Orders two UTF-16 environment entries without case sensitivity.
+ * @param left const_void* First identity, path, or metadata value in the comparison.
+ * @param right const_void* Second identity, path, or metadata value in the comparison.
+ * @return int result Negative, zero, or positive case-insensitive order of environment entries.
+ */
 static int compare_wide_environment(const void *left, const void *right)
 {
   const WCHAR *left_value;
@@ -7469,6 +8802,10 @@ static int compare_wide_environment(const void *left, const void *right)
   return _wcsicmp(left_value, right_value);
 }
 
+/* Releases owned wide environment storage.
+ * @param environment yaca_wide_environment* Child-process environment being constructed or released.
+ * @return void result Releases the converted UTF-16 environment block.
+ */
 static void free_wide_environment(yaca_wide_environment *environment)
 {
   size_t index;
@@ -7485,6 +8822,12 @@ static void free_wide_environment(yaca_wide_environment *environment)
   memset(environment, 0, sizeof(*environment));
 }
 
+/* Builds a UTF-16 environment block for a Windows child.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @param request_index int Lua stack index of the request table.
+ * @param environment yaca_wide_environment* Child-process environment being constructed or released.
+ * @return int result 1 after building the UTF-16 environment block; 0 on failure.
+ */
 static int build_wide_environment(
   lua_State *L,
   int request_index,
@@ -7667,6 +9010,10 @@ static int build_wide_environment(
   return 1;
 }
 
+/* Checks whether the Windows job has any active child processes.
+ * @param job HANDLE Win32 job object supervising descendants.
+ * @return int result 1 when the job has no active child processes; 0 otherwise.
+ */
 static int windows_job_is_empty(HANDLE job)
 {
   JOBOBJECT_BASIC_ACCOUNTING_INFORMATION information;
@@ -7684,6 +9031,10 @@ static int windows_job_is_empty(HANDLE job)
   return information.ActiveProcesses == 0;
 }
 
+/* Polls a Windows child and updates its cached outcome.
+ * @param process yaca_process* Process owner or supervisor being advanced.
+ * @return void result Polls process completion and updates the cached outcome and streams.
+ */
 static void refresh_windows_process(yaca_process *process)
 {
   DWORD wait_result;
@@ -7710,19 +9061,20 @@ static void refresh_windows_process(yaca_process *process)
   {
     return;
   }
+  if (process->input_writer != NULL
+      && WaitForSingleObject(process->input_writer->thread, 0) != WAIT_OBJECT_0)
+    return;
   process->finished_at = native_monotonic_milliseconds();
-  if (process->cancel_requested)
+  if (process->input_writer != NULL && process->input_writer->error_value != ERROR_SUCCESS)
   {
-    if (process->exit_code == 0xE0000004UL)
-    {
-      strcpy(process->outcome, "cancelled");
-      strcpy(process->exit_kind, "cancelled");
-    }
-    else
-    {
-      strcpy(process->outcome, "unknown");
-      strcpy(process->exit_kind, "outcome-unknown");
-    }
+    strcpy(process->outcome, "unknown");
+    strcpy(process->exit_kind, "outcome-unknown");
+  }
+  else if (process->cancel_requested)
+  {
+    /* The leader may have exited before cancellation stopped its children. */
+    strcpy(process->outcome, "cancelled");
+    strcpy(process->exit_kind, "cancelled");
   }
   else if (process->exit_code == 0)
   {
@@ -7736,6 +9088,13 @@ static void refresh_windows_process(yaca_process *process)
   }
 }
 
+/* Polls a Windows process pipe and pushes a bounded available byte chunk.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @param stream HANDLE* The stream bound to read windows process stream.
+ * @param kind const_char* Selected error, stream, or operation category.
+ * @param maximum size_t Maximum admitted byte count or item count.
+ * @return int result 1 after pushing a chunk, 0 when none is ready, -1 on read failure.
+ */
 static int read_windows_process_stream(
   lua_State *L,
   HANDLE *stream,
@@ -7810,12 +9169,22 @@ static int read_windows_process_stream(
 
 #else
 
+/* @struct yaca_posix_environment Owned POSIX environment entries for a child process.
+ * @field items char* Owned array of collected entries.
+ * @field count size_t Number of valid entries in the array.
+ */
 typedef struct yaca_posix_environment
 {
   char **items;
   size_t count;
 } yaca_posix_environment;
 
+/* Builds a NUL-terminated argument vector for a POSIX child.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @param request_index int Lua stack index of the request table.
+ * @param executable const_char* Selected executable path or process image.
+ * @return char**|NULL result New NUL-terminated argument vector; caller frees its members and storage, or NULL on failure.
+ */
 static char **build_posix_arguments(
   lua_State *L,
   int request_index,
@@ -7852,68 +9221,10 @@ static char **build_posix_arguments(
   return arguments;
 }
 
-static int write_posix_pipe(int descriptor, const char *bytes, size_t length)
-{
-  struct sigaction ignored;
-  struct sigaction previous;
-  size_t offset;
-  int result;
-  int saved_error;
-
-  memset(&ignored, 0, sizeof(ignored));
-  ignored.sa_handler = SIG_IGN;
-  sigemptyset(&ignored.sa_mask);
-  if (sigaction(SIGPIPE, &ignored, &previous) != 0)
-  {
-    return 0;
-  }
-  offset = 0;
-  result = 1;
-  saved_error = 0;
-  while (offset < length)
-  {
-    size_t maximum;
-    ssize_t written;
-
-    maximum = length - offset;
-    if (maximum > (size_t)SSIZE_MAX)
-    {
-      maximum = (size_t)SSIZE_MAX;
-    }
-    do
-    {
-      written = write(descriptor, bytes + offset, maximum);
-    }
-    while (written < 0 && errno == EINTR);
-    if (written < 0)
-    {
-      if (errno != EPIPE)
-      {
-        result = 0;
-        saved_error = errno;
-      }
-      break;
-    }
-    if (written == 0)
-    {
-      result = 0;
-      saved_error = EIO;
-      break;
-    }
-    offset += (size_t)written;
-  }
-  if (sigaction(SIGPIPE, &previous, NULL) != 0 && result)
-  {
-    result = 0;
-    saved_error = errno;
-  }
-  if (!result)
-  {
-    errno = saved_error;
-  }
-  return result;
-}
-
+/* Releases owned posix environment storage.
+ * @param environment yaca_posix_environment* Child-process environment being constructed or released.
+ * @return void result Releases the allocated POSIX environment vector.
+ */
 static void free_posix_environment(yaca_posix_environment *environment)
 {
   size_t index;
@@ -7929,6 +9240,12 @@ static void free_posix_environment(yaca_posix_environment *environment)
   memset(environment, 0, sizeof(*environment));
 }
 
+/* Builds a NUL-terminated environment vector for a POSIX child.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @param request_index int Lua stack index of the request table.
+ * @param environment yaca_posix_environment* Child-process environment being constructed or released.
+ * @return int result 1 after building the POSIX environment vector; 0 on failure.
+ */
 static int build_posix_environment(
   lua_State *L,
   int request_index,
@@ -8027,6 +9344,12 @@ static int build_posix_environment(
   return 1;
 }
 
+/* Applies the requested descriptor flag bits through fcntl.
+ * @param descriptor int POSIX file descriptor under inspection.
+ * @param command int Executable command or argument vector to launch.
+ * @param flag int Single control or status flag.
+ * @return int result 1 after changing the descriptor flags; 0 on fcntl failure.
+ */
 static int set_descriptor_flags(int descriptor, int command, int flag)
 {
   int current;
@@ -8039,73 +9362,91 @@ static int set_descriptor_flags(int descriptor, int command, int flag)
   return fcntl(descriptor, command, current | flag) == 0;
 }
 
-static int posix_process_group_stopped(pid_t process_id)
+/* Creates a pipe suitable for supervised child I/O.
+ * @param descriptors int_[2] POSIX descriptors owned by the process port.
+ * @return int result 1 after creating a supervised pipe pair; 0 on failure.
+ */
+static int supervised_pipe(int descriptors[2])
 {
-  if (kill(-process_id, 0) == 0)
+  int index;
+  if (pipe(descriptors) != 0) return 0;
+  for (index = 0; index < 2; index++)
   {
-    return 0;
+    if (descriptors[index] <= STDERR_FILENO)
+    {
+      int moved = fcntl(descriptors[index], F_DUPFD_CLOEXEC, 3);
+      if (moved < 0) return 0;
+      close(descriptors[index]);
+      descriptors[index] = moved;
+    }
+    if (!set_descriptor_flags(descriptors[index], F_SETFD, FD_CLOEXEC)) return 0;
   }
-  return errno == ESRCH;
+  return 1;
 }
 
+/* Reaps a POSIX child and updates its cached outcome.
+ * @param process yaca_process* Process owner or supervisor being advanced.
+ * @return void result Reaps an exited child and updates the cached process outcome.
+ */
 static void refresh_posix_process(yaca_process *process)
 {
+  int supervisor_status = 0;
+  int supervisor_ok = 1;
   pid_t result;
-
+  if (process->outcome[0] != '\0') return;
   if (!process->reaped)
   {
+    do { result = waitpid(process->process_id, &supervisor_status, WNOHANG); }
+    while (result < 0 && errno == EINTR);
+    if (result != process->process_id && !(result < 0 && errno == ECHILD)) return;
+    process->reaped = 1;
+    if (result != process->process_id || !WIFEXITED(supervisor_status)
+        || WEXITSTATUS(supervisor_status) != 0)
+      supervisor_ok = 0;
+  }
+  if (process->status_read >= 0 && process->status_bytes < sizeof(process->status_record))
+  {
+    ssize_t count;
     do
     {
-      result = waitpid(process->process_id, &process->wait_status, WNOHANG);
+      count = read(process->status_read,
+        (char *)&process->status_record + process->status_bytes,
+        sizeof(process->status_record) - process->status_bytes);
     }
-    while (result < 0 && errno == EINTR);
-    if (result != process->process_id)
-    {
-      return;
-    }
-    process->reaped = 1;
+    while (count < 0 && errno == EINTR);
+    if (count > 0) process->status_bytes += (size_t)count;
   }
-  if (process->outcome[0] != '\0')
-  {
-    return;
-  }
-  process->descendants_proven_stopped = posix_process_group_stopped(
-    process->process_id);
+  if (!supervisor_ok) process->status_record.magic = 0;
+  process->finished_at = native_monotonic_milliseconds();
+  process->descendants_proven_stopped =
+    process->status_bytes == sizeof(process->status_record)
+    && process->status_record.magic == YACA_SUPERVISOR_MAGIC;
   if (!process->descendants_proven_stopped)
   {
+    strcpy(process->outcome, "unknown");
+    strcpy(process->exit_kind, "outcome-unknown");
+    /* A dead supervisor cannot prove containment. Stop emitting stream data
+    ** with an open-ended writer; expose unknown instead of hanging forever. */
+    close_process_streams(process);
     return;
   }
-  process->finished_at = native_monotonic_milliseconds();
-  if (process->cancel_requested)
+  process->wait_status = process->status_record.leader_status;
+  if (process->status_record.cancelled)
   {
-    if (WIFSIGNALED(process->wait_status)
-        && WTERMSIG(process->wait_status) == SIGKILL)
-    {
-      strcpy(process->outcome, "cancelled");
-      strcpy(process->exit_kind, "cancelled");
-    }
-    else
-    {
-      strcpy(process->outcome, "unknown");
-      strcpy(process->exit_kind, "outcome-unknown");
-    }
+    strcpy(process->outcome, "cancelled");
+    strcpy(process->exit_kind, "cancelled");
   }
   else if (WIFEXITED(process->wait_status))
   {
-    strcpy(
-      process->outcome,
-      WEXITSTATUS(process->wait_status) == 0 ? "completed" : "failed");
+    strcpy(process->outcome, WEXITSTATUS(process->wait_status) == 0 ? "completed" : "failed");
     strcpy(process->exit_kind, "exit-code");
   }
   else if (WIFSIGNALED(process->wait_status))
   {
     strcpy(process->outcome, "failed");
     strcpy(process->exit_kind, "signal");
-    snprintf(
-      process->signal_or_exception,
-      sizeof(process->signal_or_exception),
-      "%d",
-      WTERMSIG(process->wait_status));
+    snprintf(process->signal_or_exception, sizeof(process->signal_or_exception),
+      "%d", WTERMSIG(process->wait_status));
   }
   else
   {
@@ -8114,6 +9455,13 @@ static void refresh_posix_process(yaca_process *process)
   }
 }
 
+/* Reads a bounded available byte chunk from a POSIX process pipe.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @param stream int* The stream bound to read posix process stream.
+ * @param kind const_char* Selected error, stream, or operation category.
+ * @param maximum size_t Maximum admitted byte count or item count.
+ * @return int result 1 after pushing a chunk, 0 when none is ready, -1 on read failure.
+ */
 static int read_posix_process_stream(
   lua_State *L,
   int *stream,
@@ -8171,6 +9519,10 @@ static int read_posix_process_stream(
 ** Component argv never passes through cmd.exe or /bin/sh, and its bounded
 ** stdin bytes use an anonymous pipe owned by this native boundary.
 */
+/* Implements the Lua process start native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_process_start(lua_State *L)
 {
   const char *command = NULL;
@@ -8273,6 +9625,9 @@ static int l_process_start(lua_State *L)
     lua_pop(L, 1);
   }
 
+  /* Allocate the Lua owner before spawning. A Lua allocation failure must
+  ** never strand a live process or its job outside an owned userdata. */
+  process = push_process(L);
 #if defined(_WIN32)
   {
     WCHAR system_directory[MAX_PATH + 1];
@@ -8531,16 +9886,18 @@ static int l_process_start(lua_State *L)
     }
     if (stdin_write != INVALID_HANDLE_VALUE)
     {
-      if (!write_windows_pipe(stdin_write, stdin_bytes, stdin_length))
+      if (stdin_length > 0)
       {
-        error_value = GetLastError();
-        CloseHandle(stdin_write);
-        stdin_write = INVALID_HANDLE_VALUE;
-        TerminateJobObject(job, 0xE0000005UL);
-        WaitForSingleObject(information.hProcess, INFINITE);
-        goto windows_start_cleanup;
+        process->input_writer = start_process_input(stdin_write, stdin_bytes, stdin_length);
+        if (process->input_writer == NULL)
+        {
+          error_value = GetLastError();
+          TerminateJobObject(job, 0xE0000005UL);
+          WaitForSingleObject(information.hProcess, INFINITE);
+          goto windows_start_cleanup;
+        }
       }
-      CloseHandle(stdin_write);
+      else CloseHandle(stdin_write);
       stdin_write = INVALID_HANDLE_VALUE;
     }
     created = 1;
@@ -8595,7 +9952,6 @@ windows_start_cleanup:
       }
       return push_windows_failure(L, error_value, "Windows process start failed");
     }
-    process = push_process(L);
     process->process = information.hProcess;
     process->job = job;
     process->stdout_read = stdout_read;
@@ -8607,6 +9963,8 @@ windows_start_cleanup:
     int stdout_pipe[2];
     int stderr_pipe[2];
     int stdin_pipe[2];
+    int control_pipe[2];
+    int status_pipe[2];
     int null_input;
     pid_t child;
     yaca_posix_environment environment;
@@ -8651,25 +10009,27 @@ windows_start_cleanup:
     stdout_pipe[0] = stdout_pipe[1] = -1;
     stderr_pipe[0] = stderr_pipe[1] = -1;
     stdin_pipe[0] = stdin_pipe[1] = -1;
+    control_pipe[0] = control_pipe[1] = -1;
+    status_pipe[0] = status_pipe[1] = -1;
+    child = -1;
     null_input = -1;
-    if (pipe(stdout_pipe) != 0 || pipe(stderr_pipe) != 0)
+    if (!supervised_pipe(stdout_pipe) || !supervised_pipe(stderr_pipe)
+        || !supervised_pipe(control_pipe) || !supervised_pipe(status_pipe))
     {
       error_value = errno;
       goto posix_start_failure;
     }
-    if (!set_descriptor_flags(stdout_pipe[0], F_SETFD, FD_CLOEXEC)
-        || !set_descriptor_flags(stdout_pipe[1], F_SETFD, FD_CLOEXEC)
-        || !set_descriptor_flags(stderr_pipe[0], F_SETFD, FD_CLOEXEC)
-        || !set_descriptor_flags(stderr_pipe[1], F_SETFD, FD_CLOEXEC))
+    if (!set_descriptor_flags(stdout_pipe[0], F_SETFL, O_NONBLOCK)
+        || !set_descriptor_flags(stderr_pipe[0], F_SETFL, O_NONBLOCK)
+        || !set_descriptor_flags(control_pipe[0], F_SETFL, O_NONBLOCK))
     {
       error_value = errno;
       goto posix_start_failure;
     }
     if (argv_mode)
     {
-      if (pipe(stdin_pipe) != 0
-          || !set_descriptor_flags(stdin_pipe[0], F_SETFD, FD_CLOEXEC)
-          || !set_descriptor_flags(stdin_pipe[1], F_SETFD, FD_CLOEXEC))
+      if (!supervised_pipe(stdin_pipe)
+          || !set_descriptor_flags(stdin_pipe[1], F_SETFL, O_NONBLOCK))
       {
         error_value = errno;
         goto posix_start_failure;
@@ -8683,6 +10043,13 @@ windows_start_cleanup:
         error_value = errno;
         goto posix_start_failure;
       }
+      if (null_input <= STDERR_FILENO)
+      {
+        int moved = fcntl(null_input, F_DUPFD_CLOEXEC, 3);
+        if (moved < 0) { error_value = errno; goto posix_start_failure; }
+        close(null_input);
+        null_input = moved;
+      }
     }
     child = fork();
     if (child < 0)
@@ -8692,24 +10059,15 @@ windows_start_cleanup:
     }
     if (child == 0)
     {
-      if (setpgid(0, 0) != 0
-          || (cwd != NULL && chdir(cwd) != 0)
-          || dup2(argv_mode ? stdin_pipe[0] : null_input, STDIN_FILENO) < 0
-          || dup2(stdout_pipe[1], STDOUT_FILENO) < 0
-          || dup2(stderr_pipe[1], STDERR_FILENO) < 0)
-      {
-        _exit(126);
-      }
-      close(stdout_pipe[0]);
-      close(stdout_pipe[1]);
-      close(stderr_pipe[0]);
-      close(stderr_pipe[1]);
-      if (stdin_pipe[0] >= 0) close(stdin_pipe[0]);
-      if (stdin_pipe[1] >= 0) close(stdin_pipe[1]);
-      if (null_input >= 0) close(null_input);
-      execve(selected_executable, selected_arguments, environment.items);
-      _exit(127);
+      yaca_supervisor_run(argv_mode ? stdin_pipe[0] : null_input, stdin_pipe[1],
+        stdout_pipe[1], stderr_pipe[1], control_pipe[0], status_pipe[1],
+        cwd, selected_executable, selected_arguments, environment.items,
+        stdin_bytes, stdin_length);
     }
+    close(control_pipe[0]);
+    control_pipe[0] = -1;
+    close(status_pipe[1]);
+    status_pipe[1] = -1;
     close(stdout_pipe[1]);
     stdout_pipe[1] = -1;
     close(stderr_pipe[1]);
@@ -8721,16 +10079,6 @@ windows_start_cleanup:
     }
     if (stdin_pipe[1] >= 0)
     {
-      if (!write_posix_pipe(stdin_pipe[1], stdin_bytes, stdin_length))
-      {
-        error_value = errno;
-        close(stdin_pipe[1]);
-        stdin_pipe[1] = -1;
-        kill(-child, SIGKILL);
-        kill(child, SIGKILL);
-        waitpid(child, NULL, 0);
-        goto posix_start_failure;
-      }
       close(stdin_pipe[1]);
       stdin_pipe[1] = -1;
     }
@@ -8739,28 +10087,42 @@ windows_start_cleanup:
       close(null_input);
       null_input = -1;
     }
-    if (!set_descriptor_flags(stdout_pipe[0], F_SETFL, O_NONBLOCK)
-        || !set_descriptor_flags(stderr_pipe[0], F_SETFL, O_NONBLOCK))
     {
-      error_value = errno;
-      kill(-child, SIGKILL);
-      kill(child, SIGKILL);
-      waitpid(child, NULL, 0);
-      goto posix_start_failure;
+      ssize_t received;
+      int startup_error = 0;
+      do { received = read(status_pipe[0], &startup_error, sizeof(startup_error)); }
+      while (received < 0 && errno == EINTR);
+      if (received != (ssize_t)sizeof(startup_error) || startup_error != 0)
+      {
+        error_value = startup_error != 0 ? startup_error : EIO;
+        goto posix_start_failure;
+      }
+      if (!set_descriptor_flags(status_pipe[0], F_SETFL, O_NONBLOCK))
+      { error_value = errno; goto posix_start_failure; }
     }
-    setpgid(child, child);
     free(component_arguments);
     component_arguments = NULL;
     free_posix_environment(&environment);
-    process = push_process(L);
     process->process_id = child;
     process->stdout_read = stdout_pipe[0];
     process->stderr_read = stderr_pipe[0];
+    process->control_write = control_pipe[1];
+    process->status_read = status_pipe[0];
+    control_pipe[1] = status_pipe[0] = -1;
     stdout_pipe[0] = -1;
     stderr_pipe[0] = -1;
     goto posix_start_success;
 
 posix_start_failure:
+    if (control_pipe[0] >= 0) close(control_pipe[0]);
+    if (control_pipe[1] >= 0) close(control_pipe[1]);
+    if (status_pipe[0] >= 0) close(status_pipe[0]);
+    if (status_pipe[1] >= 0) close(status_pipe[1]);
+    if (child > 0)
+    {
+      pid_t waited;
+      do { waited = waitpid(child, NULL, 0); } while (waited < 0 && errno == EINTR);
+    }
     if (stdout_pipe[0] >= 0)
     {
       close(stdout_pipe[0]);
@@ -8801,6 +10163,10 @@ posix_start_success:
   return return_success(L);
 }
 
+/* Implements the Lua process poll native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_process_poll(lua_State *L)
 {
   yaca_process *process;
@@ -8986,20 +10352,24 @@ static int l_process_poll(lua_State *L)
   return return_success(L);
 }
 
+/* Implements the Lua process cancel native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_process_cancel(lua_State *L)
 {
   yaca_process *process;
 
   process = check_process(L, 1);
   (void)luaL_checkinteger(L, 2);
-  if (process->reaped)
+  if (process->outcome[0] != '\0')
   {
     lua_pushboolean(L, 0);
     return return_success(L);
   }
 #if defined(_WIN32)
   refresh_windows_process(process);
-  if (process->reaped || windows_job_is_empty(process->job))
+  if (process->outcome[0] != '\0' || windows_job_is_empty(process->job))
   {
     lua_pushboolean(L, 0);
     return return_success(L);
@@ -9011,20 +10381,15 @@ static int l_process_cancel(lua_State *L)
   process->cancel_requested = 1;
 #else
   refresh_posix_process(process);
-  if (process->reaped)
+  if (process->outcome[0] != '\0')
   {
     lua_pushboolean(L, 0);
     return return_success(L);
   }
-  if (kill(-process->process_id, SIGKILL) != 0)
+  if (process->control_write >= 0)
   {
-    if (errno == ESRCH)
-    {
-      refresh_posix_process(process);
-      lua_pushboolean(L, 0);
-      return return_success(L);
-    }
-    return push_failure(L, errno_code(errno), "process cancellation failed");
+    close(process->control_write);
+    process->control_write = -1;
   }
   process->cancel_requested = 1;
 #endif
@@ -9032,6 +10397,11 @@ static int l_process_cancel(lua_State *L)
   return return_success(L);
 }
 
+/* Pushes process result fields onto the Lua stack.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @param process const_yaca_process* Process owner or supervisor being advanced.
+ * @return void result Pushes a Lua table containing final process outcome, exit details, and duration.
+ */
 static void push_process_result(lua_State *L, const yaca_process *process)
 {
   lua_Integer duration;
@@ -9051,7 +10421,7 @@ static void push_process_result(lua_State *L, const yaca_process *process)
     lua_setfield(L, -2, "exit_code");
   }
 #else
-  if (WIFEXITED(process->wait_status))
+  if (strcmp(process->exit_kind, "exit-code") == 0)
   {
     lua_pushinteger(L, (lua_Integer)WEXITSTATUS(process->wait_status));
     lua_setfield(L, -2, "exit_code");
@@ -9068,6 +10438,10 @@ static void push_process_result(lua_State *L, const yaca_process *process)
   lua_setfield(L, -2, "descendants_proven_stopped");
 }
 
+/* Implements the Lua process join native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_process_join(lua_State *L)
 {
   yaca_process *process;
@@ -9090,6 +10464,10 @@ static int l_process_join(lua_State *L)
   return return_success(L);
 }
 
+/* Implements the Lua process close native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_process_close(lua_State *L)
 {
   yaca_process *process;
@@ -9103,6 +10481,11 @@ static int l_process_close(lua_State *L)
   return push_true_result(L);
 }
 
+/* Validates and borrows an open Lua terminal userdata.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @param index int Lua stack index or item position being read.
+ * @return yaca_terminal* result Borrowed live terminal userdata; raises a Lua error for wrong or closed handles.
+ */
 static yaca_terminal *check_terminal(lua_State *L, int index)
 {
   yaca_terminal *terminal;
@@ -9116,9 +10499,17 @@ static yaca_terminal *check_terminal(lua_State *L, int index)
 }
 
 #if defined(_WIN32)
+/* Declares cancellation of the active Windows cooked-line reader.
+ * @param terminal yaca_terminal* Terminal owner whose reader is cancelled.
+ * @return int cancelled Whether a cancellation request was accepted.
+ */
 static int cancel_windows_cooked_read(yaca_terminal *terminal);
 #endif
 
+/* Restores original terminal mode and descriptor flags.
+ * @param terminal yaca_terminal* Terminal owner whose input and mode state are managed.
+ * @return int result 1 after restoring original terminal settings; 0 if restoration fails.
+ */
 static int restore_terminal(yaca_terminal *terminal)
 {
   if (terminal->restored)
@@ -9126,6 +10517,7 @@ static int restore_terminal(yaca_terminal *terminal)
     return 1;
   }
 #if defined(_WIN32)
+  if (!yaca_pty_restore(&terminal->pty)) return 0;
   if (terminal->has_original_mode
       && !SetConsoleMode(terminal->input, terminal->original_mode))
   {
@@ -9147,6 +10539,10 @@ static int restore_terminal(yaca_terminal *terminal)
   return 1;
 }
 
+/* Implements the Lua terminal gc native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_terminal_gc(lua_State *L)
 {
   yaca_terminal *terminal;
@@ -9168,6 +10564,10 @@ static int l_terminal_gc(lua_State *L)
   return 0;
 }
 
+/* Pushes terminal fields onto the Lua stack.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return yaca_terminal* result New terminal userdata also pushed onto Lua stack; Lua owns its lifetime.
+ */
 static yaca_terminal *push_terminal(lua_State *L)
 {
   yaca_terminal *terminal;
@@ -9180,10 +10580,19 @@ static yaca_terminal *push_terminal(lua_State *L)
   terminal->input = STDIN_FILENO;
   terminal->original_flags = -1;
 #endif
+  /* @metatable yaca_terminal_metatable Lua userdata binding installed for the exact native owner type.
+   */
   luaL_setmetatable(L, YACA_TERMINAL_METATABLE);
   return terminal;
 }
 
+/* Pushes terminal action fields onto the Lua stack.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @param intent const_char* Caller-selected operation intent.
+ * @param bytes const_char* Raw byte buffer supplied to the native operation.
+ * @param length size_t Byte or wide-character length of the supplied buffer.
+ * @return void result Pushes a terminal input action with its typed fields to the Lua stack.
+ */
 static void push_terminal_action(
   lua_State *L,
   const char *intent,
@@ -9202,6 +10611,11 @@ static void push_terminal_action(
   }
 }
 
+/* Pushes terminal fact fields onto the Lua stack.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @param terminal yaca_terminal* Terminal owner whose input and mode state are managed.
+ * @return void result Pushes a terminal observation with its typed fields to the Lua stack.
+ */
 static void push_terminal_fact(lua_State *L, yaca_terminal *terminal)
 {
   lua_createtable(L, 0, 2);
@@ -9214,6 +10628,11 @@ static void push_terminal_fact(lua_State *L, yaca_terminal *terminal)
 
 #if defined(_WIN32)
 
+/* Encodes one Unicode scalar into its UTF-8 byte sequence.
+ * @param codepoint unsigned_long The codepoint bound to encode utf8 codepoint.
+ * @param output char_[4] Caller-provided output buffer or result destination.
+ * @return size_t result Byte count, offset, or numeric value for encode utf8 codepoint.
+ */
 static size_t encode_utf8_codepoint(unsigned long codepoint, char output[4])
 {
   if (codepoint <= 0x7FUL)
@@ -9241,6 +10660,12 @@ static size_t encode_utf8_codepoint(unsigned long codepoint, char output[4])
   return 4;
 }
 
+/* Pushes windows key action fields onto the Lua stack.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @param terminal yaca_terminal* Terminal owner whose input and mode state are managed.
+ * @param key const_KEY_EVENT_RECORD* Selected metadata or table key.
+ * @return int result 1 when an action was pushed, 0 when no action was emitted, -1 on invalid input.
+ */
 static int push_windows_key_action(
   lua_State *L,
   yaca_terminal *terminal,
@@ -9269,7 +10694,7 @@ static int push_windows_key_action(
     }
     else if ((modifiers & (LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED)) != 0)
     {
-      push_terminal_action(L, "side", NULL, 0);
+      push_terminal_action(L, "ask", NULL, 0);
     }
     else
     {
@@ -9321,6 +10746,10 @@ static int push_windows_key_action(
   return 1;
 }
 
+/* Reads one cooked Windows console line in a worker thread.
+ * @param opaque LPVOID Opaque pointer retained by the callback owner.
+ * @return DWORD result Worker thread exit code 0; read outcome is stored in terminal state.
+ */
 static DWORD WINAPI windows_cooked_reader(LPVOID opaque)
 {
   yaca_terminal_read *read;
@@ -9367,6 +10796,10 @@ static DWORD WINAPI windows_cooked_reader(LPVOID opaque)
 ** preserves the host console's live XP-era echo, backspace, cursor, and IME
 ** behavior without blocking the Agent event loop while a draft is unfinished.
 */
+/* Starts an asynchronous cooked Windows console read.
+ * @param terminal yaca_terminal* Terminal owner whose input and mode state are managed.
+ * @return int result 1 after starting the line-reader worker; 0 on setup failure.
+ */
 static int start_windows_cooked_read(yaca_terminal *terminal)
 {
   yaca_terminal_read *read;
@@ -9422,6 +10855,10 @@ static int start_windows_cooked_read(yaca_terminal *terminal)
   return 1;
 }
 
+/* Releases owned windows cooked read storage.
+ * @param terminal yaca_terminal* Terminal owner whose input and mode state are managed.
+ * @return void result Releases the completed Windows cooked-input worker and buffer.
+ */
 static void free_windows_cooked_read(yaca_terminal *terminal)
 {
   yaca_terminal_read *read;
@@ -9445,6 +10882,10 @@ static void free_windows_cooked_read(yaca_terminal *terminal)
 ** Enter is written only while cancelling yaca's own active line read, then the
 ** worker is joined before its storage or the original console mode is released.
 */
+/* Cancels an active cooked Windows console read.
+ * @param terminal yaca_terminal* Terminal owner whose input and mode state are managed.
+ * @return int result 1 when no worker remains or cancellation succeeds; 0 on failure.
+ */
 static int cancel_windows_cooked_read(yaca_terminal *terminal)
 {
   INPUT_RECORD record;
@@ -9491,6 +10932,11 @@ static int cancel_windows_cooked_read(yaca_terminal *terminal)
 /*
 ** Emits one completed wide cooked line as strict UTF-8.
 */
+/* Pushes windows cooked line fields onto the Lua stack.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @param terminal yaca_terminal* Terminal owner whose input and mode state are managed.
+ * @return int result 2 for a terminal fact, 0 when pending, or a negative code on failure.
+ */
 static int push_windows_cooked_line(lua_State *L, yaca_terminal *terminal)
 {
   yaca_terminal_read *read;
@@ -9577,6 +11023,10 @@ static int push_windows_cooked_line(lua_State *L, yaca_terminal *terminal)
 
 #endif
 
+/* Implements the Lua terminal start native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_terminal_start(lua_State *L)
 {
   const char *mode;
@@ -9650,6 +11100,15 @@ static int l_terminal_start(lua_State *L)
           lua_pop(L, 1);
           return push_windows_failure(L, GetLastError(), "cannot enter terminal input mode");
         }
+      }
+    }
+    else if (yaca_is_cygwin_pty(terminal->input))
+    {
+      if (!yaca_pty_start(&terminal->pty, strcmp(mode, "cooked") == 0))
+      {
+        lua_pop(L, 1);
+        return push_failure(L, "TerminalCapability",
+          "cannot set Cygwin PTY mode using the host's stty.exe");
       }
     }
     else if (strcmp(mode, "raw") == 0)
@@ -9729,6 +11188,10 @@ static int l_terminal_start(lua_State *L)
   return return_success(L);
 }
 
+/* Implements the Lua terminal poll native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_terminal_poll(lua_State *L)
 {
   yaca_terminal *terminal;
@@ -9967,6 +11430,10 @@ static int l_terminal_poll(lua_State *L)
   return return_success(L);
 }
 
+/* Implements the Lua terminal cancel native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_terminal_cancel(lua_State *L)
 {
   yaca_terminal *terminal;
@@ -9989,6 +11456,10 @@ static int l_terminal_cancel(lua_State *L)
   return return_success(L);
 }
 
+/* Implements the Lua terminal join native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_terminal_join(lua_State *L)
 {
   yaca_terminal *terminal;
@@ -10008,6 +11479,10 @@ static int l_terminal_join(lua_State *L)
   return return_success(L);
 }
 
+/* Implements the Lua terminal restore native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_terminal_restore(lua_State *L)
 {
   yaca_terminal *terminal;
@@ -10030,6 +11505,10 @@ static int l_terminal_restore(lua_State *L)
   return push_true_result(L);
 }
 
+/* Implements the Lua terminal close native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_terminal_close(lua_State *L)
 {
   yaca_terminal *terminal;
@@ -10078,11 +11557,21 @@ static const uint32_t yaca_sha256_constants[64] = {
   UINT32_C(0xc67178f2),
 };
 
+/* Rotates one SHA-256 word by the requested bit count.
+ * @param value uint32_t Candidate value being converted or checked.
+ * @param count unsigned_int Number of values to inspect or emit.
+ * @return uint32_t result Input word rotated right by the requested bit count.
+ */
 static uint32_t sha256_rotate_right(uint32_t value, unsigned int count)
 {
   return (value >> count) | (value << (32U - count));
 }
 
+/* Overwrites secret-bearing memory before release.
+ * @param memory void* The memory bound to secure zero.
+ * @param length size_t Byte or wide-character length of the supplied buffer.
+ * @return void result Overwrites the supplied secret-bearing memory before it is released.
+ */
 static void secure_zero(void *memory, size_t length)
 {
   volatile unsigned char *bytes;
@@ -10095,6 +11584,10 @@ static void secure_zero(void *memory, size_t length)
   }
 }
 
+/* Implements the Lua secure random native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_secure_random(lua_State *L)
 {
   lua_Integer requested;
@@ -10159,6 +11652,11 @@ static int l_secure_random(lua_State *L)
   return 1;
 }
 
+/* Compresses one complete SHA-256 block into the hash state.
+ * @param context yaca_sha256* Incremental hash or process context being updated.
+ * @param block const_unsigned_char_[64] The block bound to sha256 transform.
+ * @return void result Compresses one complete 64-byte block into the SHA-256 chaining state.
+ */
 static void sha256_transform(yaca_sha256 *context, const unsigned char block[64])
 {
   uint32_t words[64];
@@ -10243,6 +11741,10 @@ static void sha256_transform(yaca_sha256 *context, const unsigned char block[64]
   secure_zero(words, sizeof(words));
 }
 
+/* Initializes a new SHA-256 hash state.
+ * @param context yaca_sha256* Incremental hash or process context being updated.
+ * @return void result Initializes SHA-256 chaining words and clears the partial-block count.
+ */
 static void sha256_initialize(yaca_sha256 *context)
 {
   memset(context, 0, sizeof(*context));
@@ -10256,6 +11758,12 @@ static void sha256_initialize(yaca_sha256 *context)
   context->state[7] = UINT32_C(0x5be0cd19);
 }
 
+/* Absorbs bounded bytes into an open SHA-256 state.
+ * @param context yaca_sha256* Incremental hash or process context being updated.
+ * @param bytes const_unsigned_char* Raw byte buffer supplied to the native operation.
+ * @param length size_t Byte or wide-character length of the supplied buffer.
+ * @return int result 1 after absorbing all bytes; 0 if the hash is closed or length overflows.
+ */
 static int sha256_append(
   yaca_sha256 *context,
   const unsigned char *bytes,
@@ -10293,6 +11801,11 @@ static int sha256_append(
   return 1;
 }
 
+/* Pads the last block and writes a complete SHA-256 digest.
+ * @param context yaca_sha256* Incremental hash or process context being updated.
+ * @param digest unsigned_char_[32] SHA-256 digest bytes used for comparison or formatting.
+ * @return void result Writes the final 32-byte digest and marks the hash state closed.
+ */
 static void sha256_finalize(yaca_sha256 *context, unsigned char digest[32])
 {
   uint64_t bit_count;
@@ -10324,11 +11837,19 @@ static void sha256_finalize(yaca_sha256 *context, unsigned char digest[32])
   }
 }
 
+/* Validates and borrows an open Lua SHA-256 userdata.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return yaca_sha256* result Borrowed live SHA-256 userdata; raises a Lua error for wrong or closed handles.
+ */
 static yaca_sha256 *check_sha256(lua_State *L)
 {
   return (yaca_sha256 *)luaL_checkudata(L, 1, YACA_SHA256_METATABLE);
 }
 
+/* Implements the Lua sha256 gc native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_sha256_gc(lua_State *L)
 {
   yaca_sha256 *context;
@@ -10339,16 +11860,26 @@ static int l_sha256_gc(lua_State *L)
   return 0;
 }
 
+/* Implements the Lua sha256 start native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_sha256_start(lua_State *L)
 {
   yaca_sha256 *context;
 
   context = (yaca_sha256 *)lua_newuserdatauv(L, sizeof(*context), 0);
   sha256_initialize(context);
+  /* @metatable native_userdata Lua userdata binding installed for the exact native owner type.
+   */
   luaL_setmetatable(L, YACA_SHA256_METATABLE);
   return 1;
 }
 
+/* Implements the Lua sha256 update native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_sha256_update(lua_State *L)
 {
   yaca_sha256 *context;
@@ -10369,6 +11900,10 @@ static int l_sha256_update(lua_State *L)
   return 1;
 }
 
+/* Implements the Lua sha256 finish native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_sha256_finish(lua_State *L)
 {
   yaca_sha256 *context;
@@ -10390,6 +11925,10 @@ static int l_sha256_finish(lua_State *L)
   return 1;
 }
 
+/* Implements the Lua sha256 close native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_sha256_close(lua_State *L)
 {
   yaca_sha256 *context;
@@ -10404,12 +11943,20 @@ static int l_sha256_close(lua_State *L)
   return 1;
 }
 
+/* Implements the Lua abi version native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_abi_version(lua_State *L)
 {
   lua_pushliteral(L, YACA_ABI_VERSION);
   return 1;
 }
 
+/* Implements the Lua platform identity native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_platform_identity(lua_State *L)
 {
   const char *operating_system;
@@ -10435,6 +11982,10 @@ static int l_platform_identity(lua_State *L)
   return 1;
 }
 
+/* Implements the Lua monotonic now native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_monotonic_now(lua_State *L)
 {
   lua_Integer value;
@@ -10456,6 +12007,10 @@ static int l_monotonic_now(lua_State *L)
 ** XP-compatible Sleep API; POSIX retries nanosleep only after EINTR.
 ** No domain state or deadline decision is owned by this primitive.
 */
+/* Implements the Lua sleep ms native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_sleep_ms(lua_State *L)
 {
   lua_Integer milliseconds;
@@ -10488,6 +12043,10 @@ static int l_sleep_ms(lua_State *L)
   return 1;
 }
 
+/* Implements the Lua current process id native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_current_process_id(lua_State *L)
 {
 #if defined(_WIN32)
@@ -10512,6 +12071,10 @@ static int l_current_process_id(lua_State *L)
   return 1;
 }
 
+/* Implements the Lua utc now native port.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result Number of Lua results pushed for success or typed failure.
+ */
 static int l_utc_now(lua_State *L)
 {
   char value[64];
@@ -10553,6 +12116,7 @@ static const luaL_Reg yaca_native_functions[] = {
   { "platform_identity", l_platform_identity },
   { "executable_paths", l_executable_paths },
   { "stdio_facts", l_stdio_facts },
+  { "console_write", l_console_write },
   { "workspace_inspect", l_workspace_inspect },
   { "fs_make_directory", l_fs_make_directory },
   { "monotonic_now", l_monotonic_now },
@@ -10596,11 +12160,19 @@ static const luaL_Reg yaca_native_functions[] = {
   { NULL, NULL },
 };
 
+/* Registers a locked Lua userdata metatable and garbage collector.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @param name const_char* Selected file, module, or resource name.
+ * @param garbage_collector lua_CFunction The garbage collector bound to create handle metatable.
+ * @return void result Registers a locked userdata metatable and its garbage collector in Lua.
+ */
 static void create_handle_metatable(
   lua_State *L,
   const char *name,
   lua_CFunction garbage_collector)
 {
+  /* @metatable native_userdata Lua userdata binding installed for the exact native owner type.
+   */
   if (luaL_newmetatable(L, name))
   {
     lua_pushcfunction(L, garbage_collector);
@@ -10611,11 +12183,13 @@ static void create_handle_metatable(
   lua_pop(L, 1);
 }
 
-/*
-** Lua module entry point. The release loader resolves this symbol only from an
-** allowlisted absolute target path.
-*/
-LUAMOD_API int luaopen_yaca_native(lua_State *L)
+LUAMOD_API
+/* Opens the native module after the release loader admits its absolute path.
+ * @param L lua_State* Lua state receiving the bound native functions.
+ * @return int result One Lua module table pushed onto the stack.
+ * @effect Installs four private userdata metatables in this Lua state.
+ */
+int luaopen_yaca_native(lua_State *L)
 {
   create_handle_metatable(L, YACA_FILE_METATABLE, l_file_gc);
   create_handle_metatable(L, YACA_PROCESS_METATABLE, l_process_gc);

@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# Author: WaterRun
+# Date: 2026-09-23
+# File: build_linux_x86_64.sh
+# Description: Builds pinned Linux candidates and records dependency, ABI and test evidence.
+
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
@@ -24,11 +29,17 @@ if [[ ${YACA_LINUX_BUILD_RESOURCE_GUARD_HELD:-0} != 1 ]]; then
     env YACA_LINUX_BUILD_RESOURCE_GUARD_HELD=1 bash "$0" "$@"
 fi
 
+# Report the required pinned inputs for a Linux qualification build.
+#@param none No arguments.
+#@return void Exits with usage status 64.
 usage() {
   echo "usage: $0 SOURCE_CACHE YACA_ARCHIVE YACA_REVISION YACA_ARCHIVE_SHA256 OUTPUT" >&2
   exit 64
 }
 
+# Stop the Linux candidate build with a specific diagnostic.
+#@param ... string Diagnostic words joined by the shell.
+#@return void Exits with failure status 1.
 die() {
   echo "linux qualification build: $*" >&2
   exit 1
@@ -85,6 +96,10 @@ MBEDTLS_ARCHIVE="$SOURCE_CACHE/mbedtls-3.6.7.tar.bz2"
 CA_BUNDLE="$SOURCE_CACHE/cacert-2026-08-13.pem"
 LUAINSTALLER_ARCHIVE="$SOURCE_CACHE/luainstaller-97192d1.tar.gz"
 
+# Verify one source archive or patch against its pinned digest.
+#@param 1 string Input file path.
+#@param 2 string Expected lowercase SHA-256 digest.
+#@return int Zero on a match; failure exits through die.
 verify_sha256() {
   local path=$1
   local expected=$2
@@ -281,7 +296,7 @@ if ! (
   "$LUA_PREFIX/bin/lua" "$SCRIPT_DIR/package_linux.lua" \
     "$LUAINSTALLER_SOURCE" "$YACA_SOURCE" "$LUA_PREFIX" \
     "$PACKAGE_ROOT/onedir" "$ARTIFACT_ROOT/yaca" \
-    "$ARTIFACT_ROOT/curl" "$CA_BUNDLE"
+    "$ARTIFACT_ROOT/curl" "$CA_BUNDLE" "$LUA_SOURCE/src"
 ) >"$LOG_ROOT/package.log" 2>&1; then
   tail -120 "$LOG_ROOT/package.log" >&2
   die "luainstaller packaging failed"
@@ -300,6 +315,9 @@ grep -q '^yaca 0\.1\.0 (linux-x86_64)$' "$LOG_ROOT/onedir-smoke.log" \
 grep -q '^yaca 0\.1\.0 (linux-x86_64)$' "$LOG_ROOT/onefile-smoke.log" \
   || die "onefile version smoke failed"
 
+# Require an x86-64 ELF header on one Linux candidate artifact.
+#@param 1 string Candidate artifact path.
+#@return int Zero if class and machine match; failure exits through die.
 assert_elf64() {
   local path=$1
   readelf -h "$path" | grep -q 'Class:[[:space:]]*ELF64' \
@@ -308,6 +326,9 @@ assert_elf64() {
     || die "not x86-64: $path"
 }
 
+# Reject any dynamic dependency outside the allowed CentOS 7 system set.
+#@param 1 string Candidate artifact path.
+#@return int Zero when every shared library is allowed; failure exits through die.
 assert_system_dependencies() {
   local path=$1
   local dependency
@@ -319,6 +340,9 @@ assert_system_dependencies() {
   done < <(readelf -d "$path" | sed -n 's/.*Shared library: \[\([^]]*\)\].*/\1/p')
 }
 
+# Reject symbol versions newer than the glibc 2.17 compatibility floor.
+#@param 1 string Candidate artifact path.
+#@return int Zero when the artifact stays within the baseline; failure exits through die.
 assert_glibc_baseline() {
   local path=$1
   local maximum

@@ -1,19 +1,29 @@
 --[[
-File: repl_input_surface_test.lua
-Date: 2026-09-14
 Author: WaterRun
+Date: 2026-09-23
+File: repl_input_surface_test.lua
 Description: Verifies each interactive surface reports its own cancellation code.
 ]]
 
 local A = assert(loadfile(YACA_TEST_ROOT .. "/test/support/assert.lua", "t", _ENV))()
 
+--Loads a source module into an isolated per-case environment.
+--@param name string Module, Model, or resource name selected by the case.
+--@param cache table Per-case module cache preserving isolated imports.
+--@return any module Module export loaded in the isolated source environment.
 local function load_module(name, cache)
     cache = cache or {}
     if cache[name] then return cache[name] end
-    local environment = { require = function(dependency)
+    local environment = {
+        --Resolves an imported Lua module through the isolated test loader.
+        --@param dependency string Source module requested from the isolated loader.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
+        require = function(dependency)
         return load_module(dependency, cache)
     end }
     environment._G = environment
+    --@metatable environment Test-owned lookup and mutation contract for the current case.
+    --@field __index any Fallback table or function used for missing fixture keys.
     setmetatable(environment, { __index = _ENV })
     local chunk, load_error = loadfile(
         YACA_TEST_ROOT .. "/src/" .. name .. ".lua",
@@ -26,6 +36,9 @@ local function load_module(name, cache)
     return value
 end
 
+--Loads a repository Lua module as a test support value.
+--@param relative_path string Repository-relative Lua source path to load.
+--@return any module Test support module export loaded from the repository.
 local function load_table(relative_path)
     local chunk, load_error = loadfile(YACA_TEST_ROOT .. "/" .. relative_path, "t", _ENV)
     A.truthy(chunk, load_error)
@@ -40,19 +53,35 @@ local fake_filesystem = load_table("test/support/fake_filesystem.lua")
 
 local CONFIG_PATH = "/data/config.ini"
 
+--Constructs an incremental SHA-256 port backed by the reference digest.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return any port Incremental SHA-256 fixture port.
 local function hash_port()
     local port = {}
+    --Starts a fake incremental SHA-256 handle.
+    --@param none No arguments; this closure uses its captured fixture state.
+    --@return table handle New incremental SHA-256 fixture handle.
     function port.sha256_start() return { parts = {}, finished = false, closed = false } end
+    --Adds bytes to the fake incremental SHA-256 handle.
+    --@param handle table|integer Fake resource handle whose state is inspected.
+    --@param bytes string Byte chunk supplied to the fake I/O port.
+    --@return boolean accepted Whether the fixture accepted the byte chunk.
     function port.sha256_update(handle, bytes)
         assert(not handle.finished and not handle.closed)
         handle.parts[#handle.parts + 1] = bytes
         return true
     end
+    --Finalizes the fake SHA-256 handle using the reference digest.
+    --@param handle table|integer Fake resource handle whose state is inspected.
+    --@return any digest Hexadecimal digest of the accumulated fixture bytes.
     function port.sha256_finish(handle)
         assert(not handle.finished and not handle.closed)
         handle.finished = true
         return sha256.digest(table.concat(handle.parts))
     end
+    --Closes the fake SHA-256 handle and records its state.
+    --@param handle table|integer Fake resource handle whose state is inspected.
+    --@return boolean closed Whether the fixture handle was closed.
     function port.sha256_close(handle)
         assert(not handle.closed)
         handle.closed = true
@@ -61,6 +90,9 @@ local function hash_port()
     return port
 end
 
+--Builds validated options for this suite's component fixture.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return table options options used to configure the component under test.
 local function options()
     return {
         schema_version = "0.1.0",
@@ -96,6 +128,9 @@ local function options()
     }
 end
 
+--Supplies source behavior required by this suite.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return any observed source value observed by the scenario assertion.
 local function source()
     return table.concat({
         "[General]",
@@ -125,14 +160,27 @@ end
 ---Terminal double emitting one scripted event batch per poll.
 -- The contract mirrors the production port: start/poll/cancel/close, with
 -- `user_action` and `io_terminal` events.
+--Supplies scripted terminal behavior required by this suite.
+--@param batches any The batches supplied to the fake service for this scenario.
+--@param cursor any The cursor supplied to the fake service for this scenario.
+--@return any observed scripted terminal value observed by the scenario assertion.
 local function scripted_terminal(batches, cursor)
     local terminal = { started = false, closed = false, cancelled = false }
+    --Simulates the start transition of a fake activity port for this suite.
+    --@param self table Fixture or port instance receiving this call.
+    --@param now integer Monotonic timestamp supplied by the fake clock.
+    --@return boolean accepted Whether start succeeds in the fixture.
     function terminal.start(self, now)
         A.equal(math.type(now), "integer")
         A.falsy(self.started)
         self.started = true
         return true
     end
+    --Simulates the poll transition of a fake activity port for this suite.
+    --@param self table Fixture or port instance receiving this call.
+    --@param now integer Monotonic timestamp supplied by the fake clock.
+    --@param budget integer|table Resource budget applied by the scenario.
+    --@return any observed poll value observed by the scenario assertion.
     function terminal.poll(self, now, budget)
         A.truthy(self.started)
         A.equal(math.type(now), "integer")
@@ -140,16 +188,27 @@ local function scripted_terminal(batches, cursor)
         cursor.index = cursor.index + 1
         return batches[cursor.index] or { { kind = "io_terminal" } }
     end
+    --Simulates the cancel transition of a fake activity port for this suite.
+    --@param self table Fixture or port instance receiving this call.
+    --@param now integer Monotonic timestamp supplied by the fake clock.
+    --@return boolean accepted Whether cancel succeeds in the fixture.
     function terminal.cancel(self, now)
         A.equal(math.type(now), "integer")
         self.cancelled = true
         return true
     end
+    --Simulates the join transition of a fake activity port for this suite.
+    --@param self table Fixture or port instance receiving this call.
+    --@param now integer Monotonic timestamp supplied by the fake clock.
+    --@return table observed Empty structured fixture record.
     function terminal.join(self, now)
         A.equal(math.type(now), "integer")
         self.joined = true
         return {}
     end
+    --Simulates the close transition of a fake activity port for this suite.
+    --@param self table Fixture or port instance receiving this call.
+    --@return boolean accepted Whether close succeeds in the fixture.
     function terminal.close(self)
         self.closed = true
         return true
@@ -157,6 +216,13 @@ local function scripted_terminal(batches, cursor)
     return terminal
 end
 
+--Constructs the harness service used by this suite.
+--@param batches any The batches supplied to the fake service for this scenario.
+--@return any fixture Constructed harness service used by this suite.
+--@return any secondary2 Additional status or structured error from the fixture operation.
+--@return any secondary3 Additional status or structured error from the fixture operation.
+--@return any secondary4 Additional status or structured error from the fixture operation.
+--@return any secondary5 Configured control actions returned by the fixture.
 local function harness(batches)
     local filesystem, controls = fake_filesystem.new({ [CONFIG_PATH] = source() })
     local service = assert(config.new({
@@ -169,6 +235,9 @@ local function harness(batches)
         config = service,
         layout = { config_path = CONFIG_PATH },
         backend = {
+            --Constructs new terminal for this test scenario.
+            --@param mode string Operating mode selected by the scenario.
+            --@return any value Callback value consumed by the enclosing scenario assertion.
             new_terminal = function(mode)
                 local terminal = scripted_terminal(batches, cursor)
                 terminal.mode = mode
@@ -176,17 +245,30 @@ local function harness(batches)
                 return terminal
             end,
             clock_port = {
+                --Supplies deterministic clock behavior for this suite.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return any value Callback value consumed by the enclosing scenario assertion.
                 monotonic_now = function()
                     ticks = ticks + 1
                     return ticks
                 end,
+                --Supplies deterministic clock behavior for this suite.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return boolean accepted Whether the fake callback accepts this scenario.
                 sleep_ms = function() return true end,
             },
-            system = { secure_random = function(count) return string.rep("\0", count) end },
+            system = {
+                --Supplies deterministic secure random bytes for this suite.
+                --@param count integer Number of items or calls expected by the fixture.
+                --@return any value Callback value consumed by the enclosing scenario assertion.
+                secure_random = function(count) return string.rep("\0", count) end },
         },
     }
     local runtime = {
         cli = assert(cli.new({ platform = "linux" })),
+        --Captures stdout bytes in the the current case scenario.
+        --@param bytes string Byte chunk supplied to the fake I/O port.
+        --@return boolean accepted Whether the fake callback accepts this scenario.
         stdout = function(bytes)
             written[#written + 1] = bytes
             return true
@@ -195,6 +277,14 @@ local function harness(batches)
     return composed, runtime, terminals, written, controls
 end
 
+--Supplies context harness behavior required by this suite.
+--@param commands any The commands supplied to the fake service for this scenario.
+--@param settings table|nil Fixture settings and scenario overrides.
+--@return any observed context harness value observed by the scenario assertion.
+--@return any secondary2 Failure diagnostic returned by the fixture.
+--@return any secondary3 Additional status or structured error from the fixture operation.
+--@return any secondary4 Recorded call count returned by the fixture.
+--@return any secondary5 Configured control actions returned by the fixture.
 local function context_harness(commands, settings)
     settings = settings or {}
     local batches = {}
@@ -232,11 +322,19 @@ local function context_harness(commands, settings)
         rows[1].canonical_name, rows[1].created_at, rows[1].updated_at = nil, nil, nil
     end
     local scanner = {
+        --Simulates the begin transition of a fake activity port for this suite.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return boolean accepted Whether the fake callback accepts this scenario.
+        --@return table secondary2 Structured fixture record selected by the exercised branch.
         begin = function()
             calls.scans = calls.scans + 1
             if settings.scan_failure then return false, { code = "ScanDenied", message = "scan denied" } end
             return true, { next = 0 }
         end,
+        --Supplies next ring behavior required by this suite.
+        --@param handle table|integer Fake resource handle whose state is inspected.
+        --@return boolean accepted Whether the fake callback accepts this scenario.
+        --@return table|nil secondary2 Structured fixture record selected by the exercised branch.
         next_ring = function(handle)
             handle.next = handle.next + 1
             if handle.next == 1 then return true, { scope = "/", complete = true, candidates = rows } end
@@ -245,10 +343,21 @@ local function context_harness(commands, settings)
             end
             return true, nil
         end,
+        --Simulates the close transition of a fake activity port for this suite.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return boolean accepted Whether the fake callback accepts this scenario.
         close = function() calls.closes = calls.closes + 1 return true end,
+        --Simulates the status transition of a fake activity port for this suite.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return table record Fixture record emitted by the scenario callback.
         status = function() return { complete = not settings.partial, partial_reason = "ScanInterrupted" } end,
     }
-    local verifier = { observe = function(target)
+    local verifier = {
+        --Supplies observe behavior required by this suite.
+        --@param target table|string Target selected for the exercised operation.
+        --@return boolean accepted Whether the fake callback accepts this scenario.
+        --@return table|any secondary2 Additional status or structured error from the fixture operation.
+        observe = function(target)
             calls.verifies = calls.verifies + 1
             for _, row in ipairs(rows) do
                 if row.logical_path == target.logical_path then
@@ -270,6 +379,11 @@ local function context_harness(commands, settings)
         maximum_collision_candidates = 4, maximum_reason_bytes = 64 }))
     composed.contexts = { catalog = catalog, catalog_scanner = scanner, path = path,
         catalog_verifier = verifier, context_root = "/data/CONTEXT", store = {
+            --Returns the inspect import observation prepared for this suite.
+            --@param target table|string Target selected for the exercised operation.
+            --@param credential table Expected file identity used for reverification.
+            --@return table|nil value Callback value consumed by the enclosing scenario assertion.
+            --@return table secondary2 Structured fixture record selected by the exercised branch.
             inspect_import = function(target, credential)
                 calls.import_reads = (calls.import_reads or 0) + 1
                 A.equal(target, credential.physical_path)
@@ -284,7 +398,12 @@ local function context_harness(commands, settings)
         } }
     composed.config_generation = { context = { recent_list_limit = 1 } }
     if settings.manage then
-        composed.publication = { manage_context = function(specification)
+        composed.publication = {
+            --Supplies manage context behavior required by this suite.
+            --@param specification table Test specification used to construct the fixture.
+            --@return table|nil value Callback value consumed by the enclosing scenario assertion.
+            --@return table|any|nil secondary2 Additional status or structured error from the fixture operation.
+            manage_context = function(specification)
             calls.mutations[#calls.mutations + 1] = specification
             A.equal(specification.context_path, specification.expected_credential.physical_path)
             A.equal(specification.logical_path, specification.expected_credential.logical_path)
@@ -302,7 +421,12 @@ local function context_harness(commands, settings)
             end
             return { outcome = "success", context_hash = "0123456789ABCDEF",
                 logical_path = "/Managed.xml", auto_rename_disabled = specification.action == "rename" }
-        end, plan_rebind = function(specification)
+        end,
+            --Supplies plan rebind behavior required by this suite.
+            --@param specification table Test specification used to construct the fixture.
+            --@return any|nil value Callback value consumed by the enclosing scenario assertion.
+            --@return any|nil secondary2 Configured plan error override.
+            plan_rebind = function(specification)
             calls.plans = (calls.plans or 0) + 1
             A.equal(specification.context_path, specification.expected_credential.physical_path)
             if settings.plan_error then return nil, settings.plan_error end
@@ -310,12 +434,22 @@ local function context_harness(commands, settings)
                 target_logical_path = "/new-work/Task001.xml", target_hash = "FEDCBA9876543210" }
             calls.proposal = plan
             return plan
-        end, plan_repair = function(specification)
+        end,
+            --Supplies plan repair behavior required by this suite.
+            --@param specification table Test specification used to construct the fixture.
+            --@return table|nil value Callback value consumed by the enclosing scenario assertion.
+            --@return any|nil secondary2 Configured plan error override.
+            plan_repair = function(specification)
             calls.repair_plans = (calls.repair_plans or 0) + 1
             if settings.plan_error then return nil, settings.plan_error end
             return { action = settings.repair_action or "restore-previous", source_path = specification.context_path .. ".yaca-prev",
                 previous_path = specification.context_path .. ".yaca-prev" }
-        end, plan_import = function(specification)
+        end,
+            --Supplies plan import behavior required by this suite.
+            --@param specification table Test specification used to construct the fixture.
+            --@return table|nil value Callback value consumed by the enclosing scenario assertion.
+            --@return any|nil secondary2 Configured plan error override.
+            plan_import = function(specification)
             calls.import_plans = (calls.import_plans or 0) + 1
             calls.import_generation = specification.generation
             if settings.plan_error then return nil, settings.plan_error end
@@ -328,6 +462,10 @@ local function context_harness(commands, settings)
     end
     if settings.controllers then
         composed.application = {
+            --Simulates the dispatch port for this suite.
+            --@param action table|string Action supplied to the exercised service.
+            --@return table|nil value Callback value consumed by the enclosing scenario assertion.
+            --@return table|any|nil secondary2 Additional status or structured error from the fixture operation.
             dispatch = function(action)
                 calls.exports = (calls.exports or 0) + 1
                 calls.export_selector = action.selector
@@ -336,6 +474,10 @@ local function context_harness(commands, settings)
                 if settings.export_error then return nil, settings.export_error end
                 return { kind = "context-export", format = "markdown", markdown = "# yaca Context export v1\n\nfixture body\n" }
             end,
+            --Returns the preview continue observation prepared for this suite.
+            --@param selector string Context selector resolved by the case.
+            --@return any|nil value Callback value consumed by the enclosing scenario assertion.
+            --@return any|nil secondary2 Configured continue error override.
             preview_continue = function(selector)
                 calls.continue_selectors = calls.continue_selectors or {}
                 calls.continue_selectors[#calls.continue_selectors + 1] = selector
@@ -345,11 +487,17 @@ local function context_harness(commands, settings)
                     requires_workspace_confirmation = settings.cross_workspace == true }
                 return calls.continue_preview
             end,
+            --Returns the continue preview observation prepared for this suite.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; the fake port or test assertion observes this callback's effects.
             continue_preview = function() error("manager must close its terminal before opening a writer") end,
         }
     end
     if settings.change_import_config then
         local write = runtime.stdout
+        --Captures stdout bytes in the the current case scenario.
+        --@param bytes string Byte chunk supplied to the fake I/O port.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
         runtime.stdout = function(bytes)
             if bytes:find("Type IMPORT", 1, true) then
                 controls.external_write(CONFIG_PATH, source():gsub("LogLevel = info", "LogLevel = debug"))
@@ -358,6 +506,9 @@ local function context_harness(commands, settings)
         end
     end
     if settings.stdout_failure then
+        --Captures stdout bytes in the the current case scenario.
+        --@param bytes string Byte chunk supplied to the fake I/O port.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
         runtime.stdout = function(bytes)
             written[#written + 1] = bytes
             return not bytes:find("context>", 1, true)
@@ -371,6 +522,14 @@ local function context_harness(commands, settings)
     return result, err, table.concat(written), calls, controls
 end
 
+--Supplies model test harness behavior required by this suite.
+--@param commands any The commands supplied to the fake service for this scenario.
+--@param settings table|nil Fixture settings and scenario overrides.
+--@return any observed model test harness value observed by the scenario assertion.
+--@return any secondary2 Failure diagnostic returned by the fixture.
+--@return any secondary3 Additional status or structured error from the fixture operation.
+--@return any secondary4 Recorded call count returned by the fixture.
+--@return any secondary5 Configured control actions returned by the fixture.
 local function model_test_harness(commands, settings)
     settings = settings or {}
     local batches = {}
@@ -382,9 +541,17 @@ local function model_test_harness(commands, settings)
     end
     local composed, runtime, terminals, written, controls = harness(batches)
     local new_terminal = composed.backend.new_terminal
+    --Constructs new terminal for this test scenario.
+    --@param mode string Operating mode selected by the scenario.
+    --@return any value Callback value consumed by the enclosing scenario assertion.
     composed.backend.new_terminal = function(mode)
         local terminal = new_terminal(mode)
         local poll = terminal.poll
+        --Simulates the poll transition of a fake activity port for this suite.
+        --@param self table Fixture or port instance receiving this call.
+        --@param now integer Monotonic timestamp supplied by the fake clock.
+        --@param budget integer|table Resource budget applied by the scenario.
+        --@return table|any value Callback value consumed by the enclosing scenario assertion.
         terminal.poll = function(self, now, budget)
             if self.cancelled then return { { kind = "io_terminal" } } end
             return poll(self, now, budget)
@@ -393,6 +560,11 @@ local function model_test_harness(commands, settings)
     end
     local calls = 0
     local original = main.check_model_connection
+    --Checks check model connection against this test expectation.
+    --@param _ any Unused callback argument supplied by the port.
+    --@param name string Module, Model, or resource name selected by the case.
+    --@param saved any The saved supplied to the fake service for this scenario.
+    --@return table record Fixture record emitted by the scenario callback.
     main.check_model_connection = function(_, name, saved)
         calls = calls + 1
         A.equal(name, "Primary")
@@ -402,6 +574,9 @@ local function model_test_harness(commands, settings)
     end
     if settings.change then
         local output = runtime.stdout
+        --Captures stdout bytes in the the current case scenario.
+        --@param bytes string Byte chunk supplied to the fake I/O port.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
         runtime.stdout = function(bytes)
             if bytes:find("MODELS model-edit-1", 1, true) then
                 controls.external_write(CONFIG_PATH, source():gsub("example%-secret%-value", "changed-secret-value"))
@@ -419,6 +594,9 @@ end
 local context_cases = {
     {
         name = "Model connection tests need exact consent and report current results without saving",
+        --Verifies model connection tests need exact consent and report current results without saving.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return nil No value; assertions verify model connection tests need exact consent and report current results without saving.
         run = function()
             local result, err, output, calls, controls = model_test_harness({
                 "test model-edit-1:1", "no", "test model-edit-1:1", "TEST model-edit-1:1", "list", "quit",
@@ -433,6 +611,9 @@ local context_cases = {
     },
     {
         name = "Model connection tests refuse unsaved or externally changed secret definitions",
+        --Verifies model connection tests need exact consent and report current results without saving.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return nil No value; assertions verify model connection tests need exact consent and report current results without saving.
         run = function()
             local result, err, output, calls = model_test_harness({
                 "rename model-edit-1:1 Renamed", "test model-edit-2:1", "quit",
@@ -448,6 +629,9 @@ local context_cases = {
     },
     {
         name = "Model rename lists referenced Contexts and saves without rewriting their history",
+        --Verifies model connection tests refuse unsaved or externally changed secret definitions.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return nil No value; assertions verify model connection tests refuse unsaved or externally changed secret definitions.
         run = function()
             local result, err, output, calls, controls = context_harness({
                 "rename model-edit-1:1 Renamed", "preview", "save model-edit-2",
@@ -464,6 +648,9 @@ local context_cases = {
     },
     {
         name = "Model reference preview rejects busy corrupt partial and invalid-body Contexts",
+        --Verifies model rename lists referenced Contexts and saves without rewriting their history.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return nil No value; assertions verify model rename lists referenced Contexts and saves without rewriting their history.
         run = function()
             for _, key in ipairs({ "busy", "corrupt", "partial", "body_error" }) do
                 local settings = { model_manager = true, reference_model = "Primary", [key] = true }
@@ -480,6 +667,9 @@ local context_cases = {
     },
     {
         name = "Model reference identity is checked again after confirmation before creating configuration temporary",
+        --Verifies model reference preview rejects busy corrupt partial and invalid-body Contexts.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return nil No value; assertions verify model reference preview rejects busy corrupt partial and invalid-body Contexts.
         run = function()
             local result, err, output, calls, controls = context_harness({
                 "rename model-edit-1:1 Renamed", "preview", "save model-edit-2", "quit",
@@ -494,6 +684,9 @@ local context_cases = {
     },
     {
         name = "Context manager exports Markdown through the read-only application owner",
+        --Verifies model reference identity is checked again after confirmation before creating configuration temporary.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return nil No value; assertions verify model reference identity is checked again after confirmation before creating configuration temporary.
         run = function()
             local result, err, output, calls = context_harness({ "export Task001", "export", "quit" }, { controllers = true })
             A.truthy(result, A.render(err))
@@ -511,6 +704,9 @@ local context_cases = {
     },
     {
         name = "Context manager restores input before transferring an exact continuation preview",
+        --Verifies context manager exports Markdown through the read-only application owner.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return nil No value; assertions verify context manager exports Markdown through the read-only application owner.
         run = function()
             for _, cross in ipairs({ false, true }) do
                 local commands = { "select Task001" }
@@ -528,6 +724,9 @@ local context_cases = {
     },
     {
         name = "Context manager cancels workspace choices without leaving management or opening a writer",
+        --Verifies context manager cancels workspace choices without leaving management or opening a writer.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return nil No value; assertions verify context manager cancels workspace choices without leaving management or opening a writer.
         run = function()
             local result, err, output, calls = context_harness({ "select Task001", "no", "list", "quit" }, {
                 controllers = true, cross_workspace = true,
@@ -551,6 +750,9 @@ local context_cases = {
 
     {
         name = "Context repair confirms a previous-only target and refuses changed confirmations",
+        --Verifies context repair confirms a previous-only target and refuses changed confirmations.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return nil No value; assertions verify context repair confirms a previous-only target and refuses changed confirmations.
         run = function()
             local path = assert(load_module("path").new(hash_port(), {
                 maximum_path_bytes = 2048, maximum_segments = 128,
@@ -575,6 +777,9 @@ local context_cases = {
     },
     {
         name = "Context repair cancellation no-op and unsafe repair never start an unconfirmed mutation",
+        --Verifies context repair cancellation no-op and unsafe repair never start an unconfirmed mutation.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return nil No value; assertions verify context repair cancellation no-op and unsafe repair never start an unconfirmed mutation.
         run = function()
             local result, err, output, calls = context_harness({ "repair Task001", "no", "quit" },
                 { manage = true, corrupt = true })
@@ -596,6 +801,9 @@ local context_cases = {
     },
     {
         name = "Context import captures an exact in-place file and confirms effective local mappings",
+        --Verifies context import captures an exact in-place file and confirms effective local mappings.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return nil No value; assertions verify context import captures an exact in-place file and confirms effective local mappings.
         run = function()
             local path = assert(load_module("path").new(hash_port(), {
                 maximum_path_bytes = 2048, maximum_segments = 128,
@@ -626,6 +834,9 @@ local context_cases = {
     },
     {
         name = "Context import rejects outside paths busy files invalid mappings and cancelled consent",
+        --Verifies context import rejects outside paths busy files invalid mappings and cancelled consent.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return nil No value; assertions verify context import rejects outside paths busy files invalid mappings and cancelled consent.
         run = function()
             for _, scenario in ipairs({
                 { commands = { "import /elsewhere/Task001.xml", "quit" }, error = "InvalidImportPath", reads = 0 },
@@ -647,6 +858,9 @@ local context_cases = {
     },
     {
         name = "Context rebind confirms the inspected destination and reverifies the original selection",
+        --Verifies context rebind confirms the inspected destination and reverifies the original selection.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return nil No value; assertions verify context rebind confirms the inspected destination and reverifies the original selection.
         run = function()
             local path = assert(load_module("path").new(hash_port(), {
                 maximum_path_bytes = 2048, maximum_segments = 128,
@@ -671,6 +885,9 @@ local context_cases = {
     },
     {
         name = "Context rebind cancellation and planning failures make no mutations",
+        --Verifies context rebind cancellation and planning failures make no mutations.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return nil No value; assertions verify context rebind cancellation and planning failures make no mutations.
         run = function()
             local result, err, output, calls = context_harness({
                 "rebind Task001 /new-work", "no", "quit",
@@ -689,6 +906,9 @@ local context_cases = {
     },
     {
         name = "Context read-only loop lists searches verifies refreshes and closes without body access",
+        --Verifies context rebind cancellation and planning failures make no mutations.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return nil No value; assertions verify context rebind cancellation and planning failures make no mutations.
         run = function()
             local result, err, output, calls = context_harness({
                 "list full", "search Task002", "inspect Task001", "refresh", "help", "quit",
@@ -705,6 +925,9 @@ local context_cases = {
     },
     {
         name = "Context inspection refuses replaced and busy targets without selecting replacements",
+        --Verifies context read-only loop lists searches verifies refreshes and closes without body access.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return nil No value; assertions verify context read-only loop lists searches verifies refreshes and closes without body access.
         run = function()
             local result, err, output, calls = context_harness({ "inspect Task001", "quit" }, { changed = true })
             A.truthy(result, A.render(err)); A.contains(output, "ContextTargetChanged")
@@ -716,6 +939,9 @@ local context_cases = {
     },
     {
         name = "Context loop rejects mutations and malformed commands then accepts subsequent input",
+        --Verifies context inspection refuses replaced and busy targets without selecting replacements.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return nil No value; assertions verify context inspection refuses replaced and busy targets without selecting replacements.
         run = function()
             local result, err, output = context_harness({ "rename Task001 NewName", "nonsense", "list", "quit" })
             A.truthy(result, A.render(err)); A.contains(output, "ContextActionUnavailable")
@@ -724,6 +950,9 @@ local context_cases = {
     },
     {
         name = "Context mutations use exact credentials and explicit permanent delete consent",
+        --Verifies context loop rejects mutations and malformed commands then accepts subsequent input.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return nil No value; assertions verify context loop rejects mutations and malformed commands then accepts subsequent input.
         run = function()
             local result, err, output, calls = context_harness({
                 "rename Task001 Managed", "set-auto-rename-disabled Task001 false",
@@ -743,6 +972,9 @@ local context_cases = {
     },
     {
         name = "Context delete confirms an exact hash and reverifies before mutation",
+        --Verifies context delete confirms an exact hash and reverifies before mutation.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return nil No value; assertions verify context delete confirms an exact hash and reverifies before mutation.
         run = function()
             local path = assert(load_module("path").new(hash_port(), {
                 maximum_path_bytes = 2048, maximum_segments = 128,
@@ -764,6 +996,9 @@ local context_cases = {
     },
     {
         name = "Context delete cancellation and uncertain mutation restore and stop the manager",
+        --Verifies context delete cancellation and uncertain mutation restore and stop the manager.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return nil No value; assertions verify context delete cancellation and uncertain mutation restore and stop the manager.
         run = function()
             local result, err, output, calls = context_harness({ "delete Task001",
                 { kind = "user_action", action = "cancel" } }, { manage = true })
@@ -784,6 +1019,9 @@ local context_cases = {
     },
     {
         name = "Context deletion admits corrupt headers but rejects busy targets and names containing secrets",
+        --Verifies context deletion admits corrupt headers but rejects busy targets and names containing secrets.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return nil No value; assertions verify context deletion admits corrupt headers but rejects busy targets and names containing secrets.
         run = function()
             local result, err, output, calls = context_harness({ "delete Task001 --yes", "quit" },
                 { manage = true, corrupt = true })
@@ -803,6 +1041,9 @@ local context_cases = {
     },
     {
         name = "Context full initial view bounds rows and reports true search totals",
+        --Verifies context full initial view bounds rows and reports true search totals.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return nil No value; assertions verify context full initial view bounds rows and reports true search totals.
         run = function()
             local result, err, output = context_harness({ "search Task", "quit" }, { count = 300, view = "full" })
             A.truthy(result, A.render(err)); A.contains(output, "CONTEXT CATALOG view=full")
@@ -815,6 +1056,9 @@ local context_cases = {
     },
     {
         name = "Context partial scans remain explicit and refreshable and scan failures propagate",
+        --Verifies context full initial view bounds rows and reports true search totals.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return nil No value; assertions verify context full initial view bounds rows and reports true search totals.
         run = function()
             local result, err, output = context_harness({ "refresh", "list", "quit" }, { partial = true })
             A.truthy(result, A.render(err)); A.contains(output, "scan incomplete")
@@ -824,6 +1068,9 @@ local context_cases = {
     },
     {
         name = "Context cancellation EOF and broken stdout always close the terminal",
+        --Verifies context partial scans remain explicit and refreshable and scan failures propagate.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return nil No value; assertions verify context partial scans remain explicit and refreshable and scan failures propagate.
         run = function()
             for _, event in ipairs({ { kind = "user_action", action = "cancel" },
                 { kind = "user_action", action = "eof" }, { kind = "io_terminal" } }) do
@@ -841,6 +1088,9 @@ local suite = {
     cases = {
         {
             name = "configuration editor reports its own cancellation code and restores the terminal",
+            --Verifies context cancellation EOF and broken stdout always close the terminal.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify context cancellation EOF and broken stdout always close the terminal.
             run = function()
                 local composed, runtime, terminals = harness({
                     { { kind = "user_action", action = "cancel" } },

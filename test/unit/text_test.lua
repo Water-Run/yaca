@@ -1,12 +1,15 @@
 --[[
-File: text_test.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-09-23
+File: text_test.lua
 Description: Verifies strict UTF-8, exact byte carriers, and display isolation.
 ]]
 
 local A = assert(loadfile(YACA_TEST_ROOT .. "/test/support/assert.lua", "t", _ENV))()
 
+--Loads a repository Lua module as a test support value.
+--@param relative_path string Repository-relative Lua source path to load.
+--@return any module Test support module export loaded from the repository.
 local function load_table(relative_path)
     local chunk, load_error = loadfile(YACA_TEST_ROOT .. "/" .. relative_path, "t", _ENV)
     A.truthy(chunk, load_error)
@@ -16,6 +19,9 @@ end
 local text = load_table("src/text.lua")
 local fixtures = load_table(".develope-docs/contracts/fixtures/formats.lua")
 
+--Supplies all octets behavior required by this suite.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return any observed all octets value observed by the scenario assertion.
 local function all_octets()
     local parts = {}
     for value = 0, 255 do parts[#parts + 1] = string.char(value) end
@@ -27,6 +33,9 @@ return {
     cases = {
         {
             name = "contract UTF-8 fixtures produce strict stable results",
+            --Verifies contract UTF-8 fixtures produce strict stable results.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify contract UTF-8 fixtures produce strict stable results.
             run = function()
                 local expected_reason = {
                     overlong = "overlong",
@@ -51,6 +60,9 @@ return {
         },
         {
             name = "scalar boundaries round trip without normalization",
+            --Verifies scalar boundaries round trip without normalization.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify scalar boundaries round trip without normalization.
             run = function()
                 local boundaries = {
                     0x00, 0x01, 0x7F, 0x80, 0x7FF, 0x800,
@@ -72,6 +84,9 @@ return {
         },
         {
             name = "invalid scalar forms fail with offsets and no replacement",
+            --Verifies invalid scalar forms fail with offsets and no replacement.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify invalid scalar forms fail with offsets and no replacement.
             run = function()
                 local cases = {
                     { string.char(0xE2, 0x28, 0xA1), "invalid-continuation", 2 },
@@ -100,12 +115,18 @@ return {
         },
         {
             name = "text and binary carriers preserve their exact byte domains",
+            --Verifies text and binary carriers preserve their exact byte domains.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify text and binary carriers preserve their exact byte domains.
             run = function()
                 local canonical = "路径\r\n" .. assert(text.encode_scalar(0x1F642))
                 local text_carrier = assert(text.text(canonical))
                 A.equal(text_carrier.kind, "text")
                 A.equal(text_carrier.byte_count, #canonical)
                 A.equal(text.canonical_bytes(text_carrier), canonical)
+                --Executes the action expected to raise in the 'text and binary carriers preserve their exact byte domains' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify text and binary carriers preserve their exact byte domains.
                 A.raises(function() text_carrier.bytes = "changed" end, "cannot be modified")
 
                 local valid_nul, nul_metadata = text.validate_utf8("a\0b")
@@ -127,6 +148,9 @@ return {
         },
         {
             name = "XML carrier classification matches lossless fixture intent",
+            --Verifies xML carrier classification matches lossless fixture intent.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify xML carrier classification matches lossless fixture intent.
             run = function()
                 for _, case in ipairs(fixtures.xml_text_cases) do
                     if case.present ~= false then
@@ -146,6 +170,9 @@ return {
         },
         {
             name = "lossy display escapes danger without feeding back into canonical bytes",
+            --Verifies lossy display escapes danger without feeding back into canonical bytes.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify lossy display escapes danger without feeding back into canonical bytes.
             run = function()
                 local canonical = "A路径\n\27" .. assert(text.encode_scalar(0x202E))
                 local carrier = assert(text.text(canonical))

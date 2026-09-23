@@ -1,7 +1,7 @@
 --[[
-File: sha256_reference.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-09-23
+File: sha256_reference.lua
 Description: Supplies an independent pure-Lua SHA-256 test oracle.
 ]]
 
@@ -26,14 +26,24 @@ local CONSTANTS = {
 
 local MASK = 0xFFFFFFFF
 
+--Supplies u32 behavior required by this suite.
+--@param value any Candidate whose acceptance or transformation the test checks.
+--@return any observed u32 value observed by the scenario assertion.
 local function u32(value)
     return value & MASK
 end
 
+--Supplies rotate right behavior required by this suite.
+--@param value any Candidate whose acceptance or transformation the test checks.
+--@param count integer Number of items or calls expected by the fixture.
+--@return number observed rotate right value observed by the scenario assertion.
 local function rotate_right(value, count)
     return ((value >> count) | (value << (32 - count))) & MASK
 end
 
+--Supplies length suffix behavior required by this suite.
+--@param byte_length any The byte length supplied to the fake service for this scenario.
+--@return any observed length suffix value observed by the scenario assertion.
 local function length_suffix(byte_length)
     local bit_length = byte_length * 8
     local result = {}
@@ -43,6 +53,9 @@ local function length_suffix(byte_length)
     return table.concat(result)
 end
 
+--Computes or records digest data for this suite.
+--@param value any Candidate whose acceptance or transformation the test checks.
+--@return any observed digest value observed by the scenario assertion.
 local function digest(value)
     assert(type(value) == "string", "SHA-256 oracle input must be bytes")
     local padded = value .. "\128"
@@ -106,7 +119,13 @@ local function digest(value)
     return table.concat(output)
 end
 
+--Supplies hex behavior required by this suite.
+--@param value any Candidate whose acceptance or transformation the test checks.
+--@return any observed hex value observed by the scenario assertion.
 local function hex(value)
+    --Supplies an assertion callback for this test scenario.
+    --@param byte integer Single byte being encoded or inspected.
+    --@return any value Callback value consumed by the enclosing scenario assertion.
     return (digest(value):gsub(".", function(byte)
         return string.format("%02x", byte:byte())
     end))

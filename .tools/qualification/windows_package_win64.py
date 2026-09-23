@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# Author: WaterRun
+# Date: 2026-09-23
+# File: windows_package_win64.py
+# Description: Audit and assemble a win64 Windows preview without asserting target qualification.
+
 """Audit and assemble a win64 Windows preview without asserting target qualification."""
 
 import hashlib
@@ -12,10 +17,16 @@ import tarfile
 import zipfile
 
 
+# Computes the SHA-256 digest of one input file.
+#@param path Path|str Input file or package path under inspection.
+#@return str digest Lowercase SHA-256 digest of the input file.
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+# Runs the windows package win64 command and reports its status.
+#@param none No arguments.
+#@return None result No value; writes the verified Win64 edition ZIP.
 def main():
     repo, output, cache = (pathlib.Path(value).resolve() for value in sys.argv[1:])
     package = output / "package"

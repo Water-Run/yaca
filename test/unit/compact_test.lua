@@ -1,7 +1,7 @@
 --[[
-File: compact_test.lua
-Date: 2026-08-30
 Author: WaterRun
+Date: 2026-09-23
+File: compact_test.lua
 Description: Verifies lossless-facts structured ModelView compaction.
 ]]
 
@@ -13,12 +13,19 @@ local sha256 = assert(loadfile(
 ))()
 local compact = assert(loadfile(YACA_TEST_ROOT .. "/src/compact.lua", "t", _ENV))()
 
+--Copies test data so a mutation cannot affect the original fixture.
+--@param values table Candidate values supplied to the fixture operation.
+--@return any copy Independent copy of the source fixture value.
 local function copy(values)
     local result = {}
     for key, value in pairs(values or {}) do result[key] = value end
     return result
 end
 
+--Builds validated options for this suite's component fixture.
+--@param overrides table|nil Per-case overrides of default fixture behavior.
+--@param initial_automatic_failure_count any The initial automatic failure count supplied to the fake service for this scenario.
+--@return table options options used to configure the component under test.
 local function options(overrides, initial_automatic_failure_count)
     local manifest = {
         snapshot_id = "manifest-compaction-v1",
@@ -48,6 +55,12 @@ local function options(overrides, initial_automatic_failure_count)
     }
 end
 
+--Writes append event through the the current case fixture.
+--@param facts table Platform or file-descriptor facts supplied to the case.
+--@param event_type string Event kind emitted by the fake activity.
+--@param turn_id integer Agent turn identity under inspection.
+--@param fields table Field values used to construct the test document.
+--@return nil No value; the fake port or test assertion observes this callback's effects.
 local function append_event(facts, event_type, turn_id, fields)
     local order, metadata = {}, {}
     for name, value in pairs(fields) do
@@ -70,6 +83,11 @@ local function append_event(facts, event_type, turn_id, fields)
     }
 end
 
+--Writes append turn through the the current case fixture.
+--@param facts table Platform or file-descriptor facts supplied to the case.
+--@param serial integer Sequence number assigned by the fake port.
+--@param settings table|nil Fixture settings and scenario overrides.
+--@return nil No value; the fake port or test assertion observes this callback's effects.
 local function append_turn(facts, serial, settings)
     settings = settings or {}
     local turn_id = "turn-" .. tostring(serial)
@@ -122,6 +140,10 @@ local function append_turn(facts, serial, settings)
     end
 end
 
+--Supplies document behavior required by the 'read' case.
+--@param turn_count integer Number of Agent turns in the fixture.
+--@param settings_by_turn any The settings by turn supplied to the fake service for this scenario.
+--@return table observed Structured fixture record selected by the exercised branch.
 local function document(turn_count, settings_by_turn)
     local facts = {}
     for serial = 1, turn_count do
@@ -142,6 +164,11 @@ local function document(turn_count, settings_by_turn)
     }
 end
 
+--Constructs the suite's isolated runtime fixture and observation ports.
+--@param settings table|nil Fixture settings and scenario overrides.
+--@param manifest_overrides any The manifest overrides supplied to the fake service for this scenario.
+--@param source_document any The source document supplied to the fake service for this scenario.
+--@return table fixture Constructed fixture service used by this suite.
 local function fixture(settings, manifest_overrides, source_document)
     settings = settings or {}
     source_document = source_document or document(6)
@@ -153,12 +180,20 @@ local function fixture(settings, manifest_overrides, source_document)
     local digest_calls, estimate_calls = 0, 0
     local old_manifest_at_publish
 
+    --Computes or records digest data for the 'read' case.
+    --@param bytes string Byte chunk supplied to the fake I/O port.
+    --@return string|nil observed Fixture text "sha256:" .. sha256.hex(bytes); nil on alternate branches.
+    --@return string|nil secondary2 Fixture text "digest-fault".
     local function digest(bytes)
         digest_calls = digest_calls + 1
         if settings.fail_digest_at == digest_calls then return nil, "digest-fault" end
         return "sha256:" .. sha256.hex(bytes)
     end
 
+    --Supplies estimate behavior required by the 'read' case.
+    --@param bytes string Byte chunk supplied to the fake I/O port.
+    --@return integer|number|nil observed estimate value observed by the scenario assertion.
+    --@return string|nil secondary2 Fixture text "estimate-fault".
     local function estimate(bytes)
         estimate_calls = estimate_calls + 1
         if settings.fail_estimate_at == estimate_calls then return nil, "estimate-fault" end
@@ -167,10 +202,19 @@ local function fixture(settings, manifest_overrides, source_document)
         return (#bytes + bytes_per_token - 1) // bytes_per_token
     end
 
+    --Supplies journal commit behavior required by the 'read' case.
+    --@param method string Port method selected by the scenario.
+    --@param binding table Verified binding under inspection.
+    --@param publishing any The publishing supplied to the fake service for this scenario.
+    --@return boolean accepted Whether journal commit succeeds in the fixture.
+    --@return table|any|nil secondary2 Additional status or structured error from the fixture operation.
     local function journal_commit(method, binding, publishing)
         log[#log + 1] = "journal:" .. method .. ":" .. binding.kind
         journal_records[#journal_records + 1] = { method = method, binding = binding }
         if settings.fail_journal_method == method then return false, nil end
+        if settings.capacity and method == "commit_intent" then
+            return false, { code = "ContextCapacity", publication_started = false }
+        end
         local previous = generation
         if settings.bad_receipt_method == method then
             return true, {
@@ -199,29 +243,52 @@ local function fixture(settings, manifest_overrides, source_document)
     end
 
     local journal = {
+        --Simulates the commit intent publication step for the 'read' case.
+        --@param binding table Verified binding under inspection.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
         commit_intent = function(binding)
             return journal_commit("commit_intent", binding, false)
         end,
+        --Simulates the commit response publication step for the 'read' case.
+        --@param binding table Verified binding under inspection.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
         commit_response = function(binding)
             return journal_commit("commit_response", binding, false)
         end,
+        --Simulates the commit rejection publication step for the 'read' case.
+        --@param binding table Verified binding under inspection.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
         commit_rejection = function(binding)
             return journal_commit("commit_rejection", binding, false)
         end,
+        --Records the publish effect observed by the 'read' case.
+        --@param binding table Verified binding under inspection.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
         publish = function(binding)
             return journal_commit("publish", binding, true)
         end,
+        --Simulates the commit correction publication step for the 'read' case.
+        --@param binding table Verified binding under inspection.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
         commit_correction = function(binding)
             return journal_commit("commit_correction", binding, false)
         end,
     }
     local model = {
+        --Simulates the start transition of a fake activity port for the 'read' case.
+        --@param specification table Test specification used to construct the fixture.
+        --@return string|nil value Callback value consumed by the enclosing scenario assertion.
+        --@return string|nil secondary2 Fixture text "model-start-fault".
         start = function(specification)
             starts[#starts + 1] = specification
             log[#log + 1] = "model:start:" .. specification.request_id
             if settings.fail_model_start then return nil, "model-start-fault" end
             return "handle:" .. specification.request_id
         end,
+        --Simulates the cancel transition of a fake activity port for the 'read' case.
+        --@param handle table|integer Fake resource handle whose state is inspected.
+        --@param reason string Failure or close reason supplied to the port.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
         cancel = function(handle, reason)
             cancel_calls[#cancel_calls + 1] = { handle = handle, reason = reason }
             log[#log + 1] = "model:cancel:" .. tostring(handle)
@@ -231,7 +298,11 @@ local function fixture(settings, manifest_overrides, source_document)
     local service, create_error = compact.new({
         safety = { digest = digest },
         estimator = { estimate = estimate },
-        clock = { now = function() return now end },
+        clock = {
+            --Supplies deterministic clock behavior for the 'read' case.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return any value Callback value consumed by the enclosing scenario assertion.
+            now = function() return now end },
         model = model,
         journal = journal,
     }, options(manifest_overrides, settings.initial_automatic_failure_count))
@@ -245,13 +316,29 @@ local function fixture(settings, manifest_overrides, source_document)
         publications = publications,
         journal_records = journal_records,
         digest = digest,
+        --Builds the generation values used by the 'read' case.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
         generation = function() return generation end,
+        --Supplies manifest behavior required by the 'read' case.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
         manifest = function() return manifest_digest end,
+        --Supplies old manifest at publish behavior required by the 'read' case.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
         old_manifest_at_publish = function() return old_manifest_at_publish end,
+        --Supplies advance behavior required by the 'read' case.
+        --@param delta integer Clock or count increment for this step.
+        --@return nil No value; the fake port or test assertion observes this callback's effects.
         advance = function(delta) now = now + delta end,
     }
 end
 
+--Supplies input for behavior required by the 'read' case.
+--@param instance table Component instance under inspection.
+--@param overrides table|nil Per-case overrides of default fixture behavior.
+--@return table observed Structured fixture record selected by the exercised branch.
 local function input_for(instance, overrides)
     overrides = overrides or {}
     local source = overrides.document or instance.document
@@ -291,6 +378,11 @@ local function input_for(instance, overrides)
     }
 end
 
+--Supplies response for behavior required by the 'read' case.
+--@param instance table Component instance under inspection.
+--@param index integer One-based event or item position.
+--@param overrides table|nil Per-case overrides of default fixture behavior.
+--@return table observed Structured fixture record selected by the exercised branch.
 local function response_for(instance, index, overrides)
     overrides = overrides or {}
     local specification = instance.starts[index or #instance.starts]
@@ -327,6 +419,11 @@ local function response_for(instance, index, overrides)
     }
 end
 
+--Supplies published document behavior required by the 'read' case.
+--@param instance table Component instance under inspection.
+--@param completed any The completed supplied to the fake service for this scenario.
+--@param summary_body any The summary body supplied to the fake service for this scenario.
+--@return table observed Structured fixture record selected by the exercised branch.
 local function published_document(instance, completed, summary_body)
     local source = instance.document
     return {
@@ -357,7 +454,27 @@ return {
     name = "unit/compact",
     cases = {
         {
+            name = "capacity refusal before the first intent leaves compaction idle and retryable",
+            --Verifies capacity refusal before the first intent leaves compaction idle and retryable.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify capacity refusal before the first intent leaves compaction idle and retryable.
+            run = function()
+                local settings = { capacity = true }
+                local instance = fixture(settings)
+                local input = input_for(instance, { active_estimated_tokens = 450 })
+                local started, err = instance.service:begin(input)
+                A.falsy(started); A.equal(err.code, "ContextCapacity")
+                A.equal(instance.service:status().state, "Idle")
+                A.equal(#instance.starts, 0)
+                settings.capacity = false
+                A.equal(assert(instance.service:begin(input)).state, "Compacting")
+            end,
+        },
+        {
             name = "manifest threshold and hard caps drive fail-closed admission",
+            --Verifies capacity refusal before the first intent leaves compaction idle and retryable.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify capacity refusal before the first intent leaves compaction idle and retryable.
             run = function()
                 local source = document(2)
                 local instance = fixture({}, nil, source)
@@ -408,17 +525,52 @@ return {
                 A.falsy(created)
                 A.equal(create_error.code, "InvalidCompactionPorts")
                 local valid_ports = {
-                    safety = { digest = function() return "digest" end },
-                    estimator = { estimate = function() return 1 end },
-                    clock = { now = function() return 0 end },
-                    model = { start = function() return true end, cancel = function()
+                    safety = {
+                        --Computes or records digest data for the 'manifest threshold and hard caps drive fail-closed admission' case.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return string text Text emitted by the scenario callback.
+                        digest = function() return "digest" end },
+                    estimator = {
+                        --Supplies estimate behavior required by the 'manifest threshold and hard caps drive fail-closed admission' case.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return integer value Callback value consumed by the enclosing scenario assertion.
+                        estimate = function() return 1 end },
+                    clock = {
+                        --Supplies deterministic clock behavior for the 'manifest threshold and hard caps drive fail-closed admission' case.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return integer value Callback value consumed by the enclosing scenario assertion.
+                        now = function() return 0 end },
+                    model = {
+                        --Simulates the start transition of a fake activity port for the 'manifest threshold and hard caps drive fail-closed admission' case.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return boolean accepted Whether the fake callback accepts this scenario.
+                        start = function() return true end,
+                        --Simulates the cancel transition of a fake activity port for the 'manifest threshold and hard caps drive fail-closed admission' case.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return table record Fixture record emitted by the scenario callback.
+                        cancel = function()
                         return { outcome = "cancelled" }
                     end },
                     journal = {
+                        --Simulates the commit intent publication step for the 'manifest threshold and hard caps drive fail-closed admission' case.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return nil No value; assertions verify capacity refusal before the first intent leaves compaction idle and retryable.
                         commit_intent = function() end,
+                        --Simulates the commit response publication step for the 'manifest threshold and hard caps drive fail-closed admission' case.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return nil No value; assertions verify capacity refusal before the first intent leaves compaction idle and retryable.
                         commit_response = function() end,
+                        --Simulates the commit rejection publication step for the 'manifest threshold and hard caps drive fail-closed admission' case.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return nil No value; assertions verify capacity refusal before the first intent leaves compaction idle and retryable.
                         commit_rejection = function() end,
+                        --Records the publish effect observed by the 'manifest threshold and hard caps drive fail-closed admission' case.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return nil No value; assertions verify capacity refusal before the first intent leaves compaction idle and retryable.
                         publish = function() end,
+                        --Simulates the commit correction publication step for the 'manifest threshold and hard caps drive fail-closed admission' case.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return nil No value; assertions verify capacity refusal before the first intent leaves compaction idle and retryable.
                         commit_correction = function() end,
                     },
                 }
@@ -429,6 +581,9 @@ return {
         },
         {
             name = "successful publication is durable ordered visible and lossless",
+            --Verifies successful publication is durable ordered visible and lossless.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify successful publication is durable ordered visible and lossless.
             run = function()
                 local instance = fixture()
                 local source_count = #instance.document.facts
@@ -479,6 +634,9 @@ return {
                     completed.compaction_id
                 ))
                 A.equal(shown.summary.goals_decisions, "实现 C28\n保持事实完整")
+                --Executes the action expected to raise in the 'successful publication is durable ordered visible and lossless' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify successful publication is durable ordered visible and lossless.
                 A.raises(function() shown.summary.open_todos = "changed" end, "cannot be modified")
                 A.equal(instance.service:status().state, "Idle")
                 A.equal(instance.service:status().automatic_consent_required, false)
@@ -486,6 +644,9 @@ return {
         },
         {
             name = "atomic tool groups never split and oversized required groups wait",
+            --Verifies atomic tool groups never split and oversized required groups wait.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify atomic tool groups never split and oversized required groups wait.
             run = function()
                 local source = document(6, { [3] = { tool = true } })
                 local instance = fixture({}, nil, source)
@@ -549,6 +710,9 @@ return {
         },
         {
             name = "invalid or useless summaries get one correction retry only",
+            --Verifies invalid or useless summaries get one correction retry only.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify invalid or useless summaries get one correction retry only.
             run = function()
                 local instance = fixture({}, { minimum_benefit_tokens = 10000 })
                 assert(instance.service:begin(input_for(instance, {
@@ -578,6 +742,9 @@ return {
         },
         {
             name = "incomplete provider responses never publish a summary",
+            --Verifies incomplete provider responses never publish a summary.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify incomplete provider responses never publish a summary.
             run = function()
                 local instance = fixture()
                 assert(instance.service:begin(input_for(instance, {
@@ -600,11 +767,17 @@ return {
         },
         {
             name = "automatic failures open a cooldown circuit with one half-open probe",
+            --Verifies automatic failures open a cooldown circuit with one half-open probe.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify automatic failures open a cooldown circuit with one half-open probe.
             run = function()
                 local instance = fixture({}, {
                     failure_threshold = 2,
                     failure_cooldown_ms = 100,
                 })
+                --Supplies fail lifecycle behavior required by the 'automatic failures open a cooldown circuit with one half-open probe' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return any observed fail lifecycle value observed by the scenario assertion.
                 local function fail_lifecycle()
                     assert(instance.service:begin(input_for(instance, {
                         active_estimated_tokens = 450,
@@ -644,6 +817,9 @@ return {
         },
         {
             name = "recovered automatic failures reopen a full monotonic cooldown",
+            --Verifies recovered automatic failures reopen a full monotonic cooldown.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify recovered automatic failures reopen a full monotonic cooldown.
             run = function()
                 local instance = fixture({
                     initial_automatic_failure_count = 2,
@@ -679,6 +855,9 @@ return {
         },
         {
             name = "publication and receipt faults retain the prior manifest",
+            --Verifies publication and receipt faults retain the prior manifest.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify publication and receipt faults retain the prior manifest.
             run = function()
                 local failed = fixture({ fail_journal_method = "publish" })
                 assert(failed.service:begin(input_for(failed, {
@@ -708,6 +887,9 @@ return {
         },
         {
             name = "manual lifecycle cancellation has durable terminal settlement",
+            --Verifies manual lifecycle cancellation has durable terminal settlement.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify manual lifecycle cancellation has durable terminal settlement.
             run = function()
                 local instance = fixture()
                 local input = input_for(instance, {
@@ -762,6 +944,9 @@ return {
         },
         {
             name = "summary lookup correction and next publication preserve provenance",
+            --Verifies summary lookup correction and next publication preserve provenance.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify summary lookup correction and next publication preserve provenance.
             run = function()
                 local instance = fixture()
                 assert(instance.service:begin(input_for(instance, {

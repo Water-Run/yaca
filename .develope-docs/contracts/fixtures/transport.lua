@@ -1,3 +1,10 @@
+--[[
+Author: WaterRun
+Date: 2026-09-23
+File: transport.lua
+Description: Supplies network environment, redirect, retry and cancellation cases.
+]]
+
 return {
   contract_version = "0.1.0-readiness.1",
   environment_cases = {

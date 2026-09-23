@@ -1,6 +1,13 @@
+--[[
+Author: WaterRun
+Date: 2026-09-23
+File: tools.lua
+Description: Defines registered tool schemas, permission bindings and result contracts.
+]]
+
 return {
   contract_version = "0.1.0-readiness.1",
-  decision_refs = { "D-043", "D-052" },
+  decision_refs = { "D-043", "D-052", "D-074" },
 
   capabilities = { "Read", "Write", "Delete", "Shell", "OutsideWorkspace" },
   decisions = { "allow", "confirm", "deny" },
@@ -15,6 +22,7 @@ return {
     { id = "rename", caps = { "Write", "Delete" }, target_kind = "direct-path", mutates = true, high_risk_review = true },
     { id = "delete", caps = { "Delete" }, target_kind = "direct-path", mutates = true, high_risk_review = true },
     { id = "exec", caps = { "Shell" }, target_kind = "opaque-command", mutates = "unknown", high_risk_review = true },
+    { id = "lua", caps = { "Shell" }, target_kind = "opaque-code", mutates = "unknown", high_risk_review = true },
   },
 
   profiles = {
@@ -27,6 +35,10 @@ return {
     outside_direct_path_adds = "OutsideWorkspace",
     exec_uses_only = "Shell",
     exec_command_is_opaque = true,
+    lua_uses_only = "Shell",
+    lua_entry = "embedded-interpreter-structured-argv-script-stdin",
+    lua_shares_foreground_deadline_output_cancel_and_durable_barriers = true,
+    lua_is_sandbox = false,
     outside_workspace_is_shell_sandbox = false,
     deny_can_be_overridden_by_review_or_human = false,
     review_can_only_maintain_or_tighten = true,

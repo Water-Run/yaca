@@ -1,19 +1,29 @@
 --[[
-File: config_test.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-09-23
+File: config_test.lua
 Description: Verifies the complete typed catalog, limits, secrets, and generations.
 ]]
 
 local A = assert(loadfile(YACA_TEST_ROOT .. "/test/support/assert.lua", "t", _ENV))()
 
+--Loads a source module into an isolated per-case environment.
+--@param name string Module, Model, or resource name selected by the case.
+--@param cache table Per-case module cache preserving isolated imports.
+--@return any module Module export loaded in the isolated source environment.
 local function load_module(name, cache)
     cache = cache or {}
     if cache[name] then return cache[name] end
-    local environment = { require = function(dependency)
+    local environment = {
+        --Resolves an imported Lua module through the isolated test loader.
+        --@param dependency string Source module requested from the isolated loader.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
+        require = function(dependency)
         return load_module(dependency, cache)
     end }
     environment._G = environment
+    --@metatable environment Test-owned lookup and mutation contract for the current case.
+    --@field __index any Fallback table or function used for missing fixture keys.
     setmetatable(environment, { __index = _ENV })
     local chunk, load_error = loadfile(
         YACA_TEST_ROOT .. "/src/" .. name .. ".lua",
@@ -26,6 +36,9 @@ local function load_module(name, cache)
     return value
 end
 
+--Loads a repository Lua module as a test support value.
+--@param relative_path string Repository-relative Lua source path to load.
+--@return any module Test support module export loaded from the repository.
 local function load_table(relative_path)
     local chunk, load_error = loadfile(YACA_TEST_ROOT .. "/" .. relative_path, "t", _ENV)
     A.truthy(chunk, load_error)
@@ -38,25 +51,41 @@ local sha256 = load_table("test/support/sha256_reference.lua")
 local contract = load_table(".develope-docs/contracts/config.lua")
 local fixtures = load_table(".develope-docs/contracts/fixtures/config.lua")
 
+--Constructs an incremental SHA-256 port backed by the reference digest.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return any port Incremental SHA-256 fixture port.
 local function hash_port()
     local port = {}
 
+    --Starts a fake incremental SHA-256 handle.
+    --@param none No arguments; this closure uses its captured fixture state.
+    --@return table handle New incremental SHA-256 fixture handle.
     function port.sha256_start()
         return { parts = {}, finished = false, closed = false }
     end
 
+    --Adds bytes to the fake incremental SHA-256 handle.
+    --@param handle table|integer Fake resource handle whose state is inspected.
+    --@param bytes string Byte chunk supplied to the fake I/O port.
+    --@return boolean accepted Whether the fixture accepted the byte chunk.
     function port.sha256_update(handle, bytes)
         assert(not handle.finished and not handle.closed)
         handle.parts[#handle.parts + 1] = bytes
         return true
     end
 
+    --Finalizes the fake SHA-256 handle using the reference digest.
+    --@param handle table|integer Fake resource handle whose state is inspected.
+    --@return any digest Hexadecimal digest of the accumulated fixture bytes.
     function port.sha256_finish(handle)
         assert(not handle.finished and not handle.closed)
         handle.finished = true
         return sha256.digest(table.concat(handle.parts))
     end
 
+    --Closes the fake SHA-256 handle and records its state.
+    --@param handle table|integer Fake resource handle whose state is inspected.
+    --@return boolean closed Whether the fixture handle was closed.
     function port.sha256_close(handle)
         assert(not handle.closed)
         handle.closed = true
@@ -66,6 +95,9 @@ local function hash_port()
     return port
 end
 
+--Builds validated options for this suite's component fixture.
+--@param overrides table|nil Per-case overrides of default fixture behavior.
+--@return any options options used to configure the component under test.
 local function options(overrides)
     local result = {
         schema_version = "0.1.0",
@@ -110,6 +142,9 @@ local function options(overrides)
     return result
 end
 
+--Supplies source behavior required by this suite.
+--@param extra table|nil Additional fixture fields for this scenario.
+--@return any observed source value observed by the scenario assertion.
 local function source(extra)
     extra = extra or {}
     return table.concat({
@@ -153,10 +188,16 @@ local function source(extra)
     }, "\n")
 end
 
+--Constructs the codec service used by this suite.
+--@param option_overrides table|nil Per-case overrides of default options.
+--@return any fixture Constructed codec service used by this suite.
 local function codec(option_overrides)
     return assert(config.new({ sha256 = hash_port() }, options(option_overrides)))
 end
 
+--Supplies by source behavior required by this suite.
+--@param advice any The advice supplied to the fake service for this scenario.
+--@return any observed by source value observed by the scenario assertion.
 local function by_source(advice)
     local result = {}
     for _, item in ipairs(advice) do result[item.source] = item.action end
@@ -168,6 +209,9 @@ return {
     cases = {
         {
             name = "resource selectors fold ASCII only and publish canonical logical names",
+            --Verifies resource selectors fold ASCII only and publish canonical logical names.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify resource selectors fold ASCII only and publish canonical logical names.
             run = function()
                 local generation = assert(codec().parse(source({ agent_extra = 'ActionReviewModel = "pRiMaRy"' }), {
                     CurrentModel = "PRIMARY", CurrentPermission = "sTD",
@@ -189,6 +233,9 @@ return {
         },
         {
             name = "runtime catalog is exactly the frozen complete field catalog",
+            --Verifies runtime catalog is exactly the frozen complete field catalog.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify runtime catalog is exactly the frozen complete field catalog.
             run = function()
                 local service = codec()
                 A.equal(#service.catalog, #contract.fields)
@@ -200,12 +247,18 @@ return {
                     A.equal(actual.secret, expected.secret, expected.id)
                     A.equal(actual.required, expected.required == true, expected.id)
                 end
+                --Executes the action expected to raise in the 'runtime catalog is exactly the frozen complete field catalog' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify runtime catalog is exactly the frozen complete field catalog.
                 A.raises(function() service.catalog[1].key = "Changed" end, "cannot be modified")
                 A.falsy(service.target_atomic_write_qualified)
             end,
         },
         {
             name = "minimal complete INI receives typed defaults and physical-order selectors",
+            --Verifies minimal complete INI receives typed defaults and physical-order selectors.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify minimal complete INI receives typed defaults and physical-order selectors.
             run = function()
                 local generation = assert(codec().parse(source()))
                 A.equal(generation.id, "config-generation-1")
@@ -232,14 +285,23 @@ return {
                 )
                 A.falsy(optional)
                 A.falsy(optional_error)
+                --Executes the action expected to raise in the 'minimal complete INI receives typed defaults and physical-order selectors' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify minimal complete INI receives typed defaults and physical-order selectors.
                 A.raises(function() generation.agent.queue_max_items = 1 end,
                     "cannot be modified")
+                --Executes the action expected to raise in the 'minimal complete INI receives typed defaults and physical-order selectors' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify minimal complete INI receives typed defaults and physical-order selectors.
                 A.raises(function() generation.models.Primary.enabled = false end,
                     "cannot be modified")
             end,
         },
         {
             name = "registered secrets stay private and use exact destinations",
+            --Verifies registered secrets stay private and use exact destinations.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify registered secrets stay private and use exact destinations.
             run = function()
                 local service = codec()
                 local generation = assert(service.parse(source({
@@ -271,6 +333,9 @@ return {
         },
         {
             name = "conditional proxy and adapter secrets are typed registry entries",
+            --Verifies conditional proxy and adapter secrets are typed registry entries.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify conditional proxy and adapter secrets are typed registry entries.
             run = function()
                 local extra = table.concat({
                     "AdapterOptions = \"{\\\"IntegerMode\\\":3,",
@@ -305,6 +370,9 @@ return {
         },
         {
             name = "proxy disclosure normalizes the route without userinfo or query values",
+            --Verifies proxy disclosure normalizes the route without userinfo or query values.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify proxy disclosure normalizes the route without userinfo or query values.
             run = function()
                 for _, vector in ipairs(fixtures.proxy_disclosure_vectors) do
                     local candidate = source() .. '\n[Network]\nProxyUrl = "'
@@ -318,6 +386,9 @@ return {
         },
         {
             name = "Model secret comparison detects value changes without exposing bindings",
+            --Verifies proxy disclosure normalizes the route without userinfo or query values.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify proxy disclosure normalizes the route without userinfo or query values.
             run = function()
                 local service = codec()
                 local candidate = source({
@@ -363,6 +434,9 @@ return {
         },
         {
             name = "context whitelist creates a new immutable effective snapshot",
+            --Verifies context whitelist creates a new immutable effective snapshot.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify context whitelist creates a new immutable effective snapshot.
             run = function()
                 local service = codec()
                 local generation = assert(service.parse(source(), {
@@ -389,6 +463,9 @@ return {
         },
         {
             name = "reload reuses exact bindings and invalid changes fail closed",
+            --Verifies reload reuses exact bindings and invalid changes fail closed.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify reload reuses exact bindings and invalid changes fail closed.
             run = function()
                 local service = codec()
                 local first = assert(service.reload(source()))
@@ -411,6 +488,9 @@ return {
         },
         {
             name = "unknown fields duplicates types references and limits fail closed",
+            --Verifies unknown fields duplicates types references and limits fail closed.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify unknown fields duplicates types references and limits fail closed.
             run = function()
                 local service = codec()
                 local cases = {
@@ -452,6 +532,9 @@ return {
         },
         {
             name = "every frozen migration fixture maps to one value-free action",
+            --Verifies every frozen migration fixture maps to one value-free action.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify every frozen migration fixture maps to one value-free action.
             run = function()
                 local service = codec()
                 local legacy = table.concat({
@@ -477,6 +560,9 @@ return {
         },
         {
             name = "construction rejects incomplete Runtime limits and malformed schemas",
+            --Verifies construction rejects incomplete Runtime limits and malformed schemas.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify construction rejects incomplete Runtime limits and malformed schemas.
             run = function()
                 local invalid = options()
                 invalid.hard_limits = { queue_items = 64 }
@@ -493,6 +579,9 @@ return {
                 A.falsy(config.new({ sha256 = hash_port() }, invalid))
 
                 local service = codec()
+                --Executes the action expected to raise in the 'construction rejects incomplete Runtime limits and malformed schemas' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify construction rejects incomplete Runtime limits and malformed schemas.
                 A.raises(function() service.schema_version = "changed" end,
                     "cannot be modified")
             end,

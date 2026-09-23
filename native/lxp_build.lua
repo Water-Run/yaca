@@ -1,7 +1,7 @@
 --[[
-File: lxp_build.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-09-23
+File: lxp_build.lua
 Description: Freezes the target build recipe for pinned LuaExpat and static Expat.
 ]]
 
@@ -22,10 +22,18 @@ local TARGETS = {
     },
 }
 
+---Builds a typed pinned-LuaExpat validation failure.
+--@param code string Stable dependency error code.
+--@param message string Explanation of the mismatched build identity.
+--@return nil result No accepted build plan or runtime.
+--@return table err Structured dependency failure.
 local function failure(code, message)
     return nil, { code = code, message = message }
 end
 
+---Copies fixed compiler arguments without exposing mutable lock data.
+--@param values table Ordered source argument array.
+--@return table copied Independent ordered argument array.
 local function copy_array(values)
     local result = {}
     for index, value in ipairs(values) do result[index] = value end
@@ -74,9 +82,9 @@ M.luaexpat_compile = {
 }
 
 ---Returns the immutable build expectations for one release target.
--- @param target_id string Exact release target identifier.
--- @return table|nil plan Copied target and compiler expectations.
--- @return table|nil err Structured target failure.
+--@param target_id string Exact release target identifier.
+--@return table|nil plan Copied target and compiler expectations.
+--@return table|nil err Structured target failure.
 function M.plan(target_id)
     local target = TARGETS[target_id]
     if not target then return failure("UnknownTarget", "unknown lxp release target") end
@@ -92,9 +100,9 @@ function M.plan(target_id)
 end
 
 ---Validates the native module identity before the XML codec accepts it.
--- @param lxp table Module returned by the absolute release loader.
--- @return boolean|nil valid True only for the pinned runtime identity.
--- @return table|nil err Structured dependency failure.
+--@param lxp table Module returned by the absolute release loader.
+--@return boolean|nil valid True only for the pinned runtime identity.
+--@return table|nil err Structured dependency failure.
 function M.validate_runtime(lxp)
     if type(lxp) ~= "table" or type(lxp.new) ~= "function" then
         return failure("InvalidXmlDependency", "lxp module does not expose new")

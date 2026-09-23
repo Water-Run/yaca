@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# Author: WaterRun
+# Date: 2026-09-23
+# File: run_coding_readiness.sh
+# Description: Runs contract, evidence and feasibility checks under the shared resource guard.
+
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -9,6 +14,9 @@ if [[ ${YACA_TEST_RESOURCE_GUARD_HELD:-0} != 1 ]]; then
 fi
 
 cd "$REPO_ROOT"
+
+python3.13 test/self/code_comments_test.py
+python3.13 .tools/check_code_comments.py
 
 bin/lua55 .tools/validate_design_contracts.lua
 bin/lua55 .tools/validate_proof_evidence.lua

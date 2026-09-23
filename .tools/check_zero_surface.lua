@@ -1,36 +1,17 @@
 --[[
-File: check_zero_surface.lua
-Date: 2026-09-19
 Author: WaterRun
-Description: Verifies an extracted yaca package tree keeps the minimal
-release surface: manifest root entries only, the versioned docs allowlist,
-no shipped data/config/Context files and no forbidden components.
+Date: 2026-09-23
+File: check_zero_surface.lua
+Description: Verifies an extracted clean-edition package contains only its
+target executable and no shipped data, configuration, or Context artifacts.
 
 Usage (qualification-time operator tool, not shipped):
-  bin/lua55 .tools/check_zero_surface.lua <repo-root> <package-root> <target-id>
+bin/lua55 .tools/check_zero_surface.lua <repo-root> <package-root> <target-id>
 ]]
 
 local M = {}
 
 local IS_WINDOWS = package.config:sub(1, 1) == "\\"
-
-local SHARED_DOC_FILES = {
-    ["docs/COMPONENTS.txt"] = true,
-    ["docs/build-summary.json"] = true,
-    ["docs/SBOM.spdx.json"] = true,
-    ["docs/licenses/Lua-MIT.html"] = true,
-    ["docs/licenses/Expat-MIT.txt"] = true,
-    ["docs/licenses/LuaExpat-MIT.html"] = true,
-    ["docs/licenses/luainstaller-LGPL.txt"] = true,
-    ["docs/licenses/curl.txt"] = true,
-    ["docs/licenses/Mbed-TLS.txt"] = true,
-    ["docs/licenses/Mozilla-CA.pem"] = true,
-}
-
-local QUICKSTART_BY_OS = {
-    windows = "docs/WINDOWS-QUICKSTART.md",
-    linux = "docs/LINUX-QUICKSTART.md",
-}
 
 -- Name fragments of components that must never ship. Mirrors the manifest's
 -- forbidden_shipped_components plus concrete historical bin/ residents.
@@ -48,6 +29,9 @@ local FORBIDDEN_DATA_NAMES = {
     ["__yaca__"] = "shipped data directory",
 }
 
+-- Normalize path separators and redundant dot components for tree comparison.
+--@param relative any Candidate path; nil is treated as empty.
+--@return string path Slash-separated path with redundant separators removed.
 local function normalize(relative)
     local path = tostring(relative or ""):gsub("\\", "/")
     path = path:gsub("/%./", "/"):gsub("//+", "/")
@@ -55,15 +39,20 @@ local function normalize(relative)
     return path
 end
 
+-- Extract one lowercased leaf for forbidden component and data-name checks.
+--@param path string Normalized package-relative path.
+--@return string stem Lowercased last path component.
 local function lowercase_stem(path)
     local name = path:match("[^/]+$") or path
     return name:lower()
 end
 
 --- Verifies one package tree against the manifest surface.
--- manifest: loaded release/manifest.lua table; entries: array of relative
--- paths found in the extracted package root; target_id: manifest target id.
--- Returns true, summary_table or false, findings_array.
+--@param manifest table Loaded release manifest with the target and clean root policy.
+--@param entries table Relative file paths enumerated in the extracted package.
+--@param target_id string Exact target identifier from the manifest.
+--@return boolean ok True only for exactly the clean executable file.
+--@return table result Target summary on success or ordered findings on failure.
 function M.verify(manifest, entries, target_id)
     if type(manifest) ~= "table" or type(manifest.packaging) ~= "table" then
         return false, { "manifest is missing its packaging section" }
@@ -75,30 +64,19 @@ function M.verify(manifest, entries, target_id)
     if not target then
         return false, { "unknown target id: " .. tostring(target_id) }
     end
-    local required = assert(
-        manifest.packaging.required_root_entries[target.os],
-        "manifest has no root entries for this target os")
-
-    local expected = {}
-    local function expect(path)
-        expected[normalize(path)] = true
+    local required = manifest.packaging.required_root_entries
+        and manifest.packaging.required_root_entries[target.os]
+    if type(required) ~= "table" or #required ~= 1
+        or required[1] ~= target.executable
+    then
+        return false, { "manifest clean root must contain only target executable" }
     end
-    for _, entry in ipairs(required) do
-        if entry:sub(-1) == "/" then
-            -- A required directory contributes its versioned file set.
-            if entry == "docs/" then
-                for doc in pairs(SHARED_DOC_FILES) do expect(doc) end
-                expect(assert(QUICKSTART_BY_OS[target.os],
-                    "manifest target has no quickstart mapping"))
-            else
-                return false, {
-                    "manifest requires unmapped directory entry: " .. entry,
-                }
-            end
-        else
-            expect(entry)
+    for key in pairs(required) do
+        if key ~= 1 then
+            return false, { "manifest clean root must contain only target executable" }
         end
     end
+    local expected = { [target.executable] = true }
 
     local seen = {}
     local findings = {}
@@ -143,16 +121,23 @@ function M.verify(manifest, entries, target_id)
         target = target_id,
         files = #entries,
         executable = target.executable,
-        installer = target.installer,
         surface = "minimal-allowlist",
     }
 end
 
+-- Quote one package path for the host shell enumeration command.
+--@param path string Filesystem path passed as one argument to find or dir.
+--@return string quoted Host-shell word with embedded quote characters escaped.
 local function shell_quote(path)
     if IS_WINDOWS then return '"' .. path:gsub('"', '""') .. '"' end
     return "'" .. path:gsub("'", "'\\''") .. "'"
 end
 
+-- Enumerate regular files under an extracted package root.
+--@param root string Extracted package directory in host path syntax.
+--@return table|nil entries Relative normalized file paths.
+--@return string|nil err Enumeration start or command failure.
+--@effect Starts a host file-enumeration command and reads its output.
 local function list_package_files(root)
     local command
     if IS_WINDOWS then
@@ -181,6 +166,10 @@ local function list_package_files(root)
     return entries
 end
 
+-- Run the clean-edition surface audit from command-line arguments.
+--@param argv table Repository root, package root, and target identifier.
+--@return integer Exit code: zero on pass, one on findings, or 64 for usage.
+--@effect Reads the manifest and package tree and writes the report to stdout/stderr.
 local function main(argv)
     local repo_root, package_root, target_id = table.unpack(argv)
     if not (repo_root and package_root and target_id) then

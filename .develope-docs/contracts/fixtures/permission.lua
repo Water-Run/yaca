@@ -1,3 +1,10 @@
+--[[
+Author: WaterRun
+Date: 2026-09-23
+File: permission.lua
+Description: Supplies permission decisions and stale one-action approval cases.
+]]
+
 return {
   contract_version = "0.1.0-readiness.1",
   cases = {
@@ -11,5 +18,7 @@ return {
     { id = "readonly-rename-inside", profile = "Readonly", tool = "rename", outside = false, expected = "deny" },
     { id = "std-exec-opaque", profile = "Std", tool = "exec", outside = true, expected = "confirm", note = "OutsideWorkspace does not pretend to sandbox shell" },
     { id = "readonly-exec-opaque", profile = "Readonly", tool = "exec", outside = true, expected = "deny" },
+    { id = "std-lua-opaque", profile = "Std", tool = "lua", outside = true, expected = "confirm" },
+    { id = "readonly-lua-opaque", profile = "Readonly", tool = "lua", outside = true, expected = "deny" },
   },
 }

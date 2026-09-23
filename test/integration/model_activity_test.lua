@@ -1,7 +1,7 @@
 --[[
-File: model_activity_test.lua
-Date: 2026-08-30
 Author: WaterRun
+Date: 2026-09-23
+File: model_activity_test.lua
 Description: Verifies the HTTP-gated logical Model request activity coordinator.
 ]]
 
@@ -12,13 +12,22 @@ local sha256 = assert(loadfile(
     _ENV
 ))()
 
+--Loads a source module into an isolated per-case environment.
+--@param name string Module, Model, or resource name selected by the case.
+--@param cache table Per-case module cache preserving isolated imports.
+--@return any module Module export loaded in the isolated source environment.
 local function load_module(name, cache)
     cache = cache or {}
     if cache[name] then return cache[name] end
     local environment = {}
     for key, value in pairs(_ENV) do environment[key] = value end
+    --Resolves an imported Lua module through the isolated test loader.
+    --@param dependency string Source module requested from the isolated loader.
+    --@return any value Callback value consumed by the enclosing scenario assertion.
     environment.require = function(dependency) return load_module(dependency, cache) end
     environment._G = environment
+    --@metatable environment Test-owned lookup and mutation contract for the current case.
+    --@field __index any Fallback table or function used for missing fixture keys.
     setmetatable(environment, { __index = _ENV })
     local chunk, load_error = loadfile(
         YACA_TEST_ROOT .. "/src/" .. name .. ".lua",
@@ -31,6 +40,9 @@ local function load_module(name, cache)
     return result
 end
 
+--Supplies adapter limits behavior required by this suite.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return table observed Structured fixture record selected by the exercised branch.
 local function adapter_limits()
     return {
         maximum_json_bytes = 65536,
@@ -62,6 +74,9 @@ local MANIFEST = {
     deterministic_jitter_permille = 0,
 }
 
+--Supplies activity options behavior required by this suite.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return table observed Structured fixture record selected by the exercised branch.
 local function activity_options()
     return {
         identity_namespace = "context-TEST",
@@ -78,6 +93,12 @@ local function activity_options()
     }
 end
 
+--Supplies normalized request behavior required by this suite.
+--@param adapter any The adapter supplied to the fake service for this scenario.
+--@param protocol string Model wire protocol selected by the case.
+--@param streaming boolean Whether the Model stream is enabled.
+--@param retry_count integer Configured number of retries.
+--@return any observed normalized request value observed by the scenario assertion.
 local function normalized_request(adapter, protocol, streaming, retry_count)
     local purpose = "main"
     return assert(adapter:normalize_request({
@@ -108,6 +129,9 @@ local function normalized_request(adapter, protocol, streaming, retry_count)
     }))
 end
 
+--Supplies result behavior required by the 'Primary' case.
+--@param settings table|nil Fixture settings and scenario overrides.
+--@return table observed Structured fixture record selected by the exercised branch.
 local function result(settings)
     settings = settings or {}
     return {
@@ -121,6 +145,11 @@ local function result(settings)
     }
 end
 
+--Supplies scripted transport behavior required by the 'Primary' case.
+--@param network table Fake network port or its configuration.
+--@param scripts table Script inputs supplied to the fake process.
+--@param observed table|any State observed after the exercised operation.
+--@return any observed scripted transport value observed by the scenario assertion.
 local function scripted_transport(network, scripts, observed)
     local cursor = 0
     local service = {
@@ -129,6 +158,10 @@ local function scripted_transport(network, scripts, observed)
         single_header = network.single_header,
         parse_retry_after = network.parse_retry_after,
     }
+    --Constructs new attempt for the Primary scenario.
+    --@param spec table Test specification or request under evaluation.
+    --@return any|nil observed new attempt value observed by the scenario assertion.
+    --@return table|nil secondary2 Typed error record with code UnexpectedAttempt.
     function service.new_attempt(spec)
         cursor = cursor + 1
         local script = scripts[cursor]
@@ -136,10 +169,16 @@ local function scripted_transport(network, scripts, observed)
         observed[#observed + 1] = spec
         local started, emitted, cancelled = false, false, false
         local port = {}
+        --Simulates the start transition of a fake activity port for the 'Primary' case.
+        --@param self table Fixture or port instance receiving this call.
+        --@return boolean accepted Whether start succeeds in the fixture.
         function port:start()
             started = true
             return true
         end
+        --Simulates the poll transition of a fake activity port for the 'Primary' case.
+        --@param self table Fixture or port instance receiving this call.
+        --@return table observed Structured fixture record selected by the exercised branch.
         function port:poll()
             A.truthy(started)
             if script.pending and not cancelled then return {} end
@@ -153,10 +192,16 @@ local function scripted_transport(network, scripts, observed)
                 },
             }
         end
+        --Simulates the cancel transition of a fake activity port for the 'Primary' case.
+        --@param self table Fixture or port instance receiving this call.
+        --@return boolean accepted Whether cancel succeeds in the fixture.
         function port:cancel()
             cancelled = true
             return true
         end
+        --Simulates the join transition of a fake activity port for the 'Primary' case.
+        --@param self table Fixture or port instance receiving this call.
+        --@return any observed join value observed by the scenario assertion.
         function port:join()
             if cancelled then
                 return result({
@@ -167,12 +212,21 @@ local function scripted_transport(network, scripts, observed)
             end
             return script.result
         end
+        --Simulates the close transition of a fake activity port for the 'Primary' case.
+        --@param self table Fixture or port instance receiving this call.
+        --@return boolean accepted Whether close succeeds in the fixture.
         function port:close() return true end
         return port
     end
     return service
 end
 
+--Constructs the suite's isolated runtime fixture and observation ports.
+--@param protocol string Model wire protocol selected by the case.
+--@param streaming boolean Whether the Model stream is enabled.
+--@param retry_count integer Configured number of retries.
+--@param scripts table Script inputs supplied to the fake process.
+--@return table fixture Constructed fixture service used by this suite.
 local function fixture(protocol, streaming, retry_count, scripts)
     local cache = {}
     local model = load_module("model", cache)
@@ -186,10 +240,19 @@ local function fixture(protocol, streaming, retry_count, scripts)
         transport = transport,
         safety = { digest = sha256.hex },
         clock = {
+            --Supplies deterministic clock behavior for the 'Primary' case.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return any value Callback value consumed by the enclosing scenario assertion.
             monotonic_now = function() return tick end,
+            --Supplies deterministic clock behavior for the 'Primary' case.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return string text Text emitted by the scenario callback.
             utc_now = function() return "2026-08-30T00:00:00Z" end,
         },
         requests = {
+            --Supplies prepare behavior required by the 'Primary' case.
+            --@param spec table Test specification or request under evaluation.
+            --@return table record Fixture record emitted by the scenario callback.
             prepare = function(spec)
                 A.equal(spec.request_id, request.request_id)
                 return {
@@ -215,10 +278,17 @@ local function fixture(protocol, streaming, retry_count, scripts)
         activity = activity,
         handle = handle,
         observed = observed,
+        --Supplies set tick behavior required by the 'Primary' case.
+        --@param value any Candidate whose acceptance or transformation the test checks.
+        --@return nil No value; the fake port or test assertion observes this callback's effects.
         set_tick = function(value) tick = value end,
     }
 end
 
+--Supplies collect behavior required by the 'Primary' case.
+--@param fixture table Test fixture state shared by this helper.
+--@param maximum integer Maximum allowed count or byte length.
+--@return any observed collect value observed by the scenario assertion.
 local function collect(fixture, maximum)
     local output = {}
     for _ = 1, maximum or 16 do
@@ -231,6 +301,9 @@ local function collect(fixture, maximum)
     error("model activity did not settle")
 end
 
+--Supplies output kinds behavior required by the 'Primary' case.
+--@param output any The output supplied to the fake service for this scenario.
+--@return any observed output kinds value observed by the scenario assertion.
 local function output_kinds(output)
     local result = {}
     for _, event in ipairs(output) do result[#result + 1] = event.kind end
@@ -242,6 +315,9 @@ return {
     cases = {
         {
             name = "request builder reproduces durable snapshots without revealing secrets",
+            --Verifies request builder reproduces durable snapshots without revealing secrets.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify request builder reproduces durable snapshots without revealing secrets.
             run = function()
                 local cache = {}
                 local model = load_module("model", cache)
@@ -292,8 +368,17 @@ return {
                         },
                     },
                     permissions = { Std = { system_prompt = "permission" } },
+                    --Simulates the reveal secret boundary for the 'read' case.
+                    --@param none No arguments; this closure uses its captured fixture state.
+                    --@return string text Text emitted by the scenario callback.
                     reveal_secret = function() return "never-called-by-builder" end,
+                    --Supplies secret descriptors behavior required by the 'read' case.
+                    --@param none No arguments; this closure uses its captured fixture state.
+                    --@return table record Fixture record emitted by the scenario callback.
                     secret_descriptors = function() return {} end,
+                    --Simulates the scan registered secrets boundary for the 'read' case.
+                    --@param none No arguments; this closure uses its captured fixture state.
+                    --@return table record Fixture record emitted by the scenario callback.
                     scan_registered_secrets = function() return {} end,
                 }
                 local initial = assert(prompt_service:assemble({
@@ -325,6 +410,10 @@ return {
                     tool_mode = "registered",
                 }))
                 local views = {
+                    --Supplies resolve view behavior required by the 'read' case.
+                    --@param digest string Expected or computed hexadecimal digest.
+                    --@return table|nil value Callback value consumed by the enclosing scenario assertion.
+                    --@return table|nil secondary2 Typed error record with code StaleModelView.
                     resolve_view = function(digest)
                         if digest ~= "view-1" then return nil, { code = "StaleModelView" } end
                         return {
@@ -381,8 +470,8 @@ return {
                 A.falsy(stale)
                 A.equal(stale_error.code, "StaleModelView")
 
-                local side_prompt = assert(prompt_service:assemble({
-                    purpose = "side",
+                local ask_prompt = assert(prompt_service:assemble({
+                    purpose = "ask",
                     config_generation = generation.id,
                     layers = {
                         global = {
@@ -406,10 +495,10 @@ return {
                             text = "context",
                         },
                     },
-                    input = { user_message = "side question" },
+                    input = { user_message = "ask question" },
                     tool_mode = "none",
                 }))
-                local side_builder = assert(model.new_side_request_builder({
+                local ask_builder = assert(model.new_ask_request_builder({
                     adapter = adapter,
                     prompt = prompt_service,
                     views = views,
@@ -419,46 +508,49 @@ return {
                 }, {
                     model_name = "Primary",
                     permission_name = "Std",
-                    model_snapshot = "side-model-snapshot",
-                    permission_snapshot = "side-permission-snapshot",
-                    prompt_snapshot = side_prompt.digest,
+                    model_snapshot = "ask-model-snapshot",
+                    permission_snapshot = "ask-permission-snapshot",
+                    prompt_snapshot = ask_prompt.digest,
                     tool_registry_snapshot = registry.digest,
-                    initial_message = "side question",
+                    initial_message = "ask question",
                     context_prompt = "context",
                     default_connect_timeout_ms = 100,
                     maximum_request_time_ms = 1200,
                     default_retry_base_delay_ms = 5,
                     maximum_output_tokens = 64,
                 }))
-                local side_spec = {
-                    request_id = "side-1:request:1",
-                    turn_id = "side-1",
-                    purpose = "side",
+                local ask_spec = {
+                    request_id = "ask-1:request:1",
+                    turn_id = "ask-1",
+                    purpose = "ask",
                     continuation = false,
                     view_manifest_ref = "view-1",
-                    progress_identity = "side:side-1",
+                    progress_identity = "ask:ask-1",
                 }
-                local side_prepared = assert(side_builder.prepare(side_spec))
-                A.equal(side_prepared.request.purpose, "side")
-                A.equal(side_prepared.request.prompt_bundle.digest, side_prompt.digest)
-                A.equal(#side_prepared.request.tool_registry.tools, 0)
-                A.falsy(side_prepared.request.tool_registry.digest == registry.digest)
-                A.equal(#side_prepared.request.controls_schema.controls, 0)
-                A.equal(side_prepared.request.limits.max_output_tokens, 64)
-                A.equal(side_prepared.total_timeout_ms, 1200)
-                A.equal(side_builder.snapshots.tools, registry.digest)
+                local ask_prepared = assert(ask_builder.prepare(ask_spec))
+                A.equal(ask_prepared.request.purpose, "ask")
+                A.equal(ask_prepared.request.prompt_bundle.digest, ask_prompt.digest)
+                A.equal(#ask_prepared.request.tool_registry.tools, 0)
+                A.falsy(ask_prepared.request.tool_registry.digest == registry.digest)
+                A.equal(#ask_prepared.request.controls_schema.controls, 0)
+                A.equal(ask_prepared.request.limits.max_output_tokens, 64)
+                A.equal(ask_prepared.total_timeout_ms, 1200)
+                A.equal(ask_builder.snapshots.tools, registry.digest)
                 A.falsy(
-                    side_builder.snapshots.transmitted_tools
-                        == side_builder.snapshots.tools
+                    ask_builder.snapshots.transmitted_tools
+                        == ask_builder.snapshots.tools
                 )
-                side_spec.purpose = "main"
-                local wrong_purpose, purpose_error = side_builder.prepare(side_spec)
+                ask_spec.purpose = "main"
+                local wrong_purpose, purpose_error = ask_builder.prepare(ask_spec)
                 A.falsy(wrong_purpose)
                 A.equal(purpose_error.code, "InvalidModelPurpose")
             end,
         },
         {
             name = "HTTP retry bodies stay behind status and one canonical response wins",
+            --Verifies hTTP retry bodies stay behind status and one canonical response wins.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify hTTP retry bodies stay behind status and one canonical response wins.
             run = function()
                 local first = result({
                     headers = "HTTP/1.1 503 Service Unavailable\r\nRetry-After: 0\r\n\r\n",
@@ -505,6 +597,9 @@ return {
         },
         {
             name = "curl transport codes separate retryable DNS and handshake from TLS trust",
+            --Verifies curl transport codes separate retryable DNS and handshake from TLS trust.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify curl transport codes separate retryable DNS and handshake from TLS trust.
             run = function()
                 local success = result({
                     headers = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n",
@@ -548,6 +643,9 @@ return {
         },
         {
             name = "try streaming falls back once only before a canonical event",
+            --Verifies try streaming falls back once only before a canonical event.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify try streaming falls back once only before a canonical event.
             run = function()
                 local malformed = result({
                     headers = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n",
@@ -573,6 +671,9 @@ return {
         },
         {
             name = "active cancellation waits for proven transport settlement",
+            --Verifies active cancellation waits for proven transport settlement.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify active cancellation waits for proven transport settlement.
             run = function()
                 local f = fixture("openai-chat", "off", 0, {
                     { pending = true, result = result() },

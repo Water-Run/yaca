@@ -1,19 +1,29 @@
 --[[
-File: operation_outcome_test.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-09-23
+File: operation_outcome_test.lua
 Description: Verifies durable operation generations, fail-stop, and no replay.
 ]]
 
 local A = assert(loadfile(YACA_TEST_ROOT .. "/test/support/assert.lua", "t", _ENV))()
 
+--Loads a source module into an isolated per-case environment.
+--@param name string Module, Model, or resource name selected by the case.
+--@param cache table Per-case module cache preserving isolated imports.
+--@return any module Module export loaded in the isolated source environment.
 local function load_module(name, cache)
     cache = cache or {}
     if cache[name] then return cache[name] end
-    local environment = { require = function(dependency)
+    local environment = {
+        --Resolves an imported Lua module through the isolated test loader.
+        --@param dependency string Source module requested from the isolated loader.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
+        require = function(dependency)
         return load_module(dependency, cache)
     end }
     environment._G = environment
+    --@metatable environment Test-owned lookup and mutation contract for the current case.
+    --@field __index any Fallback table or function used for missing fixture keys.
     setmetatable(environment, { __index = _ENV })
     local chunk, load_error = loadfile(
         YACA_TEST_ROOT .. "/src/" .. name .. ".lua",
@@ -26,6 +36,9 @@ local function load_module(name, cache)
     return value
 end
 
+--Loads a repository Lua module as a test support value.
+--@param relative_path string Repository-relative Lua source path to load.
+--@return any module Test support module export loaded from the repository.
 local function load_table(relative_path)
     local chunk, load_error = loadfile(YACA_TEST_ROOT .. "/" .. relative_path, "t", _ENV)
     A.truthy(chunk, load_error)
@@ -45,10 +58,18 @@ local modules = {
 
 local TARGET = "/data/Task.xml"
 
+--Supplies temp behavior required by this suite.
+--@param id string|integer Identity selected for the fake operation.
+--@return string observed temp value observed by the scenario assertion.
 local function temp(id)
     return TARGET .. ".yaca-tmp-" .. id
 end
 
+--Records the append effect observed by this suite.
+--@param candidate table|any Candidate state or value being validated.
+--@param event_type string Event kind emitted by the fake activity.
+--@param fields table Field values used to construct the test document.
+--@return nil No value; the fake port or test assertion observes this callback's effects.
 local function append(candidate, event_type, fields)
     candidate.facts[#candidate.facts + 1] = {
         seq = #candidate.facts + 1,
@@ -60,6 +81,9 @@ local function append(candidate, event_type, fields)
     candidate.model_view.active_manifest.last_event_seq = #candidate.facts
 end
 
+--Supplies accepted candidate behavior required by this suite.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return any observed accepted candidate value observed by the scenario assertion.
 local function accepted_candidate()
     local candidate = harness.minimal("Task")
     append(candidate, "model_request", {
@@ -77,20 +101,40 @@ local function accepted_candidate()
     return candidate
 end
 
+--Constructs an incremental SHA-256 port backed by the reference digest.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return table port Incremental SHA-256 fixture port.
 local function hash_port()
     return {
+        --Computes or records sha256 start data for the 'exec' case.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return table record Fixture record emitted by the scenario callback.
         sha256_start = function() return { parts = {} } end,
+        --Computes or records sha256 update data for the 'exec' case.
+        --@param handle table|integer Fake resource handle whose state is inspected.
+        --@param bytes string Byte chunk supplied to the fake I/O port.
+        --@return boolean accepted Whether the fake callback accepts this scenario.
         sha256_update = function(handle, bytes)
             handle.parts[#handle.parts + 1] = bytes
             return true
         end,
+        --Computes or records sha256 finish data for the 'exec' case.
+        --@param handle table|integer Fake resource handle whose state is inspected.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
         sha256_finish = function(handle)
             return modules.sha256.digest(table.concat(handle.parts))
         end,
+        --Computes or records sha256 close data for the 'exec' case.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return boolean accepted Whether the fake callback accepts this scenario.
         sha256_close = function() return true end,
     }
 end
 
+--Supplies operation fixture behavior required by the 'exec' case.
+--@param settings table|nil Fixture settings and scenario overrides.
+--@return any observed operation fixture value observed by the scenario assertion.
+--@return any secondary2 Additional status or structured error from the fixture operation.
 local function operation_fixture(settings)
     settings = settings or {}
     local safety = assert(load_module("safety", {}).new(hash_port(), {
@@ -98,6 +142,11 @@ local function operation_fixture(settings)
         minimum_scannable_secret_bytes = 8,
     }))
     local journal = { intents = {}, results = {}, calls = {} }
+    --Simulates the commit intent publication step for the 'exec' case.
+    --@param record table Recorded event or publication under inspection.
+    --@param digest string Expected or computed hexadecimal digest.
+    --@return boolean accepted Whether commit intent succeeds in the fixture.
+    --@return table|any secondary2 Additional status or structured error from the fixture operation.
     function journal.commit_intent(record, digest)
         journal.calls[#journal.calls + 1] = "intent:" .. record.operation_id
         journal.intents[#journal.intents + 1] = record
@@ -109,6 +158,11 @@ local function operation_fixture(settings)
         end
         return true, settings.bad_intent_receipt and "wrong" or digest
     end
+    --Simulates the commit result publication step for the 'exec' case.
+    --@param record table Recorded event or publication under inspection.
+    --@param digest string Expected or computed hexadecimal digest.
+    --@return boolean accepted Whether commit result succeeds in the fixture.
+    --@return table|any secondary2 Additional status or structured error from the fixture operation.
     function journal.commit_result(record, digest)
         journal.calls[#journal.calls + 1] = "result:" .. record.operation_id
         journal.results[#journal.results + 1] = record
@@ -128,6 +182,9 @@ local function operation_fixture(settings)
     return operations, journal
 end
 
+--Supplies intent behavior required by the 'exec' case.
+--@param id string|integer Identity selected for the fake operation.
+--@return table observed Structured fixture record selected by the exercised branch.
 local function intent(id)
     return {
         operation_id = id,
@@ -139,6 +196,9 @@ local function intent(id)
     }
 end
 
+--Supplies result behavior required by the 'exec' case.
+--@param status any The status supplied to the fake service for this scenario.
+--@return table observed Structured fixture record selected by the exercised branch.
 local function result(status)
     status = status or "ok"
     return {
@@ -157,6 +217,9 @@ return {
     cases = {
         {
             name = "intent and paired result are separate durable full-XML generations",
+            --Verifies intent and paired result are separate durable full-XML generations.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify intent and paired result are separate durable full-XML generations.
             run = function()
                 local candidate = accepted_candidate()
                 local fixture = harness.new(modules, { [TARGET] = candidate })
@@ -240,6 +303,9 @@ return {
         },
         {
             name = "result durability failure is fail-stop and cannot replay its operation id",
+            --Verifies result durability failure is fail-stop and cannot replay its operation id.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify result durability failure is fail-stop and cannot replay its operation id.
             run = function()
                 local operations, journal = operation_fixture({ result_failure = true })
                 local handle, digest = assert(operations.begin(intent("one")))
@@ -260,6 +326,9 @@ return {
         },
         {
             name = "ambiguous intent and recovered unresolved ids block without auto-execution",
+            --Verifies ambiguous intent and recovered unresolved ids block without auto-execution.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify ambiguous intent and recovered unresolved ids block without auto-execution.
             run = function()
                 local uncertain, journal = operation_fixture({ intent_unknown = true })
                 local handle, intent_error = uncertain.begin(intent("uncertain"))
@@ -288,6 +357,9 @@ return {
         },
         {
             name = "ordinary pre-intent failure permits only a fresh operation identity",
+            --Verifies ordinary pre-intent failure permits only a fresh operation identity.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify ordinary pre-intent failure permits only a fresh operation identity.
             run = function()
                 local operations, journal = operation_fixture({ intent_failure = true })
                 local handle, write_error = operations.begin(intent("not-written"))

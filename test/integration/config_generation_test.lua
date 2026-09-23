@@ -1,19 +1,29 @@
 --[[
-File: config_generation_test.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-09-23
+File: config_generation_test.lua
 Description: Verifies stale-bound configuration drafts and atomic publication order.
 ]]
 
 local A = assert(loadfile(YACA_TEST_ROOT .. "/test/support/assert.lua", "t", _ENV))()
 
+--Loads a source module into an isolated per-case environment.
+--@param name string Module, Model, or resource name selected by the case.
+--@param cache table Per-case module cache preserving isolated imports.
+--@return any module Module export loaded in the isolated source environment.
 local function load_module(name, cache)
     cache = cache or {}
     if cache[name] then return cache[name] end
-    local environment = { require = function(dependency)
+    local environment = {
+        --Resolves an imported Lua module through the isolated test loader.
+        --@param dependency string Source module requested from the isolated loader.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
+        require = function(dependency)
         return load_module(dependency, cache)
     end }
     environment._G = environment
+    --@metatable environment Test-owned lookup and mutation contract for the current case.
+    --@field __index any Fallback table or function used for missing fixture keys.
     setmetatable(environment, { __index = _ENV })
     local chunk, load_error = loadfile(
         YACA_TEST_ROOT .. "/src/" .. name .. ".lua",
@@ -26,6 +36,9 @@ local function load_module(name, cache)
     return value
 end
 
+--Loads a repository Lua module as a test support value.
+--@param relative_path string Repository-relative Lua source path to load.
+--@return any module Test support module export loaded from the repository.
 local function load_table(relative_path)
     local chunk, load_error = loadfile(YACA_TEST_ROOT .. "/" .. relative_path, "t", _ENV)
     A.truthy(chunk, load_error)
@@ -36,25 +49,41 @@ local config = load_module("config")
 local sha256 = load_table("test/support/sha256_reference.lua")
 local fake_filesystem = load_table("test/support/fake_filesystem.lua")
 
+--Constructs an incremental SHA-256 port backed by the reference digest.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return any port Incremental SHA-256 fixture port.
 local function hash_port()
     local port = {}
 
+    --Starts a fake incremental SHA-256 handle.
+    --@param none No arguments; this closure uses its captured fixture state.
+    --@return table handle New incremental SHA-256 fixture handle.
     function port.sha256_start()
         return { parts = {}, finished = false, closed = false }
     end
 
+    --Adds bytes to the fake incremental SHA-256 handle.
+    --@param handle table|integer Fake resource handle whose state is inspected.
+    --@param bytes string Byte chunk supplied to the fake I/O port.
+    --@return boolean accepted Whether the fixture accepted the byte chunk.
     function port.sha256_update(handle, bytes)
         assert(not handle.finished and not handle.closed)
         handle.parts[#handle.parts + 1] = bytes
         return true
     end
 
+    --Finalizes the fake SHA-256 handle using the reference digest.
+    --@param handle table|integer Fake resource handle whose state is inspected.
+    --@return any digest Hexadecimal digest of the accumulated fixture bytes.
     function port.sha256_finish(handle)
         assert(not handle.finished and not handle.closed)
         handle.finished = true
         return sha256.digest(table.concat(handle.parts))
     end
 
+    --Closes the fake SHA-256 handle and records its state.
+    --@param handle table|integer Fake resource handle whose state is inspected.
+    --@return boolean closed Whether the fixture handle was closed.
     function port.sha256_close(handle)
         assert(not handle.closed)
         handle.closed = true
@@ -64,6 +93,9 @@ local function hash_port()
     return port
 end
 
+--Builds validated options for this suite's component fixture.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return table options options used to configure the component under test.
 local function options()
     return {
         schema_version = "0.1.0",
@@ -99,6 +131,10 @@ local function options()
     }
 end
 
+--Supplies source behavior required by this suite.
+--@param log_level any The log level supplied to the fake service for this scenario.
+--@param extra_agent any The extra agent supplied to the fake service for this scenario.
+--@return any observed source value observed by the scenario assertion.
 local function source(log_level, extra_agent)
     return table.concat({
         "; preserve this comment",
@@ -127,6 +163,9 @@ local function source(log_level, extra_agent)
     }, "\n")
 end
 
+--Constructs the codec service used by this suite.
+--@param filesystem table Fake filesystem whose operations are observed.
+--@return any fixture Constructed codec service used by this suite.
 local function codec(filesystem)
     return assert(config.new({
         sha256 = hash_port(),
@@ -137,6 +176,9 @@ end
 local CONFIG_PATH = "/data/config.ini"
 local TEMP_PATH = "/data/config.ini.yaca-tmp"
 
+--Supplies setup sections behavior required by this suite.
+--@param key string|integer Lookup key selected by the operation.
+--@return table observed Structured fixture record selected by the exercised branch.
 local function setup_sections(key)
     return {
         {
@@ -170,7 +212,101 @@ return {
     name = "integration/config-generation",
     cases = {
         {
+            name = "configuration publication accepts final write time observed after close",
+            -- Publish actual INI bytes through the editor while the fixture finalizes timestamps at close.
+            --@param none No arguments.
+            --@return nil Assertions complete without returning a value.
+            --@effect Creates and replaces files only in the isolated fixture.
+            run = function()
+                local filesystem, controls = fake_filesystem.new({ [CONFIG_PATH] = source() })
+                controls.close_updates_modified = true
+                local service = codec(filesystem)
+                local draft = assert(service.begin_edit(CONFIG_PATH))
+                draft = assert(service.edit_draft(draft, {
+                    { section = "General", key = "LogLevel", value = "debug" },
+                }))
+                assert(service.commit_draft(draft, TEMP_PATH))
+                A.contains(controls.bytes(CONFIG_PATH), "LogLevel = debug")
+                A.falsy(controls.exists(TEMP_PATH))
+            end,
+        },
+        {
+            name = "failed temporary write leaves a foreign path replacement untouched",
+            -- Exercise cleanup immediately after create when another object occupies the temporary path.
+            --@param none No arguments.
+            --@return nil Assertions complete without returning a value.
+            --@effect Mutates only fake configuration files and an injected write port.
+            run = function()
+                local filesystem, controls = fake_filesystem.new({ [CONFIG_PATH] = source() })
+                -- Replace the temporary path after the original creation handle was bound.
+                --@param handle table Original temporary write handle.
+                --@param bytes string Proposed bounded INI bytes rejected by this fixture.
+                --@return boolean False because the write is deliberately rejected.
+                --@return table InjectedWrite diagnostic returned to the editor.
+                --@effect Replaces the fixture temporary path with a different file object.
+                filesystem.stream_write = function(handle, bytes)
+                    A.truthy(handle)
+                    A.truthy(bytes)
+                    controls.external_replace(TEMP_PATH, "foreign config")
+                    return false, { code = "InjectedWrite", message = "fixture write failure" }
+                end
+                local service = codec(filesystem)
+                local draft = assert(service.edit_draft(
+                    assert(service.begin_edit(CONFIG_PATH)),
+                    { { section = "General", key = "LogLevel", value = "debug" } }
+                ))
+                local published, problem = service.commit_draft(draft, TEMP_PATH)
+                A.falsy(published)
+                A.equal(problem.code, "InjectedWrite")
+                A.equal(controls.bytes(TEMP_PATH), "foreign config")
+                A.equal(controls.bytes(CONFIG_PATH), source())
+            end,
+        },
+        {
+            name = "same-byte temporary replacement after readback remains foreign",
+            -- Replace the path on the second read with a same-byte but different-object file.
+            --@param none No arguments.
+            --@return nil Assertions complete without returning a value.
+            --@effect Mutates only fake configuration files and an injected read port.
+            run = function()
+                local filesystem, controls = fake_filesystem.new({ [CONFIG_PATH] = source() })
+                local original_open = filesystem.open_read
+                local temporary_opens = 0
+                local foreign_identity
+                -- Preserve first post-close verification, then replace before the editor's second read.
+                --@param path string Absolute path requested by the configuration reader.
+                --@return boolean Whether the original fake port opened that path.
+                --@return table Handle or structured fake-port error.
+                --@effect Replaces the temporary on its second read while retaining identical bytes.
+                filesystem.open_read = function(path)
+                    if path == TEMP_PATH then
+                        temporary_opens = temporary_opens + 1
+                        if temporary_opens == 2 then
+                            controls.external_replace(TEMP_PATH, controls.bytes(TEMP_PATH))
+                            foreign_identity = controls.identity(TEMP_PATH)
+                        end
+                    end
+                    return original_open(path)
+                end
+                local service = codec(filesystem)
+                local draft = assert(service.edit_draft(
+                    assert(service.begin_edit(CONFIG_PATH)),
+                    { { section = "General", key = "LogLevel", value = "debug" } }
+                ))
+                local published, problem = service.commit_draft(draft, TEMP_PATH)
+                A.falsy(published)
+                A.equal(problem.code, "ConfigTemporaryMismatch")
+                A.equal(temporary_opens, 2)
+                A.equal(controls.identity(TEMP_PATH).object, foreign_identity.object)
+                A.contains(controls.bytes(TEMP_PATH), "LogLevel = debug")
+                A.equal(controls.bytes(CONFIG_PATH), source())
+            end,
+        },
+        {
             name = "configuration admission guard rechecks before publication and cleans rejected temporaries",
+            --Verifies configuration admission guard rechecks before publication and cleans rejected temporaries.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify configuration admission guard rechecks before publication and cleans rejected temporaries.
             run = function()
                 for _, rejection in ipairs({ "first", "second", "throw", "source-change", "none" }) do
                     local filesystem, controls = fake_filesystem.new({ [CONFIG_PATH] = source() })
@@ -180,6 +316,10 @@ return {
                         { section = "General", key = "LogLevel", value = "debug" },
                     }))
                     local calls = 0
+                    --Supplies an assertion callback for the configuration admission guard rechecks before publication and cleans rejected temporaries scenario.
+                    --@param none No arguments; this closure uses its captured fixture state.
+                    --@return boolean|nil value Callback value consumed by the enclosing scenario assertion.
+                    --@return table|nil secondary2 Typed error record with code ReferenceChanged.
                     local published, publish_error = service.commit_draft(draft, TEMP_PATH, function()
                         calls = calls + 1
                         if rejection == "throw" then error("private guard detail") end
@@ -211,6 +351,9 @@ return {
         },
         {
             name = "Model add rename and move share one exact configuration transaction",
+            --Verifies model add rename and move share one exact configuration transaction.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify model add rename and move share one exact configuration transaction.
             run = function()
                 local original = source():gsub("%[Agent%]",
                     '[Agent]\nActionReviewModel = "Primary"', 1)
@@ -241,6 +384,9 @@ return {
         },
         {
             name = "Model deletion preserves validity and never remaps external Context selectors",
+            --Verifies model deletion preserves validity and never remaps external Context selectors.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify model deletion preserves validity and never remaps external Context selectors.
             run = function()
                 local filesystem, controls = fake_filesystem.new({ [CONFIG_PATH] = source() })
                 local service = codec(filesystem)
@@ -264,6 +410,9 @@ return {
         },
         {
             name = "Model management refuses case-fold collisions invalid operations and stale publications",
+            --Verifies model management refuses case-fold collisions invalid operations and stale publications.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify model management refuses case-fold collisions invalid operations and stale publications.
             run = function()
                 local filesystem, controls = fake_filesystem.new({ [CONFIG_PATH] = source() })
                 local service = codec(filesystem)
@@ -284,6 +433,9 @@ return {
         },
         {
             name = "invalid INI repair preserves exact untouched bytes and hides every source value",
+            --Verifies invalid INI repair preserves exact untouched bytes and hides every source value.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify invalid INI repair preserves exact untouched bytes and hides every source value.
             run = function()
                 local valid = "\239\187\191" .. source():gsub("\n", "\r\n")
                 local original = valid .. '; private-comment-value\r\nUnknown = "unknown-secret"\r\n'
@@ -311,6 +463,9 @@ return {
         },
         {
             name = "repair supports multiple invalid intermediate lines but writes only a complete valid candidate",
+            --Verifies repair supports multiple invalid intermediate lines but writes only a complete valid candidate.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify repair supports multiple invalid intermediate lines but writes only a complete valid candidate.
             run = function()
                 local original = source() .. '[Model.Primary]\nKey = "replacement-secret"\n'
                 local filesystem, controls = fake_filesystem.new({ [CONFIG_PATH] = original })
@@ -329,6 +484,9 @@ return {
         },
         {
             name = "repair fixes invalid encoding and retains mixed endings and missing final newline",
+            --Verifies repair fixes invalid encoding and retains mixed endings and missing final newline.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify repair fixes invalid encoding and retains mixed endings and missing final newline.
             run = function()
                 local original = source() .. "\255broken\r"
                 local filesystem, controls = fake_filesystem.new({ [CONFIG_PATH] = original })
@@ -343,6 +501,9 @@ return {
         },
         {
             name = "repair rejects forged handles external edits and same-byte file replacement before writing",
+            --Verifies repair fixes invalid encoding and retains mixed endings and missing final newline.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify repair fixes invalid encoding and retains mixed endings and missing final newline.
             run = function()
                 for _, method in ipairs({ "external_write", "external_replace" }) do
                     local original = source() .. "broken\n"
@@ -362,6 +523,9 @@ return {
         },
         {
             name = "repair bounds edits and input without changing its original private draft",
+            --Verifies repair bounds edits and input without changing its original private draft.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify repair bounds edits and input without changing its original private draft.
             run = function()
                 local filesystem = fake_filesystem.new({ [CONFIG_PATH] = source() .. "broken\n" })
                 local service = codec(filesystem)
@@ -380,11 +544,17 @@ return {
                 end
                 A.falsy(service.edit_repair(draft, "replace", count, "; another"))
                 A.equal(#assert(service.repair_status(base)).edits, 0)
+                --Executes the action expected to raise in the 'repair bounds edits and input without changing its original private draft' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify repair bounds edits and input without changing its original private draft.
                 A.raises(function() assert(service.repair_status(base)).rows[1].label = "changed" end)
             end,
         },
         {
             name = "repair reuses temporary validation retries known failures and consumes uncertain publication",
+            --Verifies repair reuses temporary validation retries known failures and consumes uncertain publication.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify repair reuses temporary validation retries known failures and consumes uncertain publication.
             run = function()
                 for _, fault in ipairs({ "write", "corrupt_after_write_close", "replace", "flush_directory" }) do
                     local original = source() .. "broken\n"
@@ -410,6 +580,9 @@ return {
         },
         {
             name = "config editor field projection hides secret-capable values and validates literal inputs",
+            --Verifies config editor field projection hides secret-capable values and validates literal inputs.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify config editor field projection hides secret-capable values and validates literal inputs.
             run = function()
                 local original = source():gsub("%[Agent%]",
                     '[Network]\nProxyUrl = "https://user:proxy-secret@proxy.example"\n[Agent]', 1)
@@ -419,6 +592,11 @@ return {
                 local sections = assert(service.draft_sections(base))
                 A.equal(sections[1], "General")
                 A.equal(sections[#sections], "Model.Primary")
+                --Supplies row behavior required by the 'config editor field projection hides secret-capable values and validates literal inputs' case.
+                --@param draft table Private draft under test.
+                --@param section string INI section selected for the operation.
+                --@param key string|integer Lookup key selected by the operation.
+                --@return any observed row value observed by the scenario assertion.
                 local function row(draft, section, key)
                     for _, field in ipairs(assert(service.draft_fields(draft, section))) do
                         if field.key == key then return field end
@@ -434,6 +612,9 @@ return {
                 local all = A.render(service.draft_fields(base, "Network")) .. A.render(service.draft_fields(base, "Model.Primary"))
                 A.falsy(all:find("original-secret", 1, true))
                 A.falsy(all:find("proxy-secret", 1, true))
+                --Executes the action expected to raise in the 'config editor field projection hides secret-capable values and validates literal inputs' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify config editor field projection hides secret-capable values and validates literal inputs.
                 A.raises(function() sections[1] = "Changed" end, "cannot be modified")
                 local draft = assert(service.edit_draft_value(base, "General", "SystemPrompt", '"line\\nnext \\\"quote\\\""'))
                 A.equal(row(draft, "General", "SystemPrompt").value, 'line\nnext "quote"')
@@ -458,6 +639,9 @@ return {
         },
         {
             name = "existing edits recheck base write validate replace and flush directory",
+            --Verifies existing edits recheck base write validate replace and flush directory.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify existing edits recheck base write validate replace and flush directory.
             run = function()
                 local filesystem, controls = fake_filesystem.new({
                     [CONFIG_PATH] = source(),
@@ -495,6 +679,9 @@ return {
         },
         {
             name = "external replacement makes a draft stale before any temporary write",
+            --Verifies external replacement makes a draft stale before any temporary write.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify external replacement makes a draft stale before any temporary write.
             run = function()
                 local filesystem, controls = fake_filesystem.new({
                     [CONFIG_PATH] = source(),
@@ -519,6 +706,9 @@ return {
         },
         {
             name = "temporary corruption and replace failure preserve the old target",
+            --Verifies temporary corruption and replace failure preserve the old target.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify temporary corruption and replace failure preserve the old target.
             run = function()
                 local filesystem, controls = fake_filesystem.new({
                     [CONFIG_PATH] = source(),
@@ -549,6 +739,9 @@ return {
         },
         {
             name = "structural unset preserves comments and remains fully validated",
+            --Verifies structural unset preserves comments and remains fully validated.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify structural unset preserves comments and remains fully validated.
             run = function()
                 local filesystem, controls = fake_filesystem.new({
                     [CONFIG_PATH] = source("info", "MaxTurnToolCalls = 8"),
@@ -573,6 +766,9 @@ return {
         },
         {
             name = "new config is no-replace and directory-flush failure is typed unknown",
+            --Verifies new config is no-replace and directory-flush failure is typed unknown.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify new config is no-replace and directory-flush failure is typed unknown.
             run = function()
                 local filesystem, controls = fake_filesystem.new()
                 local service = codec(filesystem)
@@ -601,6 +797,9 @@ return {
         },
         {
             name = "typed first setup and exact template repair publish no secret projection",
+            --Verifies typed first setup and exact template repair publish no secret projection.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify typed first setup and exact template repair publish no secret projection.
             run = function()
                 local filesystem, controls = fake_filesystem.new()
                 local service = codec(filesystem)

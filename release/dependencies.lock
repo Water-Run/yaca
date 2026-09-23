@@ -1,7 +1,7 @@
 --[[
-File: dependencies.lock
-Date: 2026-08-30
 Author: WaterRun
+Date: 2026-09-23
+File: dependencies.lock
 Description: Locks every source that may contribute bytes to a yaca package.
 ]]
 
@@ -10,9 +10,9 @@ Description: Locks every source that may contribute bytes to a yaca package.
 return {
     schema_version = "yaca-dependency-lock-v1",
     lock_date = "2026-08-30",
-    lock_status = "source-locked-target-artifacts-qualified-per-D-072",
-    release_authorized = true,
-    target_artifacts_qualified = true,
+    lock_status = "source-locked-target-artifacts-pending",
+    release_authorized = false,
+    target_artifacts_qualified = false,
     hash_algorithm = "sha256",
 
     component_order = {
@@ -219,11 +219,11 @@ return {
             "zstd",
         },
         target_compatibility = {
-            qualification = "passed-per-D-072-tested-environments",
+            qualification = "pending",
             upstream_windows_minimum = "Windows Vista since curl 8.19.0",
-            win32_xp = "future-enhancement-real-XP-proof",
-            win64 = "qualified-on-Windows-11-per-D-072-real-Win7-is-future-enhancement",
-            linux = "qualified-in-CentOS-7.9-container-per-D-072-bare-metal-is-future-enhancement",
+            win32_xp = "candidate-tested-on-real-XP-SP3-edition-proof-required",
+            win64 = "candidate-tested-on-real-Windows-7-SP1-edition-proof-required",
+            linux = "candidate-tested-on-CentOS-7-edition-proof-required",
         },
         target_build_overrides = {
             ["win32-x86"] = {
@@ -244,21 +244,21 @@ return {
             minimum = "Windows XP SP3",
             object_format = "PE32-i386", lua_abi = "5.5",
             executable = "yaca.exe", curl_executable = "curl.exe",
-            native_extension = ".dll", qualification = "passed",
+            native_extension = ".dll", qualification = "pending",
         },
         ["win64-x86_64"] = {
             id = "win64-x86_64", os = "windows", arch = "x86_64",
             minimum = "Windows 7 SP1",
             object_format = "PE32+-x86-64", lua_abi = "5.5",
             executable = "yaca.exe", curl_executable = "curl.exe",
-            native_extension = ".dll", qualification = "passed",
+            native_extension = ".dll", qualification = "pending",
         },
         ["linux-x86_64"] = {
             id = "linux-x86_64", os = "linux", arch = "x86_64",
             minimum = "CentOS 7 x86_64",
             object_format = "ELF64-x86-64", lua_abi = "5.5",
             executable = "yaca", curl_executable = "curl",
-            native_extension = ".so", qualification = "passed",
+            native_extension = ".so", qualification = "pending",
         },
     },
 
@@ -276,7 +276,8 @@ return {
         component_manifest_required = true,
         spdx_version = "SPDX-2.3",
         spdx_data_license = "CC0-1.0",
-        notices_in_archive = true,
+        notices_in_archive = false,
+        notices_in_companion = true,
         corresponding_source_reference_required = true,
         required_license_ids = {
             "GPL-3.0-only", "LGPL-3.0-or-later", "MIT", "curl",

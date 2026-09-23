@@ -1,4 +1,4 @@
-yaca: Yet Another Coding Agent.
+yaca: General-purpose terminal agent.
 
 Usage:
   yaca [directory]
@@ -22,6 +22,13 @@ Canonical actions:
   --continue         -c     /c     Continue one Context selected by short name or precise hash.
   --export           -ex    /ex    Export a selected or current Context through the public format.
   --status           -stt   /stt   Show status for the explicitly opened current Context.
+
+Embedded Lua (handled before application startup):
+  yaca --lua [Lua options] [script [args]]
+  yaca --lua -v                 Show the linked Lua version.
+  yaca --lua -E -e <code>       Run code without Lua environment initialization.
+  yaca --lua -E -               Read a script from standard input.
+  No configuration or Model is needed; ordinary exec permissions still apply.
 
 Self-test options:
   --through-stage 1|2|3

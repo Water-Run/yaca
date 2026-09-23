@@ -1,3 +1,10 @@
+--[[
+Author: WaterRun
+Date: 2026-09-23
+File: manifest.lua
+Description: Synthetic exact-byte archive for C21. This is deliberately not TP-015 evidence.
+]]
+
 -- Synthetic exact-byte archive for C21. This is deliberately not TP-015 evidence.
 return {
     schema_version = "yaca-provider-wire-archive-v0.1.0",

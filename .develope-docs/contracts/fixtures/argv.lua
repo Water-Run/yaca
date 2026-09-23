@@ -1,3 +1,10 @@
+--[[
+Author: WaterRun
+Date: 2026-09-23
+File: argv.lua
+Description: Supplies CLI parsing and action-projection cases for the action contract.
+]]
+
 return {
   contract_version = "0.1.0-readiness.1",
   cases = {

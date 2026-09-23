@@ -1,8 +1,15 @@
+--[[
+Author: WaterRun
+Date: 2026-09-23
+File: prompts.lua
+Description: Supplies purpose-specific prompt and tool/control inclusion expectations.
+]]
+
 return {
   contract_version = "0.1.0-readiness.1",
   purpose_cases = {
     { id = "main", layers = { "runtime-purpose", "global", "model", "permission", "context", "user-message" }, tools = "registered", controls = { "yaca_finish", "yaca_ask_user", "yaca_refuse" } },
-    { id = "side", layers = { "runtime-purpose", "global", "model", "permission", "context", "user-message" }, tools = "none", controls = {} },
+    { id = "ask", layers = { "runtime-purpose", "global", "model", "permission", "context", "user-message" }, tools = "none", controls = {} },
     { id = "action-review", layers = { "runtime-purpose", "global", "model", "permission-quoted", "context-quoted", "proposed-action-quoted", "evidence-quoted" }, tools = "none", controls = {} },
     { id = "termination-review", layers = { "runtime-purpose", "global", "model", "double-check-goal-quoted", "context-quoted", "candidate-report-quoted", "evidence-quoted" }, tools = "none", controls = {} },
     { id = "compaction", layers = { "runtime-purpose", "global", "model", "model-view-input" }, tools = "none", controls = {} },

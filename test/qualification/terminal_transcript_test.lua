@@ -1,19 +1,29 @@
 --[[
-File: terminal_transcript_test.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-09-23
+File: terminal_transcript_test.lua
 Description: Runs deterministic terminal-profile transcripts without claiming target proof.
 ]]
 
 local A = assert(loadfile(YACA_TEST_ROOT .. "/test/support/assert.lua", "t", _ENV))()
 
+--Loads a source module into an isolated per-case environment.
+--@param name string Module, Model, or resource name selected by the case.
+--@param cache table Per-case module cache preserving isolated imports.
+--@return any module Module export loaded in the isolated source environment.
 local function load_module(name, cache)
     cache = cache or {}
     if cache[name] then return cache[name] end
-    local environment = { require = function(dependency)
+    local environment = {
+        --Resolves an imported Lua module through the isolated test loader.
+        --@param dependency string Source module requested from the isolated loader.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
+        require = function(dependency)
         return load_module(dependency, cache)
     end }
     environment._G = environment
+    --@metatable environment Test-owned lookup and mutation contract for the current case.
+    --@field __index any Fallback table or function used for missing fixture keys.
     setmetatable(environment, { __index = _ENV })
     local chunk, load_error = loadfile(
         YACA_TEST_ROOT .. "/src/" .. name .. ".lua",
@@ -26,12 +36,18 @@ local function load_module(name, cache)
     return value
 end
 
+--Loads a repository Lua module as a test support value.
+--@param relative_path string Repository-relative Lua source path to load.
+--@return any module Test support module export loaded from the repository.
 local function load_table(relative_path)
     local chunk, load_error = loadfile(YACA_TEST_ROOT .. "/" .. relative_path, "t", _ENV)
     A.truthy(chunk, load_error)
     return chunk()
 end
 
+--Reads read file for this test scenario.
+--@param relative_path string Repository-relative Lua source path to load.
+--@return any bytes Bytes read from the selected fixture file.
 local function read_file(relative_path)
     local handle, open_error = io.open(YACA_TEST_ROOT .. "/" .. relative_path, "rb")
     A.truthy(handle, open_error)
@@ -44,6 +60,9 @@ local cache = {}
 local tui = load_module("tui", cache)
 local manifest = load_table("release/manifest.lua")
 
+--Builds the capabilities values used by this suite.
+--@param profile table Selected Model or Permission profile.
+--@return table observed Structured fixture record selected by the exercised branch.
 local function capabilities(profile)
     return {
         ansi = false,
@@ -59,6 +78,9 @@ local function capabilities(profile)
     }
 end
 
+--Supplies renderer behavior required by this suite.
+--@param profile table Selected Model or Permission profile.
+--@return any observed renderer value observed by the scenario assertion.
 local function renderer(profile)
     return assert(tui.new({
         width = 40,
@@ -69,6 +91,10 @@ local function renderer(profile)
     }))
 end
 
+--Supplies editor options behavior required by this suite.
+--@param mode string Operating mode selected by the scenario.
+--@param draft table Private draft under test.
+--@return table observed Structured fixture record selected by the exercised branch.
 local function editor_options(mode, draft)
     return {
         mode = mode,
@@ -80,8 +106,15 @@ local function editor_options(mode, draft)
     }
 end
 
+--Supplies atomic display behavior required by this suite.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return any observed atomic display value observed by the scenario assertion.
 local function atomic_display()
     local display = { frames = {}, transcript = "" }
+    --Supplies redraw behavior required by this suite.
+    --@param self table Fixture or port instance receiving this call.
+    --@param frame table Model or transport frame under inspection.
+    --@return boolean accepted Whether redraw succeeds in the fixture.
     function display:redraw(frame)
         self.frames[#self.frames + 1] = frame
         if frame.append_bytes == "" then
@@ -94,6 +127,9 @@ local function atomic_display()
     return display
 end
 
+--Supplies cooked display behavior required by this suite.
+--@param system_draft any The system draft supplied to the fake service for this scenario.
+--@return any observed cooked display value observed by the scenario assertion.
 local function cooked_display(system_draft)
     local display = {
         system_draft = system_draft,
@@ -101,6 +137,10 @@ local function cooked_display(system_draft)
         urgent_requests = {},
         flushed = {},
     }
+    --Records the write effect observed by this suite.
+    --@param self table Fixture or port instance receiving this call.
+    --@param bytes string Byte chunk supplied to the fake I/O port.
+    --@return any observed Number of bytes accepted by the fake sink.
     function display:write(bytes)
         if bytes == ">>\n" then
             self.transcript = self.transcript .. ">> " .. self.system_draft .. "\n"
@@ -110,6 +150,10 @@ local function cooked_display(system_draft)
         end
         return #bytes
     end
+    --Writes write urgent through the the current case fixture.
+    --@param self table Fixture or port instance receiving this call.
+    --@param request table Request delivered to the fake component.
+    --@return boolean accepted Whether write urgent succeeds in the fixture.
     function display:write_urgent(request)
         self.urgent_requests[#self.urgent_requests + 1] = request
         self.transcript = self.transcript .. request.bytes
@@ -172,6 +216,9 @@ return {
     cases = {
         {
             name = "native and raw profiles atomically restore the exact frozen draft",
+            --Verifies native and raw profiles atomically restore the exact frozen draft.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify native and raw profiles atomically restore the exact frozen draft.
             run = function()
                 local golden = read_file("test/golden/tui/stream-redraw")
                 for _, profile in ipairs(OWNED_PROFILES) do
@@ -205,6 +252,9 @@ return {
         },
         {
             name = "cooked and SSH profiles expose backlog without claiming host draft ownership",
+            --Verifies cooked and SSH profiles expose backlog without claiming host draft ownership.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify cooked and SSH profiles expose backlog without claiming host draft ownership.
             run = function()
                 local golden = read_file("test/golden/tui/plain-backlog")
                 for _, profile in ipairs(COOKED_PROFILES) do
@@ -237,12 +287,15 @@ return {
         },
         {
             name = "every terminal profile keeps fixed text fallbacks and pending target status",
+            --Verifies every terminal profile keeps fixed text fallbacks and pending target status.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify every terminal profile keeps fixed text fallbacks and pending target status.
             run = function()
                 local expected_fallbacks = {
                     ["submit-or-queue"] = ".queue <message>",
                     steer = ".immediate <message>",
                     newline = ".multiline",
-                    side = ".side <message>",
+                    ask = ".ask <message>",
                     cancel = ".cancel",
                 }
                 for _, profiles in ipairs({ OWNED_PROFILES, COOKED_PROFILES }) do
@@ -266,11 +319,11 @@ return {
                 for _, target in ipairs(manifest.targets) do
                     targets[target.id] = target.qualification
                 end
-                A.equal(targets["win32-x86"], "passed")
-                A.equal(targets["win64-x86_64"], "passed")
-                A.equal(targets["linux-x86_64"], "passed")
-                A.truthy(manifest.release_authorized)
-                A.equal(manifest.release_state, "qualified")
+                A.equal(targets["win32-x86"], "pending")
+                A.equal(targets["win64-x86_64"], "pending")
+                A.equal(targets["linux-x86_64"], "pending")
+                A.falsy(manifest.release_authorized)
+                A.equal(manifest.release_state, "unqualified")
             end,
         },
     },

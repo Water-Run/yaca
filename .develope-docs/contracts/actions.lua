@@ -1,21 +1,48 @@
+--[[
+Author: WaterRun
+Date: 2026-09-23
+File: actions.lua
+Description: Defines the semantic action registry and its CLI, line and control projections.
+]]
+
+-- Describe one semantic action argument before projecting it onto an input surface.
+--@param name string Stable argument name used by the action handler.
+--@param type_name string Contract type name for argument validation.
+--@param required boolean Whether the action requires this argument.
+--@param extra table|nil Additional constraints copied after the base fields and allowed to override them.
+--@return table Argument descriptor retaining nested extra values by reference.
 local function arg(name, type_name, required, extra)
   local value = { name = name, type = type_name, required = required }
   if extra then for k, v in pairs(extra) do value[k] = v end end
   return value
 end
 
+-- Describe the process-argument spellings for one semantic action.
+--@param long string|nil Long option spelling, or nil when unavailable.
+--@param short string|nil Short option spelling, or nil when unavailable.
+--@param slash string|nil Windows slash spelling, or nil when unavailable.
+--@param extra table|nil Additional projection fields copied after the standard spellings.
+--@return table argv projection descriptor; absent spellings remain absent.
 local function argv(long, short, slash, extra)
   local value = { kind = "argv", long = long, short = short, slash = slash }
   if extra then for k, v in pairs(extra) do value[k] = v end end
   return value
 end
 
+-- Describe a chat-line command and its optional direct key binding.
+--@param command string Chat command spelling.
+--@param key string|nil Optional terminal key binding for the same action.
+--@param extra table|nil Additional projection constraints copied after the base fields.
+--@return table chat-line projection descriptor.
 local function chat(command, key, extra)
   local value = { kind = "chat-line", command = command, key = key }
   if extra then for k, v in pairs(extra) do value[k] = v end end
   return value
 end
 
+-- Describe a command available in the Context management REPL.
+--@param command string Exact management command spelling.
+--@return table context-repl-line projection descriptor carrying that command.
 local function context_repl(command)
   return { kind = "context-repl-line", command = command }
 end
@@ -197,8 +224,8 @@ return {
       tty = "tty-required", confirm = "none", allowed_states = { "Preparing", "RequestingModel", "Streaming", "DispatchingTools", "AwaitingApproval", "ExecutingTool", "EvaluatingAction", "EvaluatingTermination", "WaitingUser" }, results = { "accepted", "cancel-pending", "unknown-side-effect", "error" },
     },
     {
-      id = "side", surface = "chat", args = { arg("message", "bounded-utf8-text", true) }, projections = { chat(".side <message>", "Alt+Enter") },
-      tty = "tty-required", confirm = "none", allowed_states = { "Idle", "Preparing", "RequestingModel", "Streaming", "DispatchingTools", "AwaitingApproval", "ExecutingTool", "EvaluatingAction", "EvaluatingTermination", "WaitingUser" }, results = { "accepted", "side-busy", "error" },
+      id = "ask", surface = "chat", args = { arg("message", "bounded-utf8-text", true) }, projections = { chat(".ask <message>", "Alt+Enter") },
+      tty = "tty-required", confirm = "none", allowed_states = { "Idle", "Preparing", "RequestingModel", "Streaming", "DispatchingTools", "AwaitingApproval", "ExecutingTool", "EvaluatingAction", "EvaluatingTermination", "WaitingUser" }, results = { "accepted", "ask-busy", "error" },
     },
     {
       id = "multiline", surface = "chat", args = {}, projections = { chat(".multiline", "Shift+Enter") },

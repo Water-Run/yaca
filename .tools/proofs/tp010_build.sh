@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# Author: WaterRun
+# Date: 2026-09-23
+# File: tp010_build.sh
+# Description: Builds pinned Lua and XML dependencies and runs the modern-host XML corpus.
+
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -11,6 +16,10 @@ fi
 WORK_DIR=$(mktemp -d -t yaca-tp010-XXXXXX)
 BUILD_LOG="$WORK_DIR/build.log"
 
+# Remove the temporary XML proof build tree at process exit.
+#@param none No arguments; uses WORK_DIR from this invocation.
+#@return int rm exit status, ignored by the EXIT trap.
+#@effect Deletes only the temporary proof directory.
 cleanup() {
   rm -rf -- "$WORK_DIR"
 }
@@ -28,6 +37,13 @@ LUAEXPAT_VERSION=1.5.2
 LUAEXPAT_SHA256=89d83f2141edec31be576425637216928221918fe95dc3854d1b7fd4c627213f
 LUAEXPAT_URL=https://github.com/lunarmodules/luaexpat/archive/refs/tags/1.5.2.tar.gz
 
+# Obtain one pinned source archive from a cache or its published URL.
+#@param 1 string Source URL used when the cache is absent.
+#@param 2 string Destination archive path.
+#@param 3 string Expected lowercase SHA-256 digest.
+#@param 4 string Filename within the optional source cache.
+#@return int Zero after digest verification; mismatch exits with status 65.
+#@effect Writes the archive to the temporary build directory.
 download_and_verify() {
   local url=$1
   local destination=$2
@@ -48,6 +64,10 @@ download_and_verify() {
   fi
 }
 
+# Run a pinned build command and retain its output for diagnosis.
+#@param ... string Command and arguments executed directly.
+#@return int Zero when the command succeeds; failures exit the proof.
+#@effect Appends output to BUILD_LOG and prints its tail on failure.
 run_logged() {
   if ! "$@" >>"$BUILD_LOG" 2>&1; then
     echo "build command failed: $*" >&2

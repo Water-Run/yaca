@@ -1,12 +1,15 @@
 --[[
-File: sbom_test.lua
-Date: 2026-08-30
 Author: WaterRun
+Date: 2026-09-23
+File: sbom_test.lua
 Description: Verifies dependency provenance, licenses, and deterministic SPDX data.
 ]]
 
 local A = assert(loadfile(YACA_TEST_ROOT .. "/test/support/assert.lua", "t", _ENV))()
 
+--Reads load value for this test scenario.
+--@param relative_path string Repository-relative Lua source path to load.
+--@return any module Lua module value loaded for this case.
 local function load_value(relative_path)
     local chunk, load_error = loadfile(YACA_TEST_ROOT .. "/" .. relative_path, "t", _ENV)
     A.truthy(chunk, load_error)
@@ -15,6 +18,9 @@ local function load_value(relative_path)
     return value
 end
 
+--Clones test data before it is handed to the exercised service.
+--@param value any Candidate whose acceptance or transformation the test checks.
+--@return any clone Independent clone of the source fixture value.
 local function clone(value)
     if type(value) ~= "table" then return value end
     local result = {}
@@ -26,10 +32,20 @@ local manifest = load_value("release/manifest.lua")
 local lock = load_value("release/dependencies.lock")
 local module = load_value("release/luainstaller.lua")
 
+--Supplies hash behavior required by this suite.
+--@param byte integer Single byte being encoded or inspected.
+--@return any observed hash value observed by the scenario assertion.
 local function hash(byte)
     return string.rep(byte, 64)
 end
 
+--Supplies pending artifact behavior required by this suite.
+--@param path string File or Context path exercised by the case.
+--@param target_id string|integer Identity of the selected fake target.
+--@param object_format any The object format supplied to the fake service for this scenario.
+--@param version string Version value reported by the fake platform.
+--@param digest string Expected or computed hexadecimal digest.
+--@return table observed Structured fixture record selected by the exercised branch.
 local function pending_artifact(path, target_id, object_format, version, digest)
     return {
         source_path = path,
@@ -43,6 +59,11 @@ local function pending_artifact(path, target_id, object_format, version, digest)
     }
 end
 
+--Supplies pending file behavior required by this suite.
+--@param path string File or Context path exercised by the case.
+--@param destination string|table Publication destination selected by the case.
+--@param digest string Expected or computed hexadecimal digest.
+--@return table observed Structured fixture record with source_path, destination_path, sha256, qualification.
 local function pending_file(path, destination, digest)
     return {
         source_path = path,
@@ -52,6 +73,10 @@ local function pending_file(path, destination, digest)
     }
 end
 
+--Constructs make plan for this test scenario.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return any created Constructed make plan fixture value.
+--@return any secondary2 Additional status or structured error from the fixture operation.
 local function make_plan()
     local planner = assert(module.new(manifest, lock))
     local launcher = pending_artifact(
@@ -141,6 +166,9 @@ local function make_plan()
     return planner, assert(planner.plan("linux-x86_64", inputs))
 end
 
+--Supplies packages by id behavior required by this suite.
+--@param sbom any The sbom supplied to the fake service for this scenario.
+--@return any observed packages by id value observed by the scenario assertion.
 local function packages_by_id(sbom)
     local result = {}
     for _, package in ipairs(sbom.packages) do result[package.SPDXID] = package end
@@ -152,6 +180,9 @@ return {
     cases = {
         {
             name = "all shipped source components have exact provenance and licenses",
+            --Verifies all shipped source components have exact provenance and licenses.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify all shipped source components have exact provenance and licenses.
             run = function()
                 A.deep_equal(lock.component_order, {
                     "yaca", "luainstaller", "lua", "luaexpat", "expat",
@@ -198,7 +229,10 @@ return {
             end,
         },
         {
-            name = "curl closure is HTTP only static with recorded target states",
+            name = "curl closure is HTTP only static and honestly target-pending",
+            --Verifies curl closure is HTTP only static and honestly target-pending.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify curl closure is HTTP only static and honestly target-pending.
             run = function()
                 A.deep_equal(lock.curl_profile.protocols, { "http", "https" })
                 A.equal(lock.curl_profile.tls_component, "mbedtls")
@@ -210,16 +244,19 @@ return {
                 A.falsy(lock.curl_profile.ambient_config)
                 A.falsy(lock.curl_profile.ambient_ca)
                 A.falsy(lock.curl_profile.upx)
-                A.equal(lock.curl_profile.target_compatibility.qualification, "passed-per-D-072-tested-environments")
+                A.equal(lock.curl_profile.target_compatibility.qualification, "pending")
                 A.contains(
                     lock.curl_profile.target_compatibility.upstream_windows_minimum,
                     "Vista"
                 )
-                A.contains(lock.curl_profile.target_compatibility.win32_xp, "future-enhancement")
+                A.contains(lock.curl_profile.target_compatibility.win32_xp, "proof-required")
             end,
         },
         {
             name = "SPDX document is deterministic ordered and remains unqualified",
+            --Verifies sPDX document is deterministic ordered and remains unqualified.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify sPDX document is deterministic ordered and remains unqualified.
             run = function()
                 local planner, plan = make_plan()
                 local first = assert(planner.sbom(plan))
@@ -234,12 +271,15 @@ return {
                     A.equal(first.packages[index].SPDXID, lock.components[name].spdx_id)
                     A.falsy(first.packages[index].filesAnalyzed)
                 end
-                A.contains(first.annotations[1].comment, "released per D-072")
+                A.contains(first.annotations[1].comment, "candidate-unqualified")
                 A.contains(first.annotations[1].comment, "linux-x86_64")
             end,
         },
         {
             name = "SPDX packages preserve hashes revisions and declared license choices",
+            --Verifies sPDX packages preserve hashes revisions and declared license choices.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify sPDX packages preserve hashes revisions and declared license choices.
             run = function()
                 local planner, plan = make_plan()
                 local sbom = assert(planner.sbom(plan))
@@ -270,6 +310,9 @@ return {
         },
         {
             name = "SPDX relationships describe the complete static dependency closure",
+            --Verifies sPDX relationships describe the complete static dependency closure.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify sPDX relationships describe the complete static dependency closure.
             run = function()
                 local planner, plan = make_plan()
                 local relationships = assert(planner.sbom(plan)).relationships
@@ -319,12 +362,16 @@ return {
         },
         {
             name = "component license manifest contains every notice obligation",
+            --Verifies component license manifest contains every notice obligation.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify component license manifest contains every notice obligation.
             run = function()
                 local planner, plan = make_plan()
                 local licenses = assert(planner.license_manifest(plan))
-                A.equal(licenses.status, "released")
-                A.truthy(licenses.release_authorized)
-                A.truthy(licenses.notices_in_archive)
+                A.equal(licenses.status, "candidate-unqualified")
+                A.falsy(licenses.release_authorized)
+                A.falsy(licenses.notices_in_archive)
+                A.truthy(licenses.notices_in_companion)
                 A.truthy(licenses.corresponding_source_reference_required)
                 A.deep_equal(licenses.required_license_ids, {
                     "GPL-3.0-only", "LGPL-3.0-or-later", "MIT", "curl",
@@ -348,6 +395,9 @@ return {
         },
         {
             name = "caller mutation cannot rewrite admitted evidence",
+            --Verifies caller mutation cannot rewrite admitted evidence.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify caller mutation cannot rewrite admitted evidence.
             run = function()
                 local planner, plan = make_plan()
                 local expected = assert(planner.sbom(plan))
@@ -364,6 +414,9 @@ return {
         },
         {
             name = "foreign plans and release-authorizing policy mutations fail closed",
+            --Verifies caller mutation cannot rewrite admitted evidence.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify caller mutation cannot rewrite admitted evidence.
             run = function()
                 local planner = assert(module.new(manifest, lock))
                 local sbom, sbom_error = planner.sbom({})
@@ -371,13 +424,13 @@ return {
                 A.equal(sbom_error.code, "UnknownPackagePlan")
 
                 local altered_lock = clone(lock)
-                altered_lock.target_artifacts_qualified = false
+                altered_lock.release_authorized = true
                 local altered, altered_error = module.new(manifest, altered_lock)
                 A.falsy(altered)
                 A.equal(altered_error.code, "InvalidDependencyLock")
 
                 local altered_manifest = clone(manifest)
-                altered_manifest.target_qualification_complete = false
+                altered_manifest.release_authorized = true
                 local admitted, admitted_error = module.new(altered_manifest, lock)
                 A.falsy(admitted)
                 A.equal(admitted_error.code, "InvalidReleaseManifest")
@@ -402,6 +455,9 @@ return {
         },
         {
             name = "historical utility surface is absent from lock SBOM and allowlist",
+            --Verifies historical utility surface is absent from lock SBOM and allowlist.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify historical utility surface is absent from lock SBOM and allowlist.
             run = function()
                 local forbidden = {
                     sqlite3 = true, jq = true, ["7za"] = true, busybox = true,

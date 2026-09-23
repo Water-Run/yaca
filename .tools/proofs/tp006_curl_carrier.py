@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# Author: WaterRun
+# Date: 2026-09-23
+# File: tp006_curl_carrier.py
+# Description: TP-006 modern-host proof for curl carrier, cancellation, retry, and scanning.
+
 """TP-006 modern-host proof for curl carrier, cancellation, retry, and scanning.
 
 This script starts loopback-only programmable endpoints. It never prints the
@@ -30,6 +35,10 @@ ASSERTIONS = 0
 MIN_SCANNABLE_SECRET_BYTES_CANDIDATE = 8
 
 
+# Raises on a failed proof assertion with a scenario-specific message.
+#@param value object Candidate value under validation.
+#@param message str Assertion or diagnostic message.
+#@return None No value; the operation updates proof state or raises on failure.
 def check(value: bool, message: str) -> None:
     global ASSERTIONS
     ASSERTIONS += 1
@@ -37,10 +46,16 @@ def check(value: bool, message: str) -> None:
         raise AssertionError(f"assertion {ASSERTIONS} failed: {message}")
 
 
+# Asserts that an observed value equals its expected proof value.
+#@param actual object Observed value or fault point.
+#@param expected object Expected observation or child exit state.
+#@param message str Assertion or diagnostic message.
+#@return None No value; the operation updates proof state or raises on failure.
 def equal(actual, expected, message: str) -> None:
     check(actual == expected, f"{message} (expected={expected!r} actual={actual!r})")
 
 
+#@class ServerState Owns the curl carrier proof curl carrier state and its resource lifetime.
 @dataclass
 class ServerState:
     lock: threading.Lock = field(default_factory=threading.Lock)
@@ -50,27 +65,47 @@ class ServerState:
     sse_seen: threading.Event = field(default_factory=threading.Event)
     release_sse: threading.Event = field(default_factory=threading.Event)
 
+    # Records one HTTP request received by the proof server.
+    #@param self ServerState Owner of the proof fixture and its resources.
+    #@param item dict Request record added to proof state.
+    #@return None result No value; appends the request to server evidence.
     def record(self, item: dict) -> None:
         with self.lock:
             self.requests.append(item)
 
+    # Finds recorded HTTP requests for the selected route.
+    #@param self ServerState Owner of the proof fixture and its resources.
+    #@param path Path|str Input file or package path under inspection.
+    #@return list[dict] requests Recorded requests matching the selected route.
     def matching(self, path: str) -> list[dict]:
         with self.lock:
             return [request for request in self.requests if request["path"] == path]
 
 
+#@class ProofHandler Owns the curl carrier proof curl carrier state and its resource lifetime.
 class ProofHandler(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "yaca-proof"
     sys_version = ""
 
+    # Suppresses default proof-server request logging.
+    #@param self ProofHandler Owner of the proof fixture and its resources.
+    #@param _format str Unused HTTP server log format.
+    #@param _args object Unused HTTP server log arguments.
+    #@return None No value; the operation updates proof state or raises on failure.
     def log_message(self, _format: str, *_args) -> None:
         return
 
+    # Checks state in curl carrier proof curl carrier.
+    #@param self ProofHandler Owner of the proof fixture and its resources.
+    #@return ServerState state Shared request evidence owned by the proof server.
     @property
     def state(self) -> ServerState:
         return self.server.proof_state  # type: ignore[attr-defined]
 
+    # Checks  request record in curl carrier proof curl carrier.
+    #@param self ProofHandler Owner of the proof fixture and its resources.
+    #@return dict record Captured method, path, headers, and body of this POST.
     def _request_record(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))
         body = self.rfile.read(length)
@@ -82,6 +117,9 @@ class ProofHandler(http.server.BaseHTTPRequestHandler):
         self.state.record(record)
         return record
 
+    # Handles a proof HTTP POST and records its request evidence.
+    #@param self ProofHandler Owner of the proof fixture and its resources.
+    #@return None No value; the operation updates proof state or raises on failure.
     def do_POST(self) -> None:  # noqa: N802 - standard handler name
         record = self._request_record()
         if record["path"] == "/echo":
@@ -118,6 +156,9 @@ class ProofHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
 
 
+# Starts the local HTTP proof server on a loopback port.
+#@param state object Shared proof-server state.
+#@return tuple server Loopback HTTP server and its running thread.
 def start_server(state: ServerState):
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), ProofHandler)
     server.daemon_threads = True
@@ -127,6 +168,10 @@ def start_server(state: ServerState):
     return server, thread
 
 
+# Writes a private temporary file for the transport proof.
+#@param path Path|str Input file or package path under inspection.
+#@param data bytes|str Input bytes or text under examination.
+#@return None result No value; writes the private proof input with restricted permissions.
 def private_file(path: Path, data: bytes) -> None:
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
@@ -139,6 +184,9 @@ def private_file(path: Path, data: bytes) -> None:
         os.close(descriptor)
 
 
+# Builds a restricted environment for the curl subprocess.
+#@param fake_home object The fake home supplied to this proof operation.
+#@return tuple environment Restricted environment and inherited-secret observations.
 def scrubbed_environment(fake_home: Path) -> tuple[dict[str, str], int]:
     ambient_names = {
         "http_proxy",
@@ -169,6 +217,11 @@ def scrubbed_environment(fake_home: Path) -> tuple[dict[str, str], int]:
     return environment, inherited_hits
 
 
+# Builds a curl config file with credentials kept out of argv.
+#@param url str Request or redirect URL under test.
+#@param secret str Credential used only inside the proof fixture.
+#@param body_path Path File containing the request body bytes.
+#@return bytes configuration Encoded curl configuration with private credential fields.
 def curl_config(url: str, secret: bytes, body_path: Path) -> bytes:
     secret_text = secret.decode("ascii")
     lines = [
@@ -186,6 +239,11 @@ def curl_config(url: str, secret: bytes, body_path: Path) -> bytes:
     return ("\n".join(lines) + "\n").encode("utf-8")
 
 
+# Starts the configured curl request for the transport proof.
+#@param curl Path Pinned curl executable under test.
+#@param configuration Path Private curl configuration file.
+#@param environment dict[str,str] Restricted child-process environment.
+#@return Popen process Started curl child monitored by the proof.
 def launch_curl(curl: str, configuration: bytes, environment: dict[str, str]) -> subprocess.Popen:
     # --disable must be the first curl option. All secret-bearing configuration
     # is delivered through an anonymous stdin pipe.
@@ -203,10 +261,18 @@ def launch_curl(curl: str, configuration: bytes, environment: dict[str, str]) ->
     return process
 
 
+# Reads one procfs process attribute during zero-surface inspection.
+#@param pid int Process identity inspected through procfs.
+#@param name str Selected fixture, component, or tool name.
+#@return bytes data Selected procfs process attribute bytes.
 def read_proc_bytes(pid: int, name: str) -> bytes:
     return Path(f"/proc/{pid}/{name}").read_bytes()
 
 
+# Checks a process tree for leaked secret bytes.
+#@param root Path Isolated proof or staging root.
+#@param value object Candidate value under validation.
+#@return list hits Process-tree locations containing the searched bytes.
 def scan_tree_for_value(root: Path, value: bytes) -> list[str]:
     hits: list[str] = []
     for path in sorted(root.rglob("*")):
@@ -215,6 +281,11 @@ def scan_tree_for_value(root: Path, value: bytes) -> list[str]:
     return hits
 
 
+# Waits for a proof event while detecting early process exit.
+#@param event Event Synchronization event awaited by the proof.
+#@param process Popen Child process monitored by the proof.
+#@param message str Assertion or diagnostic message.
+#@return None result No value; returns when the event arrives and raises on early child exit.
 def wait_for(event: threading.Event, process: subprocess.Popen, message: str) -> None:
     deadline = time.monotonic() + 6
     while time.monotonic() < deadline:
@@ -224,6 +295,9 @@ def wait_for(event: threading.Event, process: subprocess.Popen, message: str) ->
     raise AssertionError(f"timed out waiting for {message}")
 
 
+# Extracts the scheme, host, and port used by redirect checks.
+#@param url str Request or redirect URL under test.
+#@return str origin Normalized URL origin for redirect comparison.
 def origin(url: str) -> tuple[str, str, int | None]:
     parsed = urllib.parse.urlsplit(url)
     port = parsed.port
@@ -232,6 +306,10 @@ def origin(url: str) -> tuple[str, str, int | None]:
     return parsed.scheme.lower(), (parsed.hostname or "").lower(), port
 
 
+# Checks whether a redirect remains inside the admitted origin.
+#@param source str|Path Source file or URL being inspected.
+#@param target str|dict Selected release target or destination.
+#@return bool allowed Whether the destination shares the admitted origin.
 def redirect_allowed(source: str, target: str) -> bool:
     return origin(source) == origin(urllib.parse.urljoin(source, target))
 
@@ -239,6 +317,9 @@ def redirect_allowed(source: str, target: str) -> bool:
 MASK64 = (1 << 64) - 1
 
 
+# Computes a 64-bit FNV-1a digest for retry jitter.
+#@param data bytes|str Input bytes or text under examination.
+#@return int digest 64-bit FNV-1a hash of the supplied bytes.
 def fnv1a64(data: bytes) -> int:
     value = 14695981039346656037
     for octet in data:
@@ -247,6 +328,7 @@ def fnv1a64(data: bytes) -> int:
     return value
 
 
+#@class RetryManifest Owns the curl carrier proof curl carrier state and its resource lifetime.
 @dataclass(frozen=True)
 class RetryManifest:
     identity: str = "tp006-modern-candidate-v1"
@@ -257,6 +339,11 @@ class RetryManifest:
     jitter_permille: int = 100
 
 
+# Multiplies retry delay without exceeding the selected cap.
+#@param value object Candidate value under validation.
+#@param multiplier object The multiplier supplied to this proof operation.
+#@param cap object The cap supplied to this proof operation.
+#@return int product Nonnegative multiplication capped at the selected limit.
 def saturating_multiply(value: int, multiplier: int, cap: int) -> int:
     if value <= 0:
         return 0
@@ -267,6 +354,12 @@ def saturating_multiply(value: int, multiplier: int, cap: int) -> int:
     return min(value * multiplier, cap)
 
 
+# Computes bounded deterministic retry delay for a logical request.
+#@param logical_request object The logical request supplied to this proof operation.
+#@param retry_number object The retry number supplied to this proof operation.
+#@param base_ms object The base ms supplied to this proof operation.
+#@param manifest object The manifest supplied to this proof operation.
+#@return int delay_ms Bounded deterministic retry delay in milliseconds.
 def retry_delay_ms(logical_request: str, retry_number: int, base_ms: int, manifest: RetryManifest) -> int:
     check(retry_number >= 1, "retry number starts at one after the initial attempt")
     delay = min(base_ms, manifest.maximum_delay_ms)
@@ -280,12 +373,24 @@ def retry_delay_ms(logical_request: str, retry_number: int, base_ms: int, manife
     return max(0, min(delay + offset, manifest.maximum_delay_ms))
 
 
+# Checks whether the observed transport failure may be retried.
+#@param category object The category supplied to this proof operation.
+#@param canonical_event_seen object The canonical event seen supplied to this proof operation.
+#@param cancelled object The cancelled supplied to this proof operation.
+#@param outcome_unknown object The outcome unknown supplied to this proof operation.
+#@return bool eligible Whether the current failure permits another attempt.
 def retry_eligible(*, category: str, canonical_event_seen: bool, cancelled: bool, outcome_unknown: bool) -> bool:
     if canonical_event_seen or cancelled or outcome_unknown:
         return False
     return category in {"dns", "connect", "tls-before-body", "http-429", "http-503"}
 
 
+# Bounds retry wait by Retry-After and remaining request time.
+#@param local_ms object The local ms supplied to this proof operation.
+#@param retry_after_ms object The retry after ms supplied to this proof operation.
+#@param remaining_ms object The remaining ms supplied to this proof operation.
+#@param manifest object The manifest supplied to this proof operation.
+#@return int wait_ms Admitted delay within the remaining request deadline.
 def effective_retry_wait(local_ms: int, retry_after_ms: int | None, remaining_ms: int, manifest: RetryManifest):
     required = max(local_ms, retry_after_ms or 0)
     if required > remaining_ms or required > manifest.runtime_wait_cap_ms:
@@ -293,6 +398,9 @@ def effective_retry_wait(local_ms: int, retry_after_ms: int | None, remaining_ms
     return required
 
 
+# Proves bounded retry policy against deterministic failure cases.
+#@param none No arguments.
+#@return str digest SHA-256 digest of the deterministic retry trace.
 def retry_scenario() -> str:
     manifest = RetryManifest()
     vectors = []
@@ -344,6 +452,9 @@ def retry_scenario() -> str:
     return hashlib.sha256(serialized).hexdigest()
 
 
+# Normalizes secret patterns before streaming redaction checks.
+#@param registry object The registry supplied to this proof operation.
+#@return tuple patterns Eligible secret patterns and rejected short-pattern count.
 def normalized_patterns(registry: Iterable[tuple[bytes, str, str]]):
     grouped: dict[bytes, set[tuple[str, str]]] = {}
     ineligible: list[tuple[str, str]] = []
@@ -357,11 +468,17 @@ def normalized_patterns(registry: Iterable[tuple[bytes, str, str]]):
         (value, tuple(sorted(metadata)))
         for value, metadata in grouped.items()
     ]
+    # Orders registered secret patterns by their byte sequence.
+    #@param item tuple[bytes, tuple] Pattern bytes and their provenance.
+    #@return bytes Pattern bytes used as the sort key.
     patterns.sort(key=lambda item: item[0])
     ineligible.sort()
     return patterns, ineligible
 
 
+# Merges overlapping secret-match byte intervals.
+#@param intervals object The intervals supplied to this proof operation.
+#@return tuple intervals Sorted, nonoverlapping byte intervals.
 def merge_intervals(intervals: Iterable[tuple[int, int]]) -> tuple[tuple[int, int], ...]:
     ordered = sorted(set(intervals))
     merged: list[list[int]] = []
@@ -373,6 +490,10 @@ def merge_intervals(intervals: Iterable[tuple[int, int]]) -> tuple[tuple[int, in
     return tuple((start, end) for start, end in merged)
 
 
+# Finds secret-match intervals across streamed chunk boundaries.
+#@param chunks object The chunks supplied to this proof operation.
+#@param patterns object The patterns supplied to this proof operation.
+#@return tuple matches Merged secret intervals and maximum carried tail length.
 def streaming_intervals(chunks: Iterable[bytes], patterns) -> tuple[tuple[tuple[int, int], ...], int]:
     maximum_pattern = max((len(value) for value, _metadata in patterns), default=1)
     tail = b""
@@ -397,6 +518,9 @@ def streaming_intervals(chunks: Iterable[bytes], patterns) -> tuple[tuple[tuple[
     return merge_intervals(hits), maximum_tail
 
 
+# Proves streaming secret redaction across chunk boundaries.
+#@param none No arguments.
+#@return tuple evidence Scanner trace digest, tail bound, and rejected-pattern count.
 def scanner_scenario() -> tuple[str, int, int]:
     p1 = b"alpha-SECRET-0001"
     p2 = b"SECRET-0001-omega"
@@ -443,6 +567,9 @@ def scanner_scenario() -> tuple[str, int, int]:
     return digest, maximum_tail, len(ineligible)
 
 
+# Proves that credentials remain absent from command and environment surfaces.
+#@param none No arguments.
+#@return tuple counts Checked process purposes and secret-surface hits.
 def zero_surface_scenario() -> tuple[int, int]:
     purposes = {
         "main",
@@ -468,6 +595,9 @@ def zero_surface_scenario() -> tuple[int, int]:
     return len(purposes), len(hits)
 
 
+# Proves the curl carrier against a local HTTP server.
+#@param none No arguments.
+#@return tuple evidence curl version, environment, and observed request counts.
 def curl_scenario() -> tuple[str, int, int, int]:
     curl = shutil.which("curl")
     check(curl is not None, "curl is installed")
@@ -568,6 +698,9 @@ def curl_scenario() -> tuple[str, int, int, int]:
     return version_line, inherited_ambient, len(state.matching("/echo")), len(state.matching("/sse"))
 
 
+# Runs the curl carrier proof curl carrier command and reports its status.
+#@param none No arguments.
+#@return None result No value; prints proof evidence and raises on failed assertions.
 def main() -> None:
     curl_version, inherited_ambient, echo_attempts, sse_attempts = curl_scenario()
     retry_digest = retry_scenario()

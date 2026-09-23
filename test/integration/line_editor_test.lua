@@ -1,19 +1,29 @@
 --[[
-File: line_editor_test.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-09-23
+File: line_editor_test.lua
 Description: Verifies owned-draft redraw and cooked safe-line buffering.
 ]]
 
 local A = assert(loadfile(YACA_TEST_ROOT .. "/test/support/assert.lua", "t", _ENV))()
 
+--Loads a source module into an isolated per-case environment.
+--@param name string Module, Model, or resource name selected by the case.
+--@param cache table Per-case module cache preserving isolated imports.
+--@return any module Module export loaded in the isolated source environment.
 local function load_module(name, cache)
     cache = cache or {}
     if cache[name] then return cache[name] end
-    local environment = { require = function(dependency)
+    local environment = {
+        --Resolves an imported Lua module through the isolated test loader.
+        --@param dependency string Source module requested from the isolated loader.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
+        require = function(dependency)
         return load_module(dependency, cache)
     end }
     environment._G = environment
+    --@metatable environment Test-owned lookup and mutation contract for the current case.
+    --@field __index any Fallback table or function used for missing fixture keys.
     setmetatable(environment, { __index = _ENV })
     local chunk, load_error = loadfile(
         YACA_TEST_ROOT .. "/src/" .. name .. ".lua",
@@ -26,6 +36,9 @@ local function load_module(name, cache)
     return value
 end
 
+--Reads read file for this test scenario.
+--@param relative_path string Repository-relative Lua source path to load.
+--@return any bytes Bytes read from the selected fixture file.
 local function read_file(relative_path)
     local handle, open_error = io.open(YACA_TEST_ROOT .. "/" .. relative_path, "rb")
     A.truthy(handle, open_error)
@@ -38,6 +51,9 @@ local cache = {}
 local terminal = load_module("terminal", cache)
 local tui = load_module("tui", cache)
 
+--Builds the capabilities values used by this suite.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return table observed Structured fixture record selected by the exercised branch.
 local function capabilities()
     return {
         ansi = false,
@@ -53,6 +69,9 @@ local function capabilities()
     }
 end
 
+--Supplies renderer behavior required by this suite.
+--@param overrides table|nil Per-case overrides of default fixture behavior.
+--@return any observed renderer value observed by the scenario assertion.
 local function renderer(overrides)
     local options = {
         width = 40,
@@ -65,6 +84,10 @@ local function renderer(overrides)
     return assert(tui.new(options))
 end
 
+--Supplies editor options behavior required by this suite.
+--@param mode string Operating mode selected by the scenario.
+--@param overrides table|nil Per-case overrides of default fixture behavior.
+--@return any observed editor options value observed by the scenario assertion.
 local function editor_options(mode, overrides)
     local options = {
         mode = mode,
@@ -77,6 +100,9 @@ local function editor_options(mode, overrides)
     return options
 end
 
+--Copies test data so a mutation cannot affect the original fixture.
+--@param value any Candidate whose acceptance or transformation the test checks.
+--@return any copy Independent copy of the source fixture value.
 local function copy(value)
     if type(value) ~= "table" then return value end
     local result = {}
@@ -84,9 +110,17 @@ local function copy(value)
     return result
 end
 
+--Supplies raw display behavior required by this suite.
+--@param settings table|nil Fixture settings and scenario overrides.
+--@return any observed raw display value observed by the scenario assertion.
 local function raw_display(settings)
     settings = settings or {}
     local display = { frames = {}, calls = 0 }
+    --Supplies redraw behavior required by this suite.
+    --@param self table Fixture or port instance receiving this call.
+    --@param frame table Model or transport frame under inspection.
+    --@return boolean accepted Whether redraw succeeds in the fixture.
+    --@return table|nil secondary2 Typed error record with code BrokenStdout.
     function display:redraw(frame)
         self.calls = self.calls + 1
         if settings.fail_at == self.calls then
@@ -98,9 +132,17 @@ local function raw_display(settings)
     return display
 end
 
+--Supplies cooked display behavior required by this suite.
+--@param settings table|nil Fixture settings and scenario overrides.
+--@return any observed cooked display value observed by the scenario assertion.
 local function cooked_display(settings)
     settings = settings or {}
     local display = { writes = {}, urgent = {}, write_calls = 0 }
+    --Records the write effect observed by this suite.
+    --@param self table Fixture or port instance receiving this call.
+    --@param bytes string Byte chunk supplied to the fake I/O port.
+    --@return boolean|any observed write value observed by the scenario assertion.
+    --@return table|nil secondary2 Typed error record with code BrokenStdout.
     function display:write(bytes)
         self.write_calls = self.write_calls + 1
         if settings.fail_write_at == self.write_calls then
@@ -109,6 +151,11 @@ local function cooked_display(settings)
         self.writes[#self.writes + 1] = bytes
         return #bytes
     end
+    --Writes write urgent through the the current case fixture.
+    --@param self table Fixture or port instance receiving this call.
+    --@param request table Request delivered to the fake component.
+    --@return boolean accepted Whether write urgent succeeds in the fixture.
+    --@return table|nil secondary2 Typed error record with code BrokenStdout.
     function display:write_urgent(request)
         if settings.fail_urgent then
             return false, { code = "BrokenStdout", message = "urgent failed" }
@@ -124,6 +171,9 @@ return {
     cases = {
         {
             name = "native publish is one hide append redraw transaction with exact draft",
+            --Verifies native publish is one hide append redraw transaction with exact draft.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify native publish is one hide append redraw transaction with exact draft.
             run = function()
                 local display = raw_display()
                 local editor = assert(renderer().new_line_editor(
@@ -162,6 +212,9 @@ return {
         },
         {
             name = "raw editor changes Unicode only at scalar boundaries",
+            --Verifies raw editor changes Unicode only at scalar boundaries.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify raw editor changes Unicode only at scalar boundaries.
             run = function()
                 local display = raw_display()
                 local editor = assert(renderer().new_line_editor(
@@ -191,6 +244,9 @@ return {
         },
         {
             name = "submission lease clears only after explicit accepted resolution",
+            --Verifies submission lease clears only after explicit accepted resolution.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify submission lease clears only after explicit accepted resolution.
             run = function()
                 local display = raw_display()
                 local editor = assert(renderer().new_line_editor(
@@ -238,6 +294,9 @@ return {
         },
         {
             name = "raw text events preserve split UTF-8 and apply embedded backspace",
+            --Verifies raw text events preserve split UTF-8 and apply embedded backspace.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify raw text events preserve split UTF-8 and apply embedded backspace.
             run = function()
                 local display = raw_display()
                 local editor = assert(renderer().new_line_editor(
@@ -271,7 +330,7 @@ return {
                 A.truthy(editor.consume({
                     kind = "user_action", action = "text", text = chinese:sub(1, 1),
                 }))
-                local submitted, incomplete_error = editor.prepare_submission("side")
+                local submitted, incomplete_error = editor.prepare_submission("ask")
                 A.falsy(submitted)
                 A.equal(incomplete_error.code, "InputEncodingIncomplete")
                 local closed, close_error = editor.close()
@@ -287,6 +346,9 @@ return {
         },
         {
             name = "raw display failure keeps runtime draft and marks display unknown",
+            --Verifies raw display failure keeps runtime draft and marks display unknown.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify raw display failure keeps runtime draft and marks display unknown.
             run = function()
                 local display = raw_display({ fail_at = 2 })
                 local editor = assert(renderer().new_line_editor(
@@ -309,6 +371,9 @@ return {
         },
         {
             name = "cooked editor never owns draft and flushes complete blocks at safe line",
+            --Verifies cooked editor never owns draft and flushes complete blocks at safe line.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify cooked editor never owns draft and flushes complete blocks at safe line.
             run = function()
                 local display = cooked_display()
                 local editor = assert(renderer().new_line_editor(
@@ -356,6 +421,9 @@ return {
         },
         {
             name = "cooked backlog limits reject whole new blocks without dropping old ones",
+            --Verifies cooked backlog limits reject whole new blocks without dropping old ones.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify cooked backlog limits reject whole new blocks without dropping old ones.
             run = function()
                 local display = cooked_display()
                 local editor = assert(renderer().new_line_editor(
@@ -392,6 +460,9 @@ return {
         },
         {
             name = "editor constructors modes cursors and semantic sequence fail closed",
+            --Verifies editor constructors modes cursors and semantic sequence fail closed.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify editor constructors modes cursors and semantic sequence fail closed.
             run = function()
                 local display = raw_display()
                 local invalid, invalid_error = terminal.new_line_editor(display, {
@@ -434,6 +505,9 @@ return {
                 })
                 A.falsy(invalid_event)
                 A.equal(event_error.code, "InvalidInputEvent")
+                --Executes the action expected to raise in the 'editor constructors modes cursors and semantic sequence fail closed' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify editor constructors modes cursors and semantic sequence fail closed.
                 A.raises(function() editor.extra = true end, "cannot be modified")
             end,
         },

@@ -1,3 +1,18 @@
+--[[
+Author: WaterRun
+Date: 2026-09-23
+File: readiness.lua
+Description: Maps implementation and release gates to required artifacts and proof tasks.
+]]
+
+-- Bind a readiness concern to its implementation artifact and required evidence.
+--@param id string Stable readiness gate identifier.
+--@param status string Recorded gate state for validation and tracking.
+--@param artifact string Artifact reference or combined artifact names.
+--@param proof string Required or observed proof reference.
+--@param task string Implementation task responsible for closing this gate.
+--@param hard_gate string Milestone boundary at which the gate must be satisfied.
+--@return table Readiness descriptor; this constructor does not validate or authorize release.
 local function gate(id, status, artifact, proof, task, hard_gate)
   return {
     id = id,
@@ -9,6 +24,14 @@ local function gate(id, status, artifact, proof, task, hard_gate)
   }
 end
 
+-- Describe an implementation task with its dependency and verification scope.
+--@param id string Stable task identifier.
+--@param milestone string Milestone containing the task.
+--@param depends table Ordered prerequisite task identifiers.
+--@param files table Source or document paths belonging to the task.
+--@param tests table Required validation paths or descriptions.
+--@param commit string Intended commit description for the completed task.
+--@return table Task descriptor retaining supplied arrays by reference.
 local function task(id, milestone, depends, files, tests, commit)
   return {
     id = id,
@@ -41,32 +64,34 @@ return {
     },
     R = {
       name = "qualification-and-release",
-      status = "passed",
-      meaning = "qualified-on-the-three-tested-environments-per-D-072",
-      release_authorized = true,
-      decision = "D-072",
-      decision_date = "2026-09-19",
-      pending_targets = {},
-      qualified_environments = {
+      status = "closed",
+      meaning = "clean-std-full-edition-artifacts-and-target-evidence-pending-per-D-073",
+      release_authorized = false,
+      decision = "D-073",
+      decision_date = "2026-09-22",
+      pending_targets = { "win32-x86", "win64-x86_64", "linux-x86_64" },
+      qualified_environments = {},
+      candidate_environments = {
         { target = "win32-x86", environment = "Windows Server 2008 non-R2 x64 (real machine)" },
-        { target = "win64-x86_64", environment = "Windows 11 x64 (real machine)" },
-        { target = "linux-x86_64", environment = "CentOS 7.9.2009 container, glibc 2.17, GCC 4.8.5" },
+        { target = "win32-x86", environment = "Windows XP SP3 x86 (real VM candidate proof)" },
+        { target = "win64-x86_64", environment = "Windows 7 SP1 x64 (real VM candidate proof)" },
+        { target = "linux-x86_64", environment = "CentOS 7.9.2009 candidate proof" },
       },
-      future_enhancement_targets = {
-        "windows-xp-sp3-x86-real-machine",
-        "windows-7-sp1-x64-real-machine",
-        "bare-metal-centos-7-power-loss-and-filesystem-matrix",
+      required_edition_proofs = {
+        "win32-x86-clean-std-full",
+        "win64-x86_64-clean-std-full",
+        "linux-x86_64-clean-std-full",
       },
-      required_proof_status = "proven-target",
+      required_proof_status = "pending-target",
     },
   },
 
   source_start = {
     authorized_after_this_contract_and_validators_commit = true,
-    implementation_phase = "released",
+    implementation_phase = "implemented-unqualified",
     allowed_implementation_phases = { "pre-coding", "implementing", "implemented-unqualified", "released" },
     source_is_currently_skeleton_only = false,
-    release_is_not_authorized = false,
+    release_is_not_authorized = true,
     first_task = "C01",
     transitions = {
       { from = "pre-coding", to = "implementing", task = "C02" },
@@ -76,9 +101,9 @@ return {
       ["pre-coding"] = { en = "not implemented yet", zh = "目前尚未实现", plan = "尚未开始产品实现" },
       implementing = { en = "implementation in progress", zh = "正在实现", plan = "产品实现进行中" },
       ["implemented-unqualified"] = {
-        en = "platform-independent core implemented through M9; target qualification pending",
-        zh = "平台无关核心已实现至 M9；目标资格验证待完成",
-        plan = "平台无关核心已实现至 M9 / 目标资格验证待完成",
+        en = "target qualification pending",
+        zh = "目标资格验证待完成",
+        plan = "目标资格验证待完成",
       },
       released = {
         en = "v0.1 qualified and released on its three tested environments per D-072",
@@ -161,7 +186,7 @@ return {
     task("C24", "M7", { "C04", "C09", "C23" }, { "src/tools.lua", "src/fs.lua" }, { "test/integration/direct_tools_test.lua", "test/fault/target_reverify_test.lua" }, "feat: add verified direct tools"),
     task("C25", "M7", { "C17", "C19", "C23", "C24" }, { "src/tools.lua", "src/process.lua", "src/context.lua" }, { "test/integration/exec_tool_test.lua", "test/fault/operation_outcome_test.lua" }, "feat: add raw exec and durable operations"),
     task("C26", "M8", { "C03", "C18", "C22", "C25" }, { "src/runtime.lua" }, { "test/golden/agentloop", "test/fault/agentloop_test.lua" }, "feat: connect typed agent loop"),
-    task("C27", "M8", { "C26" }, { "src/runtime.lua", "src/session.lua" }, { "test/integration/review_queue_side_test.lua" }, "feat: add reviews queue and side turns"),
+    task("C27", "M8", { "C26" }, { "src/runtime.lua", "src/session.lua" }, { "test/integration/review_queue_ask_test.lua" }, "feat: add reviews queue and ask turns"),
     task("C28", "M8", { "C15", "C21", "C26" }, { "src/compact.lua" }, { "test/unit/compact_test.lua", "test/performance/long_context_test.lua" }, "feat: add lossless model-view compaction"),
     task("C29", "M9", { "C11", "C26" }, { "src/diagnostics.lua" }, { "test/unit/diagnostics_test.lua", "test/golden/errors" }, "feat: add stable diagnostics projection"),
     task("C30", "M9", { "C18", "C21", "C25", "C29" }, { "src/diagnostics.lua", "src/main.lua", ".develope-docs/contracts/readiness.lua", ".develope-docs/IMPLEMENTATION-PLAN.md", "README.md", "README-zh.md" }, { "test/integration/self_test_test.lua" }, "feat: add staged self-test runner"),

@@ -1,19 +1,29 @@
 --[[
-File: context_commit_test.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-09-23
+File: context_commit_test.lua
 Description: Verifies full-XML publication, recovery, and injected commit failures.
 ]]
 
 local A = assert(loadfile(YACA_TEST_ROOT .. "/test/support/assert.lua", "t", _ENV))()
 
+--Loads a source module into an isolated per-case environment.
+--@param name string Module, Model, or resource name selected by the case.
+--@param cache table Per-case module cache preserving isolated imports.
+--@return any module Module export loaded in the isolated source environment.
 local function load_module(name, cache)
     cache = cache or {}
     if cache[name] then return cache[name] end
-    local environment = { require = function(dependency)
+    local environment = {
+        --Resolves an imported Lua module through the isolated test loader.
+        --@param dependency string Source module requested from the isolated loader.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
+        require = function(dependency)
         return load_module(dependency, cache)
     end }
     environment._G = environment
+    --@metatable environment Test-owned lookup and mutation contract for the current case.
+    --@field __index any Fallback table or function used for missing fixture keys.
     setmetatable(environment, { __index = _ENV })
     local chunk, load_error = loadfile(
         YACA_TEST_ROOT .. "/src/" .. name .. ".lua",
@@ -26,6 +36,9 @@ local function load_module(name, cache)
     return value
 end
 
+--Loads a repository Lua module as a test support value.
+--@param relative_path string Repository-relative Lua source path to load.
+--@return any module Test support module export loaded from the repository.
 local function load_table(relative_path)
     local chunk, load_error = loadfile(YACA_TEST_ROOT .. "/" .. relative_path, "t", _ENV)
     A.truthy(chunk, load_error)
@@ -47,10 +60,17 @@ local TARGET = "/data/Task.xml"
 local LOCK = TARGET .. ".yaca-lock"
 local PREVIOUS = TARGET .. ".yaca-prev"
 
+--Supplies temp behavior required by this suite.
+--@param id string|integer Identity selected for the fake operation.
+--@return string observed temp value observed by the scenario assertion.
 local function temp(id)
     return TARGET .. ".yaca-tmp-" .. id
 end
 
+--Supplies operation index behavior required by this suite.
+--@param operations table Queued operations supplied to the fixture.
+--@param expected any Expected value used by the assertion.
+--@return any|nil observed operation index value observed by the scenario assertion.
 local function operation_index(operations, expected)
     for index, operation in ipairs(operations) do
         if operation == expected then return index end
@@ -58,6 +78,14 @@ local function operation_index(operations, expected)
     return nil
 end
 
+--Supplies replacement fixture behavior required by this suite.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return any observed replacement fixture value observed by the scenario assertion.
+--@return any secondary2 Additional status or structured error from the fixture operation.
+--@return any secondary3 Additional status or structured error from the fixture operation.
+--@return any secondary4 Additional status or structured error from the fixture operation.
+--@return any secondary5 Context document returned by the fixture.
+--@return any secondary6 Additional status or structured error from the fixture operation.
 local function replacement_fixture()
     local first = harness.minimal("Task")
     local fixture = harness.new(modules, { [TARGET] = first })
@@ -73,7 +101,138 @@ return {
     name = "fault/context-commit",
     cases = {
         {
+            name = "first Ask can publish and reopen an empty view with newly appended facts",
+            -- Exercise empty Context creation, first Ask admission and reopen with FAT-style close timestamps.
+            --@param none No arguments.
+            --@return nil Assertions complete without returning a value.
+            --@effect Mutates only the isolated in-memory Context fixture.
+            run = function()
+                local first = harness.minimal("Task")
+                local events = first.facts
+                first.facts = {}
+                first.model_view.active_manifest.first_event_seq = 0
+                first.model_view.active_manifest.last_event_seq = 0
+                local f = harness.new(modules)
+                f.controls.close_updates_modified = true
+                local writer = assert(f.store.create_writer(TARGET, f.metadata()))
+                local initial = f.document(first)
+                assert(f.store.publish(writer, initial, temp("empty")))
+                for _, event in ipairs(events) do event.turn_id, event.at = "ask-1", nil end
+                events[1].fields.kind = "ask"
+                events[3] = { seq = 3, type = "model_request", turn_id = "ask-1", fields = {
+                    requestId = "ask-1:request:1", purpose = "ask",
+                    viewManifestRef = first.model_view.active_manifest.digest,
+                } }
+                local next_document = assert(f.schema.append_events(initial, {
+                    updated_at = "2026-08-29T00:00:02Z", events = events,
+                }))
+                f.register_document(next_document)
+                assert(f.store.publish(writer, next_document, temp("ask")))
+                assert(f.store.close_writer(writer))
+                local reopened, document = assert(f.store.open_writer(TARGET, f.metadata()))
+                A.equal(document.event_count, 3)
+                A.equal(document.recovery.model_view_status, "current")
+                A.equal(document.facts[1].fields.kind, "ask")
+                A.equal(document.recovery.unfinished_turn_ids[1], "ask-1")
+                assert(f.store.close_writer(reopened))
+            end,
+        },
+        {
+            name = "capacity rejects new work without IO while accepted calls and terminal still publish",
+            --Verifies capacity rejects new work without IO while accepted calls and terminal still publish.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify capacity rejects new work without IO while accepted calls and terminal still publish.
+            run = function()
+                local first = harness.next_generation(harness.minimal("Task"), {
+                    event = { type = "model_request", turn_id = "turn-1", fields = {
+                        requestId = "request-1", purpose = "main", viewManifestRef = "sha256:view-manifest",
+                    } },
+                })
+                first.generation = 1
+                local fixture = harness.new(modules, nil, {
+                    maximum_bytes = 8 * 1024 * 1024, maximum_total_text_bytes = 4 * 1024 * 1024,
+                    maximum_events = 40,
+                    settlement_reserve = { model_calls = 2, model_bytes = 4096,
+                        message_bytes = 4096, result_bytes = 32768 },
+                })
+                local writer = assert(fixture.store.create_writer(TARGET, fixture.metadata()))
+                local current = first
+                local document = fixture.document(current)
+                assert(fixture.store.publish(writer, document, temp("initial")))
+                local serial = 0
+                --Records the publish effect observed by the 'capacity rejects new work without IO while accepted calls and terminal still publish' case.
+                --@param event table Event delivered to the fake runtime.
+                --@return any observed Publication receipt returned by the fixture.
+                --@return any secondary2 Failure diagnostic returned by the fixture.
+                local function publish(event)
+                    serial = serial + 1
+                    local candidate = harness.next_generation(current, {
+                        updated_at = string.format("2026-08-29T00:%02d:%02dZ", serial // 60 + 1, serial % 60),
+                        event = event,
+                    })
+                    local next_document = fixture.document(candidate)
+                    fixture.controls.operations = {}
+                    local receipt, err = fixture.store.publish(writer, next_document, temp(tostring(serial)))
+                    if receipt then current, document = candidate, next_document end
+                    return receipt, err
+                end
+                local rejected
+                for _ = 1, 40 do
+                    local receipt, err = publish({ type = "warning", fields = {
+                        errorId = "CapacityProbe", summary = "metadata may not consume pending results",
+                    } })
+                    if not receipt then
+                        A.equal(err.code, "ContextCapacity")
+                        A.equal(err.publication_started, false)
+                        A.equal(#fixture.controls.operations, 0)
+                        A.equal(fixture.store.writer_status(writer).status, "active")
+                        rejected = true
+                        break
+                    end
+                end
+                A.truthy(rejected)
+                -- Reopen before settlement to prove that reservations derive
+                -- from facts, with no lost in-memory capacity token.
+                assert(fixture.store.close_writer(writer))
+                fixture.store = fixture.new_store()
+                writer = assert(fixture.store.open_writer(TARGET, fixture.metadata()))
+                assert(publish({ type = "model_message", turn_id = "turn-1", fields = {
+                    messageId = "reply-1", requestId = "request-1", role = "assistant", status = "complete",
+                    body = string.rep("&", 4096), rawBytes = "4096", digest = "sha256:reply",
+                } }))
+                for index = 1, 2 do
+                    assert(publish({ type = "tool_call", turn_id = "turn-1", fields = {
+                        toolCallId = "call-" .. index, requestId = "request-1", name = "write",
+                        canonicalArguments = "{}",
+                    } }))
+                end
+                for index = 1, 2 do
+                    assert(publish({ type = "operation_intent", turn_id = "turn-1", fields = {
+                        operationId = "op-" .. index, toolCallId = "call-" .. index, kind = "write",
+                        targetIdentity = "sha256:target", expectedDigest = "sha256:expected",
+                    } }))
+                    assert(publish({ type = "operation_result", turn_id = "turn-1", fields = {
+                        operationId = "op-" .. index, status = "ok", evidence = "sha256:effect",
+                    } }))
+                    assert(publish({ type = "tool_result", turn_id = "turn-1", fields = {
+                        toolCallId = "call-" .. index, status = "ok", body = string.rep("&", 32768),
+                        truncated = "false", rawBytes = "32768",
+                    } }))
+                end
+                assert(publish({ type = "turn_ended", turn_id = "turn-1", fields = {
+                    outcome = "budget_exhausted", reason = "ContextCapacity",
+                } }))
+                A.equal(#document.recovery.unresolved_operation_ids, 0)
+                A.equal(#document.recovery.unresolved_tool_call_ids, 0)
+                A.equal(#document.recovery.unfinished_turn_ids, 0)
+                assert(fixture.store.close_writer(writer))
+            end,
+        },
+        {
             name = "active writer inspection is read-only and stops after external changes",
+            --Verifies active writer inspection is read-only and stops after external changes.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify active writer inspection is read-only and stops after external changes.
             run = function()
                 for _, mutation in ipairs({ "replace", "write", "delete", "during-read" }) do
                     local fixture, writer = replacement_fixture()
@@ -93,6 +252,9 @@ return {
                     elseif mutation == "delete" then
                         fixture.controls.external_delete(TARGET)
                     else
+                        --Supplies fs close behavior required by the 'active writer inspection is read-only and stops after external changes' case.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return nil No value; assertions verify active writer inspection is read-only and stops after external changes.
                         fixture.hooks.after.fs_close = function()
                             fixture.controls.external_replace(TARGET, before)
                         end
@@ -111,6 +273,9 @@ return {
         },
         {
             name = "new Context publishes no-replace only after exact validation",
+            --Verifies new Context publishes no-replace only after exact validation.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify new Context publishes no-replace only after exact validation.
             run = function()
                 local fixture = harness.new(modules)
                 local candidate = harness.minimal("Task")
@@ -140,6 +305,9 @@ return {
                 A.truthy(create_index < flush_index)
                 A.truthy(flush_index < publish_index)
                 A.truthy(publish_index < directory_index)
+                --Executes the action expected to raise in the 'new Context publishes no-replace only after exact validation' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify new Context publishes no-replace only after exact validation.
                 A.raises(function() receipt.generation = 99 end, "cannot be modified")
                 A.truthy(fixture.store.close_writer(writer))
                 A.falsy(fixture.controls.exists(LOCK))
@@ -147,6 +315,9 @@ return {
         },
         {
             name = "existing Context keeps one previous generation only inside replace window",
+            --Verifies existing Context keeps one previous generation only inside replace window.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify existing Context keeps one previous generation only inside replace window.
             run = function()
                 local fixture, writer, _, _, document, expected = replacement_fixture()
                 local receipt = assert(fixture.store.publish(writer, document, temp("replace")))
@@ -174,20 +345,32 @@ return {
         },
         {
             name = "write flush validation and replace failures preserve old generation",
+            --Verifies write flush validation and replace failures preserve old generation.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify write flush validation and replace failures preserve old generation.
             run = function()
                 local fault_cases = {
                     {
                         id = "write",
+                        --Supplies enable behavior required by the 'write flush validation and replace failures preserve old generation' case.
+                        --@param fixture table Test fixture state shared by this helper.
+                        --@return nil No value; assertions verify write flush validation and replace failures preserve old generation.
                         enable = function(fixture) fixture.controls.faults.write = true end,
                         code = "InjectedWrite",
                     },
                     {
                         id = "flush",
+                        --Supplies enable behavior required by the 'write flush validation and replace failures preserve old generation' case.
+                        --@param fixture table Test fixture state shared by this helper.
+                        --@return nil No value; assertions verify write flush validation and replace failures preserve old generation.
                         enable = function(fixture) fixture.controls.faults.flush_file = true end,
                         code = "InjectedFlush",
                     },
                     {
                         id = "validation",
+                        --Supplies enable behavior required by the 'write flush validation and replace failures preserve old generation' case.
+                        --@param fixture table Test fixture state shared by this helper.
+                        --@return nil No value; assertions verify write flush validation and replace failures preserve old generation.
                         enable = function(fixture)
                             fixture.controls.faults.corrupt_after_write_close = true
                         end,
@@ -195,6 +378,9 @@ return {
                     },
                     {
                         id = "replace",
+                        --Supplies enable behavior required by the 'write flush validation and replace failures preserve old generation' case.
+                        --@param fixture table Test fixture state shared by this helper.
+                        --@return nil No value; assertions verify write flush validation and replace failures preserve old generation.
                         enable = function(fixture) fixture.controls.faults.replace = true end,
                         code = "InjectedReplace",
                     },
@@ -220,6 +406,9 @@ return {
         },
         {
             name = "external replacement makes writer stale before temporary creation",
+            --Verifies external replacement makes writer stale before temporary creation.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify external replacement makes writer stale before temporary creation.
             run = function()
                 local fixture, writer, _, _, document = replacement_fixture()
                 local external = harness.minimal("Task")
@@ -242,9 +431,15 @@ return {
         },
         {
             name = "post-replace directory failure retains recovery generation and faults writer",
+            --Verifies post-replace directory failure retains recovery generation and faults writer.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify post-replace directory failure retains recovery generation and faults writer.
             run = function()
                 local fixture, writer, first, _, document, expected = replacement_fixture()
                 local _, old_bytes = fixture.document(first)
+                --Supplies fs replace behavior required by the 'post-replace directory failure retains recovery generation and faults writer' case.
+                --@param ok boolean Success status returned by the fake operation.
+                --@return nil No value; assertions verify post-replace directory failure retains recovery generation and faults writer.
                 fixture.hooks.after.fs_replace = function(ok)
                     if ok then fixture.controls.faults.flush_directory = true end
                 end
@@ -274,6 +469,9 @@ return {
         },
         {
             name = "missing or corrupt official restores the validated previous generation",
+            --Verifies missing or corrupt official restores the validated previous generation.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify missing or corrupt official restores the validated previous generation.
             run = function()
                 for _, mode in ipairs({ "missing", "corrupt" }) do
                     local first = harness.minimal("Task")
@@ -296,15 +494,24 @@ return {
         },
         {
             name = "generation time name and durable Fact prefix cannot be rewritten",
+            --Verifies generation time name and durable Fact prefix cannot be rewritten.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify generation time name and durable Fact prefix cannot be rewritten.
             run = function()
                 local mutations = {
                     {
                         id = "generation",
+                        --Supplies apply behavior required by the 'generation time name and durable Fact prefix cannot be rewritten' case.
+                        --@param value any Candidate whose acceptance or transformation the test checks.
+                        --@return nil No value; assertions verify generation time name and durable Fact prefix cannot be rewritten.
                         apply = function(value) value.generation = 3 end,
                         code = "ContextGeneration",
                     },
                     {
                         id = "time",
+                        --Supplies apply behavior required by the 'generation time name and durable Fact prefix cannot be rewritten' case.
+                        --@param value any Candidate whose acceptance or transformation the test checks.
+                        --@return nil No value; assertions verify generation time name and durable Fact prefix cannot be rewritten.
                         apply = function(value)
                             value.header.updated_at = "2026-08-29T00:00:01Z"
                         end,
@@ -312,11 +519,17 @@ return {
                     },
                     {
                         id = "name",
+                        --Supplies apply behavior required by the 'generation time name and durable Fact prefix cannot be rewritten' case.
+                        --@param value any Candidate whose acceptance or transformation the test checks.
+                        --@return nil No value; assertions verify generation time name and durable Fact prefix cannot be rewritten.
                         apply = function(value) value.header.name = "Other" end,
                         code = "ContextNameMismatch",
                     },
                     {
                         id = "history",
+                        --Supplies apply behavior required by the 'generation time name and durable Fact prefix cannot be rewritten' case.
+                        --@param value any Candidate whose acceptance or transformation the test checks.
+                        --@return nil No value; assertions verify generation time name and durable Fact prefix cannot be rewritten.
                         apply = function(value) value.facts[2].fields.text = "rewritten" end,
                         code = "ContextHistoryRewrite",
                     },
@@ -343,6 +556,9 @@ return {
         },
         {
             name = "intent without result reopens as blocked and is never auto-replayed",
+            --Verifies intent without result reopens as blocked and is never auto-replayed.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify intent without result reopens as blocked and is never auto-replayed.
             run = function()
                 local fixture = harness.new(modules)
                 local candidate = harness.unresolved("Task")

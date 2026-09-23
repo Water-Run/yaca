@@ -1,3 +1,10 @@
+--[[
+Author: WaterRun
+Date: 2026-09-23
+File: platform.lua
+Description: Defines supported platform identities, capability probes and compatibility floors.
+]]
+
 return {
   contract_version = "0.1.0-readiness.1",
   decision_refs = { "D-013", "D-014", "D-017", "D-045", "D-057" },

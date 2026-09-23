@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# Author: WaterRun
+# Date: 2026-09-23
+# File: package_linux_zip.py
+# Description: Audit and assemble the Linux preview zip without asserting target qualification.
+
 """Audit and assemble the Linux preview zip without asserting target qualification."""
 
 import hashlib
@@ -12,10 +17,16 @@ import tarfile
 import zipfile
 
 
+# Computes the SHA-256 digest of one input file.
+#@param path Path|str Input file or package path under inspection.
+#@return str digest Lowercase SHA-256 digest of the input file.
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+# Runs the package linux zip command and reports its status.
+#@param none No arguments.
+#@return None result No value; writes the verified Linux edition ZIP.
 def main():
     repo, output, cache = (pathlib.Path(value).resolve() for value in sys.argv[1:])
     artifacts = output / "artifacts"
@@ -42,6 +53,9 @@ def main():
         versions = subprocess.check_output(
             ["readelf", "--version-info", str(path)], text=True)
         symbols = re.findall(r"Name: GLIBC_([0-9.]+)", versions)
+        # Converts a GLIBC version to numeric components for comparison.
+        #@param v str GLIBC version suffix reported by readelf.
+        #@return list[int] Numeric version components in comparison order.
         highest = max(symbols, key=lambda v: [int(x) for x in v.split(".")]) \
             if symbols else "0"
         assert [int(x) for x in highest.split(".")] <= [2, 17], \

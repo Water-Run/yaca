@@ -1,7 +1,7 @@
 --[[
-File: legacy_https_patch_test.lua
-Date: 2026-08-30
 Author: WaterRun
+Date: 2026-09-23
+File: legacy_https_patch_test.lua
 Description: Verifies the exact Windows XP HTTPS compatibility patch closure.
 ]]
 
@@ -12,6 +12,9 @@ local SHA256 = assert(loadfile(
     _ENV
 ))()
 
+--Reads load value for this test scenario.
+--@param relative_path string Repository-relative Lua source path to load.
+--@return any module Lua module value loaded for this case.
 local function load_value(relative_path)
     local chunk, load_error = loadfile(YACA_TEST_ROOT .. "/" .. relative_path, "t", _ENV)
     A.truthy(chunk, load_error)
@@ -20,6 +23,9 @@ local function load_value(relative_path)
     return value
 end
 
+--Reads read bytes for this test scenario.
+--@param relative_path string Repository-relative Lua source path to load.
+--@return any bytes Bytes read from the selected fixture file.
 local function read_bytes(relative_path)
     local handle, open_error = io.open(YACA_TEST_ROOT .. "/" .. relative_path, "rb")
     A.truthy(handle, open_error)
@@ -29,6 +35,10 @@ local function read_bytes(relative_path)
     return bytes
 end
 
+--Supplies patch files behavior required by this suite.
+--@param bytes string Byte chunk supplied to the fake I/O port.
+--@return any observed patch files value observed by the scenario assertion.
+--@return any secondary2 Additional status or structured error from the fixture operation.
 local function patch_files(bytes)
     local old_files, new_files = {}, {}
     for line in (bytes .. "\n"):gmatch("([^\n]*)\n") do
@@ -40,6 +50,9 @@ local function patch_files(bytes)
     return old_files, new_files
 end
 
+--Supplies additions behavior required by this suite.
+--@param bytes string Byte chunk supplied to the fake I/O port.
+--@return any observed additions value observed by the scenario assertion.
 local function additions(bytes)
     local result = {}
     for line in (bytes .. "\n"):gmatch("([^\n]*)\n") do
@@ -50,6 +63,9 @@ local function additions(bytes)
     return table.concat(result, "\n")
 end
 
+--Clones test data before it is handed to the exercised service.
+--@param value any Candidate whose acceptance or transformation the test checks.
+--@return any clone Independent clone of the source fixture value.
 local function clone(value)
     if type(value) ~= "table" then return value end
     local result = {}
@@ -73,6 +89,9 @@ return {
     cases = {
         {
             name = "archive patch bytes source bindings and target scope are exactly pinned",
+            --Verifies archive patch bytes source bindings and target scope are exactly pinned.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify archive patch bytes source bindings and target scope are exactly pinned.
             run = function()
                 A.equal(#lock.components.curl.downstream_patches, 1)
                 A.equal(#lock.components.mbedtls.downstream_patches, 1)
@@ -94,6 +113,9 @@ return {
         },
         {
             name = "patches change only the audited curl and TLS source files",
+            --Verifies patches change only the audited curl and TLS source files.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify patches change only the audited curl and TLS source files.
             run = function()
                 local curl_old, curl_new = patch_files(curl_patch)
                 local mbedtls_old, mbedtls_new = patch_files(mbedtls_patch)
@@ -115,6 +137,9 @@ return {
         },
         {
             name = "XP additions use CryptoAPI old CRT and synchronous IPv4 guards",
+            --Verifies xP additions use CryptoAPI old CRT and synchronous IPv4 guards.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify xP additions use CryptoAPI old CRT and synchronous IPv4 guards.
             run = function()
                 local curl_added = additions(curl_patch)
                 local mbedtls_added = additions(mbedtls_patch)
@@ -152,6 +177,9 @@ return {
         },
         {
             name = "transport profile keeps verification TLS floor and evidence gate closed",
+            --Verifies transport profile keeps verification TLS floor and evidence gate closed.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify transport profile keeps verification TLS floor and evidence gate closed.
             run = function()
                 local profile = lock.curl_profile
                 local xp = profile.target_build_overrides["win32-x86"]
@@ -171,12 +199,15 @@ return {
                 }) do
                     A.contains(candidate_build, marker)
                 end
-                A.truthy(lock.release_authorized)
-                A.truthy(lock.target_artifacts_qualified)
+                A.falsy(lock.release_authorized)
+                A.falsy(lock.target_artifacts_qualified)
             end,
         },
         {
             name = "planner rejects patch target source and manifest drift",
+            --Verifies planner rejects patch target source and manifest drift.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify planner rejects patch target source and manifest drift.
             run = function()
                 A.truthy(planner_module.new(manifest, lock))
 

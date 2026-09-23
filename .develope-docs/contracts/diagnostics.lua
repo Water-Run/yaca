@@ -1,3 +1,18 @@
+--[[
+Author: WaterRun
+Date: 2026-09-23
+File: diagnostics.lua
+Description: Defines stable error records, exit classes and user recovery actions.
+]]
+
+-- Describe one stable diagnostic and its user-facing recovery classification.
+--@param id string Stable diagnostic identifier.
+--@param severity string Severity assigned by the diagnostics contract.
+--@param exit_class string CLI exit classification associated with this error.
+--@param retryable boolean Whether a caller may consider retrying the failed action.
+--@param summary string Public diagnostic summary without operation-specific secret values.
+--@param next_action string Suggested user recovery action.
+--@return table Diagnostic descriptor containing the supplied classification and wording.
 local function error_record(id, severity, exit_class, retryable, summary, next_action)
   return {
     id = id,
@@ -9,6 +24,14 @@ local function error_record(id, severity, exit_class, retryable, summary, next_a
   }
 end
 
+-- Describe a self-test node and the prerequisite checks that must precede it.
+--@param id string Stable self-test identifier.
+--@param stage integer Ordered self-test stage number.
+--@param required boolean Whether this check is required for its stage to pass.
+--@param online boolean Whether execution requires online model or transport access.
+--@param dependencies table|nil Prerequisite check identifiers; defaults to a new empty array.
+--@param owner string Subsystem responsible for implementing the check.
+--@return table Self-test descriptor retaining the dependency array by reference.
 local function check(id, stage, required, online, dependencies, owner)
   return {
     id = id,

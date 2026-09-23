@@ -1,7 +1,7 @@
 --[[
-File: manifest.lua
-Date: 2026-08-30
 Author: WaterRun
+Date: 2026-09-23
+File: manifest.lua
 Description: Declares the versioned runtime and release assembly manifest.
 ]]
 
@@ -10,9 +10,9 @@ Description: Declares the versioned runtime and release assembly manifest.
 return {
     schema_version = "yaca-release-manifest-v0.1.0",
     product_version = "0.1.0",
-    release_state = "qualified",
-    release_authorized = true,
-    target_qualification_complete = true,
+    release_state = "unqualified",
+    release_authorized = false,
+    target_qualification_complete = false,
     dependency_lock = "release/dependencies.lock",
 
     layout = {
@@ -50,20 +50,20 @@ return {
         {
             id = "win32-x86", os = "windows", arch = "x86",
             minimum = "Windows XP SP3", executable = "yaca.exe",
-            installer = "Install.cmd", archive = "yaca-0.1.0-win32-x86.zip",
-            object_format = "PE32-i386", qualification = "passed",
+            installer = "Install.cmd", archive = "yaca-0.1.0-win32-x86-clean.zip",
+            object_format = "PE32-i386", qualification = "pending",
         },
         {
             id = "win64-x86_64", os = "windows", arch = "x86_64",
             minimum = "Windows 7 SP1", executable = "yaca.exe",
-            installer = "Install.cmd", archive = "yaca-0.1.0-win64-x86_64.zip",
-            object_format = "PE32+-x86-64", qualification = "passed",
+            installer = "Install.cmd", archive = "yaca-0.1.0-win64-x86_64-clean.zip",
+            object_format = "PE32+-x86-64", qualification = "pending",
         },
         {
             id = "linux-x86_64", os = "linux", arch = "x86_64",
             minimum = "CentOS 7 x86_64", executable = "yaca",
-            installer = "Install.sh", archive = "yaca-0.1.0-linux-x86_64.zip",
-            object_format = "ELF64-x86-64", qualification = "passed",
+            installer = "Install.sh", archive = "yaca-0.1.0-linux-x86_64-clean.zip",
+            object_format = "ELF64-x86-64", qualification = "pending",
         },
     },
 
@@ -159,6 +159,10 @@ return {
     },
 
     packaging = {
+        editions = { "clean", "std", "full" },
+        same_core_for_all_editions = true,
+        tool_catalog = "release/tool-bundles.json",
+        companion_notices = true,
         builder = "luainstaller-1.3.0",
         builder_mode = "onefile-from-qualified-onedir",
         lua_discovery = "manual-exact-allowlist",
@@ -166,17 +170,20 @@ return {
         historical_bin_copy = false,
         compression_of_native_inputs = false,
         required_root_entries = {
-            windows = { "yaca.exe", "Install.cmd", "README.txt", "LICENSE", "docs/" },
-            linux = { "yaca", "Install.sh", "README.txt", "LICENSE", "docs/" },
+            windows = { "yaca.exe" },
+            linux = { "yaca" },
         },
         shipped_component_allowlist = {
             "launcher+embedded-lua", "yaca-lua-sources", "yaca-native",
             "lxp+static-expat", "curl+static-mbedtls", "ca-bundle",
-            "Install-script", "README.txt", "LICENSE", "docs",
+            "optional-edition-tools",
+        },
+        forbidden_core_components = {
+            "sqlite3", "jq", "7za", "busybox", "file", "iconv", "patch",
+            "diff", "python", "ssh", "git", "compiler-toolchain",
         },
         forbidden_shipped_components = {
-            "sqlite3", "jq", "7za", "busybox", "file", "iconv", "patch",
-            "diff", "web-server", "browser-assets", "media-codec",
+            "web-server", "browser-assets", "media-codec",
             "speech-runtime", "remote-controller", "plugin-loader", "mcp-client",
             "telemetry-client", "update-client",
         },

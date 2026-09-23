@@ -2,6 +2,7 @@ build/
 out/
 /bin/*
 !/bin/list.txt
+!/bin/LICENSE_THIRD_PARTY.txt
 obj/
 
 *.o
@@ -11,6 +12,11 @@ obj/
 *.exe
 *.dylib
 *.luac
+*.pyc
+__pycache__/
+__yaca__/
+.mimocode/
+node_modules/
 
 CMakeFiles/
 CMakeCache.txt

@@ -1,7 +1,7 @@
 --[[
-File: compact.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-09-23
+File: compact.lua
 Description: Builds and publishes lossless-facts structured ModelView compactions.
 ]]
 
@@ -17,16 +17,28 @@ local SUMMARY_SLOTS = {
     "prompt_model_transitions",
 }
 
+-- Construct a structured diagnostic without throwing or formatting its optional fields.
+--@param code string Stable diagnostic code used by callers to choose recovery behavior.
+--@param message string Human-readable summary supplied by the failing operation.
+--@param detail any|nil Optional underlying cause or contextual diagnostic data; retained as supplied.
+--@return table New diagnostic record; optional non-nil fields are retained without deep copying.
 local function failure(code, message, detail)
     local result = { code = code, message = message }
     if detail ~= nil then result.detail = detail end
     return result
 end
 
+-- Accept only a Lua integer at or above the requested bound.
+--@param value any Candidate number.
+--@param minimum integer Inclusive lower bound.
+--@return boolean True when value is an integer meeting the bound.
 local function integer_at_least(value, minimum)
     return math.type(value) == "integer" and value >= minimum
 end
 
+-- Count a dense one-based array while rejecting holes and extra key kinds.
+--@param values any Candidate table; every key must belong to the sequence 1 through count.
+--@return integer|nil Sequence length, including zero for an empty table; nil for an invalid shape.
 local function dense_count(values)
     if type(values) ~= "table" then return nil end
     local count = 0
@@ -38,6 +50,10 @@ local function dense_count(values)
     return count
 end
 
+-- Reject records with any key outside a declared string-field set.
+--@param value any Candidate record.
+--@param allowed table Set of permitted field names.
+--@return boolean True only for a table with allowed string keys.
 local function exact_fields(value, allowed)
     if type(value) ~= "table" then return false end
     for key in pairs(value) do
@@ -46,6 +62,11 @@ local function exact_fields(value, allowed)
     return true
 end
 
+-- Bound a string by bytes and reject embedded NUL characters.
+--@param value any Candidate text.
+--@param maximum integer Maximum byte count.
+--@param empty boolean Whether an empty string is accepted.
+--@return boolean True only for accepted text.
 local function valid_text(value, maximum, empty)
     return type(value) == "string"
         and (empty or value ~= "")
@@ -53,23 +74,61 @@ local function valid_text(value, maximum, empty)
         and not value:find("\0", 1, true)
 end
 
+-- Accept a bounded identity from the compaction identifier grammar.
+--@param value any Candidate identity.
+--@param maximum integer Maximum byte count.
+--@return boolean True for a nonempty restricted ASCII identifier.
 local function valid_id(value, maximum)
     return valid_text(value, maximum, false)
         and value:match("^[A-Za-z0-9][A-Za-z0-9._:-]*$") ~= nil
 end
 
+-- Create a shallow read-only view without copying the backing table.
+--@param values table Backing fields retained by reference; the caller owns their stability.
+--@param label string|nil Diagnostic label; defaults to "readonly value".
+--@return table Empty proxy exposing the backing fields through its locked metatable.
+--@ownership Retains values by reference; nested values and the backing table are not frozen.
 local function readonly(values, label)
+    --@metatable readonly_proxy Forwards reads and iteration; ordinary assignments raise an error.
+    --@field __index table Backing values used for missing-key reads.
+    --@field __newindex function Rejects ordinary assignments without changing the backing values.
+    --@field __pairs function Enumerates the backing table with next.
+    --@field __len function Reports the backing table sequence length.
+    --@field __metatable string Hides this metatable behind the fixed "locked" marker.
     return setmetatable({}, {
         __index = values,
+        -- Reject a write through the proxy before it can create an ordinary field.
+        --@param _ table Proxy receiving the assignment; its contents are not consulted.
+        --@param key any Attempted field name included in the diagnostic.
+        --@return nil Does not return normally.
+        --@error Always raises a read-only assignment error at the caller frame.
         __newindex = function(_, key)
             error((label or "readonly value") .. " cannot be modified: " .. tostring(key), 2)
         end,
-        __pairs = function() return next, values, nil end,
-        __len = function() return #values end,
+        -- Iterate the backing fields instead of the empty proxy table.
+        --@param none The proxy argument supplied by pairs is ignored.
+        --@return function The standard next iterator.
+        --@return table Backing values used as iterator state.
+        --@return nil Initial key used to start iteration.
+        __pairs = function()
+            return next, values, nil
+        end,
+        -- Forward sequence-length queries to the backing table.
+        --@param none The proxy operand supplied by Lua is ignored.
+        --@return integer Length of the backing sequence under the Lua length operator.
+        __len = function()
+            return #values
+        end,
         __metatable = "locked",
     })
 end
 
+-- Recursively copy tables into read-only proxies and reject cyclic graphs.
+--@param value any Scalar or table to freeze.
+--@param visiting table|nil Recursion stack for cycle detection.
+--@param label string|nil Proxy write-error label.
+--@return any|nil Unchanged scalar or frozen table copy; nil for a cycle.
+--@ownership Copies table entries; scalar values are retained.
 local function freeze(value, visiting, label)
     if type(value) ~= "table" then return value end
     visiting = visiting or {}
@@ -88,17 +147,31 @@ local function freeze(value, visiting, label)
     return readonly(copied, label)
 end
 
+-- Copy the contiguous array prefix while retaining element references.
+--@param values table|nil Sequence copied with ipairs; nil is treated as empty.
+--@return table New sequence containing the original element values through the first hole.
+--@ownership Copies the outer table only; nested objects retain their original owners.
 local function copy_array(values)
     local copied = {}
     for index, value in ipairs(values or {}) do copied[index] = value end
     return copied
 end
 
+-- Encode one value with an explicit byte count to avoid delimiter ambiguity.
+--@param tag string Field name in the canonical envelope.
+--@param value any Value converted to text before measuring bytes.
+--@return string Tagged-length field bytes without a trailing newline.
 local function tagged(tag, value)
     value = tostring(value)
     return tag .. ":" .. tostring(#value) .. ":" .. value
 end
 
+-- Encode one Context fact in stable field order for source binding.
+--@param item any Candidate Context event.
+--@param maximum_identifier_bytes integer Identity and field-name cap.
+--@param maximum_input_bytes integer Event and field-value byte cap.
+--@return string|nil Canonical newline-terminated event bytes.
+--@return table|nil Validation or size error on failure.
 local function canonical_event(item, maximum_identifier_bytes, maximum_input_bytes)
     if not exact_fields(item, {
         seq = true, type = true, at = true, turn_id = true, fields = true,
@@ -141,6 +214,14 @@ local function canonical_event(item, maximum_identifier_bytes, maximum_input_byt
     return encoded
 end
 
+-- Concatenate a complete one-based Context event range under a byte cap.
+--@param document table Context snapshot containing canonical facts.
+--@param first_sequence integer Inclusive starting sequence.
+--@param last_sequence integer Inclusive ending sequence.
+--@param maximum_identifier_bytes integer Event identity cap.
+--@param maximum_bytes integer Total source byte cap.
+--@return string|nil Canonical source bytes.
+--@return table|nil Range, event, or byte-limit error on failure.
 local function encode_source(
     document,
     first_sequence,
@@ -183,6 +264,9 @@ local function encode_source(
     return table.concat(parts)
 end
 
+-- Serialize the fixed structured-summary slots in canonical order.
+--@param summary table Validated schema, source binding, and slot values.
+--@return string Tagged-length summary envelope with a final newline.
 local function encode_summary(summary)
     local pieces = { "yaca-structured-summary-v1" }
     pieces[#pieces + 1] = tagged("schema", summary.schema_version)
@@ -195,6 +279,11 @@ local function encode_summary(summary)
     return table.concat(pieces, "\n") .. "\n"
 end
 
+-- Parse and re-encode a structured summary to reject noncanonical bytes.
+--@param bytes any Candidate serialized summary.
+--@param maximum integer Maximum serialized byte count.
+--@return table|nil Parsed source binding and required slots.
+--@return table|nil Malformed-summary error on failure.
 local function decode_summary(bytes, maximum)
     if not valid_text(bytes, maximum, false) then
         return nil, failure("InvalidStructuredSummary", "summary bytes are invalid")
@@ -204,6 +293,10 @@ local function decode_summary(bytes, maximum)
         return nil, failure("InvalidStructuredSummary", "summary envelope is invalid")
     end
     local cursor = #header + 1
+    -- Read exactly the next tagged field and advance the local cursor.
+    --@param expected string Required tag name at the current cursor.
+    --@return string|nil Field value or nil for malformed encoding.
+    --@effect Advances cursor only after consuming a complete field.
     local function read_tag(expected)
         local tag_end = bytes:find(":", cursor, true)
         if not tag_end then return nil end
@@ -252,6 +345,10 @@ local function decode_summary(bytes, maximum)
     return summary
 end
 
+-- Sort sequence numbers and coalesce adjacent values into inclusive ranges.
+--@param sequences table Mutable sequence-number array.
+--@return table Ordered inclusive range records.
+--@effect Sorts the caller's array in place.
 local function ranges_from_sequences(sequences)
     table.sort(sequences)
     local ranges = {}
@@ -270,6 +367,9 @@ local function ranges_from_sequences(sequences)
     return ranges
 end
 
+-- Encode ordered inclusive event ranges for a ModelView manifest.
+--@param ranges table Range records with first and last sequence.
+--@return string Comma-separated range text; empty for no ranges.
 local function encode_ranges(ranges)
     local parts = {}
     for index, range in ipairs(ranges) do
@@ -278,6 +378,9 @@ local function encode_ranges(ranges)
     return table.concat(parts, ",")
 end
 
+-- Serialize ModelView binding fields in fixed canonical order.
+--@param manifest table Validated compacted ModelView manifest.
+--@return string Tagged-length manifest bytes with a final newline.
 local function canonical_manifest(manifest)
     local pieces = {
         "yaca-model-view-manifest-v1",
@@ -324,6 +427,12 @@ end
 MODEL_VIEW_MANIFEST_ALLOWED_FIELDS.digest = true
 MODEL_VIEW_MANIFEST_ALLOWED_FIELDS.canonical_bytes = true
 
+-- Validate a compacted manifest and return its canonical byte envelope.
+--@param manifest any Candidate ModelView manifest, possibly with digest fields.
+--@param maximum_identifier_bytes integer ID byte cap.
+--@param maximum_bytes integer Encoded manifest byte cap.
+--@return string|nil Canonical manifest bytes on success.
+--@return table|nil Shape, range, identity, or byte-limit error on failure.
 local function encode_manifest(manifest, maximum_identifier_bytes, maximum_bytes)
     if not exact_fields(manifest, MODEL_VIEW_MANIFEST_ALLOWED_FIELDS)
         or not integer_at_least(maximum_identifier_bytes, 16)
@@ -433,6 +542,10 @@ local MANIFEST_FIELDS = {
     minimum_benefit_tokens = true,
 }
 
+-- Validate immutable compaction manifest limits and restored counters.
+--@param options any Candidate manifest and initialization values.
+--@return table|nil Copy of accepted limits and manifest fields.
+--@return table|nil Structured option error on failure.
 local function validate_options(options)
     if not exact_fields(options, {
         manifest = true, maximum_identifier_bytes = true, initial_serial = true,
@@ -476,6 +589,11 @@ local function validate_options(options)
     return copied
 end
 
+-- Require the digest, estimator, clock, Model, and journal capabilities.
+--@param ports any Candidate compaction capability map.
+--@return table|nil Accepted ports on success; retains caller's table by reference.
+--@return table|nil Structured missing-port error on failure.
+--@ownership Retains ports by reference, including mutable method tables.
 local function validate_ports(ports)
     if not exact_fields(ports, {
         safety = true, estimator = true, clock = true, model = true, journal = true,
@@ -504,6 +622,12 @@ local function validate_ports(ports)
     return ports
 end
 
+-- Digest canonical bytes through the admitted safety port.
+--@param ports table Compaction capability map.
+--@param bytes string Canonical payload to digest.
+--@return string|nil Bounded digest from the port.
+--@return table|nil Digest service error on failure.
+--@effect Invokes the digest port once under pcall.
 local function digest_bytes(ports, bytes)
     local called, value, digest_error = pcall(ports.safety.digest, bytes)
     if not called or not valid_text(value, 512, false) then
@@ -516,6 +640,13 @@ local function digest_bytes(ports, bytes)
     return value
 end
 
+-- Estimate tokens for a payload against the frozen Model snapshot.
+--@param ports table Compaction capability map.
+--@param bytes string Payload to estimate.
+--@param model_snapshot table Selected Model identity and capacity.
+--@return integer|nil Nonnegative token estimate.
+--@return table|nil Estimator error on failure.
+--@effect Invokes the estimator port once under pcall.
 local function estimate_bytes(ports, bytes, model_snapshot)
     local called, value, estimate_error = pcall(
         ports.estimator.estimate,
@@ -532,6 +663,11 @@ local function estimate_bytes(ports, bytes, model_snapshot)
     return value
 end
 
+-- Bind a compaction request to a complete Context, ModelView, and Model snapshot.
+--@param input any Candidate planning input and historical corrections.
+--@param limits table Validated service limits.
+--@return boolean|nil True for an accepted input.
+--@return table|nil Structured binding or capacity error on failure.
 local function validate_input(input, limits)
     if not exact_fields(input, {
         mode = true, document = true, expected_context_generation = true,
@@ -643,11 +779,22 @@ local function validate_input(input, limits)
     return true
 end
 
+-- Group related Context events so no turn, tool, or operation is split.
+--@param input table Validated Context snapshot and Model binding.
+--@param ports table Estimator capability used per canonical event.
+--@param limits table Group, event, and byte limits.
+--@return table|nil Ordered atomic groups with mandatory flags.
+--@return table|nil Encoded event bytes on success, structured error on failure.
+--@effect Invokes the estimator for each event.
 local function build_groups(input, ports, limits)
     local facts = input.document.facts
     local count = #facts
     local parent, rank, encoded, tokens = {}, {}, {}, {}
     for index = 1, count do parent[index], rank[index] = index, 0 end
+    -- Find a union-find root while compressing its ancestry.
+    --@param index integer Context event sequence index.
+    --@return integer Current group root.
+    --@effect Rewrites parent links along the path.
     local function find(index)
         local root = index
         while parent[root] ~= root do root = parent[root] end
@@ -658,6 +805,11 @@ local function build_groups(input, ports, limits)
         end
         return root
     end
+    -- Merge two event groups by rank.
+    --@param left integer First event index.
+    --@param right integer Second event index.
+    --@return nil No return value.
+    --@effect Updates parent and rank maps when roots differ.
     local function union(left, right)
         left, right = find(left), find(right)
         if left == right then return end
@@ -668,6 +820,11 @@ local function build_groups(input, ports, limits)
     local bindings = {}
     local turn_ended, calls, results, operations, operation_results = {}, {}, {}, {}, {}
     local mandatory_event = {}
+    -- Associate a turn, request, tool, or operation key with an event group.
+    --@param key string Namespaced relation key.
+    --@param index integer Current event index.
+    --@return nil No return value.
+    --@effect Merges with the earlier event carrying the same key.
     local function bind(key, index)
         local prior = bindings[key]
         if prior then union(prior, index) else bindings[key] = index end
@@ -758,6 +915,10 @@ local function build_groups(input, ports, limits)
         group.ranges = ranges_from_sequences(copy_array(group.sequences))
         groups[#groups + 1] = group
     end
+    -- Order atomic groups by their first canonical event sequence.
+    --@param left table First group.
+    --@param right table Second group.
+    --@return boolean True when left starts earlier than right.
     table.sort(groups, function(left, right) return left.first < right.first end)
     if #groups > limits.manifest.maximum_groups then
         return nil, failure("CompactionGroupLimit", "atomic group count exceeds manifest cap")
@@ -765,6 +926,13 @@ local function build_groups(input, ports, limits)
     return groups, encoded
 end
 
+-- Choose a complete closed prefix that leaves a bounded, lossless tail.
+--@param input table Candidate planning request.
+--@param ports table Digest and estimator capabilities.
+--@param limits table Validated compaction manifest caps.
+--@return table|nil Internal fit, no-op, waiting, or compact decision.
+--@return table|nil Validation, estimator, or digest error on failure.
+--@effect Invokes digest and estimator ports while constructing a plan.
 local function plan_internal(input, ports, limits)
     local valid, input_error = validate_input(input, limits)
     if not valid then return nil, input_error end
@@ -966,6 +1134,9 @@ local function plan_internal(input, ports, limits)
     }
 end
 
+-- Remove private source bytes and Model details before exposing a plan.
+--@param plan table Internal compaction decision.
+--@return table Frozen public plan with source byte count where relevant.
 local function public_plan(plan)
     local result = {}
     for key, value in pairs(plan) do
@@ -977,7 +1148,11 @@ local function public_plan(plan)
     return assert(freeze(result, nil, "compaction plan"))
 end
 
----Creates the structured prefix compaction and ModelView publication service.
+-- Create the structured prefix compaction and ModelView publication service.
+--@param ports table Safety, estimator, clock, Model, and durable journal ports.
+--@param options table Manifest limits and restored serial/circuit state.
+--@return table|nil Read-only service on success.
+--@return table|nil Structured port or option error on failure.
 function M.new(ports, options)
     local admitted_ports, ports_error = validate_ports(ports)
     if not admitted_ports then return nil, ports_error end
@@ -998,6 +1173,11 @@ function M.new(ports, options)
     local last_clock
     local service = {}
 
+    -- Read a nondecreasing monotonic clock for the service lifecycle.
+    --@param none No parameters.
+    --@return integer|nil Current monotonic time in milliseconds.
+    --@return table|nil Clock contract error on failure.
+    --@effect Advances last_clock after a valid reading.
     local function clock_now()
         local called, value = pcall(admitted_ports.clock.now)
         if not called or not integer_at_least(value, 0)
@@ -1009,6 +1189,13 @@ function M.new(ports, options)
         return value
     end
 
+    -- Commit a frozen journal record and demand an exact durable receipt.
+    --@param method string Journal method name to call.
+    --@param record table Intent, response, rejection, publication, or correction.
+    --@param publishing boolean Whether receipt must bind the new manifest digest.
+    --@return table|nil Confirmed durable receipt.
+    --@return table|nil Frozen binding on success, structured error on failure.
+    --@effect May move service to Unknown; first intent capacity rejection restores Idle.
     local function commit(method, record, publishing)
         local binding = freeze(record, nil, "compaction journal binding")
         if not binding then
@@ -1018,6 +1205,13 @@ function M.new(ports, options)
             admitted_ports.journal[method],
             binding
         )
+        if called and committed ~= true and method == "commit_intent"
+            and record.attempt == 1 and type(receipt) == "table"
+            and receipt.code == "ContextCapacity" and receipt.publication_started == false
+        then
+            state, active = "Idle", nil
+            return nil, receipt
+        end
         if not called or committed ~= true or type(receipt) ~= "table"
             or receipt.binding ~= binding
             or not integer_at_least(
@@ -1046,6 +1240,10 @@ function M.new(ports, options)
         return receipt, binding
     end
 
+    -- Count an automatic failure and open its circuit at the threshold.
+    --@param completed table|nil Former active attempt, if any.
+    --@return nil No return value.
+    --@effect Updates automatic failure count and circuit opening time.
     local function mark_automatic_failure(completed)
         if not completed or completed.plan.mode ~= "automatic" then return end
         consecutive_automatic_failures = consecutive_automatic_failures + 1
@@ -1054,6 +1252,11 @@ function M.new(ports, options)
         end
     end
 
+    -- Complete an attempt that requires user action while retaining the old view.
+    --@param reason string Stable waiting reason.
+    --@param error_code string Error class for the final rejection.
+    --@return table Frozen waiting-user outcome.
+    --@effect Clears active attempt, returns to Idle, and counts automatic failure.
     local function finish_waiting(reason, error_code)
         local completed = active
         mark_automatic_failure(completed)
@@ -1071,6 +1274,11 @@ function M.new(ports, options)
     local start_request
     local reject_attempt
 
+    -- Persist the next attempt intent before starting its no-tool Model request.
+    --@param correction_reason string|nil Rejection code motivating a retry.
+    --@return table|nil Frozen request admission or terminal waiting outcome.
+    --@return table|nil Journal or start error on failure.
+    --@effect Increments request serial, journals intent, and starts Model work.
     start_request = function(correction_reason)
         active.attempt = active.attempt + 1
         request_serial = request_serial + 1
@@ -1140,6 +1348,13 @@ function M.new(ports, options)
         }, nil, "compaction request admission"))
     end
 
+    -- Journal an invalid attempt, retry once if allowed, or wait for the user.
+    --@param error_code string Stable rejection identity.
+    --@param detail any Diagnostic detail converted to text for the journal record.
+    --@param response_facts table|boolean Safe canonical response data or false.
+    --@return table|nil New request admission or final waiting outcome.
+    --@return table|nil Journal or retry error on failure.
+    --@effect Commits rejection and may launch the next Model attempt.
     reject_attempt = function(error_code, detail, response_facts)
         local rejection = {
             kind = "compaction-rejection",
@@ -1172,6 +1387,11 @@ function M.new(ports, options)
         return finish_waiting("compaction-rejected", error_code)
     end
 
+    -- Bind a Model response to the active request and canonical summary schema.
+    --@param wrapper any Candidate Model completion envelope.
+    --@return table|nil Decoded structured summary on success.
+    --@return table|nil Contract or digest error on failure.
+    --@effect May invoke digest service to verify canonical body bytes.
     local function validate_response(wrapper)
         if not exact_fields(wrapper, {
             request_id = true, canonical_body = true, canonical_digest = true,
@@ -1242,12 +1462,24 @@ function M.new(ports, options)
         return summary
     end
 
+    -- Preview a compaction decision without starting its lifecycle.
+    --@param self table Owning compaction service.
+    --@param input table Context, ModelView, Model, and correction snapshot.
+    --@return table|nil Frozen public plan.
+    --@return table|nil Planning error on failure.
+    --@effect Calls estimator and digest ports when needed for the plan.
     function service:plan(input)
         local plan, plan_error = plan_internal(input, admitted_ports, limits)
         if not plan then return nil, plan_error end
         return public_plan(plan)
     end
 
+    -- Admit a plan, enforce the automatic circuit, and persist its first intent.
+    --@param self table Owning compaction service.
+    --@param input table Context, ModelView, Model, and correction snapshot.
+    --@return table|nil Public non-compact decision or active request admission.
+    --@return table|nil Closed, busy, planning, clock, or journal error.
+    --@effect May open a Model request after durable intent; updates serial and circuit state.
     function service:begin(input)
         if closed then
             return nil, failure("CompactionClosed", "compaction service is closed")
@@ -1309,6 +1541,12 @@ function M.new(ports, options)
         return start_request(false)
     end
 
+    -- Validate a Model summary, journal response, and publish a beneficial view.
+    --@param self table Owning compaction service.
+    --@param wrapper any Completion envelope for the active request.
+    --@return table|nil Frozen completed, retry, waiting, or cancellation outcome.
+    --@return table|nil State, clock, stale-response, or journal error.
+    --@effect Can commit response, rejection, publication, or cancellation records.
     function service:accept_response(wrapper)
         if state ~= "Compacting" or not active then
             return nil, failure("NoCompactionRequest", "no compaction response is pending")
@@ -1465,6 +1703,11 @@ function M.new(ports, options)
         return assert(freeze(last_result, nil, "compaction outcome"))
     end
 
+    -- Journal terminal cancellation and clear or poison the active state.
+    --@param outcome string Cancelled or unknown settlement.
+    --@return table|nil Frozen terminal cancellation outcome.
+    --@return table|nil Journal error on failure.
+    --@effect Retains old view and moves to Idle or Unknown after durable record.
     local function finish_cancel(outcome)
         local terminal = {
             kind = "compaction-cancel-result",
@@ -1502,6 +1745,12 @@ function M.new(ports, options)
         return assert(freeze(last_result, nil, "compaction cancellation"))
     end
 
+    -- Persist cancellation intent before asking the Model to stop.
+    --@param self table Owning compaction service.
+    --@param reason string Bounded reason for the cancellation record.
+    --@return table|nil Pending or terminal cancellation outcome.
+    --@return table|nil State, reason, or journal error.
+    --@effect Calls Model cancel; a missing exact receipt keeps journal failure visible.
     function service:cancel(reason)
         if state ~= "Compacting" or not active then
             return nil, failure("NoCompactionRequest", "no compaction request can be cancelled")
@@ -1549,6 +1798,12 @@ function M.new(ports, options)
         return finish_cancel(result.outcome)
     end
 
+    -- Record the final outcome of a previously pending cancellation.
+    --@param self table Owning compaction service.
+    --@param settlement table Active request identity and cancelled/unknown outcome.
+    --@return table|nil Frozen terminal cancellation outcome.
+    --@return table|nil State, settlement, or journal error.
+    --@effect Commits a terminal cancellation record.
     function service:settle_cancel(settlement)
         if state ~= "Cancelling" or not active then
             return nil, failure("NoCompactionCancel", "no compaction cancellation is pending")
@@ -1562,6 +1817,11 @@ function M.new(ports, options)
         return finish_cancel(settlement.outcome)
     end
 
+    -- Advance active-time enforcement using the monotonic clock.
+    --@param self table Owning compaction service.
+    --@return table|nil Frozen state/time or cancellation outcome.
+    --@return table|nil Clock or cancellation error.
+    --@effect May initiate cancellation or settle a timed-out pending cancel as unknown.
     function service:tick()
         local now, clock_error = clock_now()
         if not now then return nil, clock_error end
@@ -1578,6 +1838,12 @@ function M.new(ports, options)
         return assert(freeze({ state = state, now = now }, nil, "compaction tick"))
     end
 
+    -- Read a stored structured summary and recheck its source binding.
+    --@param self table Owning compaction service.
+    --@param document table Context snapshot with compaction records.
+    --@param compaction_id string Exact compaction identity.
+    --@return table|nil Frozen summary and source binding.
+    --@return table|nil Lookup, schema, or binding error on failure.
     function service:show_summary(document, compaction_id)
         if not valid_id(compaction_id, limits.maximum_identifier_bytes)
             or type(document) ~= "table" or type(document.model_view) ~= "table"
@@ -1621,6 +1887,12 @@ function M.new(ports, options)
         }, nil, "structured summary"))
     end
 
+    -- Append an explicit correction bound to an accepted summary.
+    --@param self table Owning compaction service.
+    --@param command table Text, compaction identity, and expected Context/View generation.
+    --@return table|nil Frozen correction receipt for the next publication.
+    --@return table|nil State, validation, digest, or journal error.
+    --@effect Allocates a correction ID and commits the correction to the journal.
     function service:correct_summary(command)
         if closed then
             return nil, failure("CompactionClosed", "compaction service is closed")
@@ -1676,6 +1948,12 @@ function M.new(ports, options)
         }, nil, "summary correction"))
     end
 
+    -- Close the service and request cancellation for an active Model call.
+    --@param self table Owning compaction service.
+    --@param reason string|nil Cancel reason, defaulting to service close.
+    --@return table|nil Frozen close or cancellation outcome.
+    --@return table|nil Reason or journal error when active cancellation fails.
+    --@effect Marks service closed before cancelling an active request.
     function service:close(reason)
         if closed then
             return assert(freeze({
@@ -1705,6 +1983,9 @@ function M.new(ports, options)
         }, nil, "compaction close outcome"))
     end
 
+    -- Snapshot lifecycle, circuit, and manifest-policy state for callers.
+    --@param self table Owning compaction service.
+    --@return table Frozen status with no mutable internal references.
     function service:status()
         local circuit_state = (circuit_opened_at ~= nil or recovered_circuit)
             and "open" or "closed"

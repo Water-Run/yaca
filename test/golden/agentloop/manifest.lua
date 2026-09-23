@@ -1,9 +1,9 @@
---[=[
-File: manifest.lua
-Date: 2026-08-29
+--[[
 Author: WaterRun
+Date: 2026-09-23
+File: manifest.lua
 Description: Golden typed AgentLoop state, control, purpose, and outcome traces.
-]=]
+]]
 
 return {
     schema_version = "yaca-agentloop-golden-v1",

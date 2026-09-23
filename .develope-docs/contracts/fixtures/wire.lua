@@ -1,3 +1,19 @@
+--[[
+Author: WaterRun
+Date: 2026-09-23
+File: wire.lua
+Description: Supplies exact provider request/response bytes and canonical event expectations.
+]]
+
+-- Package a synthetic exact-byte provider exchange with its canonical model expectations.
+--@param protocol string Provider wire protocol exercised by the fixture.
+--@param id string Stable fixture identifier within the protocol.
+--@param request_bytes string Exact request body bytes.
+--@param response_bytes string Exact response body or event-stream bytes.
+--@param events table Expected canonical event sequence.
+--@param finish_class string Expected model finish classification.
+--@param control string|false|nil Expected canonical control name; absent values become false.
+--@return table Synthetic exchange fixture; it does not claim live-provider evidence.
 local function wire_case(protocol, id, request_bytes, response_bytes, events, finish_class, control)
   return {
     protocol = protocol,

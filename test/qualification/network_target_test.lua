@@ -1,7 +1,7 @@
 --[[
-File: network_target_test.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-09-23
+File: network_target_test.lua
 Description: Keeps curl carrier evidence separate from target release qualification.
 ]]
 
@@ -12,15 +12,25 @@ local fake_filesystem = assert(loadfile(
     _ENV
 ))()
 
+-- Load one source module under an isolated dependency cache for qualification tests.
+--@param name string Source module basename.
+--@param cache table|nil Shared cache for this load graph.
+--@return any Module value returned by the source chunk.
 local function load_module(name, cache)
     cache = cache or {}
     if cache[name] then return cache[name] end
     local environment = {}
     for key, value in pairs(_ENV) do environment[key] = value end
+    -- Resolve a source dependency through the same isolated module cache.
+    --@param dependency string Required module basename.
+    --@return any Loaded dependency value.
     environment.require = function(dependency)
         return load_module(dependency, cache)
     end
     environment._G = environment
+    --@metatable isolated_test_environment Falls back to suite globals for read access;
+    -- explicit fields remain mutable only within this test loader.
+    --@field __index table Parent test environment used for absent keys.
     setmetatable(environment, { __index = _ENV })
     local chunk, load_error = loadfile(
         YACA_TEST_ROOT .. "/src/" .. name .. ".lua",
@@ -33,6 +43,9 @@ local function load_module(name, cache)
     return value
 end
 
+-- Build bounded carrier options for a supplied curl executable path.
+--@param curl_path string Candidate absolute or relative executable path.
+--@return table Network factory options with test-local paths.
 local function options(curl_path)
     return {
         curl_executable = curl_path,
@@ -51,11 +64,18 @@ local function options(curl_path)
     }
 end
 
+-- Provide inert filesystem/process dependencies for metadata-only checks.
+--@param none No parameters.
+--@return table Network factory port map.
 local function ports()
     local filesystem = fake_filesystem.new(nil, 128)
     return {
         filesystem = filesystem,
         processes = {
+            -- Reject any unexpected child-process creation in metadata tests.
+            --@param none No parameters.
+            --@return nil Does not return normally.
+            --@error Always raises when network I/O is attempted.
             new_component_port = function()
                 error("qualification metadata test must not start curl")
             end,
@@ -68,6 +88,9 @@ return {
     cases = {
         {
             name = "carrier candidate never self-declares target qualification",
+            -- Check fixed curl arguments and an honest pending target-qualification flag.
+            --@param none No parameters.
+            --@return nil Assertions raise on failure.
             run = function()
                 local network = load_module("network")
                 local service = assert(network.new(
@@ -79,8 +102,12 @@ return {
                 A.equal(service.capabilities.config_carrier, "anonymous-stdin-pipe")
                 A.falsy(service.capabilities.secret_in_argv)
                 A.falsy(service.capabilities.secret_in_environment)
-                A.truthy(service.capabilities.target_qualified)
-                A.contains(service.capabilities.qualification, "target-curl-tls-proxy-ca-passed-per-D-072")
+                A.falsy(service.capabilities.target_qualified)
+                A.contains(service.capabilities.qualification, "three-edition-target-qualification-pending")
+                -- Attempt to mutate the published fixed curl argv snapshot.
+                --@param none No parameters.
+                --@return nil Does not return normally when proxy is locked.
+                --@error Raises the read-only proxy assignment error.
                 A.raises(function()
                     service.capabilities.fixed_arguments[1] = "--config"
                 end, "cannot be modified")
@@ -88,6 +115,9 @@ return {
         },
         {
             name = "relative or caller-qualified curl component is rejected",
+            -- Reject relative paths and caller-supplied qualification claims.
+            --@param none No parameters.
+            --@return nil Assertions raise on failure.
             run = function()
                 local network = load_module("network")
                 local rejected, path_error = network.new(ports(), options("bin/curl"))
@@ -103,15 +133,18 @@ return {
         },
         {
             name = "release manifest locks sources while every target artifact stays pending",
+            -- Keep source pins separate from still-pending target artifacts.
+            --@param none No parameters.
+            --@return nil Assertions raise on failure.
             run = function()
                 local manifest = assert(loadfile(
                     YACA_TEST_ROOT .. "/release/manifest.lua",
                     "t",
                     _ENV
                 ))()
-                A.equal(manifest.release_state, "qualified")
-                A.truthy(manifest.release_authorized)
-                A.truthy(manifest.target_qualification_complete)
+                A.equal(manifest.release_state, "unqualified")
+                A.falsy(manifest.release_authorized)
+                A.falsy(manifest.target_qualification_complete)
                 A.equal(manifest.dependencies.curl.version, "8.21.0")
                 A.equal(manifest.dependencies.mbedtls.version, "3.6.7")
                 A.equal(manifest.dependencies.ca_bundle.version, "2026-08-13")
@@ -139,7 +172,7 @@ return {
                     A.equal(target.os, values[2])
                     A.equal(target.arch, values[3])
                     A.equal(target.minimum, values[4])
-                    A.equal(target.qualification, "passed")
+                    A.equal(target.qualification, "pending")
                 end
             end,
         },

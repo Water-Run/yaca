@@ -1,7 +1,7 @@
 --[[
-File: index.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-09-23
+File: index.lua
 Description: Resolves Context selectors over bounded real-time catalog rings.
 ]]
 
@@ -49,21 +49,50 @@ local RING_FIELDS = {
     candidates = true,
 }
 
+-- Construct a structured diagnostic without throwing or formatting its optional fields.
+--@param code string Stable diagnostic code used by callers to choose recovery behavior.
+--@param message string Human-readable summary supplied by the failing operation.
+--@param reason string|nil Optional machine-readable cause or validation rule.
+--@return table New diagnostic record; optional non-nil fields are retained without deep copying.
 local function failure(code, message, reason)
     local result = { code = code, message = message }
     if reason ~= nil then result.reason = reason end
     return result
 end
 
+-- Create a shallow read-only view without copying the backing table.
+--@param values table Backing fields retained by reference; the caller owns their stability.
+--@param label string|nil Diagnostic label; defaults to "readonly value".
+--@return table Empty proxy exposing the backing fields through its locked metatable.
+--@ownership Retains values by reference; nested values and the backing table are not frozen.
 local function readonly(values, label)
+    --@metatable readonly_proxy Forwards reads and iteration; ordinary assignments raise an error.
+    --@field __index table Backing values used for missing-key reads.
+    --@field __newindex function Rejects ordinary assignments without changing the backing values.
+    --@field __pairs function Enumerates the backing table with next.
+    --@field __len function Reports the backing table sequence length.
+    --@field __metatable string Hides this metatable behind the fixed "locked" marker.
     return setmetatable({}, {
         __index = values,
+        -- Reject a write through the proxy before it can create an ordinary field.
+        --@param _ table Proxy receiving the assignment; its contents are not consulted.
+        --@param key any Attempted field name included in the diagnostic.
+        --@return nil Does not return normally.
+        --@error Always raises a read-only assignment error at the caller frame.
         __newindex = function(_, key)
             error((label or "readonly value") .. " cannot be modified: " .. tostring(key), 2)
         end,
+        -- Iterate the backing fields instead of the empty proxy table.
+        --@param none The proxy argument supplied by pairs is ignored.
+        --@return function The standard next iterator.
+        --@return table Backing values used as iterator state.
+        --@return nil Initial key used to start iteration.
         __pairs = function()
             return next, values, nil
         end,
+        -- Forward sequence-length queries to the backing table.
+        --@param none The proxy operand supplied by Lua is ignored.
+        --@return integer Length of the backing sequence under the Lua length operator.
         __len = function()
             return #values
         end,
@@ -71,6 +100,12 @@ local function readonly(values, label)
     })
 end
 
+-- Copy nested tables into read-only proxies and reject cycles.
+--@param value any Scalar or table to freeze.
+--@param visiting table|nil Current recursion stack for cycle detection.
+--@param label string|nil Diagnostic label for proxy write errors.
+--@return any|nil Unchanged scalar or frozen copy; nil for a cycle.
+--@ownership Copies table entries while retaining non-table scalar values.
 local function freeze(value, visiting, label)
     if type(value) ~= "table" then return value end
     visiting = visiting or {}
@@ -89,10 +124,18 @@ local function freeze(value, visiting, label)
     return readonly(copy, label)
 end
 
+-- Check the Lua integer subtype and the caller's inclusive lower bound.
+--@param value any Candidate value; floats and non-numeric values are rejected.
+--@param minimum integer Inclusive minimum accepted by this check.
+--@return boolean True only for an integer at least minimum.
 local function valid_integer(value, minimum)
     return math.type(value) == "integer" and value >= minimum
 end
 
+-- Accept exactly the resolver's four positive hard limits.
+--@param options any Candidate index limits.
+--@return table|nil Independent copy of the admitted limits.
+--@return table|nil Structured option error on failure.
 local function validate_options(options)
     if type(options) ~= "table" then
         return nil, failure("InvalidIndexOptions", "Context index hard limits are required")
@@ -129,6 +172,13 @@ local function validate_options(options)
     return limits
 end
 
+-- Capture named port functions so later caller mutation cannot replace them.
+--@param value any Candidate capability port.
+--@param names table Required method-name sequence.
+--@param code string Error identity when a method is missing.
+--@param label string Port label included in the error.
+--@return table|nil Shallow method snapshot.
+--@return table|nil Structured missing-port error.
 local function snapshot_methods(value, names, code, label)
     if type(value) ~= "table" then
         return nil, failure(code, label .. " is required")
@@ -143,6 +193,10 @@ local function snapshot_methods(value, names, code, label)
     return snapshot
 end
 
+-- Validate and snapshot the path, scanner, and optional verifier ports.
+--@param ports any Candidate resolver dependency map.
+--@return table|nil Admitted port-method snapshots.
+--@return table|nil Structured dependency error on failure.
 local function validate_ports(ports)
     if type(ports) ~= "table" then
         return nil, failure("InvalidIndexPorts", "Context index ports are required")
@@ -180,6 +234,11 @@ local function validate_ports(ports)
     return { path = path, scanner = scanner, verifier = verifier }
 end
 
+-- Reduce an untrusted dependency error to a bounded reason token.
+--@param value any Error table or candidate reason string.
+--@param limits table Resolver byte bounds.
+--@param fallback string Reason used when the candidate is unsafe.
+--@return string Safe machine-readable reason.
 local function safe_reason(value, limits, fallback)
     if type(value) == "table" then value = value.reason or value.code end
     if type(value) ~= "string"
@@ -192,6 +251,13 @@ local function safe_reason(value, limits, fallback)
     return value
 end
 
+-- Call a scanner-style port and normalize its boolean status contract.
+--@param scanner table Admitted capability port.
+--@param method string Name of the captured function to invoke.
+--@param ... any Arguments forwarded unchanged to the function.
+--@return boolean Whether the port reported success.
+--@return any Successful value or untrusted port failure value; callers bound public reasons.
+--@effect Invokes the named port once under pcall.
 local function invoke(scanner, method, ...)
     local called, ok, value = pcall(scanner[method], ...)
     if not called then return false, "scanner-exception" end
@@ -200,18 +266,32 @@ local function invoke(scanner, method, ...)
     return false, "scanner-contract"
 end
 
+-- Freeze an internally constructed resolver result.
+--@param value table Discriminated resolver outcome.
+--@return table Read-only, recursively copied outcome.
+--@error Raises only if an internal cyclic outcome violates the invariant.
 local function result(value)
     return assert(freeze(value, nil, "Context resolver result"))
 end
 
+-- Form a typed invalid-selector outcome.
+--@param reason string Safe reason token.
+--@return table Frozen InvalidSelector outcome.
 local function invalid_selector(reason)
     return result({ tag = "InvalidSelector", reason = reason })
 end
 
+-- Form an incomplete scan outcome without implying target absence.
+--@param scope string Logical scope where scan stopped.
+--@param reason string Safe reason token.
+--@return table Frozen ScanIncomplete outcome.
 local function scan_incomplete(scope, reason)
     return result({ tag = "ScanIncomplete", scope = scope, reason = reason })
 end
 
+-- Preserve the logical identity of a matching but unreadable candidate.
+--@param candidate table Admitted catalog candidate.
+--@return table Frozen MatchedUnavailable outcome.
 local function matched_unavailable(candidate)
     return result({
         tag = "MatchedUnavailable",
@@ -220,10 +300,16 @@ local function matched_unavailable(candidate)
     })
 end
 
+-- Form a NotFound result only after a complete catalog traversal.
+--@param none No parameters.
+--@return table Frozen NotFound outcome.
 local function not_found()
     return result({ tag = "NotFound" })
 end
 
+-- Require a dense one-based array with no non-index keys.
+--@param values any Candidate array.
+--@return boolean True only for a dense array.
 local function valid_array(values)
     if type(values) ~= "table" then return false end
     local count = 0
@@ -238,12 +324,21 @@ local function valid_array(values)
     return true
 end
 
+-- Accept a non-NUL string, optionally including the empty string.
+--@param value any Candidate string.
+--@param allow_empty boolean Whether zero bytes are allowed.
+--@return boolean True for accepted text.
 local function valid_text(value, allow_empty)
     return type(value) == "string"
         and (allow_empty or value ~= "")
         and value:find("\0", 1, true) == nil
 end
 
+-- Compare nested observation snapshots while handling shared subgraphs.
+--@param left any Expected value.
+--@param right any Re-observed value.
+--@param visited table|nil Previously compared table pairs.
+--@return boolean True when reachable keys and values are structurally equal.
 local function deep_equal(left, right, visited)
     if left == right then return true end
     if type(left) ~= type(right) or type(left) ~= "table" then return false end
@@ -260,6 +355,12 @@ local function deep_equal(left, right, visited)
     return true
 end
 
+-- Admit a catalog row only when path, header, and observation fields agree.
+--@param candidate any Untrusted scanner or verifier row.
+--@param rank integer Expected search-ring rank.
+--@param path table Captured LogicalPath service.
+--@return table|nil Frozen normalized candidate.
+--@return string|nil Failure reason for an invalid row.
 local function validate_candidate(candidate, rank, path)
     if type(candidate) ~= "table" then return nil, "candidate-contract" end
     for key in pairs(candidate) do
@@ -336,6 +437,14 @@ local function validate_candidate(candidate, rank, path)
     return frozen
 end
 
+-- Validate one complete ring and order its candidates by logical path.
+--@param ring any Scanner-supplied ring.
+--@param expected_rank integer Rank assigned by the resolver.
+--@param path table Captured LogicalPath service.
+--@param limits table Resolver scan caps.
+--@return table|nil Sorted candidate sequence for a complete ring.
+--@return string|nil Logical scope when available.
+--@return string|nil Incomplete-scan reason on failure.
 local function validate_ring(ring, expected_rank, path, limits)
     if type(ring) ~= "table" then return nil, nil, "ring-contract" end
     for key in pairs(ring) do
@@ -365,6 +474,11 @@ local function validate_ring(ring, expected_rank, path, limits)
         candidates[index] = admitted
     end
     local compare_failed = false
+    -- Compare canonical logical paths and flag a broken path comparator.
+    --@param left table First admitted candidate.
+    --@param right table Second admitted candidate.
+    --@return boolean True when left sorts before right.
+    --@effect Sets compare_failed if the path port returns a non-number.
     local sorted = pcall(table.sort, candidates, function(left, right)
         local order = path.compare_logical(left.logical_path, right.logical_path)
         if type(order) ~= "number" then
@@ -377,6 +491,10 @@ local function validate_ring(ring, expected_rank, path, limits)
     return candidates, scope
 end
 
+-- Compute and validate the public 16-hex Context address.
+--@param candidate table Admitted catalog candidate.
+--@param path table Captured LogicalPath service.
+--@return string|nil Uppercase hash or nil for a broken path port.
 local function hash_candidate(candidate, path)
     local hash = path.context_hash(candidate.logical_path)
     if type(hash) ~= "string"
@@ -388,6 +506,13 @@ local function hash_candidate(candidate, path)
     return hash
 end
 
+-- Expose a selected row while retaining its full frozen credential privately.
+--@param candidate table Admitted catalog candidate.
+--@param hash string Valid public Context hash.
+--@param tag string Unique or TargetSnapshot outcome tag.
+--@param selections table Weak-key map from public results to target snapshots.
+--@return table Frozen public selection.
+--@effect Adds a private snapshot keyed by the returned selection.
 local function selected_result(candidate, hash, tag, selections)
     local value = {
         tag = tag,
@@ -404,10 +529,19 @@ local function selected_result(candidate, hash, tag, selections)
     return exposed
 end
 
+-- Select a single usable candidate.
+--@param candidate table Admitted catalog candidate.
+--@param hash string Valid Context hash.
+--@param selections table Private selection map.
+--@return table Frozen Unique outcome.
 local function unique(candidate, hash, selections)
     return selected_result(candidate, hash, "Unique", selections)
 end
 
+-- Decide whether a candidate can be opened, deleted, or repaired.
+--@param candidate table Admitted catalog candidate.
+--@param mode boolean|string False for open, true for delete, repair for recovery.
+--@return boolean True when its observed header state permits the operation.
 local function manageable(candidate, mode)
     return candidate.header_state == "valid"
         or (mode and candidate.header_state == "corrupt")
@@ -415,6 +549,14 @@ local function manageable(candidate, mode)
             and type(candidate.recovery_stat) == "table")
 end
 
+-- Resolve an exact display or canonical name within one sorted ring.
+--@param candidates table Admitted candidates in the current ring.
+--@param selector string Canonical Context name.
+--@param path table Captured LogicalPath service.
+--@param scope string Current logical scan scope.
+--@param selections table Private selection map.
+--@param deleting boolean|string Operation mode for damaged targets.
+--@return table|nil Matching outcome, or nil to inspect the next ring.
 local function decide_name(candidates, selector, path, scope, selections, deleting)
     for _, candidate in ipairs(candidates) do
         if candidate.display_name == selector or candidate.canonical_name == selector then
@@ -429,6 +571,15 @@ local function decide_name(candidates, selector, path, scope, selections, deleti
     return nil
 end
 
+-- Resolve a hash within one ring, preserving collision and unavailable facts.
+--@param candidates table Admitted candidates in the current ring.
+--@param selector string Canonical 16-hex hash.
+--@param path table Captured LogicalPath service.
+--@param scope string Current logical scan scope.
+--@param limits table Collision result cap.
+--@param selections table Private selection map.
+--@param deleting boolean|string Operation mode for damaged targets.
+--@return table|nil Unique, collision, or unavailable outcome; nil if no match.
 local function decide_hash(candidates, selector, path, scope, limits, selections, deleting)
     local usable, unavailable = {}, {}
     for _, candidate in ipairs(candidates) do
@@ -464,10 +615,10 @@ end
 -- The scanner is a narrow platform adapter. Each resolve call opens a fresh
 -- scan, then `next_ring` returns one complete bounded ring at a time or nil at
 -- end-of-catalog. No candidate or outcome is cached between calls.
--- @param ports table Contains path and scanner services.
--- @param options table Mandatory release hard limits.
--- @return table|nil service Immutable resolver service.
--- @return table|nil err Structured dependency or limit failure.
+--@param ports table Contains path and scanner services.
+--@param options table Mandatory release hard limits.
+--@return table|nil service Immutable resolver service.
+--@return table|nil err Structured dependency or limit failure.
 function M.new(ports, options)
     local admitted, ports_error = validate_ports(ports)
     if not admitted then return nil, ports_error end
@@ -475,12 +626,16 @@ function M.new(ports, options)
     if not limits then return nil, limits_error end
     local path, scanner, verifier = admitted.path, admitted.scanner, admitted.verifier
     local service = {}
+    --@metatable selections Associates exposed Context selections with the frozen target snapshots they represent.
+    --@field __mode string Fixed k mode: keys are weak; entries remain mutable within their owning module.
     local selections = setmetatable({}, { __mode = "k" })
 
-    ---Resolves one exact Context name or canonical 16-hex path hash.
-    -- @param selector string Exact display name or hash token.
-    -- @param origin_logical string Current workspace mirror directory.
-    -- @return table ResolveResult immutable discriminated union.
+    -- Resolve one exact name or hash using a fresh bounded ring scan.
+    --@param selector string Exact display name or canonical hash token.
+    --@param origin_logical string Current workspace mirror directory.
+    --@param deleting boolean|string False for open, true for delete, repair for recovery.
+    --@return table Frozen discriminated resolver outcome.
+    --@effect Opens and closes an ephemeral scanner handle for each invocation.
     local function resolve(selector, origin_logical, deleting)
         local classified, selector_error = path.classify_selector(selector)
         if not classified then
@@ -510,6 +665,10 @@ function M.new(ports, options)
         end
         local handle = handle_or_error
         local closed = false
+        -- Close the current scanner handle and preserve close failures when material.
+        --@param outcome table Resolver outcome selected before closing.
+        --@return table Original outcome or a ScanIncomplete close-error outcome.
+        --@effect Calls scanner.close at most once for this resolution.
         local function finish(outcome)
             if closed then return outcome end
             closed = true
@@ -581,36 +740,45 @@ function M.new(ports, options)
         return finish(scan_incomplete(origin, "ring-limit"))
     end
 
+    -- Resolve a valid Context for ordinary opening.
+    --@param selector string Exact name or canonical hash.
+    --@param origin_logical string Current logical workspace scope.
+    --@return table Frozen resolver outcome.
     function service.resolve(selector, origin_logical)
         return resolve(selector, origin_logical, false)
     end
 
-    ---Resolves a deletable valid or corrupt Context without opening its body.
-    -- A damaged candidate still participates in exact hash collision checks;
-    -- busy and unavailable candidates never become deletion authority.
+    -- Resolve a deletable valid or corrupt Context without opening its body.
+    --@param selector string Exact name or canonical hash.
+    --@param origin_logical string Current logical workspace scope.
+    --@return table Frozen resolver outcome; busy or unavailable rows stay unusable.
     function service.resolve_for_delete(selector, origin_logical)
         return resolve(selector, origin_logical, true)
     end
 
-    ---Includes damaged officials and exact previous-only observations solely
-    -- for explicit repair. Ordinary open/delete never acquire these targets.
+    -- Resolve damaged or previous-only targets solely for explicit repair.
+    --@param selector string Exact name or canonical hash.
+    --@param origin_logical string Current logical workspace scope.
+    --@return table Frozen resolver outcome including eligible recovery rows.
     function service.resolve_for_repair(selector, origin_logical)
         return resolve(selector, origin_logical, "repair")
     end
 
-    ---Computes `.status` hash from the current handle path without scanning.
-    -- @param logical_path string Current Context LogicalPath.
-    -- @return string|nil hash Canonical 16-uppercase-hex address.
-    -- @return table|nil err Structured path/hash failure.
+    -- Compute the current Context address without a catalog scan.
+    --@param logical_path string Current Context LogicalPath.
+    --@return string|nil Canonical uppercase 16-hex address.
+    --@return table|nil Structured path failure; hash-port failure may return nil.
     function service.current_hash(logical_path)
         local details, path_error = path.context_file(logical_path)
         if not details then return nil, path_error end
         return path.context_hash(details.logical_path)
     end
 
-    ---Captures one browser/catalog row without resolving its short name again.
-    -- The snapshot remains an observation only and must pass `verify_target`
-    -- immediately before open or mutation.
+    -- Capture a catalog row as an observation bound to this resolver instance.
+    --@param candidate table Browser or catalog row with path and header observations.
+    --@return table|nil Frozen TargetSnapshot selection.
+    --@return table|nil Structured malformed-row or hash error.
+    --@effect Stores a private credential for later verify_target use.
     function service.capture_target(candidate)
         local rank = type(candidate) == "table" and candidate.scope_rank or 0
         if not valid_integer(rank, 0) then
@@ -636,9 +804,11 @@ function M.new(ports, options)
         )
     end
 
-    ---Re-observes one selected target and compares its complete credential.
-    -- This never resolves by name/hash a second time and never scans for a
-    -- replacement when the selected path has changed.
+    -- Re-observe the selected path and compare its complete credential.
+    --@param selection table Selection minted by this resolver.
+    --@param purpose string|nil Open by default, or mutation, delete, or repair.
+    --@return table Frozen Verified, TargetChanged, or TargetUnavailable outcome.
+    --@effect Invokes the verifier once; never scans for a replacement target.
     function service.verify_target(selection, purpose)
         purpose = purpose or "open"
         if purpose ~= "open" and purpose ~= "mutation" and purpose ~= "delete" and purpose ~= "repair" then
@@ -775,6 +945,9 @@ local CATALOG_PATH_METHODS = {
     "context_file",
 }
 
+-- Accept a POSIX, drive-absolute, or UNC-shaped path with no NUL byte.
+--@param value any Candidate physical path.
+--@return boolean True when the path has an absolute prefix.
 local function valid_absolute_path(value)
     if not valid_text(value, false) then return false end
     local normalized = value:gsub("\\", "/")
@@ -783,6 +956,10 @@ local function valid_absolute_path(value)
         or normalized:match("^//[^/]+/[^/]+") ~= nil
 end
 
+-- Ensure the catalog root uses the configured platform's absolute syntax.
+--@param value any Candidate physical root path.
+--@param platform_kind string Windows or POSIX platform selector.
+--@return boolean True when the absolute prefix matches the platform.
 local function valid_platform_root(value, platform_kind)
     if not valid_absolute_path(value) then return false end
     local normalized = value:gsub("\\", "/")
@@ -794,6 +971,10 @@ local function valid_platform_root(value, platform_kind)
         and normalized:match("^[A-Za-z]:/") == nil
 end
 
+-- Admit exactly the physical catalog root, platform, and walk caps.
+--@param options any Candidate scanner configuration.
+--@return table|nil Independent copy of accepted options.
+--@return table|nil Structured option error on failure.
 local function validate_filesystem_scanner_options(options)
     if type(options) ~= "table" then
         return nil, failure(
@@ -833,6 +1014,10 @@ local function validate_filesystem_scanner_options(options)
     }
 end
 
+-- Snapshot the direct filesystem, Context store, and path port methods.
+--@param ports any Candidate production scanner dependencies.
+--@return table|nil Captured port functions.
+--@return table|nil Structured dependency error on failure.
 local function validate_filesystem_scanner_ports(ports)
     if type(ports) ~= "table" then
         return nil, failure(
@@ -875,6 +1060,11 @@ local function validate_filesystem_scanner_ports(ports)
     return { filesystem = filesystem, store = store, path = path }
 end
 
+-- Join a trusted logical-relative suffix to a platform physical root.
+--@param root string Physical catalog root.
+--@param relative string Slash-separated relative suffix, possibly empty.
+--@param platform_kind string Windows or POSIX separator mode.
+--@return string Physical path in the target platform's separator style.
 local function join_catalog_path(root, relative, platform_kind)
     if relative == "" then return root end
     local separator = platform_kind == "windows" and "\\" or "/"
@@ -883,6 +1073,10 @@ local function join_catalog_path(root, relative, platform_kind)
     return root .. separator .. suffix
 end
 
+-- Normalize a physical path for catalog-root mapping comparison.
+--@param value string Physical path.
+--@param platform_kind string Windows folds case; POSIX preserves it.
+--@return string Slash-normalized comparison key.
 local function physical_key(value, platform_kind)
     local normalized = value:gsub("\\", "/")
     if platform_kind == "windows" then return normalized:lower() end
@@ -912,6 +1106,9 @@ local CATALOG_CHANGED_ERRORS = {
     TargetChanged = true,
 }
 
+-- Classify a Header or reverify error for catalog display.
+--@param error_value any Structured dependency error when available.
+--@return string Changed, unavailable, or corrupt candidate state.
 local function catalog_error_state(error_value)
     local code = type(error_value) == "table" and error_value.code or nil
     if code and CATALOG_CHANGED_ERRORS[code] then return "changed" end
@@ -919,6 +1116,13 @@ local function catalog_error_state(error_value)
     return "corrupt"
 end
 
+-- Call a value-returning dependency without letting an exception escape.
+--@param port table Captured dependency methods.
+--@param method string Method to invoke.
+--@param ... any Arguments forwarded to the port.
+--@return any|nil Primary value returned by the port.
+--@return any|nil Port error or structured exception error.
+--@effect Invokes the dependency once under pcall.
 local function call_value(port, method, ...)
     local called, value, value_error = pcall(port[method], ...)
     if not called then
@@ -931,22 +1135,35 @@ local function call_value(port, method, ...)
     return value, value_error
 end
 
+-- Unwrap a status-returning dependency after protected invocation.
+--@param port table Captured dependency methods.
+--@param method string Method to invoke.
+--@param ... any Arguments forwarded to the port.
+--@return any|nil Successful port value, or nil on failure.
+--@return any|nil Port failure value when status was false.
+--@effect Invokes the dependency once.
 local function call_status(port, method, ...)
     local ok, value = invoke(port, method, ...)
     if not ok then return nil, value end
     return value
 end
 
+-- Add to a named catalog statistic with one as the default increment.
+--@param values table Mutable statistics map.
+--@param name string Existing counter name.
+--@param amount integer|nil Increment, default one.
+--@return nil No return value.
+--@effect Mutates the named counter in values.
 local function increment(values, name, amount)
     values[name] = values[name] + (amount or 1)
 end
 
----Creates the no-follow, bounded production scanner and target verifier.
--- Search rings are materialized only one at a time. Each complete ring is
--- enumerated twice around Header inspection so directory changes fail closed.
--- @return table|nil scanner Ephemeral ring scanner.
--- @return table|nil verifier Exact selected-target observer.
--- @return table|nil err Structured construction failure.
+-- Create a bounded no-follow scanner and exact selected-target verifier.
+--@param ports table Direct filesystem, Context store, and LogicalPath services.
+--@param options table Catalog root, platform kind, and walk caps.
+--@return table|nil Ephemeral ring scanner on success.
+--@return table|nil Exact selected-target verifier on success.
+--@return table|nil Structured construction error on failure.
 function M.new_filesystem_scanner(ports, options)
     local admitted_ports, ports_error = validate_filesystem_scanner_ports(ports)
     if not admitted_ports then return nil, nil, ports_error end
@@ -955,10 +1172,16 @@ function M.new_filesystem_scanner(ports, options)
     local filesystem = admitted_ports.filesystem
     local store = admitted_ports.store
     local path = admitted_ports.path
+    --@metatable handles Associates resolver handles with their private catalog traversal and selection state.
+    --@field __mode string Fixed k mode: keys are weak; entries remain mutable within their owning module.
     local handles = setmetatable({}, { __mode = "k" })
     local scanner = {}
     local verifier = {}
 
+    -- Map a validated logical path beneath a physical catalog root.
+    --@param root string Physical catalog root.
+    --@param logical string LogicalPath under that root.
+    --@return string|nil Physical path, or nil for an unsafe Windows separator.
     local function physical_for_logical(root, logical)
         if admitted.platform_kind == "windows" and logical:find("\\", 1, true) then
             return nil
@@ -967,6 +1190,12 @@ function M.new_filesystem_scanner(ports, options)
         return join_catalog_path(root, relative, admitted.platform_kind)
     end
 
+    -- Preserve an unavailable row's path and any safely observed file identity.
+    --@param snapshot table Direct filesystem observation.
+    --@param logical string Candidate LogicalPath.
+    --@param details table Parsed Context filename details.
+    --@param rank integer|nil Search-ring rank, if scanning a ring.
+    --@return table Mutable unavailable candidate used before admission.
     local function unavailable_candidate(snapshot, logical, details, rank)
         local candidate = {
             physical_path = snapshot.requested_path,
@@ -980,6 +1209,15 @@ function M.new_filesystem_scanner(ports, options)
         return candidate
     end
 
+    -- Inspect a candidate Header only after identity and writer checks.
+    --@param snapshot table Direct no-follow file observation.
+    --@param logical string Candidate LogicalPath.
+    --@param details table Parsed Context filename details.
+    --@param rank integer|nil Search-ring rank.
+    --@param statistics table Mutable per-ring state counters.
+    --@return table Candidate classified as valid, changed, corrupt, or unavailable.
+    --@return table|nil Optional dependency error associated with classification.
+    --@effect Calls writer, Header, and reverify ports and updates counters.
     local function inspect_candidate(snapshot, logical, details, rank, statistics)
         local candidate = unavailable_candidate(snapshot, logical, details, rank)
         if snapshot.exists ~= true
@@ -1067,6 +1305,15 @@ function M.new_filesystem_scanner(ports, options)
         return candidate
     end
 
+    -- Admit a missing official only when an exact previous-file observation is safe.
+    --@param snapshot table Observation of the absent official file.
+    --@param previous table Observation of its previous-file companion.
+    --@param logical string Official Context LogicalPath.
+    --@param details table Parsed official filename details.
+    --@param rank integer|nil Search-ring rank.
+    --@param statistics table Mutable per-ring counters.
+    --@return table Unavailable candidate with recovery_stat when reverified.
+    --@effect Rechecks both observations and increments unavailable statistics.
     local function inspect_missing_candidate(snapshot, previous, logical, details, rank, statistics)
         local candidate = unavailable_candidate(snapshot, logical, details, rank)
         increment(statistics, "unavailable")
@@ -1087,11 +1334,23 @@ function M.new_filesystem_scanner(ports, options)
         return candidate
     end
 
+    -- Record that a scanner handle can no longer claim a complete traversal.
+    --@param state table Mutable handle state.
+    --@param reason string Partial-scan reason.
+    --@return nil No return value.
+    --@effect Updates the handle's completion statistics.
     local function mark_partial(state, reason)
         state.statistics.complete = false
         state.statistics.partial_reason = reason
     end
 
+    -- Return an incomplete ring and mark the handle partial.
+    --@param state table Mutable handle state.
+    --@param scope string Logical scope being inspected.
+    --@param rank integer Search-ring rank.
+    --@param reason string Failure reason.
+    --@return table Ring with complete=false and no candidates.
+    --@effect Updates the handle's partial-scan statistics.
     local function incomplete_ring(state, scope, rank, reason)
         mark_partial(state, reason)
         return {
@@ -1103,6 +1362,9 @@ function M.new_filesystem_scanner(ports, options)
         }
     end
 
+    -- Accept only an observed, no-follow directory with a complete ancestry.
+    --@param snapshot table Direct filesystem observation.
+    --@return boolean True when the directory is safe to enumerate.
     local function safe_directory(snapshot)
         return snapshot.exists == true
             and type(snapshot.identity) == "table"
@@ -1112,10 +1374,19 @@ function M.new_filesystem_scanner(ports, options)
             and snapshot.metadata.link_target == false
     end
 
+    -- Extract a dependency code for an enumeration failure.
+    --@param error_value any Structured error when available.
+    --@param fallback string Reason when no structured code exists.
+    --@return string Dependency code or fallback.
     local function observation_reason(error_value, fallback)
         return type(error_value) == "table" and error_value.code or fallback
     end
 
+    -- Re-enumerate prior directories to reject changed catalog generations.
+    --@param observations table Logical-path map of recorded directory generations.
+    --@return boolean|nil True when every generation still matches.
+    --@return string|nil Reason when enumeration changed or failed.
+    --@effect Calls direct_walk once for each recorded directory.
     local function confirm_observations(observations)
         local logical_paths = {}
         for logical in pairs(observations) do logical_paths[#logical_paths + 1] = logical end
@@ -1141,11 +1412,24 @@ function M.new_filesystem_scanner(ports, options)
         return true
     end
 
+    -- Count and return a complete scope that contains no candidates.
+    --@param state table Mutable handle state.
+    --@param scope string Logical scope.
+    --@param rank integer Search-ring rank.
+    --@return table Complete empty ring.
+    --@effect Increments the handle's completed-ring counter.
     local function complete_empty_ring(state, scope, rank)
         state.statistics.rings = state.statistics.rings + 1
         return { scope = scope, rank = rank, complete = true, candidates = {} }
     end
 
+    -- Enumerate one bounded ring and verify directory generations before commit.
+    --@param state table Mutable scanner-handle state.
+    --@param scope string Logical scope to scan.
+    --@param rank integer Search-ring rank.
+    --@return table Complete candidate ring or explicit incomplete ring.
+    --@effect Uses direct filesystem and store ports; commits candidate state after confirmation,
+    -- while entry counters may already reflect a failed traversal.
     local function scan_ring(state, scope, rank)
         local prior_stable, prior_error = confirm_observations(state.observations)
         if not prior_stable then
@@ -1337,6 +1621,12 @@ function M.new_filesystem_scanner(ports, options)
         }
     end
 
+    -- Open a fresh bounded scan from a logical workspace scope.
+    --@param origin string Logical starting scope.
+    --@param limits table Candidate and ring caps supplied by resolver.
+    --@return boolean True when a handle is created; false for invalid input.
+    --@return table Handle on success or structured error on failure.
+    --@effect Stores mutable scan state behind a weak-key handle.
     function scanner.begin(origin, limits)
         local logical = path.validate_logical(origin)
         if not logical
@@ -1396,6 +1686,11 @@ function M.new_filesystem_scanner(ports, options)
         return true, handle
     end
 
+    -- Materialize at most one next search ring for an owned open handle.
+    --@param handle table Handle returned by scanner.begin.
+    --@return boolean True for a valid handle, false otherwise.
+    --@return table|nil Ring or nil at end; structured error on failure.
+    --@effect Advances the handle's next-scope cursor before scanning.
     function scanner.next_ring(handle)
         local state = handles[handle]
         if not state then
@@ -1411,6 +1706,11 @@ function M.new_filesystem_scanner(ports, options)
         return true, scan_ring(state, scope, rank)
     end
 
+    -- Mark an owned scan handle closed so no more rings can be read.
+    --@param handle table Handle returned by scanner.begin.
+    --@return boolean True after close, false for foreign or already closed handle.
+    --@return table|nil Structured error on failure.
+    --@effect Changes the handle's closed flag.
     function scanner.close(handle)
         local state = handles[handle]
         if not state then
@@ -1423,6 +1723,10 @@ function M.new_filesystem_scanner(ports, options)
         return true
     end
 
+    -- Snapshot statistics for an owned scan handle.
+    --@param handle table Handle returned by scanner.begin.
+    --@return table|nil Frozen statistics including closed state.
+    --@return table|nil Structured foreign-handle error.
     function scanner.status(handle)
         local state = handles[handle]
         if not state then
@@ -1434,6 +1738,11 @@ function M.new_filesystem_scanner(ports, options)
         return result(values)
     end
 
+    -- Re-observe one exact selected target within the current catalog root.
+    --@param request table Physical path and LogicalPath from a private selection.
+    --@return boolean True when a candidate observation is available.
+    --@return table Candidate or structured validation/observation error.
+    --@effect Rechecks catalog root, target identity, writer, and Header ports.
     function verifier.observe(request)
         if type(request) ~= "table"
             or type(request.physical_path) ~= "string"

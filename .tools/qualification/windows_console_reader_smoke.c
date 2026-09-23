@@ -1,13 +1,12 @@
 /*
-** File: windows_console_reader_smoke.c
-** Date: 2026-09-14
-** Author: WaterRun
-** Description: Checks the production cooked reader against a bounded console
-** double, including UTF-16 fragments and failures. Run on Windows; this is a
-** deterministic reader check, not a substitute for real console interaction.
+Author: WaterRun
+Date: 2026-09-23
+File: windows_console_reader_smoke.c
+Description: Checks the production cooked reader against a bounded console
+double, including UTF-16 fragments and failures. Run on Windows; this is a
+deterministic reader check, not a substitute for real console interaction.
 */
-/* Default to the XP header baseline; command-line -D values (for example the
-** win64 0x0601 baseline) override these without a redefinition diagnostic. */
+
 #ifndef WINVER
 #define WINVER 0x0501
 #endif
@@ -26,6 +25,14 @@ static DWORD fixture_calls;
 static DWORD fixture_fail_call;
 static int fixture_overreport;
 
+/* Supplies deterministic Win32 console input to the smoke test.
+ * @param input HANDLE Owned process or terminal input state.
+ * @param buffer LPVOID The buffer bound to fixture read console.
+ * @param requested DWORD Path or byte count requested by the caller.
+ * @param received LPDWORD The received bound to fixture read console.
+ * @param control LPVOID The control bound to fixture read console.
+ * @return BOOL result Operating-system success or comparison result.
+ */
 static BOOL WINAPI fixture_read_console(
   HANDLE input, LPVOID buffer, DWORD requested, LPDWORD received, LPVOID control)
 {
@@ -60,6 +67,11 @@ static BOOL WINAPI fixture_read_console(
 #include "../../native/yaca_native.c"
 #undef ReadConsoleW
 
+/* Initializes a bounded terminal-read fixture for the smoke test.
+ * @param read yaca_terminal_read* The read bound to prepare.
+ * @param length DWORD Byte or wide-character length of the supplied buffer.
+ * @return void No value; resets fixture counters and allocates the wide input buffer.
+ */
 static void prepare(yaca_terminal_read *read, DWORD length)
 {
   DWORD index;
@@ -84,6 +96,10 @@ static void prepare(yaca_terminal_read *read, DWORD length)
   }
 }
 
+/* Runs the windows console reader smoke executable and reports its exit status.
+ * @param none No arguments.
+ * @return int result Process exit status, zero only when all smoke checks pass.
+ */
 int main(void)
 {
   yaca_terminal_read read;

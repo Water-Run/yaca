@@ -1,3 +1,10 @@
+--[[
+Author: WaterRun
+Date: 2026-09-23
+File: model-events.lua
+Description: Supplies canonical provider-event sequences and expected model outcomes.
+]]
+
 return {
   contract_version = "0.1.0-readiness.1",
   cases = {

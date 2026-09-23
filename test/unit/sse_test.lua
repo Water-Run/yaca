@@ -1,21 +1,30 @@
 --[[
-File: sse_test.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-09-23
+File: sse_test.lua
 Description: Verifies bounded exact Server-Sent Events parsing.
 ]]
 
 local A = assert(loadfile(YACA_TEST_ROOT .. "/test/support/assert.lua", "t", _ENV))()
 
+--Loads a source module into an isolated per-case environment.
+--@param name string Module, Model, or resource name selected by the case.
+--@param cache table Per-case module cache preserving isolated imports.
+--@return any module Module export loaded in the isolated source environment.
 local function load_module(name, cache)
     cache = cache or {}
     if cache[name] then return cache[name] end
     local environment = {}
     for key, value in pairs(_ENV) do environment[key] = value end
+    --Resolves an imported Lua module through the isolated test loader.
+    --@param dependency string Source module requested from the isolated loader.
+    --@return any value Callback value consumed by the enclosing scenario assertion.
     environment.require = function(dependency)
         return load_module(dependency, cache)
     end
     environment._G = environment
+    --@metatable environment Test-owned lookup and mutation contract for the current case.
+    --@field __index any Fallback table or function used for missing fixture keys.
     setmetatable(environment, { __index = _ENV })
     local chunk, load_error = loadfile(
         YACA_TEST_ROOT .. "/src/" .. name .. ".lua",
@@ -28,6 +37,10 @@ local function load_module(name, cache)
     return value
 end
 
+--Transforms parser data used by this suite.
+--@param network table Fake network port or its configuration.
+--@param overrides table|nil Per-case overrides of default fixture behavior.
+--@return any observed parser value observed by the scenario assertion.
 local function parser(network, overrides)
     local options = {
         maximum_line_bytes = 256,
@@ -39,6 +52,12 @@ local function parser(network, overrides)
     return assert(network.new_sse_parser(options))
 end
 
+--Supplies collect behavior required by this suite.
+--@param network table Fake network port or its configuration.
+--@param chunks table Data chunks queued for the fake stream.
+--@param options table|nil Options configuring the exercised component.
+--@return any|nil observed collect value observed by the scenario assertion.
+--@return any|nil secondary2 Additional status or structured error from the fixture operation.
 local function collect(network, chunks, options)
     local instance = parser(network, options)
     local events = {}
@@ -53,6 +72,9 @@ local function collect(network, chunks, options)
     return events
 end
 
+--Supplies data values behavior required by this suite.
+--@param events table Recorded event batch delivered to the consumer.
+--@return any observed data values value observed by the scenario assertion.
 local function data_values(events)
     local result = {}
     for index, event in ipairs(events) do result[index] = event.data end
@@ -64,6 +86,9 @@ return {
     cases = {
         {
             name = "frozen SSE corpus is invariant at every byte split",
+            --Verifies frozen SSE corpus is invariant at every byte split.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify frozen SSE corpus is invariant at every byte split.
             run = function()
                 local network = load_module("network")
                 local fixtures = assert(loadfile(
@@ -94,6 +119,9 @@ return {
         },
         {
             name = "LF CRLF and CR preserve event data and diagnostic id semantics",
+            --Verifies lF CRLF and CR preserve event data and diagnostic id semantics.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify lF CRLF and CR preserve event data and diagnostic id semantics.
             run = function()
                 local network = load_module("network")
                 local bytes = table.concat({
@@ -119,11 +147,17 @@ return {
                 A.equal(events[2].id, "first")
                 A.equal(events[3].data, "last")
                 A.equal(events[3].id, "first")
+                --Executes the action expected to raise in the 'LF CRLF and CR preserve event data and diagnostic id semantics' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify lF CRLF and CR preserve event data and diagnostic id semantics.
                 A.raises(function() events[1].data = "changed" end, "cannot be modified")
             end,
         },
         {
             name = "CRLF and multibyte scalars survive one-byte chunking",
+            --Verifies cRLF and multibyte scalars survive one-byte chunking.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify cRLF and multibyte scalars survive one-byte chunking.
             run = function()
                 local network = load_module("network")
                 local bytes = "event: 路径\r\ndata: 你\r\ndata: 好\r\n\r\n"
@@ -137,6 +171,9 @@ return {
         },
         {
             name = "BOM invalid UTF-8 and EOF never synthesize a partial event",
+            --Verifies cRLF and multibyte scalars survive one-byte chunking.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify cRLF and multibyte scalars survive one-byte chunking.
             run = function()
                 local network = load_module("network")
                 local bom = string.char(0xEF, 0xBB, 0xBF)
@@ -170,6 +207,9 @@ return {
         },
         {
             name = "line event buffer and output limits fail sticky and bounded",
+            --Verifies line event buffer and output limits fail sticky and bounded.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify line event buffer and output limits fail sticky and bounded.
             run = function()
                 local network = load_module("network")
                 local line = parser(network, {
@@ -207,6 +247,9 @@ return {
         },
         {
             name = "constructor and lifecycle reject ambiguous limits and reuse",
+            --Verifies constructor and lifecycle reject ambiguous limits and reuse.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify constructor and lifecycle reject ambiguous limits and reuse.
             run = function()
                 local network = load_module("network")
                 local rejected, option_error = network.new_sse_parser({

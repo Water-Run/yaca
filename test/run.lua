@@ -1,7 +1,7 @@
 --[[
-File: run.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-09-23
+File: run.lua
 Description: Discovers and executes isolated yaca Lua test suites.
 ]]
 
@@ -9,6 +9,9 @@ local M = {}
 
 local is_windows = package.config:sub(1, 1) == "\\"
 
+--Supplies normalize behavior required by this suite.
+--@param path string File or Context path exercised by the case.
+--@return any observed normalize value observed by the scenario assertion.
 local function normalize(path)
     path = tostring(path or ""):gsub("\\", "/")
     local unc = path:sub(1, 2) == "//"
@@ -18,11 +21,17 @@ local function normalize(path)
     return path
 end
 
+--Checks is absolute for this test scenario.
+--@param path string File or Context path exercised by the case.
+--@return number matches Whether is absolute satisfies the tested condition.
 local function is_absolute(path)
     path = normalize(path)
     return path:sub(1, 1) == "/" or path:match("^[A-Za-z]:/") ~= nil or path:match("^//[^/]+/[^/]+") ~= nil
 end
 
+--Supplies current directory behavior required by this suite.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return any observed current directory value observed by the scenario assertion.
 local function current_directory()
     local command = is_windows and "cd" or "pwd"
     local pipe = io.popen(command, "r")
@@ -36,17 +45,26 @@ local function current_directory()
     error("cannot determine test working directory")
 end
 
+--Supplies absolute behavior required by this suite.
+--@param path string File or Context path exercised by the case.
+--@return any observed absolute value observed by the scenario assertion.
 local function absolute(path)
     path = normalize(path)
     if is_absolute(path) then return path end
     return normalize(current_directory() .. "/" .. path)
 end
 
+--Supplies shell quote behavior required by this suite.
+--@param path string File or Context path exercised by the case.
+--@return string quoted Argument quoted for the selected command shell.
 local function shell_quote(path)
     if is_windows then return '"' .. path:gsub('"', '""') .. '"' end
     return "'" .. path:gsub("'", "'\\''") .. "'"
 end
 
+--Supplies root from script behavior required by this suite.
+--@param script any The script supplied to the fake service for this scenario.
+--@return any observed root from script value observed by the scenario assertion.
 local function root_from_script(script)
     local path = absolute(script or "test/run.lua")
     local root = path:match("^(.*)/test/run%.lua$")
@@ -54,6 +72,10 @@ local function root_from_script(script)
     return root
 end
 
+--Supplies discover one behavior required by this suite.
+--@param path string File or Context path exercised by the case.
+--@return table|any|nil observed discover one value observed by the scenario assertion.
+--@return string|nil secondary2 Additional status or structured error from the fixture operation.
 local function discover_one(path)
     path = absolute(path)
     if path:match("_test%.lua$") then return { path } end
@@ -78,9 +100,9 @@ local function discover_one(path)
 end
 
 --- Discovers unique test files beneath files or directories.
--- @param paths table Paths to search.
--- @return table|nil Sorted absolute test file paths.
--- @return string|nil Discovery error.
+--@param paths table Paths to search.
+--@return table|nil Sorted absolute test file paths.
+--@return string|nil Discovery error.
 function M.discover(paths)
     local found, seen = {}, {}
     for _, path in ipairs(paths or {}) do
@@ -97,6 +119,11 @@ function M.discover(paths)
     return found
 end
 
+--Supplies validate spec behavior required by this suite.
+--@param spec table Test specification or request under evaluation.
+--@param file table|string Fixture file or its path.
+--@return any|nil observed validate spec value observed by the scenario assertion.
+--@return string|nil secondary2 Additional status or structured error from the fixture operation.
 local function validate_spec(spec, file)
     if type(spec) ~= "table" then return nil, file .. " must return a test suite table" end
     if type(spec.name) ~= "string" or spec.name == "" then return nil, file .. " has no suite name" end
@@ -114,26 +141,35 @@ end
 
 M.validate_spec = validate_spec
 
+--Supplies traceback behavior required by this suite.
+--@param message string|table Message or diagnostic passed through this test port.
+--@return any observed traceback value observed by the scenario assertion.
 local function traceback(message)
     return debug.traceback(tostring(message), 2)
 end
 
 --- Loads a suite in an isolated global environment.
--- @param file string Absolute test file path.
--- @param root string Absolute repository root.
--- @return table|nil Validated suite.
--- @return string|nil Load or validation error.
--- @return table Captured log lines.
+--@param file string Absolute test file path.
+--@param root string Absolute repository root.
+--@return table|nil Validated suite.
+--@return string|nil Load or validation error.
+--@return table Captured log lines.
 function M.load_spec(file, root)
     local logs = {}
     local test_os = {}
     for key, value in pairs(os) do test_os[key] = value end
+    --Supplies exit behavior required by this suite.
+    --@param code string|integer Expected error or exit code.
+    --@return nil No value; the fake port or test assertion observes this callback's effects.
     test_os.exit = function(code) error("test attempted os.exit(" .. tostring(code) .. ")", 2) end
     local environment = {
         arg = false,
         os = test_os,
         YACA_TEST_ROOT = root,
         YACA_TEST_RUNNER = M,
+        --Supplies print behavior required by this suite.
+        --@param ... any Additional values forwarded by the fake port.
+        --@return nil No value; the fake port or test assertion observes this callback's effects.
         print = function(...)
             local values = {}
             for index = 1, select("#", ...) do values[index] = tostring(select(index, ...)) end
@@ -141,6 +177,8 @@ function M.load_spec(file, root)
         end,
     }
     environment._G = environment
+    --@metatable environment Test-owned lookup and mutation contract for the current case.
+    --@field __index any Fallback table or function used for missing fixture keys.
     setmetatable(environment, { __index = _G })
     local chunk, load_error = loadfile(file, "t", environment)
     if not chunk then return nil, load_error, logs end
@@ -151,22 +189,31 @@ function M.load_spec(file, root)
     return valid, nil, logs
 end
 
+--Supplies snapshot loaded behavior required by this suite.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return any observed Captured snapshot returned by the fixture.
 local function snapshot_loaded()
     local snapshot = {}
     for key, value in pairs(package.loaded) do snapshot[key] = value end
     return snapshot
 end
 
+--Supplies restore loaded behavior required by this suite.
+--@param snapshot table Captured immutable state under inspection.
+--@return nil No value; the fake port or test assertion observes this callback's effects.
 local function restore_loaded(snapshot)
     for key in pairs(package.loaded) do if snapshot[key] == nil then package.loaded[key] = nil end end
     for key, value in pairs(snapshot) do package.loaded[key] = value end
 end
 
 --- Executes every case despite individual failures.
--- @param entries table Normalized case entries.
--- @param writer function|nil Line output callback.
--- @return table Summary counts.
+--@param entries table Normalized case entries.
+--@param writer function|nil Line output callback.
+--@return table Summary counts.
 function M.run_cases(entries, writer)
+    --Supplies an assertion callback for this test scenario.
+    --@param line string|integer Input line or physical line position.
+    --@return nil No value; the fake port or test assertion observes this callback's effects.
     writer = writer or function(line) io.stdout:write(line, "\n") end
     local summary = { total = 0, passed = 0, failed = 0 }
     for _, entry in ipairs(entries) do
@@ -191,13 +238,16 @@ function M.run_cases(entries, writer)
     return summary
 end
 
+--Supplies usage behavior required by this suite.
+--@param writer table|function Writer receiving generated test output.
+--@return nil No value; the fake port or test assertion observes this callback's effects.
 local function usage(writer)
     writer("usage: lua test/run.lua [--list] [test-file-or-directory ...]")
 end
 
 --- Runs the command-line test runner.
--- @param arguments table Lua argument array.
--- @return integer Stable process exit code.
+--@param arguments table Lua argument array.
+--@return integer Stable process exit code.
 function M.main(arguments)
     local root = root_from_script(arguments[0])
     local paths, list_only = {}, false
@@ -206,10 +256,16 @@ function M.main(arguments)
         if value == "--list" then
             list_only = true
         elseif value == "--help" or value == "-h" then
+            --Supplies usage behavior required by this suite.
+            --@param line string|integer Input line or physical line position.
+            --@return nil No value; the fake port or test assertion observes this callback's effects.
             usage(function(line) io.stdout:write(line, "\n") end)
             return 0
         elseif value:sub(1, 1) == "-" then
             io.stderr:write("unknown test option: ", value, "\n")
+            --Supplies usage behavior required by this suite.
+            --@param line string|integer Input line or physical line position.
+            --@return nil No value; the fake port or test assertion observes this callback's effects.
             usage(function(line) io.stderr:write(line, "\n") end)
             return 2
         else
@@ -239,6 +295,9 @@ function M.main(arguments)
             entries[#entries + 1] = {
                 suite = file,
                 name = "<load>",
+                --Verifies <load>.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify <load>.
                 run = function() error(load_error, 0) end,
                 logs = logs,
             }

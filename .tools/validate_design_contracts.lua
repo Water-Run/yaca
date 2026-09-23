@@ -1,12 +1,26 @@
+--[[
+Author: WaterRun
+Date: 2026-09-23
+File: validate_design_contracts.lua
+Description: Checks consistency and fixture coverage across the executable design contracts.
+]]
+
 local failures = {}
 local assertion_count = 0
 local notes = {}
 
+--Records an assertion failure when a validate design contracts condition is false.
+--@param condition any The condition supplied to this scenario's fixture operation.
+--@param message string|table Message delivered through the fake port.
+--@return nil No value; assertions or fixture effects define this case.
 local function check(condition, message)
   assertion_count = assertion_count + 1
   if not condition then failures[#failures + 1] = message end
 end
 
+--Adds a diagnostic note to the validate design contracts report.
+--@param message string|table Message delivered through the fake port.
+--@return nil No value; assertions or fixture effects define this case.
 local function note(message)
   notes[#notes + 1] = message
 end
@@ -17,6 +31,9 @@ if not root or root == "" then root = "." end
 local contract_dir = root .. "/.develope-docs/contracts"
 local fixture_dir = contract_dir .. "/fixtures"
 
+--Loads an executable contract or fixture table for validate design contracts.
+--@param path string File or Context path exercised by the case.
+--@return table|any module Test support module export loaded from the repository.
 local function load_table(path)
   local chunk, load_error = loadfile(path)
   check(chunk ~= nil, "cannot load " .. path .. ": " .. tostring(load_error))
@@ -28,20 +45,34 @@ local function load_table(path)
   return value
 end
 
+--Loads a named executable design contract for comparison.
+--@param name string Module, Model, or resource name selected by the case.
+--@return any decoded load contract data supplied to the assertion.
 local function load_contract(name)
   return load_table(contract_dir .. "/" .. name .. ".lua")
 end
 
+--Loads a named contract fixture for comparison.
+--@param name string Module, Model, or resource name selected by the case.
+--@return any decoded load fixture data supplied to the assertion.
 local function load_fixture(name)
   return load_table(fixture_dir .. "/" .. name .. ".lua")
 end
 
+--Computes value list in validate design contracts.
+--@param records any The records supplied to this scenario's fixture operation.
+--@param key string|integer Lookup key selected by the operation.
+--@return any observed value list value observed by the scenario assertion.
 local function value_list(records, key)
   local result = {}
   for _, record in ipairs(records or {}) do result[#result + 1] = key and record[key] or record end
   return result
 end
 
+--Computes as set in validate design contracts.
+--@param values table Candidate values supplied to the fixture operation.
+--@param label any The label supplied to this scenario's fixture operation.
+--@return any observed as set value observed by the scenario assertion.
 local function as_set(values, label)
   local result = {}
   for _, value in ipairs(values or {}) do
@@ -52,6 +83,11 @@ local function as_set(values, label)
   return result
 end
 
+--Computes exact set in validate design contracts.
+--@param label any The label supplied to this scenario's fixture operation.
+--@param actual_values any The actual values supplied to this scenario's fixture operation.
+--@param expected_values any The expected values supplied to this scenario's fixture operation.
+--@return nil No value; assertions or fixture effects define this case.
 local function exact_set(label, actual_values, expected_values)
   local actual = as_set(actual_values, label)
   local expected = as_set(expected_values, label .. " expected")
@@ -59,6 +95,11 @@ local function exact_set(label, actual_values, expected_values)
   for value in pairs(actual) do check(expected[value], label .. " has unexpected value " .. value) end
 end
 
+--Computes index by in validate design contracts.
+--@param records any The records supplied to this scenario's fixture operation.
+--@param key string|integer Lookup key selected by the operation.
+--@param label any The label supplied to this scenario's fixture operation.
+--@return any observed index by value observed by the scenario assertion.
 local function index_by(records, key, label)
   local result = {}
   for _, record in ipairs(records or {}) do
@@ -70,16 +111,28 @@ local function index_by(records, key, label)
   return result
 end
 
+--Computes list has in validate design contracts.
+--@param values table Candidate values supplied to the fixture operation.
+--@param wanted any The wanted supplied to this scenario's fixture operation.
+--@return boolean accepted Whether list has succeeds in the fixture.
 local function list_has(values, wanted)
   for _, value in ipairs(values or {}) do if value == wanted then return true end end
   return false
 end
 
+--Computes maps equal in validate design contracts.
+--@param label any The label supplied to this scenario's fixture operation.
+--@param left any First value in the comparison.
+--@param right any Second value in the comparison.
+--@return nil No value; assertions or fixture effects define this case.
 local function maps_equal(label, left, right)
   for key, value in pairs(left or {}) do check(right and right[key] == value, label .. " differs at " .. tostring(key)) end
   for key, value in pairs(right or {}) do check(left and left[key] == value, label .. " has unexpected/mismatched " .. tostring(key)) end
 end
 
+--Reads the complete fixture file for validate design contracts.
+--@param path string File or Context path exercised by the case.
+--@return string|any bytes Complete bytes read from the selected fixture file.
 local function read_all(path)
   local handle, open_error = io.open(path, "rb")
   check(handle ~= nil, "cannot read " .. path .. ": " .. tostring(open_error))
@@ -89,15 +142,24 @@ local function read_all(path)
   return bytes
 end
 
+--Quotes one argument for the shell command used by validate design contracts.
+--@param value any Candidate value supplied to the fixture operation.
+--@return string quoted Argument quoted for the selected command shell.
 local function shell_quote(value)
   return "'" .. value:gsub("'", "'\\''") .. "'"
 end
 
+--Computes command ok in validate design contracts.
+--@param command string|table Command delivered to the fake executor.
+--@return any observed command ok value observed by the scenario assertion.
 local function command_ok(command)
   local ok = os.execute(command)
   return ok == true
 end
 
+--Computes sha256 bytes in validate design contracts.
+--@param value any Candidate value supplied to the fixture operation.
+--@return any|nil observed sha256 bytes value observed by the scenario assertion.
 local function sha256_bytes(value)
   local pipe = io.popen("printf %s " .. shell_quote(value) .. " | sha256sum", "r")
   check(pipe ~= nil, "cannot run sha256sum")
@@ -107,17 +169,27 @@ local function sha256_bytes(value)
   return line:match("^([0-9a-f]+)")
 end
 
+--Computes json syntax ok in validate design contracts.
+--@param value any Candidate value supplied to the fixture operation.
+--@return any observed json syntax ok value observed by the scenario assertion.
 local function json_syntax_ok(value)
   local python = "import json,sys; json.load(sys.stdin)"
   return command_ok("printf %s " .. shell_quote(value) .. " | python3 -c " .. shell_quote(python) .. " >/dev/null 2>&1")
 end
 
+--Computes keys of in validate design contracts.
+--@param value any Candidate value supplied to the fixture operation.
+--@return any observed keys of value observed by the scenario assertion.
 local function keys_of(value)
   local result = {}
   for key in pairs(value or {}) do result[#result + 1] = key end
   return result
 end
 
+--Computes list files in validate design contracts.
+--@param directory any The directory supplied to this scenario's fixture operation.
+--@param name_pattern any The name pattern supplied to this scenario's fixture operation.
+--@return table|any observed list files value observed by the scenario assertion.
 local function list_files(directory, name_pattern)
   local command = "find " .. shell_quote(directory) .. " -maxdepth 1 -type f -name " .. shell_quote(name_pattern) .. " -printf '%f\\n' 2>/dev/null"
   local pipe = io.popen(command, "r")
@@ -182,8 +254,11 @@ exact_set("product journeys", value_list(product.journeys, "id"), {
 for _, target in ipairs(product.release_targets or {}) do
   check(target.qualification == "independent-full-matrix", "target " .. tostring(target.id) .. " is not independently qualified")
   check(list_has(target.required_root_entries, target.executable), "target " .. tostring(target.id) .. " package omits its executable")
-  check(list_has(target.required_root_entries, target.installer), "target " .. tostring(target.id) .. " package omits its installer")
+  exact_set("clean package roots for " .. tostring(target.id), target.required_root_entries, { target.executable })
 end
+exact_set("release editions", release.packaging.editions, { "clean", "std", "full" })
+check(release.packaging.same_core_for_all_editions == true and release.packaging.companion_notices == true,
+  "editions must share their core and deliver companion notices")
 check(product.package_invariants and product.package_invariants.system_lua_dependency == false, "release must not depend on system Lua")
 check(product.package_invariants and product.package_invariants.data_root == "executable-directory/__yaca__", "data root must remain executable-adjacent")
 
@@ -212,9 +287,9 @@ check(release.implementation_candidates and release.implementation_candidates.st
 -- Phase-separated readiness and executable implementation graph.
 check(readiness.gates and readiness.gates.A and readiness.gates.A.status == "passed", "Gate A must be explicitly audited passed")
 check(readiness.gates and readiness.gates.B and readiness.gates.B.status == "passed", "Gate B must be explicitly planned passed")
-check(readiness.gates and readiness.gates.R and readiness.gates.R.status == "passed" and readiness.gates.R.release_authorized == true and readiness.gates.R.decision == "D-072", "Release Gate R must be passed per D-072")
-exact_set("release-gate pending targets", readiness.gates and readiness.gates.R and readiness.gates.R.pending_targets or {}, {})
-exact_set("release-gate qualified environments", value_list(readiness.gates.R.qualified_environments, "target"), value_list(product.release_targets, "id"))
+check(readiness.gates and readiness.gates.R and readiness.gates.R.status == "closed" and readiness.gates.R.release_authorized == false and readiness.gates.R.decision == "D-073", "Release Gate R must stay closed pending target qualification per D-073")
+exact_set("release-gate pending targets", readiness.gates and readiness.gates.R and readiness.gates.R.pending_targets or {}, value_list(product.release_targets, "id"))
+exact_set("release-gate qualified environments", value_list(readiness.gates.R.qualified_environments, "target"), {})
 check(readiness.source_start and readiness.source_start.authorized_after_this_contract_and_validators_commit == true, "source-start authorization is not explicit")
 local implementation_phase = readiness.source_start and readiness.source_start.implementation_phase
 local implementation_phase_set = as_set(readiness.source_start and readiness.source_start.allowed_implementation_phases or {}, "implementation phases")
@@ -273,6 +348,9 @@ for _, implementation_task in ipairs(readiness.tasks or {}) do
     if module_id then planned_module_coverage[module_id] = true end
   end
 end
+--Supplies an assertion callback for the validate design contracts scenario.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return any value Value emitted by the scenario callback for the current assertion.
 exact_set("implementation task ids", keys_of(readiness_task_by_id), (function()
   local result = {}
   for index = 1, 34 do result[#result + 1] = string.format("C%02d", index) end
@@ -409,7 +487,7 @@ check(runtime.hard_caps and runtime.hard_caps.unlimited_sentinel == false and ru
 -- Semantic actions and all local command-line projections.
 local expected_actions = {
   "run-chat", "help", "version", "self-test", "model-repl", "config-repl", "context-repl", "continue", "export-context", "status",
-  "queue-add", "queue-list", "queue-delete", "queue-move", "queue-edit", "queue-clear", "steer", "side", "multiline", "cancel", "cautious",
+  "queue-add", "queue-list", "queue-delete", "queue-move", "queue-edit", "queue-clear", "steer", "ask", "multiline", "cancel", "cautious",
   "select-model", "select-context", "status-chat", "help-chat", "details", "prompt-edit", "compact-manual", "quit",
   "context-list", "context-inspect", "context-search", "context-rename", "context-rebind", "context-delete",
   "context-set-auto-rename-disabled", "context-import", "context-repair", "context-refresh",
@@ -501,7 +579,9 @@ for _, transcript in ipairs(tui_fixture.transcripts or {}) do
 end
 
 -- Tool and permission matrix, including executable fixtures.
-exact_set("tool ids", value_list(tools.tools, "id"), { "list", "read", "search", "write", "patch", "rename", "delete", "exec" })
+exact_set("tool ids", value_list(tools.tools, "id"), { "list", "read", "search", "write", "patch", "rename", "delete", "exec", "lua" })
+check(tools.evaluation.lua_uses_only == "Shell" and tools.evaluation.lua_is_sandbox == false,
+  "embedded Lua must retain Shell permission and its ordinary-process boundary")
 exact_set("permission capabilities", tools.capabilities, { "Read", "Write", "Delete", "Shell", "OutsideWorkspace" })
 exact_set("permission decisions", tools.decisions, { "allow", "confirm", "deny" })
 local tool_by_id = index_by(tools.tools, "id", "tools")
@@ -515,6 +595,11 @@ for name, profile in pairs(profile_by_name) do
   check(config_profile ~= nil, "config omits permission profile " .. name)
   for _, capability in ipairs(tools.capabilities or {}) do check(config_profile and config_profile[capability] == profile[capability], "profile matrix drift for " .. name .. "." .. capability) end
 end
+--Computes evaluate permission in validate design contracts.
+--@param profile_name any The profile name supplied to this scenario's fixture operation.
+--@param tool_name any The tool name supplied to this scenario's fixture operation.
+--@param outside any The outside supplied to this scenario's fixture operation.
+--@return any|nil observed evaluate permission value observed by the scenario assertion.
 local function evaluate_permission(profile_name, tool_name, outside)
   local profile = profile_by_name[profile_name]
   local tool = tool_by_id[tool_name]
@@ -536,7 +621,7 @@ end
 
 -- Canonical Model schema and Runtime control crosswalk.
 exact_set("model protocols", value_list(model.protocols, "id"), { "openai-chat", "anthropic-messages" })
-exact_set("model purposes", model.purposes, { "main", "side", "action-review", "termination-review", "compaction", "self-test", "context-name" })
+exact_set("model purposes", model.purposes, { "main", "ask", "action-review", "termination-review", "compaction", "self-test", "context-name" })
 exact_set("model event kinds", value_list(model.event_kinds, "id"), {
   "response_start", "text_delta", "reasoning_summary_delta", "tool_call_start", "tool_arguments_delta", "tool_call_complete",
   "control", "usage_update", "response_finish", "transport_error", "protocol_error",
@@ -574,6 +659,9 @@ for id, runtime_control in pairs(runtime_control_by_id) do
   check(prompt_control and prompt_control.wire_name == runtime_control.wire_name, "prompt/runtime control wire name drifted: " .. id)
   check(prompt_control and prompt_control.schema and prompt_control.schema.additionalProperties == false, "prompt control must reject unknown properties: " .. id)
   exact_set("prompt control required " .. id, prompt_control and prompt_control.schema and prompt_control.schema.required or {}, runtime_control.required_payload)
+  --Supplies an assertion callback for the validate design contracts scenario.
+  --@param none No arguments; this closure uses its captured fixture state.
+  --@return any value Value emitted by the scenario callback for the current assertion.
   exact_set("prompt control properties " .. id, prompt_control and prompt_control.schema and keys_of(prompt_control.schema.properties) or {}, (function()
     local result = {}
     for _, key in ipairs(runtime_control.required_payload or {}) do result[#result + 1] = key end
@@ -818,6 +906,9 @@ for _, case in ipairs(config_fixture.cases or {}) do
   end
 end
 check(config_by_id["Model.*.Key"] and config_by_id["Model.*.Key"].secret == true, "Model Key must stay in the secret registry")
+--Computes decode quoted text in validate design contracts.
+--@param encoded any The encoded supplied to this scenario's fixture operation.
+--@return any|nil decoded decode quoted text data supplied to the assertion.
 local function decode_quoted_text(encoded)
   if type(encoded) ~= "string" or #encoded < 2 or encoded:sub(1, 1) ~= "\"" or encoded:sub(-1) ~= "\"" then return nil end
   local body = encoded:sub(2, -2)

@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# Author: WaterRun
+# Date: 2026-09-23
+# File: rp001_resource_overlay.sh
+# Description: Builds and checks the pinned luainstaller resource-overlay patch on the host.
+
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -11,6 +16,10 @@ fi
 WORK_DIR=$(mktemp -d -t yaca-rp001-XXXXXX)
 BUILD_LOG="$WORK_DIR/build.log"
 
+# Remove the temporary proof checkout after every exit path.
+#@param none No arguments; uses WORK_DIR from this proof invocation.
+#@return int rm exit status; the EXIT trap does not consume a result value.
+#@effect Deletes only the temporary proof directory.
 cleanup() {
   rm -rf -- "$WORK_DIR"
 }
@@ -24,6 +33,10 @@ LUA_VERSION=5.5.1
 LUA_SHA256=1c4b4068d67061f2a2231ad2b5422e77acea1487ea9890f6320af614f4373dce
 LUA_URL=https://www.lua.org/ftp/lua-5.5.1.tar.gz
 
+# Run a proof command and show its final log lines if it fails.
+#@param ... string Command and arguments executed without shell re-parsing.
+#@return int Zero when the command succeeds; failures exit the proof.
+#@effect Appends command output to BUILD_LOG and exits on failure.
 run_logged() {
   if ! "$@" >>"$BUILD_LOG" 2>&1; then
     echo "proof command failed: $*" >&2
@@ -32,6 +45,10 @@ run_logged() {
   fi
 }
 
+# Compare a proof input with its pinned SHA-256 digest.
+#@param 1 string Input file path.
+#@param 2 string Expected lowercase SHA-256 digest.
+#@return int Zero on a matching digest; mismatch exits with status 65.
 verify_sha256() {
   local file=$1
   local expected=$2

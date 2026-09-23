@@ -1,14 +1,14 @@
 --[[
-File: journeys.lua
-Date: 2026-09-19
 Author: WaterRun
+Date: 2026-09-23
+File: journeys.lua
 Description: Clean-machine release journey driver. The module part is a
 pure plan/verify core covered by the suite; the CLI part executes the
 offline journey for a candidate zip on a matching Linux host.
 
 CLI usage:
-  bin/lua55 test/release/journeys.lua <repo-root> <zip> <target-id> <scratch>
-    [--i-accept-online-journey <config-ini>]
+bin/lua55 test/release/journeys.lua <repo-root> <zip> <target-id> <scratch>
+[--i-accept-online-journey <config-ini>]
 The online segment (stages 2/3 with a provider) only runs with the explicit
 consent flag plus a configuration file path.
 ]]
@@ -28,6 +28,11 @@ local EXECUTABLE_BY_OS = {
 
 --- Plans the journey steps for one target.
 -- options.online is only honoured when options.online_consent is true.
+--Supplies plan behavior required by this suite.
+--@param target_id string|integer Identity of the selected fake target.
+--@param options table|nil Options configuring the exercised component.
+--@return any|nil observed plan value observed by the scenario assertion.
+--@return string|nil secondary2 Fixture text "unknown target id: " .. tostring(target_id).
 function M.plan(target_id, options)
     options = options or {}
     if not PLATFORM_LINE[target_id] then
@@ -54,6 +59,12 @@ end
 --- Verifies the observed evidence for one journey step.
 -- observed: table with string fields depending on the step (output, exit_code,
 -- residue_paths). Returns true or false, finding.
+--Checks verify step against this test expectation.
+--@param step_id any The step id supplied to the fake service for this scenario.
+--@param target_id string|integer Identity of the selected fake target.
+--@param observed table|any State observed after the exercised operation.
+--@return boolean accepted Whether verify step succeeds in the fixture.
+--@return string|nil secondary2 Additional status or structured error from the fixture operation.
 function M.verify_step(step_id, target_id, observed)
     observed = observed or {}
     if step_id == "extract" then
@@ -113,6 +124,10 @@ end
 
 --- Steps that must be skipped when the driver host OS differs from the
 -- target OS (for example auditing a Windows zip from a Linux driver).
+--Supplies skipped on host mismatch behavior required by this suite.
+--@param steps any The steps supplied to the fake service for this scenario.
+--@param host_os any The host os supplied to the fake service for this scenario.
+--@return any observed skipped on host mismatch value observed by the scenario assertion.
 function M.skipped_on_host_mismatch(steps, host_os)
     local skipped = {}
     for _, step in ipairs(steps) do
@@ -127,10 +142,16 @@ end
 -- CLI execution (Linux hosts only for the run/online kinds).
 ----------------------------------------------------------------------------
 
+--Supplies shell quote behavior required by this suite.
+--@param value any Candidate whose acceptance or transformation the test checks.
+--@return string quoted Argument quoted for the selected command shell.
 local function shell_quote(value)
     return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
 end
 
+--Supplies run command behavior required by this suite.
+--@param command string|table Command delivered to the fake executor.
+--@return table observed Structured fixture record selected by the exercised branch.
 local function run_command(command)
     local pipe = io.popen(command .. " 2>&1", "r")
     if not pipe then return { exit_code = 1, output = "cannot start command" } end
@@ -139,6 +160,9 @@ local function run_command(command)
     return { exit_code = ok and 0 or (code or 1), output = output }
 end
 
+--Supplies main behavior required by this suite.
+--@param argv any The argv supplied to the fake service for this scenario.
+--@return integer observed main value observed by the scenario assertion.
 local function main(argv)
     local repo, zip_path, target_id, scratch = argv[1], argv[2], argv[3], argv[4]
     local consent, config_path

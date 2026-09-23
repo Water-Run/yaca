@@ -1,13 +1,20 @@
 /*
-** File: windows_metadata_smoke.c
-** Date: 2026-09-14
-** Author: WaterRun
-** Description: Windows fixture for the strict legacy metadata restoration predicate.
-** Build against the same Lua import library as yaca_native; run on Windows
-** with an ordinary test file path. This does not modify the test file. */
+Author: WaterRun
+Date: 2026-09-23
+File: windows_metadata_smoke.c
+Description: Windows fixture for the strict legacy metadata restoration predicate.
+Build against the same Lua import library as yaca_native; run on Windows
+with an ordinary test file path. This does not modify the test file.
+*/
+
 #include "../../native/yaca_native.c"
 #include <assert.h>
 
+/* Runs the windows metadata smoke executable and reports its exit status.
+ * @param argc int Number of command-line arguments supplied by the host.
+ * @param argv char** Host command-line argument vector.
+ * @return int result Process exit status, zero only when all smoke checks pass.
+ */
 int main(int argc, char **argv)
 {
   yaca_windows_snapshot snapshot;

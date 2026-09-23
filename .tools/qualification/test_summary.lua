@@ -1,12 +1,15 @@
 --[[
-File: test_summary.lua
-Date: 2026-09-07
 Author: WaterRun
+Date: 2026-09-23
+File: test_summary.lua
 Description: Validates complete Lua suite evidence for the qualification builder.
 ]]
 
 local M = {}
 
+--Computes count value in test summary.
+--@param value any Candidate value supplied to the fixture operation.
+--@return any|nil observed count value value observed by the scenario assertion.
 local function count_value(value)
     if value ~= "0" and not value:match("^[1-9][0-9]*$") then return nil end
     local number = tonumber(value)
@@ -17,9 +20,9 @@ end
 ---Parses exactly one successful, nonempty full-suite summary from a build log.
 -- Counts are derived from the tested checkout; malformed or repeated SUMMARY
 -- lines cannot be accepted as complete qualification evidence.
--- @param source string Captured test runner stdout/stderr bytes.
--- @return table|nil summary Validated total, passed, and failed counts.
--- @return string|nil err Reason the log cannot establish complete test evidence.
+--@param source string Captured test runner stdout/stderr bytes.
+--@return table|nil summary Validated total, passed, and failed counts.
+--@return string|nil err Reason the log cannot establish complete test evidence.
 function M.parse(source)
     if type(source) ~= "string" then return nil, "test log must be bytes" end
     local summary

@@ -1,3 +1,10 @@
+--[[
+Author: WaterRun
+Date: 2026-09-23
+File: formats.lua
+Description: Supplies UTF-8 and serialization boundary cases for format validation.
+]]
+
 return {
   contract_version = "0.1.0-readiness.1",
   utf8_cases = {

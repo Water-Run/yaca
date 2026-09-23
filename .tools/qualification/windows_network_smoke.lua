@@ -1,7 +1,7 @@
 --[[
-File: windows_network_smoke.lua
-Date: 2026-09-14
 Author: WaterRun
+Date: 2026-09-23
+File: windows_network_smoke.lua
 Description: Exercises the real anonymous curl carrier using a credential-free test endpoint.
 ]]
 
@@ -31,8 +31,17 @@ local port = assert(network.new_attempt({
     secret_headers = {}, proxy = { mode = "off" },
     connect_timeout_ms = 10000, total_timeout_ms = 30000,
     secret_source = {
+        --Exercises secret descriptors in the windows network smoke fixture.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return table record Fixture record emitted by the scenario callback.
         secret_descriptors = function() return {} end,
+        --Exercises reveal secret in the windows network smoke fixture.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return nil No value; assertions or fixture effects define this case.
         reveal_secret = function() error("no credential is permitted") end,
+        --Exercises scan registered secrets in the windows network smoke fixture.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return table record Fixture record emitted by the scenario callback.
         scan_registered_secrets = function() return {} end,
     },
 }))

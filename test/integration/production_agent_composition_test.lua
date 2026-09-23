@@ -1,7 +1,7 @@
 --[[
-File: production_agent_composition_test.lua
-Date: 2026-08-30
 Author: WaterRun
+Date: 2026-09-23
+File: production_agent_composition_test.lua
 Description: Verifies the production first-turn Agent composition and durable ordering.
 ]]
 
@@ -12,6 +12,9 @@ local compact = assert(loadfile(
     _ENV
 ))()
 
+--Supplies test digest behavior required by this suite.
+--@param bytes string Byte chunk supplied to the fake I/O port.
+--@return any observed test digest value observed by the scenario assertion.
 local function test_digest(bytes)
     local value = 2166136261
     for index = 1, #bytes do
@@ -20,6 +23,12 @@ local function test_digest(bytes)
     return string.format("test-digest-%08x-%d", value, #bytes)
 end
 
+--Writes append compaction event through the the current case fixture.
+--@param facts table Platform or file-descriptor facts supplied to the case.
+--@param event_type string Event kind emitted by the fake activity.
+--@param turn_id integer Agent turn identity under inspection.
+--@param fields table Field values used to construct the test document.
+--@return nil No value; the fake port or test assertion observes this callback's effects.
 local function append_compaction_event(facts, event_type, turn_id, fields)
     facts[#facts + 1] = {
         seq = #facts + 1,
@@ -30,6 +39,9 @@ local function append_compaction_event(facts, event_type, turn_id, fields)
     }
 end
 
+--Supplies compaction document behavior required by this suite.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return table observed Structured fixture record selected by the exercised branch.
 local function compaction_document()
     local facts = {}
     for serial = 1, 6 do
@@ -78,9 +90,15 @@ local function compaction_document()
     }
 end
 
+--Reads load main for this test scenario.
+--@param cache table Per-case module cache preserving isolated imports.
+--@return any decoded load main data supplied to the assertion.
 local function load_main(cache)
     local environment = {}
     for key, value in pairs(_ENV) do environment[key] = value end
+    --Resolves an imported Lua module through the isolated test loader.
+    --@param name string Module, Model, or resource name selected by the case.
+    --@return any value Callback value consumed by the enclosing scenario assertion.
     environment.require = function(name)
         if cache[name] then return cache[name] end
         local chunk, load_error = loadfile(
@@ -94,6 +112,8 @@ local function load_main(cache)
         return module
     end
     environment._G = environment
+    --@metatable environment Test-owned lookup and mutation contract for the current case.
+    --@field __index any Fallback table or function used for missing fixture keys.
     setmetatable(environment, { __index = _ENV })
     local chunk, load_error = loadfile(
         YACA_TEST_ROOT .. "/src/main.lua",
@@ -104,6 +124,9 @@ local function load_main(cache)
     return chunk()
 end
 
+--Constructs the suite's isolated runtime fixture and observation ports.
+--@param settings table|nil Fixture settings and scenario overrides.
+--@return table fixture Constructed fixture service used by this suite.
 local function fixture(settings)
     settings = settings or {}
     local continuing = settings.continuing == true
@@ -145,7 +168,7 @@ local function fixture(settings)
         general = { system_prompt = "global" },
         network = { follow_proxy = false },
         exec = {
-            max_output_kb = 64,
+            max_output_kb = settings.max_output_kb or 1024,
             timeout_ms = 5000,
             environment_mode = "minimal",
         },
@@ -200,7 +223,13 @@ local function fixture(settings)
                 adapter_options = {},
             },
         },
+        --Simulates the scan registered secrets boundary for this suite.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return table record Fixture record emitted by the scenario callback.
         scan_registered_secrets = function() return {} end,
+        --Constructs new stream scanner for this test scenario.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return table record Fixture record emitted by the scenario callback.
         new_stream_scanner = function() return {} end,
     }
     if settings.proxy_route then
@@ -213,6 +242,10 @@ local function fixture(settings)
     local next_generation = {}
     for key, value in pairs(generation) do next_generation[key] = value end
     next_generation.id = "config-generation-2"
+    --Supplies matches model secrets behavior required by this suite.
+    --@param previous any The previous supplied to the fake service for this scenario.
+    --@param name string Module, Model, or resource name selected by the case.
+    --@return any observed matches model secrets value observed by the scenario assertion.
     function next_generation.matches_model_secrets(previous, name)
         A.equal(previous, generation)
         A.equal(name, "Secondary")
@@ -243,25 +276,43 @@ local function fixture(settings)
     local compaction_gate = false
     local loop = {}
     for _, name in ipairs({
-        "submit_main", "enqueue", "steer", "start_side", "resolve_yield",
+        "submit_main", "enqueue", "steer", "start_ask", "resolve_yield",
         "reply", "list_queue", "drop_queue", "edit_queue", "reorder_queue",
-        "clear_queue", "use_side",
+        "clear_queue", "use_ask",
     }) do
+        --Supplies an assertion callback for this test scenario.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return boolean accepted Whether the fake callback accepts this scenario.
         loop[name] = function() return true end
     end
+    --Simulates the status transition of a fake activity port for this suite.
+    --@param self table Fixture or port instance receiving this call.
+    --@return any observed status value observed by the scenario assertion.
     function loop:status() return loop_status end
+    --Supplies resume published main behavior required by this suite.
+    --@param self table Fixture or port instance receiving this call.
+    --@param observed table|any State observed after the exercised operation.
+    --@return table observed Structured fixture record with state, request_id.
     function loop:resume_published_main(observed)
         A.truthy(published, "Model admission crossed the first publication barrier")
         A.equal(observed, handoff)
         log[#log + 1] = "runtime-resume"
         return { state = "RequestingModel", request_id = "turn-1:request:1" }
     end
+    --Simulates the close transition of a fake activity port for this suite.
+    --@param self table Fixture or port instance receiving this call.
+    --@param reason string Failure or close reason supplied to the port.
+    --@return boolean accepted Whether close succeeds in the fixture.
     function loop:close(reason)
         A.equal(reason, "agent-composition-failed")
         loop_closed = true
         log[#log + 1] = "runtime-close"
         return true
     end
+    --Supplies begin compaction behavior required by this suite.
+    --@param self table Fixture or port instance receiving this call.
+    --@param command string|table Command delivered to the fake executor.
+    --@return table|boolean observed begin compaction value observed by the scenario assertion.
     function loop:begin_compaction(command)
         if not compaction_lifecycle then return true end
         local automatic = settings.automatic_compaction_lifecycle == true
@@ -285,6 +336,11 @@ local function fixture(settings)
             manifest_digest = loop_status.active_view_manifest_ref,
         }
     end
+    --Supplies adopt compaction receipt behavior required by this suite.
+    --@param self table Fixture or port instance receiving this call.
+    --@param record table Recorded event or publication under inspection.
+    --@param receipt table Publication receipt inspected by the assertion.
+    --@return table|boolean observed adopt compaction receipt value observed by the scenario assertion.
     function loop:adopt_compaction_receipt(record, receipt)
         if not compaction_lifecycle then return true end
         A.truthy(compaction_gate)
@@ -303,6 +359,11 @@ local function fixture(settings)
             manifest_digest = loop_status.active_view_manifest_ref,
         }
     end
+    --Supplies adopt session override behavior required by this suite.
+    --@param self table Fixture or port instance receiving this call.
+    --@param record table Recorded event or publication under inspection.
+    --@param receipt table Publication receipt inspected by the assertion.
+    --@return table observed Structured fixture record with context_generation, last_sequence, manifest_digest, effective_at.
     function loop:adopt_session_override(record, receipt)
         A.equal(record.kind, "session-override")
         A.equal(record.replaces_manifest_digest, loop_status.active_view_manifest_ref)
@@ -321,16 +382,30 @@ local function fixture(settings)
             effective_at = "next-turn",
         }
     end
+    --Supplies fail session override barrier behavior required by this suite.
+    --@param self table Fixture or port instance receiving this call.
+    --@param reason string Failure or close reason supplied to the port.
+    --@return nil rejected Explicit empty outcome from fail session override barrier.
+    --@return table secondary2 Typed error record with code AgentDurabilityFailure.
     function loop:fail_session_override_barrier(reason)
         loop_status.halted = true
         log[#log + 1] = "runtime-session-fail:" .. reason
         return nil, { code = "AgentDurabilityFailure" }
     end
+    --Supplies fail context observation behavior required by this suite.
+    --@param self table Fixture or port instance receiving this call.
+    --@return nil rejected Explicit empty outcome from fail context observation.
+    --@return table secondary2 Typed error record with code AgentDurabilityFailure.
     function loop:fail_context_observation()
         loop_status.halted = true
         log[#log + 1] = "runtime-context-stale"
         return nil, { code = "AgentDurabilityFailure" }
     end
+    --Supplies fail compaction barrier behavior required by this suite.
+    --@param self table Fixture or port instance receiving this call.
+    --@param reason string Failure or close reason supplied to the port.
+    --@return nil rejected Explicit empty outcome from fail compaction barrier.
+    --@return table secondary2 Typed error record with code AgentDurabilityFailure.
     function loop:fail_compaction_barrier(reason)
         if not compaction_lifecycle then
             return nil, { code = "AgentDurabilityFailure" }
@@ -339,6 +414,11 @@ local function fixture(settings)
         log[#log + 1] = "runtime-compaction-fail:" .. tostring(reason)
         return nil, { code = "AgentDurabilityFailure" }
     end
+    --Supplies finish compaction behavior required by this suite.
+    --@param self table Fixture or port instance receiving this call.
+    --@param command string|table Command delivered to the fake executor.
+    --@return boolean|any|nil observed finish compaction value observed by the scenario assertion.
+    --@return table|nil secondary2 Typed error record with code AgentDurabilityFailure.
     function loop:finish_compaction(command)
         if not compaction_lifecycle then return true end
         if loop_status.halted then
@@ -372,6 +452,10 @@ local function fixture(settings)
         end
         return settlement
     end
+    --Supplies resolve compaction preflight behavior required by this suite.
+    --@param self table Fixture or port instance receiving this call.
+    --@param command string|table Command delivered to the fake executor.
+    --@return table observed Structured fixture record with state, request_id.
     function loop:resolve_compaction_preflight(command)
         A.truthy(settings.automatic_compaction_lifecycle)
         A.equal(command.preflight_id, loop_status.compaction_preflight_id)
@@ -386,13 +470,28 @@ local function fixture(settings)
     end
 
     local operation_journal = {
+        --Simulates the commit intent publication step for this suite.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return boolean accepted Whether the fake callback accepts this scenario.
         commit_intent = function() return true end,
+        --Simulates the commit result publication step for this suite.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return boolean accepted Whether the fake callback accepts this scenario.
         commit_result = function() return true end,
+        --Supplies take intent receipt behavior required by this suite.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return table record Fixture record emitted by the scenario callback.
         take_intent_receipt = function() return {} end,
+        --Supplies take result receipt behavior required by this suite.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return table record Fixture record emitted by the scenario callback.
         take_result_receipt = function() return {} end,
     }
     local durable_compaction_attempt = 0
     local durable_compaction_mode = false
+    --Supplies compaction events behavior required by this suite.
+    --@param record table Recorded event or publication under inspection.
+    --@return table observed Structured fixture record selected by the exercised branch.
     local function compaction_events(record)
         if record.kind == "compaction-request" then
             durable_compaction_attempt = record.attempt
@@ -468,9 +567,17 @@ local function fixture(settings)
             },
         } }
     end
+    --Supplies commit compaction behavior required by this suite.
+    --@param record table Recorded event or publication under inspection.
+    --@param publishing any The publishing supplied to the fake service for this scenario.
+    --@return boolean accepted Whether commit compaction succeeds in the fixture.
+    --@return table|any secondary2 Additional status or structured error from the fixture operation.
     local function commit_compaction(record, publishing)
         A.truthy(compaction_lifecycle)
         A.equal(record.expected_context_generation, loop_status.context_generation)
+        if settings.compaction_capacity and record.kind == "compaction-request" then
+            return false, { code = "ContextCapacity", publication_started = false }
+        end
         if settings.compaction_journal_failure == record.kind then
             log[#log + 1] = "journal-rejected:" .. record.kind
             return false, { code = "InjectedCompactionJournalFailure" }
@@ -514,18 +621,33 @@ local function fixture(settings)
         return true, receipt
     end
     local durable_compaction_journal = {
+        --Simulates the commit intent publication step for this suite.
+        --@param record table Recorded event or publication under inspection.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
         commit_intent = function(record)
             return commit_compaction(record, false)
         end,
+        --Simulates the commit response publication step for this suite.
+        --@param record table Recorded event or publication under inspection.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
         commit_response = function(record)
             return commit_compaction(record, false)
         end,
+        --Simulates the commit rejection publication step for this suite.
+        --@param record table Recorded event or publication under inspection.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
         commit_rejection = function(record)
             return commit_compaction(record, false)
         end,
+        --Records the publish effect observed by this suite.
+        --@param record table Recorded event or publication under inspection.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
         publish = function(record)
             return commit_compaction(record, true)
         end,
+        --Simulates the commit correction publication step for this suite.
+        --@param record table Recorded event or publication under inspection.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
         commit_correction = function(record)
             return commit_compaction(record, false)
         end,
@@ -534,6 +656,10 @@ local function fixture(settings)
     local durable_context_prompt = "workspace context"
     local durable_current_model = "Primary"
     local publication = {
+        --Supplies inspect active behavior required by this suite.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return table|nil value Callback value consumed by the enclosing scenario assertion.
+        --@return any|nil secondary2 Configured context inspection error override.
         inspect_active = function()
             if settings.context_inspection_throws then error("private diagnostic") end
             if settings.context_inspection_error then
@@ -541,23 +667,47 @@ local function fixture(settings)
             end
             return { context_hash = "ABCDABCD12341234", display_name = "current-task" }
         end,
+        --Supplies operation journal behavior required by this suite.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
         operation_journal = function()
             log[#log + 1] = "operation-journal"
             return operation_journal
         end,
+        --Supplies compaction journal behavior required by this suite.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return table|any value Callback value consumed by the enclosing scenario assertion.
         compaction_journal = function()
             log[#log + 1] = "compaction-journal"
             if compaction_lifecycle then
                 return durable_compaction_journal
             end
             return {
+                --Simulates the commit intent publication step for this suite.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return boolean accepted Whether the fake callback accepts this scenario.
                 commit_intent = function() return false end,
+                --Simulates the commit response publication step for this suite.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return boolean accepted Whether the fake callback accepts this scenario.
                 commit_response = function() return false end,
+                --Simulates the commit rejection publication step for this suite.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return boolean accepted Whether the fake callback accepts this scenario.
                 commit_rejection = function() return false end,
+                --Records the publish effect observed by this suite.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return boolean accepted Whether the fake callback accepts this scenario.
                 publish = function() return false end,
+                --Simulates the commit correction publication step for this suite.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return boolean accepted Whether the fake callback accepts this scenario.
                 commit_correction = function() return false end,
             }
         end,
+        --Supplies compaction snapshot behavior required by this suite.
+        --@param observation table Observed state supplied to the assertion.
+        --@return table|nil value Callback value consumed by the enclosing scenario assertion.
         compaction_snapshot = function(observation)
             if not compaction_lifecycle then return nil end
             A.equal(observation.expected_context_generation, loop_status.context_generation)
@@ -584,6 +734,9 @@ local function fixture(settings)
                 binding = observation,
             }
         end,
+        --Supplies turn context behavior required by this suite.
+        --@param observation table Observed state supplied to the assertion.
+        --@return table record Fixture record emitted by the scenario callback.
         turn_context = function(observation)
             A.truthy(published)
             A.equal(
@@ -603,6 +756,10 @@ local function fixture(settings)
                 },
             }
         end,
+        --Supplies update session behavior required by this suite.
+        --@param specification table Test specification used to construct the fixture.
+        --@return any|nil value Callback value consumed by the enclosing scenario assertion.
+        --@return table secondary2 Structured fixture record selected by the exercised branch.
         update_session = function(specification)
             if settings.session_update_exception then
                 error("injected Session publication exception")
@@ -705,8 +862,11 @@ local function fixture(settings)
                 context_generation = loop_status.context_generation + 1,
             }
         end,
+        --Supplies capture turn behavior required by this suite.
+        --@param specification table Test specification used to construct the fixture.
+        --@return table record Fixture record emitted by the scenario callback.
         capture_turn = function(specification)
-            A.truthy(specification.kind == "main" or specification.kind == "side")
+            A.truthy(specification.kind == "main" or specification.kind == "ask")
             local reopening = continuing
                 and specification.source == "context-reopen"
             if reopening then
@@ -716,7 +876,7 @@ local function fixture(settings)
             else
                 A.equal(
                     specification.text,
-                    specification.kind == "side" and "inspect durable facts" or "second turn"
+                    specification.kind == "ask" and "inspect durable facts" or "second turn"
                 )
                 A.equal(specification.source, "terminal")
                 A.equal(specification.expected_context_generation, continuing and 7 or 2)
@@ -724,8 +884,8 @@ local function fixture(settings)
             log[#log + 1] = "capture-turn"
             if settings.after_capture then settings.after_capture() end
             local prompt_snapshot = reopening and "prompt-snapshot-1"
-                or specification.kind == "side"
-                and "side-prompt-snapshot-2"
+                or specification.kind == "ask"
+                and "ask-prompt-snapshot-2"
                 or "prompt-snapshot-2"
             local suffix = reopening and "1" or "2"
             return {
@@ -745,6 +905,9 @@ local function fixture(settings)
                 queue_limit = reopening and 5 or 4,
             }
         end,
+        --Supplies resolve view behavior required by this suite.
+        --@param digest string Expected or computed hexadecimal digest.
+        --@return table record Fixture record emitted by the scenario callback.
         resolve_view = function(digest)
             A.equal(digest, loop_status.active_view_manifest_ref)
             return {
@@ -754,11 +917,21 @@ local function fixture(settings)
                 body = "<DurableFacts><Goal>implement</Goal></DurableFacts>",
             }
         end,
+        --Supplies prepare view behavior required by this suite.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return table record Fixture record emitted by the scenario callback.
         prepare_view = function() return {} end,
+        --Simulates the commit publication step for this suite.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return boolean accepted Whether the fake callback accepts this scenario.
         commit = function() return true end,
     }
     local safety = {
         digest = test_digest,
+        --Computes or records binding digest data for this suite.
+        --@param domain string Namespace used to classify this value.
+        --@param fields table Field values used to construct the test document.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
         binding_digest = function(domain, fields)
             A.equal(domain, "yaca-tool-authority-v1")
             A.equal(fields[1].value, "call-digest")
@@ -769,6 +942,10 @@ local function fixture(settings)
         safety = safety,
         path = {},
         prompt = {
+            --Supplies assemble behavior required by this suite.
+            --@param _ any Unused callback argument supplied by the port.
+            --@param specification table Test specification used to construct the fixture.
+            --@return table record Fixture record emitted by the scenario callback.
             assemble = function(_, specification)
                 A.equal(specification.purpose, "main")
                 A.equal(specification.tool_mode, "registered")
@@ -782,14 +959,30 @@ local function fixture(settings)
     }
     local model_activities = {}
     local tool_port = {
+        --Simulates the poll transition of a fake activity port for this suite.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return table record Fixture record emitted by the scenario callback.
+        --@return boolean secondary2 Explicit false rejection from the fake port.
         poll = function() return {}, false end,
+        --Supplies active handle behavior required by this suite.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return boolean accepted Whether the fake callback accepts this scenario.
         active_handle = function() return false end,
     }
     local review_port = {
+        --Simulates the poll transition of a fake activity port for this suite.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return table record Fixture record emitted by the scenario callback.
         poll = function() return {} end,
+        --Simulates the status transition of a fake activity port for this suite.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return table record Fixture record emitted by the scenario callback.
         status = function() return { state = "idle" } end,
     }
     local compaction_port = {
+        --Simulates the start transition of a fake activity port for this suite.
+        --@param specification table Test specification used to construct the fixture.
+        --@return table|string value Callback value consumed by the enclosing scenario assertion.
         start = function(specification)
             if not compaction_lifecycle then return {} end
             settings.compaction_specification = specification
@@ -798,10 +991,16 @@ local function fixture(settings)
             log[#log + 1] = "effect:compaction-model"
             return "compaction-model-handle"
         end,
+        --Simulates the cancel transition of a fake activity port for this suite.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return table record Fixture record emitted by the scenario callback.
         cancel = function()
             settings.compaction_port_state = "idle"
             return { outcome = "cancelled" }
         end,
+        --Simulates the poll transition of a fake activity port for this suite.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return table record Fixture record emitted by the scenario callback.
         poll = function()
             if not compaction_lifecycle
                 or not settings.compaction_response_pending
@@ -848,6 +1047,9 @@ local function fixture(settings)
                 },
             } }
         end,
+        --Simulates the status transition of a fake activity port for this suite.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return table record Fixture record emitted by the scenario callback.
         status = function()
             return { state = settings.compaction_port_state or "idle" }
         end,
@@ -856,17 +1058,41 @@ local function fixture(settings)
 
     local modules = {}
     modules.context = {
+        --Constructs new operation service for this test scenario.
+        --@param ports table Ports supplied to the component under test.
+        --@param options table|nil Options configuring the exercised component.
+        --@return table record Fixture record emitted by the scenario callback.
         new_operation_service = function(ports, options)
             A.equal(ports.journal, operation_journal)
             A.equal(options.maximum_identifier_bytes, 256)
             log[#log + 1] = "operations"
-            return { begin = function() end, finish = function() end, status = function() end }
+            return {
+                --Simulates the begin transition of a fake activity port for this suite.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; the fake port or test assertion observes this callback's effects.
+                begin = function() end,
+                --Simulates the finish transition of a fake activity port for this suite.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; the fake port or test assertion observes this callback's effects.
+                finish = function() end,
+                --Simulates the status transition of a fake activity port for this suite.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; the fake port or test assertion observes this callback's effects.
+                status = function() end }
         end,
     }
     modules.permission = {
+        --Constructs the new service used by this suite.
+        --@param _ any Unused callback argument supplied by the port.
+        --@param options table|nil Options configuring the exercised component.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
         new = function(_, options)
             A.equal(options.maximum_name_bytes, 128)
             local service = {}
+            --Builds the profile values used by this suite.
+            --@param self table Fixture or port instance receiving this call.
+            --@param spec table Test specification or request under evaluation.
+            --@return table observed Structured fixture record with snapshot_digest.
             function service:profile(spec)
                 A.equal(spec.config_generation, active_generation.id)
                 A.equal(spec.matrix.Read, "allow")
@@ -878,10 +1104,14 @@ local function fixture(settings)
         end,
     }
     modules.tools = {
+        --Constructs the new service used by this suite.
+        --@param dependencies any The dependencies supplied to the fake service for this scenario.
+        --@param options table|nil Options configuring the exercised component.
+        --@return table record Fixture record emitted by the scenario callback.
         new = function(dependencies, options)
             A.equal(options.workspace_path, "/workspace")
             A.equal(options.reserved_paths[1], "/release/__yaca__")
-            A.equal(options.maximum_exec_output_bytes, 65536)
+            A.equal(options.maximum_exec_output_bytes, settings.expected_output_bytes or 65536)
             local facts = {
                 permission_snapshot_digest = "profile-snapshot-" .. active_generation.id:sub(-1),
                 approval_digest = "",
@@ -902,14 +1132,24 @@ local function fixture(settings)
             if settings.after_tools then settings.after_tools() end
             return { registry_digest = settings.tool_registry_digest or "registry-1" }
         end,
+        --Constructs new agent port for this test scenario.
+        --@param _ any Unused callback argument supplied by the port.
+        --@param options table|nil Options configuring the exercised component.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
         new_agent_port = function(_, options)
             A.equal(options.config_generation, active_generation.id)
             A.equal(options.exec_policy.decoder, "utf-8-strict-candidate-v1")
+            A.equal(options.exec_policy.output_limit_bytes, settings.expected_output_bytes or 65536)
+            A.equal(options.exec_policy.deadline_ms, active_generation.exec.timeout_ms)
             log[#log + 1] = "tool-port"
             return tool_port
         end,
     }
     modules.model = {
+        --Constructs new request builder for this test scenario.
+        --@param _ any Unused callback argument supplied by the port.
+        --@param options table|nil Options configuring the exercised component.
+        --@return table record Fixture record emitted by the scenario callback.
         new_request_builder = function(_, options)
             local suffix = active_generation.id:sub(-1)
             A.equal(options.model_snapshot, "model-snapshot-" .. suffix)
@@ -918,17 +1158,25 @@ local function fixture(settings)
             log[#log + 1] = "model-builder"
             return {}
         end,
-        new_side_request_builder = function(ports, options)
+        --Constructs new ask request builder for this test scenario.
+        --@param ports table Ports supplied to the component under test.
+        --@param options table|nil Options configuring the exercised component.
+        --@return table record Fixture record emitted by the scenario callback.
+        new_ask_request_builder = function(ports, options)
             A.equal(ports.generation.id, "config-generation-2")
             A.equal(options.model_name, "Primary")
             A.equal(options.permission_name, "Std")
-            A.equal(options.prompt_snapshot, "side-prompt-snapshot-2")
+            A.equal(options.prompt_snapshot, "ask-prompt-snapshot-2")
             A.equal(options.tool_registry_snapshot, "registry-1")
             A.equal(options.maximum_request_time_ms, 120000)
             A.equal(options.maximum_output_tokens, 1024)
-            log[#log + 1] = "side-model-builder"
+            log[#log + 1] = "ask-model-builder"
             return {}
         end,
+        --Constructs new compaction request builder for this test scenario.
+        --@param _ any Unused callback argument supplied by the port.
+        --@param options table|nil Options configuring the exercised component.
+        --@return table record Fixture record emitted by the scenario callback.
         new_compaction_request_builder = function(_, options)
             local suffix = active_generation.id:sub(-1)
             A.equal(options.model_snapshot, "model-snapshot-" .. suffix)
@@ -937,6 +1185,10 @@ local function fixture(settings)
             log[#log + 1] = "compaction-builder"
             return {}
         end,
+        --Constructs new review request builder for this test scenario.
+        --@param _ any Unused callback argument supplied by the port.
+        --@param options table|nil Options configuring the exercised component.
+        --@return table record Fixture record emitted by the scenario callback.
         new_review_request_builder = function(_, options)
             A.equal(options.main_model_name, "Primary")
             A.equal(
@@ -947,26 +1199,49 @@ local function fixture(settings)
             log[#log + 1] = "review-builder"
             return {}
         end,
+        --Constructs new activity for this test scenario.
+        --@param _ any Unused callback argument supplied by the port.
+        --@param options table|nil Options configuring the exercised component.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
         new_activity = function(_, options)
             A.equal(options.identity_namespace, "context-0123456789ABCDEF")
             local serial = #model_activities + 1
             local activity = {
+                --Simulates the start transition of a fake activity port for this suite.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return table record Fixture record emitted by the scenario callback.
                 start = function()
                     log[#log + 1] = "effect:model-activity-" .. tostring(serial)
                     return {}
                 end,
+                --Simulates the cancel transition of a fake activity port for this suite.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return table record Fixture record emitted by the scenario callback.
                 cancel = function() return { outcome = "cancelled" } end,
+                --Simulates the poll transition of a fake activity port for this suite.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return table record Fixture record emitted by the scenario callback.
                 poll = function() return {} end,
+                --Simulates the status transition of a fake activity port for this suite.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return table record Fixture record emitted by the scenario callback.
                 status = function() return { state = "idle" } end,
             }
             model_activities[#model_activities + 1] = activity
             log[#log + 1] = "model-activity-" .. tostring(#model_activities)
             return activity
         end,
+        --Constructs new review port for this test scenario.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
         new_review_port = function()
             log[#log + 1] = "review-port"
             return review_port
         end,
+        --Constructs new compaction port for this test scenario.
+        --@param _ any Unused callback argument supplied by the port.
+        --@param options table|nil Options configuring the exercised component.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
         new_compaction_port = function(_, options)
             A.equal(options.maximum_poll_events, 128)
             log[#log + 1] = "compaction-port"
@@ -974,6 +1249,9 @@ local function fixture(settings)
         end,
     }
     modules.json = {
+        --Constructs the new service used by this suite.
+        --@param options table|nil Options configuring the exercised component.
+        --@return table record Fixture record emitted by the scenario callback.
         new = function(options)
             A.equal(options.maximum_bytes, 1024 * 1024)
             return {}
@@ -981,14 +1259,18 @@ local function fixture(settings)
     }
     local runtime_options_seen
     modules.runtime = {
+        --Constructs new agent loop for this test scenario.
+        --@param ports table Ports supplied to the component under test.
+        --@param options table|nil Options configuring the exercised component.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
         new_agent_loop = function(ports, options)
             A.equal(ports.journal, publication)
             A.truthy(ports.model ~= model_activities[1])
             A.truthy(ports.tools ~= tool_port)
             A.truthy(ports.reviews ~= review_port)
             A.equal(type(ports.snapshots.capture), "function")
-            A.equal(type(ports.side.start), "function")
-            A.equal(type(ports.side.poll), "function")
+            A.equal(type(ports.ask.start), "function")
+            A.equal(type(ports.ask.poll), "function")
             A.equal(options.hard_caps.model_requests, 64)
             A.equal(options.hard_caps.tool_calls, 256)
             A.equal(options.lanes.queue_maximum, 9)
@@ -998,18 +1280,31 @@ local function fixture(settings)
             log[#log + 1] = "agent-loop"
             return loop
         end,
+        --Constructs new agent activity driver for this test scenario.
+        --@param ports table Ports supplied to the component under test.
+        --@param options table|nil Options configuring the exercised component.
+        --@return table record Fixture record emitted by the scenario callback.
         new_agent_activity_driver = function(ports, options)
             A.equal(ports.loop, loop)
             A.equal(ports.model, runtime_ports.model)
             A.equal(ports.tools, runtime_ports.tools)
             A.equal(ports.reviews, runtime_ports.reviews)
-            A.equal(ports.side, runtime_ports.side)
+            A.equal(ports.ask, runtime_ports.ask)
             A.equal(options.maximum_output_events, 512)
             log[#log + 1] = "driver"
-            return { step = function() return {} end }
+            return {
+                --Simulates the step transition of a fake activity port for this suite.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return table record Fixture record emitted by the scenario callback.
+                step = function() return {} end }
         end,
     }
     modules.session = {
+        --Constructs new agent session for this test scenario.
+        --@param candidate table|any Candidate state or value being validated.
+        --@param options table|nil Options configuring the exercised component.
+        --@return table|nil value Callback value consumed by the enclosing scenario assertion.
+        --@return table|nil secondary2 Typed error record with code InjectedSessionFailure.
         new_agent_session = function(candidate, options)
             A.equal(candidate, loop)
             A.equal(options.maximum_draft_bytes, 16384)
@@ -1017,11 +1312,19 @@ local function fixture(settings)
             if settings.session_error then
                 return nil, { code = "InjectedSessionFailure" }
             end
-            return { status = function() return {} end }
+            return {
+                --Simulates the status transition of a fake activity port for this suite.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return table record Fixture record emitted by the scenario callback.
+                status = function() return {} end }
         end,
     }
 
     local draft = {}
+    --Supplies begin main behavior required by this suite.
+    --@param message string|table Message or diagnostic passed through this test port.
+    --@param source string|table Source content or object under test.
+    --@return table observed Structured fixture record with durable.
     function draft.begin_main(message, source)
         A.falsy(continuing)
         A.equal(message, "implement the project")
@@ -1031,11 +1334,33 @@ local function fixture(settings)
         log[#log + 1] = "publish-first"
         return { durable = true }
     end
+    --Supplies begin ask behavior required by this suite.
+    --@param message string|table Message or diagnostic passed through this test port.
+    --@param source string|table Source content or object under test.
+    --@return table observed Structured fixture record selected by the exercised branch.
+    function draft.begin_ask(message, source)
+        A.equal(message, "only a question"); A.equal(source, "terminal")
+        A.falsy(published); published = true
+        log[#log + 1] = "publish-empty"
+        return { durable = true, event_count = 0, generation = 1,
+            view_manifest_snapshot = "sha256:empty-view",
+            runtime_initial_serials = { turn = 0, message = 0, request = 0, tool = 0,
+                operation = 0, queue = 0, queue_display = 0, ask = 0 } }
+    end
+    --Supplies agent handoff behavior required by this suite.
+    --@param none No arguments; this closure uses its captured fixture state.
+    --@return any observed agent handoff value observed by the scenario assertion.
     function draft.agent_handoff()
         A.truthy(published)
         return handoff
     end
+    --Builds the config generation values used by this suite.
+    --@param none No arguments; this closure uses its captured fixture state.
+    --@return any observed config generation value observed by the scenario assertion.
     function draft.config_generation() return generation end
+    --Supplies open receipt behavior required by this suite.
+    --@param none No arguments; this closure uses its captured fixture state.
+    --@return table observed Structured fixture record selected by the exercised branch.
     function draft.open_receipt()
         A.truthy(continuing)
         return {
@@ -1048,10 +1373,13 @@ local function fixture(settings)
             approval_initial_serial = 7,
             runtime_initial_serials = {
                 turn = 4, message = 8, request = 6, tool = 3,
-                operation = 2, queue = 5, queue_display = 2, side = 1,
+                operation = 2, queue = 5, queue_display = 2, ask = 1,
             },
         }
     end
+    --Simulates the status transition of a fake activity port for this suite.
+    --@param none No arguments; this closure uses its captured fixture state.
+    --@return table observed Structured fixture record selected by the exercised branch.
     function draft.status()
         return {
             workspace = "/workspace",
@@ -1062,6 +1390,9 @@ local function fixture(settings)
             context_hash = published and "0123456789ABCDEF" or false,
         }
     end
+    --Simulates the close transition of a fake activity port for this suite.
+    --@param none No arguments; this closure uses its captured fixture state.
+    --@return boolean accepted Whether close succeeds in the fixture.
     function draft.close()
         closed = true
         log[#log + 1] = "draft-close"
@@ -1071,6 +1402,10 @@ local function fixture(settings)
     local composed = {
         backend = {
             filesystem = {
+                --Supplies the direct inspect observation used by this suite.
+                --@param path string File or Context path exercised by the case.
+                --@return boolean accepted Whether the fake callback accepts this scenario.
+                --@return table secondary2 Structured fixture record with identity, volume, object, kind.
                 direct_inspect = function(path)
                     A.truthy(published)
                     A.equal(path, "/workspace")
@@ -1085,13 +1420,23 @@ local function fixture(settings)
             },
             processes = {},
             clock_port = {
+                --Supplies deterministic clock behavior for this suite.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return integer value Callback value consumed by the enclosing scenario assertion.
                 monotonic_now = function() return 1 end,
+                --Supplies deterministic clock behavior for this suite.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return string text Text emitted by the scenario callback.
                 utc_now = function() return "2026-08-30T00:00:00Z" end,
             },
         },
         contexts = contexts,
         publication = publication,
         config = {
+            --Supplies reload file behavior required by this suite.
+            --@param path string File or Context path exercised by the case.
+            --@param overrides table|nil Per-case overrides of default fixture behavior.
+            --@return any value Callback value consumed by the enclosing scenario assertion.
             reload_file = function(path, overrides)
                 A.equal(path, "/release/__yaca__/config.ini")
                 A.truthy(overrides.CurrentModel == "Primary"
@@ -1163,20 +1508,35 @@ local function fixture(settings)
         composed = composed,
         chat = chat,
         log = log,
+        --Supplies closed behavior required by this suite.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
         closed = function() return closed end,
+        --Supplies loop closed behavior required by this suite.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
         loop_closed = function() return loop_closed end,
+        --Supplies capture behavior required by this suite.
+        --@param specification table Test specification used to construct the fixture.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
         capture = function(specification)
             return runtime_ports.snapshots.capture(specification)
         end,
+        --Supplies start current model behavior required by this suite.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
         start_current_model = function()
             return runtime_ports.model.start({ request_id = "turn-2:request:1" })
         end,
-        start_side_model = function()
-            return runtime_ports.side.start({
-                side_id = "side-1",
-                turn_id = "side-1",
-                request_id = "side-1:request:1",
-                purpose = "side",
+        --Supplies start ask model behavior required by this suite.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
+        start_ask_model = function()
+            return runtime_ports.ask.start({
+                ask_id = "ask-1",
+                turn_id = "ask-1",
+                request_id = "ask-1:request:1",
+                purpose = "ask",
                 view_manifest_ref = "view-1",
                 no_tools = true,
                 active_time_cap_ms = 120000,
@@ -1184,6 +1544,9 @@ local function fixture(settings)
                 budget_snapshot_id = "tp022-modern-candidate-v1",
             })
         end,
+        --Supplies pause for compaction behavior required by this suite.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return nil No value; the fake port or test assertion observes this callback's effects.
         pause_for_compaction = function()
             A.truthy(compact_source)
             loop_status.state = "Idle"
@@ -1193,6 +1556,9 @@ local function fixture(settings)
             loop_status.active_view_manifest_ref
                 = compact_source.model_view.active_manifest.digest
         end,
+        --Supplies pause for automatic compaction behavior required by this suite.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return nil No value; the fake port or test assertion observes this callback's effects.
         pause_for_automatic_compaction = function()
             A.truthy(compact_source)
             loop_status.state = "Preparing"
@@ -1206,7 +1572,13 @@ local function fixture(settings)
                 = "turn-1:compaction-preflight:1"
             loop_status.compaction_preflight_purpose = "main"
         end,
+        --Supplies current generation behavior required by this suite.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
         current_generation = function() return active_generation end,
+        --Supplies runtime options behavior required by this suite.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
         runtime_options = function() return runtime_options_seen end,
     }
 end
@@ -1215,7 +1587,39 @@ return {
     name = "integration/production-agent-composition",
     cases = {
         {
+            name = "configured output below the durable result cap stays effective in production",
+            --Verifies configured output below the durable result cap stays effective in production.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify configured output below the durable result cap stays effective in production.
+            run = function()
+                local f = fixture({ max_output_kb = 16, expected_output_bytes = 16384 })
+                A.truthy(f.main.start_published_agent(
+                    f.composed, f.chat, "implement the project", "terminal"))
+            end,
+        },
+        {
+            name = "first Ask composes an idle Agent without resuming a main request",
+            --Verifies configured output below the durable result cap stays effective in production.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify configured output below the durable result cap stays effective in production.
+            run = function()
+                local f = fixture()
+                local agent = assert(f.main.start_published_agent(
+                    f.composed, f.chat, "only a question", "terminal", "ask"))
+                A.falsy(agent.capabilities.published_first_turn)
+                A.falsy(agent.admission)
+                A.equal(f.runtime_options().initial_sequence, 0)
+                A.equal(f.runtime_options().initial_serials.turn, 0)
+                A.equal(f.runtime_options().initial_serials.ask, 0)
+                A.falsy(table.concat(f.log, "|"):find("runtime-resume", 1, true))
+                A.equal(f.log[1], "publish-empty")
+            end,
+        },
+        {
             name = "production status uses publication ownership and halts on inspection failure",
+            --Verifies first Ask composes an idle Agent without resuming a main request.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify first Ask composes an idle Agent without resuming a main request.
             run = function()
                 for _, throws in ipairs({ false, true }) do
                     local settings = {}
@@ -1237,6 +1641,9 @@ return {
         },
         {
             name = "durable first turn precedes every production Agent activity",
+            --Verifies durable first turn precedes every production Agent activity.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify durable first turn precedes every production Agent activity.
             run = function()
                 local f = fixture()
                 local agent = assert(f.main.start_published_agent(
@@ -1249,7 +1656,7 @@ return {
                 A.equal(agent.loop:status().state, "RequestingModel")
                 A.truthy(agent.capabilities.published_first_turn)
                 A.truthy(agent.capabilities.later_turn_snapshots)
-                A.truthy(agent.capabilities.side)
+                A.truthy(agent.capabilities.ask)
                 A.truthy(agent.capabilities.compaction)
                 A.falsy(f.closed())
                 A.deep_equal(f.log, {
@@ -1277,6 +1684,9 @@ return {
         },
         {
             name = "verified existing Context composes an idle collision-free Agent owner",
+            --Verifies verified existing Context composes an idle collision-free Agent owner.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify verified existing Context composes an idle collision-free Agent owner.
             run = function()
                 local f = fixture({ continuing = true })
                 local agent = assert(f.main.start_published_agent(
@@ -1321,10 +1731,16 @@ return {
         },
         {
             name = "continued workspace replacement fails before Agent admission",
+            --Verifies continued workspace replacement fails before Agent admission.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify continued workspace replacement fails before Agent admission.
             run = function()
                 for _, phase in ipairs({ "before", "capture", "tools", "missing" }) do
                     local settings = { continuing = true }
                     local f = fixture(settings)
+                    --Records the replace effect observed by the 'continued workspace replacement fails before Agent admission' case.
+                    --@param none No arguments; this closure uses its captured fixture state.
+                    --@return nil No value; assertions verify continued workspace replacement fails before Agent admission.
                     local function replace() settings.workspace_object = "replacement" end
                     if phase == "before" then replace() end
                     if phase == "capture" then settings.after_capture = replace end
@@ -1349,9 +1765,12 @@ return {
             end,
         },
         {
-            name = "continued main and side snapshots retain the confirmed workspace identity",
+            name = "continued main and ask snapshots retain the confirmed workspace identity",
+            --Verifies continued main and ask snapshots retain the confirmed workspace identity.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify continued main and ask snapshots retain the confirmed workspace identity.
             run = function()
-                for _, kind in ipairs({ "main", "side" }) do
+                for _, kind in ipairs({ "main", "ask" }) do
                     for _, phase in ipairs({ "before", "capture" }) do
                         local settings = { continuing = true }
                         local f = fixture(settings)
@@ -1359,6 +1778,9 @@ return {
                             f.composed, f.chat,
                             "Continue from the latest durable Context facts.", "context-reopen"
                         ))
+                        --Records the replace effect observed by the 'continued main and ask snapshots retain the confirmed workspace identity' case.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return nil No value; assertions verify continued main and ask snapshots retain the confirmed workspace identity.
                         local function replace() settings.workspace_object = "replacement" end
                         if phase == "before" then replace()
                         else settings.after_capture = replace end
@@ -1369,14 +1791,14 @@ return {
                             source = "terminal",
                             context_generation = 7,
                             active_turn_id = false,
-                            cause = { kind = kind == "main" and "direct-main" or "side" },
+                            cause = { kind = kind == "main" and "direct-main" or "ask" },
                         })
                         A.falsy(snapshot)
                         A.equal(snapshot_error.code, "ContextTargetChanged")
                         A.equal(agent.current_generation().id, "config-generation-1")
                         for index = previous_count + 1, #f.log do
                             A.falsy(f.log[index]:match("^effect:"))
-                            A.falsy(f.log[index] == "tools" or f.log[index] == "side-model-builder")
+                            A.falsy(f.log[index] == "tools" or f.log[index] == "ask-model-builder")
                         end
                         if phase == "before" then A.equal(#f.log, previous_count) end
                         f.chat.draft.close()
@@ -1386,6 +1808,9 @@ return {
         },
         {
             name = "production Session settings publish and adopt cautious for the next turn",
+            --Verifies production Session settings publish and adopt cautious for the next turn.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify production Session settings publish and adopt cautious for the next turn.
             run = function()
                 local f = fixture()
                 local agent = assert(f.main.start_published_agent(
@@ -1438,6 +1863,9 @@ return {
         },
         {
             name = "production Session settings publish and adopt ContextPrompt for the next turn",
+            --Verifies production Session settings publish and adopt ContextPrompt for the next turn.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify production Session settings publish and adopt ContextPrompt for the next turn.
             run = function()
                 local f = fixture()
                 local agent = assert(f.main.start_published_agent(
@@ -1482,6 +1910,9 @@ return {
         },
         {
             name = "production Model selection binds disclosure then publishes exact next-turn selector",
+            --Verifies production Model selection binds disclosure then publishes exact next-turn selector.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify production Model selection binds disclosure then publishes exact next-turn selector.
             run = function()
                 local f = fixture()
                 local agent = assert(f.main.start_published_agent(
@@ -1551,6 +1982,9 @@ return {
         },
         {
             name = "production Model previews disclose the sanitized proxy route",
+            --Verifies production Model previews disclose the sanitized proxy route.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify production Model previews disclose the sanitized proxy route.
             run = function()
                 local route = "https://proxy.example/tunnel?configured"
                 local f = fixture({ proxy_route = route })
@@ -1567,6 +2001,9 @@ return {
         },
         {
             name = "secret-only Model reload race is rejected before Context publication",
+            --Verifies production Model previews disclose the sanitized proxy route.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify production Model previews disclose the sanitized proxy route.
             run = function()
                 local f = fixture({ model_secret_changed_on_reload = true })
                 local agent = assert(f.main.start_published_agent(
@@ -1587,6 +2024,9 @@ return {
         },
         {
             name = "Model definition reload race is rejected before Context publication",
+            --Verifies model definition reload race is rejected before Context publication.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify model definition reload race is rejected before Context publication.
             run = function()
                 local f = fixture({ model_definition_changed_on_reload = true })
                 local agent = assert(f.main.start_published_agent(
@@ -1610,6 +2050,9 @@ return {
         },
         {
             name = "smaller Model that cannot carry Prompt tools and view is rejected before staging",
+            --Verifies smaller Model that cannot carry Prompt tools and view is rejected before staging.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify smaller Model that cannot carry Prompt tools and view is rejected before staging.
             run = function()
                 local f = fixture({ small_model_window = true })
                 local agent = assert(f.main.start_published_agent(
@@ -1628,6 +2071,9 @@ return {
         },
         {
             name = "ambiguous Session publication and adoption exceptions halt the Runtime",
+            --Verifies smaller Model that cannot carry Prompt tools and view is rejected before staging.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify smaller Model that cannot carry Prompt tools and view is rejected before staging.
             run = function()
                 for _, scenario in ipairs({
                     {
@@ -1661,24 +2107,47 @@ return {
         },
         {
             name = "reopened interactive chat uses its saved Model owner and releases failed terminal setup",
+            --Verifies reopened interactive chat uses its saved Model owner and releases failed terminal setup.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify reopened interactive chat uses its saved Model owner and releases failed terminal setup.
             run = function()
                 local f = fixture({ continuing = true })
                 local calls = {}
+                --Supplies deterministic clock behavior for the 'reopened interactive chat uses its saved Model owner and releases failed terminal setup' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return boolean accepted Whether the fake callback accepts this scenario.
                 f.composed.backend.clock_port.sleep_ms = function() return true end
+                --Constructs new terminal for the reopened interactive chat uses its saved Model owner and releases failed terminal setup scenario.
+                --@param mode string Operating mode selected by the scenario.
+                --@return nil rejected Explicit rejection from the scenario callback.
+                --@return table secondary2 Typed error record with code TerminalUnavailable.
                 f.composed.backend.new_terminal = function(mode)
                     A.equal(mode, "cooked")
                     calls[#calls + 1] = "terminal"
                     return nil, { code = "TerminalUnavailable", message = "test terminal failure" }
                 end
                 local draft = {
+                    --Simulates the close transition of a fake activity port for the 'reopened interactive chat uses its saved Model owner and releases failed terminal setup' case.
+                    --@param none No arguments; this closure uses its captured fixture state.
+                    --@return boolean accepted Whether the fake callback accepts this scenario.
                     close = function() calls[#calls + 1] = "draft-close" return true end,
                 }
                 local agent = {
-                    models = { list = function() return {} end },
+                    models = {
+                        --Returns the list observation prepared for the 'reopened interactive chat uses its saved Model owner and releases failed terminal setup' case.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return table record Fixture record emitted by the scenario callback.
+                        list = function() return {} end },
                     compaction = {
+                        --Simulates the close transition of a fake activity port for the 'reopened interactive chat uses its saved Model owner and releases failed terminal setup' case.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return boolean accepted Whether the fake callback accepts this scenario.
                         close = function() calls[#calls + 1] = "compaction-close" return true end,
                     },
                     session = {
+                        --Simulates the close transition of a fake activity port for the 'reopened interactive chat uses its saved Model owner and releases failed terminal setup' case.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return boolean accepted Whether the fake callback accepts this scenario.
                         close = function() calls[#calls + 1] = "session-close" return true end,
                     },
                     draft = draft,
@@ -1695,17 +2164,26 @@ return {
         },
         {
             name = "production Context switcher reopens only the previewed exact hash",
+            --Verifies production Context switcher reopens only the previewed exact hash.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify production Context switcher reopens only the previewed exact hash.
             run = function()
                 local f = fixture()
                 local current_preview_calls = 0
                 local next_preview_calls = 0
                 local closed = 0
                 local initial = { application = {} }
+                --Simulates the dispatch port for the 'production Context switcher reopens only the previewed exact hash' case.
+                --@param request table Request delivered to the fake component.
+                --@return table observed Structured fixture record with action, rows.
                 function initial.application.dispatch(request)
                     A.equal(request.id, "context-repl")
                     A.equal(request.view, "recent")
                     return { action = "context-repl", rows = {} }
                 end
+                --Returns the preview continue observation prepared for the 'production Context switcher reopens only the previewed exact hash' case.
+                --@param selector string Context selector resolved by the case.
+                --@return table observed Structured fixture record selected by the exercised branch.
                 function initial.application.preview_continue(selector)
                     current_preview_calls = current_preview_calls + 1
                     return {
@@ -1717,10 +2195,18 @@ return {
                     }
                 end
                 local next_composed = { application = {} }
+                --Returns the continue preview observation prepared for the 'production Context switcher reopens only the previewed exact hash' case.
+                --@param preview table Preflight preview being confirmed or rejected.
+                --@param confirmation any The confirmation supplied to the fake service for this scenario.
+                --@return table observed Outcome record with status ready.
                 function next_composed.application.continue_preview(preview, confirmation)
                     A.equal(preview.context_hash, "FEDCBA9876543210")
                     A.equal(confirmation, nil)
-                    local draft = { close = function()
+                    local draft = {
+                        --Simulates the close transition of a fake activity port for the 'production Context switcher reopens only the previewed exact hash' case.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return boolean accepted Whether the fake callback accepts this scenario.
+                        close = function()
                         closed = closed + 1
                         return true
                     end }
@@ -1736,6 +2222,9 @@ return {
                         },
                     }
                 end
+                --Returns the preview continue observation prepared for the 'production Context switcher reopens only the previewed exact hash' case.
+                --@param selector string Context selector resolved by the case.
+                --@return table observed Structured fixture record with selector.
                 function next_composed.application.preview_continue(selector)
                     next_preview_calls = next_preview_calls + 1
                     return { selector = selector }
@@ -1746,12 +2235,27 @@ return {
                     driver = {},
                     session = {},
                     settings = {
+                        --Simulates the status transition of a fake activity port for the 'production Context switcher reopens only the previewed exact hash' case.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return table record Fixture record emitted by the scenario callback.
                         status = function() return {} end,
+                        --Supplies update behavior required by the 'production Context switcher reopens only the previewed exact hash' case.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return table record Fixture record emitted by the scenario callback.
                         update = function() return {} end,
                     },
                     models = {
+                        --Returns the list observation prepared for the 'production Context switcher reopens only the previewed exact hash' case.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return table record Fixture record emitted by the scenario callback.
                         list = function() return {} end,
+                        --Returns the preview observation prepared for the 'production Context switcher reopens only the previewed exact hash' case.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return table record Fixture record emitted by the scenario callback.
                         preview = function() return {} end,
+                        --Supplies apply behavior required by the 'production Context switcher reopens only the previewed exact hash' case.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return table record Fixture record emitted by the scenario callback.
                         apply = function() return {} end,
                     },
                     tools = {},
@@ -1759,7 +2263,16 @@ return {
                     draft = {},
                 }
                 local switcher = assert(f.main.new_context_switcher(initial, {}, {
+                    --Supplies compose behavior required by the 'production Context switcher reopens only the previewed exact hash' case.
+                    --@param none No arguments; this closure uses its captured fixture state.
+                    --@return any value Callback value consumed by the enclosing scenario assertion.
                     compose = function() return next_composed end,
+                    --Supplies start agent behavior required by the 'production Context switcher reopens only the previewed exact hash' case.
+                    --@param composed any The composed supplied to the fake service for this scenario.
+                    --@param chat any The chat supplied to the fake service for this scenario.
+                    --@param message string|table Message or diagnostic passed through this test port.
+                    --@param source string|table Source content or object under test.
+                    --@return any value Callback value consumed by the enclosing scenario assertion.
                     start_agent = function(composed, chat, message, source)
                         A.equal(composed, next_composed)
                         A.equal(chat.status.context_hash, "FEDCBA9876543210")
@@ -1779,12 +2292,25 @@ return {
                 A.equal(closed, 0)
 
                 local mismatch = assert(f.main.new_context_switcher(initial, {}, {
+                    --Supplies compose behavior required by the 'production Context switcher reopens only the previewed exact hash' case.
+                    --@param none No arguments; this closure uses its captured fixture state.
+                    --@return table record Fixture record emitted by the scenario callback.
                     compose = function()
                         return { application = {
+                            --Returns the preview continue observation prepared for the 'production Context switcher reopens only the previewed exact hash' case.
+                            --@param none No arguments; this closure uses its captured fixture state.
+                            --@return table record Fixture record emitted by the scenario callback.
                             preview_continue = function() return {} end,
+                            --Returns the continue preview observation prepared for the 'production Context switcher reopens only the previewed exact hash' case.
+                            --@param none No arguments; this closure uses its captured fixture state.
+                            --@return table record Fixture record emitted by the scenario callback.
                             continue_preview = function()
                                 return {
-                                    draft = { close = function()
+                                    draft = {
+                                        --Simulates the close transition of a fake activity port for the 'production Context switcher reopens only the previewed exact hash' case.
+                                        --@param none No arguments; this closure uses its captured fixture state.
+                                        --@return boolean accepted Whether the fake callback accepts this scenario.
+                                        close = function()
                                         closed = closed + 1
                                         return true
                                     end },
@@ -1796,6 +2322,9 @@ return {
                             end,
                         } }
                     end,
+                    --Supplies start agent behavior required by the 'production Context switcher reopens only the previewed exact hash' case.
+                    --@param none No arguments; this closure uses its captured fixture state.
+                    --@return nil No value; assertions verify production Context switcher reopens only the previewed exact hash.
                     start_agent = function()
                         error("changed target must not start an Agent")
                     end,
@@ -1808,6 +2337,9 @@ return {
         },
         {
             name = "manual compaction crosses the real production owner and publication chain",
+            --Verifies manual compaction crosses the real production owner and publication chain.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify manual compaction crosses the real production owner and publication chain.
             run = function()
                 local f = fixture({ compaction_lifecycle = true })
                 local agent = assert(f.main.start_published_agent(
@@ -1864,6 +2396,9 @@ return {
         },
         {
             name = "automatic compaction binds the deferred production request before resuming it",
+            --Verifies automatic compaction binds the deferred production request before resuming it.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify automatic compaction binds the deferred production request before resuming it.
             run = function()
                 local f = fixture({ automatic_compaction_lifecycle = true })
                 local agent = assert(f.main.start_published_agent(
@@ -1903,6 +2438,9 @@ return {
         },
         {
             name = "recovered failure history suppresses the production automatic request",
+            --Verifies recovered failure history suppresses the production automatic request.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify recovered failure history suppresses the production automatic request.
             run = function()
                 for _, recovered in ipairs({
                     {
@@ -1940,7 +2478,30 @@ return {
             end,
         },
         {
+            name = "production compaction capacity refusal releases the untouched lane",
+            --Verifies production compaction capacity refusal releases the untouched lane.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify production compaction capacity refusal releases the untouched lane.
+            run = function()
+                local settings = { compaction_lifecycle = true, compaction_capacity = true }
+                local f = fixture(settings)
+                local agent = assert(f.main.start_published_agent(
+                    f.composed, f.chat, "implement the project", "terminal"))
+                f.pause_for_compaction()
+                local started, err = agent.compaction:begin("manual")
+                A.falsy(started); A.equal(err.code, "ContextCapacity")
+                A.falsy(agent.loop:status().halted)
+                A.falsy(agent.compaction:status().active)
+                A.falsy(table.concat(f.log, "|"):find("effect:compaction-model", 1, true))
+                settings.compaction_capacity = false
+                A.equal(assert(agent.compaction:begin("manual")).state, "active")
+            end,
+        },
+        {
             name = "production compaction journal ambiguity halts instead of releasing its lane",
+            --Verifies production compaction journal ambiguity halts instead of releasing its lane.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify production compaction journal ambiguity halts instead of releasing its lane.
             run = function()
                 local f = fixture({
                     compaction_lifecycle = true,
@@ -1972,7 +2533,10 @@ return {
             end,
         },
         {
-            name = "side snapshot reloads independently and exposes no Tool activity",
+            name = "ask snapshot reloads independently and exposes no Tool activity",
+            --Verifies ask snapshot reloads independently and exposes no Tool activity.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify ask snapshot reloads independently and exposes no Tool activity.
             run = function()
                 local f = fixture()
                 local agent = assert(f.main.start_published_agent(
@@ -1982,32 +2546,35 @@ return {
                     "terminal"
                 ))
                 local snapshot = assert(f.capture({
-                    kind = "side",
+                    kind = "ask",
                     text = "inspect durable facts",
                     source = "terminal",
                     context_generation = 2,
                     active_turn_id = "turn-1",
-                    cause = { kind = "side" },
+                    cause = { kind = "ask" },
                 }))
-                A.equal(snapshot.prompt_snapshot, "side-prompt-snapshot-2")
+                A.equal(snapshot.prompt_snapshot, "ask-prompt-snapshot-2")
                 A.equal(agent.current_generation().id, "config-generation-1")
-                A.equal(agent.current_side_generation().id, "config-generation-2")
-                A.truthy(f.start_side_model())
+                A.equal(agent.current_ask_generation().id, "config-generation-2")
+                A.truthy(f.start_ask_model())
                 A.equal(f.log[#f.log], "effect:model-activity-4")
 
                 local tool_builds = 0
-                local side_builder_index, side_activity_index
+                local ask_builder_index, ask_activity_index
                 for index, value in ipairs(f.log) do
                     if value == "tools" then tool_builds = tool_builds + 1 end
-                    if value == "side-model-builder" then side_builder_index = index end
-                    if value == "model-activity-4" then side_activity_index = index end
+                    if value == "ask-model-builder" then ask_builder_index = index end
+                    if value == "model-activity-4" then ask_activity_index = index end
                 end
                 A.equal(tool_builds, 1)
-                A.truthy(side_builder_index < side_activity_index)
+                A.truthy(ask_builder_index < ask_activity_index)
             end,
         },
         {
             name = "post-publication composition failure releases the writer",
+            --Verifies post-publication composition failure releases the writer.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify post-publication composition failure releases the writer.
             run = function()
                 local f = fixture({ tool_registry_digest = "stale-registry" })
                 local agent, agent_error = f.main.start_published_agent(
@@ -2024,6 +2591,9 @@ return {
         },
         {
             name = "later main snapshot reloads and atomically replaces turn ports",
+            --Verifies post-publication composition failure releases the writer.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify post-publication composition failure releases the writer.
             run = function()
                 local f = fixture()
                 local agent = assert(f.main.start_published_agent(
@@ -2064,6 +2634,9 @@ return {
         },
         {
             name = "post-admission composition failure closes activity and writer",
+            --Verifies post-admission composition failure closes activity and writer.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify post-admission composition failure closes activity and writer.
             run = function()
                 local f = fixture({ session_error = true })
                 local agent, agent_error = f.main.start_published_agent(

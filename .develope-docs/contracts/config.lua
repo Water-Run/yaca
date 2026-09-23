@@ -1,3 +1,18 @@
+--[[
+Author: WaterRun
+Date: 2026-09-23
+File: config.lua
+Description: Defines typed configuration fields, defaults, scopes and validation limits.
+]]
+
+-- Describe a typed INI field with explicit secret and Context-override defaults.
+--@param id string Stable catalog identifier independent of the INI spelling.
+--@param section string INI section or section-family name.
+--@param key string Key spelling within the section.
+--@param type_name string Validation type declared by the configuration contract.
+--@param default any Default value; nil leaves the default field absent.
+--@param extra table|nil Additional constraints or overrides, including secret and context_override flags.
+--@return table Field descriptor; nested defaults and extra values are retained by reference.
 local function field(id, section, key, type_name, default, extra)
   local value = {
     id = id,
@@ -27,7 +42,7 @@ return {
   unknown_section = "error",
   unknown_key = "error",
   duplicate_key = "error",
-  invalid_generation = "block-new-main-or-side",
+  invalid_generation = "block-new-main-or-ask",
 
   model_selection = {
     proxy_disclosure = "normalized-origin-path-without-userinfo-query-values",
@@ -178,7 +193,7 @@ return {
     },
   },
 
-  prompt_order = { "runtime-purpose", "global", "model", "permission-main-side-only", "context-main-side-only", "user-message" },
+  prompt_order = { "runtime-purpose", "global", "model", "permission-main-ask-only", "context-main-ask-only", "user-message" },
   forbidden_field_ids = {
     "Agent.StuckNoProgressRounds",
     "Agent.MaxNoProgressRounds",

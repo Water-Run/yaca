@@ -1,19 +1,29 @@
 --[[
-File: context.lua
-Date: 2026-08-30
 Author: WaterRun
+Date: 2026-09-23
+File: context.lua
 Description: Models, reads, writes, and exports canonical internal Context documents.
 ]]
 
 local text = require("text")
 local xml = require("xml")
+local filesystem_util = require("fs")
 
 local M = {}
 
 local SCHEMA_VERSION = "0.1.0"
+--@metatable document_states Associates validated Context document proxies with canonical document state.
+--@field __mode string Fixed k mode: keys are weak; entries remain mutable within their owning module.
 local document_states = setmetatable({}, { __mode = "k" })
+--@metatable schema_service_states Associates schema service facades with their admitted private schema configuration.
+--@field __mode string Fixed k mode: keys are weak; entries remain mutable within their owning module.
 local schema_service_states = setmetatable({}, { __mode = "k" })
 
+-- Define one closed Context event type and its required/optional fields.
+--@param id string Event type identifier.
+--@param required table|nil Ordered required field names.
+--@param optional table|nil Ordered optional field names.
+--@return table Event schema definition.
 local function event(id, required, optional)
     return { id = id, required = required or {}, optional = optional or {} }
 end
@@ -29,7 +39,7 @@ local EVENT_DEFINITIONS = {
     }),
     event("queue_item", {
         "queueItemId", "displayId", "action", "text",
-    }, { "beforeQueueItemId", "sideId", "reason" }),
+    }, { "beforeQueueItemId", "askId", "reason" }),
     event("model_request", { "requestId", "purpose", "viewManifestRef" }, {
         "attemptId", "compactionId", "compactionMode", "sourceFirstSeq",
         "sourceLastSeq", "sourceDigest", "sourceEventCount", "configSnapshot",
@@ -67,7 +77,7 @@ local EVENT_DEFINITIONS = {
     }, { "gap", "reason" }),
     event("turn_ended", { "outcome" }, { "reason", "errorId" }),
     event("cancel", { "targetKind", "targetId", "reason" }, { "result" }),
-    event("steer", { "messageId", "targetTurnId", "summary" }, { "sideId" }),
+    event("steer", { "messageId", "targetTurnId", "summary" }, { "askId" }),
     event("compaction", {
         "compactionId", "sourceFirstSeq", "sourceLastSeq", "sourceDigest", "status",
     }, {
@@ -119,7 +129,7 @@ local RESULT_STATUSES = {
 local MODEL_STATUSES = { complete = true, interrupted = true }
 local MODEL_PURPOSES = {
     main = true,
-    side = true,
+    ask = true,
     ["action-review"] = true,
     ["termination-review"] = true,
     compaction = true,
@@ -167,12 +177,19 @@ local IDENTIFIER_FIELDS = {
     causeId = true,
     queueItemId = true,
     beforeQueueItemId = true,
-    sideId = true,
+    askId = true,
     continuesResponseId = true,
     supersedesResponseId = true,
     manifestSnapshot = true,
 }
 
+-- Construct a structured diagnostic without throwing or formatting its optional fields.
+--@param code string Stable diagnostic code used by callers to choose recovery behavior.
+--@param message string Human-readable summary supplied by the failing operation.
+--@param reason string|nil Optional machine-readable cause or validation rule.
+--@param path string|nil Optional document or filesystem path associated with the failure.
+--@param detail any|nil Optional underlying cause or contextual diagnostic data; retained as supplied.
+--@return table New diagnostic record; optional non-nil fields are retained without deep copying.
 local function failure(code, message, reason, path, detail)
     local result = { code = code, message = message }
     if reason ~= nil then result.reason = reason end
@@ -181,18 +198,52 @@ local function failure(code, message, reason, path, detail)
     return result
 end
 
+-- Create a shallow read-only view without copying the backing table.
+--@param values table Backing fields retained by reference; the caller owns their stability.
+--@param label string|nil Diagnostic label; defaults to "readonly value".
+--@return table Empty proxy exposing the backing fields through its locked metatable.
+--@ownership Retains values by reference; nested values and the backing table are not frozen.
 local function readonly(values, label)
+    --@metatable readonly_proxy Forwards reads and iteration; ordinary assignments raise an error.
+    --@field __index table Backing values used for missing-key reads.
+    --@field __newindex function Rejects ordinary assignments without changing the backing values.
+    --@field __pairs function Enumerates the backing table with next.
+    --@field __len function Reports the backing table sequence length.
+    --@field __metatable string Hides this metatable behind the fixed "locked" marker.
     return setmetatable({}, {
         __index = values,
+        -- Reject a write through the proxy before it can create an ordinary field.
+        --@param _ table Proxy receiving the assignment; its contents are not consulted.
+        --@param key any Attempted field name included in the diagnostic.
+        --@return nil Does not return normally.
+        --@error Always raises a read-only assignment error at the caller frame.
         __newindex = function(_, key)
             error((label or "readonly value") .. " cannot be modified: " .. tostring(key), 2)
         end,
-        __pairs = function() return next, values, nil end,
-        __len = function() return #values end,
+        -- Iterate the backing fields instead of the empty proxy table.
+        --@param none The proxy argument supplied by pairs is ignored.
+        --@return function The standard next iterator.
+        --@return table Backing values used as iterator state.
+        --@return nil Initial key used to start iteration.
+        __pairs = function()
+            return next, values, nil
+        end,
+        -- Forward sequence-length queries to the backing table.
+        --@param none The proxy operand supplied by Lua is ignored.
+        --@return integer Length of the backing sequence under the Lua length operator.
+        __len = function()
+            return #values
+        end,
         __metatable = "locked",
     })
 end
 
+-- Copy Context values into read-only proxies while rejecting cycles and bad keys.
+--@param value any Candidate scalar or table.
+--@param label string Diagnostic label for each proxy.
+--@param visiting table|nil Recursion stack for cycle detection.
+--@return any|nil Frozen recursive copy or unchanged scalar.
+--@return table|nil InvalidContextValue diagnostic.
 local function freeze(value, label, visiting)
     if type(value) ~= "table" then return value end
     visiting = visiting or {}
@@ -217,6 +268,9 @@ local function freeze(value, label, visiting)
     return readonly(copied, label)
 end
 
+-- Count a dense one-based array while rejecting holes and extra key kinds.
+--@param values any Candidate table; every key must belong to the sequence 1 through count.
+--@return integer|nil Sequence length, including zero for an empty table; nil for an invalid shape.
 local function dense_count(values)
     if type(values) ~= "table" then return nil end
     local count = 0
@@ -228,10 +282,20 @@ local function dense_count(values)
     return count
 end
 
+-- Check the Lua integer subtype and the caller's inclusive lower bound.
+--@param value any Candidate value; floats and non-numeric values are rejected.
+--@param minimum integer Inclusive minimum accepted by this check.
+--@return boolean True only for an integer at least minimum.
 local function valid_integer(value, minimum)
     return math.type(value) == "integer" and value >= minimum
 end
 
+-- Require a Context object with no fields outside its schema.
+--@param value any Candidate object.
+--@param allowed table Set of admitted string keys.
+--@param path string Diagnostic Context path.
+--@return boolean|nil True for an exact-key object.
+--@return table|nil ContextSchema diagnostic.
 local function check_keys(value, allowed, path)
     if type(value) ~= "table" then
         return nil, failure("ContextSchema", "Context object is required", "type", path)
@@ -250,6 +314,13 @@ local function check_keys(value, allowed, path)
     return true
 end
 
+-- Admit bounded strict NUL-free UTF-8 as a Context text carrier.
+--@param value any Candidate field bytes.
+--@param maximum_bytes integer Inclusive field byte cap.
+--@param path string Diagnostic Context path.
+--@param empty boolean Whether empty text is allowed.
+--@return string|nil Original admitted text.
+--@return table|nil Schema, UTF-8, or limit error.
 local function strict_text(value, maximum_bytes, path, empty)
     if type(value) ~= "string" then
         return nil, failure("ContextSchema", "Context text must be bytes", "type", path)
@@ -272,6 +343,13 @@ local function strict_text(value, maximum_bytes, path, empty)
     return value
 end
 
+-- Admit structural text that survives XML 1.0 encoding losslessly.
+--@param value any Candidate field bytes.
+--@param maximum_bytes integer Inclusive byte cap.
+--@param path string Diagnostic Context path.
+--@param empty boolean Whether empty text is allowed.
+--@return string|nil Admitted XML text.
+--@return table|nil Text or XML compatibility error.
 local function xml_text(value, maximum_bytes, path, empty)
     local admitted, admitted_error = strict_text(value, maximum_bytes, path, empty)
     if not admitted then return nil, admitted_error end
@@ -286,6 +364,13 @@ local function xml_text(value, maximum_bytes, path, empty)
     return value
 end
 
+-- Admit XML attribute text without normalized whitespace controls.
+--@param value any Candidate attribute value.
+--@param maximum_bytes integer Inclusive byte cap.
+--@param path string Diagnostic Context path.
+--@param empty boolean Whether empty text is allowed.
+--@return string|nil Admitted attribute value.
+--@return table|nil Text or attribute-control error.
 local function attribute_text(value, maximum_bytes, path, empty)
     local admitted, admitted_error = xml_text(value, maximum_bytes, path, empty)
     if not admitted then return nil, admitted_error end
@@ -300,6 +385,12 @@ local function attribute_text(value, maximum_bytes, path, empty)
     return value
 end
 
+-- Parse a canonical nonnegative decimal within Lua's exact integer range.
+--@param value any Candidate decimal text.
+--@param minimum integer Inclusive accepted lower bound.
+--@param path string Diagnostic Context path.
+--@return integer|nil Parsed value.
+--@return table|nil Schema or integer-limit error.
 local function canonical_decimal(value, minimum, path)
     if type(value) ~= "string" or not value:match("^[0-9]+$")
         or (#value > 1 and value:sub(1, 1) == "0")
@@ -317,10 +408,18 @@ local function canonical_decimal(value, minimum, path)
     return number
 end
 
+-- Apply Gregorian leap-year rules for Context UTC fields.
+--@param year integer Calendar year.
+--@return boolean True for a leap year.
 local function leap_year(year)
     return year % 4 == 0 and (year % 100 ~= 0 or year % 400 == 0)
 end
 
+-- Validate an exact UTC timestamp and its Gregorian calendar date.
+--@param value any Candidate YYYY-MM-DDTHH:MM:SSZ text.
+--@param path string Diagnostic Context path.
+--@return string|nil Original canonical timestamp.
+--@return table|nil ContextSchema time/date diagnostic.
 local function canonical_time(value, path)
     if type(value) ~= "string" then
         return nil, failure("ContextSchema", "Context time must be text", "time", path)
@@ -342,12 +441,20 @@ local function canonical_time(value, path)
     return value
 end
 
+-- Copy the contiguous array prefix while retaining element references.
+--@param values table Sequence copied with ipairs.
+--@return table New sequence containing the original element values through the first hole.
+--@ownership Copies the outer table only; nested objects retain their original owners.
 local function copy_array(values)
     local copied = {}
     for index, value in ipairs(values) do copied[index] = value end
     return copied
 end
 
+-- Admit XML, safety, and hard Context schema limits as one dependency set.
+--@param options any Candidate schema dependencies and limits.
+--@return table|nil Validated dependency record.
+--@return table|nil InvalidContextOptions diagnostic.
 local function validate_dependency(options)
     if type(options) ~= "table" then
         return nil, failure("InvalidContextOptions", "Context dependencies and limits are required")
@@ -416,6 +523,11 @@ local function validate_dependency(options)
     }
 end
 
+-- Validate Context header name, chronological UTC times, and naming waterlines.
+--@param candidate table Candidate header fields.
+--@param admitted table Schema limits and dependencies.
+--@return table|nil Normalized header.
+--@return table|nil Schema or limit error.
 local function normalize_header(candidate, admitted)
     local valid, valid_error = check_keys(candidate, {
         name = true,
@@ -494,6 +606,12 @@ local function normalize_header(candidate, admitted)
     }
 end
 
+-- Validate a Model or Permission selector with its exact snapshot digest.
+--@param candidate table Candidate selector record.
+--@param admitted table Schema limits.
+--@param path string Diagnostic Context path.
+--@return table|nil Normalized name/digest selector.
+--@return table|nil Schema or text error.
 local function normalize_selector(candidate, admitted, path)
     local valid, valid_error = check_keys(candidate, {
         name = true, snapshot_digest = true,
@@ -516,6 +634,11 @@ local function normalize_selector(candidate, admitted, path)
     return { name = name, snapshot_digest = digest }
 end
 
+-- Normalize durable Session selectors, overrides, and ContextPrompt.
+--@param candidate table Candidate Session element.
+--@param admitted table Schema limits.
+--@return table|nil Normalized Session record.
+--@return table|nil Schema, text, or limit error.
 local function normalize_session(candidate, admitted)
     local valid, valid_error = check_keys(candidate, {
         current_model = true,
@@ -593,6 +716,12 @@ local function normalize_session(candidate, admitted)
     }
 end
 
+-- Classify a Fact field as XML text or Base64 with exact raw-byte metadata.
+--@param value any Candidate field bytes.
+--@param admitted table XML and safety services with byte caps.
+--@param path string Diagnostic field path.
+--@return table|nil Carrier, representation, raw size, and optional digest.
+--@return table|nil Schema, carrier, limit, or digest error.
 local function field_metadata(value, admitted, path)
     if type(value) ~= "string" then
         return nil, failure("ContextSchema", "Event fields must contain bytes", "type", path)
@@ -623,6 +752,12 @@ local function field_metadata(value, admitted, path)
     }
 end
 
+-- Validate one Fact's event schema, exact sequence, typed fields, and carrier.
+--@param candidate table Candidate Context Fact event.
+--@param expected_seq integer Required one-based durable sequence.
+--@param admitted table Schema, XML, and safety limits.
+--@return table|nil Normalized event and field metadata.
+--@return table|nil Schema, sequence, relation, or limit error.
 local function normalize_event(candidate, expected_seq, admitted)
     local path = "/YacaContext/Facts/Event[" .. tostring(expected_seq) .. "]"
     local valid, valid_error = check_keys(candidate, {
@@ -817,7 +952,7 @@ local function normalize_event(candidate, expected_seq, admitted)
         )
     end
     if candidate.type == "turn_started"
-        and fields.kind ~= "main" and fields.kind ~= "side"
+        and fields.kind ~= "main" and fields.kind ~= "ask"
     then
         return nil, failure("ContextSchema", "turn kind is invalid", "enum", path)
     end
@@ -885,6 +1020,11 @@ local function normalize_event(candidate, expected_seq, admitted)
     }
 end
 
+-- Describe a Context relation that points to an absent or later identifier.
+--@param kind string Referenced entity kind.
+--@param identifier string Missing identifier.
+--@param path string Failing Fact path.
+--@return table ContextRelation diagnostic.
 local function reference_error(kind, identifier, path)
     return failure(
         "ContextRelation",
@@ -895,6 +1035,13 @@ local function reference_error(kind, identifier, path)
     )
 end
 
+-- Admit an identifier once within its Context relation namespace.
+--@param registry table Mutable set of previously seen identifiers.
+--@param identifier string Candidate local identifier.
+--@param kind string Entity label for duplicate diagnostics.
+--@param path string Failing Fact path.
+--@return boolean|nil True after first admission.
+--@return table|nil Duplicate ContextRelation error.
 local function unique_id(registry, identifier, kind, path)
     if registry[identifier] then
         return nil, failure(
@@ -909,6 +1056,10 @@ local function unique_id(registry, identifier, kind, path)
     return true
 end
 
+-- Validate ordered Fact references and derive crash-recovery waterlines.
+--@param events table Chronological normalized Context events.
+--@return table|nil Recovery IDs, pending lifecycles, counters, and active queue/view facts.
+--@return table|nil ContextRelation diagnostic for duplicate or out-of-order facts.
 local function validate_relations(events)
     local requests, messages, tool_calls, operations = {}, {}, {}, {}
     local approvals, reviews, compactions, turns = {}, {}, {}, {}
@@ -933,9 +1084,14 @@ local function validate_relations(events)
         operation = 0,
         queue = 0,
         queue_display = 0,
-        side = 0,
+        ask = 0,
     }
 
+    -- Raise a recovered Runtime ID counter from one canonical identifier.
+    --@param name string Counter field to update.
+    --@param identifier string|nil Candidate Runtime identity.
+    --@param pattern string Anchored serial capture pattern.
+    --@return nil Updates the maximum observed serial in place.
     local function observe_runtime_serial(name, identifier, pattern)
         local serial = type(identifier) == "string" and identifier:match(pattern)
         serial = tonumber(serial)
@@ -944,9 +1100,13 @@ local function validate_relations(events)
         end
     end
 
+    -- Observe every Runtime-owned serial represented by one Fact.
+    --@param item table Normalized Context event.
+    --@param fields table Its normalized field map.
+    --@return nil Advances only the matching recovered counters.
     local function observe_runtime_identities(item, fields)
         observe_runtime_serial("turn", item.turn_id, "^turn%-([1-9][0-9]*)$")
-        observe_runtime_serial("side", item.turn_id, "^side%-([1-9][0-9]*)$")
+        observe_runtime_serial("ask", item.turn_id, "^ask%-([1-9][0-9]*)$")
         observe_runtime_serial(
             "message",
             fields.messageId,
@@ -977,9 +1137,12 @@ local function validate_relations(events)
             fields.displayId,
             "^#([1-9][0-9]*)$"
         )
-        observe_runtime_serial("side", fields.sideId, "^side%-([1-9][0-9]*)$")
+        observe_runtime_serial("ask", fields.askId, "^ask%-([1-9][0-9]*)$")
     end
 
+    -- Raise the recovered compaction serial from a canonical compaction ID.
+    --@param identifier string|nil Candidate compaction ID.
+    --@return nil Updates the maximum observed compaction serial.
     local function observe_compaction_serial(identifier)
         local serial = type(identifier) == "string"
             and identifier:match("^compaction%-([1-9][0-9]*)$")
@@ -1021,8 +1184,8 @@ local function validate_relations(events)
             local ok, id_error = unique_id(messages, fields.messageId, "message", path)
             if not ok then return nil, id_error end
         elseif item.type == "queue_item" then
-            if fields.sideId and turn_kinds[fields.sideId] ~= "side" then
-                return nil, reference_error("side turn", fields.sideId, path)
+            if fields.askId and turn_kinds[fields.askId] ~= "ask" then
+                return nil, reference_error("ask turn", fields.askId, path)
             end
             local prior = queue_items[fields.queueItemId]
             if fields.action == "enqueue" then
@@ -1261,8 +1424,8 @@ local function validate_relations(events)
             if not turns[fields.targetTurnId] then
                 return nil, reference_error("turn", fields.targetTurnId, path)
             end
-            if fields.sideId and turn_kinds[fields.sideId] ~= "side" then
-                return nil, reference_error("side turn", fields.sideId, path)
+            if fields.askId and turn_kinds[fields.askId] ~= "ask" then
+                return nil, reference_error("ask turn", fields.askId, path)
             end
             local ok, id_error = unique_id(messages, fields.messageId, "message", path)
             if not ok then return nil, id_error end
@@ -1478,7 +1641,12 @@ local function validate_relations(events)
             }
         end
     end
-    table.sort(pending_compactions, function(left, right)
+    table.sort(pending_compactions,
+        -- Reopen pending compactions in their durable request order.
+        --@param left table Pending lifecycle.
+        --@param right table Pending lifecycle.
+        --@return boolean True when left was requested earlier.
+        function(left, right)
         return left.request_sequence < right.request_sequence
     end)
     local legacy_pending_compaction_request_ids = {}
@@ -1511,6 +1679,12 @@ local function validate_relations(events)
     }
 end
 
+-- Validate an active Model view manifest against the available Fact count.
+--@param candidate table Candidate digest, range, and compaction identity.
+--@param admitted table Schema text limits.
+--@param event_count integer Number of durable Facts.
+--@return table|nil Normalized manifest.
+--@return table|nil Schema, range, or text error.
 local function normalize_manifest(candidate, admitted, event_count)
     local path = "/YacaContext/ModelView/ActiveManifest"
     local valid, valid_error = check_keys(candidate, {
@@ -1546,7 +1720,10 @@ local function normalize_manifest(candidate, admitted, event_count)
         )
         if not compaction_id then return nil, digest_error end
     end
-    local current = (event_count == 0 and first == 0 and last == 0)
+    -- A published empty prefix remains a valid view when the first Ask
+    -- appends its admission facts. Like any earlier nonempty prefix, it is
+    -- retained until an explicit model_view_published event advances it.
+    local current = (first == 0 and last == 0 and compaction_id == nil)
         or (event_count > 0 and first >= 1 and first <= last and last <= event_count)
     return {
         digest = digest,
@@ -1556,6 +1733,13 @@ local function normalize_manifest(candidate, admitted, event_count)
     }, current
 end
 
+-- Validate active manifest and compaction records against terminal Facts.
+--@param candidate table Candidate ModelView element.
+--@param admitted table Schema text and count limits.
+--@param events table Normalized chronological Facts.
+--@param relations table Derived publication and compaction relations.
+--@return table|nil Normalized ModelView.
+--@return boolean|table Whether view is current, or structured error on failure.
 local function normalize_model_view(candidate, admitted, events, relations)
     local valid, valid_error = check_keys(candidate, {
         active_manifest = true, compaction_records = true,
@@ -1708,6 +1892,9 @@ local function normalize_model_view(candidate, admitted, events, relations)
     }, range_current and published_current
 end
 
+-- Remove private XML carrier objects from a normalized Fact projection.
+--@param item table Internal normalized event and field metadata.
+--@return table Public event with representation, size, and digest metadata.
 local function public_event(item)
     local metadata = {}
     for name, info in pairs(item.field_metadata) do
@@ -1728,6 +1915,10 @@ local function public_event(item)
     }
 end
 
+-- Freeze a canonical Context document and retain its private normalized state.
+--@param canonical table Internal validated Context state.
+--@return table|nil Public immutable document facade.
+--@return table|nil Freeze error.
 local function create_document(canonical)
     local public_events = {}
     for index, item in ipairs(canonical.events) do public_events[index] = public_event(item) end
@@ -1748,6 +1939,11 @@ local function create_document(canonical)
     return frozen
 end
 
+-- Validate a full Context document and derive its safe recovery state.
+--@param candidate table Candidate Context structure.
+--@param admitted table Schema dependencies and hard limits.
+--@return table|nil Immutable canonical Context document.
+--@return table|nil Schema, relation, view, or limit error.
 local function normalize_document(candidate, admitted)
     local valid, valid_error = check_keys(candidate, {
         schema_version = true,
@@ -1838,7 +2034,7 @@ local function normalize_document(candidate, admitted)
             operation = relations.runtime_initial_serials.operation,
             queue = relations.runtime_initial_serials.queue,
             queue_display = relations.runtime_initial_serials.queue_display,
-            side = relations.runtime_initial_serials.side,
+            ask = relations.runtime_initial_serials.ask,
         },
         auto_continue = view_current
             and #relations.unresolved_operations == 0
@@ -1860,16 +2056,33 @@ local function normalize_document(candidate, admitted)
     return create_document(canonical)
 end
 
+-- Build one XML attribute pair for the canonical writer.
+--@param name string Attribute name.
+--@param value string Attribute value.
+--@return table Name/value writer argument.
 local function attr(name, value)
     return { name = name, value = value }
 end
 
+-- Forward a canonical XML writer method and preserve its typed failure.
+--@param writer table Bounded XML writer.
+--@param method string Writer method name.
+--@param ... any Method-specific arguments.
+--@return boolean|nil True after the method succeeds.
+--@return table|nil XML writer error.
 local function writer_call(writer, method, ...)
     local accepted, writer_error = writer[method](...)
     if not accepted then return nil, writer_error end
     return true
 end
 
+-- Write one complete XML leaf with optional attributes and text carrier.
+--@param writer table Bounded XML writer.
+--@param name string Element name.
+--@param value string|nil Text content.
+--@param attributes table|nil Ordered attribute pairs.
+--@return boolean|nil True after closing the leaf.
+--@return table|nil XML writer error.
 local function write_leaf(writer, name, value, attributes)
     local accepted, write_error = writer_call(writer, "start_element", name, attributes)
     if not accepted then return nil, write_error end
@@ -1880,6 +2093,13 @@ local function write_leaf(writer, name, value, attributes)
     return writer_call(writer, "end_element", name)
 end
 
+-- Stream one canonical Context document through the bounded XML writer.
+--@param codec table XML codec providing new_writer.
+--@param canonical table Private normalized Context state.
+--@param sink function XML byte sink.
+--@return boolean|nil True after writing a complete document.
+--@return table|nil Writer or sink error.
+--@effect Emits XML bytes to the caller's sink.
 local function write_document(codec, canonical, sink)
     local writer, writer_error = codec.new_writer(sink)
     if not writer then return nil, writer_error end
@@ -2052,6 +2272,13 @@ local function write_document(codec, canonical, sink)
     return writer.finish()
 end
 
+-- Require exact XML attributes and copy them before semantic parsing.
+--@param attributes table Parsed attribute map.
+--@param required table Ordered required attribute names.
+--@param optional table|nil Optional attribute names.
+--@param path string Diagnostic element path.
+--@return table|nil Copied admitted attributes.
+--@return table|nil Missing or unknown attribute diagnostic.
 local function exact_attributes(attributes, required, optional, path)
     local allowed, copied = {}, {}
     for _, name in ipairs(required) do allowed[name] = true end
@@ -2107,6 +2334,13 @@ local SESSION_RANK = {
     ContextPrompt = 5,
 }
 
+-- Parse complete Context XML or a bounded stream into a candidate structure.
+--@param codec table XML parser and carrier decoder.
+--@param safety_service table Raw digest service for binary fields.
+--@param source string|function XML bytes or next-chunk callback.
+--@param admitted table Context schema limits.
+--@return table|nil Parsed candidate structure.
+--@return table|nil Parser statistics on success, or semantic/stream error on failure.
 local function read_candidate(codec, safety_service, source, admitted)
     local candidate = {
         header = {},
@@ -2118,15 +2352,28 @@ local function read_candidate(codec, safety_service, source, admitted)
     local semantic_error
     local root_stage, header_stage, session_stage, model_stage = 0, 0, 0, 0
 
+    -- Latch the first semantic XML error for parser callback propagation.
+    --@param error_value table Structured Context error.
+    --@return boolean False to stop parsing.
+    --@return string Diagnostic message for the XML parser.
     local function reject(error_value)
         semantic_error = semantic_error or error_value
         return false, error_value.message
     end
 
+    -- Peek at the current XML element frame.
+    --@param none This parser closure takes no arguments.
+    --@return table|nil Top frame, or nil outside the root.
     local function parent()
         return frames[#frames]
     end
 
+    -- Admit an XML start tag in canonical section and child order.
+    --@param name string Element name.
+    --@param attributes table Parsed attribute map.
+    --@param path string XML diagnostic path.
+    --@return boolean Accepted start-tag status.
+    --@return string|nil Rejection message.
     local function start_element(name, attributes, path)
         if semantic_error then return false, semantic_error.message end
         local parent_frame = parent()
@@ -2317,6 +2564,11 @@ local function read_candidate(codec, safety_service, source, admitted)
         return true
     end
 
+    -- Collect leaf text and reject non-whitespace container content.
+    --@param value string Parsed XML text fragment.
+    --@param path string XML diagnostic path.
+    --@return boolean Accepted text status.
+    --@return string|nil Rejection message.
     local function character_data(value, path)
         if semantic_error then return false, semantic_error.message end
         local frame = parent()
@@ -2339,6 +2591,11 @@ local function read_candidate(codec, safety_service, source, admitted)
         return true
     end
 
+    -- Finish one XML element and assign its canonical candidate field.
+    --@param name string Closing element name.
+    --@param path string XML diagnostic path.
+    --@return boolean Accepted closing-tag status.
+    --@return string|nil Rejection message.
     local function end_element(name, path)
         if semantic_error then return false, semantic_error.message end
         local frame = frames[#frames]
@@ -2602,6 +2859,12 @@ local function read_candidate(codec, safety_service, source, admitted)
     return candidate, stats
 end
 
+-- Parse only the Context root and Header from a bounded input stream.
+--@param codec table XML incremental reader.
+--@param source function Next-chunk callback.
+--@param admitted table Header and XML limits.
+--@return table|nil Parsed header candidate without reading the full body.
+--@return table|nil Stream/parser error.
 local function read_header_candidate(codec, source, admitted)
     if type(source) ~= "function" then
         return nil, failure("InvalidContextInput", "Context header stream is required")
@@ -2614,15 +2877,28 @@ local function read_header_candidate(codec, source, admitted)
     local header_stage = 0
     local bytes_read = 0
 
+    -- Latch the first header semantic error for XML reader propagation.
+    --@param error_value table Structured header error.
+    --@return boolean False to stop parsing.
+    --@return string Diagnostic message.
     local function reject(error_value)
         semantic_error = semantic_error or error_value
         return false, error_value.message
     end
 
+    -- Peek at the current header XML frame.
+    --@param none This header parser closure takes no arguments.
+    --@return table|nil Top frame, or nil before root.
     local function parent()
         return frames[#frames]
     end
 
+    -- Admit only the root, first Header, and ordered Header leaves.
+    --@param name string Element name.
+    --@param attributes table Parsed attribute map.
+    --@param path string XML diagnostic path.
+    --@return boolean Accepted start-tag status.
+    --@return string|nil Rejection message.
     local function start_element(name, attributes, path)
         if completed then return true end
         if semantic_error then return false, semantic_error.message end
@@ -2694,6 +2970,11 @@ local function read_header_candidate(codec, source, admitted)
         return true
     end
 
+    -- Collect Header leaf text and reject non-whitespace container data.
+    --@param value string Parsed XML text fragment.
+    --@param path string XML diagnostic path.
+    --@return boolean Accepted text status.
+    --@return string|nil Rejection message.
     local function character_data(value, path)
         if completed then return true end
         if semantic_error then return false, semantic_error.message end
@@ -2722,6 +3003,11 @@ local function read_header_candidate(codec, source, admitted)
         return true
     end
 
+    -- Finish a Header leaf or stop after the complete Header closes.
+    --@param name string Closing element name.
+    --@param path string XML diagnostic path.
+    --@return boolean Accepted closing-tag status.
+    --@return string|nil Rejection message.
     local function end_element(name, path)
         if completed then return true end
         if semantic_error then return false, semantic_error.message end
@@ -2853,6 +3139,10 @@ local function read_header_candidate(codec, source, admitted)
     }, "Context catalog header statistics")
 end
 
+-- Render arbitrary Context text visibly inside a single Markdown code span.
+--@param value string Source bytes for lossy display.
+--@return string|nil Escaped one-line code span.
+--@return table|nil Display conversion error.
 local function markdown_code(value)
     local visible, visible_error = text.display_lossy(value, {
         ascii_only = false,
@@ -2868,6 +3158,10 @@ end
 
 -- Checks decoded values before escaping or Base64 can hide a registered secret.
 -- Canonical documents are bounded, acyclic tables produced by schema validation.
+--@param value any Canonical document subtree, including map keys.
+--@param scan function Current config secret scanner.
+--@return boolean|nil True when no registered secret is present.
+--@return table|nil Secret or scanner error.
 local function scan_export_value(value, scan)
     if type(value) == "table" then
         for key, item in pairs(value) do
@@ -2888,12 +3182,23 @@ local function scan_export_value(value, scan)
     return true
 end
 
+-- Emit a bounded Markdown export of verified Context data.
+--@param canonical table Private normalized Context document.
+--@param admitted table Export byte cap and schema options.
+--@param sink function|nil Optional streaming sink; nil buffers output.
+--@return string|boolean|nil Export text or successful streaming marker.
+--@return table|nil Rendering, limit, or sink error.
+--@effect Writes to the caller's sink when supplied.
 local function export_document(canonical, admitted, sink)
     if sink ~= nil and type(sink) ~= "function" then
         return nil, failure("InvalidContextExport", "Context export sink must be a function")
     end
     local output = sink == nil and {} or nil
     local bytes_written = 0
+    -- Write one Markdown fragment while preserving the export byte cap.
+    --@param bytes string Export fragment.
+    --@return boolean|nil True after buffering or sink acceptance.
+    --@return table|nil Limit or uncertain sink error.
     local function emit(bytes)
         if bytes_written > admitted.maximum_export_bytes - #bytes then
             return nil, failure(
@@ -2929,6 +3234,11 @@ local function export_document(canonical, admitted, sink)
         bytes_written = bytes_written + #bytes
         return true
     end
+    -- Render one labeled export field as a safe Markdown line.
+    --@param label string Human-readable field label.
+    --@param value string Field bytes to display.
+    --@return boolean|nil True after emission.
+    --@return table|nil Display or sink error.
     local function line(label, value)
         local rendered, render_error = markdown_code(value)
         if not rendered then return nil, render_error end
@@ -3052,6 +3362,11 @@ local function export_document(canonical, admitted, sink)
     return table.concat(output)
 end
 
+---Copies a Context candidate into mutable tables while rejecting cyclic values.
+--@param value any Value to copy recursively.
+--@param visiting table|nil Ancestor set shared by recursive calls.
+--@return any|nil Copied value, or nil when a cycle is found.
+--@return table|nil err Structured cycle failure.
 local function mutable_copy(value, visiting)
     if type(value) ~= "table" then return value end
     visiting = visiting or {}
@@ -3072,6 +3387,10 @@ local function mutable_copy(value, visiting)
     return copied
 end
 
+---Reconstructs an editable candidate from a canonical lifecycle document.
+--@param document table Immutable document issued by this schema service.
+--@return table|nil candidate Mutable candidate retaining every durable Fact.
+--@return table|nil canonical_or_error Original canonical state or structured failure.
 local function lifecycle_candidate(document)
     local canonical = document_states[document]
     if not canonical then
@@ -3102,6 +3421,12 @@ local function lifecycle_candidate(document)
     return candidate, canonical
 end
 
+---Appends a validated Agent event batch and its prepared view publication.
+--@param document table Current immutable Context document.
+--@param mutation table Event batch, timestamp, and optional compaction record.
+--@param admitted table Validated schema dependencies and limits.
+--@return table|nil document Next canonical generation, or nil on failure.
+--@return table|nil err Structured mutation or validation failure.
 local function build_event_document(document, mutation, admitted)
     if type(mutation) ~= "table" then
         return nil, failure("InvalidEventMutation", "Context event mutation is required")
@@ -3264,6 +3589,12 @@ local SESSION_OVERRIDE_NAMES = {
     ContextPrompt = true,
 }
 
+---Applies one typed Session override with its audit Fact and view update.
+--@param document table Current immutable Context document.
+--@param mutation table Validated override input and prepared view metadata.
+--@param admitted table Validated schema dependencies and limits.
+--@return table|nil document Next canonical generation, or nil on failure.
+--@return table|nil err Structured mutation or validation failure.
 local function build_session_document(document, mutation, admitted)
     if type(mutation) ~= "table" then
         return nil, failure("InvalidSessionMutation", "typed session mutation is required")
@@ -3525,6 +3856,11 @@ local LIFECYCLE_FIELDS = {
     },
 }
 
+---Changes lifecycle fields and builds the corresponding durable Fact payload.
+--@param candidate table Mutable canonical candidate to update.
+--@param mutation table Typed lifecycle input.
+--@return string|nil event_type Lifecycle Fact type, or nil on failure.
+--@return table fields_or_error Fact fields or structured mutation failure.
 local function lifecycle_event(candidate, mutation)
     local kind = mutation.kind
     if kind == "rename" then
@@ -3629,6 +3965,12 @@ local function lifecycle_event(candidate, mutation)
     return nil, failure("InvalidLifecycleMutation", "Context lifecycle kind is unknown")
 end
 
+---Builds a new Context generation for a lifecycle mutation and view publication.
+--@param document table Current immutable Context document.
+--@param mutation table Typed lifecycle input and prepared view metadata.
+--@param admitted table Validated schema dependencies and limits.
+--@return table|nil document Next canonical generation, or nil on failure.
+--@return table|nil err Structured mutation or validation failure.
 local function build_lifecycle_document(document, mutation, admitted)
     if type(mutation) ~= "table" or type(mutation.kind) ~= "string" then
         return nil, failure("InvalidLifecycleMutation", "typed lifecycle mutation is required")
@@ -3732,27 +4074,38 @@ end
 ---Creates the internal v0.1 Context document service.
 -- The XML codec and SHA-256 service are injected from the release loader. All
 -- dimensions are mandatory release limits; callers cannot disable them.
--- @param options table Bounded XML/safety services and Context hard limits.
--- @return table|nil service Immutable Context schema service.
--- @return table|nil err Structured dependency or limit failure.
+--@param options table Bounded XML/safety services and Context hard limits.
+--@return table|nil service Immutable Context schema service.
+--@return table|nil err Structured dependency or limit failure.
 function M.new(options)
     local admitted, options_error = validate_dependency(options)
     if not admitted then return nil, options_error end
     local service = {}
 
     ---Validates and freezes one semantic Context candidate.
+    --@param candidate table Untrusted semantic Context fields and Facts.
+    --@return table|nil document Immutable canonical Context document.
+    --@return table|nil err Structured schema failure.
     function service.build(candidate)
         return normalize_document(candidate, admitted)
     end
 
     ---Appends one already-sequenced durable Agent batch as a new full XML
     -- generation without rewriting prior Facts or changing the active view.
+    --@param document table Current immutable Context document.
+    --@param mutation table Sequenced Fact batch and prepared view metadata.
+    --@return table|nil document Next immutable Context generation.
+    --@return table|nil err Structured mutation or schema failure.
     function service.append_events(document, mutation)
         return build_event_document(document, mutation, admitted)
     end
 
     ---Builds one atomic Session override generation, its privacy-preserving
     -- audit event, and the matching already-prepared Model-view publication.
+    --@param document table Current immutable Context document.
+    --@param mutation table Typed Session override and prepared view metadata.
+    --@return table|nil document Next immutable Context generation.
+    --@return table|nil err Structured mutation or schema failure.
     function service.session_document(document, mutation)
         return build_session_document(document, mutation, admitted)
     end
@@ -3760,11 +4113,18 @@ function M.new(options)
     ---Builds one full lifecycle generation without rewriting durable Facts.
     -- Supported kinds are rename, rebind, import, repair,
     -- set_auto_rename_disabled, and resolve_operation.
+    --@param document table Current immutable Context document.
+    --@param mutation table Typed lifecycle change and prepared view metadata.
+    --@return table|nil document Next immutable Context generation.
+    --@return table|nil err Structured mutation or schema failure.
     function service.lifecycle_document(document, mutation)
         return build_lifecycle_document(document, mutation, admitted)
     end
 
     ---Reads one untrusted internal Context XML source through the bounded SAX codec.
+    --@param source string|table XML bytes or dense byte-chunk array.
+    --@return table|nil document Immutable validated Context document.
+    --@return table stats_or_error Parse statistics or structured failure.
     function service.read(source)
         if type(source) ~= "string" and type(source) ~= "table" then
             return nil, failure(
@@ -3787,6 +4147,9 @@ function M.new(options)
     ---Reads one untrusted Context from a bounded pull source without buffering XML bytes.
     -- The callback returns `true, {bytes=string, eof=boolean}` or
     -- `false, structured_error` on every invocation.
+    --@param next_chunk function Pull callback yielding bounded XML chunks.
+    --@return table|nil document Immutable validated Context document.
+    --@return table stats_or_error Parse statistics or structured failure.
     function service.read_stream(next_chunk)
         if type(next_chunk) ~= "function" then
             return nil, failure("InvalidContextInput", "Context stream callback is required")
@@ -3806,11 +4169,18 @@ function M.new(options)
     ---Reads only the bounded canonical Header prefix of one Context stream.
     -- The pull source is not called again after `</Header>` is observed. Full
     -- document validation remains the responsibility of normal Context open.
+    --@param next_chunk function Pull callback yielding bounded XML chunks.
+    --@return table|nil header Canonical Context Header on success.
+    --@return table|nil err Structured parse or schema failure.
     function service.read_header_stream(next_chunk)
         return read_header_candidate(admitted.codec, next_chunk, admitted)
     end
 
     ---Streams deterministic internal XML for a document with a current ModelView.
+    --@param document table Immutable canonical Context document.
+    --@param sink function Consumer of each deterministic XML byte chunk.
+    --@return table|nil stats Written byte and event counts.
+    --@return table|nil err Structured validation, codec, or sink failure.
     function service.write(document, sink)
         local canonical = document_states[document]
         if not canonical then
@@ -3829,8 +4199,14 @@ function M.new(options)
     end
 
     ---Returns deterministic internal XML bytes without exposing a filesystem path.
+    --@param document table Immutable canonical Context document.
+    --@return string|nil bytes Serialized XML, or nil on failure.
+    --@return table stats_or_error Write statistics or structured failure.
     function service.encode(document)
         local parts = {}
+        ---Collects one XML chunk for the in-memory encoding result.
+        --@param bytes string Encoded XML chunk.
+        --@return boolean accepted Always true for this local collector.
         local stats, encode_error = service.write(document, function(bytes)
             parts[#parts + 1] = bytes
             return true
@@ -3842,11 +4218,11 @@ function M.new(options)
     ---Projects a bounded Markdown transfer view from canonical Facts.
     -- An optional secret scanner checks decoded data before any sink output.
     -- Without a sink, the complete rendered bytes are checked before return too.
-    -- @param document table Validated immutable Context document.
-    -- @param sink function|nil Optional streaming output; failures may be partial.
-    -- @param secret_scan function|nil Current ConfigGeneration secret scanner.
-    -- @return string|table|nil Markdown bytes, sink statistics, or nil on failure.
-    -- @return table|nil err Structured validation, secret, limit, or sink failure.
+    --@param document table Validated immutable Context document.
+    --@param sink function|nil Optional streaming output; failures may be partial.
+    --@param secret_scan function|nil Current ConfigGeneration secret scanner.
+    --@return string|table|nil Markdown bytes, sink statistics, or nil on failure.
+    --@return table|nil err Structured validation, secret, limit, or sink failure.
     function service.export(document, sink, secret_scan)
         local canonical = document_states[document]
         if not canonical then
@@ -3872,6 +4248,9 @@ function M.new(options)
     end
 
     ---Returns the fixed required/optional payload names for one event type.
+    --@param event_type string Context Fact type identifier.
+    --@return table|nil schema Immutable field definition for the Fact type.
+    --@return table|nil err Structured unknown-type failure.
     function service.event_schema(event_type)
         local definition = EVENT_BY_ID[event_type]
         if not definition then
@@ -3908,6 +4287,11 @@ end
 -- operation_result and tool_result in the same generation, so a result cannot
 -- become visible to the next model request without closing both relations.
 -- The caller still publishes the returned full document through new_store.
+--@param document table Current immutable Context document.
+--@param mutation table Typed begin or finish operation record.
+--@param admitted table Validated schema dependencies and limits.
+--@return table|nil document Next immutable Context generation.
+--@return table|nil err Structured mutation or schema failure.
 local function build_operation_document(document, mutation, admitted)
     if type(mutation) ~= "table" or type(mutation.kind) ~= "string" then
         return nil, failure("InvalidOperationMutation", "typed operation mutation is required")
@@ -4067,6 +4451,11 @@ local function build_operation_document(document, mutation, admitted)
 end
 
 ---Builds a full canonical operation generation for a schema service.
+--@param schema table Context schema service issued by this module.
+--@param document table Current immutable Context document.
+--@param mutation table Typed operation begin or finish record.
+--@return table|nil document Next immutable Context generation.
+--@return table|nil err Structured dependency or mutation failure.
 function M.operation_document(schema, document, mutation)
     local admitted = schema_service_states[schema]
     if not admitted then
@@ -4082,6 +4471,10 @@ end
 -- The journal must acknowledge the exact binding digest supplied with each
 -- commit.  A result-commit ambiguity permanently blocks new effects in this
 -- service instance; recovery data is audit-only and is never replayed.
+--@param ports table Safety digest/freezer and durable journal ports.
+--@param options table Identifier/evidence limits and unresolved operation IDs.
+--@return table|nil service Read-only operation barrier service.
+--@return table|nil err Structured dependency or option failure.
 function M.new_operation_service(ports, options)
     if type(ports) ~= "table"
         or type(ports.safety) ~= "table"
@@ -4120,6 +4513,11 @@ function M.new_operation_service(ports, options)
         return nil, failure("InvalidOperationOptions", "operation limits must be positive")
     end
 
+    ---Checks bounded UTF-8 journal text and its empty-value policy.
+    --@param value any Candidate journal text.
+    --@param maximum integer Maximum encoded byte count.
+    --@param empty boolean Whether an empty string is permitted.
+    --@return boolean valid Whether the text satisfies journal limits.
     local function valid_string(value, maximum, empty)
         return type(value) == "string"
             and (empty or value ~= "")
@@ -4127,6 +4525,9 @@ function M.new_operation_service(ports, options)
             and not value:find("\0", 1, true)
             and text.validate_utf8(value) == true
     end
+    ---Checks a bounded operation or tool-call identifier.
+    --@param value any Candidate identifier.
+    --@return boolean valid Whether the identifier is canonical.
     local function valid_id(value)
         return valid_string(value, options.maximum_identifier_bytes, false)
             and value:match("^[A-Za-z0-9][A-Za-z0-9._:-]*$") ~= nil
@@ -4146,11 +4547,19 @@ function M.new_operation_service(ports, options)
         recovery_ids[index] = operation_id
     end
 
+    --@metatable operation_states Associates durable operation handles with their private generation and outcome state.
+    --@field __mode string Fixed k mode: keys are weak; entries remain mutable within their owning module.
     local operation_states = setmetatable({}, { __mode = "k" })
     local active
     local blocked = unresolved_count > 0
     local service = {}
 
+    ---Commits a journal record and requires acknowledgement of its exact digest.
+    --@param method string Journal commit port name.
+    --@param record table Immutable intent or result record.
+    --@param digest_value string Binding digest to acknowledge.
+    --@return boolean|nil committed True only after exact durable acknowledgement.
+    --@return table|nil err Structured journal failure.
     local function journal_commit(method, record, digest_value)
         local called, ok, receipt = pcall(
             ports.journal[method],
@@ -4172,6 +4581,10 @@ function M.new_operation_service(ports, options)
         return true
     end
 
+    ---Records an operation intent before its external effect is allowed.
+    --@param intent table Operation identity, tool call, target, and expected digest.
+    --@return table|nil handle Opaque active-operation handle.
+    --@return string|table digest_or_error Intent digest or structured failure.
     function service.begin(intent)
         if blocked then
             return nil, failure(
@@ -4254,6 +4667,11 @@ function M.new_operation_service(ports, options)
         return handle, digest_value
     end
 
+    ---Records the matching result before another external effect is allowed.
+    --@param handle table Opaque handle returned by begin.
+    --@param result table Observed effect and tool result evidence.
+    --@return string|nil digest Committed result binding digest.
+    --@return table|nil err Structured validation or durability failure.
     function service.finish(handle, result)
         local state = operation_states[handle]
         if not state or state ~= active or state.finished then
@@ -4338,6 +4756,9 @@ function M.new_operation_service(ports, options)
         return digest_value
     end
 
+    ---Reports current barrier and unresolved operation state without replaying effects.
+    --@param none No arguments.
+    --@return table status Immutable barrier state snapshot.
     function service.status()
         return assert(ports.safety.freeze({
             blocked = blocked,
@@ -4375,6 +4796,9 @@ local STORE_FILESYSTEM_METHODS = {
     "release_lease",
 }
 
+---Checks an absolute Context path without dot segments or NUL bytes.
+--@param value any Candidate physical path.
+--@return boolean valid Whether the path is absolute and canonical enough for storage.
 local function valid_absolute_path(value)
     if type(value) ~= "string" or value == "" or value:find("\0", 1, true) then
         return false
@@ -4390,6 +4814,9 @@ local function valid_absolute_path(value)
     return true
 end
 
+---Extracts the parent directory while preserving the host path separator.
+--@param path string Candidate physical path.
+--@return string|nil directory Parent directory, or nil for an invalid path.
 local function directory_of(path)
     if type(path) ~= "string" then return nil end
     local separator
@@ -4406,18 +4833,29 @@ local function directory_of(path)
     return path:sub(1, separator - 1)
 end
 
+---Extracts the final path component across slash styles.
+--@param path string Candidate physical path.
+--@return string|nil basename Final path component, or nil for invalid input.
 local function basename_of(path)
     if type(path) ~= "string" then return nil end
     local normalized = path:gsub("\\", "/")
     return normalized:match("([^/]+)$")
 end
 
+---Checks that two Context paths share the same textual parent directory.
+--@param left string First physical path.
+--@param right string Second physical path.
+--@return boolean same Whether both parents match after separator normalization.
 local function same_directory(left, right)
     local left_directory, right_directory = directory_of(left), directory_of(right)
     if not left_directory or not right_directory then return false end
     return left_directory:gsub("\\", "/") == right_directory:gsub("\\", "/")
 end
 
+---Compares the complete filesystem identity fields used by Context storage.
+--@param left table First observed file identity.
+--@param right table Second observed file identity.
+--@return boolean equal Whether kind, volume, object, size, and modification agree.
 local function identity_equal(left, right)
     if type(left) ~= "table" or type(right) ~= "table" then return false end
     for _, key in ipairs({ "kind", "volume", "object", "size", "modified" }) do
@@ -4426,6 +4864,11 @@ local function identity_equal(left, right)
     return true
 end
 
+---Compares nested immutable proposal values with cycle-safe pair tracking.
+--@param left any First value.
+--@param right any Second value.
+--@param visited table|nil Previously compared table pairs.
+--@return boolean equal Whether both structures contain equal keys and values.
 local function deep_equal(left, right, visited)
     if left == right then return true end
     if type(left) ~= type(right) or type(left) ~= "table" then return false end
@@ -4442,6 +4885,11 @@ local function deep_equal(left, right, visited)
     return true
 end
 
+---Validates an optional observed target credential before opening a writer.
+--@param credential table|nil Expected physical identity and Header fields.
+--@param path string Physical target path to bind.
+--@return boolean|nil valid True for an admissible credential.
+--@return table|nil err Structured credential failure.
 local function validate_target_credential(credential, path)
     if credential == nil then return true end
     if type(credential) ~= "table" then
@@ -4496,6 +4944,12 @@ local function validate_target_credential(credential, path)
     return true
 end
 
+---Matches a bound target credential to observed file and Context state.
+--@param credential table|nil Optional expected target state.
+--@param path string Observed physical path.
+--@param identity table Observed filesystem identity.
+--@param document table|nil Parsed Context document when available.
+--@return boolean matches Whether all supplied expectations still hold.
 local function credential_matches(credential, path, identity, document)
     if credential == nil then return true end
     if credential.physical_path ~= path
@@ -4523,6 +4977,11 @@ local function credential_matches(credential, path, identity, document)
     return true
 end
 
+---Checks Context store limits against the schema codec and reserve policy.
+--@param options table Candidate size, permission, and settlement limits.
+--@param schema_state table Validated schema state containing codec bounds.
+--@return table|nil limits Normalized store limits.
+--@return table|nil err Structured option failure.
 local function validate_store_options(options, schema_state)
     if type(options) ~= "table" then
         return nil, failure("InvalidContextStoreOptions", "Context store limits are required")
@@ -4533,6 +4992,7 @@ local function validate_store_options(options, schema_state)
         maximum_temp_nonce_bytes = true,
         context_permissions = true,
         lock_permissions = true,
+        settlement_reserve = true,
     }
     for key in pairs(options) do
         if type(key) ~= "string" or not allowed[key] then
@@ -4562,15 +5022,157 @@ local function validate_store_options(options, schema_state)
             "Context byte limit exceeds the XML codec limit"
         )
     end
+    local reserve = options.settlement_reserve
+    if reserve ~= nil then
+        if type(reserve) ~= "table" then
+            return nil, failure("InvalidContextStoreOptions", "settlement reserve must be a table")
+        end
+        for name, value in pairs(reserve) do
+            if name ~= "model_calls" and name ~= "model_bytes"
+                and name ~= "message_bytes" and name ~= "result_bytes"
+                or not valid_integer(value, 1)
+            then
+                return nil, failure("InvalidContextStoreOptions", "invalid settlement reserve")
+            end
+        end
+        for _, name in ipairs({ "model_calls", "model_bytes", "message_bytes", "result_bytes" }) do
+            if not valid_integer(reserve[name], 1)
+                or reserve[name] > schema_state.maximum_field_bytes
+            then
+                return nil, failure("InvalidContextStoreOptions", "settlement reserve exceeds schema")
+            end
+        end
+        reserve = assert(freeze(reserve, "Context settlement reserve"))
+    end
     return {
         maximum_context_bytes = options.maximum_context_bytes,
         maximum_lock_hostname_bytes = options.maximum_lock_hostname_bytes,
         maximum_temp_nonce_bytes = options.maximum_temp_nonce_bytes,
         context_permissions = options.context_permissions,
         lock_permissions = options.lock_permissions,
+        settlement_reserve = reserve,
     }
 end
 
+---Creates a capacity failure naming the exhausted publication dimension.
+--@param dimension string Exhausted byte, text, element, SAX, or Fact dimension.
+--@return table err Structured Context capacity failure.
+local function capacity_failure(dimension)
+    local error_value = failure("ContextCapacity",
+        "Context has no capacity for new work and its pending results; start a new Context",
+        dimension)
+    error_value.publication_started = false
+    return error_value
+end
+
+-- Space belongs to accepted obligations until their matching durable result.
+-- Estimate their worst XML expansion (six bytes per raw byte, or base64),
+-- including event/field markup. No reservation is an ephemeral runtime token:
+-- the same calculation works after reopening the durable Context.
+--@param schema_state table Validated codec and semantic limits.
+--@param canonical table Canonical Context generation being published.
+--@param limits table Store byte limit and optional settlement reserve.
+--@return boolean|nil fits True if publication and reserved settlement fit.
+--@return table|nil err Structured capacity or serialization failure.
+local function check_publication_capacity(schema_state, canonical, limits)
+    ---Counts serialized XML without retaining its output chunks.
+    --@param none No callback arguments are consumed.
+    --@return boolean accepted Always true for capacity accounting.
+    local stats, write_error = write_document(schema_state.codec, canonical, function() return true end)
+    if not stats then
+        if write_error and write_error.code == "XmlLimit" then
+            return nil, capacity_failure(write_error.reason or "xml")
+        end
+        return nil, write_error
+    end
+    local raw, events = 0, 0
+    local policy = limits.settlement_reserve
+    if policy then
+        local turns, requests, calls = {}, {}, {}
+        for _, event in ipairs(canonical.events) do
+            local fields = event.fields
+            if event.type == "turn_started" then turns[event.turn_id] = true
+            elseif event.type == "turn_ended" then turns[event.turn_id] = nil
+            elseif event.type == "model_request" then
+                requests[fields.requestId] = { turn = event.turn_id, purpose = fields.purpose }
+            elseif event.type == "model_message" then requests[fields.requestId] = nil
+            elseif event.type == "action_review" or event.type == "termination_review" then
+                requests[fields.reviewId] = nil
+            elseif event.type == "tool_call" then
+                calls[fields.toolCallId] = { permission = true, intent = true, approval = true, cancels = 2 }
+            elseif event.type == "tool_result" then calls[fields.toolCallId] = nil
+            elseif event.type == "permission_decision" and calls[fields.toolCallId] then
+                calls[fields.toolCallId].permission = false
+            elseif event.type == "operation_intent" and calls[fields.toolCallId] then
+                calls[fields.toolCallId].intent = false
+            elseif event.type == "approval" and fields.decision ~= "defer" and calls[fields.toolCallId] then
+                calls[fields.toolCallId].approval = false
+            elseif event.type == "cancel" and fields.targetKind == "ToolCall" and calls[fields.targetId] then
+                local call = calls[fields.targetId]
+                call.cancels = math.max(0, call.cancels - 1)
+            end
+        end
+        ---Adds conservative serialized bytes and Fact count for pending settlement.
+        --@param bytes integer Raw pending payload bytes.
+        --@param count integer Pending Fact count.
+        --@return nil Accumulates bounds in the enclosing scope.
+        local function add(bytes, count)
+            raw, events = raw + bytes + 8192 * count, events + count
+        end
+        ---Reserves the remaining permission, journal, approval, and result Facts.
+        --@param call table Outstanding tool-call settlement state.
+        --@return nil Updates the enclosing reserve counters.
+        local function add_call(call)
+            add(policy.result_bytes, 2) -- atomic operation_result + tool_result
+            if call.permission then add(2 * policy.message_bytes, 1) end
+            if call.intent then add(policy.message_bytes, 1) end
+            if call.approval then add(4096, 1) end
+            add(call.cancels * policy.message_bytes, call.cancels)
+        end
+        for _ in pairs(turns) do add(4 * policy.message_bytes, 4) end
+        for _, request in pairs(requests) do
+            if request.turn == nil or request.turn == false or turns[request.turn] then
+                add(3 * policy.model_bytes + 2 * policy.message_bytes, 8)
+                if request.purpose == "main" or request.purpose == "escape" then
+                    for _ = 1, policy.model_calls do
+                        add(policy.message_bytes, 1) -- accepted tool_call
+                        add_call({ permission = true, intent = true, approval = true, cancels = 2 })
+                    end
+                end
+            end
+        end
+        for _, call in pairs(calls) do add_call(call) end
+        for _ in ipairs(canonical.recovery.pending_compactions or {}) do
+            add(4 * policy.model_bytes + 4 * policy.message_bytes, 16)
+        end
+    end
+    local codec = schema_state.codec.limits
+    local required = {
+        bytes = stats.bytes + 6 * raw + 4096 * events,
+        text_bytes = stats.text_bytes + ((raw + 2) // 3) * 4,
+        elements = stats.elements + 64 * events,
+        sax_events = stats.sax_events + 192 * events,
+        events = #canonical.events + events,
+    }
+    local maximum = {
+        bytes = limits.maximum_context_bytes,
+        text_bytes = codec.maximum_total_text_bytes,
+        elements = codec.maximum_elements,
+        sax_events = codec.maximum_sax_events,
+        events = schema_state.maximum_events,
+    }
+    for _, dimension in ipairs({ "bytes", "text_bytes", "elements", "sax_events", "events" }) do
+        if required[dimension] > maximum[dimension] then
+            return nil, capacity_failure(dimension)
+        end
+    end
+    return true
+end
+
+---Snapshots the bounded filesystem methods and declared target capabilities.
+--@param filesystem table Candidate Context filesystem port.
+--@return table|nil port Stable method snapshot and capability record.
+--@return table|nil err Structured missing-port or capability failure.
 local function validate_store_filesystem(filesystem)
     if type(filesystem) ~= "table" then
         return nil, failure("InvalidContextStorePort", "filesystem service is required")
@@ -4609,6 +5211,10 @@ local function validate_store_filesystem(filesystem)
     return snapshot
 end
 
+---Checks the absolute canonical .xml target and extracts its Context name.
+--@param path string Physical Context target path.
+--@return string|nil name Context name derived from the basename.
+--@return table|nil err Structured path failure.
 local function validate_context_target(path)
     if not valid_absolute_path(path) then
         return nil, failure("InvalidContextPath", "Context target must be absolute")
@@ -4624,6 +5230,11 @@ local function validate_context_target(path)
     return { basename = basename, name = name, directory = assert(directory_of(path)) }
 end
 
+---Encodes bounded lock-owner metadata for a new exclusive lease.
+--@param metadata table Process identity, start time, and optional hostname.
+--@param limits table Store hostname and lease byte limits.
+--@return string|nil bytes Canonical lock metadata bytes.
+--@return table|nil err Structured metadata failure.
 local function encode_lock_metadata(metadata, limits)
     if type(metadata) ~= "table" then
         return nil, failure("InvalidWriterMetadata", "writer metadata is required")
@@ -4663,6 +5274,12 @@ local function encode_lock_metadata(metadata, limits)
     return table.concat(lines, "\n") .. "\n"
 end
 
+---Binds a temporary path to its same-directory target and nonce limit.
+--@param target_path string Canonical target XML path.
+--@param temporary_path string Candidate new temporary path.
+--@param limits table Maximum temporary nonce length.
+--@return string|nil path Validated temporary path.
+--@return table|nil err Structured path failure.
 local function validate_temp_path(target_path, temporary_path, limits)
     if not valid_absolute_path(temporary_path)
         or not same_directory(target_path, temporary_path)
@@ -4686,6 +5303,11 @@ local function validate_temp_path(target_path, temporary_path, limits)
     return temporary_path
 end
 
+---Checks that a create destination is absent without masking read failures.
+--@param filesystem table Bounded filesystem port.
+--@param path string Candidate destination path.
+--@return boolean|nil absent True only for an observed NotFound result.
+--@return table|nil err Existing-target or filesystem failure.
 local function target_absent(filesystem, path)
     local opened, handle_or_error = filesystem.open_read(path)
     if opened then
@@ -4698,6 +5320,12 @@ local function target_absent(filesystem, path)
     return nil, handle_or_error
 end
 
+---Deletes a temporary only while its observed object identity still matches.
+--@param filesystem table Bounded filesystem port.
+--@param path string Temporary path to clean up.
+--@param identity table|nil Previously observed object identity.
+--@return boolean|nil cleaned True when absent or safely deleted.
+--@return table|nil err Structured cleanup failure.
 local function cleanup_file(filesystem, path, identity)
     local stated, observed = filesystem.stat_identity(path)
     if stated then
@@ -4717,6 +5345,14 @@ local function cleanup_file(filesystem, path, identity)
     return true
 end
 
+---Reads a complete Context while checking pre/post file identity and size.
+--@param schema table Context schema reader.
+--@param filesystem table Bounded filesystem port.
+--@param path string Absolute Context path.
+--@param limits table Maximum Context byte limit.
+--@return table|nil document Immutable parsed Context document.
+--@return table identity_or_error Stable file identity or structured failure.
+--@return table|nil stats Parse statistics on success.
 local function stable_read(schema, filesystem, path, limits)
     local opened, handle_or_error = filesystem.open_read(path)
     if not opened then return nil, handle_or_error end
@@ -4735,6 +5371,10 @@ local function stable_read(schema, filesystem, path, limits)
         return nil, failure("ContextLimit", "Context file exceeds its byte limit")
     end
     local total = 0
+    ---Pulls bounded XML chunks and enforces the store byte ceiling.
+    --@param none No callback arguments.
+    --@return boolean read Whether the next chunk was read.
+    --@return table chunk_or_error Chunk/eof record or structured failure.
     local document, stats_or_error = schema.read_stream(function()
         local read, chunk_or_error = filesystem.stream_read(
             handle,
@@ -4758,6 +5398,14 @@ local function stable_read(schema, filesystem, path, limits)
     return document, initial_or_error, stats_or_error
 end
 
+---Reads only a Context Header under the same identity and byte checks.
+--@param schema table Context schema Header reader.
+--@param filesystem table Bounded filesystem port.
+--@param path string Absolute Context path.
+--@param limits table Maximum Context byte limit.
+--@return table|nil header Canonical parsed Header.
+--@return table identity_or_error Stable file identity or structured failure.
+--@return table|nil stats Prefix parse statistics on success.
 local function stable_header_read(schema, filesystem, path, limits)
     local opened, handle_or_error = filesystem.open_read(path)
     if not opened then return nil, handle_or_error end
@@ -4777,6 +5425,10 @@ local function stable_header_read(schema, filesystem, path, limits)
     end
     local total = 0
     local chunk_limit = math.min(filesystem.capabilities.maximum_chunk_bytes, 4096)
+    ---Pulls small XML chunks until the canonical Header is complete.
+    --@param none No callback arguments.
+    --@return boolean read Whether the next chunk was read.
+    --@return table chunk_or_error Chunk/eof record or structured failure.
     local header, stats_or_error = schema.read_header_stream(function()
         local read, chunk_or_error = filesystem.stream_read(handle, chunk_limit)
         if not read then return false, chunk_or_error end
@@ -4797,11 +5449,25 @@ local function stable_header_read(schema, filesystem, path, limits)
     return header, initial_or_error, stats_or_error
 end
 
+-- Serialize and flush a fresh canonical Context temporary, then bind its
+-- post-close identity. The caller must verify canonical bytes before publishing.
+--@param schema table Context codec owning document.
+--@param filesystem table Bounded filesystem port.
+--@param path string New absolute temporary path; existing paths are refused.
+--@param document table Canonical immutable Context generation.
+--@param limits table Context size and file permission limits.
+--@return table|nil Post-close file identity, or nil on failure.
+--@return table|nil Serialization statistics on success; structured failure otherwise.
+--@effect Creates, writes and flushes the temporary; attempts identity-bound cleanup on failure.
 local function write_new_document(schema, filesystem, path, document, limits)
     local created, handle_or_error = filesystem.create_new(path, limits.context_permissions)
     if not created then return nil, handle_or_error end
     local handle = handle_or_error
     local write_failure
+    ---Writes one canonical XML chunk in filesystem-sized pieces.
+    --@param bytes string Canonical encoded XML chunk.
+    --@return boolean accepted Whether every piece was written.
+    --@return string|nil reason Filesystem failure message for the codec.
     local stats, write_error = schema.write(document, function(bytes)
         for offset = 1, #bytes, filesystem.capabilities.maximum_chunk_bytes do
             local chunk = bytes:sub(
@@ -4843,9 +5509,22 @@ local function write_new_document(schema, filesystem, path, document, limits)
         cleanup_file(filesystem, path, identity_or_error)
         return nil, close_error
     end
-    return identity_or_error, stats
+    local final_identity, final_error = filesystem_util.observe_closed_write(filesystem, path, identity_or_error)
+    if not final_identity then
+        cleanup_file(filesystem, path, identity_or_error)
+        return nil, failure("ContextTemporaryMismatch", "Context temporary changed at close", final_error.code)
+    end
+    return final_identity, stats
 end
 
+---Compares a closed file with canonical XML bytes and stable identity.
+--@param schema table Context schema writer.
+--@param filesystem table Bounded filesystem port.
+--@param path string File path to verify.
+--@param document table Expected canonical Context generation.
+--@param expected_identity table|nil Optional prebound file identity.
+--@return table|nil identity Exact verified file identity.
+--@return table|nil stats_or_error Write statistics or structured failure.
 local function compare_document_bytes(schema, filesystem, path, document, expected_identity)
     local opened, handle_or_error = filesystem.open_read(path)
     if not opened then return nil, handle_or_error end
@@ -4860,6 +5539,10 @@ local function compare_document_bytes(schema, filesystem, path, document, expect
         return nil, failure("ContextTemporaryMismatch", "Context file identity changed")
     end
     local buffer, eof, comparison_error = "", false, nil
+    ---Refills the comparison buffer from the opened file.
+    --@param none No arguments.
+    --@return boolean|nil filled True when buffered or EOF is observed.
+    --@return table|nil err Structured read or progress failure.
     local function fill()
         if eof then return true end
         local read, chunk_or_error = filesystem.stream_read(
@@ -4874,6 +5557,10 @@ local function compare_document_bytes(schema, filesystem, path, document, expect
         eof = chunk_or_error.eof
         return true
     end
+    ---Checks one canonical output chunk against the streamed file bytes.
+    --@param expected string Next canonical XML chunk.
+    --@return boolean matched Whether the chunk matches exactly.
+    --@return string|nil reason Mismatch or read failure message.
     local stats, write_error = schema.write(document, function(expected)
         local offset = 1
         while offset <= #expected do
@@ -4926,6 +5613,15 @@ local function compare_document_bytes(schema, filesystem, path, document, expect
     return initial_or_error, stats
 end
 
+---Verifies byte identity and a second semantic parse before publication.
+--@param schema table Context schema reader/writer.
+--@param filesystem table Bounded filesystem port.
+--@param path string Candidate file path.
+--@param document table Expected canonical Context generation.
+--@param expected_identity table|nil Optional bound file identity.
+--@param limits table Maximum Context byte limit.
+--@return table|nil identity Stable verified file identity.
+--@return table parsed_or_error Parsed Context document or structured failure.
 local function verify_document_path(schema, filesystem, path, document, expected_identity, limits)
     local exact_identity, exact_error = compare_document_bytes(
         schema,
@@ -4949,6 +5645,14 @@ local function verify_document_path(schema, filesystem, path, document, expected
     return parsed_identity_or_error, parsed
 end
 
+---Copies a stable Context generation into a new identity-bound previous file.
+--@param filesystem table Bounded filesystem port.
+--@param source_path string Current Context source path.
+--@param source_identity table Expected source file identity.
+--@param target_path string New previous-generation path.
+--@param limits table Maximum bytes and file permissions.
+--@return table|nil identity Verified copy identity.
+--@return table|nil err Structured copy or identity failure.
 local function copy_file_verified(filesystem, source_path, source_identity, target_path, limits)
     local opened, source_or_error = filesystem.open_read(source_path)
     if not opened then return nil, source_or_error end
@@ -5037,6 +5741,12 @@ local function copy_file_verified(filesystem, source_path, source_identity, targ
     return target_identity_or_error
 end
 
+---Checks generation, name, view, and immutable Fact prefix before publication.
+--@param state table Active writer state and base document.
+--@param document table Candidate canonical next generation.
+--@param expected_name string|nil Override for a move destination name.
+--@return table|nil canonical Internal canonical state on success.
+--@return table|nil err Structured history or generation failure.
 local function validate_publication_document(state, document, expected_name)
     local canonical = document_states[document]
     if not canonical then
@@ -5096,6 +5806,11 @@ local function validate_publication_document(state, document, expected_name)
     return canonical
 end
 
+---Observes whether a control path exists and records its file identity.
+--@param filesystem table Bounded filesystem port.
+--@param path string Lock or previous-generation path.
+--@return string|nil state Present or absent observation.
+--@return table|nil identity_or_error File identity or structured failure.
 local function control_path_state(filesystem, path)
     local opened, handle_or_error = filesystem.open_read(path)
     if not opened then
@@ -5114,11 +5829,11 @@ end
 ---Creates a durable single-XML Context store around one schema and filesystem.
 -- Writer leases are long lived; the per-writer publication mutex exists only
 -- in memory and is held for the full write/validate/publish/confirm sequence.
--- @param schema table Context schema service returned by M.new.
--- @param ports table Contains the bounded filesystem service.
--- @param options table Mandatory release storage limits and permissions.
--- @return table|nil store Immutable Context store service.
--- @return table|nil err Structured dependency or limit failure.
+--@param schema table Context schema service returned by M.new.
+--@param ports table Contains the bounded filesystem service.
+--@param options table Mandatory release storage limits and permissions.
+--@return table|nil store Immutable Context store service.
+--@return table|nil err Structured dependency or limit failure.
 function M.new_store(schema, ports, options)
     local schema_state = schema_service_states[schema]
     if not schema_state then
@@ -5159,9 +5874,16 @@ function M.new_store(schema, ports, options)
 
     local store = {}
     local owner = {}
+    --@metatable writer_states Associates writer proxies with their private store, document and lease state; collection does not release leases.
+    --@field __mode string Fixed k mode: keys are weak; entries remain mutable within their owning module.
     local writer_states = setmetatable({}, { __mode = "k" })
+    --@metatable repair_plans Associates proposed repairs with private inspected facts used to reject stale or foreign plans.
+    --@field __mode string Fixed k mode: keys are weak; entries remain mutable within their owning module.
     local repair_plans = setmetatable({}, { __mode = "k" })
 
+    ---Wraps a leased Context writer state in an opaque read-only handle.
+    --@param state table Active lease and target generation state.
+    --@return table writer Opaque writer handle owned by this store.
     local function new_writer(state)
         local writer = readonly({}, "Context writer")
         state.owner = owner
@@ -5172,6 +5894,11 @@ function M.new_store(schema, ports, options)
         return writer
     end
 
+    ---Releases a failed setup lease while preserving uncertain-release evidence.
+    --@param lease table Lease acquired before writer setup failed.
+    --@param original_error table Structured setup failure.
+    --@return nil No writer is returned after setup failure.
+    --@return table err Original failure or unknown-lease failure.
     local function release_after_failure(lease, original_error)
         local released, release_error = filesystem.release_lease(lease)
         if not released then
@@ -5186,6 +5913,9 @@ function M.new_store(schema, ports, options)
         return nil, original_error
     end
 
+    ---Limits previous-generation recovery to missing or malformed official XML.
+    --@param error_value table Read failure for the official Context.
+    --@return boolean recoverable Whether previous-valid recovery may be attempted.
     local function recoverable_official_error(error_value)
         if type(error_value) ~= "table" or type(error_value.code) ~= "string" then
             return false
@@ -5200,6 +5930,13 @@ function M.new_store(schema, ports, options)
             })[error_value.code] == true
     end
 
+    ---Restores a valid previous generation under the already-held writer lease.
+    --@param path string Official Context path.
+    --@param previous_path string Previous-valid control path.
+    --@param official_error table Original official-file read failure.
+    --@return table|nil document Restored canonical Context.
+    --@return table identity_or_error Restored identity or structured failure.
+    --@return boolean retain_lease Whether uncertainty requires retaining the lease.
     local function recover_previous(path, previous_path, official_error)
         if not recoverable_official_error(official_error) then
             return nil, official_error, false
@@ -5268,6 +6005,13 @@ function M.new_store(schema, ports, options)
         return recovered, recovered_identity_or_error, false
     end
 
+    ---Acquires the writer lease and binds a create or replace target generation.
+    --@param path string Official Context path.
+    --@param metadata table Lock-owner metadata.
+    --@param mode string Create or replace writer mode.
+    --@param expected_credential table|nil Selected target identity and Header.
+    --@return table|nil writer Opaque active writer handle.
+    --@return table|nil document_or_error Current document or structured failure.
     local function acquire(path, metadata, mode, expected_credential)
         local target, target_error = validate_context_target(path)
         if not target then return nil, target_error end
@@ -5404,6 +6148,12 @@ function M.new_store(schema, ports, options)
         return writer, document
     end
 
+    ---Acquires a deletion lease bound to the exact file object without XML parse.
+    --@param path string Official Context path.
+    --@param metadata table Lock-owner metadata.
+    --@param expected_credential table|nil Selected file identity.
+    --@return table|nil writer Opaque deletion writer handle.
+    --@return table|nil err Structured path, lease, or identity failure.
     local function acquire_delete(path, metadata, expected_credential)
         local target, target_error = validate_context_target(path)
         if not target then return nil, target_error end
@@ -5469,6 +6219,10 @@ function M.new_store(schema, ports, options)
     ---Validates an in-place foreign Context without acquiring a writer lease.
     -- Historical approvals remain data only; this report never activates a
     -- local Model, Permission, mapping, or pending operation.
+    --@param path string In-place imported Context path.
+    --@param expected_credential table|nil Selected target identity and Header.
+    --@return table|nil document Immutable validated imported Context.
+    --@return table report_or_error Read-only audit report or structured failure.
     function store.inspect_import(path, expected_credential)
         local target, target_error = validate_context_target(path)
         if not target then return nil, target_error end
@@ -5537,6 +6291,10 @@ function M.new_store(schema, ports, options)
 
     ---Reads only canonical catalog metadata when no writer lease is present.
     -- This never parses Session, Facts, or ModelView and never acquires a lock.
+    --@param path string Context path to inspect.
+    --@param expected_credential table|nil Selected target identity and Header.
+    --@return table|nil header Canonical Context Header.
+    --@return table report_or_error Header-only report or structured failure.
     function store.inspect_catalog_header(path, expected_credential)
         local target, target_error = validate_context_target(path)
         if not target then return nil, target_error end
@@ -5593,11 +6351,20 @@ function M.new_store(schema, ports, options)
     end
 
     ---Acquires a long-lived writer lease before reading an existing Context body.
+    --@param path string Existing official Context path.
+    --@param metadata table Lock-owner metadata.
+    --@param expected_credential table|nil Selected target identity and Header.
+    --@return table|nil writer Opaque active writer handle.
+    --@return table document_or_error Current document or structured failure.
     function store.open_writer(path, metadata, expected_credential)
         return acquire(path, metadata, "replace", expected_credential)
     end
 
     ---Acquires a long-lived writer lease for a not-yet-published Context path.
+    --@param path string New official Context path.
+    --@param metadata table Lock-owner metadata.
+    --@return table|nil writer Opaque active writer handle.
+    --@return table|nil err Structured path, lease, or target failure.
     function store.create_writer(path, metadata)
         return acquire(path, metadata, "create")
     end
@@ -5605,10 +6372,19 @@ function M.new_store(schema, ports, options)
     ---Acquires a mutation lease and exact identity without parsing the XML body.
     -- This permits confirmed deletion of a corrupt Context while still binding
     -- the operation to the selected file object.
+    --@param path string Existing official Context path.
+    --@param metadata table Lock-owner metadata.
+    --@param expected_credential table|nil Selected file identity.
+    --@return table|nil writer Opaque identity-bound delete writer.
+    --@return table|nil err Structured path, lease, or identity failure.
     function store.open_delete_writer(path, metadata, expected_credential)
         return acquire_delete(path, metadata, expected_credential)
     end
 
+    ---Inspects one repair path and rejects redirected ancestry or non-file targets.
+    --@param path string Official, previous, lock, or temporary path.
+    --@return table|nil snapshot Direct filesystem observation.
+    --@return table|nil err Structured unsafe-path or inspection failure.
     local function repair_file(path)
         local inspected, snapshot = filesystem.direct_inspect(path)
         if not inspected then return nil, snapshot end
@@ -5632,6 +6408,11 @@ function M.new_store(schema, ports, options)
         return snapshot
     end
 
+    ---Rechecks every repair identity and exact source document before mutation.
+    --@param plan table Opaque inspection facts bound to a repair proposal.
+    --@param own_lease boolean|nil Whether this transaction owns the lock path.
+    --@return boolean|nil valid True while all inspected facts remain current.
+    --@return table|nil err Structured changed-target or read failure.
     local function verify_repair_plan(plan, own_lease)
         for _, snapshot in ipairs(own_lease and { plan.official, plan.previous }
             or { plan.lock, plan.official, plan.previous }) do
@@ -5660,6 +6441,10 @@ function M.new_store(schema, ports, options)
 
     ---Inspects only the official and its named previous file, without a lease
     -- or recovery. The returned opaque plan binds every source and destination.
+    --@param path string Official Context path.
+    --@param credential table Selected target identity and Header evidence.
+    --@return table|nil proposal Immutable repair proposal.
+    --@return table document_or_error Source document or structured failure.
     function store.plan_repair(path, credential)
         for _, name in ipairs({ "direct_inspect", "direct_reverify", "direct_replace", "direct_rename" }) do
             if type(filesystem[name]) ~= "function" then
@@ -5750,6 +6535,12 @@ function M.new_store(schema, ports, options)
 
     ---Publishes one confirmed repair generation while retaining the previous
     -- source until the new official has been flushed and verified.
+    --@param proposal table Opaque proposal returned by plan_repair.
+    --@param document table Audited next canonical repair generation.
+    --@param temporary_path string New same-directory Context temporary path.
+    --@param metadata table Lock-owner metadata.
+    --@return table|nil receipt Confirmed repair outcome.
+    --@return table|nil err Structured failure or unknown-publication result.
     function store.apply_repair(proposal, document, temporary_path, metadata)
         local plan = repair_plans[proposal]
         if not plan then return nil, failure("InvalidRepairPlan", "repair plan is stale or foreign") end
@@ -5777,6 +6568,10 @@ function M.new_store(schema, ports, options)
         local acquired, lease = filesystem.acquire_lease(plan.lock.requested_path, lock_bytes, limits.lock_permissions)
         if not acquired then return nil, lease end
         local temporary_identity, publication_attempted, published = nil, false, false
+        ---Executes a repair after renewed identity checks under the lease.
+        --@param none No arguments; uses bound repair proposal and paths.
+        --@return table|nil receipt Confirmed repaired Context outcome.
+        --@return table|nil err Structured transaction failure.
         local function transact()
             local current, current_error = verify_repair_plan(plan, true)
             if not current then return nil, current_error end
@@ -5836,6 +6631,12 @@ function M.new_store(schema, ports, options)
 
     ---Runs only evidence-safe previous-valid recovery under the normal lease.
     -- A stale-looking lock remains a conflict; age is never repair evidence.
+    --@param path string Official Context path.
+    --@param metadata table Lock-owner metadata.
+    --@param expected_credential table|nil Selected target identity and Header.
+    --@return table|nil writer Active repaired Context writer.
+    --@return table document_or_error Current document or structured failure.
+    --@return table|nil receipt Recovery outcome on success.
     function store.repair(path, metadata, expected_credential)
         local writer, document_or_error = acquire(
             path,
@@ -5865,6 +6666,11 @@ function M.new_store(schema, ports, options)
     end
 
     ---Publishes one full canonical generation through the fixed commit state machine.
+    --@param writer table Active writer issued by this store.
+    --@param document table Canonical next Context generation.
+    --@param temporary_path string New same-directory temporary path.
+    --@return table|nil receipt Confirmed publication outcome.
+    --@return table|nil err Structured failure or unknown-publication result.
     function store.publish(writer, document, temporary_path)
         local state = writer_states[writer]
         if not state or state.owner ~= owner or state.status ~= "active" then
@@ -5877,12 +6683,25 @@ function M.new_store(schema, ports, options)
         if not valid_temp then return nil, temp_error end
         local canonical, document_error = validate_publication_document(state, document)
         if not canonical then return nil, document_error end
+        local capacity, capacity_error = check_publication_capacity(schema_state, canonical, limits)
+        if not capacity then return nil, capacity_error end
         state.commit_active = true
 
+        ---Clears the publication mutex before returning a result.
+        --@param value any Success value or nil.
+        --@param error_value table|nil Structured failure.
+        --@return any value Unchanged transaction result.
+        --@return table|nil err Unchanged failure.
         local function finish(value, error_value)
             state.commit_active = false
             return value, error_value
         end
+        ---Faults the writer after an unsafe publication state.
+        --@param code string Structured failure code.
+        --@param message string Human-readable failure message.
+        --@param reason string|nil Underlying reason code.
+        --@return nil No receipt is issued.
+        --@return table err Structured fault result.
         local function fault(code, message, reason)
             state.status = "faulted"
             return finish(nil, failure(code, message, reason))
@@ -6087,6 +6906,13 @@ function M.new_store(schema, ports, options)
     -- explicit rebind transactions. The old official is hidden as the one
     -- recognized previous-valid generation before the new path is published,
     -- so Catalog observation never treats both paths as active Contexts.
+    --@param writer table Active replace writer issued by this store.
+    --@param document table Canonical lifecycle generation with move Fact.
+    --@param destination_path string New official Context path.
+    --@param temporary_path string New destination-side temporary path.
+    --@param action string|nil Rename or rebind; inferred from parent directory.
+    --@return table|nil receipt Confirmed move outcome.
+    --@return table|nil err Structured failure or unknown-move result.
     function store.move(writer, document, destination_path, temporary_path, action)
         local state = writer_states[writer]
         if not state or state.owner ~= owner or state.status ~= "active"
@@ -6129,6 +6955,8 @@ function M.new_store(schema, ports, options)
             destination.name
         )
         if not canonical then return nil, document_error end
+        local capacity, capacity_error = check_publication_capacity(schema_state, canonical, limits)
+        if not capacity then return nil, capacity_error end
         local lifecycle_found = false
         for index = state.base_document.event_count + 1, document.event_count do
             if document.facts[index].type == action then
@@ -6148,24 +6976,47 @@ function M.new_store(schema, ports, options)
         local destination_previous_path = destination_path .. ".yaca-prev"
         local destination_lease
 
+        ---Clears the move publication mutex before returning a result.
+        --@param value any Success value or nil.
+        --@param error_value table|nil Structured failure.
+        --@return any value Unchanged transaction result.
+        --@return table|nil err Unchanged failure.
         local function finish(value, error_value)
             state.commit_active = false
             return value, error_value
         end
+        ---Faults a writer after unsafe move or destination state.
+        --@param code string Structured failure code.
+        --@param message string Human-readable failure message.
+        --@param reason string|nil Underlying reason code.
+        --@return nil No receipt is issued.
+        --@return table err Structured fault result.
         local function fault(code, message, reason)
             state.status = "faulted"
             return finish(nil, failure(code, message, reason))
         end
+        ---Keeps the destination lease when move outcome cannot be established.
+        --@param none No arguments.
+        --@return nil Moves lease ownership into writer state if present.
         local function retain_destination_lease()
             if destination_lease then
                 state.leases[#state.leases + 1] = destination_lease
                 destination_lease = nil
             end
         end
+        ---Reports an uncertain move while retaining both relevant leases.
+        --@param message string Human-readable uncertainty message.
+        --@param reason string|nil Underlying reason code.
+        --@return nil No confirmed move receipt.
+        --@return table err Structured unknown-move failure.
         local function move_unknown(message, reason)
             retain_destination_lease()
             return fault("ContextMoveUnknown", message, reason)
         end
+        ---Releases destination lease after a confirmed pre-publication failure.
+        --@param original_error table Structured transaction failure.
+        --@return nil No move receipt.
+        --@return table err Original failure or unknown-lease failure.
         local function release_destination(original_error)
             if not destination_lease then return finish(nil, original_error) end
             local released, release_error = filesystem.release_lease(destination_lease)
@@ -6447,6 +7298,10 @@ function M.new_store(schema, ports, options)
     -- There is no trash, archive, restore, tombstone, secure-erase, or remote
     -- provider withdrawal claim. Every directory entry is removed only against
     -- the identity observed for that exact role.
+    --@param writer table Active replace or delete writer.
+    --@param temporary_or_options string|table|nil Optional delete temporary path.
+    --@return table|nil receipt Confirmed per-target deletion or partial outcome.
+    --@return table|nil err Structured pre-deletion failure.
     function store.delete(writer, temporary_or_options)
         local state = writer_states[writer]
         if not state or state.owner ~= owner or state.status ~= "active"
@@ -6497,6 +7352,11 @@ function M.new_store(schema, ports, options)
 
         state.commit_active = true
         local targets = {}
+        ---Captures the exact identity or absence of one deletion target.
+        --@param role string Official, temporary, or previous-valid role.
+        --@param path string Physical path for that role.
+        --@param known_identity table|nil Already verified official identity.
+        --@return table observation Role, path, and identity or observation error.
         local function observed_role(role, path, known_identity)
             if known_identity ~= nil then
                 return { role = role, path = path, identity = known_identity }
@@ -6599,6 +7459,9 @@ function M.new_store(schema, ports, options)
     end
 
     ---Releases one writer lease after all synchronous publication work ends.
+    --@param writer table Writer issued by this store.
+    --@return boolean|nil closed True when all owned leases were released.
+    --@return table|nil err Structured stale-writer or lease-release failure.
     function store.close_writer(writer)
         local state = writer_states[writer]
         if not state or state.owner ~= owner or state.status == "closed" then
@@ -6625,6 +7488,9 @@ function M.new_store(schema, ports, options)
     end
 
     ---Returns non-secret writer lifecycle state for status and fault handling.
+    --@param writer table Writer issued by this store.
+    --@return table|nil status Immutable lifecycle status.
+    --@return table|nil err Structured foreign-writer failure.
     function store.writer_status(writer)
         local state = writer_states[writer]
         if not state or state.owner ~= owner then
@@ -6641,9 +7507,9 @@ function M.new_store(schema, ports, options)
     ---Revalidates the owned official file without scanning, recovery, or writes.
     -- A changed identity or canonical document permanently faults this writer;
     -- the caller must stop admission and close it, never follow another path.
-    -- @param writer table Opaque writer issued by this store.
-    -- @return table|nil status Current path and generation when still exact.
-    -- @return table|nil err Stale writer, active publication, or target failure.
+    --@param writer table Opaque writer issued by this store.
+    --@return table|nil status Current path and generation when still exact.
+    --@return table|nil err Stale writer, active publication, or target failure.
     function store.verify_writer(writer)
         local state = writer_states[writer]
         if not state or state.owner ~= owner or state.status ~= "active"
@@ -6677,6 +7543,9 @@ function M.new_store(schema, ports, options)
     ---Inspects only bounded public lease metadata and never opens Context XML.
     -- A malformed or unreadable lease remains busy with an unknown PID; this
     -- method never treats age, hostname, or parse failure as stale evidence.
+    --@param path string Official Context path whose lock is inspected.
+    --@return table|nil inspection Bounded busy state and public lock metadata.
+    --@return table|nil err Structured target-path failure.
     function store.inspect_writer(path)
         local target, target_error = validate_context_target(path)
         if not target then return nil, target_error end

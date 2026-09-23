@@ -1,7 +1,7 @@
 --[[
-File: session.lua
-Date: 2026-08-30
 Author: WaterRun
+Date: 2026-09-23
+File: session.lua
 Description: Owns the bounded chat draft and first durable Context publication.
 ]]
 
@@ -10,18 +10,43 @@ local text = require("text")
 
 local M = {}
 
+-- Construct a structured diagnostic without throwing or formatting its optional fields.
+--@param code string Stable diagnostic code used by callers to choose recovery behavior.
+--@param message string Human-readable summary supplied by the failing operation.
+--@param reason string|nil Optional machine-readable cause or validation rule.
+--@return table New diagnostic record; optional non-nil fields are retained without deep copying.
 local function failure(code, message, reason)
     local result = { code = code, message = message }
     if reason ~= nil then result.reason = reason end
     return result
 end
 
+-- Create a shallow read-only view without copying the backing table.
+--@param values table Backing fields retained by reference; the caller owns their stability.
+--@param label string|nil Diagnostic label; defaults to "readonly value".
+--@return table Empty proxy exposing the backing fields through its locked metatable.
+--@ownership Retains values by reference; nested values and the backing table are not frozen.
 local function readonly(values, label)
+    --@metatable readonly_proxy Forwards reads and iteration; ordinary assignments raise an error.
+    --@field __index table Backing values used for missing-key reads.
+    --@field __newindex function Rejects ordinary assignments without changing the backing values.
+    --@field __pairs function Enumerates the backing table with next.
+    --@field __metatable string Hides this metatable behind the fixed "locked" marker.
     return setmetatable({}, {
         __index = values,
+        -- Reject a write through the proxy before it can create an ordinary field.
+        --@param _ table Proxy receiving the assignment; its contents are not consulted.
+        --@param key any Attempted field name included in the diagnostic.
+        --@return nil Does not return normally.
+        --@error Always raises a read-only assignment error at the caller frame.
         __newindex = function(_, key)
             error((label or "readonly value") .. " cannot be modified: " .. tostring(key), 2)
         end,
+        -- Iterate the backing fields instead of the empty proxy table.
+        --@param none The proxy argument supplied by pairs is ignored.
+        --@return function The standard next iterator.
+        --@return table Backing values used as iterator state.
+        --@return nil Initial key used to start iteration.
         __pairs = function()
             return next, values, nil
         end,
@@ -29,10 +54,17 @@ local function readonly(values, label)
     })
 end
 
+-- Check the Lua integer subtype and the caller's inclusive lower bound.
+--@param value any Candidate value; floats and non-numeric values are rejected.
+--@param minimum integer Inclusive minimum accepted by this check.
+--@return boolean True only for an integer at least minimum.
 local function valid_integer(value, minimum)
     return math.type(value) == "integer" and value >= minimum
 end
 
+-- Count a dense one-based array while rejecting holes and extra key kinds.
+--@param values any Candidate table; every key must belong to the sequence 1 through count.
+--@return integer|nil Sequence length, including zero for an empty table; nil for an invalid shape.
 local function dense_count(values)
     if type(values) ~= "table" then return nil end
     local count = 0
@@ -44,18 +76,29 @@ local function dense_count(values)
     return count
 end
 
+-- Accept bounded NUL-free UTF-8 used in durable Context fields.
+--@param value any Candidate text.
+--@param maximum_bytes integer Inclusive byte limit.
+--@return boolean True only for valid text within the limit.
 local function valid_text(value, maximum_bytes)
     if type(value) ~= "string" or #value > maximum_bytes then return false end
     local valid, metadata = text.validate_utf8(value)
     return valid and not metadata.contains_nul
 end
 
+-- Recognize the lowercase hexadecimal SHA-256 digest format.
+--@param value any Candidate digest.
+--@return boolean True only for exactly 64 lowercase hexadecimal characters.
 local function valid_digest(value)
     return type(value) == "string"
         and #value == 64
         and value:match("^[0-9a-f]+$") ~= nil
 end
 
+-- Require an enterable workspace before an unsaved chat can be published.
+--@param workspace any Candidate workspace selection.
+--@return table|nil Path and identity for a validated workspace.
+--@return table|nil InvalidWorkspace diagnostic.
 local function validate_workspace(workspace)
     if type(workspace) ~= "table"
         or type(workspace.path) ~= "string"
@@ -73,6 +116,10 @@ local function validate_workspace(workspace)
     }
 end
 
+-- Require an Agent-ready config generation with Model and Permission snapshots.
+--@param generation any Candidate immutable configuration generation.
+--@return table|nil Original ready generation.
+--@return table|nil ModelUnavailable diagnostic.
 local function validate_generation(generation)
     if type(generation) ~= "table"
         or type(generation.id) ~= "string"
@@ -92,6 +139,9 @@ local function validate_generation(generation)
     return generation
 end
 
+-- Measure the bounded text fields in current Session settings.
+--@param settings table Validated Session settings.
+--@return integer Sum of Model, Permission, goal, and ContextPrompt bytes.
 local function settings_bytes(settings)
     return #settings.model
         + #settings.permission
@@ -99,6 +149,9 @@ local function settings_bytes(settings)
         + #settings.context_prompt
 end
 
+-- Recognize NUL-free POSIX, drive-absolute, or UNC paths.
+--@param path any Candidate native path.
+--@return boolean True for a supported absolute path shape.
 local function valid_absolute_path(path)
     if type(path) ~= "string" or path == "" or path:find("\0", 1, true) then
         return false
@@ -109,6 +162,10 @@ local function valid_absolute_path(path)
         or normalized:match("^//[^/]+/[^/]+") ~= nil
 end
 
+-- Extract the parent of a native path while preserving a filesystem root.
+--@param path any Candidate native path.
+--@param platform_kind string windows or posix separator semantics.
+--@return string|nil Parent directory, or nil when no parent is represented.
 local function directory_of(path, platform_kind)
     if type(path) ~= "string" then return nil end
     local separator
@@ -125,18 +182,33 @@ local function directory_of(path, platform_kind)
     return path:sub(1, separator - 1)
 end
 
+-- Join one child name beneath a native platform directory.
+--@param root string Parent directory path.
+--@param leaf string Child name without a leading separator.
+--@param platform_kind string windows or posix.
+--@return string Joined native path.
 local function join_native(root, leaf, platform_kind)
     local separator = platform_kind == "windows" and "\\" or "/"
     if root:sub(-1) == separator then return root .. leaf end
     return root .. separator .. leaf
 end
 
+-- Encode random identifier bytes as uppercase hexadecimal text.
+--@param bytes string Raw identifier bytes.
+--@return string Two hexadecimal digits per byte.
 local function hex(bytes)
-    return (bytes:gsub(".", function(byte)
+    return (bytes:gsub(".",
+        -- Encode one raw byte without locale-sensitive formatting.
+        --@param byte string One-byte string.
+        --@return string Two uppercase hexadecimal digits.
+        function(byte)
         return string.format("%02X", byte:byte())
     end))
 end
 
+-- Parse a canonical UTC timestamp and reject impossible calendar dates.
+--@param value any Candidate YYYY-MM-DDTHH:MM:SSZ text.
+--@return table|nil Year, month, day, hour, minute, second components.
 local function utc_parts(value)
     if type(value) ~= "string" then return nil end
     local year, month, day, hour, minute, second = value:match(
@@ -158,6 +230,11 @@ local function utc_parts(value)
     return { year, month, day, hour, minute, second }
 end
 
+-- Return a strictly increasing canonical UTC timestamp despite clock regression.
+--@param observed string Current UTC clock reading.
+--@param previous string Last published UTC timestamp.
+--@return string|nil Observed time if later, otherwise previous plus one second.
+--@return table|nil Clock format or year-overflow diagnostic.
 local function next_utc_time(observed, previous)
     local current = utc_parts(observed)
     local prior = utc_parts(previous)
@@ -191,6 +268,11 @@ local function next_utc_time(observed, previous)
     )
 end
 
+-- Canonically encode acyclic public data for stable binding digests.
+--@param value any String, boolean, finite number, or table of supported data.
+--@param visiting table|nil Recursion stack used to reject cycles.
+--@return string|nil Type-marked deterministic encoding.
+--@return table|nil InvalidSnapshot diagnostic for unsupported or cyclic data.
 local function canonical_public(value, visiting)
     local value_type = type(value)
     if value_type == "string" then return "s" .. tostring(#value) .. ":" .. value end
@@ -223,12 +305,21 @@ local function canonical_public(value, visiting)
     return "t" .. tostring(#entries) .. ":" .. table.concat(entries, "|")
 end
 
+-- Bind a public data snapshot to a named safety-digest domain.
+--@param safety table Digest service exposing binding_digest.
+--@param domain string Domain separator for the snapshot.
+--@param value any Acyclic public snapshot data.
+--@return string|nil Binding digest.
+--@return table|nil Canonicalization or digest error.
 local function snapshot_digest(safety, domain, value)
     local bytes, bytes_error = canonical_public(value)
     if not bytes then return nil, bytes_error end
     return safety.binding_digest(domain, { { name = "public", value = bytes } })
 end
 
+-- Escape XML metacharacters before adding durable facts to a Model view.
+--@param value string Field or attribute text.
+--@return string XML-escaped text.
 local function model_view_escape(value)
     return value
         :gsub("&", "&amp;")
@@ -237,6 +328,14 @@ local function model_view_escape(value)
         :gsub('"', "&quot;")
 end
 
+-- Render a bounded, digest-bound Model view of durable facts and optional compaction.
+--@param safety table Digest service.
+--@param facts table Dense chronological Context event array.
+--@param context_generation integer Published Context generation.
+--@param maximum_bytes integer Maximum rendered view size.
+--@param projection table|nil Structured compaction projection and waterline.
+--@return table|nil Digest, sequence range, generation, and rendered XML body.
+--@return table|nil Invalid view, size, or digest error.
 local function render_model_view(
     safety,
     facts,
@@ -267,6 +366,10 @@ local function render_model_view(
         '">\n',
     }
     local size = 0
+    -- Append one rendered fragment without exceeding the Model view budget.
+    --@param value string XML fragment to append.
+    --@return boolean|nil True after appending.
+    --@return table|nil ModelViewLimit diagnostic.
     local function add(value)
         size = size + #value
         if size > maximum_bytes then
@@ -322,7 +425,7 @@ local function render_model_view(
         }))
         if not added then return nil, add_error end
     end
-    local side_turns = {}
+    local ask_turns = {}
     for index = 1, fact_limit do
         local event = facts[index]
         if type(event) ~= "table"
@@ -333,19 +436,19 @@ local function render_model_view(
         then
             return nil, failure("InvalidModelView", "Context event cannot enter the model view")
         end
-        if event.type == "turn_started" and event.fields.kind == "side"
+        if event.type == "turn_started" and event.fields.kind == "ask"
             and type(event.turn_id) == "string"
         then
-            side_turns[event.turn_id] = true
+            ask_turns[event.turn_id] = true
         end
-        -- Side turns remain complete durable audit facts, but their Model input
+        -- Ask turns remain complete durable audit facts, but their Model input
         -- and response are not main-turn authority. Only a later queue_item or
-        -- steer event created by explicit side-use is visible to the main view.
+        -- steer event created by explicit ask-use is visible to the main view.
         local included = not projection
             or (index > projection.source_last_seq
                 and (index <= projection.source_event_count
                     or index > projection.internal_last_sequence))
-        if included and not side_turns[event.turn_id] then
+        if included and not ask_turns[event.turn_id] then
             local turn = event.turn_id and ' turnId="'
                 .. model_view_escape(event.turn_id) .. '"' or ""
             added, add_error = add(table.concat({
@@ -413,6 +516,10 @@ local function render_model_view(
     }
 end
 
+-- Expose a public config generation with the Session's selected settings.
+--@param generation table Config generation snapshot.
+--@param settings table Current Session Model and Permission choices.
+--@return table Public generation fields used by Prompt and Runtime.
 local function public_generation_snapshot(generation, settings)
     return {
         id = generation.id,
@@ -436,6 +543,11 @@ local function public_generation_snapshot(generation, settings)
     }
 end
 
+-- Require an exact no-follow ordinary directory ancestry at a Context mirror path.
+--@param path string Requested native path.
+--@param snapshot table Direct filesystem inspection of that path.
+--@return table|nil Original admitted snapshot.
+--@return table|nil Alias or directory-conflict diagnostic.
 local function admit_directory_snapshot(path, snapshot)
     if type(snapshot) ~= "table"
         or snapshot.requested_path ~= path
@@ -477,12 +589,24 @@ local function admit_directory_snapshot(path, snapshot)
     return snapshot
 end
 
+-- Inspect and admit a Context mirror directory without following aliases.
+--@param filesystem table Direct filesystem port.
+--@param path string Exact native directory path.
+--@return table|nil Admitted existing or absent directory snapshot.
+--@return table|nil Inspection or ancestry error.
 local function inspect_directory(filesystem, path)
     local inspected, snapshot_or_error = filesystem.direct_inspect(path)
     if not inspected then return nil, snapshot_or_error end
     return admit_directory_snapshot(path, snapshot_or_error)
 end
 
+-- Create a missing Context directory and prove its postcondition and durability.
+--@param filesystem table Direct filesystem and flush port.
+--@param path string Exact native directory path.
+--@param platform_kind string windows or posix for parent extraction.
+--@return table|nil Verified existing or newly created directory snapshot.
+--@return table|nil Creation, conflict, or uncertain-durability error.
+--@effect May create one directory and flush its parent.
 local function ensure_directory(filesystem, path, platform_kind)
     local snapshot, inspect_error = inspect_directory(filesystem, path)
     if not snapshot then return nil, inspect_error end
@@ -517,6 +641,10 @@ local function ensure_directory(filesystem, path, platform_kind)
     return snapshot
 end
 
+-- Verify every required Context publication dependency and operation method.
+--@param ports any Candidate publication port bundle.
+--@return table|nil Original validated ports.
+--@return table|nil InvalidContextPublication diagnostic.
 local function validate_publication_ports(ports)
     if type(ports) ~= "table" then
         return nil, failure("InvalidContextPublication", "Context publication ports are required")
@@ -560,6 +688,10 @@ local function validate_publication_ports(ports)
     return ports
 end
 
+-- Validate Context paths and hard publication, view, compaction, and queue limits.
+--@param options any Candidate publication limits.
+--@return table|nil Original validated options.
+--@return table|nil InvalidContextPublication diagnostic.
 local function validate_publication_options(options)
     if type(options) ~= "table" then
         return nil, failure("InvalidContextPublication", "Context publication limits are required")
@@ -605,6 +737,10 @@ end
 ---Creates the single-owner service that turns a first main message into the
 -- initial durable Context generation. Candidate names come only from the
 -- injected secure random port and every attempt is published no-replace.
+--@param ports table Filesystem, schema, store, path, safety, Prompt, and system ports.
+--@param options table Platform, data root, and hard Context limits.
+--@return table|nil Single-owner Context publication service.
+--@return table|nil Invalid dependency or option error.
 function M.new_context_publication(ports, options)
     local admitted_ports, ports_error = validate_publication_ports(ports)
     if not admitted_ports then return nil, ports_error end
@@ -630,6 +766,13 @@ function M.new_context_publication(ports, options)
     local operation_intent_receipts = {}
     local operation_result_receipts = {}
 
+    -- Render and retain one read-only Model view indexed by its binding digest.
+    --@param facts table Published chronological Context events.
+    --@param context_generation integer Durable Context generation.
+    --@param projection table|nil Structured compaction projection.
+    --@param forced_digest string|nil Verified external manifest digest to index this view.
+    --@return table|nil Read-only cached Model view.
+    --@return table|nil Rendering or forced-digest error.
     local function cache_model_view(
         facts,
         context_generation,
@@ -658,6 +801,11 @@ function M.new_context_publication(ports, options)
         return frozen
     end
 
+    -- Rebuild and hash the durable compaction source and summary before accepting them.
+    --@param document table Current verified Context document.
+    --@param values table Candidate compaction ranges, digests, summary, and waterline.
+    --@return table|nil Verified structured compaction projection.
+    --@return table|nil Invalid, stale, or mismatched source/summary diagnostic.
     local function verified_compaction_projection(document, values)
         if type(document) ~= "table"
             or type(values) ~= "table"
@@ -747,6 +895,11 @@ function M.new_context_publication(ports, options)
         }
     end
 
+    -- Link an active manifest to its accepted compaction record and publication bracket.
+    --@param document table Verified durable Context document.
+    --@param manifest table Active Model view manifest.
+    --@return table|nil Verified compaction projection.
+    --@return integer|table View generation on success, or structured error on failure.
     local function durable_compaction_projection(document, manifest)
         local compaction_id = manifest.compaction_id
         if not compaction_id then
@@ -831,6 +984,10 @@ function M.new_context_publication(ports, options)
         return projection, view_generation
     end
 
+    -- Recreate the active compacted Model view from durable Context evidence.
+    --@param document table Verified Context document with active compacted manifest.
+    --@return table|nil Cached read-only Model view.
+    --@return table|nil Compaction or view validation error.
     local function rebuild_active_compaction_view(document)
         local manifest = document.model_view.active_manifest
         local projection, view_generation = durable_compaction_projection(
@@ -846,6 +1003,10 @@ function M.new_context_publication(ports, options)
         )
     end
 
+    -- Recreate an active Model view from durable facts and its manifest digest.
+    --@param document table Verified Context document.
+    --@return table|nil Cached read-only plain or compacted Model view.
+    --@return table|nil Manifest or rebuild error.
     local function rebuild_active_model_view(document)
         local manifest = document.model_view.active_manifest
         if manifest.compaction_id then
@@ -881,6 +1042,12 @@ function M.new_context_publication(ports, options)
         )
     end
 
+    -- Build the no-follow Context mirror directories for a logical workspace path.
+    --@param workspace_path string Validated native workspace path.
+    --@return string|nil Native mirror directory path.
+    --@return string|table Logical workspace path on success, or error on failure.
+    --@return table|nil Final admitted directory snapshot.
+    --@effect May create and flush missing Context mirror directories.
     local function prepare_mirror(workspace_path)
         local logical, logical_error = path.to_logical(workspace_path)
         if not logical then return nil, logical_error end
@@ -908,6 +1075,13 @@ function M.new_context_publication(ports, options)
         return current, logical, prepared
     end
 
+    -- Assemble a purpose-bound Prompt snapshot from selected config and message.
+    --@param generation table Agent-ready config generation.
+    --@param settings table Current Model, Permission, and ContextPrompt settings.
+    --@param message string User input for this request.
+    --@param purpose string|nil main or ask request purpose; defaults to main.
+    --@return table|nil Prompt bundle with digest and tool mode.
+    --@return table|nil Missing selection or Prompt assembly error.
     local function prompt_bundle(generation, settings, message, purpose)
         local model = generation.models[settings.model]
         local permission = generation.permissions[settings.permission]
@@ -941,10 +1115,14 @@ function M.new_context_publication(ports, options)
                 },
             },
             input = { user_message = message },
-            tool_mode = purpose == "side" and "none" or "registered",
+            tool_mode = purpose == "ask" and "none" or "registered",
         })
     end
 
+    -- Bind the selected Model, Permission, config, Prompt, registry, and turn caps.
+    --@param specification table Generation, Session settings, message, and request kind.
+    --@return table|nil Digests and bounded Agent turn limits.
+    --@return table|nil Missing selection, excessive limit, or digest error.
     local function snapshots(specification)
         local generation = specification.generation
         local settings = specification.settings
@@ -1009,6 +1187,9 @@ function M.new_context_publication(ports, options)
         }
     end
 
+    -- Project durable Session overrides into config-generation selector fields.
+    --@param document table Verified Context document.
+    --@return table Model, Permission, double-check, prompt, and rename overrides.
     local function document_overrides(document)
         local goal = document.session.double_check_goal_override
         return {
@@ -1021,11 +1202,18 @@ function M.new_context_publication(ports, options)
         }
     end
 
+    -- Read Session overrides from the currently owned durable Context.
+    --@param none This closure takes no arguments.
+    --@return table|nil Current override projection, or nil before opening a Context.
     local function durable_context_overrides()
         if not active or not active.document then return nil end
         return document_overrides(active.document)
     end
 
+    -- Check whether a config generation implements every durable Session override.
+    --@param generation table Candidate Agent-ready config generation.
+    --@param overrides table Current durable Context selector and setting values.
+    --@return boolean True only when the generation matches all effective choices.
     local function generation_matches_context(generation, overrides)
         if type(generation) ~= "table"
             or generation.agent_ready ~= true
@@ -1045,12 +1233,21 @@ function M.new_context_publication(ports, options)
             or generation.effective_double_check_goal == overrides.DoubleCheckGoalOverride
     end
 
+    -- Copy a flat Session override map before applying one management change.
+    --@param source table Existing override fields.
+    --@return table Shallow independent map of the same fields.
     local function copy_overrides(source)
         local result = {}
         for key, value in pairs(source) do result[key] = value end
         return result
     end
 
+    -- Bind an enabled Model or available Permission selector to its exact config snapshot.
+    --@param generation table Current config generation.
+    --@param name string CurrentModel or CurrentPermission field name.
+    --@param selector string Selected Model or Permission name.
+    --@return string|nil Snapshot binding digest.
+    --@return table|nil Unavailable selector or digest error.
     local function selector_snapshot(generation, name, selector)
         local values
         local domain
@@ -1082,6 +1279,10 @@ function M.new_context_publication(ports, options)
         })
     end
 
+    -- Read one canonical durable Session override value from a Context document.
+    --@param document table Verified Context document.
+    --@param name string Override field name.
+    --@return any Selector record, boolean, goal mode, or ContextPrompt text.
     local function override_value(document, name)
         if name == "CurrentModel" then
             return {
@@ -1107,6 +1308,11 @@ function M.new_context_publication(ports, options)
         return document.session.context_prompt
     end
 
+    -- Hash one named Session override value for publication evidence.
+    --@param name string Override field name.
+    --@param value any Canonical override value.
+    --@return string|nil Binding digest.
+    --@return table|nil Snapshot or digest error.
     local function override_digest(name, value)
         return snapshot_digest(safety, "yaca-session-override-value-v1", {
             name = name,
@@ -1114,6 +1320,12 @@ function M.new_context_publication(ports, options)
         })
     end
 
+    -- Release a failed Context writer while preserving uncertainty about release.
+    --@param writer table Open Context writer owned by this service.
+    --@param original_error table Original publication failure.
+    --@return nil Publication remains failed.
+    --@return table Original error, or ContextPublicationUnknown if writer close fails.
+    --@effect Closes the writer lease.
     local function close_writer(writer, original_error)
         local closed_writer, close_error = store.close_writer(writer)
         if not closed_writer then
@@ -1126,6 +1338,11 @@ function M.new_context_publication(ports, options)
         return nil, original_error
     end
 
+    -- Build a lifecycle document whose Model view manifest matches its new facts.
+    --@param document table Verified previous Context document.
+    --@param mutation table Rename, import, repair, or setting mutation fields.
+    --@return table|nil Candidate next Context document.
+    --@return table Model view on success, or structured error on failure.
     local function management_document(document, mutation)
         local manifest = document.model_view.active_manifest
         -- Let the schema form the lifecycle event, then compute its real
@@ -1162,6 +1379,11 @@ function M.new_context_publication(ports, options)
     local import_plans = {}
     local repair_plans = {}
 
+    -- Bind an offline management request to its exact inspected Context path.
+    --@param specification table Context path, logical path, and inspection credential.
+    --@param allow_corrupt string|boolean|nil Repair or delete allowance for damaged headers.
+    --@return string|nil Exact physical path within the logical mirror.
+    --@return string|table Context hash on success, or binding error on failure.
     local function bound_management_path(specification, allow_corrupt)
         local credential = specification.expected_credential
         local missing = allow_corrupt == "repair" and type(credential) == "table"
@@ -1188,6 +1410,11 @@ function M.new_context_publication(ports, options)
         return physical, hash
     end
 
+    -- Hash a workspace root's logical path and stable physical object identity.
+    --@param logical string Logical workspace root.
+    --@param identity table Direct directory identity.
+    --@return string|nil Domain-separated root identity digest.
+    --@return table|nil InvalidWorkspace or digest error.
     local function root_identity_digest(logical, identity)
         if type(identity) ~= "table" or identity.kind ~= "directory"
             or type(identity.volume) ~= "string" or type(identity.object) ~= "string"
@@ -1200,6 +1427,10 @@ function M.new_context_publication(ports, options)
         })
     end
 
+    -- Reinspect the workspace bound to a pending offline Context proposal.
+    --@param plan table Proposal's direct snapshot, root path, and identity digest.
+    --@return boolean|nil True when root path and identity remain exact.
+    --@return table|nil Changed-workspace or inspection error.
     local function verify_management_workspace(plan)
         local current, current_error = filesystem.direct_reverify(plan.root_snapshot)
         if not current then
@@ -1220,6 +1451,9 @@ function M.new_context_publication(ports, options)
 
     ---Builds a read-only rebind proposal. Only this owner's latest proposal can
     -- be consumed, once, by manage_context after the controller confirms it.
+    --@param specification table Inspected Context credential and desired workspace root.
+    --@return table|nil Opaque, read-only rebind proposal.
+    --@return table|nil Validation, workspace, or binding error.
     function service.plan_rebind(specification)
         rebind_plans = {}
         if closed or journal_failure or active then
@@ -1289,6 +1523,9 @@ function M.new_context_publication(ports, options)
     ---Prepares a complete in-place import generation without acquiring a writer.
     -- Local mappings replace only effective selectors. Historical authority and
     -- unfinished operations remain data, and cannot resume work through import.
+    --@param specification table Inspected Context, credential, and local config generation.
+    --@return table|nil Read-only import proposal with mapping and recovery facts.
+    --@return table|nil Workspace, mapping, source, or candidate-generation error.
     function service.plan_import(specification)
         import_plans = {}
         if closed or journal_failure or active then
@@ -1347,6 +1584,11 @@ function M.new_context_publication(ports, options)
         if not utc_parts(now) then return nil, time_error or failure("UtcClockReadFailed", "UTC is unavailable") end
         local updated_at, updated_error = next_utc_time(now, document.header.updated_at)
         if not updated_at then return nil, updated_error end
+        -- Render one explicit before-and-after selector mapping for audit facts.
+        --@param previous table Prior selector name and snapshot digest.
+        --@param name string New local selector name.
+        --@param digest string New selector snapshot digest.
+        --@return string Human-readable mapping with both digests.
         local function mapping_text(previous, name, digest)
             return previous.name .. " [" .. previous.snapshot_digest .. "] -> " .. name .. " [" .. digest .. "]"
         end
@@ -1402,6 +1644,13 @@ function M.new_context_publication(ports, options)
         return proposal
     end
 
+    -- Create a durable repair lifecycle generation from a validated prior document.
+    --@param document table Verified surviving Context document.
+    --@param action string restore-previous or cleanup action.
+    --@param now string Canonical current UTC timestamp.
+    --@param previous_updated_at string|nil Latest known prior timestamp.
+    --@return table|nil Repaired lifecycle document.
+    --@return table|nil View or timestamp error.
     local function repair_document(document, action, now, previous_updated_at)
         local old_view, view_error = rebuild_active_model_view(document)
         if not old_view then return nil, view_error end
@@ -1422,6 +1671,9 @@ function M.new_context_publication(ports, options)
 
     ---Previews a bounded physical repair without acquiring a writer or moving
     -- files. Missing officials remain unavailable until confirmed publication.
+    --@param specification table Exact damaged Context credential and paths.
+    --@return table|nil Read-only repair proposal.
+    --@return table|nil Inspection, source, or candidate-document error.
     function service.plan_repair(specification)
         repair_plans = {}
         if closed or journal_failure or active then
@@ -1457,6 +1709,11 @@ function M.new_context_publication(ports, options)
         return result
     end
 
+    -- Consume an exact repair proposal and publish its verified replacement.
+    --@param specification table Repair plan and matching Context credential.
+    --@return table|nil Read-only repair receipt.
+    --@return table|nil Stale proposal, repair, or uncertain-publication error.
+    --@effect May replace Context files; closes this management owner on uncertain outcome.
     local function apply_context_repair(specification)
         local plan = repair_plans[specification.repair_plan]
         repair_plans = {}
@@ -1503,6 +1760,10 @@ function M.new_context_publication(ports, options)
     -- This uses a separate short-lived writer, never opens a Runtime, and never
     -- recovers or replays pending work. Every path releases its writer before
     -- returning; uncertain publication stops this management owner.
+    --@param specification table Exact offline action, credential, and optional proposal.
+    --@return table|nil Read-only management transaction receipt.
+    --@return table|nil Validation, writer, or uncertain-publication error.
+    --@effect May rename, rebind, import, repair, delete, or update Context metadata.
     function service.manage_context(specification)
         if closed or journal_failure then
             return nil, failure("ContextMutationUnknown", "Context management owner is closed")
@@ -1639,6 +1900,11 @@ function M.new_context_publication(ports, options)
             end
             return nil, document
         end
+        -- Execute one already-bound offline mutation under the short-lived writer.
+        --@param none This closure captures the selected management action and writer.
+        --@return table|nil Read-only mutation receipt.
+        --@return table|nil Validation, publication, or changed-target error.
+        --@effect May delete, move, or publish a Context generation.
         local function transact()
             if action == "delete" then return store.delete(writer) end
             if type(document) ~= "table" or type(document.header) ~= "table"
@@ -1787,6 +2053,11 @@ function M.new_context_publication(ports, options)
         return receipt
     end
 
+    -- Publish the first durable Context generation under a collision-safe random name.
+    --@param specification table Generation, workspace, settings, initial message, and lane.
+    --@return table|nil Read-only first-publication receipt with Agent binding digests.
+    --@return table|nil Input, name, filesystem, or publication error.
+    --@effect Creates a Context file and retains its writer as the active owner.
     function service.publish_first(specification)
         if closed then
             return nil, failure("ContextPublicationClosed", "Context publication service is closed")
@@ -1803,6 +2074,8 @@ function M.new_context_publication(ports, options)
             or specification.message == ""
             or type(specification.source) ~= "string"
             or specification.source == ""
+            or (specification.initial_lane ~= nil and specification.initial_lane ~= "main"
+                and specification.initial_lane ~= "ask")
         then
             return nil, failure("InvalidFirstMain", "first main publication input is incomplete")
         end
@@ -1872,6 +2145,11 @@ function M.new_context_publication(ports, options)
                     },
                 },
             }
+            -- An initial Ask publishes only the Context owner here. The Ask
+            -- lane then records its own turn and request atomically; no main
+            -- turn or main Model activity is manufactured for initialization.
+            local first_ask = specification.initial_lane == "ask"
+            if first_ask then facts = {} end
             local initial_view, view_error = cache_model_view(facts, 1)
             if not initial_view then return nil, view_error end
             snapshot.view = initial_view.digest
@@ -1907,8 +2185,8 @@ function M.new_context_publication(ports, options)
                 model_view = {
                     active_manifest = {
                         digest = snapshot.view,
-                        first_event_seq = 1,
-                        last_event_seq = 2,
+                        first_event_seq = first_ask and 0 or 1,
+                        last_event_seq = #facts,
                     },
                     compaction_records = {},
                 },
@@ -1935,10 +2213,11 @@ function M.new_context_publication(ports, options)
                         display_name = display_name,
                         generation = document.generation,
                         event_count = document.event_count,
-                        first_sequence = 1,
-                        last_sequence = 2,
-                        turn_id = "turn-1",
-                        message_id = "turn-1:message:1",
+                        first_sequence = first_ask and 0 or 1,
+                        last_sequence = #facts,
+                        turn_id = not first_ask and "turn-1" or false,
+                        message_id = not first_ask and "turn-1:message:1" or false,
+                        runtime_initial_serials = document.recovery.runtime_initial_serials,
                         config_snapshot = snapshot.config,
                         model_snapshot = snapshot.model,
                         permission_snapshot = snapshot.permission,
@@ -1973,6 +2252,10 @@ function M.new_context_publication(ports, options)
         )
     end
 
+    -- Reconstruct pending compaction lifecycle state from verified recovery facts.
+    --@param document table Reopened durable Context document.
+    --@return boolean|nil True after valid lifecycles are restored.
+    --@return table|nil Invalid recovery or compaction-binding error.
     local function restore_compaction_lifecycles(document)
         compaction_lifecycles = {}
         local recovery = document.recovery or {}
@@ -2048,6 +2331,11 @@ function M.new_context_publication(ports, options)
         return true
     end
 
+    -- Settle every crash-left compaction request as unknown before exposing a Runtime.
+    --@param none This closure uses the active durable Context and its journal.
+    --@return table|nil Read-only recovery counts and retained-view status.
+    --@return table|nil Journal or incomplete-recovery error.
+    --@effect Publishes cancellation facts for bound and legacy pending compactions.
     local function recover_opened_compactions()
         local recovery = active.document.recovery or {}
         local pending = recovery.pending_compactions or {}
@@ -2195,6 +2483,10 @@ function M.new_context_publication(ports, options)
 
     ---Acquires a verified existing Context and resolves every crash-left
     -- compaction bracket before exposing the writer to a new Runtime.
+    --@param specification table Exact physical/logical paths and inspection credential.
+    --@return table|nil Opened or recovered Context receipt.
+    --@return table|nil Validation, lease, view, or recovery error.
+    --@effect Acquires and retains the Context writer; may publish recovery facts.
     function service.open_existing(specification)
         if closed then
             return nil, failure(
@@ -2332,6 +2624,9 @@ function M.new_context_publication(ports, options)
     ---Builds a bounded quoted-data model view from the exact current durable
     -- Fact prefix. A changed view is only a candidate until AgentLoop commits
     -- the matching model_view_published event through this journal.
+    --@param specification table Expected Context generation, event count, and manifest digest.
+    --@return table|nil Read-only view candidate or unchanged active-view reference.
+    --@return table|nil Stale observation, rebuild, or size error.
     function service.prepare_view(specification)
         if closed then
             return nil, failure("ContextPublicationClosed", "Context model view is closed")
@@ -2414,6 +2709,9 @@ function M.new_context_publication(ports, options)
     end
 
     ---Returns one body only after its manifest is the active durable view.
+    --@param digest string Exact active Model view manifest digest.
+    --@return table|nil Read-only active Model view with its quoted-data body.
+    --@return table|nil Stale, unavailable, or rebuild error.
     function service.resolve_view(digest)
         if closed then
             return nil, failure("ContextPublicationClosed", "Context model view is closed")
@@ -2437,6 +2735,9 @@ function M.new_context_publication(ports, options)
 
     ---Returns the exact durable session overrides used for the next complete
     -- Config reload. The private config source digest never enters this view.
+    --@param observation table Expected current Context generation.
+    --@return table|nil Read-only Context generation and override snapshot.
+    --@return table|nil Closed, unpublished, invalid, or stale-observation error.
     function service.turn_context(observation)
         if closed then
             return nil, failure("ContextPublicationClosed", "Context turn snapshot is closed")
@@ -2468,6 +2769,10 @@ function M.new_context_publication(ports, options)
     ---Atomically publishes one whitelisted Context Session override plus the
     -- refreshed active Model view. The returned receipt must be adopted by the
     -- sole Runtime before any later barrier is allowed to advance.
+    --@param specification table Exact override change and expected Context/config state.
+    --@return table|nil Durable Session update receipt for Runtime adoption.
+    --@return table|nil Validation, stale generation, or publication error.
+    --@effect Publishes a new Context generation with the override and Model view.
     function service.update_session(specification)
         if closed then
             return nil, failure(
@@ -2714,6 +3019,12 @@ function M.new_context_publication(ports, options)
                 active.receipt.context_path .. ".yaca-tmp-" .. hex(random)
             )
             if published then break end
+            if publish_error and publish_error.code == "ContextCapacity"
+                and publish_error.publication_started == false
+            then
+                model_views[view.digest] = nil
+                return nil, publish_error
+            end
             if type(publish_error) ~= "table"
                 or publish_error.code ~= "DestinationExists"
             then
@@ -2807,6 +3118,9 @@ function M.new_context_publication(ports, options)
 
     ---Builds a complete immutable Runtime turn input from one already reloaded
     -- ConfigGeneration and the current durable Model-view manifest.
+    --@param specification table Generation, main/ask text, source, and expected Context generation.
+    --@return table|nil Read-only Runtime turn snapshot with binding digests and limits.
+    --@return table|nil Invalid, stale, or mismatched generation error.
     function service.capture_turn(specification)
         if closed then
             return nil, failure("ContextPublicationClosed", "Context turn snapshot is closed")
@@ -2833,7 +3147,7 @@ function M.new_context_publication(ports, options)
         if type(specification.generation) ~= "table"
             or (specification.kind ~= nil
                 and specification.kind ~= "main"
-                and specification.kind ~= "side")
+                and specification.kind ~= "ask")
             or not valid_text(specification.text, admitted.maximum_model_view_bytes)
             or specification.text == ""
             or not valid_text(specification.source, 256)
@@ -2886,6 +3200,9 @@ function M.new_context_publication(ports, options)
     ---Returns the exact immutable Context and active Model-view facts needed
     -- to plan compaction. The caller supplies the complete Runtime waterline;
     -- a stale generation, sequence, or manifest fails before XML encoding.
+    --@param observation table Expected Context generation, sequence, and active manifest digest.
+    --@return table|nil Read-only compaction source, corrections, ranges, and recovery state.
+    --@return table|nil Stale, oversized, encoding, or digest error.
     function service.compaction_snapshot(observation)
         if closed then
             return nil, failure(
@@ -3024,6 +3341,10 @@ function M.new_context_publication(ports, options)
 
     ---Commits one AgentLoop batch through the already-owned writer lease. Each
     -- acknowledged batch is a fully validated replacement generation.
+    --@param batch table Exact sequence, generation, events, barrier, and optional compaction record.
+    --@return boolean|nil True when a replacement generation is durable.
+    --@return table Context journal receipt on success, or structured error on failure.
+    --@effect Publishes a new Context generation and latches uncertain journal failures.
     function service.commit(batch)
         if closed then
             return nil, failure("ContextPublicationClosed", "Context journal is closed")
@@ -3104,7 +3425,13 @@ function M.new_context_publication(ports, options)
             events = batch.events,
             compaction_record = batch.compaction_record,
         })
-        if not document then return nil, document_error end
+        if not document then
+            if document_error and document_error.code == "ContextLimit" then
+                return nil, { code = "ContextCapacity", publication_started = false,
+                    message = "Context event capacity is exhausted; start a new Context" }
+            end
+            return nil, document_error
+        end
 
         local published, publish_error
         for _ = 1, admitted.maximum_create_attempts do
@@ -3121,6 +3448,11 @@ function M.new_context_publication(ports, options)
                 active.receipt.context_path .. ".yaca-tmp-" .. hex(random)
             )
             if published then break end
+            if publish_error and publish_error.code == "ContextCapacity"
+                and publish_error.publication_started == false
+            then
+                return nil, publish_error
+            end
             if type(publish_error) ~= "table"
                 or publish_error.code ~= "DestinationExists"
             then
@@ -3169,15 +3501,27 @@ function M.new_context_publication(ports, options)
     -- commit is translated into the same sequenced Context stream owned by
     -- this publication lease. Receipts are retained until the Runtime tool
     -- adapter adopts the external barrier into its local sequence waterline.
+    --@param none This service method takes no arguments.
+    --@return table Read-only operation journal with commit and receipt methods.
     function service.operation_journal()
         if operation_journal then return operation_journal end
         local journal = {}
 
+        -- Recover the owning turn ID from a canonical Tool call identifier.
+        --@param tool_call_id any Candidate Tool call ID.
+        --@return string|boolean Turn ID, or false when the ID is not canonical.
         local function turn_id(tool_call_id)
             if type(tool_call_id) ~= "string" then return false end
             return tool_call_id:match("^(.-):tool:[1-9][0-9]*$") or false
         end
 
+        -- Publish operation intent or paired result facts under one Context barrier.
+        --@param record table Operation record from the durable operation service.
+        --@param digest string Record binding digest.
+        --@param kind string intent or result.
+        --@return boolean True after Context publication.
+        --@return string|table Record digest on success, or error on failure.
+        --@effect Appends operation facts and retains a one-use Runtime receipt.
         local function commit_record(record, digest, kind)
             if not active or not active.document then
                 return false, failure(
@@ -3257,14 +3601,30 @@ function M.new_context_publication(ports, options)
             return true, digest
         end
 
+        -- Publish an operation intent and retain its adoption receipt.
+        --@param record table Durable operation intent record.
+        --@param digest string Record digest.
+        --@return boolean Commit status.
+        --@return string|table Digest on success, or error on failure.
         function journal.commit_intent(record, digest)
             return commit_record(record, digest, "intent")
         end
 
+        -- Publish operation and Tool result facts atomically.
+        --@param record table Durable operation-result record.
+        --@param digest string Record digest.
+        --@return boolean Commit status.
+        --@return string|table Digest on success, or error on failure.
         function journal.commit_result(record, digest)
             return commit_record(record, digest, "result")
         end
 
+        -- Consume the exact one-use Context receipt for an operation barrier.
+        --@param receipts table Intent or result receipt map.
+        --@param operation_id string Durable operation ID.
+        --@param digest string|nil Expected record digest.
+        --@return table|nil Matching Context receipt.
+        --@return table|nil OperationJournalContract diagnostic.
         local function take(receipts, operation_id, digest)
             local slot = receipts[operation_id]
             if not slot or (digest ~= nil and slot.digest ~= digest) then
@@ -3277,10 +3637,20 @@ function M.new_context_publication(ports, options)
             return slot.receipt
         end
 
+        -- Take the Runtime adoption receipt for a published intent.
+        --@param operation_id string Durable operation ID.
+        --@param digest string|nil Expected intent digest.
+        --@return table|nil Context receipt.
+        --@return table|nil Missing or mismatched receipt error.
         function journal.take_intent_receipt(operation_id, digest)
             return take(operation_intent_receipts, operation_id, digest)
         end
 
+        -- Take the Runtime adoption receipt for a published operation result.
+        --@param operation_id string Durable operation ID.
+        --@param digest string|nil Expected result digest.
+        --@return table|nil Context receipt.
+        --@return table|nil Missing or mismatched receipt error.
         function journal.take_result_receipt(operation_id, digest)
             return take(operation_result_receipts, operation_id, digest)
         end
@@ -3293,6 +3663,8 @@ function M.new_context_publication(ports, options)
     -- record advances Context while retaining the active manifest. An accepted
     -- summary, its terminal CompactionRecord, and its prepared Model view are
     -- published in one replacement generation or not at all.
+    --@param none This service method takes no arguments.
+    --@return table Read-only compaction journal with lifecycle commit methods.
     function service.compaction_journal()
         if compaction_journal then return compaction_journal end
         local journal = {}
@@ -3364,18 +3736,29 @@ function M.new_context_publication(ports, options)
             },
         }
 
+        -- Check a bounded identifier accepted by the compaction journal.
+        --@param value any Candidate lifecycle or request ID.
+        --@return boolean True for a nonempty safe identifier.
         local function valid_id(value)
             return valid_text(value, admitted.maximum_compaction_identifier_bytes)
                 and value ~= ""
                 and value:match("^[A-Za-z0-9][A-Za-z0-9._:-]*$") ~= nil
         end
 
+        -- Check a lowercase SHA-256 digest in compaction records.
+        --@param value any Candidate digest.
+        --@return boolean True for a 64-character lowercase hexadecimal digest.
         local function valid_digest(value)
             return type(value) == "string"
                 and #value == 64
                 and value:match("^[0-9a-f]+$") ~= nil
         end
 
+        -- Require every field in a closed compaction record schema and reject extras.
+        --@param record any Candidate journal record.
+        --@param kind string Expected record kind.
+        --@return boolean|nil True for an exact record.
+        --@return table|nil CompactionJournalContract diagnostic.
         local function exact_record(record, kind)
             local allowed = RECORD_FIELDS[kind]
             if type(record) ~= "table" or record.kind ~= kind or not allowed then
@@ -3404,6 +3787,10 @@ function M.new_context_publication(ports, options)
             return true
         end
 
+        -- Bind a compaction record to this owner's active generation and manifest.
+        --@param record table Journal record with expected Context and manifest references.
+        --@return table|nil Active durable Context document.
+        --@return table Active manifest on success, or structured error on failure.
         local function current_document(record)
             if not active or not active.document then
                 return nil, failure(
@@ -3427,6 +3814,13 @@ function M.new_context_publication(ports, options)
             return document, manifest
         end
 
+        -- Verify an exact digest while mapping mismatch to the caller's error code.
+        --@param bytes string Canonical bytes to hash.
+        --@param expected string Claimed lowercase digest.
+        --@param code string Mismatch diagnostic code.
+        --@param message string Mismatch diagnostic summary.
+        --@return boolean|nil True on exact match.
+        --@return table|nil Structured mismatch or digest failure.
         local function verify_digest(bytes, expected, code, message)
             if not valid_digest(expected) then return nil, failure(code, message) end
             local called, observed, digest_error = pcall(safety.digest, bytes)
@@ -3440,6 +3834,13 @@ function M.new_context_publication(ports, options)
             return true
         end
 
+        -- Rebuild a bounded compaction source and match its durable range and digest.
+        --@param document table Active Context document.
+        --@param record table Candidate source range and digest.
+        --@param lifecycle table|nil Earlier lifecycle binding for retries.
+        --@param source_event_count integer|nil Explicit source waterline.
+        --@return integer|nil Verified source event count.
+        --@return table|nil Stale range, encoder, or digest error.
         local function verify_source(document, record, lifecycle, source_event_count)
             source_event_count = source_event_count
                 or (lifecycle and lifecycle.source_event_count)
@@ -3484,6 +3885,11 @@ function M.new_context_publication(ports, options)
             return source_event_count
         end
 
+        -- Resolve a live compaction lifecycle matching request, attempt, and manifest.
+        --@param record table Compaction journal record.
+        --@param require_response boolean Whether a response must already be durable.
+        --@return table|nil Matching nonterminal lifecycle.
+        --@return table|nil CompactionJournalContract diagnostic.
         local function lifecycle_for(record, require_response)
             local lifecycle = compaction_lifecycles[record.compaction_id]
             if not lifecycle or lifecycle.terminal
@@ -3500,6 +3906,11 @@ function M.new_context_publication(ports, options)
             return lifecycle
         end
 
+        -- Derive a unique Context barrier ID from compaction kind and sequence.
+        --@param record table Bound compaction record.
+        --@param first_sequence integer First event sequence in the proposed batch.
+        --@return string|nil Domain-separated barrier ID.
+        --@return table|nil Binding-digest error.
         local function barrier_id(record, first_sequence)
             local called, digest, digest_error = pcall(
                 safety.binding_digest,
@@ -3520,6 +3931,14 @@ function M.new_context_publication(ports, options)
             return "compaction:" .. digest
         end
 
+        -- Commit a compaction fact batch and return its Runtime adoption receipt.
+        --@param record table Bound compaction journal record.
+        --@param events table New events to sequence and publish.
+        --@param compaction_record table|nil Terminal summary record for schema publication.
+        --@param publishing boolean Whether this batch changes the active Model view.
+        --@return boolean True after durable Context publication.
+        --@return table Journal receipt on success, or structured error on failure.
+        --@effect Publishes a new Context generation through the sole writer.
         local function commit_events(record, events, compaction_record, publishing)
             local first_sequence = active.document.event_count + 1
             local barrier, barrier_error = barrier_id(record, first_sequence)
@@ -3555,6 +3974,11 @@ function M.new_context_publication(ports, options)
             return true, readonly(values, "durable compaction journal receipt")
         end
 
+        -- Publish and bind a new compaction request or valid retry.
+        --@param record table Exact compaction-request record.
+        --@return boolean True after durable request publication.
+        --@return table Receipt on success, or structured error on failure.
+        --@effect Adds a model_request fact and retains lifecycle state.
         function journal.commit_intent(record)
             local exact, exact_error = exact_record(record, "compaction-request")
             if not exact then return false, exact_error end
@@ -3662,6 +4086,11 @@ function M.new_context_publication(ports, options)
             return true, receipt
         end
 
+        -- Publish one digest-verified complete compaction Model response.
+        --@param record table Exact compaction-response record.
+        --@return boolean True after durable response publication.
+        --@return table Receipt on success, or structured error on failure.
+        --@effect Adds a model_message fact and marks response committed.
         function journal.commit_response(record)
             local exact, exact_error = exact_record(record, "compaction-response")
             if not exact then return false, exact_error end
@@ -3711,6 +4140,14 @@ function M.new_context_publication(ports, options)
             return true, receipt
         end
 
+        -- Build a terminal compaction event and schema record from one lifecycle.
+        --@param record table Source and terminal result fields.
+        --@param lifecycle table Bound live compaction lifecycle.
+        --@param status string Terminal status.
+        --@param error_id string|nil Failure code for rejected or unknown compaction.
+        --@param automatic_failure boolean Whether this counts as an automatic failure.
+        --@return table Compaction event.
+        --@return table Terminal schema record.
         local function terminal_event(
             record,
             lifecycle,
@@ -3750,6 +4187,11 @@ function M.new_context_publication(ports, options)
             }
         end
 
+        -- Publish a rejected response or cancellation while retaining the old view.
+        --@param record table Exact rejection, cancel-request, or cancel-result record.
+        --@return boolean True after durable event publication.
+        --@return table Receipt on success, or structured error on failure.
+        --@effect Adds warning/cancel/terminal facts and updates lifecycle state.
         function journal.commit_rejection(record)
             if type(record) ~= "table" or not RECORD_FIELDS[record.kind] then
                 return false, failure(
@@ -3949,6 +4391,11 @@ function M.new_context_publication(ports, options)
             return true, receipt
         end
 
+        -- Atomically publish an accepted summary, terminal fact, and new Model view.
+        --@param record table Exact compaction-publication record and canonical manifest.
+        --@return boolean True after one durable replacement generation.
+        --@return table Receipt on success, or validation/publication error.
+        --@effect Advances active Model view only with verified source and summary bindings.
         function journal.publish(record)
             local exact, exact_error = exact_record(record, "compaction-publication")
             if not exact then return false, exact_error end
@@ -4147,6 +4594,11 @@ function M.new_context_publication(ports, options)
             return true, receipt
         end
 
+        -- Publish a digest-checked correction for an already accepted summary.
+        --@param record table Exact summary-correction record.
+        --@return boolean True after durable warning publication.
+        --@return table Receipt on success, or structured error on failure.
+        --@effect Appends a correction warning for the next Model view publication.
         function journal.commit_correction(record)
             local exact, exact_error = exact_record(record, "summary-correction")
             if not exact then return false, exact_error end
@@ -4201,6 +4653,8 @@ function M.new_context_publication(ports, options)
     end
 
     ---Returns the latest publication receipt without filesystem access.
+    --@param none This service method takes no arguments.
+    --@return table Active publication receipt or non-durable closed status.
     function service.status()
         if active then return active.receipt end
         return readonly({ durable = false, closed = closed }, "Context publication status")
@@ -4209,6 +4663,9 @@ function M.new_context_publication(ports, options)
     ---Checks the active writer and derives its current public path hash.
     -- A failed observation is sticky and closes all later publication barriers.
     -- This reads only the owned file and never discovers or follows a replacement.
+    --@param none This service method takes no arguments.
+    --@return table|nil Verified active Context status and current hash.
+    --@return table|nil Closed, stale, or missing-owner error.
     function service.inspect_active()
         if closed then
             return nil, failure("ContextPublicationClosed", "Context inspection is closed")
@@ -4242,9 +4699,9 @@ function M.new_context_publication(ports, options)
     end
 
     ---Exports only this owner's verified current document without mutation.
-    -- @param secret_scan function|nil Current ConfigGeneration secret scanner.
-    -- @return string|nil markdown Complete bounded public Markdown view.
-    -- @return table|nil receipt Verified identity, or a typed failure.
+    --@param secret_scan function|nil Current ConfigGeneration secret scanner.
+    --@return string|nil markdown Complete bounded public Markdown view.
+    --@return table|nil receipt Verified identity, or a typed failure.
     function service.export_active(secret_scan)
         local inspected, inspection_error = service.inspect_active()
         if not inspected then return nil, inspection_error end
@@ -4255,6 +4712,11 @@ function M.new_context_publication(ports, options)
         return markdown, verified
     end
 
+    -- Release the owned Context writer and close this publication service.
+    --@param none This service method takes no arguments.
+    --@return boolean|nil True after release, false if already closed.
+    --@return table|nil Writer-release error.
+    --@effect Closes the sole Context writer lease.
     function service.close()
         if closed then return false end
         closed = true
@@ -4272,11 +4734,12 @@ end
 ---Creates a bounded in-memory chat draft without scanning or writing Contexts.
 -- The draft owns only not-yet-durable session selectors. It cannot accept a
 -- first main message until the later Context publication service is attached.
--- @param generation table Immutable Agent-ready ConfigGeneration.
--- @param workspace table Validated path/identity/enterable observation.
--- @param options table Contains maximum_draft_bytes.
--- @return table|nil draft Immutable facade over the owned draft state.
--- @return table|nil err Structured validation failure.
+--@param generation table Immutable Agent-ready ConfigGeneration.
+--@param workspace table Validated path/identity/enterable observation.
+--@param options table Contains maximum_draft_bytes.
+--@param publication table|nil First-Context publication service attached to the draft.
+--@return table|nil draft Immutable facade over the owned draft state.
+--@return table|nil err Structured validation failure.
 function M.new_draft(generation, workspace, options, publication)
     local admitted_generation, generation_error = validate_generation(generation)
     if not admitted_generation then return nil, generation_error end
@@ -4326,6 +4789,10 @@ function M.new_draft(generation, workspace, options, publication)
     local published_source
     local close_failure
 
+    -- Require the unsaved draft to remain before first publication or close.
+    --@param none This closure takes no arguments.
+    --@return boolean|nil True while the draft is not saved.
+    --@return table|nil SessionClosed diagnostic.
     local function require_open()
         if lifecycle ~= "not-saved" then
             return nil, failure("SessionClosed", "the unsaved chat draft is closed")
@@ -4333,6 +4800,9 @@ function M.new_draft(generation, workspace, options, publication)
         return true
     end
 
+    -- Snapshot unsaved draft settings and any published Context identity.
+    --@param none This closure takes no arguments.
+    --@return table Read-only draft status and selection fields.
     local function status()
         return readonly({
             lifecycle = lifecycle,
@@ -4354,14 +4824,16 @@ function M.new_draft(generation, workspace, options, publication)
     end
 
     ---Returns a fresh immutable projection of the owned draft state.
+    --@param none This draft method takes no arguments.
+    --@return table Read-only draft status.
     function draft.status()
         return status()
     end
 
     ---Updates only session-whitelisted settings before the first main message.
-    -- @param changes table Model, Permission, DoubleCheck, goal, and Prompt fields.
-    -- @return table|nil status New immutable draft projection.
-    -- @return table|nil err Unknown, invalid, or closed-state failure.
+    --@param changes table Model, Permission, DoubleCheck, goal, and Prompt fields.
+    --@return table|nil status New immutable draft projection.
+    --@return table|nil err Unknown, invalid, or closed-state failure.
     function draft.update(changes)
         local open, open_error = require_open()
         if not open then return nil, open_error end
@@ -4462,7 +4934,13 @@ function M.new_draft(generation, workspace, options, publication)
     end
 
     ---Publishes the first main input before any Model or tool may be started.
-    function draft.begin_main(message, source)
+    --@param message string Initial main or ask input.
+    --@param source string|nil Input source label.
+    --@param lane string main or ask initial lane.
+    --@return table|nil Durable first Context receipt.
+    --@return table|nil Closed, secret, validation, or publication error.
+    --@effect Publishes and retains the first Context writer on success.
+    local function begin_first(message, source, lane)
         local open, open_error = require_open()
         if not open then return nil, open_error end
         if not publication then
@@ -4501,6 +4979,7 @@ function M.new_draft(generation, workspace, options, publication)
             },
             message = message,
             source = source,
+            initial_lane = lane,
         })
         if not called then
             return nil, failure(
@@ -4525,8 +5004,29 @@ function M.new_draft(generation, workspace, options, publication)
         return receipt
     end
 
+    -- Publish the first main request through the shared first-turn gate.
+    --@param message string Initial main input.
+    --@param source string|nil Input source label.
+    --@return table|nil Durable first Context receipt.
+    --@return table|nil First-turn validation or publication error.
+    function draft.begin_main(message, source)
+        return begin_first(message, source, "main")
+    end
+
+    -- Publish only the Context owner before a first ask request begins.
+    --@param message string Initial ask input.
+    --@param source string|nil Input source label.
+    --@return table|nil Durable first Context receipt.
+    --@return table|nil First-turn validation or publication error.
+    function draft.begin_ask(message, source)
+        return begin_first(message, source, "ask")
+    end
+
     ---Returns the exact precommitted first-turn handoff for AgentLoop. The
     -- handoff exists only after begin_main received a durable receipt.
+    --@param none This draft method takes no arguments.
+    --@return table|nil Read-only first-turn input and publication binding.
+    --@return table|nil ContextNotPublished diagnostic.
     function draft.agent_handoff()
         if not publication_receipt then
             return nil, failure(
@@ -4572,6 +5072,10 @@ function M.new_draft(generation, workspace, options, publication)
     end
 
     ---Closes the in-memory draft without creating any filesystem object.
+    --@param none This draft method takes no arguments.
+    --@return boolean|nil True after close, false if already closed.
+    --@return table|nil Context writer release error.
+    --@effect Releases a saved Context writer when one was attached.
     function draft.close()
         if lifecycle == "closed" then
             if close_failure then return nil, close_failure end
@@ -4592,6 +5096,8 @@ function M.new_draft(generation, workspace, options, publication)
     end
 
     ---Returns the frozen generation used to create this draft.
+    --@param none This draft method takes no arguments.
+    --@return table Original immutable config generation.
     function draft.config_generation()
         return generation
     end
@@ -4602,17 +5108,17 @@ end
 ---Creates the saved-session input owner over one typed AgentLoop.
 -- Draft observation is captured when text is staged, so a delayed submission
 -- cannot silently redirect itself to a newer Context generation or turn.
--- @param loop table Typed Runtime AgentLoop facade.
--- @param options table Contains maximum_draft_bytes.
--- @return table|nil session Readonly saved-session facade.
--- @return table|nil err Structured construction failure.
+--@param loop table Typed Runtime AgentLoop facade.
+--@param options table Contains maximum_draft_bytes.
+--@return table|nil session Readonly saved-session facade.
+--@return table|nil err Structured construction failure.
 function M.new_agent_session(loop, options)
     if type(loop) ~= "table"
         or type(loop.status) ~= "function"
         or type(loop.submit_main) ~= "function"
         or type(loop.enqueue) ~= "function"
         or type(loop.steer) ~= "function"
-        or type(loop.start_side) ~= "function"
+        or type(loop.start_ask) ~= "function"
         or type(loop.resolve_yield) ~= "function"
         or type(loop.reply) ~= "function"
         or type(loop.list_queue) ~= "function"
@@ -4620,7 +5126,7 @@ function M.new_agent_session(loop, options)
         or type(loop.edit_queue) ~= "function"
         or type(loop.reorder_queue) ~= "function"
         or type(loop.clear_queue) ~= "function"
-        or type(loop.use_side) ~= "function"
+        or type(loop.use_ask) ~= "function"
         or type(loop.close) ~= "function"
     then
         return nil, failure("InvalidAgentSession", "a typed AgentLoop is required")
@@ -4641,6 +5147,10 @@ function M.new_agent_session(loop, options)
     local staged
     local session = {}
 
+    -- Reject saved-session input after the AgentLoop owner has closed.
+    --@param none This closure takes no arguments.
+    --@return boolean|nil True while the saved session is open.
+    --@return table|nil SessionClosed diagnostic.
     local function require_open()
         if lifecycle ~= "open" then
             return nil, failure("SessionClosed", "the saved Agent session is closed")
@@ -4648,6 +5158,9 @@ function M.new_agent_session(loop, options)
         return true
     end
 
+    -- Capture the exact Context generation and turn ID seen by a queue action.
+    --@param status table Current typed AgentLoop status.
+    --@return table Expected Context generation and turn identity.
     local function observation(status)
         return {
             expected_context_generation = status.context_generation,
@@ -4655,10 +5168,17 @@ function M.new_agent_session(loop, options)
         }
     end
 
+    -- Read the current AgentLoop observation for an immediate queue action.
+    --@param none This closure takes no arguments.
+    --@return table Context generation and turn identity.
     local function current_observation()
         return observation(loop:status())
     end
 
+    -- Project staged text and its captured observation into a Runtime command.
+    --@param none This closure takes no arguments.
+    --@return table|nil Text, source, and expected Context/turn fields.
+    --@return table|nil DraftEmpty diagnostic.
     local function command_from_draft()
         if not staged then return nil, failure("DraftEmpty", "no chat draft is staged") end
         return {
@@ -4669,12 +5189,21 @@ function M.new_agent_session(loop, options)
         }
     end
 
+    -- Clear staged text only after Runtime accepts an action.
+    --@param result table|nil Runtime action receipt.
+    --@param action_error table|nil Failure returned by Runtime.
+    --@return table|nil Accepted action receipt.
+    --@return table|nil Original action error when not accepted.
     local function consume_on_success(result, action_error)
         if not result then return nil, action_error end
         staged = nil
         return result
     end
 
+    -- Resolve a visible queue number to its current durable queue-item ID.
+    --@param display_id string Display ID such as #1.
+    --@return string|nil Durable queue-item ID.
+    --@return table|nil Invalid or missing display-ID diagnostic.
     local function resolve_display(display_id)
         if type(display_id) ~= "string" or not display_id:match("^#[1-9][0-9]*$") then
             return nil, failure("InvalidQueueId", "queue display id is invalid")
@@ -4687,6 +5216,11 @@ function M.new_agent_session(loop, options)
     end
 
     ---Captures a bounded draft plus the exact Context/turn observation it saw.
+    --@param self table Saved Agent session facade.
+    --@param text_value string User input to stage.
+    --@param source string|nil Input source; defaults to user.
+    --@return table|nil Read-only staged draft.
+    --@return table|nil Closed-session or invalid-text error.
     function session:stage(text_value, source)
         local open, open_error = require_open()
         if not open then return nil, open_error end
@@ -4707,6 +5241,8 @@ function M.new_agent_session(loop, options)
     end
 
     ---Returns the detached current draft; its text is preserved on lane rejection.
+    --@param self table Saved Agent session facade.
+    --@return table|boolean Read-only staged draft, or false when empty.
     function session:draft()
         if not staged then return false end
         return readonly({
@@ -4718,6 +5254,10 @@ function M.new_agent_session(loop, options)
     end
 
     ---Submits staged text to reply, supersede-yield, direct-main, or queue by state.
+    --@param self table Saved Agent session facade.
+    --@return table|nil Runtime receipt for the selected lane.
+    --@return table|nil Closed, stale-draft, or Runtime action error.
+    --@effect May submit, reply, supersede, or enqueue a durable Agent action.
     function session:submit()
         local open, open_error = require_open()
         if not open then return nil, open_error end
@@ -4750,6 +5290,10 @@ function M.new_agent_session(loop, options)
     end
 
     ---Explicit queue admission for the staged draft.
+    --@param self table Saved Agent session facade.
+    --@return table|nil Queue admission receipt.
+    --@return table|nil Closed, empty, or Runtime action error.
+    --@effect May enqueue the staged text through AgentLoop.
     function session:queue()
         local open, open_error = require_open()
         if not open then return nil, open_error end
@@ -4760,6 +5304,10 @@ function M.new_agent_session(loop, options)
     end
 
     ---Explicit same-turn steer for the staged draft.
+    --@param self table Saved Agent session facade.
+    --@return table|nil Steer receipt.
+    --@return table|nil Closed, empty, or Runtime action error.
+    --@effect May steer the active turn through AgentLoop.
     function session:steer()
         local open, open_error = require_open()
         if not open then return nil, open_error end
@@ -4769,17 +5317,26 @@ function M.new_agent_session(loop, options)
         return consume_on_success(result, action_error)
     end
 
-    ---Explicit single-concurrency side request for the staged draft.
-    function session:side()
+    ---Explicit single-concurrency ask request for the staged draft.
+    --@param self table Saved Agent session facade.
+    --@return table|nil Ask request receipt.
+    --@return table|nil Closed, empty, or Runtime action error.
+    --@effect May start the pure ask lane through AgentLoop.
+    function session:ask()
         local open, open_error = require_open()
         if not open then return nil, open_error end
         local command, command_error = command_from_draft()
         if not command then return nil, command_error end
-        local result, action_error = loop:start_side(command)
+        local result, action_error = loop:start_ask(command)
         return consume_on_success(result, action_error)
     end
 
     ---Continues the exact yielded response in a new turn using the staged text.
+    --@param self table Saved Agent session facade.
+    --@param response_id string Exact yielded response to continue.
+    --@return table|nil Continue receipt.
+    --@return table|nil Closed, empty, stale, or Runtime action error.
+    --@effect May resolve a yielded Model response through AgentLoop.
     function session:continue_response(response_id)
         local open, open_error = require_open()
         if not open then return nil, open_error end
@@ -4791,12 +5348,23 @@ function M.new_agent_session(loop, options)
         return consume_on_success(result, action_error)
     end
 
+    -- List the current durable queue projection.
+    --@param self table Saved Agent session facade.
+    --@return table|nil Queue projection.
+    --@return table|nil SessionClosed diagnostic.
     function session:queue_list()
         local open, open_error = require_open()
         if not open then return nil, open_error end
         return loop:list_queue()
     end
 
+    -- Drop a displayed queue item against the current Context observation.
+    --@param self table Saved Agent session facade.
+    --@param display_id string Visible queue ID.
+    --@param reason string|nil Drop reason; defaults to user-drop.
+    --@return table|nil Queue mutation receipt.
+    --@return table|nil Closed, missing-item, or Runtime error.
+    --@effect Publishes a queue drop through AgentLoop.
     function session:queue_drop(display_id, reason)
         local open, open_error = require_open()
         if not open then return nil, open_error end
@@ -4808,6 +5376,13 @@ function M.new_agent_session(loop, options)
         return loop:drop_queue(observed)
     end
 
+    -- Replace a displayed queue item's text under the draft byte limit.
+    --@param self table Saved Agent session facade.
+    --@param display_id string Visible queue ID.
+    --@param text_value string New bounded queue text.
+    --@return table|nil Queue mutation receipt.
+    --@return table|nil Invalid text, missing item, or Runtime error.
+    --@effect Publishes a queue edit through AgentLoop.
     function session:queue_edit(display_id, text_value)
         local open, open_error = require_open()
         if not open then return nil, open_error end
@@ -4822,6 +5397,13 @@ function M.new_agent_session(loop, options)
         return loop:edit_queue(observed)
     end
 
+    -- Reorder a displayed queue item before another item or to the end.
+    --@param self table Saved Agent session facade.
+    --@param display_id string Item to move.
+    --@param before_display_id string|boolean Destination item or false for end.
+    --@return table|nil Queue mutation receipt.
+    --@return table|nil Missing item or Runtime error.
+    --@effect Publishes a queue reorder through AgentLoop.
     function session:queue_move(display_id, before_display_id)
         local open, open_error = require_open()
         if not open then return nil, open_error end
@@ -4838,6 +5420,12 @@ function M.new_agent_session(loop, options)
         return loop:reorder_queue(observed)
     end
 
+    -- Clear queued items against the current Context observation.
+    --@param self table Saved Agent session facade.
+    --@param reason string|nil Clear reason; defaults to user-clear.
+    --@return table|nil Queue mutation receipt.
+    --@return table|nil Closed-session or Runtime error.
+    --@effect Publishes a queue clear through AgentLoop.
     function session:queue_clear(reason)
         local open, open_error = require_open()
         if not open then return nil, open_error end
@@ -4846,21 +5434,34 @@ function M.new_agent_session(loop, options)
         return loop:clear_queue(observed)
     end
 
-    function session:use_side(side_id, lane)
+    -- Insert an ask result into the requested main or queue lane explicitly.
+    --@param self table Saved Agent session facade.
+    --@param ask_id string Completed ask result ID.
+    --@param lane string Requested use lane.
+    --@return table|nil AgentLoop use-ask receipt.
+    --@return table|nil Closed-session or Runtime error.
+    --@effect May publish a durable ask-use fact.
+    function session:use_ask(ask_id, lane)
         local open, open_error = require_open()
         if not open then return nil, open_error end
         local observed = current_observation()
-        observed.side_id = side_id
+        observed.ask_id = ask_id
         observed.lane = lane
-        return loop:use_side(observed)
+        return loop:use_ask(observed)
     end
 
+    -- Discard staged text without touching durable Context state.
+    --@param self table Saved Agent session facade.
+    --@return boolean True when a staged draft existed.
     function session:clear_draft()
         local existed = staged ~= nil
         staged = nil
         return existed
     end
 
+    -- Snapshot saved-session lifecycle, staged text, and AgentLoop status.
+    --@param self table Saved Agent session facade.
+    --@return table Read-only status projection.
     function session:status()
         return readonly({
             lifecycle = lifecycle,
@@ -4870,6 +5471,12 @@ function M.new_agent_session(loop, options)
         }, "saved Agent session status")
     end
 
+    -- Close AgentLoop and discard staged text after its close is acknowledged.
+    --@param self table Saved Agent session facade.
+    --@param reason string|nil Close reason; defaults to session-close.
+    --@return boolean|nil True after close, false if already closed.
+    --@return table|nil AgentLoop close error.
+    --@effect Closes the Runtime owner and clears in-memory staged text.
     function session:close(reason)
         if lifecycle ~= "open" then return false end
         local closed, close_error = loop:close(reason or "session-close")

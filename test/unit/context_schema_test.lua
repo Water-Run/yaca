@@ -1,19 +1,29 @@
 --[[
-File: context_schema_test.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-09-23
+File: context_schema_test.lua
 Description: Verifies the canonical Context event and document model.
 ]]
 
 local A = assert(loadfile(YACA_TEST_ROOT .. "/test/support/assert.lua", "t", _ENV))()
 
+--Loads a source module into an isolated per-case environment.
+--@param name string Module, Model, or resource name selected by the case.
+--@param cache table Per-case module cache preserving isolated imports.
+--@return any module Module export loaded in the isolated source environment.
 local function load_module(name, cache)
     cache = cache or {}
     if cache[name] then return cache[name] end
-    local environment = { require = function(dependency)
+    local environment = {
+        --Resolves an imported Lua module through the isolated test loader.
+        --@param dependency string Source module requested from the isolated loader.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
+        require = function(dependency)
         return load_module(dependency, cache)
     end }
     environment._G = environment
+    --@metatable environment Test-owned lookup and mutation contract for the current case.
+    --@field __index any Fallback table or function used for missing fixture keys.
     setmetatable(environment, { __index = _ENV })
     local chunk, load_error = loadfile(
         YACA_TEST_ROOT .. "/src/" .. name .. ".lua",
@@ -26,6 +36,9 @@ local function load_module(name, cache)
     return value
 end
 
+--Loads a repository Lua module as a test support value.
+--@param relative_path string Repository-relative Lua source path to load.
+--@return any module Test support module export loaded from the repository.
 local function load_table(relative_path)
     local chunk, load_error = loadfile(YACA_TEST_ROOT .. "/" .. relative_path, "t", _ENV)
     A.truthy(chunk, load_error)
@@ -39,7 +52,19 @@ local fake_lxp = load_table("test/support/fake_lxp.lua")
 local sha256 = load_table("test/support/sha256_reference.lua")
 local contract = load_table(".develope-docs/contracts/context.lua")
 
+--Constructs new service for this test scenario.
+--@param overrides table|nil Per-case overrides of default fixture behavior.
+--@param lxp_override any The lxp override supplied to the fake service for this scenario.
+--@return any created Constructed new service fixture value.
+--@return any secondary2 Additional status or structured error from the fixture operation.
 local function new_service(overrides, lxp_override)
+    --Constructs the fake lxp service used by this suite.
+    --@param none No arguments; this closure uses its captured fixture state.
+    --@return boolean accepted Whether the fake callback accepts this scenario.
+    --@return string secondary2 Fixture text "schema test reader is not configured".
+    --@return integer secondary3 Fixture numeric value 1.
+    --@return integer secondary4 Fixture numeric value 1.
+    --@return integer secondary5 Fixture numeric value 1.
     local lxp = lxp_override or fake_lxp(function()
         return false, "schema test reader is not configured", 1, 1, 1
     end)
@@ -71,6 +96,9 @@ local function new_service(overrides, lxp_override)
     return assert(context.new(options)), options
 end
 
+--Supplies minimal behavior required by this suite.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return table observed Structured fixture record selected by the exercised branch.
 local function minimal()
     return {
         schema_version = "0.1.0",
@@ -127,6 +155,9 @@ local function minimal()
     }
 end
 
+--Copies test data so a mutation cannot affect the original fixture.
+--@param value any Candidate whose acceptance or transformation the test checks.
+--@return any copy Independent copy of the source fixture value.
 local function copy(value)
     if type(value) ~= "table" then return value end
     local result = {}
@@ -134,6 +165,12 @@ local function copy(value)
     return result
 end
 
+--Records the append effect observed by the 'Std' case.
+--@param candidate table|any Candidate state or value being validated.
+--@param type_name string Type label selected for serialization.
+--@param fields table Field values used to construct the test document.
+--@param extras any The extras supplied to the fake service for this scenario.
+--@return any observed append value observed by the scenario assertion.
 local function append(candidate, type_name, fields, extras)
     local item = {
         seq = #candidate.facts + 1,
@@ -157,7 +194,15 @@ local EXPECTED_EVENTS = {
     "config_generation_ref", "warning", "unknown_side_effect", "import_mapping",
 }
 
+--Supplies incremental header lxp behavior required by the 'Std' case.
+--@param observations any The observations supplied to the fake service for this scenario.
+--@return any observed incremental header lxp value observed by the scenario assertion.
 local function incremental_header_lxp(observations)
+    --Records the emit effect observed by the 'Std' case.
+    --@param callbacks table Callbacks supplied to the fake service.
+    --@param name string Module, Model, or resource name selected by the case.
+    --@param value any Candidate whose acceptance or transformation the test checks.
+    --@return nil No value; the fake port or test assertion observes this callback's effects.
     local function emit(callbacks, name, value)
         callbacks.StartElement(nil, name, {})
         callbacks.CharacterData(nil, value)
@@ -168,8 +213,15 @@ local function incremental_header_lxp(observations)
         _EXPAT_VERSION = "expat_2.8.2",
         _EXPAT_FEATURES = { sizeof_XML_Char = 1 },
     }
+    --Constructs the new service used by the 'Std' case.
+    --@param callbacks table Callbacks supplied to the fake service.
+    --@return any observed new value observed by the scenario assertion.
     function module.new(callbacks)
         local parser = { closed = false, emitted = false }
+        --Transforms parse data used by the 'Std' case.
+        --@param self table Fixture or port instance receiving this call.
+        --@param chunk string Data chunk supplied to the stream.
+        --@return boolean accepted Whether parse succeeds in the fixture.
         function parser.parse(self, chunk)
             if chunk ~= nil and not self.emitted then
                 self.emitted = true
@@ -190,7 +242,15 @@ local function incremental_header_lxp(observations)
             if chunk ~= nil then observations.feeds = observations.feeds + 1 end
             return true
         end
+        --Supplies pos behavior required by the 'Std' case.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return integer observed Fixture numeric value 1.
+        --@return integer secondary2 Fixture numeric value 1.
+        --@return integer secondary3 Fixture numeric value 1.
         function parser.pos() return 1, 1, 1 end
+        --Simulates the close transition of a fake activity port for the 'Std' case.
+        --@param self table Fixture or port instance receiving this call.
+        --@return boolean accepted Whether close succeeds in the fixture.
         function parser.close(self)
             self.closed = true
             observations.closes = observations.closes + 1
@@ -206,6 +266,9 @@ return {
     cases = {
         {
             name = "event registry is the exact frozen 28-type semantic schema",
+            --Verifies event registry is the exact frozen 28-type semantic schema.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify event registry is the exact frozen 28-type semantic schema.
             run = function()
                 local service = new_service()
                 A.deep_equal(service.event_types, EXPECTED_EVENTS)
@@ -232,13 +295,22 @@ return {
                 local unknown, unknown_error = service.event_schema("token_delta")
                 A.falsy(unknown)
                 A.equal(unknown_error.code, "UnknownContextEvent")
+                --Executes the action expected to raise in the 'event registry is the exact frozen 28-type semantic schema' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify event registry is the exact frozen 28-type semantic schema.
                 A.raises(function() service.event_types[1] = "changed" end,
                     "cannot be modified")
+                --Executes the action expected to raise in the 'event registry is the exact frozen 28-type semantic schema' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify event registry is the exact frozen 28-type semantic schema.
                 A.raises(function() service.extra = true end, "cannot be modified")
             end,
         },
         {
             name = "minimal documents freeze exact header session Facts and empty identity",
+            --Verifies minimal documents freeze exact header session Facts and empty identity.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify minimal documents freeze exact header session Facts and empty identity.
             run = function()
                 local service = new_service()
                 local candidate = minimal()
@@ -262,19 +334,28 @@ return {
                 A.equal(document.last_event_seq, 3)
                 A.equal(document.recovery.model_view_status, "current")
                 A.truthy(document.recovery.auto_continue)
+                --Executes the action expected to raise in the 'minimal documents freeze exact header session Facts and empty identity' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify minimal documents freeze exact header session Facts and empty identity.
                 A.raises(function() document.header.name = "changed" end,
                     "cannot be modified")
-                A.raises(function() document.facts[1].fields.kind = "side" end,
+                --Executes the action expected to raise in the 'minimal documents freeze exact header session Facts and empty identity' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify minimal documents freeze exact header session Facts and empty identity.
+                A.raises(function() document.facts[1].fields.kind = "ask" end,
                     "cannot be modified")
 
                 candidate.header.name = "mutated after build"
-                candidate.facts[1].fields.kind = "side"
+                candidate.facts[1].fields.kind = "ask"
                 A.equal(document.header.name, "Untitled Conversation [0A1B]")
                 A.equal(document.facts[1].fields.kind, "main")
             end,
         },
         {
             name = "session overrides atomically change Session and append digest-only audit facts",
+            --Verifies session overrides atomically change Session and append digest-only audit facts.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify session overrides atomically change Session and append digest-only audit facts.
             run = function()
                 local service = new_service()
                 local document = assert(service.build(minimal()))
@@ -346,6 +427,9 @@ return {
         },
         {
             name = "recovery projects unfinished lanes and every canonical Runtime serial waterline",
+            --Verifies recovery projects unfinished lanes and every canonical Runtime serial waterline.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify recovery projects unfinished lanes and every canonical Runtime serial waterline.
             run = function()
                 local service = new_service()
                 local unfinished = assert(service.build(minimal()))
@@ -369,6 +453,11 @@ return {
                 candidate.facts[1].turn_id = "turn-12"
                 candidate.facts[2].turn_id = "turn-12"
                 candidate.facts[2].fields.messageId = "turn-12:message:31"
+                --Supplies add behavior required by the 'recovery projects unfinished lanes and every canonical Runtime serial waterline' case.
+                --@param type_name string Type label selected for serialization.
+                --@param fields table Field values used to construct the test document.
+                --@param turn_id integer Agent turn identity under inspection.
+                --@return nil No value; assertions verify recovery projects unfinished lanes and every canonical Runtime serial waterline.
                 local function add(type_name, fields, turn_id)
                     append(candidate, type_name, fields)
                     candidate.facts[#candidate.facts].turn_id = turn_id
@@ -429,31 +518,31 @@ return {
                     reason = "test",
                 }, nil)
                 add("turn_started", {
-                    kind = "side",
+                    kind = "ask",
                     configGeneration = "sha256:config-generation",
                     modelSnapshot = "sha256:model-snapshot",
                     permissionSnapshot = "sha256:permission-snapshot",
                     promptSnapshot = "sha256:prompt-snapshot",
                     toolRegistrySnapshot = "sha256:tool-registry",
-                }, "side-6")
+                }, "ask-6")
                 add("user_message", {
-                    messageId = "side-6:message:33",
+                    messageId = "ask-6:message:33",
                     text = "inspect",
-                    source = "side",
-                }, "side-6")
+                    source = "ask",
+                }, "ask-6")
                 add("model_request", {
-                    requestId = "side-6:request:18",
-                    purpose = "side",
+                    requestId = "ask-6:request:18",
+                    purpose = "ask",
                     viewManifestRef = "sha256:view-manifest",
-                }, "side-6")
+                }, "ask-6")
                 add("model_message", {
-                    messageId = "side-6:message:34",
-                    requestId = "side-6:request:18",
+                    messageId = "ask-6:message:34",
+                    requestId = "ask-6:request:18",
                     role = "assistant",
                     status = "complete",
                     body = "observed",
-                }, "side-6")
-                add("turn_ended", { outcome = "completed", reason = "" }, "side-6")
+                }, "ask-6")
+                add("turn_ended", { outcome = "completed", reason = "" }, "ask-6")
 
                 local recovered = assert(service.build(candidate))
                 A.truthy(recovered.recovery.auto_continue)
@@ -468,12 +557,15 @@ return {
                     operation = 7,
                     queue = 9,
                     queue_display = 4,
-                    side = 6,
+                    ask = 6,
                 })
             end,
         },
         {
             name = "writer follows root section and event field order without forbidden authority",
+            --Verifies writer follows root section and event field order without forbidden authority.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify writer follows root section and event field order without forbidden authority.
             run = function()
                 local service = new_service()
                 local document = assert(service.build(minimal()))
@@ -510,6 +602,9 @@ return {
         },
         {
             name = "binary event fields use canonical base64 size and SHA-256 metadata",
+            --Verifies binary event fields use canonical base64 size and SHA-256 metadata.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify binary event fields use canonical base64 size and SHA-256 metadata.
             run = function()
                 local service = new_service()
                 local candidate = minimal()
@@ -569,10 +664,16 @@ return {
                 A.contains(exported, "AP8NYnl0ZXM=")
                 A.falsy(exported:find("WorkspaceRoot", 1, true))
                 local chunks = {}
+                --Returns the scanner observation prepared for the 'read' case.
+                --@param value any Candidate whose acceptance or transformation the test checks.
+                --@return table record Fixture record emitted by the scenario callback.
                 local scanner = function(value)
                     if value:find(binary, 1, true) then return { { id = "binary-secret" } } end
                     return {}
                 end
+                --Supplies an assertion callback for the read scenario.
+                --@param bytes string Byte chunk supplied to the fake I/O port.
+                --@return boolean accepted Whether the fake callback accepts this scenario.
                 local rejected, reject_error = service.export(document, function(bytes)
                     chunks[#chunks + 1] = bytes
                     return true
@@ -584,12 +685,18 @@ return {
         },
         {
             name = "export checks registered secrets before and after Markdown escaping",
+            --Verifies export checks registered secrets before and after Markdown escaping.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify export checks registered secrets before and after Markdown escaping.
             run = function()
                 local service = new_service()
                 local candidate = minimal()
                 candidate.session.context_prompt = "private `prompt` value"
                 local document = assert(service.build(candidate))
                 for _, secret in ipairs({ "private `prompt`", "# yaca Context export v1" }) do
+                    --Supplies an assertion callback for the export checks registered secrets before and after Markdown escaping scenario.
+                    --@param value any Candidate whose acceptance or transformation the test checks.
+                    --@return table record Fixture record emitted by the scenario callback.
                     local rejected, reject_error = service.export(document, nil, function(value)
                         if value:find(secret, 1, true) then return { { id = "registered" } } end
                         return {}
@@ -597,6 +704,9 @@ return {
                     A.falsy(rejected)
                     A.equal(reject_error.code, "RegisteredSecret")
                 end
+                --Supplies an assertion callback for the export checks registered secrets before and after Markdown escaping scenario.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; the fake port or test assertion observes this callback's effects.
                 local rejected, reject_error = service.export(document, nil, function()
                     error("private scanner exception")
                 end)
@@ -607,6 +717,9 @@ return {
         },
         {
             name = "relations expose unresolved side effects and reject duplicate terminal truth",
+            --Verifies relations expose unresolved side effects and reject duplicate terminal truth.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify relations expose unresolved side effects and reject duplicate terminal truth.
             run = function()
                 local service = new_service()
                 local candidate = minimal()
@@ -652,6 +765,9 @@ return {
         },
         {
             name = "bound compaction requests expose exact crash recovery state",
+            --Verifies bound compaction requests expose exact crash recovery state.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify bound compaction requests expose exact crash recovery state.
             run = function()
                 local service = new_service()
                 local candidate = minimal()
@@ -727,9 +843,15 @@ return {
         },
         {
             name = "durable compaction terminals reconstruct the automatic failure streak",
+            --Verifies durable compaction terminals reconstruct the automatic failure streak.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify durable compaction terminals reconstruct the automatic failure streak.
             run = function()
                 local service = new_service()
                 local candidate = minimal()
+                --Writes append failure through the durable compaction terminals reconstruct the automatic failure streak fixture.
+                --@param serial integer Sequence number assigned by the fake port.
+                --@return nil No value; the fake port or test assertion observes this callback's effects.
                 local function append_failure(serial)
                     local compaction_id = "compaction-" .. tostring(serial)
                     local request_id = compaction_id .. ":request:1"
@@ -780,7 +902,10 @@ return {
             end,
         },
         {
-            name = "queue side steer and yield continuations preserve ordered local causality",
+            name = "queue ask steer and yield continuations preserve ordered local causality",
+            --Verifies queue ask steer and yield continuations preserve ordered local causality.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify queue ask steer and yield continuations preserve ordered local causality.
             run = function()
                 local service = new_service()
                 local candidate = minimal()
@@ -826,43 +951,43 @@ return {
                     messageId = "message-2", text = "next edited", source = "user",
                 }, { turn_id = "turn-2" })
                 append(candidate, "turn_started", {
-                    kind = "side",
+                    kind = "ask",
                     configGeneration = "config-2",
                     modelSnapshot = "model-2",
                     permissionSnapshot = "permission-2",
                     promptSnapshot = "prompt-2",
                     toolRegistrySnapshot = "tools-2",
-                }, { turn_id = "side-1" })
+                }, { turn_id = "ask-1" })
                 append(candidate, "user_message", {
-                    messageId = "side-message-1", text = "side question", source = "user",
-                }, { turn_id = "side-1" })
+                    messageId = "ask-message-1", text = "ask question", source = "user",
+                }, { turn_id = "ask-1" })
                 append(candidate, "model_request", {
-                    requestId = "side-request-1", purpose = "side", viewManifestRef = "view-2",
-                }, { turn_id = "side-1" })
+                    requestId = "ask-request-1", purpose = "ask", viewManifestRef = "view-2",
+                }, { turn_id = "ask-1" })
                 append(candidate, "model_message", {
-                    messageId = "side-message-2", requestId = "side-request-1",
-                    role = "assistant", status = "complete", body = "side answer",
-                }, { turn_id = "side-1" })
+                    messageId = "ask-message-2", requestId = "ask-request-1",
+                    role = "assistant", status = "complete", body = "ask answer",
+                }, { turn_id = "ask-1" })
                 append(candidate, "turn_ended", { outcome = "completed" }, {
-                    turn_id = "side-1",
+                    turn_id = "ask-1",
                 })
                 append(candidate, "steer", {
                     messageId = "steer-message-1", targetTurnId = "turn-2",
-                    summary = "use side", sideId = "side-1",
+                    summary = "use ask", askId = "ask-1",
                 }, { turn_id = "turn-2" })
-                local side_queue = append(candidate, "queue_item", {
+                local ask_queue = append(candidate, "queue_item", {
                     queueItemId = "queue-item-2", displayId = "#2",
-                    action = "enqueue", text = "side answer", sideId = "side-1",
+                    action = "enqueue", text = "ask answer", askId = "ask-1",
                 })
-                side_queue.turn_id = nil
+                ask_queue.turn_id = nil
 
                 local document = assert(service.build(candidate))
                 A.equal(document.facts[10].fields.supersedesResponseId, "message-yield")
-                A.equal(document.facts[17].fields.sideId, "side-1")
-                A.equal(document.facts[18].fields.sideId, "side-1")
+                A.equal(document.facts[17].fields.askId, "ask-1")
+                A.equal(document.facts[18].fields.askId, "ask-1")
 
                 local forged = copy(candidate)
-                forged.facts[#forged.facts].fields.sideId = "turn-2"
+                forged.facts[#forged.facts].fields.askId = "turn-2"
                 local rejected, relation_error = service.build(forged)
                 A.falsy(rejected)
                 A.equal(relation_error.code, "ContextRelation")
@@ -870,6 +995,9 @@ return {
         },
         {
             name = "stale ModelView remains readable and exportable but cannot be published",
+            --Verifies stale ModelView remains readable and exportable but cannot be published.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify stale ModelView remains readable and exportable but cannot be published.
             run = function()
                 local service = new_service()
                 local candidate = minimal()
@@ -886,6 +1014,9 @@ return {
         },
         {
             name = "accepted compaction record and ModelView publish atomically",
+            --Verifies stale ModelView remains readable and exportable but cannot be published.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify stale ModelView remains readable and exportable but cannot be published.
             run = function()
                 local service = new_service()
                 local original = assert(service.build(minimal()))
@@ -955,10 +1086,17 @@ return {
         },
         {
             name = "catalog Header reader stops pulling before the Context body",
+            --Verifies catalog Header reader stops pulling before the Context body.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify catalog Header reader stops pulling before the Context body.
             run = function()
                 local observations = { feeds = 0, closes = 0 }
                 local service = new_service(nil, incremental_header_lxp(observations))
                 local pulls = 0
+                --Reads read header stream for the catalog Header reader stops pulling before the Context body scenario.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return boolean accepted Whether the fake callback accepts this scenario.
+                --@return table secondary2 Structured fixture record with bytes, eof.
                 local header, stats = assert(service.read_header_stream(function()
                     pulls = pulls + 1
                     return true, { bytes = "header-prefix", eof = false }
@@ -977,19 +1115,46 @@ return {
         },
         {
             name = "schema time identifiers enums limits and construction fail closed",
+            --Verifies schema time identifiers enums limits and construction fail closed.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify schema time identifiers enums limits and construction fail closed.
             run = function()
                 local service, options = new_service()
                 local cases = {
-                    { function(value) value.header.updated_at = "2026-02-30T00:00:00Z" end,
+                    {
+                        --Supplies an assertion callback for the schema time identifiers enums limits and construction fail closed scenario.
+                        --@param value any Candidate whose acceptance or transformation the test checks.
+                        --@return nil No value; the fake port or test assertion observes this callback's effects.
+                        function(value) value.header.updated_at = "2026-02-30T00:00:00Z" end,
                         "ContextSchema" },
-                    { function(value) value.facts[1].seq = 2 end, "ContextSequence" },
-                    { function(value) value.facts[2].fields.extra = "x" end,
+                    {
+                        --Supplies an assertion callback for the schema time identifiers enums limits and construction fail closed scenario.
+                        --@param value any Candidate whose acceptance or transformation the test checks.
+                        --@return nil No value; the fake port or test assertion observes this callback's effects.
+                        function(value) value.facts[1].seq = 2 end, "ContextSequence" },
+                    {
+                        --Supplies an assertion callback for the schema time identifiers enums limits and construction fail closed scenario.
+                        --@param value any Candidate whose acceptance or transformation the test checks.
+                        --@return nil No value; the fake port or test assertion observes this callback's effects.
+                        function(value) value.facts[2].fields.extra = "x" end,
                         "ContextSchema" },
-                    { function(value) value.facts[2].fields.messageId = "" end,
+                    {
+                        --Supplies an assertion callback for the schema time identifiers enums limits and construction fail closed scenario.
+                        --@param value any Candidate whose acceptance or transformation the test checks.
+                        --@return nil No value; the fake port or test assertion observes this callback's effects.
+                        function(value) value.facts[2].fields.messageId = "" end,
                         "ContextSchema" },
-                    { function(value) value.facts[1].type = "token_delta" end,
+                    {
+                        --Supplies an assertion callback for the schema time identifiers enums limits and construction fail closed scenario.
+                        --@param value any Candidate whose acceptance or transformation the test checks.
+                        --@return nil No value; the fake port or test assertion observes this callback's effects.
+                        function(value) value.facts[1].type = "token_delta" end,
                         "ContextSchema" },
-                    { function(value) value.model_view.compaction_records = { false } end,
+                    {
+                        --Supplies an assertion callback for the schema time identifiers enums limits and construction fail closed scenario.
+                        --@param value any Candidate whose acceptance or transformation the test checks.
+                        --@return nil No value; the fake port or test assertion observes this callback's effects.
+                        function(value) value.model_view.compaction_records = { false } end,
                         "ContextSchema" },
                 }
                 for _, case in ipairs(cases) do

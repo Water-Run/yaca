@@ -1,21 +1,30 @@
 --[[
-File: native_ports_test.lua
-Date: 2026-08-30
 Author: WaterRun
+Date: 2026-09-23
+File: native_ports_test.lua
 Description: Verifies narrow filesystem, process, terminal, and backend ports.
 ]]
 
 local A = assert(loadfile(YACA_TEST_ROOT .. "/test/support/assert.lua", "t", _ENV))()
 
+--Loads a source module into an isolated per-case environment.
+--@param name string Module, Model, or resource name selected by the case.
+--@param cache table Per-case module cache preserving isolated imports.
+--@return any module Module export loaded in the isolated source environment.
 local function load_module(name, cache)
     cache = cache or {}
     if cache[name] then return cache[name] end
     local environment = {}
     for key, value in pairs(_ENV) do environment[key] = value end
+    --Resolves an imported Lua module through the isolated test loader.
+    --@param dependency string Source module requested from the isolated loader.
+    --@return any value Callback value consumed by the enclosing scenario assertion.
     environment.require = function(dependency)
         return load_module(dependency, cache)
     end
     environment._G = environment
+    --@metatable environment Test-owned lookup and mutation contract for the current case.
+    --@field __index any Fallback table or function used for missing fixture keys.
     setmetatable(environment, { __index = _ENV })
     local chunk, load_error = loadfile(
         YACA_TEST_ROOT .. "/src/" .. name .. ".lua",
@@ -28,6 +37,9 @@ local function load_module(name, cache)
     return value
 end
 
+--Supplies port options behavior required by this suite.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return table observed Structured fixture record selected by the exercised branch.
 local function port_options()
     return {
         filesystem = { maximum_chunk_bytes = 16 },
@@ -39,6 +51,9 @@ local function port_options()
     }
 end
 
+--Supplies success native behavior required by this suite.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return any observed success native value observed by the scenario assertion.
 local function success_native()
     local native = {
         calls = {},
@@ -46,41 +61,72 @@ local function success_native()
         terminal_batches = {},
     }
 
+    --Simulates abi version in this test fixture.
+    --@param none No arguments; this closure uses its captured fixture state.
+    --@return string outcome Simulated abi version outcome returned to the component.
     function native.abi_version()
         return "yaca-native-v0.1.0"
     end
 
+    --Simulates monotonic now in this test fixture.
+    --@param none No arguments; this closure uses its captured fixture state.
+    --@return integer outcome Simulated monotonic now outcome returned to the component.
     function native.monotonic_now()
         return 100
     end
 
+    --Simulates sleep ms in this test fixture.
+    --@param milliseconds integer Requested fake-clock delay in milliseconds.
+    --@return boolean accepted Whether sleep ms succeeds in the fixture.
     function native.sleep_ms(milliseconds)
         native.calls.sleep_ms = milliseconds
         return true
     end
 
+    --Simulates utc now in this test fixture.
+    --@param none No arguments; this closure uses its captured fixture state.
+    --@return string outcome Simulated utc now outcome returned to the component.
     function native.utc_now()
         return "2026-08-29T00:00:00Z"
     end
 
+    --Simulates secure random in this test fixture.
+    --@param length integer Byte or item length requested by the fixture.
+    --@return any outcome Simulated secure random outcome returned to the component.
     function native.secure_random(length)
         return string.rep("r", length)
     end
 
+    --Simulates current process id in this test fixture.
+    --@param none No arguments; this closure uses its captured fixture state.
+    --@return integer outcome Simulated current process id outcome returned to the component.
     function native.current_process_id()
         return 41
     end
 
+    --Simulates fs open read in this test fixture.
+    --@param path string File or Context path exercised by the case.
+    --@return boolean accepted Whether fs open read succeeds in the fixture.
+    --@return table secondary2 Structured fixture record with handle.
     function native.fs_open_read(path)
         native.calls.fs_open_read = path
         return true, { handle = "read" }
     end
 
+    --Simulates fs create new in this test fixture.
+    --@param path string File or Context path exercised by the case.
+    --@param permissions table Permission profile exercised by the case.
+    --@return boolean accepted Whether fs create new succeeds in the fixture.
+    --@return table secondary2 Structured fixture record with handle.
     function native.fs_create_new(path, permissions)
         native.calls.fs_create_new = { path, permissions }
         return true, { handle = "write" }
     end
 
+    --Simulates fs stat identity in this test fixture.
+    --@param handle_or_path table|string Fake handle or path accepted by this port.
+    --@return boolean accepted Whether fs stat identity succeeds in the fixture.
+    --@return table secondary2 Structured fixture record selected by the exercised branch.
     function native.fs_stat_identity(handle_or_path)
         native.calls.fs_stat_identity = handle_or_path
         return true, {
@@ -92,60 +138,115 @@ local function success_native()
         }
     end
 
+    --Simulates fs read in this test fixture.
+    --@param _ any Unused callback argument supplied by the port.
+    --@param maximum_bytes integer Maximum allowed byte length.
+    --@return boolean accepted Whether fs read succeeds in the fixture.
+    --@return table secondary2 Structured fixture record with bytes, eof.
     function native.fs_read(_, maximum_bytes)
         return true, { bytes = ("abc"):sub(1, maximum_bytes), eof = true }
     end
 
+    --Simulates fs write in this test fixture.
+    --@param _ any Unused callback argument supplied by the port.
+    --@param bytes string Byte chunk supplied to the fake I/O port.
+    --@return boolean accepted Whether fs write succeeds in the fixture.
+    --@return any secondary2 Number of bytes accepted by the fake sink.
     function native.fs_write(_, bytes)
         native.calls.fs_write = bytes
         return true, #bytes
     end
 
+    --Simulates fs flush file in this test fixture.
+    --@param none No arguments; this closure uses its captured fixture state.
+    --@return boolean accepted Whether fs flush file succeeds in the fixture.
+    --@return boolean secondary2 True acknowledgment from the fake port.
     function native.fs_flush_file()
         return true, true
     end
 
+    --Simulates fs flush directory in this test fixture.
+    --@param path string File or Context path exercised by the case.
+    --@return boolean accepted Whether fs flush directory succeeds in the fixture.
+    --@return boolean secondary2 True acknowledgment from the fake port.
     function native.fs_flush_directory(path)
         native.calls.fs_flush_directory = path
         return true, true
     end
 
+    --Simulates fs replace in this test fixture.
+    --@param temporary_path string Temporary publication path used by the fixture.
+    --@param target_path string Destination path targeted by the operation.
+    --@return boolean accepted Whether fs replace succeeds in the fixture.
+    --@return boolean secondary2 True acknowledgment from the fake port.
     function native.fs_replace(temporary_path, target_path)
         native.calls.fs_replace = { temporary_path, target_path }
         return true, true
     end
 
+    --Simulates fs rename no replace in this test fixture.
+    --@param source_path string Source file path read by the fixture.
+    --@param target_path string Destination path targeted by the operation.
+    --@return boolean accepted Whether fs rename no replace succeeds in the fixture.
+    --@return boolean secondary2 True acknowledgment from the fake port.
     function native.fs_rename_no_replace(source_path, target_path)
         native.calls.fs_rename = { source_path, target_path }
         return true, true
     end
 
+    --Simulates fs delete verified in this test fixture.
+    --@param path string File or Context path exercised by the case.
+    --@param identity table File or process identity under inspection.
+    --@return boolean accepted Whether fs delete verified succeeds in the fixture.
+    --@return boolean secondary2 True acknowledgment from the fake port.
     function native.fs_delete_verified(path, identity)
         native.calls.fs_delete = { path, identity }
         return true, true
     end
 
+    --Simulates fs close in this test fixture.
+    --@param handle table|integer Fake resource handle whose state is inspected.
+    --@return boolean accepted Whether fs close succeeds in the fixture.
+    --@return boolean secondary2 True acknowledgment from the fake port.
     function native.fs_close(handle)
         native.calls.fs_close = handle
         return true, true
     end
 
+    --Simulates process start in this test fixture.
+    --@param request table Request delivered to the fake component.
+    --@return boolean accepted Whether process start succeeds in the fixture.
+    --@return table secondary2 Structured fixture record with process.
     function native.process_start(request)
         native.calls.process_start = request
         return true, { process = 1 }
     end
 
+    --Simulates process poll in this test fixture.
+    --@param _ any Unused callback argument supplied by the port.
+    --@param _ any Unused callback argument supplied by the port.
+    --@param budget integer|table Resource budget applied by the scenario.
+    --@return boolean accepted Whether process poll succeeds in the fixture.
+    --@return any secondary2 Event batch returned by the fixture.
     function native.process_poll(_, _, budget)
         local batch = table.remove(native.process_batches, 1) or {}
         A.truthy(#batch <= budget)
         return true, batch
     end
 
+    --Simulates process cancel in this test fixture.
+    --@param none No arguments; this closure uses its captured fixture state.
+    --@return boolean accepted Whether process cancel succeeds in the fixture.
+    --@return boolean secondary2 True acknowledgment from the fake port.
     function native.process_cancel()
         native.calls.process_cancel = (native.calls.process_cancel or 0) + 1
         return true, true
     end
 
+    --Simulates process join in this test fixture.
+    --@param none No arguments; this closure uses its captured fixture state.
+    --@return boolean accepted Whether process join succeeds in the fixture.
+    --@return number secondary2 Additional status or structured error from the fixture operation.
     function native.process_join()
         return true, native.process_result or {
             outcome = "completed",
@@ -156,16 +257,30 @@ local function success_native()
         }
     end
 
+    --Simulates process close in this test fixture.
+    --@param none No arguments; this closure uses its captured fixture state.
+    --@return boolean accepted Whether process close succeeds in the fixture.
+    --@return boolean secondary2 True acknowledgment from the fake port.
     function native.process_close()
         native.calls.process_close = true
         return true, true
     end
 
+    --Simulates terminal start in this test fixture.
+    --@param request table Request delivered to the fake component.
+    --@return boolean accepted Whether terminal start succeeds in the fixture.
+    --@return table secondary2 Structured fixture record with terminal.
     function native.terminal_start(request)
         native.calls.terminal_start = request
         return true, { terminal = 1 }
     end
 
+    --Simulates terminal poll in this test fixture.
+    --@param _ any Unused callback argument supplied by the port.
+    --@param _ any Unused callback argument supplied by the port.
+    --@param budget integer|table Resource budget applied by the scenario.
+    --@return boolean accepted Whether terminal poll succeeds in the fixture.
+    --@return any secondary2 Event batch returned by the fixture.
     function native.terminal_poll(_, _, budget)
         native.calls.terminal_poll = (native.calls.terminal_poll or 0) + 1
         local batch = table.remove(native.terminal_batches, 1) or {}
@@ -173,19 +288,35 @@ local function success_native()
         return true, batch
     end
 
+    --Simulates terminal cancel in this test fixture.
+    --@param none No arguments; this closure uses its captured fixture state.
+    --@return boolean accepted Whether terminal cancel succeeds in the fixture.
+    --@return boolean secondary2 True acknowledgment from the fake port.
     function native.terminal_cancel()
         return true, true
     end
 
+    --Simulates terminal join in this test fixture.
+    --@param none No arguments; this closure uses its captured fixture state.
+    --@return boolean accepted Whether terminal join succeeds in the fixture.
+    --@return table secondary2 Structured fixture record with outcome.
     function native.terminal_join()
         return true, { outcome = native.terminal_outcome or "completed" }
     end
 
+    --Simulates terminal restore in this test fixture.
+    --@param none No arguments; this closure uses its captured fixture state.
+    --@return boolean accepted Whether terminal restore succeeds in the fixture.
+    --@return boolean secondary2 True acknowledgment from the fake port.
     function native.terminal_restore()
         native.calls.terminal_restore = (native.calls.terminal_restore or 0) + 1
         return true, true
     end
 
+    --Simulates terminal close in this test fixture.
+    --@param none No arguments; this closure uses its captured fixture state.
+    --@return boolean accepted Whether terminal close succeeds in the fixture.
+    --@return boolean secondary2 True acknowledgment from the fake port.
     function native.terminal_close()
         native.calls.terminal_close = true
         return true, true
@@ -194,6 +325,9 @@ local function success_native()
     return native
 end
 
+--Supplies method names behavior required by this suite.
+--@param value any Candidate whose acceptance or transformation the test checks.
+--@return any observed method names value observed by the scenario assertion.
 local function method_names(value)
     local names = {}
     for name, item in pairs(value) do
@@ -208,6 +342,9 @@ return {
     cases = {
         {
             name = "filesystem validates paths bounds identities and publication primitives",
+            --Verifies filesystem validates paths bounds identities and publication primitives.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify filesystem validates paths bounds identities and publication primitives.
             run = function()
                 local fs = load_module("fs")
                 local native = success_native()
@@ -219,6 +356,9 @@ return {
                 local identified, identity = service.stat_identity(read_handle)
                 A.truthy(identified)
                 A.equal(identity.object, "11")
+                --Executes the action expected to raise in the 'filesystem validates paths bounds identities and publication primitives' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify filesystem validates paths bounds identities and publication primitives.
                 A.raises(function() identity.size = 9 end, "cannot be modified")
                 local read_ok, chunk = service.stream_read(read_handle, 4)
                 A.truthy(read_ok)
@@ -240,6 +380,9 @@ return {
         },
         {
             name = "process port preserves opaque shell command and bounded separate streams",
+            --Verifies process port preserves opaque shell command and bounded separate streams.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify process port preserves opaque shell command and bounded separate streams.
             run = function()
                 local process = load_module("process")
                 local native = success_native()
@@ -304,6 +447,9 @@ return {
         },
         {
             name = "process cancellation remains a request until typed terminal truth",
+            --Verifies process cancellation remains a request until typed terminal truth.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify process cancellation remains a request until typed terminal truth.
             run = function()
                 local process = load_module("process")
                 local native = success_native()
@@ -339,6 +485,9 @@ return {
         },
         {
             name = "Windows environment filtering is case-insensitive and minimal",
+            --Verifies windows environment filtering is case-insensitive and minimal.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify windows environment filtering is case-insensitive and minimal.
             run = function()
                 local process = load_module("process")
                 local native = success_native()
@@ -384,6 +533,9 @@ return {
         },
         {
             name = "terminal maps semantic actions and restores before close",
+            --Verifies terminal maps semantic actions and restores before close.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify terminal maps semantic actions and restores before close.
             run = function()
                 local terminal = load_module("terminal")
                 local native = success_native()
@@ -421,6 +573,9 @@ return {
         },
         {
             name = "terminal splits line chunks within budget and folds split CRLF",
+            --Verifies terminal splits line chunks within budget and folds split CRLF.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify terminal splits line chunks within budget and folds split CRLF.
             run = function()
                 local terminal = load_module("terminal")
                 local native = success_native()
@@ -455,6 +610,9 @@ return {
         },
         {
             name = "backends bind exact package identities shells and pending qualification",
+            --Verifies backends bind exact package identities shells and pending qualification.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify backends bind exact package identities shells and pending qualification.
             run = function()
                 local linux = load_module("backend_linux")
                 local windows = load_module("backend_windows")
@@ -472,6 +630,9 @@ return {
                 A.equal(#assert(linux_backend.system.secure_random(10)), 10)
                 A.equal(linux_backend.system.current_process_id(), 41)
                 A.equal(linux_backend.qualification, "pending-target-evidence")
+                --Executes the action expected to raise in the 'backends bind exact package identities shells and pending qualification' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify backends bind exact package identities shells and pending qualification.
                 A.raises(function() linux_backend.target_id = "win32-x86" end, "cannot be modified")
 
                 local windows_native = success_native()
@@ -500,10 +661,17 @@ return {
         },
         {
             name = "malformed native results fail closed at adapter boundary",
+            --Verifies malformed native results fail closed at adapter boundary.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify malformed native results fail closed at adapter boundary.
             run = function()
                 local fs = load_module("fs")
                 local process = load_module("process")
                 local native = success_native()
+                --Simulates fs open read in the malformed native results fail closed at adapter boundary fixture.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return string text Text emitted by the scenario callback.
+                --@return string secondary2 Fixture text "handle".
                 native.fs_open_read = function()
                     return "yes", "handle"
                 end
@@ -530,6 +698,9 @@ return {
                     output_limit_bytes = 8,
                 }))
                 port:start(0)
+                --Executes the action expected to raise in the 'malformed native results fail closed at adapter boundary' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; the fake port or test assertion observes this callback's effects.
                 A.raises(function() port:poll(1, 1) end, "NativeContract")
 
                 local invalid_shell, shell_error = process.new(native, {
@@ -553,6 +724,9 @@ return {
                     maximum_input_bytes = 4,
                 }))
                 terminal_port:start(0)
+                --Executes the action expected to raise in the 'malformed native results fail closed at adapter boundary' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; the fake port or test assertion observes this callback's effects.
                 A.raises(function() terminal_port:poll(1, 1) end, "NativeContract")
             end,
         },

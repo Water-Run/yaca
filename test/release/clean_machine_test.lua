@@ -1,12 +1,16 @@
 --[[
-File: clean_machine_test.lua
-Date: 2026-09-19
 Author: WaterRun
+Date: 2026-09-23
+File: clean_machine_test.lua
 Description: Verifies the zero-surface package verifier decision table.
 ]]
 
 local A = assert(loadfile(YACA_TEST_ROOT .. "/test/support/assert.lua", "t", _ENV))()
 
+-- Load a repository-owned Lua contract under the isolated test environment.
+--@param relative_path string Path relative to YACA_TEST_ROOT.
+--@return any value First value produced by the loaded contract chunk.
+--@error Fails the test when loading or executing the contract fails.
 local function load_value(relative_path)
     local chunk, load_error = loadfile(YACA_TEST_ROOT .. "/" .. relative_path, "t", _ENV)
     A.truthy(chunk, load_error)
@@ -19,38 +23,33 @@ local manifest = load_value("release/manifest.lua")
 local surface = load_value(".tools/check_zero_surface.lua")
 local journeys = load_value("test/release/journeys.lua")
 
-local WINDOWS_ROOT = {
-    "yaca.exe", "Install.cmd", "README.txt", "LICENSE",
-    "docs/WINDOWS-QUICKSTART.md", "docs/COMPONENTS.txt",
-    "docs/build-summary.json", "docs/SBOM.spdx.json",
-    "docs/licenses/Lua-MIT.html", "docs/licenses/Expat-MIT.txt",
-    "docs/licenses/LuaExpat-MIT.html", "docs/licenses/luainstaller-LGPL.txt",
-    "docs/licenses/curl.txt", "docs/licenses/Mbed-TLS.txt",
-    "docs/licenses/Mozilla-CA.pem",
-}
+local WINDOWS_ROOT = { "yaca.exe" }
 
-local LINUX_ROOT = {
-    "yaca", "Install.sh", "README.txt", "LICENSE",
-    "docs/LINUX-QUICKSTART.md", "docs/COMPONENTS.txt",
-    "docs/build-summary.json", "docs/SBOM.spdx.json",
-    "docs/licenses/Lua-MIT.html", "docs/licenses/Expat-MIT.txt",
-    "docs/licenses/LuaExpat-MIT.html", "docs/licenses/luainstaller-LGPL.txt",
-    "docs/licenses/curl.txt", "docs/licenses/Mbed-TLS.txt",
-    "docs/licenses/Mozilla-CA.pem",
-}
+local LINUX_ROOT = { "yaca" }
 
+-- Copy one flat sequence used as a mutable package fixture.
+--@param values table Dense source file list.
+--@return table copy New sequence with the same file-name strings.
 local function clone(values)
     local copy = {}
     for index, value in ipairs(values) do copy[index] = value end
     return copy
 end
 
+-- Add one file path to an independent package fixture copy.
+--@param base table Dense base file list.
+--@param extra string Additional relative file path.
+--@return table copy New list containing base entries followed by extra.
 local function with_extra(base, extra)
     local copy = clone(base)
     copy[#copy + 1] = extra
     return copy
 end
 
+-- Remove one matching file path from an independent package fixture copy.
+--@param base table Dense base file list.
+--@param removed string Exact path omitted from the result.
+--@return table copy New list of remaining paths.
 local function without(base, removed)
     local copy = {}
     for _, value in ipairs(base) do
@@ -64,6 +63,10 @@ return {
     cases = {
         {
             name = "exact minimal windows trees pass for both windows targets",
+            -- Verify both Windows clean editions accept precisely their executable.
+            --@param none The test harness passes no case arguments.
+            --@return nil Returns after both target assertions succeed.
+            --@error Assertions fail if either clean package shape is rejected.
             run = function()
                 for _, target_id in ipairs({ "win32-x86", "win64-x86_64" }) do
                     local ok, result = surface.verify(manifest, clone(WINDOWS_ROOT), target_id)
@@ -76,15 +79,23 @@ return {
         },
         {
             name = "exact minimal linux tree passes",
+            -- Verify the Linux clean package has one executable and no companion files.
+            --@param none The test harness passes no case arguments.
+            --@return nil Returns after Linux surface assertions succeed.
+            --@error Assertions fail if the clean Linux tree is rejected.
             run = function()
                 local ok, result = surface.verify(manifest, clone(LINUX_ROOT), "linux-x86_64")
                 A.truthy(ok, table.concat(result or {}, "; "))
                 A.equal(result.executable, "yaca")
-                A.equal(result.installer, "Install.sh")
+                A.equal(result.files, 1)
             end,
         },
         {
             name = "unexpected root file is rejected",
+            -- Verify the clean allowlist rejects a second root-level executable.
+            --@param none The test harness passes no case arguments.
+            --@return nil Returns after checking the exact unexpected-file finding.
+            --@error Assertions fail if the extra executable is admitted or misreported.
             run = function()
                 local ok, findings = surface.verify(manifest,
                     with_extra(WINDOWS_ROOT, "sqlite3.exe"), "win32-x86")
@@ -101,6 +112,10 @@ return {
         },
         {
             name = "forbidden component names are rejected anywhere in the tree",
+            -- Verify historical utility names remain forbidden even at nested paths.
+            --@param none The test harness passes no case arguments.
+            --@return nil Returns after every forbidden-name finding is checked.
+            --@error Assertions fail if a forbidden component is admitted.
             run = function()
                 for _, extra in ipairs({
                     "busybox", "docs/licenses/7za.exe", ".luai/jq",
@@ -120,6 +135,10 @@ return {
         },
         {
             name = "shipped configuration and data roots are rejected",
+            -- Verify a package cannot carry a configured instance's data tree.
+            --@param none The test harness passes no case arguments.
+            --@return nil Returns after all data-root fixtures are rejected.
+            --@error Assertions fail if configuration or Context data is admitted.
             run = function()
                 for _, extra in ipairs({
                     "config.ini", "__yaca__/config.ini",
@@ -133,6 +152,10 @@ return {
         },
         {
             name = "shipped Context artifacts are rejected",
+            -- Verify Context XML and lease artifacts are identified as unsafe inputs.
+            --@param none The test harness passes no case arguments.
+            --@return nil Returns after both Context artifact findings are checked.
+            --@error Assertions fail if a Context artifact is admitted or misreported.
             run = function()
                 for _, extra in ipairs({
                     "context-backup.xml", "work/Untitled.xml.yaca-lock",
@@ -151,25 +174,73 @@ return {
             end,
         },
         {
-            name = "missing expected files are rejected",
+            name = "missing clean executable is rejected",
+            -- Verify the only required clean file cannot be absent.
+            --@param none The test harness passes no case arguments.
+            --@return nil Returns after the missing-executable finding is checked.
+            --@error Assertions fail if an empty package is accepted.
             run = function()
-                for _, removed in ipairs({ "yaca.exe", "LICENSE",
-                                            "docs/SBOM.spdx.json" }) do
-                    local ok, findings = surface.verify(manifest,
-                        without(WINDOWS_ROOT, removed), "win32-x86")
-                    A.falsy(ok, removed)
-                    local matched = false
-                    for _, finding in ipairs(findings) do
-                        if finding:find("missing expected file: " .. removed, 1, true) then
-                            matched = true
-                        end
+                local ok, findings = surface.verify(manifest,
+                    without(WINDOWS_ROOT, "yaca.exe"), "win32-x86")
+                A.falsy(ok)
+                local matched = false
+                for _, finding in ipairs(findings) do
+                    if finding:find("missing expected file: yaca.exe", 1, true) then
+                        matched = true
                     end
-                    A.truthy(matched, removed)
+                end
+                A.truthy(matched)
+            end,
+        },
+        {
+            name = "clean edition rejects installer and documentation companions",
+            -- Verify installer, README, license, and SBOM stay outside the clean archive.
+            --@param none The test harness passes no case arguments.
+            --@return nil Returns after all companion paths are rejected.
+            --@error Assertions fail if any companion becomes part of clean.
+            run = function()
+                for _, extra in ipairs({ "Install.cmd", "README.txt",
+                                         "LICENSE", "docs/SBOM.spdx.json" }) do
+                    local ok, findings = surface.verify(manifest,
+                        with_extra(WINDOWS_ROOT, extra), "win32-x86")
+                    A.falsy(ok, extra)
+                    A.contains(table.concat(findings, "; "), "unexpected file: " .. extra)
                 end
             end,
         },
         {
+            name = "manifest cannot expand the clean root allowlist",
+            -- Verify a forged manifest cannot add either a second entry or map key.
+            --@param none The test harness passes no case arguments.
+            --@return nil Returns after both malformed root policies are rejected.
+            --@error Assertions fail if a widened clean policy is accepted.
+            run = function()
+                local altered = clone(manifest.packaging.required_root_entries.windows)
+                altered[2] = "README.txt"
+                local forged = {
+                    targets = manifest.targets,
+                    packaging = { required_root_entries = {
+                        windows = altered,
+                    } },
+                }
+                local ok, findings = surface.verify(forged,
+                    { "yaca.exe", "README.txt" }, "win32-x86")
+                A.falsy(ok)
+                A.equal(findings[1], "manifest clean root must contain only target executable")
+                altered[2] = nil
+                altered.extra = true
+                ok, findings = surface.verify(forged,
+                    { "yaca.exe" }, "win32-x86")
+                A.falsy(ok)
+                A.equal(findings[1], "manifest clean root must contain only target executable")
+            end,
+        },
+        {
             name = "unknown target ids and broken manifests fail closed",
+            -- Verify unknown targets and missing packaging policy are rejected.
+            --@param none The test harness passes no case arguments.
+            --@return nil Returns after exact failure findings are checked.
+            --@error Assertions fail if either malformed request is admitted.
             run = function()
                 local ok, findings = surface.verify(manifest, clone(WINDOWS_ROOT), "win16-x86")
                 A.falsy(ok)
@@ -182,6 +253,10 @@ return {
         },
         {
             name = "journey plan is offline by default and gates online steps on consent",
+            -- Verify the journey planner adds online steps only after explicit consent.
+            --@param none The test harness passes no case arguments.
+            --@return nil Returns after offline, consented, and unknown-target checks.
+            --@error Assertions fail if online work is scheduled without consent.
             run = function()
                 local offline, plan_error = journeys.plan("linux-x86_64", {})
                 A.truthy(offline, plan_error)
@@ -203,6 +278,10 @@ return {
         },
         {
             name = "journey step verification accepts matching and rejects wrong evidence",
+            -- Verify version, self-test, surface, and residue evidence bindings.
+            --@param none The test harness passes no case arguments.
+            --@return nil Returns after accepted and rejected evidence is checked.
+            --@error Assertions fail if a mismatched journey observation passes.
             run = function()
                 local ok = journeys.verify_step("version", "linux-x86_64",
                     { output = "yaca 0.1.0 (linux-x86_64)\n" })
@@ -227,7 +306,7 @@ return {
                       output = "self-test outcome=error completed-stage=1 auto-fixes=0" })
                 A.falsy(ok)
                 ok = journeys.verify_step("zero-surface", "win32-x86",
-                    { exit_code = 0, output = "zero-surface=PASS target=win32-x86 files=15" })
+                    { exit_code = 0, output = "zero-surface=PASS target=win32-x86 files=1" })
                 A.truthy(ok)
                 ok = journeys.verify_step("verify-no-residue", "win32-x86",
                     { residue_paths = {} })
@@ -241,6 +320,10 @@ return {
         },
         {
             name = "host mismatch only skips run and online steps",
+            -- Verify cross-host qualification skips only host-dependent actions.
+            --@param none The test harness passes no case arguments.
+            --@return nil Returns after skip-list assertions succeed.
+            --@error Assertions fail if offline package checks are skipped.
             run = function()
                 local steps = journeys.plan("win64-x86_64", {})
                 local skipped = journeys.skipped_on_host_mismatch(steps, "linux")
@@ -254,6 +337,10 @@ return {
         },
         {
             name = "duplicate entries are reported",
+            -- Verify a duplicate executable path is not accepted as a valid clean tree.
+            --@param none The test harness passes no case arguments.
+            --@return nil Returns after the duplicate-path finding is checked.
+            --@error Assertions fail if duplicate entries are admitted or hidden.
             run = function()
                 local ok, findings = surface.verify(manifest,
                     with_extra(WINDOWS_ROOT, "yaca.exe"), "win32-x86")

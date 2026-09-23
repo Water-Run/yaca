@@ -1,46 +1,35 @@
 # 开发追踪
 
-更新日期：2026-09-19（发布）
+更新日期：2026-09-22
 
-**v0.1 已发布**：按所有者 D-072 决策，Release Gate R 以独立发布提交
-翻转为 passed；资格基线为三个实测环境（win32-x86@Server 2008 实机、
-win64-x86_64@Windows 11 实机、linux-x86_64@CentOS 7.9 容器）。翻转同步
-更新了 readiness/manifest/lock/planner/check_loader/network 能力投影、
-四个 validator（7614/56/557 + documentation-truth 5 文档）、公开文档与
-全部关联测试；最终验证：完整 Lua suite **591/591**，TP-003/006/008/010
-与 RP-001 全部 PASS。旧三硬门（XP SP3/Win7 SP1/裸机 CentOS 7）转为
-后续增强项，边界如实记录在各验收文档。
+## 2026-09-22 定位收口与开发排序
 
-2026-09-19 第三轮：C33/C34 工具收尾——Linux zip 装配器
-（`package_linux_zip.py` + `LINUX-QUICKSTART.md`）、干净机旅程驱动
-（`test/release/journeys.lua`，Linux 容器内 6/6 PASS）、文档真源守卫
-（`.tools/check_documentation_truth.lua`，入 readiness 链）。三包
-（win32/win64/linux）均按同标准重建/组装并完成机器内试跑；
-干净机首跑发现并修复两个真实缺陷：zip 预置空 `__yaca__` 数据根、
-未初始化配置记 warning 且不阻断依赖（`outcome=partial`）。套件
-**591/591**。见 [C33/C34 工具收尾](C33-C34-TOOLING-2026-09-19.md)。
+新主线是 [通用 Agent F0--F6](PRODUCT-ROADMAP-2026-09-22.md)：
+契约对齐 → 直接启动 → 网络闭环 → 内置 Lua/可选 tools → 文件/容量/恢复 → 核心收敛 → 原发行资格。
+负责人明确的方向登记为 D-072；具体技术建议与未完成工作在路线中分开标记。
+后续澄清已纳入：产品是通用 Agent，旧设备/U 盘为典型场景；仅 Lua 为必带 Agent 工具，
+Python/SSH 等选配。架构、兼容迁移与可判定验收见[大改蓝图](MAJOR-REDESIGN-PLAN-2026-09-22.md)。
 
-2026-09-19 第二轮：以 rootless podman 的 CentOS 7.9.2009 容器完成
-linux-x86_64 锁定工具链（glibc 2.17 / GCC 4.8.5）资格构建
-（full_tests=575/575）与真实 DeepSeek 安装验收（Stage 1/2/3、工具/
-审批/`--continue` 恢复）；落地 C33 零表面检查器
-（`.tools/check_zero_surface.lua`，真实 win32/win64 包 PASS）与
-`clean_machine_test.lua`，完整 suite 升至 **584/584**。见
-[CentOS 7 资格与 C33](LINUX-CENTOS7-QUALIFICATION-2026-09-19.md)。
-容器共享宿主内核，裸机 CentOS 7 与 XP/Win7 硬门仍未执行。
+后续范围收敛：原版已是通用 Agent，定位与主体架构保持；明确增量为 Lua 和可选工具说明。
+F 编号保留作分类，既有能力按缺陷修补和目标验收推进。onedir、exec 新 schema、
+改默认值、拆 main、格式迁移均移出必做范围，不先进行全面重构/规格重写。
 
-2026-09-19 第一轮在新 Linux 构建机上重建全部锁定源码缓存与基线
-（suite 575/575、validators 7612/56/553、TP-003/006/008/010 与 RP-001
-全部 PASS），新增 `win64-x86_64` 候选构建路径并修复三个真实构建问题
-（curl configure 的 mingw mbedtls 探测缺 `-lbcrypt`、64 位 msvcrt 的
-secure-CRT 审计语义、console-reader fixture 的基线宏重定义）。两个包
-分别安装到 win2008（Server 2008 非 R2 x64，win32-x86）与 evader-admin
-（Windows 11 x64，win64-x86_64），均以真实 DeepSeek 完成 Stage 1/2/3、
-文件/Shell 工具审批、干净退出与 `--continue` 恢复；详见
-[两测试系统验收](TWO-TARGET-ACCEPTANCE-2026-09-19.md)。Win11 证据不
-外推 Win7 SP1，C32--C34 仍待执行，Release Gate R 保持关闭。
+D-073 最新增量：Lua 内嵌 yaca，通过程序自身解释器入口调用；每目标 clean/std/full，
+三档使用同一核心。full 已选开发工具箱，Git/Python 3/编译工具按平台取舍；
+默认版本与来源见[发行分档清单](../release/TOOL-BUNDLES.md)。独立 Lua 文件/onedir 候选撤回。
 
-此前 2026-09-16 记录：接续 ZCode 的 N8 在线自检实现，完成 Model 管理器显式联网测试、
+完成：[三个上游固定提交源码对照](references/agent-loop-source-review-2026-09-22.md)、
+首次 575/575 基线与[指定服务器离线复核](BASELINE-REVIEW-2026-09-22.md)、产品入口同步。
+随后已实现内嵌解释器、可选工具信息、首次引导、Cygwin PTY 修复、三档装配及工具
+输入锁定。新增用例后 CentOS 7 完整 suite **581/581** 通过；Server 2008 真实 PTY
+识别、隐藏输入和恢复通过。详情见[本轮实现记录](PORTABLE-IMPLEMENTATION-2026-09-22.md)。
+
+代码、goldens、机读契约随实现更新，release gate 不变。大文件/旧编码、跨层容量、
+目标故障矩阵与各目标实际 full 工具闭包仍待完成；C32--C34 仍是正式发行资格工作。
+
+## 2026-09-16 实现基线
+
+本轮接续 ZCode 的 N8 在线自检实现，完成 Model 管理器显式联网测试、
 Stage 1 实际文件发布探针、在线 Stage 2/3 的生产组合，以及 M05-57
 资源 selector 语义复核。配置/映射/`.model` 统一使用完整 logical name，
 只折叠 ASCII 大小写，保留原始 UTF-8 拼写和 Model/Permission 独立命名空间。
@@ -83,7 +72,7 @@ C01--C31 已有核心实现、测试 harness、最小发行规划和现代 Linux
 | M9 / C29--C30 | typed diagnostics、self-test 调度/Stage 1、`.details` | 已接通 Stage 2/3；三目标完整端到端资格待执行 |
 | M10 / C31 | 最小包 allowlist、依赖锁/license/SBOM、资源 overlay、候选构建脚本 | C32--C34 |
 | C32 | 三目标资格计划与部分候选工具 | XP SP3 x86、Win7 SP1 x64、CentOS 7 x64 真实构建/运行/完整测试 |
-| C33 | 发行旅程与零表面契约 | 三个最终 zip 的干净机安装、配置、新建/恢复、退出、升级、卸载 |
+| C33 | 发行旅程与零表面契约；D-073 增补三档 | 三目标各 clean/std/full 的包布局、配置、新建/恢复、退出、升级、卸载与工具资格 |
 | C34 | 文档与 evidence 布局规划 | 最终 SHA-256/license/SBOM/build/test evidence，公开声明复核 |
 
 已接通的近期 controller 包括 `--continue`、跨 workspace `.context`、

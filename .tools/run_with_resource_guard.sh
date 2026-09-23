@@ -1,11 +1,24 @@
 #!/usr/bin/env bash
+# Author: WaterRun
+# Date: 2026-09-23
+# File: run_with_resource_guard.sh
+# Description: Serializes expensive work and enforces host resource admission before starting it.
+
 set -euo pipefail
 
+# Explain the required guarded command when no command was supplied.
+#@param none No arguments; uses the current script name for the usage line.
+#@return void Does not return to the caller.
+#@effect Writes to stderr and exits the guard with usage status 64.
 usage() {
   echo "usage: $0 COMMAND [ARGUMENT ...]" >&2
   exit 64
 }
 
+# Stop before starting expensive work when resource admission cannot be established.
+#@param ... string Diagnostic words joined using the shell's argument separator.
+#@return void Does not return to the caller.
+#@effect Writes the refusal reason to stderr and exits with temporary-failure status 75.
 refuse() {
   echo "test resource preflight: REFUSED: $*" >&2
   exit 75
@@ -72,6 +85,10 @@ LOADAVG="$PROC_ROOT/loadavg"
 [[ -r "$MEMINFO" ]] || refuse "memory availability cannot be read"
 [[ -r "$LOADAVG" ]] || refuse "system load cannot be read"
 
+# Read one named memory counter from the selected procfs-style meminfo file.
+#@param 1 string Counter name without its trailing colon.
+#@return int Exit status of awk; the matching counter in KiB is written to stdout, or nothing if absent.
+#@effect Reads MEMINFO; callers validate the returned counter before arithmetic.
 read_meminfo_kib() {
   local name=$1
   awk -v key="$name:" '$1 == key { print $2; exit }' "$MEMINFO"
@@ -90,6 +107,11 @@ SWAP_TOTAL_KIB=$(read_meminfo_kib SwapTotal)
 EFFECTIVE_AVAILABLE_KIB=$MEMORY_AVAILABLE_KIB
 AVAILABILITY_SOURCE=host
 
+# Restrict admitted memory headroom using one available cgroup limit/current pair.
+#@param 1 string Path of the byte-valued memory limit file, optionally containing max.
+#@param 2 string Path of the byte-valued current memory usage file.
+#@return int Zero when no tighter readable limit applies or after applying a valid tighter limit.
+#@effect Updates EFFECTIVE_AVAILABLE_KIB and AVAILABILITY_SOURCE; malformed counters exit through refuse.
 apply_cgroup_limit() {
   local maximum_path=$1
   local current_path=$2

@@ -1,7 +1,7 @@
 --[[
-File: xml.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-09-23
+File: xml.lua
 Description: Provides a bounded LuaExpat reader and narrow streaming XML writer.
 ]]
 
@@ -9,12 +9,23 @@ local text = require("text")
 
 local M = {}
 
+--@metatable carrier_states Associates XML carrier proxies with their representation, bytes and digest metadata.
+--@field __mode string Fixed k mode: keys are weak; entries remain mutable within their owning module.
 local carrier_states = setmetatable({}, { __mode = "k" })
 local ABORT_MARKER = "yaca-xml-reader-abort"
 local BASE64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 local BASE64_REVERSE = {}
 for index = 1, #BASE64 do BASE64_REVERSE[BASE64:byte(index)] = index - 1 end
 
+-- Construct a structured diagnostic without throwing or formatting its optional fields.
+--@param code string Stable diagnostic code used by callers to choose recovery behavior.
+--@param message string Human-readable summary supplied by the failing operation.
+--@param reason string|nil Optional machine-readable cause or validation rule.
+--@param path string|nil Optional document or filesystem path associated with the failure.
+--@param line integer|nil Parser-reported source line; omitted when no source location is available.
+--@param column integer|nil Parser-reported column in that parser's coordinate convention.
+--@param offset integer|nil Source byte position in the reporting parser's coordinate convention.
+--@return table New diagnostic record; optional non-nil fields are retained without deep copying.
 local function failure(code, message, reason, path, line, column, offset)
     local result = { code = code, message = message }
     if reason ~= nil then result.reason = reason end
@@ -25,12 +36,32 @@ local function failure(code, message, reason, path, line, column, offset)
     return result
 end
 
+-- Create a shallow read-only view without copying the backing table.
+--@param values table Backing fields retained by reference; the caller owns their stability.
+--@param label string|nil Diagnostic label; defaults to "readonly value".
+--@return table Empty proxy exposing the backing fields through its locked metatable.
+--@ownership Retains values by reference; nested values and the backing table are not frozen.
 local function readonly(values, label)
+    --@metatable readonly_proxy Forwards reads and iteration; ordinary assignments raise an error.
+    --@field __index table Backing values used for missing-key reads.
+    --@field __newindex function Rejects ordinary assignments without changing the backing values.
+    --@field __pairs function Enumerates the backing table with next.
+    --@field __metatable string Hides this metatable behind the fixed "locked" marker.
     return setmetatable({}, {
         __index = values,
+        -- Reject a write through the proxy before it can create an ordinary field.
+        --@param _ table Proxy receiving the assignment; its contents are not consulted.
+        --@param key any Attempted field name included in the diagnostic.
+        --@return nil Does not return normally.
+        --@error Always raises a read-only assignment error at the caller frame.
         __newindex = function(_, key)
             error((label or "readonly value") .. " cannot be modified: " .. tostring(key), 2)
         end,
+        -- Iterate the backing fields instead of the empty proxy table.
+        --@param none The proxy argument supplied by pairs is ignored.
+        --@return function The standard next iterator.
+        --@return table Backing values used as iterator state.
+        --@return nil Initial key used to start iteration.
         __pairs = function()
             return next, values, nil
         end,
@@ -38,10 +69,17 @@ local function readonly(values, label)
     })
 end
 
+-- Check the Lua integer subtype and the caller's inclusive lower bound.
+--@param value any Candidate value; floats and non-numeric values are rejected.
+--@param minimum integer Inclusive minimum accepted by this check.
+--@return boolean True only for an integer at least minimum.
 local function valid_integer(value, minimum)
     return math.type(value) == "integer" and value >= minimum
 end
 
+-- Count a dense positive-integer sequence while rejecting map keys and holes.
+--@param values any Candidate Lua sequence.
+--@return integer|nil count Sequence length, or nil for an invalid shape.
 local function dense_array_length(values)
     if type(values) ~= "table" then return nil end
     local count = 0
@@ -55,6 +93,9 @@ local function dense_array_length(values)
     return count
 end
 
+-- Encode exact binary bytes with canonical padded standard Base64.
+--@param value string Raw bytes from a present carrier.
+--@return string encoded Four-character-group Base64 text.
 local function encode_base64(value)
     local output = {}
     local index = 1
@@ -76,6 +117,9 @@ local function encode_base64(value)
     return table.concat(output)
 end
 
+-- Escape XML markup characters in already admitted text.
+--@param value string Lossless XML-safe UTF-8 text or attribute value.
+--@return string escaped Entity-escaped XML character data.
 local function escaped_xml(value)
     return (value
         :gsub("&", "&amp;")
@@ -85,6 +129,10 @@ local function escaped_xml(value)
         :gsub("'", "&apos;"))
 end
 
+-- Decode only canonical padded Base64, including zero pad bits.
+--@param value any Candidate encoded carrier text.
+--@return string|nil bytes Exact decoded bytes.
+--@return table|nil err Structured length, alphabet, or padding failure.
 local function decode_base64(value)
     if type(value) ~= "string" or #value % 4 ~= 0 then
         return nil, failure("InvalidXmlCarrier", "base64 length is invalid", "base64-length")
@@ -134,6 +182,12 @@ local function decode_base64(value)
     return table.concat(output)
 end
 
+-- Register a read-only carrier with private presence and exact-byte facts.
+--@param present boolean Whether a semantic value exists.
+--@param representation string missing, text, or base64 storage form.
+--@param bytes string|nil Exact present bytes, nil only for missing.
+--@return table carrier Immutable typed XML carrier.
+--@effect Adds the carrier to the weak-key private registry.
 local function new_carrier(present, representation, bytes)
     local values = {
         present = present,
@@ -151,9 +205,9 @@ M.missing = new_carrier(false, "missing", nil)
 ---Creates a lossless XML text/base64 carrier, retaining missing separately.
 -- Strict XML-1.0-safe, CR-free UTF-8 uses text; all other exact bytes use
 -- standard padded base64. Invalid UTF-8 is therefore never replaced.
--- @param bytes string|nil Exact bytes, or nil for a missing field.
--- @return table|nil carrier Immutable typed carrier.
--- @return table|nil err Structured input failure.
+--@param bytes string|nil Exact bytes, or nil for a missing field.
+--@return table|nil carrier Immutable typed carrier.
+--@return table|nil err Structured input failure.
 function M.carrier(bytes)
     if bytes == nil then return M.missing end
     if type(bytes) ~= "string" then
@@ -164,9 +218,9 @@ function M.carrier(bytes)
 end
 
 ---Creates a forced binary base64 carrier from exact bytes.
--- @param bytes string Exact arbitrary bytes.
--- @return table|nil carrier Immutable base64 carrier.
--- @return table|nil err Structured type failure.
+--@param bytes string Exact arbitrary bytes.
+--@return table|nil carrier Immutable base64 carrier.
+--@return table|nil err Structured type failure.
 function M.binary(bytes)
     if type(bytes) ~= "string" then
         return nil, failure("InvalidXmlCarrier", "binary carrier input must be bytes")
@@ -175,9 +229,9 @@ function M.binary(bytes)
 end
 
 ---Returns immutable public metadata and encoded content for a carrier.
--- @param carrier table Carrier created by this module.
--- @return table|nil info Presence, representation, size, and encoded content.
--- @return table|nil err Structured carrier failure.
+--@param carrier table Carrier created by this module.
+--@return table|nil info Presence, representation, size, and encoded content.
+--@return table|nil err Structured carrier failure.
 function M.carrier_info(carrier)
     local state = carrier_states[carrier]
     if not state then
@@ -197,9 +251,9 @@ function M.carrier_info(carrier)
 end
 
 ---Returns the exact canonical bytes held by a present XML carrier.
--- @param carrier table Carrier created by this module.
--- @return string|nil bytes Exact original bytes; nil for missing.
--- @return table|nil err Structured carrier failure or missing marker.
+--@param carrier table Carrier created by this module.
+--@return string|nil bytes Exact original bytes; nil for missing.
+--@return table|nil err Structured carrier failure or missing marker.
 function M.carrier_bytes(carrier)
     local state = carrier_states[carrier]
     if not state then
@@ -211,6 +265,10 @@ function M.carrier_bytes(carrier)
     return state.bytes
 end
 
+-- Require the pinned LuaExpat and Expat runtime identity before parsing.
+--@param lxp any Candidate native LuaExpat module.
+--@return boolean|nil valid True for the exact pinned version and feature shape.
+--@return table|nil err Structured missing or version-mismatch failure.
 local function validate_lxp(lxp)
     if type(lxp) ~= "table" or type(lxp.new) ~= "function" then
         return nil, failure("InvalidXmlDependency", "lxp module does not expose new")
@@ -243,6 +301,10 @@ local LIMIT_NAMES = {
     "maximum_chunk_bytes",
 }
 
+-- Validate pinned parser dependency and every XML reader/writer hard limit.
+--@param options table Candidate lxp module and positive integer limit fields.
+--@return table|nil admitted Native module reference and copied limit table.
+--@return table|nil err Structured dependency, field, or limit failure.
 local function validate_options(options)
     if type(options) ~= "table" then
         return nil, failure("InvalidXmlOptions", "XML codec options are required")
@@ -276,11 +338,19 @@ local function validate_options(options)
     return { lxp = options.lxp, limits = limits }
 end
 
+-- Render the current element stack as a slash-rooted diagnostic path.
+--@param stack table Ordered open element names.
+--@return string path Root or concatenated element path.
 local function path_string(stack)
     if #stack == 0 then return "/" end
     return "/" .. table.concat(stack, "/")
 end
 
+-- Probe a native parser's current source location without propagating exceptions.
+--@param parser userdata|table|nil Candidate LuaExpat parser.
+--@return integer|nil line Current source line when available.
+--@return integer|nil column Parser-reported source column when available.
+--@return integer|nil offset Parser-reported byte offset when available.
 local function parser_position(parser)
     if type(parser) ~= "userdata" and type(parser) ~= "table" then return nil end
     local ok, line, column, offset = pcall(parser.pos, parser)
@@ -288,6 +358,12 @@ local function parser_position(parser)
     return line, column, offset
 end
 
+-- Add current element path and parser location to a structured reader error.
+--@param error_value table Mutable diagnostic to enrich when fields are absent.
+--@param parser userdata|table|nil Current native parser.
+--@param stack table Ordered open element names.
+--@return table err The same enriched diagnostic.
+--@effect Fills missing path and position fields on error_value.
 local function positioned(error_value, parser, stack)
     if error_value.path == nil then error_value.path = path_string(stack) end
     if error_value.line == nil then
@@ -299,6 +375,10 @@ local function positioned(error_value, parser, stack)
     return error_value
 end
 
+-- Admit only the three supported SAX consumer callbacks.
+--@param sink table|nil Candidate callback map; nil means no callbacks.
+--@return table|nil callbacks Original admitted callback map or a new empty map.
+--@return table|nil err Structured map or callback-shape failure.
 local function validate_sink(sink)
     sink = sink or {}
     if type(sink) ~= "table" then
@@ -313,6 +393,10 @@ local function validate_sink(sink)
     return sink
 end
 
+-- Compare a canonical unsigned decimal string to a limit without conversion.
+--@param value any Candidate decimal attribute value.
+--@param maximum integer Inclusive nonnegative carrier byte limit.
+--@return boolean|nil within True/false for grammatical decimals; nil for malformed text.
 local function at_most_decimal(value, maximum)
     if type(value) ~= "string" or not value:match("^[0-9]+$") then return nil end
     if #value > 1 and value:sub(1, 1) == "0" then return nil end
@@ -321,6 +405,12 @@ local function at_most_decimal(value, maximum)
     return value <= boundary
 end
 
+-- Construct a bounded LuaExpat SAX reader around one validated consumer.
+--@param admitted table Pinned LuaExpat reference and validated limits.
+--@param sink table Admitted optional SAX callback map.
+--@return table|nil reader Read-only incremental reader with private parser state.
+--@return table|nil err Structured native parser creation or shape failure.
+--@ownership Reader owns and closes its native parser handle after a terminal result.
 local function new_reader(admitted, sink)
     local limits = admitted.limits
     local state = {
@@ -341,6 +431,11 @@ local function new_reader(admitted, sink)
     }
     local parser
 
+    -- Record one positioned terminal reader failure and stop native callbacks.
+    --@param error_value table Structured failure raised inside a SAX callback.
+    --@return nil Does not return normally.
+    --@error Raises the internal abort marker to unwind LuaExpat callbacks.
+    --@effect Sets the first terminal failure in state.failed.
     local function abort(error_value)
         if not state.failed then
             state.failed = positioned(error_value, parser, state.stack)
@@ -348,6 +443,11 @@ local function new_reader(admitted, sink)
         error(ABORT_MARKER, 0)
     end
 
+    -- Charge one semantic SAX event against the reader event cap.
+    --@param none Uses captured reader counters and limits.
+    --@return nil No result on success.
+    --@error Aborts the reader after the SAX event cap is exceeded.
+    --@effect Increments state.sax_events.
     local function admit_sax_event()
         state.sax_events = state.sax_events + 1
         if state.sax_events > limits.maximum_sax_events then
@@ -355,6 +455,12 @@ local function new_reader(admitted, sink)
         end
     end
 
+    -- Deliver one admitted event to the selected consumer under exception containment.
+    --@param name string One of start_element, text, or end_element.
+    --@param ... any Event arguments forwarded in order.
+    --@return nil No result on acceptance or absent callback.
+    --@error Aborts the reader if the consumer raises or returns false.
+    --@effect Invokes the registered consumer callback when present.
     local function invoke(name, ...)
         local callback = sink[name]
         if not callback then return end
@@ -370,6 +476,11 @@ local function new_reader(admitted, sink)
         end
     end
 
+    -- Coalesce adjacent Expat text chunks into one bounded consumer event.
+    --@param none Uses captured pending text and element stack.
+    --@return nil No result when no text is pending or after delivery.
+    --@error Aborts on SAX cap or consumer rejection.
+    --@effect Clears pending text and invokes the text consumer.
     local function flush_text()
         if state.pending_text_bytes == 0 then return end
         local value = table.concat(state.pending_text)
@@ -381,6 +492,13 @@ local function new_reader(admitted, sink)
 
     local callbacks = {}
 
+    -- Admit an element and its bounded attributes before notifying the consumer.
+    --@param _ userdata Native parser callback sender, unused.
+    --@param name string Element name supplied by Expat.
+    --@param attributes table Expat attribute map copied before delivery.
+    --@return nil Callback has no return value.
+    --@error Aborts on depth, element, event, attribute, or consumer failure.
+    --@effect Updates reader stack and counters and invokes start_element.
     callbacks.StartElement = function(_, name, attributes)
         flush_text()
         state.depth = state.depth + 1
@@ -429,6 +547,12 @@ local function new_reader(admitted, sink)
         )
     end
 
+    -- Verify the current element and deliver its closing event.
+    --@param _ userdata Native parser callback sender, unused.
+    --@param name string Closing element name supplied by Expat.
+    --@return nil Callback has no return value.
+    --@error Aborts on stack inconsistency, event cap, or consumer failure.
+    --@effect Flushes text, invokes end_element, and pops the stack.
     callbacks.EndElement = function(_, name)
         flush_text()
         local current = state.stack[#state.stack]
@@ -441,6 +565,12 @@ local function new_reader(admitted, sink)
         state.depth = state.depth - 1
     end
 
+    -- Buffer one native text fragment subject to node and total text caps.
+    --@param _ userdata Native parser callback sender, unused.
+    --@param value string Exact text fragment supplied by Expat.
+    --@return nil Callback has no return value.
+    --@error Aborts when node or total text limits are exceeded.
+    --@effect Appends pending text and updates reader byte counters.
     callbacks.CharacterData = function(_, value)
         state.pending_text_bytes = state.pending_text_bytes + #value
         state.text_bytes = state.text_bytes + #value
@@ -453,6 +583,12 @@ local function new_reader(admitted, sink)
         state.pending_text[#state.pending_text + 1] = value
     end
 
+    -- Admit only XML 1.0 with UTF-8 or omitted encoding declaration.
+    --@param _ userdata Native parser callback sender, unused.
+    --@param version string Declared XML version.
+    --@param encoding string|nil Declared encoding.
+    --@return nil Callback has no return value.
+    --@error Aborts for a declaration outside the pinned XML profile.
     callbacks.XmlDecl = function(_, version, encoding)
         if version ~= "1.0"
             or (encoding ~= nil and encoding:upper() ~= "UTF-8")
@@ -461,6 +597,10 @@ local function new_reader(admitted, sink)
         end
     end
 
+    -- Reject all processing instructions as an unsupported active surface.
+    --@param none Native callback operands are ignored.
+    --@return nil Does not return normally.
+    --@error Always aborts with XmlSecurity.
     callbacks.ProcessingInstruction = function()
         abort(failure(
             "XmlSecurity",
@@ -469,10 +609,18 @@ local function new_reader(admitted, sink)
         ))
     end
 
+    -- Reject every DTD before it can define entity behavior.
+    --@param none Native callback operands are ignored.
+    --@return nil Does not return normally.
+    --@error Always aborts with XmlSecurity.
     callbacks.StartDoctypeDecl = function()
         abort(failure("XmlSecurity", "XML DTD is forbidden", "dtd"))
     end
 
+    -- Reject entity and related declaration callbacks shared by the aliases below.
+    --@param none Native callback operands are ignored.
+    --@return nil Does not return normally.
+    --@error Always aborts with XmlSecurity.
     callbacks.EntityDecl = function()
         abort(failure("XmlSecurity", "XML entity declarations are forbidden", "entity"))
     end
@@ -483,6 +631,10 @@ local function new_reader(admitted, sink)
     callbacks.ElementDecl = callbacks.EntityDecl
     callbacks.SkippedEntity = callbacks.EntityDecl
     callbacks.NotStandalone = callbacks.EntityDecl
+    -- Reject external entity access before any resolver can open a resource.
+    --@param none Native callback operands are ignored.
+    --@return nil Does not return normally.
+    --@error Always aborts with XmlSecurity.
     callbacks.ExternalEntityRef = function()
         abort(failure("XmlSecurity", "XML external entities are forbidden", "external-entity"))
     end
@@ -499,6 +651,10 @@ local function new_reader(admitted, sink)
         return nil, failure("InvalidXmlDependency", "LuaExpat returned a malformed parser")
     end
 
+    -- Attempt to close the owned native parser at most once.
+    --@param none Uses the captured parser and state.
+    --@return nil No result; native close failures are contained.
+    --@effect Marks the reader closed and calls parser.close once.
     local function close_parser()
         if not state.closed then
             state.closed = true
@@ -506,6 +662,12 @@ local function new_reader(admitted, sink)
         end
     end
 
+    -- Feed or finalize LuaExpat and translate all terminal failures.
+    --@param chunk string|nil Input bytes for a feed; nil when finalizing.
+    --@param final boolean Whether to request the native final parse call.
+    --@return boolean|nil accepted True for a successful native parse step.
+    --@return table|nil err Positioned callback, syntax, or dependency failure.
+    --@effect Calls the native parser and closes it on a terminal failure.
     local function parser_call(chunk, final)
         local called, parsed, parse_error, line, column, offset
         if final then
@@ -549,9 +711,9 @@ local function new_reader(admitted, sink)
     local reader = {}
 
     ---Feeds exact bytes through fixed-size chunks to bound native buffering.
-    -- @param chunk string Next source bytes.
-    -- @return boolean|nil accepted True while the reader remains usable.
-    -- @return table|nil err Structured terminal reader failure.
+    --@param chunk string Next source bytes.
+    --@return boolean|nil accepted True while the reader remains usable.
+    --@return table|nil err Structured terminal reader failure.
     function reader.feed(chunk)
         if state.failed then return nil, state.failed end
         if state.finished or state.closed then
@@ -581,8 +743,10 @@ local function new_reader(admitted, sink)
     end
 
     ---Finalizes the native parser and returns bounded parse statistics.
-    -- @return table|nil stats Immutable successful reader statistics.
-    -- @return table|nil err Structured terminal reader failure.
+    --@param none Uses the captured reader state.
+    --@return table|nil stats Immutable successful reader statistics.
+    --@return table|nil err Structured terminal reader failure.
+    --@effect Finalizes and closes the native parser.
     function reader.finish()
         if state.failed then return nil, state.failed end
         if state.finished or state.closed then
@@ -609,7 +773,9 @@ local function new_reader(admitted, sink)
     end
 
     ---Closes an unfinished reader without accepting a document.
-    -- @return boolean closed Always true after validation.
+    --@param none Uses the captured reader state.
+    --@return boolean closed Always true after validation.
+    --@effect Attempts to close the native parser at most once.
     function reader.close()
         close_parser()
         return true
@@ -618,15 +784,25 @@ local function new_reader(admitted, sink)
     return readonly(reader, "XML reader")
 end
 
+-- Admit only the fixed ASCII element/attribute name profile.
+--@param name any Candidate XML name.
+--@return boolean valid Whether the name starts with a letter and continues alphanumeric.
 local function valid_xml_name(name)
     return type(name) == "string" and name:match("^[A-Za-z][A-Za-z0-9]*$") ~= nil
 end
 
+-- Check that text can be written losslessly as XML 1.0 UTF-8.
+--@param value any Candidate text bytes.
+--@return boolean|nil safe True for the text carrier form; nil for non-string input.
 local function safe_xml_text(value)
     if type(value) ~= "string" then return nil end
     return text.xml_carrier_kind(value) == "text"
 end
 
+-- Require a callable byte sink for the incremental XML writer.
+--@param sink any Candidate sink callback.
+--@return boolean|nil valid True when sink is callable.
+--@return table|nil err Structured invalid-sink failure.
 local function validate_writer_sink(sink)
     if type(sink) ~= "function" then
         return nil, failure("InvalidXmlSink", "XML writer sink must be a function")
@@ -634,6 +810,11 @@ local function validate_writer_sink(sink)
     return true
 end
 
+-- Create a bounded single-document XML writer with a caller-owned byte sink.
+--@param admitted table Validated native dependency and XML hard limits.
+--@param sink function Callback receiving each output byte fragment.
+--@return table writer Read-only writer interface with private mutable state.
+--@ownership Caller owns sink effects; writer stops after a terminal failure.
 local function new_writer(admitted, sink)
     local limits = admitted.limits
     local state = {
@@ -652,11 +833,21 @@ local function new_writer(admitted, sink)
         failed = nil,
     }
 
+    -- Retain the first terminal writer error and reject further output.
+    --@param error_value table Structured failure to record if none exists.
+    --@return nil No successful value.
+    --@return table err First retained terminal failure.
+    --@effect Sets state.failed once.
     local function reject(error_value)
         state.failed = state.failed or error_value
         return nil, state.failed
     end
 
+    -- Send bounded output bytes to the sink under exception containment.
+    --@param bytes string Exact serialized XML fragment.
+    --@return boolean|nil accepted True after the sink accepts the fragment.
+    --@return table|nil err Structured byte-cap or sink failure.
+    --@effect Calls sink and advances state.bytes only after acceptance.
     local function emit(bytes)
         if state.bytes > limits.maximum_bytes - #bytes then
             return reject(failure("XmlLimit", "written XML exceeds maximum_bytes", "bytes"))
@@ -673,6 +864,11 @@ local function new_writer(admitted, sink)
         return true
     end
 
+    -- Charge the number of SAX-equivalent writer events before emission.
+    --@param count integer Positive event charge for the next writer action.
+    --@return boolean|nil admitted True while under the event cap.
+    --@return table|nil err Structured SAX-event limit failure.
+    --@effect Increments state.sax_events on admission.
     local function admit_events(count)
         if state.sax_events > limits.maximum_sax_events - count then
             return reject(failure(
@@ -685,6 +881,10 @@ local function new_writer(admitted, sink)
         return true
     end
 
+    -- Render caller-ordered canonical attributes after checking names and values.
+    --@param attributes table|nil Dense ordered name/value records.
+    --@return string|nil rendered Escaped attribute suffix beginning with spaces.
+    --@return table|nil err Structured shape, duplicate, text, or count failure.
     local function validate_attributes(attributes)
         attributes = attributes or {}
         local count = dense_array_length(attributes)
@@ -723,6 +923,13 @@ local function new_writer(admitted, sink)
         return table.concat(output)
     end
 
+    -- Validate and emit one start or self-closing element in the writer sequence.
+    --@param name string Fixed ASCII XML element name.
+    --@param attributes table|nil Ordered canonical attributes.
+    --@param empty boolean Whether to emit a self-closing element.
+    --@return boolean|nil accepted True after the element is emitted.
+    --@return table|nil err Structured sequence, name, limit, or sink failure.
+    --@effect Updates element/event counters and root/stack state; may emit before a later failure.
     local function admit_element(name, attributes, empty)
         if state.failed then return nil, state.failed end
         if state.terminal then return nil, failure("XmlWriterClosed", "XML writer is terminal") end
@@ -768,8 +975,10 @@ local function new_writer(admitted, sink)
     local writer = {}
 
     ---Writes the only admitted declaration for canonical context XML.
-    -- @return boolean|nil accepted True when emitted.
-    -- @return table|nil err Structured sequence or sink failure.
+    --@param none Uses the captured writer state and sink.
+    --@return boolean|nil accepted True when emitted.
+    --@return table|nil err Structured sequence or sink failure.
+    --@effect Emits the declaration and marks it written on success.
     function writer.declaration()
         if state.failed then return nil, state.failed end
         if state.declaration or state.root_started or state.terminal then
@@ -782,27 +991,27 @@ local function new_writer(admitted, sink)
     end
 
     ---Starts a fixed-name element with caller-ordered attributes.
-    -- @param name string Fixed ASCII element name.
-    -- @param attributes table|nil Dense ordered name/value records.
-    -- @return boolean|nil accepted True when emitted.
-    -- @return table|nil err Structured writer failure.
+    --@param name string Fixed ASCII element name.
+    --@param attributes table|nil Dense ordered name/value records.
+    --@return boolean|nil accepted True when emitted.
+    --@return table|nil err Structured writer failure.
     function writer.start_element(name, attributes)
         return admit_element(name, attributes, false)
     end
 
     ---Writes a fixed-name empty element using canonical self-closing syntax.
-    -- @param name string Fixed ASCII element name.
-    -- @param attributes table|nil Dense ordered name/value records.
-    -- @return boolean|nil accepted True when emitted.
-    -- @return table|nil err Structured writer failure.
+    --@param name string Fixed ASCII element name.
+    --@param attributes table|nil Dense ordered name/value records.
+    --@return boolean|nil accepted True when emitted.
+    --@return table|nil err Structured writer failure.
     function writer.empty_element(name, attributes)
         return admit_element(name, attributes, true)
     end
 
     ---Writes canonical XML-1.0-safe, CR-free UTF-8 text.
-    -- @param value string Exact semantic text bytes.
-    -- @return boolean|nil accepted True when emitted.
-    -- @return table|nil err Structured text, limit, sequence, or sink failure.
+    --@param value string Exact semantic text bytes.
+    --@return boolean|nil accepted True when emitted.
+    --@return table|nil err Structured text, limit, sequence, or sink failure.
     function writer.text(value)
         if state.failed then return nil, state.failed end
         if state.terminal then return nil, failure("XmlWriterClosed", "XML writer is terminal") end
@@ -828,9 +1037,9 @@ local function new_writer(admitted, sink)
     end
 
     ---Writes the encoded content of a present typed carrier.
-    -- @param carrier table XML carrier created by this module.
-    -- @return boolean|nil accepted True when emitted.
-    -- @return table|nil err Structured carrier or writer failure.
+    --@param carrier table XML carrier created by this module.
+    --@return boolean|nil accepted True when emitted.
+    --@return table|nil err Structured carrier or writer failure.
     function writer.carrier(carrier)
         local carrier_state = carrier_states[carrier]
         if not carrier_state or not carrier_state.present then
@@ -846,9 +1055,9 @@ local function new_writer(admitted, sink)
     end
 
     ---Closes the current element, requiring an exact name match.
-    -- @param name string Expected current fixed element name.
-    -- @return boolean|nil accepted True when emitted.
-    -- @return table|nil err Structured sequence or sink failure.
+    --@param name string Expected current fixed element name.
+    --@return boolean|nil accepted True when emitted.
+    --@return table|nil err Structured sequence or sink failure.
     function writer.end_element(name)
         if state.failed then return nil, state.failed end
         if state.terminal then return nil, failure("XmlWriterClosed", "XML writer is terminal") end
@@ -867,8 +1076,10 @@ local function new_writer(admitted, sink)
     end
 
     ---Finishes a complete single-root XML document.
-    -- @return table|nil stats Immutable successful writer statistics.
-    -- @return table|nil err Structured completeness failure.
+    --@param none Uses the captured writer state.
+    --@return table|nil stats Immutable successful writer statistics.
+    --@return table|nil err Structured completeness failure.
+    --@effect Marks the writer terminal after a complete document.
     function writer.finish()
         if state.failed then return nil, state.failed end
         if state.terminal then return nil, failure("XmlWriterClosed", "XML writer is terminal") end
@@ -893,18 +1104,18 @@ end
 ---Creates a pinned, bounded XML reader/writer service.
 -- LuaExpat must be supplied by the absolute release loader. Every limit is an
 -- injected release value; users of this module cannot disable a hard cap.
--- @param options table Pinned lxp module and complete limit set.
--- @return table|nil codec Immutable XML service.
--- @return table|nil err Structured dependency or limit failure.
+--@param options table Pinned lxp module and complete limit set.
+--@return table|nil codec Immutable XML service.
+--@return table|nil err Structured dependency or limit failure.
 function M.new(options)
     local admitted, options_error = validate_options(options)
     if not admitted then return nil, options_error end
     local service = {}
 
     ---Creates an incremental secure SAX reader.
-    -- @param sink table|nil Optional start_element/text/end_element callbacks.
-    -- @return table|nil reader Incremental reader.
-    -- @return table|nil err Structured sink or dependency failure.
+    --@param sink table|nil Optional start_element/text/end_element callbacks.
+    --@return table|nil reader Incremental reader.
+    --@return table|nil err Structured sink or dependency failure.
     function service.new_reader(sink)
         local validated, sink_error = validate_sink(sink)
         if not validated then return nil, sink_error end
@@ -912,10 +1123,10 @@ function M.new(options)
     end
 
     ---Parses a byte string or dense chunk array through the incremental reader.
-    -- @param source string|table Exact XML bytes or dense byte chunk array.
-    -- @param sink table|nil Optional SAX consumer.
-    -- @return table|nil stats Immutable successful parse statistics.
-    -- @return table|nil err Structured input, syntax, security, or limit failure.
+    --@param source string|table Exact XML bytes or dense byte chunk array.
+    --@param sink table|nil Optional SAX consumer.
+    --@return table|nil stats Immutable successful parse statistics.
+    --@return table|nil err Structured input, syntax, security, or limit failure.
     function service.parse(source, sink)
         local reader, reader_error = service.new_reader(sink)
         if not reader then return nil, reader_error end
@@ -937,9 +1148,9 @@ function M.new(options)
     end
 
     ---Creates a deterministic streaming XML writer.
-    -- @param sink function Receives each exact output chunk.
-    -- @return table|nil writer Narrow writer service.
-    -- @return table|nil err Structured sink failure.
+    --@param sink function Receives each exact output chunk.
+    --@return table|nil writer Narrow writer service.
+    --@return table|nil err Structured sink failure.
     function service.new_writer(sink)
         local valid, sink_error = validate_writer_sink(sink)
         if not valid then return nil, sink_error end
@@ -947,11 +1158,11 @@ function M.new(options)
     end
 
     ---Decodes and validates a parsed text/base64 carrier under release limits.
-    -- @param representation string|nil Nil is the default text representation.
-    -- @param encoded string Parsed element character data.
-    -- @param raw_bytes integer|nil Optional declared exact byte count.
-    -- @return table|nil carrier Immutable present carrier.
-    -- @return table|nil err Structured representation, encoding, or limit failure.
+    --@param representation string|nil Nil is the default text representation.
+    --@param encoded string Parsed element character data.
+    --@param raw_bytes integer|nil Optional declared exact byte count.
+    --@return table|nil carrier Immutable present carrier.
+    --@return table|nil err Structured representation, encoding, or limit failure.
     function service.decode_carrier(representation, encoded, raw_bytes)
         representation = representation or "text"
         if representation ~= "text" and representation ~= "base64" then

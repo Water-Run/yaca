@@ -1,21 +1,30 @@
 --[[
-File: network_retry_test.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-09-23
+File: network_retry_test.lua
 Description: Verifies HTTP redirects, Retry-After, budgets, and replay closure.
 ]]
 
 local A = assert(loadfile(YACA_TEST_ROOT .. "/test/support/assert.lua", "t", _ENV))()
 
+--Loads a source module into an isolated per-case environment.
+--@param name string Module, Model, or resource name selected by the case.
+--@param cache table Per-case module cache preserving isolated imports.
+--@return any module Module export loaded in the isolated source environment.
 local function load_module(name, cache)
     cache = cache or {}
     if cache[name] then return cache[name] end
     local environment = {}
     for key, value in pairs(_ENV) do environment[key] = value end
+    --Resolves an imported Lua module through the isolated test loader.
+    --@param dependency string Source module requested from the isolated loader.
+    --@return any value Callback value consumed by the enclosing scenario assertion.
     environment.require = function(dependency)
         return load_module(dependency, cache)
     end
     environment._G = environment
+    --@metatable environment Test-owned lookup and mutation contract for the current case.
+    --@field __index any Fallback table or function used for missing fixture keys.
     setmetatable(environment, { __index = _ENV })
     local chunk, load_error = loadfile(
         YACA_TEST_ROOT .. "/src/" .. name .. ".lua",
@@ -37,6 +46,10 @@ local MANIFEST = {
     deterministic_jitter_permille = 100,
 }
 
+--Supplies controller behavior required by this suite.
+--@param network table Fake network port or its configuration.
+--@param overrides table|nil Per-case overrides of default fixture behavior.
+--@return any observed controller value observed by the scenario assertion.
 local function controller(network, overrides)
     local spec = {
         logical_request_id = "request-A",
@@ -58,6 +71,9 @@ return {
     cases = {
         {
             name = "HTTP header carrier selects final block and rejects ambiguity",
+            --Verifies hTTP header carrier selects final block and rejects ambiguity.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify hTTP header carrier selects final block and rejects ambiguity.
             run = function()
                 local network = load_module("network")
                 local bytes = table.concat({
@@ -76,6 +92,9 @@ return {
                 A.equal(response.status, 429)
                 A.equal(assert(network.single_header(response, "retry-after")), "2")
                 A.falsy(network.single_header(response, "x-interim"))
+                --Executes the action expected to raise in the 'HTTP header carrier selects final block and rejects ambiguity' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify hTTP header carrier selects final block and rejects ambiguity.
                 A.raises(function() response.status = 200 end, "cannot be modified")
 
                 local duplicated = assert(network.parse_http_headers(
@@ -105,6 +124,9 @@ return {
         },
         {
             name = "same-origin redirect fixture follows only 307 and 308",
+            --Verifies same-origin redirect fixture follows only 307 and 308.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify same-origin redirect fixture follows only 307 and 308.
             run = function()
                 local network = load_module("network")
                 local fixtures = assert(loadfile(
@@ -167,6 +189,9 @@ return {
         },
         {
             name = "Retry-After delta and legacy date forms are UTC bounded",
+            --Verifies retry-After delta and legacy date forms are UTC bounded.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify retry-After delta and legacy date forms are UTC bounded.
             run = function()
                 local network = load_module("network")
                 A.equal(assert(network.parse_retry_after(" 2 ", 0, 60000)), 2000)
@@ -196,6 +221,9 @@ return {
         },
         {
             name = "deterministic retry vector matches the modern proof oracle",
+            --Verifies deterministic retry vector matches the modern proof oracle.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify deterministic retry vector matches the modern proof oracle.
             run = function()
                 local network = load_module("network")
                 local expected = {
@@ -231,6 +259,9 @@ return {
         },
         {
             name = "retry attempts honor local delay Retry-After and exact exhaustion",
+            --Verifies retry attempts honor local delay Retry-After and exact exhaustion.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify retry attempts honor local delay Retry-After and exact exhaustion.
             run = function()
                 local network = load_module("network")
                 local retry = controller(network)
@@ -266,6 +297,9 @@ return {
         },
         {
             name = "first canonical event permanently closes automatic replay",
+            --Verifies first canonical event permanently closes automatic replay.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify first canonical event permanently closes automatic replay.
             run = function()
                 local network = load_module("network")
                 local retry = controller(network)
@@ -285,6 +319,9 @@ return {
         },
         {
             name = "controller applies the frozen retry matrix without hidden fallbacks",
+            --Verifies first canonical event permanently closes automatic replay.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify first canonical event permanently closes automatic replay.
             run = function()
                 local network = load_module("network")
                 local fixtures = assert(loadfile(
@@ -319,6 +356,9 @@ return {
         },
         {
             name = "same-origin redirect becomes a fresh attempt but cross-origin does not",
+            --Verifies same-origin redirect becomes a fresh attempt but cross-origin does not.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify same-origin redirect becomes a fresh attempt but cross-origin does not.
             run = function()
                 local network = load_module("network")
                 local retry = controller(network)
@@ -351,6 +391,9 @@ return {
         },
         {
             name = "deadline budget and cancel close waits without ghost attempts",
+            --Verifies deadline budget and cancel close waits without ghost attempts.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify deadline budget and cancel close waits without ghost attempts.
             run = function()
                 local network = load_module("network")
                 local budget = controller(network, {
@@ -387,6 +430,9 @@ return {
         },
         {
             name = "body-unknown protocol auth refusal and user cancel are terminal",
+            --Verifies body-unknown protocol auth refusal and user cancel are terminal.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify body-unknown protocol auth refusal and user cancel are terminal.
             run = function()
                 local network = load_module("network")
                 local expected = {

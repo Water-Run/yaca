@@ -1,18 +1,24 @@
 --[[
-File: loader_path_test.lua
-Date: 2026-08-30
 Author: WaterRun
+Date: 2026-09-23
+File: loader_path_test.lua
 Description: Qualifies absolute native loading against ambient path injection.
 ]]
 
 local A = assert(loadfile(YACA_TEST_ROOT .. "/test/support/assert.lua", "t", _ENV))()
 
+--Loads a repository Lua module as a test support value.
+--@param relative_path string Repository-relative Lua source path to load.
+--@return any module Test support module export loaded from the repository.
 local function load_table(relative_path)
     local chunk, load_error = loadfile(YACA_TEST_ROOT .. "/" .. relative_path, "t", _ENV)
     A.truthy(chunk, load_error)
     return chunk()
 end
 
+--Reads read all for this test scenario.
+--@param relative_path string Repository-relative Lua source path to load.
+--@return any bytes Complete bytes read from the selected fixture file.
 local function read_all(relative_path)
     local file, open_error = io.open(YACA_TEST_ROOT .. "/" .. relative_path, "rb")
     A.truthy(file, open_error)
@@ -26,14 +32,24 @@ return {
     cases = {
         {
             name = "native module path is absolute allowlisted and independent of ambient cpath",
+            --Verifies native module path is absolute allowlisted and independent of ambient cpath.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify native module path is absolute allowlisted and independent of ambient cpath.
             run = function()
                 local loader = load_table(".tools/check_loader.lua")
                 local manifest = load_table("release/manifest.lua")
                 local calls = {}
                 local secure = assert(loader.new(manifest, YACA_TEST_ROOT, {
                     target_id = "linux-x86_64",
+                    --Supplies the loadlib behavior used by the 'native module path is absolute allowlisted and independent of ambient cpath' case.
+                    --@param path string File or Context path exercised by the case.
+                    --@param symbol any The symbol supplied to the fake service for this scenario.
+                    --@return function callback Nested callback supplied by this scenario.
                     loadlib = function(path, symbol)
                         calls[#calls + 1] = { path = path, symbol = symbol }
+                        --Supplies an assertion callback for the native module path is absolute allowlisted and independent of ambient cpath scenario.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return table record Fixture record emitted by the scenario callback.
                         return function() return { origin = path } end
                     end,
                 }))
@@ -49,12 +65,21 @@ return {
         },
         {
             name = "validated native filename map is snapshotted against mutation",
+            --Verifies validated native filename map is snapshotted against mutation.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify validated native filename map is snapshotted against mutation.
             run = function()
                 local loader = load_table(".tools/check_loader.lua")
                 local manifest = load_table("release/manifest.lua")
                 local secure = assert(loader.new(manifest, YACA_TEST_ROOT, {
                     target_id = "win32-x86",
+                    --Supplies the loadlib behavior used by the 'validated native filename map is snapshotted against mutation' case.
+                    --@param path string File or Context path exercised by the case.
+                    --@return function callback Nested callback supplied by this scenario.
                     loadlib = function(path)
+                        --Supplies an assertion callback for the validated native filename map is snapshotted against mutation scenario.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return any value Callback value consumed by the enclosing scenario assertion.
                         return function() return path end
                     end,
                 }))
@@ -67,6 +92,9 @@ return {
         },
         {
             name = "native source exposes one portable allowlisted Lua entry point",
+            --Verifies validated native filename map is snapshotted against mutation.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify validated native filename map is snapshotted against mutation.
             run = function()
                 local source = read_all("native/yaca_native.c")
                 A.contains(source, "luaopen_yaca_native")
@@ -85,6 +113,9 @@ return {
         },
         {
             name = "native source owns a closed streaming SHA-256 handle",
+            --Verifies native source exposes one portable allowlisted Lua entry point.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify native source exposes one portable allowlisted Lua entry point.
             run = function()
                 local source = read_all("native/yaca_native.c")
                 for _, symbol in ipairs({
@@ -121,23 +152,31 @@ return {
         },
         {
             name = "native component carrier bypasses both platform command shells",
+            --Verifies native component carrier bypasses both platform command shells.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify native component carrier bypasses both platform command shells.
             run = function()
                 local source = read_all("native/yaca_native.c")
+                local supervisor = read_all("native/yaca_supervisor.h")
                 A.contains(source, "request_component_stdin")
                 A.contains(source, 'memcmp(mode, "argv", 4U)')
                 A.contains(source, "build_wide_arguments")
                 A.contains(source, "CreateProcessW(\n        application_name,")
                 A.contains(
-                    source,
-                    "execve(selected_executable, selected_arguments, environment.items)"
+                    supervisor,
+                    "execve(executable, arguments, environment)"
                 )
-                A.contains(source, "write_windows_pipe(stdin_write, stdin_bytes, stdin_length)")
-                A.contains(source, "write_posix_pipe(stdin_pipe[1], stdin_bytes, stdin_length)")
+                A.contains(source, "start_process_input(stdin_write, stdin_bytes, stdin_length)")
+                A.contains(source, "yaca_supervisor_run(argv_mode ? stdin_pipe[0] : null_input")
+                A.contains(supervisor, "PR_SET_CHILD_SUBREAPER")
                 A.contains(source, "command_length >= 32767U")
             end,
         },
         {
             name = "Windows console paths retain the XP API floor and host line editor",
+            --Verifies windows console paths retain the XP API floor and host line editor.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify windows console paths retain the XP API floor and host line editor.
             run = function()
                 local source = read_all("native/yaca_native.c")
                 A.contains(source, "#define _WIN32_WINNT 0x0501")

@@ -1,11 +1,12 @@
 --[[
-File: network.lua
-Date: 2026-08-30
 Author: WaterRun
+Date: 2026-09-23
+File: network.lua
 Description: Builds a secret-safe curl carrier over structured process ports.
 ]]
 
 local text = require("text")
+local filesystem_util = require("fs")
 
 local M = {}
 
@@ -48,21 +49,50 @@ local CONTROLLED_SECRET_HEADERS = {
     ["transfer-encoding"] = true,
 }
 
+-- Construct a structured diagnostic without throwing or formatting its optional fields.
+--@param code string Stable diagnostic code used by callers to choose recovery behavior.
+--@param message string Human-readable summary supplied by the failing operation.
+--@param detail any|nil Optional underlying cause or contextual diagnostic data; retained as supplied.
+--@return table New diagnostic record; optional non-nil fields are retained without deep copying.
 local function failure(code, message, detail)
     local result = { code = code, message = message }
     if detail ~= nil then result.detail = detail end
     return result
 end
 
+-- Create a shallow read-only view without copying the backing table.
+--@param values table Backing fields retained by reference; the caller owns their stability.
+--@param label string|nil Diagnostic label; defaults to "readonly value".
+--@return table Empty proxy exposing the backing fields through its locked metatable.
+--@ownership Retains values by reference; nested values and the backing table are not frozen.
 local function readonly(values, label)
+    --@metatable readonly_proxy Forwards reads and iteration; ordinary assignments raise an error.
+    --@field __index table Backing values used for missing-key reads.
+    --@field __newindex function Rejects ordinary assignments without changing the backing values.
+    --@field __pairs function Enumerates the backing table with next.
+    --@field __len function Reports the backing table sequence length.
+    --@field __metatable string Hides this metatable behind the fixed "locked" marker.
     return setmetatable({}, {
         __index = values,
+        -- Reject a write through the proxy before it can create an ordinary field.
+        --@param _ table Proxy receiving the assignment; its contents are not consulted.
+        --@param key any Attempted field name included in the diagnostic.
+        --@return nil Does not return normally.
+        --@error Always raises a read-only assignment error at the caller frame.
         __newindex = function(_, key)
             error((label or "readonly value") .. " cannot be modified: " .. tostring(key), 2)
         end,
+        -- Iterate the backing fields instead of the empty proxy table.
+        --@param none The proxy argument supplied by pairs is ignored.
+        --@return function The standard next iterator.
+        --@return table Backing values used as iterator state.
+        --@return nil Initial key used to start iteration.
         __pairs = function()
             return next, values, nil
         end,
+        -- Forward sequence-length queries to the backing table.
+        --@param none The proxy operand supplied by Lua is ignored.
+        --@return integer Length of the backing sequence under the Lua length operator.
         __len = function()
             return #values
         end,
@@ -70,10 +100,17 @@ local function readonly(values, label)
     })
 end
 
+-- Check the Lua integer subtype and the caller's inclusive lower bound.
+--@param value any Candidate value; floats and non-numeric values are rejected.
+--@param minimum integer Inclusive minimum accepted by this check.
+--@return boolean True only for an integer at least minimum.
 local function valid_integer(value, minimum)
     return math.type(value) == "integer" and value >= minimum
 end
 
+-- Recognize a nonempty absolute physical path without a NUL byte.
+--@param path any Candidate POSIX, drive, or UNC path.
+--@return boolean True when its prefix is absolute.
 local function valid_absolute_path(path)
     if type(path) ~= "string" or path == "" or path:find("\0", 1, true) then
         return false
@@ -84,6 +121,9 @@ local function valid_absolute_path(path)
         or normalized:match("^//[^/]+/[^/]+") ~= nil
 end
 
+-- Count a dense one-based array while rejecting holes and extra key kinds.
+--@param values any Candidate table; every key must belong to the sequence 1 through count.
+--@return integer|nil Sequence length, including zero for an empty table; nil for an invalid shape.
 local function dense_count(values)
     if type(values) ~= "table" then return nil end
     local count = 0
@@ -97,29 +137,47 @@ local function dense_count(values)
     return count
 end
 
+-- Copy the contiguous array prefix while retaining element references.
+--@param values table Sequence copied with ipairs.
+--@return table New sequence containing the original element values through the first hole.
+--@ownership Copies the outer table only; nested objects retain their original owners.
 local function copy_array(values)
     local result = {}
     for index, value in ipairs(values) do result[index] = value end
     return result
 end
 
+-- Copy a string-keyed option map without cloning its values.
+--@param values table|nil Source map; nil is treated as empty.
+--@return table New map retaining original value references.
 local function copy_string_map(values)
     local result = {}
     for key, value in pairs(values or {}) do result[key] = value end
     return result
 end
 
+-- Preserve a Windows-only separator style for generated child paths.
+--@param path string Parent directory spelling.
+--@return string Backslash for backslash-only paths, slash otherwise.
 local function directory_separator(path)
     if path:find("\\", 1, true) and not path:find("/", 1, true) then return "\\" end
     return "/"
 end
 
+-- Append one filename using the directory's separator style.
+--@param directory string Physical parent directory.
+--@param name string Child filename.
+--@return string Joined physical path.
 local function join_path(directory, name)
     local tail = directory:sub(-1)
     if tail == "/" or tail == "\\" then return directory .. name end
     return directory .. directory_separator(directory) .. name
 end
 
+-- Compare complete file identities including size and modification time.
+--@param left any Expected filesystem identity.
+--@param right any Observed filesystem identity.
+--@return boolean True when all tracked identity fields match.
 local function identity_equal(left, right)
     return type(left) == "table"
         and type(right) == "table"
@@ -130,6 +188,10 @@ local function identity_equal(left, right)
         and left.modified == right.modified
 end
 
+-- Compare stable file object identity while allowing curl to change its bytes.
+--@param left any Created carrier identity.
+--@param right any Observed carrier identity.
+--@return boolean True for the same volume and file object.
 local function same_object(left, right)
     return type(left) == "table"
         and type(right) == "table"
@@ -139,6 +201,9 @@ local function same_object(left, right)
         and left.object == right.object
 end
 
+-- Quote a value for curl's config-file grammar.
+--@param value string Config value after request validation.
+--@return string Double-quoted value with control and slash escapes.
 local function config_quote(value)
     return '"' .. value
         :gsub("\\", "\\\\")
@@ -149,6 +214,10 @@ local function config_quote(value)
         :gsub("\v", "\\v") .. '"'
 end
 
+-- Render a standalone curl option or a quoted key/value line.
+--@param name string Canonical curl config option name.
+--@param value boolean|string Option value.
+--@return string Curl config line without a final newline.
 local function option_line(name, value)
     if type(value) == "boolean" then
         -- curl config stand-alone options reject a trailing true/false argument.
@@ -157,10 +226,17 @@ local function option_line(name, value)
     return name .. " = " .. config_quote(value)
 end
 
+-- Render millisecond deadlines with exactly three fractional digits.
+--@param value integer Duration in milliseconds.
+--@return string Decimal seconds accepted by curl.
 local function milliseconds_as_seconds(value)
     return tostring(value // 1000) .. "." .. string.format("%03d", value % 1000)
 end
 
+-- Admit an absolute HTTP(S) URL without fragments or newline injection.
+--@param value any Candidate URL.
+--@param allow_credentials boolean Whether authority user-info is permitted.
+--@return boolean True when the URL satisfies the carrier boundary.
 local function valid_url(value, allow_credentials)
     if type(value) ~= "string"
         or value == ""
@@ -178,16 +254,27 @@ local function valid_url(value, allow_credentials)
     return allow_credentials or not authority:find("@", 1, true)
 end
 
+-- Check an HTTP token-shaped header name.
+--@param value any Candidate name.
+--@return boolean True for a nonempty token.
 local function valid_header_name(value)
     return type(value) == "string"
         and value ~= ""
         and value:match("^[!#$%%&'*+%.%^_`|~0-9A-Za-z%-]+$") ~= nil
 end
 
+-- Prevent NUL or line breaks from entering a header fragment.
+--@param value any Candidate value, prefix, suffix, or no-proxy list.
+--@return boolean True for a string without forbidden control bytes.
 local function valid_header_fragment(value)
     return type(value) == "string" and not value:find("[\0\r\n]")
 end
 
+-- Validate and copy public and referenced-secret headers without duplicates.
+--@param public_headers any Ordinary header sequence.
+--@param secret_headers any Typed secret-header reference sequence.
+--@return table|nil Copied public headers.
+--@return table|nil Copied secret headers on success, structured error on failure.
 local function validate_headers(public_headers, secret_headers)
     local public_count = dense_count(public_headers)
     local secret_count = dense_count(secret_headers)
@@ -257,6 +344,10 @@ local function validate_headers(public_headers, secret_headers)
     return public_copy, secret_copy
 end
 
+-- Normalize an off, public, or secret-referenced explicit proxy route.
+--@param proxy any Candidate proxy snapshot; nil means disabled.
+--@return table|nil Copied proxy policy and route reference.
+--@return table|nil Structured proxy error on failure.
 local function validate_proxy(proxy)
     proxy = proxy or { mode = "off" }
     if type(proxy) ~= "table" then
@@ -309,6 +400,11 @@ local function validate_proxy(proxy)
     }
 end
 
+-- Require typed secret reveal and scanning capabilities when referenced.
+--@param source any Configuration secret source or nil.
+--@param required boolean Whether this request carries secret references.
+--@return boolean|nil True when the source is sufficient.
+--@return table|nil Structured secret-source error on failure.
 local function validate_secret_source(source, required)
     if not required and source == nil then return true end
     if type(source) ~= "table"
@@ -321,6 +417,11 @@ local function validate_secret_source(source, required)
     return true
 end
 
+-- Bind one POST attempt to bounded URL, headers, body, proxy, CA, and timeouts.
+--@param spec any Candidate transport attempt.
+--@param limits table Release limits and default bundled CA path.
+--@return table|nil Normalized attempt with copied header/proxy data.
+--@return table|nil Structured request validation error on failure.
 local function validate_attempt(spec, limits)
     if type(spec) ~= "table" then
         return nil, failure("InvalidRequest", "network attempt spec must be a table")
@@ -396,6 +497,12 @@ local function validate_attempt(spec, limits)
     }
 end
 
+-- Reject registered secrets embedded in ordinary request fields.
+--@param source table|nil Typed secret scanner; nil skips scanning.
+--@param values table Ordinary byte strings to inspect.
+--@return boolean|nil True when every value is secret-free.
+--@return table|nil Scanner or registered-secret error on failure.
+--@effect Invokes scanner once per ordinary value when available.
 local function scan_public_bytes(source, values)
     if source == nil then return true end
     for _, value in ipairs(values) do
@@ -420,6 +527,11 @@ local function scan_public_bytes(source, values)
     return true
 end
 
+-- Reveal only eligible typed secrets for this request's named destinations.
+--@param attempt table Validated attempt with secret header and proxy references.
+--@return table|nil Unique revealed secret byte strings for later redaction.
+--@return table|nil Reference-to-value map on success, structured error on failure.
+--@effect Invokes the secret source for each distinct ID/destination pair.
 local function reveal_secrets(attempt)
     local source = attempt.secret_source
     if source == nil then return {}, {} end
@@ -434,6 +546,12 @@ local function reveal_secrets(attempt)
         end
     end
     local used, by_reference, seen = {}, {}, {}
+    -- Resolve and cache one eligible ID/destination secret reference.
+    --@param id string Registered secret identity.
+    --@param destination string Typed consumer identity.
+    --@return string|nil Revealed secret bytes.
+    --@return table|nil Eligibility or reveal error on failure.
+    --@effect Updates reference cache and unique redaction list.
     local function reveal(id, destination)
         local reference = id .. "\0" .. destination
         if by_reference[reference] ~= nil then return by_reference[reference] end
@@ -474,6 +592,10 @@ local function reveal_secrets(attempt)
     return used, by_reference
 end
 
+-- Replace every overlapping occurrence of known secret bytes in text.
+--@param bytes any Diagnostic bytes to sanitize.
+--@param secrets table Unique revealed secret strings.
+--@return any Original nonstring/empty value or redacted string.
 local function redact(bytes, secrets)
     if type(bytes) ~= "string" or bytes == "" or #secrets == 0 then return bytes end
     local intervals = {}
@@ -487,6 +609,10 @@ local function redact(bytes, secrets)
         end
     end
     if #intervals == 0 then return bytes end
+    -- Order secret hits by start and then by longest span at a tie.
+    --@param left table First inclusive byte interval.
+    --@param right table Second inclusive byte interval.
+    --@return boolean True when left precedes right.
     table.sort(intervals, function(left, right)
         if left[1] ~= right[1] then return left[1] < right[1] end
         return left[2] > right[2]
@@ -510,6 +636,12 @@ local function redact(bytes, secrets)
     return table.concat(parts)
 end
 
+-- Raise a diagnostic after removing all revealed secret byte spans.
+--@param value any Error record or other thrown value.
+--@param secrets table|nil Revealed secrets to redact.
+--@param level integer|nil Additional error stack level, default one.
+--@return nil Does not return normally.
+--@error Always raises the redacted message.
 local function raise_redacted(value, secrets, level)
     local message
     if type(value) == "table" and type(value.code) == "string" then
@@ -520,6 +652,13 @@ local function raise_redacted(value, secrets, level)
     error(redact(message, secrets or {}), (level or 1) + 1)
 end
 
+-- Delete only the verified temporary carrier created for this request.
+--@param filesystem table Bounded direct filesystem port.
+--@param directory string Carrier parent directory to flush after deletion.
+--@param carrier table|nil Carrier path and original identity.
+--@return boolean|nil True after deletion or if already absent/deleted.
+--@return table|nil Filesystem or changed-identity error on failure.
+--@effect May delete and flush the carrier; marks carrier.deleted on success.
 local function cleanup_file(filesystem, directory, carrier)
     if carrier == nil or carrier.deleted then return true end
     local stated, observed = filesystem.stat_identity(carrier.path)
@@ -544,6 +683,14 @@ local function cleanup_file(filesystem, directory, carrier)
     return true
 end
 
+-- Attempt cleanup of both carrier files while preserving the first error.
+--@param filesystem table Bounded direct filesystem port.
+--@param directory string Carrier parent directory.
+--@param body_carrier table|nil Request-body carrier.
+--@param header_carrier table|nil Response-header carrier.
+--@return boolean|nil True only when both carriers are settled.
+--@return table|nil First cleanup error.
+--@effect Calls verified cleanup for each carrier even if the first fails.
 local function cleanup_carriers(filesystem, directory, body_carrier, header_carrier)
     local first_error
     local body_ok, body_error = cleanup_file(filesystem, directory, body_carrier)
@@ -554,10 +701,24 @@ local function cleanup_carriers(filesystem, directory, body_carrier, header_carr
     return true
 end
 
+-- Create and verify a curl carrier before starting the child process.
+--@param filesystem table Bounded filesystem port.
+--@param directory string Absolute carrier directory to flush.
+--@param path string New carrier path; existing files are never overwritten.
+--@param bytes string Exact initial body or empty response-header payload.
+--@param limits table Permissions and bounded IO chunk sizes.
+--@param mutable boolean Whether curl may subsequently write this carrier.
+--@return table|nil Carrier descriptor with post-close identity, or nil on failure.
+--@return table|nil Structured storage or verification failure.
+--@effect Creates, flushes and verifies the file; attempts cleanup on failure.
 local function write_private_file(filesystem, directory, path, bytes, limits, mutable)
     local created, handle_or_error = filesystem.create_new(path, limits.private_permissions)
     if not created then return nil, handle_or_error end
     local handle = handle_or_error
+    -- Close and best-effort remove a carrier whose construction failed.
+    --@param identity table|nil Last observed identity, if available.
+    --@return nil No return value.
+    --@effect Closes the file handle and deletes only an owned carrier.
     local function abandon(identity)
         filesystem.close(handle)
         local carrier = { path = path, identity = identity, mutable = true }
@@ -591,6 +752,13 @@ local function write_private_file(filesystem, directory, path, bytes, limits, mu
         cleanup_file(filesystem, directory, carrier)
         return nil, close_error
     end
+    local final_identity, final_error = filesystem_util.observe_closed_write(filesystem, path, identity_or_error, bytes)
+    if not final_identity then
+        local carrier = { path = path, identity = identity_or_error, mutable = true }
+        cleanup_file(filesystem, directory, carrier)
+        return nil, final_error
+    end
+    identity_or_error = final_identity
     local directory_flushed, directory_error = filesystem.flush_directory(directory)
     if not directory_flushed then
         local carrier = { path = path, identity = identity_or_error, mutable = true }
@@ -605,6 +773,14 @@ local function write_private_file(filesystem, directory, path, bytes, limits, mu
     }
 end
 
+-- Read curl's mutable response-header carrier with identity checks throughout.
+--@param filesystem table Bounded direct filesystem port.
+--@param carrier table Created header carrier and current object identity.
+--@param maximum_bytes integer Total header byte cap.
+--@param maximum_chunk_bytes integer Per-read cap.
+--@return string|nil Exact header bytes on success.
+--@return table|nil Filesystem, identity, or size error on failure.
+--@effect Opens and closes a read handle; refreshes carrier identity after safe read.
 local function read_header_file(filesystem, carrier, maximum_bytes, maximum_chunk_bytes)
     local stated, before = filesystem.stat_identity(carrier.path)
     if not stated then return nil, before end
@@ -667,6 +843,13 @@ local function read_header_file(filesystem, carrier, maximum_bytes, maximum_chun
     return table.concat(parts)
 end
 
+-- Build fixed-policy curl config bytes for an admitted attempt.
+--@param attempt table Validated URL, headers, proxy, CA, and timeout snapshot.
+--@param body_path string Verified request-body carrier path.
+--@param header_path string Verified response-header carrier path.
+--@param by_reference table Revealed secret values keyed by ID and destination.
+--@return string Newline-terminated curl config bytes for anonymous stdin.
+--@error Raises if an expected secret reference is absent after validation.
 local function build_config(attempt, body_path, header_path, by_reference)
     local lines = {
         option_line("url", attempt.url),
@@ -719,6 +902,10 @@ local function build_config(attempt, body_path, header_path, by_reference)
     return table.concat(lines, "\n") .. "\n"
 end
 
+-- Require positive SSE line, event, buffer, and output caps.
+--@param options any Candidate parser limits.
+--@return table|nil Copy of accepted limits.
+--@return table|nil Structured option error on failure.
 local function validate_sse_options(options)
     if type(options) ~= "table" then
         return nil, failure("InvalidSseOptions", "SSE release limits are required")
@@ -752,6 +939,10 @@ local function validate_sse_options(options)
     }
 end
 
+-- Split one SSE field at its first colon and strip one optional space.
+--@param line string Validated UTF-8 non-comment line.
+--@return string Field name.
+--@return string Field value, empty when no colon is present.
 local function split_sse_field(line)
     local colon = line:find(":", 1, true)
     if not colon then return line, "" end
@@ -760,14 +951,10 @@ local function split_sse_field(line)
     return line:sub(1, colon - 1), value
 end
 
----Creates a bounded incremental Server-Sent Events parser.
--- It accepts LF, CRLF, and CR at arbitrary chunk boundaries. Unknown fields,
--- comments, id resume semantics, and retry overrides never become canonical
--- transport behavior. A leading UTF-8 BOM and an unterminated final event are
--- stable protocol errors.
--- @param options table Required line, event, buffer, and output limits.
--- @return table|nil parser Incremental push/finish parser.
--- @return table|nil err Structured construction failure.
+-- Create a bounded incremental SSE parser for LF, CRLF, and CR streams.
+--@param options table Required line, event, buffer, and output limits.
+--@return table|nil Read-only push/finish parser.
+--@return table|nil Structured construction error on failure.
 function M.new_sse_parser(options)
     local limits, options_error = validate_sse_options(options)
     if not limits then return nil, options_error end
@@ -782,12 +969,22 @@ function M.new_sse_parser(options)
     local sticky_error
     local parser = {}
 
+    -- Make a protocol or resource failure sticky for subsequent calls.
+    --@param code string Stable parser error identity.
+    --@param message string Public failure explanation.
+    --@return nil No successful result.
+    --@return table Sticky structured parser error.
+    --@effect Changes parser state to failed.
     local function fail(code, message)
         sticky_error = failure(code, message)
         state = "failed"
         return nil, sticky_error
     end
 
+    -- Clear the current SSE event fields after an empty line.
+    --@param none No parameters.
+    --@return nil No return value.
+    --@effect Resets pending data, event name, and byte counter; retains last ID.
     local function reset_event()
         data_parts = {}
         has_data = false
@@ -795,6 +992,11 @@ function M.new_sse_parser(options)
         event_bytes = 0
     end
 
+    -- Consume one complete SSE line and optionally dispatch an event.
+    --@param line string Terminator-free SSE line.
+    --@return boolean|nil True when accepted, nil on sticky failure.
+    --@return table|nil Completed event or structured error; absent for other lines.
+    --@effect Updates pending event fields or clears them at a blank line.
     local function process_line(line)
         if #line > limits.maximum_line_bytes then
             return fail("SseLineLimit", "SSE line exceeds its release limit")
@@ -837,6 +1039,10 @@ function M.new_sse_parser(options)
         return true
     end
 
+    -- Check buffered line and active-event bytes against the shared cap.
+    --@param none No parameters.
+    --@return boolean|nil True within limit, nil on failure.
+    --@return table|nil Sticky limit error on failure.
     local function check_buffer_limit()
         if #buffer + event_bytes > limits.maximum_buffered_bytes then
             return fail("SseBufferLimit", "SSE parser buffer exceeds its release limit")
@@ -844,6 +1050,11 @@ function M.new_sse_parser(options)
         return true
     end
 
+    -- Delay classification of a partial UTF-8 BOM, then forbid a complete BOM.
+    --@param none No parameters.
+    --@return boolean|nil True when checked, false for an incomplete prefix, nil on error.
+    --@return table|nil Sticky BOM error on failure.
+    --@effect Marks prefix_checked when enough bytes are present.
     local function check_prefix()
         if prefix_checked then return true end
         local bom = string.char(0xEF, 0xBB, 0xBF)
@@ -858,6 +1069,11 @@ function M.new_sse_parser(options)
         return true
     end
 
+    -- Parse all complete buffered lines while honoring CR chunk boundaries.
+    --@param ending boolean Whether the input stream has ended.
+    --@return table|nil Completed SSE events from this drain step.
+    --@return table|nil Sticky syntax or size error on failure.
+    --@effect Consumes bytes from buffer and updates pending event state.
     local function drain(ending)
         local events = {}
         while true do
@@ -896,10 +1112,12 @@ function M.new_sse_parser(options)
         return events
     end
 
-    ---Consumes one exact response byte chunk.
-    -- @param bytes string Bounded raw response bytes.
-    -- @return table|nil events Immutable SSE event objects.
-    -- @return table|nil err Sticky protocol or resource failure.
+    -- Consume one exact response byte chunk.
+    --@param self table Owning SSE parser.
+    --@param bytes string Raw response bytes subject to parser caps.
+    --@return table|nil Immutable SSE event objects.
+    --@return table|nil Sticky protocol or resource failure.
+    --@effect Appends to buffer and drains complete lines.
     function parser:push(bytes)
         if state == "failed" then return nil, sticky_error end
         if state ~= "open" then
@@ -921,9 +1139,11 @@ function M.new_sse_parser(options)
         return drain(false)
     end
 
-    ---Closes the byte stream without synthesizing a final SSE event.
-    -- @return table|nil events Events completed by a final CR delimiter.
-    -- @return table|nil err Incomplete or sticky protocol failure.
+    -- Close the byte stream without synthesizing an unterminated event.
+    --@param self table Owning SSE parser.
+    --@return table|nil Events completed by a final CR delimiter.
+    --@return table|nil Incomplete or sticky protocol failure.
+    --@effect Moves parser to finished only after a complete stream.
     function parser:finish()
         if state == "failed" then return nil, sticky_error end
         if state ~= "open" then
@@ -945,6 +1165,10 @@ function M.new_sse_parser(options)
         return events
     end
 
+    -- Expose parser state and any sticky error without changing it.
+    --@param self table Owning SSE parser.
+    --@return string Open, finished, or failed state.
+    --@return table|nil Sticky failure when state is failed.
     function parser:status()
         return state, sticky_error
     end
@@ -963,16 +1187,28 @@ local MONTH_NUMBER = {
     Jul = 7, Aug = 8, Sep = 9, Oct = 10, Nov = 11, Dec = 12,
 }
 
+-- Apply Gregorian leap-year rules to an HTTP-date year.
+--@param year integer Four-digit calendar year.
+--@return boolean True when February has 29 days.
 local function leap_year(year)
     return year % 4 == 0 and (year % 100 ~= 0 or year % 400 == 0)
 end
 
+-- Look up the number of days in a validated Gregorian month.
+--@param year integer Calendar year.
+--@param month integer One-based month number.
+--@return integer Days in the month, including leap February.
 local function days_in_month(year, month)
     local values = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 }
     if month == 2 and leap_year(year) then return 29 end
     return values[month]
 end
 
+-- Convert a civil date to days relative to the Unix epoch.
+--@param year integer Gregorian year.
+--@param month integer One-based month.
+--@param day integer One-based day of month.
+--@return integer Signed days from 1970-01-01.
 local function days_from_civil(year, month, day)
     year = year - (month <= 2 and 1 or 0)
     local era = (year >= 0 and year or year - 399) // 400
@@ -984,6 +1220,14 @@ local function days_from_civil(year, month, day)
     return era * 146097 + day_of_era - 719468
 end
 
+-- Validate a UTC civil timestamp and compute Unix epoch seconds.
+--@param year any Candidate year at least 1601.
+--@param month any Candidate month from one through twelve.
+--@param day any Candidate day valid for that month.
+--@param hour any Candidate hour from zero through 23.
+--@param minute any Candidate minute from zero through 59.
+--@param second any Candidate second from zero through 59.
+--@return integer|nil UTC epoch seconds or nil for invalid fields.
 local function utc_epoch(year, month, day, hour, minute, second)
     if not valid_integer(year, 1601)
         or not valid_integer(month, 1)
@@ -1002,6 +1246,9 @@ local function utc_epoch(year, month, day, hour, minute, second)
     return days_from_civil(year, month, day) * 86400 + hour * 3600 + minute * 60 + second
 end
 
+-- Parse one of the three HTTP-date grammars for Retry-After.
+--@param value string Candidate date header value.
+--@return integer|nil UTC epoch seconds, or nil for malformed date.
 local function parse_http_date(value)
     local day, month_name, year, hour, minute, second = value:match(
         "^%a%a%a, (%d%d) (%a%a%a) (%d%d%d%d) (%d%d):(%d%d):(%d%d) GMT$"
@@ -1033,12 +1280,12 @@ local function parse_http_date(value)
     )
 end
 
----Parses a Retry-After delta or HTTP-date into a bounded millisecond wait.
--- @param value string Exact single header value.
--- @param now_epoch_seconds integer Trusted current UTC seconds for date form.
--- @param maximum_ms integer Uncloseable release wait maximum.
--- @return integer|nil wait_ms Nonnegative minimum wait.
--- @return table|nil err Invalid or over-limit header failure.
+-- Parse a Retry-After delta or HTTP-date into a bounded wait.
+--@param value string Exact single header value.
+--@param now_epoch_seconds integer Trusted current UTC seconds for date form.
+--@param maximum_ms integer Release wait maximum.
+--@return integer|nil Nonnegative wait in milliseconds.
+--@return table|nil Invalid or over-limit header error.
 function M.parse_retry_after(value, now_epoch_seconds, maximum_ms)
     if type(value) ~= "string"
         or not valid_integer(now_epoch_seconds, 0)
@@ -1071,6 +1318,11 @@ function M.parse_retry_after(value, now_epoch_seconds, maximum_ms)
     return wait_ms
 end
 
+-- Require positive total, line, and count limits for HTTP response headers.
+--@param options any Candidate parser limits.
+--@return table|nil Accepted limit table by reference.
+--@return table|nil Structured limit error on failure.
+--@ownership Retains the caller's options table without copying it.
 local function validate_http_header_options(options)
     if type(options) ~= "table" then
         return nil, failure("InvalidHeaderOptions", "HTTP header limits are required")
@@ -1096,6 +1348,12 @@ local function validate_http_header_options(options)
     return options
 end
 
+-- Parse one status line and its unfolded headers within cumulative line caps.
+--@param block string CRLF-separated response block without final empty line.
+--@param limits table Header line and count bounds.
+--@param total_lines integer Lines consumed by earlier blocks.
+--@return table|nil Read-only parsed response head.
+--@return integer|table Updated line count on success, structured error on failure.
 local function parse_header_block(block, limits, total_lines)
     local lines = {}
     local cursor = 1
@@ -1156,13 +1414,11 @@ local function parse_header_block(block, limits, total_lines)
     }, "HTTP response head"), total_lines
 end
 
----Parses curl's bounded response-header carrier and selects the final block.
--- Interim and proxy blocks remain noncanonical; the last response block is the
--- authority used for status, redirect, and retry decisions.
--- @param bytes string Exact header carrier bytes.
--- @param options table Total, line, and line-count limits.
--- @return table|nil response Immutable final response head.
--- @return table|nil err Structured syntax or limit failure.
+-- Parse curl's bounded header carrier and select the final response block.
+--@param bytes string Exact header-carrier bytes.
+--@param options table Total, line, and line-count limits.
+--@return table|nil Read-only final response head.
+--@return table|nil Structured syntax or limit error.
 function M.parse_http_headers(bytes, options)
     local limits, options_error = validate_http_header_options(options)
     if not limits then return nil, options_error end
@@ -1195,11 +1451,11 @@ function M.parse_http_headers(bytes, options)
     return parsed[#parsed]
 end
 
----Returns one unambiguous response header value.
--- @param response table Parsed response returned by parse_http_headers.
--- @param name string Case-insensitive field name.
--- @return string|nil value Exact trimmed field value when present once.
--- @return table|nil err Duplicate or invalid selector failure.
+-- Return one unambiguous response-header value.
+--@param response table Parsed response from parse_http_headers.
+--@param name string Case-insensitive field name.
+--@return string|nil Trimmed field value when present exactly once.
+--@return table|nil Duplicate or invalid-selector error.
 function M.single_header(response, name)
     if type(response) ~= "table" or type(response.headers) ~= "table"
         or not valid_header_name(name)
@@ -1214,8 +1470,15 @@ function M.single_header(response, name)
     return values[1]
 end
 
+-- Normalize relative dot segments in a redirect path.
+--@param path string URL path without its query.
+--@return string Canonical absolute path, slash when empty.
 local function remove_dot_segments(path)
     local input, output = path, ""
+    -- Remove the last path segment accumulated in output.
+    --@param none No parameters.
+    --@return nil No return value.
+    --@effect Replaces the captured output path.
     local function remove_last_segment()
         output = output:gsub("/?[^/]*$", "")
     end
@@ -1255,6 +1518,10 @@ local function remove_dot_segments(path)
     return output == "" and "/" or output
 end
 
+-- Parse a restricted absolute HTTP(S) URL for redirect safety decisions.
+--@param value any Candidate URL without credentials or control bytes.
+--@return table|nil Normalized scheme, origin, path, query, and canonical URL.
+--@return table|nil Structured URL error on failure.
 local function parse_network_url(value)
     if type(value) ~= "string"
         or value == ""
@@ -1339,6 +1606,11 @@ local function parse_network_url(value)
     }
 end
 
+-- Resolve a Location reference against a canonical source URL.
+--@param source string Current absolute request URL.
+--@param location any Redirect Location header value.
+--@return table|nil Parsed normalized target URL.
+--@return table|nil Source or Location validation error.
 local function resolve_redirect(source, location)
     local base, base_error = parse_network_url(source)
     if not base then return nil, base_error end
@@ -1374,10 +1646,10 @@ local function resolve_redirect(source, location)
     return parse_network_url(base.scheme .. "://" .. authority .. path .. query)
 end
 
----Decides one explicit 307/308 redirect without asking curl to follow it.
--- @param spec table Status, source, Location, redirect count/history, and cap.
--- @return table|nil decision Immutable none/follow/reject decision.
--- @return table|nil err Invalid decision input.
+-- Decide one explicit 307/308 redirect without asking curl to follow it.
+--@param spec table Status, source, Location, redirect count/history, and cap.
+--@return table|nil Read-only none, follow, or reject decision.
+--@return table|nil Invalid decision input error.
 function M.redirect_decision(spec)
     if type(spec) ~= "table" then
         return nil, failure("InvalidRedirect", "redirect decision spec must be a table")
@@ -1475,6 +1747,10 @@ local NEVER_RETRY_CATEGORIES = {
     cancel = "cancelled",
 }
 
+-- Validate and copy bounded deterministic retry-policy fields.
+--@param manifest any Candidate retry manifest.
+--@return table|nil Copy of admitted retry limits and identity.
+--@return table|nil Structured manifest error on failure.
 local function validate_retry_manifest(manifest)
     if type(manifest) ~= "table" then
         return nil, failure("InvalidRetryManifest", "retry manifest is required")
@@ -1517,12 +1793,21 @@ local function validate_retry_manifest(manifest)
     }
 end
 
+-- Multiply nonnegative delay factors without integer overflow.
+--@param value integer Current delay.
+--@param multiplier integer Exponential factor.
+--@param cap integer Saturating upper bound.
+--@return integer Product capped at cap.
 local function multiply_capped(value, multiplier, cap)
     if value == 0 or multiplier == 0 then return 0 end
     if value > cap // multiplier then return cap end
     return math.min(value * multiplier, cap)
 end
 
+-- Hash retry identity bytes into two unsigned 32-bit FNV-1a limbs.
+--@param bytes string Stable retry seed.
+--@return integer Unsigned high limb.
+--@return integer Unsigned low limb.
 local function fnv1a64_parts(bytes)
     local high, low = 0xCBF29CE4, 0x84222325
     local multiplier_low = 0x1B3
@@ -1537,18 +1822,23 @@ local function fnv1a64_parts(bytes)
     return high, low
 end
 
+-- Compute a 64-bit limb value modulo a small positive divisor.
+--@param high integer Unsigned high 32-bit limb.
+--@param low integer Unsigned low 32-bit limb.
+--@param divisor integer Positive modulus.
+--@return integer Residue from zero through divisor minus one.
 local function unsigned64_mod(high, low, divisor)
     local base_mod = 0x100000000 % divisor
     return ((high % divisor) * base_mod + low % divisor) % divisor
 end
 
----Calculates one deterministic, saturated retry delay from the frozen manifest.
--- @param logical_request_id string Stable local request identity.
--- @param retry_number integer One-based automatic retry number.
--- @param base_delay_ms integer Per-Model frozen base delay.
--- @param manifest table Versioned retry constants.
--- @return integer|nil delay_ms Deterministic bounded delay.
--- @return table|nil err Invalid input or manifest failure.
+-- Calculate one deterministic, saturated retry delay from the manifest.
+--@param logical_request_id string Stable local request identity.
+--@param retry_number integer One-based automatic retry number.
+--@param base_delay_ms integer Frozen per-Model base delay.
+--@param manifest table Versioned retry constants.
+--@return integer|nil Deterministic bounded delay.
+--@return table|nil Invalid input or manifest error.
 function M.retry_delay_ms(logical_request_id, retry_number, base_delay_ms, manifest)
     local admitted, manifest_error = validate_retry_manifest(manifest)
     if not admitted then return nil, manifest_error end
@@ -1576,6 +1866,9 @@ function M.retry_delay_ms(logical_request_id, retry_number, base_delay_ms, manif
     return math.max(0, math.min(delay + offset, admitted.maximum_delay_ms))
 end
 
+-- Select the earliest logical, turn, or runtime deadline.
+--@param spec table Validated retry-controller snapshot.
+--@return integer Earliest monotonic deadline.
 local function minimum_deadline(spec)
     return math.min(
         spec.logical_deadline_at,
@@ -1584,6 +1877,10 @@ local function minimum_deadline(spec)
     )
 end
 
+-- Validate and copy one logical request's retry, redirect, and deadline policy.
+--@param spec any Candidate controller specification.
+--@return table|nil Immutable-by-convention copied snapshot.
+--@return table|nil Manifest, URL, or field validation error.
 local function validate_retry_controller_spec(spec)
     if type(spec) ~= "table" then
         return nil, failure("InvalidRetryController", "retry controller spec is required")
@@ -1636,16 +1933,18 @@ local function validate_retry_controller_spec(spec)
     }
 end
 
+-- Expose a controller decision through a read-only proxy.
+--@param values table Internally constructed decision fields.
+--@return table Shallow read-only decision view.
+--@ownership Retains values by reference; caller cannot assign through the proxy.
 local function immutable_decision(values)
     return readonly(values, "retry decision")
 end
 
----Creates the single state source for attempts, redirects, retry waits, and cancel.
--- The controller never sleeps or starts I/O. It admits explicit attempt IDs and
--- returns immutable decisions that the runtime timer/event pump must execute.
--- @param spec table Logical identity, URL, retry snapshot, redirects, and deadlines.
--- @return table|nil controller Retry and redirect state machine.
--- @return table|nil err Structured construction failure.
+-- Create the state machine for attempts, redirects, retry waits, and cancel.
+--@param spec table Logical identity, URL, retry snapshot, redirects, and deadlines.
+--@return table|nil Read-only retry and redirect controller.
+--@return table|nil Structured construction error.
 function M.new_retry_controller(spec)
     local snapshot, spec_error = validate_retry_controller_spec(spec)
     if not snapshot then return nil, spec_error end
@@ -1664,6 +1963,11 @@ function M.new_retry_controller(spec)
     local last_now
     local controller = {}
 
+    -- Reject invalid or regressing monotonic time observations.
+    --@param now any Candidate monotonic milliseconds.
+    --@return boolean|nil True after accepting time.
+    --@return table|nil Time validation error on failure.
+    --@effect Advances last_now on success.
     local function observe_now(now)
         if not valid_integer(now, 0) or last_now and now < last_now then
             return nil, failure("InvalidMonotonicTime", "retry controller time is invalid")
@@ -1672,6 +1976,12 @@ function M.new_retry_controller(spec)
         return true
     end
 
+    -- Move the request to terminal state with a frozen decision.
+    --@param outcome string Completed, failed, unknown, or cancelled outcome.
+    --@param code string Terminal reason identity.
+    --@param detail any|nil Optional bounded reason detail.
+    --@return table Frozen terminal decision.
+    --@effect Clears active and waiting state permanently.
     local function finish(outcome, code, detail)
         local values = {
             action = "finish",
@@ -1689,6 +1999,11 @@ function M.new_retry_controller(spec)
         return terminal
     end
 
+    -- Reject a start or fallback at or after the shared deadline.
+    --@param now integer Current monotonic milliseconds.
+    --@return integer|nil Earliest deadline while time remains.
+    --@return table|nil Terminal deadline decision on exhaustion.
+    --@effect May move the controller to terminal state.
     local function check_deadline(now)
         local deadline = minimum_deadline(snapshot)
         if now >= deadline then
@@ -1697,7 +2012,13 @@ function M.new_retry_controller(spec)
         return deadline
     end
 
-    ---Admits exactly one fresh attempt after any returned wait has elapsed.
+    -- Admit exactly one fresh attempt after any returned wait has elapsed.
+    --@param self table Owning retry controller.
+    --@param attempt_id string Unique NUL-free attempt identity.
+    --@param now integer Monotonic start time.
+    --@return table|nil Read-only attempt admission.
+    --@return table|nil State, time, or terminal limit decision on failure.
+    --@effect Advances attempt count and binds the active attempt.
     function controller:start_attempt(attempt_id, now)
         local time_ok, time_error = observe_now(now)
         if not time_ok then return nil, time_error end
@@ -1744,7 +2065,13 @@ function M.new_retry_controller(spec)
         }, "attempt admission")
     end
 
-    ---Marks the first and subsequent canonical provider events for replay safety.
+    -- Mark canonical provider events so no later replay is admitted.
+    --@param self table Owning retry controller.
+    --@param attempt_id string Current attempt identity.
+    --@param now integer Monotonic event time.
+    --@return integer|nil Total canonical events observed.
+    --@return table|nil Time or active-attempt error.
+    --@effect Increments canonical event count.
     function controller:observe_canonical_event(attempt_id, now)
         local time_ok, time_error = observe_now(now)
         if not time_ok then return nil, time_error end
@@ -1755,10 +2082,13 @@ function M.new_retry_controller(spec)
         return canonical_events
     end
 
-    ---Abandons one streaming attempt before any canonical provider event and
-    -- admits the contract's sole immediate non-streaming fallback attempt.
-    -- Model semantics decide whether fallback is appropriate; this controller
-    -- owns only attempt identity, replay safety, and the shared deadline.
+    -- Admit the single immediate non-streaming fallback before any canonical event.
+    --@param self table Owning retry controller.
+    --@param attempt_id string Current streaming attempt identity.
+    --@param now integer Monotonic fallback time.
+    --@return table|nil Read-only immediate wait or terminal refusal decision.
+    --@return table|nil State, time, or deadline error.
+    --@effect Clears the active attempt and counts the fallback when admitted.
     function controller:streaming_fallback(attempt_id, now)
         local time_ok, time_error = observe_now(now)
         if not time_ok then return nil, time_error end
@@ -1788,10 +2118,14 @@ function M.new_retry_controller(spec)
         return waiting
     end
 
-    ---Finishes one active attempt and decides terminal, redirect, or bounded retry.
-    -- observation.category is completed or one frozen retry matrix category;
-    -- optional status/location drive explicit 307/308 handling, and optional
-    -- retry_after_ms is already parsed against trusted UTC by parse_retry_after.
+    -- Finish one active attempt and decide terminal, redirect, or bounded retry.
+    --@param self table Owning retry controller.
+    --@param attempt_id string Active attempt identity.
+    --@param observation table Category and optional status, Location, and Retry-After wait.
+    --@param now integer Monotonic completion time.
+    --@return table|nil Read-only terminal or wait decision.
+    --@return table|nil Observation, time, redirect, or retry-policy error.
+    --@effect Updates redirect/retry history or terminal state; restores active state on invalid input.
     function controller:finish_attempt(attempt_id, observation, now)
         local time_ok, time_error = observe_now(now)
         if not time_ok then return nil, time_error end
@@ -1932,7 +2266,12 @@ function M.new_retry_controller(spec)
         return waiting
     end
 
-    ---Cancels active I/O or a pending wait and permanently closes auto retry.
+    -- Cancel active I/O or a pending wait and permanently close auto retry.
+    --@param self table Owning retry controller.
+    --@param now integer Monotonic cancellation time.
+    --@return table|nil Frozen cancellation or previous terminal decision.
+    --@return table|nil Time validation error.
+    --@effect Moves a nonterminal controller to terminal state.
     function controller:cancel(now)
         local time_ok, time_error = observe_now(now)
         if not time_ok then return nil, time_error end
@@ -1955,10 +2294,16 @@ function M.new_retry_controller(spec)
         return terminal
     end
 
+    -- Inspect a pending retry, redirect, or fallback wait.
+    --@param self table Owning retry controller.
+    --@return table|nil Frozen wait decision or nil when none is pending.
     function controller:pending()
         return waiting
     end
 
+    -- Snapshot current URL, attempt counts, canonical events, and terminal state.
+    --@param self table Owning retry controller.
+    --@return table Read-only controller status.
     function controller:status()
         return readonly({
             state = state,
@@ -1990,13 +2335,11 @@ function M.new_retry_controller(spec)
     return readonly(controller, "retry controller")
 end
 
----Creates a curl transport factory with release-owned component and carrier paths.
--- Configured secret values are accepted only as typed references and revealed
--- while constructing the anonymous stdin config carrier for one attempt.
--- @param ports table Narrow filesystem and process services.
--- @param options table Release paths, environment, permissions, and hard caps.
--- @return table|nil service Immutable curl transport service.
--- @return table|nil err Structured construction failure.
+-- Create a curl transport factory with release-owned component and carrier paths.
+--@param ports table Narrow filesystem and process services.
+--@param options table Component paths, environment, permissions, and hard caps.
+--@return table|nil Read-only curl transport service.
+--@return table|nil Structured construction error.
 function M.new(ports, options)
     if type(ports) ~= "table"
         or type(ports.filesystem) ~= "table"
@@ -2085,11 +2428,10 @@ function M.new(ports, options)
     service.redirect_decision = M.redirect_decision
     service.new_retry_controller = M.new_retry_controller
 
-    ---Creates one POST attempt AsyncPort without revealing or persisting secrets.
-    -- Files and the native process are created only when start is called.
-    -- @param spec table Frozen request snapshot and typed secret references.
-    -- @return table|nil port Network AsyncPort in the created state.
-    -- @return table|nil err Structured validation failure.
+    -- Create one POST attempt port without revealing secrets yet.
+    --@param spec table Request snapshot and typed secret references.
+    --@return table|nil Network AsyncPort in the created state.
+    --@return table|nil Structured request validation error.
     function service.new_attempt(spec)
         local attempt, attempt_error = validate_attempt(spec, limits)
         if not attempt then return nil, attempt_error end
@@ -2099,6 +2441,11 @@ function M.new(ports, options)
         local used_secrets = {}
         local port = {}
 
+        -- Remove both temporary carrier files using their verified identities.
+        --@param none No parameters.
+        --@return boolean|nil True when both carriers are settled.
+        --@return table|nil First filesystem cleanup error.
+        --@effect Deletes verified body and header carriers if present.
         local function cleanup()
             return cleanup_carriers(
                 ports.filesystem,
@@ -2108,6 +2455,12 @@ function M.new(ports, options)
             )
         end
 
+        -- Reveal typed secrets, create carriers, and start the fixed curl component.
+        --@param self table Owning network attempt port.
+        --@param now integer Monotonic start time forwarded to process port.
+        --@return boolean True after the process starts.
+        --@error Raises a redacted validation, storage, or process error.
+        --@effect Creates private files and starts one child process.
         function port:start(now)
             if state ~= "created" then error("network port is " .. state, 2) end
             if not valid_integer(now, 0) then error("network start time is invalid", 2) end
@@ -2198,6 +2551,13 @@ function M.new(ports, options)
             return true
         end
 
+        -- Translate bounded process events into network body and terminal events.
+        --@param self table Owning network attempt port.
+        --@param now integer Monotonic poll time.
+        --@param budget table Process event budget.
+        --@return table Network event sequence.
+        --@error Raises a redacted state or process-contract error.
+        --@effect Polls the child process once.
         function port:poll(now, budget)
             if state ~= "started" then error("network port is " .. state, 2) end
             local called, process_events = pcall(process_port.poll, process_port, now, budget)
@@ -2224,6 +2584,12 @@ function M.new(ports, options)
             return events
         end
 
+        -- Request cancellation of the exact running curl process.
+        --@param self table Owning network attempt port.
+        --@param now integer Monotonic cancellation time.
+        --@return any Process-port cancellation acceptance value.
+        --@error Raises a redacted state or process error.
+        --@effect Calls process cancel once.
         function port:cancel(now)
             if state ~= "started" then error("network port is " .. state, 2) end
             local called, accepted = pcall(process_port.cancel, process_port, now)
@@ -2231,6 +2597,12 @@ function M.new(ports, options)
             return accepted
         end
 
+        -- Join curl, reverify its response headers, and settle temporary files.
+        --@param self table Owning network attempt port.
+        --@param deadline integer Monotonic join deadline.
+        --@return table Terminal transport result with redacted diagnostics.
+        --@error Raises a redacted process, carrier, or cleanup error.
+        --@effect Joins the child and deletes verified carriers.
         function port:join(deadline)
             if state ~= "started" then error("network port is " .. state, 2) end
             local called, result = pcall(process_port.join, process_port, deadline)
@@ -2272,6 +2644,11 @@ function M.new(ports, options)
             }
         end
 
+        -- Close the process port and settle any remaining carrier files.
+        --@param self table Owning network attempt port.
+        --@return boolean True after process and carrier cleanup.
+        --@error Raises a redacted state, process-close, or cleanup error.
+        --@effect Closes child port, deletes verified carriers, and clears secret list.
         function port:close()
             if state ~= "started" and state ~= "joined" then
                 error("network port is " .. state, 2)
@@ -2310,8 +2687,8 @@ function M.new(ports, options)
         sse = "bounded-exact-lf-crlf-cr",
         redirects = "runtime-controlled-307-308-same-origin-only",
         retry = "runtime-controlled-bounded-no-replay-after-canonical-event",
-        target_qualified = true,
-        qualification = "runtime-tls-ca-policy-closed;target-curl-tls-proxy-ca-passed-per-D-072",
+        target_qualified = false,
+        qualification = "runtime-tls-ca-policy-closed;three-edition-target-qualification-pending",
     }, "network capabilities")
 
     return readonly(service, "network service")

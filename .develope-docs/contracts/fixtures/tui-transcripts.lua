@@ -1,3 +1,10 @@
+--[[
+Author: WaterRun
+Date: 2026-09-23
+File: tui-transcripts.lua
+Description: Supplies exact terminal transcript and input-surface projections.
+]]
+
 return {
   contract_version = "0.1.0-readiness.1",
   width = 40,
@@ -5,7 +12,7 @@ return {
     {
       id = "startup-plain", mode = "plain-tty",
       lines = {
-        "yaca: Yet Another Coding Agent.",
+        "yaca: General-purpose terminal agent.",
         "version: 0.1.0",
         "work directory: C:\\Work\\demo",
         "config: valid",

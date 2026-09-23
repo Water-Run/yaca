@@ -1,19 +1,29 @@
 --[[
-File: context_publication_test.lua
-Date: 2026-08-30
 Author: WaterRun
+Date: 2026-09-23
+File: context_publication_test.lua
 Description: Verifies first-message durable Context publication and fail-closed retries.
 ]]
 
 local A = assert(loadfile(YACA_TEST_ROOT .. "/test/support/assert.lua", "t", _ENV))()
 
+--Loads a source module into an isolated per-case environment.
+--@param name string Module, Model, or resource name selected by the case.
+--@param cache table Per-case module cache preserving isolated imports.
+--@return any module Module export loaded in the isolated source environment.
 local function load_module(name, cache)
     cache = cache or {}
     if cache[name] then return cache[name] end
-    local environment = { require = function(dependency)
+    local environment = {
+        --Resolves an imported Lua module through the isolated test loader.
+        --@param dependency string Source module requested from the isolated loader.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
+        require = function(dependency)
         return load_module(dependency, cache)
     end }
     environment._G = environment
+    --@metatable environment Test-owned lookup and mutation contract for the current case.
+    --@field __index any Fallback table or function used for missing fixture keys.
     setmetatable(environment, { __index = _ENV })
     local chunk, load_error = loadfile(
         YACA_TEST_ROOT .. "/src/" .. name .. ".lua",
@@ -26,6 +36,9 @@ local function load_module(name, cache)
     return value
 end
 
+--Loads a repository Lua module as a test support value.
+--@param relative_path string Repository-relative Lua source path to load.
+--@return any module Test support module export loaded from the repository.
 local function load_table(relative_path)
     local chunk, load_error = loadfile(YACA_TEST_ROOT .. "/" .. relative_path, "t", _ENV)
     A.truthy(chunk, load_error)
@@ -44,25 +57,41 @@ local xml = load_module("xml", cache)
 local fake_lxp = load_table("test/support/fake_lxp.lua")
 local sha256 = load_table("test/support/sha256_reference.lua")
 
+--Constructs an incremental SHA-256 port backed by the reference digest.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return any port Incremental SHA-256 fixture port.
 local function hash_port()
     local port = {}
 
+    --Starts a fake incremental SHA-256 handle.
+    --@param none No arguments; this closure uses its captured fixture state.
+    --@return table handle New incremental SHA-256 fixture handle.
     function port.sha256_start()
         return { parts = {}, closed = false }
     end
 
+    --Adds bytes to the fake incremental SHA-256 handle.
+    --@param handle table|integer Fake resource handle whose state is inspected.
+    --@param bytes string Byte chunk supplied to the fake I/O port.
+    --@return boolean accepted Whether the fixture accepted the byte chunk.
     function port.sha256_update(handle, bytes)
         A.falsy(handle.closed)
         handle.parts[#handle.parts + 1] = bytes
         return true
     end
 
+    --Finalizes the fake SHA-256 handle using the reference digest.
+    --@param handle table|integer Fake resource handle whose state is inspected.
+    --@return any digest Hexadecimal digest of the accumulated fixture bytes.
     function port.sha256_finish(handle)
         A.falsy(handle.closed)
         handle.closed = true
         return sha256.digest(table.concat(handle.parts))
     end
 
+    --Closes the fake SHA-256 handle and records its state.
+    --@param handle table|integer Fake resource handle whose state is inspected.
+    --@return boolean closed Whether the fixture handle was closed.
     function port.sha256_close(handle)
         handle.closed = true
         return true
@@ -71,6 +100,9 @@ local function hash_port()
     return port
 end
 
+--Builds the generation values used by this suite.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return table observed Structured fixture record selected by the exercised branch.
 local function generation()
     return {
         id = "config-generation-7",
@@ -109,6 +141,9 @@ local function generation()
         },
         model_order = { "Primary" },
         warnings = {},
+        --Simulates the scan registered secrets boundary for this suite.
+        --@param bytes string Byte chunk supplied to the fake I/O port.
+        --@return table record Fixture record emitted by the scenario callback.
         scan_registered_secrets = function(bytes)
             if bytes:find("registered-secret", 1, true) then
                 return { { id = "Model.Primary.Key" } }
@@ -118,6 +153,14 @@ local function generation()
     }
 end
 
+--Constructs the suite's isolated runtime fixture and observation ports.
+--@param settings table|nil Fixture settings and scenario overrides.
+--@return any fixture Constructed fixture service used by this suite.
+--@return any secondary2 Additional status or structured error from the fixture operation.
+--@return any secondary3 Additional status or structured error from the fixture operation.
+--@return any secondary4 Additional status or structured error from the fixture operation.
+--@return any secondary5 Additional status or structured error from the fixture operation.
+--@return any secondary6 Additional status or structured error from the fixture operation.
 local function fixture(settings)
     settings = settings or {}
     local native = hash_port()
@@ -126,6 +169,13 @@ local function fixture(settings)
         minimum_scannable_secret_bytes = 8,
     }))
     local codec = assert(xml.new({
+        --Constructs the fake lxp service used by this suite.
+        --@param none No arguments; this closure uses its captured fixture state.
+        --@return boolean accepted Whether the fake callback accepts this scenario.
+        --@return string secondary2 Fixture text "publication reader is not configured".
+        --@return integer secondary3 Fixture numeric value 1.
+        --@return integer secondary4 Fixture numeric value 1.
+        --@return integer secondary5 Fixture numeric value 1.
         lxp = fake_lxp(function()
             return false, "publication reader is not configured", 1, 1, 1
         end),
@@ -178,6 +228,9 @@ local function fixture(settings)
     }
     local filesystem = {}
 
+    --Supplies direct snapshot behavior required by this suite.
+    --@param target table|string Target selected for the exercised operation.
+    --@return table observed Structured fixture record selected by the exercised branch.
     local function direct_snapshot(target)
         local canonical = settings.alias_path == target and target .. "-redirected" or target
         local exists = directories[target] == true
@@ -195,10 +248,18 @@ local function fixture(settings)
         }
     end
 
+    --Supplies the direct inspect observation used by this suite.
+    --@param target table|string Target selected for the exercised operation.
+    --@return boolean accepted Whether direct inspect succeeds in the fixture.
+    --@return any secondary2 Additional status or structured error from the fixture operation.
     function filesystem.direct_inspect(target)
         return true, direct_snapshot(target)
     end
 
+    --Supplies the direct reverify observation used by this suite.
+    --@param snapshot table Captured immutable state under inspection.
+    --@return boolean accepted Whether direct reverify succeeds in the fixture.
+    --@return table|any secondary2 Additional status or structured error from the fixture operation.
     function filesystem.direct_reverify(snapshot)
         if settings.changed_root == snapshot.requested_path then
             return false, { code = "TargetChanged" }
@@ -206,11 +267,20 @@ local function fixture(settings)
         return true, direct_snapshot(snapshot.requested_path)
     end
 
+    --Supplies the stat identity observation used by this suite.
+    --@param target table|string Target selected for the exercised operation.
+    --@return boolean accepted Whether stat identity succeeds in the fixture.
+    --@return table secondary2 Structured fixture record selected by the exercised branch.
     function filesystem.stat_identity(target)
         if directories[target] then return true, { kind = "directory" } end
         return false, { code = "NotFound", message = "absent" }
     end
 
+    --Constructs make directory for this test scenario.
+    --@param target table|string Target selected for the exercised operation.
+    --@param permissions table Permission profile exercised by the case.
+    --@return boolean accepted Whether make directory succeeds in the fixture.
+    --@return table|nil secondary2 Typed error record with code DestinationExists.
     function filesystem.make_directory(target, permissions)
         A.equal(permissions, 448)
         if directories[target] then
@@ -221,12 +291,20 @@ local function fixture(settings)
         return true
     end
 
+    --Supplies flush directory behavior required by this suite.
+    --@param target table|string Target selected for the exercised operation.
+    --@return boolean accepted Whether flush directory succeeds in the fixture.
     function filesystem.flush_directory(target)
         observations.flushes[#observations.flushes + 1] = target
         return true
     end
 
     local store = {}
+    --Supplies plan repair behavior required by this suite.
+    --@param target table|string Target selected for the exercised operation.
+    --@param credential table Expected file identity used for reverification.
+    --@return table|nil observed Structured fixture record selected by the exercised branch.
+    --@return any secondary2 Additional status or structured error from the fixture operation.
     function store.plan_repair(target, credential)
         observations.repair_plans = (observations.repair_plans or 0) + 1
         A.equal(target, credential.physical_path)
@@ -236,6 +314,13 @@ local function fixture(settings)
             source_path = target .. ".yaca-prev", previous_path = target .. ".yaca-prev",
             official_exists = credential.observed_stat ~= nil, generation = document.generation }, document
     end
+    --Supplies apply repair behavior required by this suite.
+    --@param plan table Proposed publication or execution plan.
+    --@param document table Parsed Context or configuration document under test.
+    --@param temporary string Temporary publication path.
+    --@param metadata table Bounded file or Context metadata.
+    --@return table|nil observed Structured fixture record selected by the exercised branch.
+    --@return any|nil secondary2 Configured apply repair error override.
     function store.apply_repair(plan, document, temporary, metadata)
         observations.applied_repair = plan
         if settings.apply_repair_error then return nil, settings.apply_repair_error end
@@ -244,6 +329,11 @@ local function fixture(settings)
         observations.published = { document = document, temporary_path = temporary, metadata = metadata }
         return { outcome = "restored-previous", generation = document.generation }
     end
+    --Returns the inspect import observation prepared for this suite.
+    --@param target table|string Target selected for the exercised operation.
+    --@param credential table Expected file identity used for reverification.
+    --@return any|nil observed inspect import value observed by the scenario assertion.
+    --@return table|any secondary2 Additional status or structured error from the fixture operation.
     function store.inspect_import(target, credential)
         observations.import_reads = (observations.import_reads or 0) + 1
         A.equal(target, credential.physical_path)
@@ -251,6 +341,11 @@ local function fixture(settings)
         return settings.import_document or settings.open_document,
             { outcome = "validated-readonly", history_approvals = "audit-only", auto_replay = false }
     end
+    --Constructs create writer for this test scenario.
+    --@param target table|string Target selected for the exercised operation.
+    --@param metadata table Bounded file or Context metadata.
+    --@return any|nil observed create writer value observed by the scenario assertion.
+    --@return table|nil secondary2 Typed error record with code LockConflict.
     function store.create_writer(target, metadata)
         observations.create_attempts = (observations.create_attempts or 0) + 1
         if observations.create_attempts <= (settings.create_collisions or 0) then
@@ -261,6 +356,12 @@ local function fixture(settings)
         return writer
     end
 
+    --Supplies open writer behavior required by this suite.
+    --@param target table|string Target selected for the exercised operation.
+    --@param metadata table Bounded file or Context metadata.
+    --@param expected_credential any The expected credential supplied to the fake service for this scenario.
+    --@return any|nil observed open writer value observed by the scenario assertion.
+    --@return table|any secondary2 Additional status or structured error from the fixture operation.
     function store.open_writer(target, metadata, expected_credential)
         observations.opened = {
             target = target,
@@ -279,8 +380,17 @@ local function fixture(settings)
         return writer, document
     end
 
+    --Records the publish effect observed by this suite.
+    --@param writer table|function Writer receiving generated test output.
+    --@param document table Parsed Context or configuration document under test.
+    --@param temporary_path string Temporary publication path used by the fixture.
+    --@return table|nil observed Outcome record with status published; nil on alternate branches.
+    --@return table|any|nil secondary2 Additional status or structured error from the fixture operation.
     function store.publish(writer, document, temporary_path)
         if settings.publish_exception then error("synthetic storage failure") end
+        if document.recovery.model_view_status ~= "current" then
+            return nil, { code = "StaleModelView" }
+        end
         observations.published = {
             writer = writer,
             document = document,
@@ -296,6 +406,14 @@ local function fixture(settings)
         }
     end
 
+    --Supplies move behavior required by this suite.
+    --@param writer table|function Writer receiving generated test output.
+    --@param document table Parsed Context or configuration document under test.
+    --@param destination string|table Publication destination selected by the case.
+    --@param temporary_path string Temporary publication path used by the fixture.
+    --@param action table|string Action supplied to the exercised service.
+    --@return any|nil observed move value observed by the scenario assertion.
+    --@return any|nil secondary2 Configured move error override.
     function store.move(writer, document, destination, temporary_path, action)
         observations.moved = { destination = destination, action = action, temporary_path = temporary_path }
         if settings.move_error then return nil, settings.move_error end
@@ -304,17 +422,30 @@ local function fixture(settings)
         return store.publish(writer, document, temporary_path)
     end
 
+    --Supplies open delete writer behavior required by this suite.
+    --@param target table|string Target selected for the exercised operation.
+    --@param metadata table Bounded file or Context metadata.
+    --@param credential table Expected file identity used for reverification.
+    --@return table|nil observed Structured fixture record with target, metadata; nil on alternate branches.
+    --@return any|nil secondary2 Configured open error override.
     function store.open_delete_writer(target, metadata, credential)
         observations.delete_opened = { target = target, credential = credential }
         if settings.open_error then return nil, settings.open_error end
         return { target = target, metadata = metadata }
     end
 
+    --Supplies delete behavior required by this suite.
+    --@param writer table|function Writer receiving generated test output.
+    --@return table observed Structured fixture record with outcome, targets.
     function store.delete(writer)
         observations.deleted = writer.target
         return { outcome = settings.partial_delete and "partial" or "deleted", targets = {} }
     end
 
+    --Checks verify writer against this test expectation.
+    --@param writer table|function Writer receiving generated test output.
+    --@return table|nil observed Structured fixture record with path, generation; nil on alternate branches.
+    --@return any|nil secondary2 Configured inspect error override.
     function store.verify_writer(writer)
         if settings.inspect_error then return nil, settings.inspect_error end
         local document = writer.document or settings.open_document
@@ -322,6 +453,10 @@ local function fixture(settings)
         return { path = writer.target, generation = document.generation }
     end
 
+    --Supplies close writer behavior required by this suite.
+    --@param writer table|function Writer receiving generated test output.
+    --@return boolean|nil observed True acknowledgment from the fake port; nil on alternate branches.
+    --@return any|nil secondary2 Configured close error override.
     function store.close_writer(writer)
         observations.closes = observations.closes + 1
         observations.last_closed = writer
@@ -333,6 +468,9 @@ local function fixture(settings)
         string.char(0x0A, 0x1B) .. "12345678",
     }
     local system = {}
+    --Supplies deterministic secure random bytes for this suite.
+    --@param length integer Byte or item length requested by the fixture.
+    --@return any observed Selected fixture value returned by the fixture.
     function system.secure_random(length)
         observations.random_calls = observations.random_calls + 1
         local value = random_values[observations.random_calls] or string.rep("z", length)
@@ -340,12 +478,23 @@ local function fixture(settings)
         A.equal(#value, length)
         return value
     end
+    --Supplies current process id behavior required by this suite.
+    --@param none No arguments; this closure uses its captured fixture state.
+    --@return integer observed Fixture numeric value 1234.
     function system.current_process_id() return 1234 end
+    --Supplies deterministic clock behavior for this suite.
+    --@param none No arguments; this closure uses its captured fixture state.
+    --@return number observed utc now value observed by the scenario assertion.
     function system.utc_now() return settings.now or "2026-08-30T12:34:56Z" end
 
     local publication = assert(session.new_context_publication({
         filesystem = filesystem,
-        workspace = { inspect = function(target)
+        workspace = {
+            --Returns the inspect observation prepared for this suite.
+            --@param target table|string Target selected for the exercised operation.
+            --@return table|nil value Callback value consumed by the enclosing scenario assertion.
+            --@return table|nil secondary2 Typed error record with code InvalidWorkspace.
+            inspect = function(target)
             if not directories[target] or settings.unenterable == target then
                 return nil, { code = "InvalidWorkspace" }
             end
@@ -373,6 +522,12 @@ local function fixture(settings)
     return publication, observations, path_service, registry, safety_service, schema
 end
 
+--Supplies management spec behavior required by this suite.
+--@param receipt table Publication receipt inspected by the assertion.
+--@param document table Parsed Context or configuration document under test.
+--@param action table|string Action supplied to the exercised service.
+--@param extra table|nil Additional fixture fields for this scenario.
+--@return any observed Selected fixture value returned by the fixture.
 local function management_spec(receipt, document, action, extra)
     local value = {
         action = action, context_path = receipt.context_path, logical_path = receipt.logical_path,
@@ -387,6 +542,10 @@ local function management_spec(receipt, document, action, extra)
     return value
 end
 
+--Supplies management seed behavior required by this suite.
+--@param pending any The pending supplied to the fake service for this scenario.
+--@return any observed Publication receipt returned by the fixture.
+--@return any secondary2 Additional status or structured error from the fixture operation.
 local function management_seed(pending)
     local publication, observed = fixture()
     local draft = assert(session.new_draft(generation(), {
@@ -425,6 +584,9 @@ return {
     cases = {
         {
             name = "active inspection derives the current hash and stale failure stays closed",
+            --Verifies active inspection derives the current hash and stale failure stays closed.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify active inspection derives the current hash and stale failure stays closed.
             run = function()
                 local settings = {}
                 local publication, observed, path_service = fixture(settings)
@@ -454,7 +616,58 @@ return {
             end,
         },
         {
+            name = "first Ask publishes an empty Context owner without inventing main facts",
+            --Verifies first Ask publishes an empty Context owner without inventing main facts.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify first Ask publishes an empty Context owner without inventing main facts.
+            run = function()
+                local publication, observed = fixture()
+                local draft = assert(session.new_draft(generation(), {
+                    path = "/work/项目", enterable = true, identity = { object = "workspace-1" },
+                }, { maximum_draft_bytes = 16384 }, publication))
+                local receipt = assert(draft.begin_ask("一个纯问题", "terminal"))
+                A.equal(receipt.event_count, 0)
+                A.equal(receipt.first_sequence, 0)
+                A.equal(receipt.last_sequence, 0)
+                A.equal(receipt.turn_id, false)
+                A.equal(receipt.runtime_initial_serials.turn, 0)
+                A.equal(receipt.runtime_initial_serials.ask, 0)
+                A.equal(#observed.published.document.facts, 0)
+                A.truthy(observed.published.document.recovery.auto_continue)
+                A.equal(draft.agent_handoff().input.text, "一个纯问题")
+                local snapshot = assert(publication.capture_turn({
+                    generation = generation(), kind = "ask", text = "一个纯问题",
+                    source = "terminal", expected_context_generation = receipt.generation,
+                }))
+                assert(publication.commit({
+                    barrier_id = "ask-first", first_sequence = 1, last_sequence = 3,
+                    event_count = 3, expected_context_generation = receipt.generation,
+                    events = {
+                        { seq = 1, type = "turn_started", turn_id = "ask-1", fields = {
+                            kind = "ask", configGeneration = snapshot.config_generation,
+                            modelSnapshot = snapshot.model_snapshot,
+                            permissionSnapshot = snapshot.permission_snapshot,
+                            promptSnapshot = snapshot.prompt_snapshot,
+                            toolRegistrySnapshot = snapshot.tool_registry_snapshot,
+                        } },
+                        { seq = 2, type = "user_message", turn_id = "ask-1", fields = {
+                            messageId = "ask-1:message:1", text = "一个纯问题", source = "terminal",
+                        } },
+                        { seq = 3, type = "model_request", turn_id = "ask-1", fields = {
+                            requestId = "ask-1:request:1", purpose = "ask",
+                            viewManifestRef = snapshot.view_manifest_ref,
+                        } },
+                    },
+                }))
+                A.equal(observed.published.document.recovery.model_view_status, "current")
+                assert(draft.close())
+            end,
+        },
+        {
             name = "first main message publishes generation one before becoming durable",
+            --Verifies first main message publishes generation one before becoming durable.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify first main message publishes generation one before becoming durable.
             run = function()
                 local publication, observed, path_service, registry = fixture()
                 local draft = assert(session.new_draft(generation(), {
@@ -620,6 +833,9 @@ return {
                 )
                 A.equal(turn_context.overrides.ContextPrompt, "current session context")
                 A.truthy(turn_context.overrides.AutoRenameDisabled)
+                --Executes the action expected to raise in the 'first main message publishes generation one before becoming durable' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify first main message publishes generation one before becoming durable.
                 A.raises(function()
                     turn_context.overrides.CurrentModel = "forged"
                 end, "cannot be modified")
@@ -647,18 +863,18 @@ return {
                 A.equal(turn_snapshot.queue_limit, 9)
                 A.falsy(turn_snapshot.config_generation == next_generation.id)
                 A.falsy(turn_snapshot.prompt_snapshot == receipt.prompt_snapshot)
-                local side_snapshot = assert(publication.capture_turn({
+                local ask_snapshot = assert(publication.capture_turn({
                     generation = next_generation,
-                    kind = "side",
+                    kind = "ask",
                     text = "继续实现第二个节点",
                     source = "terminal",
                     expected_context_generation = 3,
                 }))
-                A.falsy(side_snapshot.prompt_snapshot == turn_snapshot.prompt_snapshot)
-                A.equal(side_snapshot.model_snapshot, turn_snapshot.model_snapshot)
-                A.equal(side_snapshot.permission_snapshot, turn_snapshot.permission_snapshot)
-                A.equal(side_snapshot.tool_registry_snapshot, turn_snapshot.tool_registry_snapshot)
-                A.equal(side_snapshot.view_manifest_ref, turn_snapshot.view_manifest_ref)
+                A.falsy(ask_snapshot.prompt_snapshot == turn_snapshot.prompt_snapshot)
+                A.equal(ask_snapshot.model_snapshot, turn_snapshot.model_snapshot)
+                A.equal(ask_snapshot.permission_snapshot, turn_snapshot.permission_snapshot)
+                A.equal(ask_snapshot.tool_registry_snapshot, turn_snapshot.tool_registry_snapshot)
+                A.equal(ask_snapshot.view_manifest_ref, turn_snapshot.view_manifest_ref)
                 local stale, stale_error = publication.capture_turn({
                     generation = next_generation,
                     text = "stale",
@@ -668,9 +884,9 @@ return {
                 A.falsy(stale)
                 A.equal(stale_error.code, "InvalidTurnSnapshot")
 
-                local side_answer = "SIDE-ONLY-ANSWER"
-                local side_committed, side_commit_error = publication.commit({
-                    barrier_id = "side-1:barrier:1",
+                local ask_answer = "ASK-ONLY-ANSWER"
+                local ask_committed, ask_commit_error = publication.commit({
+                    barrier_id = "ask-1:barrier:1",
                     first_sequence = 5,
                     last_sequence = 9,
                     event_count = 5,
@@ -679,58 +895,58 @@ return {
                         {
                             seq = 5,
                             type = "turn_started",
-                            turn_id = "side-1",
+                            turn_id = "ask-1",
                             fields = {
-                                kind = "side",
-                                configGeneration = side_snapshot.config_generation,
-                                modelSnapshot = side_snapshot.model_snapshot,
-                                permissionSnapshot = side_snapshot.permission_snapshot,
-                                promptSnapshot = side_snapshot.prompt_snapshot,
-                                toolRegistrySnapshot = side_snapshot.tool_registry_snapshot,
+                                kind = "ask",
+                                configGeneration = ask_snapshot.config_generation,
+                                modelSnapshot = ask_snapshot.model_snapshot,
+                                permissionSnapshot = ask_snapshot.permission_snapshot,
+                                promptSnapshot = ask_snapshot.prompt_snapshot,
+                                toolRegistrySnapshot = ask_snapshot.tool_registry_snapshot,
                             },
                         },
                         {
                             seq = 6,
                             type = "user_message",
-                            turn_id = "side-1",
+                            turn_id = "ask-1",
                             fields = {
-                                messageId = "side-1:message:1",
-                                text = "private side question",
+                                messageId = "ask-1:message:1",
+                                text = "private ask question",
                                 source = "terminal",
                             },
                         },
                         {
                             seq = 7,
                             type = "model_request",
-                            turn_id = "side-1",
+                            turn_id = "ask-1",
                             fields = {
-                                requestId = "side-1:request:1",
-                                purpose = "side",
+                                requestId = "ask-1:request:1",
+                                purpose = "ask",
                                 viewManifestRef = next_view.digest,
                             },
                         },
                         {
                             seq = 8,
                             type = "model_message",
-                            turn_id = "side-1",
+                            turn_id = "ask-1",
                             fields = {
-                                messageId = "side-1:message:2",
-                                requestId = "side-1:request:1",
+                                messageId = "ask-1:message:2",
+                                requestId = "ask-1:request:1",
                                 role = "assistant",
                                 status = "complete",
-                                body = side_answer,
+                                body = ask_answer,
                             },
                         },
                         {
                             seq = 9,
                             type = "turn_ended",
-                            turn_id = "side-1",
+                            turn_id = "ask-1",
                             fields = { outcome = "completed" },
                         },
                     },
                 })
-                A.truthy(side_committed, A.render(side_commit_error))
-                local hidden_side_view = assert(publication.prepare_view({
+                A.truthy(ask_committed, A.render(ask_commit_error))
+                local hidden_ask_view = assert(publication.prepare_view({
                     expected_context_generation = 4,
                     expected_last_sequence = 9,
                     current_manifest_ref = next_view.digest,
@@ -746,19 +962,19 @@ return {
                         type = "model_view_published",
                         turn_id = "turn-1",
                         fields = {
-                            manifestDigest = hidden_side_view.digest,
-                            firstEventSeq = tostring(hidden_side_view.first_sequence),
-                            lastEventSeq = tostring(hidden_side_view.last_sequence),
-                            replacesManifestDigest = hidden_side_view.replaces_manifest_ref,
+                            manifestDigest = hidden_ask_view.digest,
+                            firstEventSeq = tostring(hidden_ask_view.first_sequence),
+                            lastEventSeq = tostring(hidden_ask_view.last_sequence),
+                            replacesManifestDigest = hidden_ask_view.replaces_manifest_ref,
                         },
                     } },
                 }))
                 local hidden_body = assert(
-                    publication.resolve_view(hidden_side_view.digest)
+                    publication.resolve_view(hidden_ask_view.digest)
                 ).body
-                A.falsy(hidden_body:find("private side question", 1, true))
-                A.falsy(hidden_body:find(side_answer, 1, true))
-                A.falsy(hidden_body:find('turnId="side-1"', 1, true))
+                A.falsy(hidden_body:find("private ask question", 1, true))
+                A.falsy(hidden_body:find(ask_answer, 1, true))
+                A.falsy(hidden_body:find('turnId="ask-1"', 1, true))
 
                 A.truthy(publication.commit({
                     barrier_id = "queue:barrier:1",
@@ -773,15 +989,15 @@ return {
                             queueItemId = "queue-1",
                             displayId = "#1",
                             action = "enqueue",
-                            text = side_answer,
-                            sideId = "side-1",
+                            text = ask_answer,
+                            askId = "ask-1",
                         },
                     } },
                 }))
-                local authorized_side_view = assert(publication.prepare_view({
+                local authorized_ask_view = assert(publication.prepare_view({
                     expected_context_generation = 6,
                     expected_last_sequence = 11,
-                    current_manifest_ref = hidden_side_view.digest,
+                    current_manifest_ref = hidden_ask_view.digest,
                 }))
                 A.truthy(publication.commit({
                     barrier_id = "turn-1:barrier:4",
@@ -794,26 +1010,60 @@ return {
                         type = "model_view_published",
                         turn_id = "turn-1",
                         fields = {
-                            manifestDigest = authorized_side_view.digest,
-                            firstEventSeq = tostring(authorized_side_view.first_sequence),
-                            lastEventSeq = tostring(authorized_side_view.last_sequence),
-                            replacesManifestDigest = authorized_side_view.replaces_manifest_ref,
+                            manifestDigest = authorized_ask_view.digest,
+                            firstEventSeq = tostring(authorized_ask_view.first_sequence),
+                            lastEventSeq = tostring(authorized_ask_view.last_sequence),
+                            replacesManifestDigest = authorized_ask_view.replaces_manifest_ref,
                         },
                     } },
                 }))
                 local authorized_body = assert(
-                    publication.resolve_view(authorized_side_view.digest)
+                    publication.resolve_view(authorized_ask_view.digest)
                 ).body
-                A.contains(authorized_body, side_answer)
+                A.contains(authorized_body, ask_answer)
                 A.contains(authorized_body, "queue_item")
-                A.contains(authorized_body, "side-1")
+                A.contains(authorized_body, "ask-1")
                 A.truthy(draft.close())
                 A.equal(observed.closes, 1)
                 A.equal(draft.status().lifecycle, "closed")
             end,
         },
         {
+            name = "capacity refusal leaves Session unchanged and its writer usable",
+            --Verifies capacity refusal leaves Session unchanged and its writer usable.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify capacity refusal leaves Session unchanged and its writer usable.
+            run = function()
+                local settings = {}
+                local publication = fixture(settings)
+                local draft = assert(session.new_draft(generation(), {
+                    path = "/work/project", enterable = true,
+                    identity = { object = "workspace-1" },
+                }, { maximum_draft_bytes = 16384 }, publication))
+                local first = assert(draft.begin_main("start", "terminal"))
+                local next_generation = generation()
+                next_generation.id = "config-generation-8"
+                next_generation.effective_double_check = false
+                local specification = {
+                    expected_context_generation = first.generation,
+                    expected_last_sequence = first.last_sequence,
+                    expected_manifest_digest = first.view_manifest_snapshot,
+                    generation = next_generation, name = "DoubleCheckOverride", value = false,
+                }
+                settings.publish_error = { code = "ContextCapacity", publication_started = false }
+                local changed, err = publication.update_session(specification)
+                A.falsy(changed); A.equal(err.code, "ContextCapacity")
+                A.equal(publication.status().generation, first.generation)
+                assert(publication.inspect_active())
+                settings.publish_error = nil
+                assert(publication.update_session(specification))
+            end,
+        },
+        {
             name = "session override publishes Session audit view and exact Runtime receipt atomically",
+            --Verifies session override publishes Session audit view and exact Runtime receipt atomically.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify session override publishes Session audit view and exact Runtime receipt atomically.
             run = function()
                 local publication, observed = fixture()
                 local draft = assert(session.new_draft(generation(), {
@@ -962,6 +1212,9 @@ return {
         },
         {
             name = "repair keeps previous-only targets read-only until a reconstructable audited publication",
+            --Verifies repair keeps previous-only targets read-only until a reconstructable audited publication.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify repair keeps previous-only targets read-only until a reconstructable audited publication.
             run = function()
                 local first, document = management_seed()
                 local manager, observed = fixture({ open_document = document })
@@ -995,6 +1248,9 @@ return {
         },
         {
             name = "repair no-op leaves the generation intact and uncertain repair stops further mutation",
+            --Verifies repair no-op leaves the generation intact and uncertain repair stops further mutation.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify repair no-op leaves the generation intact and uncertain repair stops further mutation.
             run = function()
                 local first, document = management_seed()
                 for _, noop in ipairs({ true, false }) do
@@ -1023,6 +1279,9 @@ return {
         },
         {
             name = "import preserves historical approvals and unresolved work without granting or replaying it",
+            --Verifies import preserves historical approvals and unresolved work without granting or replaying it.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify import preserves historical approvals and unresolved work without granting or replaying it.
             run = function()
                 local first, document = management_seed(true)
                 local importer, observed = fixture({ open_document = document, workspace_roots = { "/work" } })
@@ -1050,6 +1309,9 @@ return {
         },
         {
             name = "in-place import applies both local mappings in one durable generation and rebuilds history",
+            --Verifies in-place import applies both local mappings in one durable generation and rebuilds history.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify in-place import applies both local mappings in one durable generation and rebuilds history.
             run = function()
                 local first, document = management_seed()
                 local settings = { open_document = document, workspace_roots = { "/work" } }
@@ -1107,6 +1369,9 @@ return {
         },
         {
             name = "import mapping refuses missing workspace invalid profiles changed config and changed source",
+            --Verifies import mapping refuses missing workspace invalid profiles changed config and changed source.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify import mapping refuses missing workspace invalid profiles changed config and changed source.
             run = function()
                 local first, document = management_seed()
                 for _, stage in ipairs({ "workspace", "model", "permission", "overrides", "busy-read",
@@ -1153,6 +1418,9 @@ return {
         },
         {
             name = "rebind plans are read-only and publish a reconstructable move with both root identities",
+            --Verifies rebind plans are read-only and publish a reconstructable move with both root identities.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify rebind plans are read-only and publish a reconstructable move with both root identities.
             run = function()
                 local first, document = management_seed()
                 local manager, observed = fixture({ open_document = document,
@@ -1196,6 +1464,9 @@ return {
         },
         {
             name = "rebind refuses stale roots before and during publication and closes failed writers",
+            --Verifies rebind refuses stale roots before and during publication and closes failed writers.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify rebind refuses stale roots before and during publication and closes failed writers.
             run = function()
                 local first, document = management_seed()
                 for _, stage in ipairs({ "before", "open", "move", "collision", "busy", "credential", "unknown" }) do
@@ -1235,6 +1506,9 @@ return {
         },
         {
             name = "rebind requires an existing enterable plain directory and the latest private proposal",
+            --Verifies rebind requires an existing enterable plain directory and the latest private proposal.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify rebind requires an existing enterable plain directory and the latest private proposal.
             run = function()
                 local first, document = management_seed()
                 for _, invalid in ipairs({ "missing", "unenterable", "alias", "same" }) do
@@ -1267,6 +1541,9 @@ return {
         },
         {
             name = "offline rename and naming switch publish reconstructable views and release every writer",
+            --Verifies offline rename and naming switch publish reconstructable views and release every writer.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify offline rename and naming switch publish reconstructable views and release every writer.
             run = function()
                 local first, document = management_seed()
                 local manager, observed = fixture({ open_document = document })
@@ -1305,6 +1582,9 @@ return {
         },
         {
             name = "offline management rejects stale bindings and known failures without changing the document",
+            --Verifies offline management rejects stale bindings and known failures without changing the document.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify offline management rejects stale bindings and known failures without changing the document.
             run = function()
                 local first, document = management_seed()
                 local manager, observed = fixture({ open_document = document })
@@ -1334,6 +1614,9 @@ return {
         },
         {
             name = "management exceptions publication uncertainty and failed release stop subsequent mutation",
+            --Verifies management exceptions publication uncertainty and failed release stop subsequent mutation.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify management exceptions publication uncertainty and failed release stop subsequent mutation.
             run = function()
                 local first, document = management_seed()
                 for _, setting in ipairs({
@@ -1358,6 +1641,9 @@ return {
         },
         {
             name = "Windows management rejects device alternate-stream and ambiguous names before opening a writer",
+            --Verifies windows management rejects device alternate-stream and ambiguous names before opening a writer.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify windows management rejects device alternate-stream and ambiguous names before opening a writer.
             run = function()
                 local _, document = management_seed()
                 local manager, observed = fixture({ platform_kind = "windows",
@@ -1379,6 +1665,9 @@ return {
         },
         {
             name = "corrupt deletion uses a body-free writer and partial results close management",
+            --Verifies corrupt deletion uses a body-free writer and partial results close management.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify corrupt deletion uses a body-free writer and partial results close management.
             run = function()
                 local first, document = management_seed()
                 for _, partial in ipairs({ false, true }) do
@@ -1401,6 +1690,9 @@ return {
         },
         {
             name = "compaction journal publishes summary and ModelView in one generation",
+            --Verifies compaction journal publishes summary and ModelView in one generation.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify compaction journal publishes summary and ModelView in one generation.
             run = function()
                 local publication, observed, _, _, safety_service = fixture()
                 local first = assert(publication.publish_first({
@@ -1724,6 +2016,9 @@ return {
         },
         {
             name = "compaction cancellation records terminal truth without replacing the view",
+            --Verifies compaction cancellation records terminal truth without replacing the view.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify compaction cancellation records terminal truth without replacing the view.
             run = function()
                 local publication, observed, _, _, safety_service = fixture()
                 local first = assert(publication.publish_first({
@@ -1827,6 +2122,9 @@ return {
         },
         {
             name = "existing Context open terminalizes every crash-left compaction bracket",
+            --Verifies existing Context open terminalizes every crash-left compaction bracket.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify existing Context open terminalizes every crash-left compaction bracket.
             run = function()
                 for _, crash_state in ipairs({
                     "request-only", "automatic-request-only", "response-only",
@@ -2090,6 +2388,9 @@ return {
         },
         {
             name = "operation journal publishes intent and paired result into one waterline",
+            --Verifies operation journal publishes intent and paired result into one waterline.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify operation journal publishes intent and paired result into one waterline.
             run = function()
                 local publication, observed, _, _, safety_service = fixture()
                 local first = assert(publication.publish_first({
@@ -2216,6 +2517,9 @@ return {
         },
         {
             name = "name collision retries with fresh secure bytes and remains bounded",
+            --Verifies name collision retries with fresh secure bytes and remains bounded.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify name collision retries with fresh secure bytes and remains bounded.
             run = function()
                 local publication, observed = fixture({
                     create_collisions = 1,
@@ -2248,6 +2552,9 @@ return {
         },
         {
             name = "secret and publication failure leave the draft not saved",
+            --Verifies secret and publication failure leave the draft not saved.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify secret and publication failure leave the draft not saved.
             run = function()
                 local publication, observed = fixture({
                     publish_error = { code = "Storage", message = "write failed" },
@@ -2272,6 +2579,9 @@ return {
         },
         {
             name = "Windows mirror uses logical drive segments and native separators",
+            --Verifies windows mirror uses logical drive segments and native separators.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify windows mirror uses logical drive segments and native separators.
             run = function()
                 local publication, observed = fixture({
                     initial_root = "C:\\release",
@@ -2311,6 +2621,9 @@ return {
         },
         {
             name = "aliased Context ancestry fails before directory or Context creation",
+            --Verifies aliased Context ancestry fails before directory or Context creation.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify aliased Context ancestry fails before directory or Context creation.
             run = function()
                 local publication, observed = fixture({
                     alias_path = "/release/__yaca__/CONTEXT",

@@ -1,10 +1,17 @@
+--[[
+Author: WaterRun
+Date: 2026-09-23
+File: manifest.lua
+Description: Indexes modern-host feasibility evidence and its limits for target qualification.
+]]
+
 return {
-  evidence_version = "modern-2026-08-29.2",
-  observed_at = "2026-08-30",
+  evidence_version = "modern-2026-08-29.3",
+  observed_at = "2026-09-23",
   design_baseline_commit = "a169dd0",
   host = {
     os = "Fedora Linux 44 (Workstation Edition)",
-    kernel = "Linux 7.1.10-200.fc44.x86_64",
+    kernel = "Linux 7.2.6-200.fc44.x86_64",
     architecture = "x86_64",
   },
   source_pins = {
@@ -31,7 +38,7 @@ return {
       scope = "deterministic-fake-port-core",
       command = "bin/lua55 .tools/proofs/tp003_event_pump.lua",
       assertions = 453,
-      source_sha256 = "2133be3a0cfb4e489d5268d2c11beec875f4558c638a9672a9321ba5d914a418",
+      source_sha256 = "8a7ead513c41dea5463555602f7dc5e3c04959133ebc9c3cfaaa4c2f993d44db",
       target_pending = { "Win32 console/wait adapter", "CentOS wait adapter", "real process/network I/O", "suspend/resume" },
     },
     {
@@ -40,7 +47,7 @@ return {
       scope = "loopback-carrier-cancel-retry-scanner",
       command = "python3 .tools/proofs/tp006_curl_carrier.py",
       assertions = 319,
-      source_sha256 = "8103e6e0d902526f2fc6068a8baef828a121611538d8b577ca876388109241ff",
+      source_sha256 = "ca9d36a85f3f4cc8fde3e75a5f2572114da18e2251b9df6926769d87575dba78",
       target_pending = { "bundled curl", "XP/CentOS TLS/proxy/CA", "target timer granularity", "integrated redirect controller" },
       candidates_not_release_frozen = {
         minimum_scannable_secret_bytes = 8,
@@ -53,7 +60,7 @@ return {
       scope = "linux-posix-publication-recovery",
       command = "python3 .tools/proofs/tp008_xml_commit.py .develope-docs/contracts/fixtures/context-minimal.xml .develope-docs/contracts/context.rng",
       assertions = 321,
-      source_sha256 = "a7e4db216d3ed15625eca76dbba0b3119d51158e2ac1478aa51c2c6d9a597566",
+      source_sha256 = "cabd182deb12b606566d4d8d56e33404049ef8fb644944ff4228026cb7d8c407",
       target_pending = { "Windows replace/no-replace", "target filesystem matrix", "power-loss rig", "antivirus/share violations" },
     },
     {
@@ -63,15 +70,15 @@ return {
       command = "bash .tools/proofs/tp010_build.sh",
       assertions = 5564743,
       source_sha256 = {
-        build = "7751ced36de3f6bd7a8278767d919603248fa0a8bd4f4d977213fcf4979163be",
-        corpus = "11e5ad1953193fa7477401bd197a8ef807ca713ca3944323a043be9fc5f557e2",
+        build = "8199ac07ea85ee5c404d6b97515ea94252239301cc981d701cda9016546de5c3",
+        corpus = "b31f2d3747df5244ba11e90f77572e35125932573b89b6a66a033becff0f8dd1",
       },
       target_pending = { "Win32 x86 build/load", "Win64 build/load", "CentOS 7 runtime", "target resource limits" },
     },
   },
   conclusions = {
-    target_qualification_complete = true,
-    release_gate_open = true,
+    target_qualification_complete = false,
+    release_gate_open = false,
     product_source_written = true,
   },
 }

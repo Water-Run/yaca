@@ -1,7 +1,7 @@
 --[[
-File: prove_native_component.lua
-Date: 2026-08-30
 Author: WaterRun
+Date: 2026-09-23
+File: prove_native_component.lua
 Description: Proves the production native structured-argv and stdin carrier.
 ]]
 
@@ -34,6 +34,10 @@ local service = assert(process.new(native, {
     shell = shell,
 }))
 
+--Computes assert native rejects in prove native component.
+--@param request table Request delivered to the fake component.
+--@param expected_code any The expected code supplied to this scenario's fixture operation.
+--@return nil No value; assertions or fixture effects define this case.
 local function assert_native_rejects(request, expected_code)
     local ok, value = native.process_start(request)
     assert(ok == false, "malformed native component request was accepted")
@@ -78,12 +82,22 @@ local port = assert(service.new_component_port({
     output_limit_bytes = 65536,
 }))
 
+--Computes hex in prove native component.
+--@param bytes string Byte chunk supplied to the fake I/O port.
+--@return any observed hex value observed by the scenario assertion.
 local function hex(bytes)
+    --Supplies an assertion callback for the prove native component scenario.
+    --@param byte integer Single byte being encoded or inspected.
+    --@return any value Value emitted by the scenario callback for the current assertion.
     return (bytes:gsub(".", function(byte)
         return string.format("%02x", byte:byte())
     end))
 end
 
+--Computes run to terminal in prove native component.
+--@param active_port any The active port supplied to this scenario's fixture operation.
+--@param label any The label supplied to this scenario's fixture operation.
+--@return any observed run to terminal value observed by the scenario assertion.
 local function run_to_terminal(active_port, label)
     assert(active_port:start(native.monotonic_now()))
     local terminal = false

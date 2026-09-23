@@ -1,3 +1,10 @@
+--[[
+Author: WaterRun
+Date: 2026-09-23
+File: transport.lua
+Description: Defines curl carrier isolation, redirect, retry and network error contracts.
+]]
+
 return {
   contract_version = "0.1.0-readiness.1",
   decision_refs = { "D-039", "D-050", "D-052", "D-055", "D-056", "M05-55=A", "M05-58=A", "M05-59=A" },

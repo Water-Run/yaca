@@ -1,19 +1,29 @@
 --[[
-File: context_management_test.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-09-23
+File: context_management_test.lua
 Description: Verifies identity-bound Context lifecycle and permanent management transactions.
 ]]
 
 local A = assert(loadfile(YACA_TEST_ROOT .. "/test/support/assert.lua", "t", _ENV))()
 
+--Loads a source module into an isolated per-case environment.
+--@param name string Module, Model, or resource name selected by the case.
+--@param cache table Per-case module cache preserving isolated imports.
+--@return any module Module export loaded in the isolated source environment.
 local function load_module(name, cache)
     cache = cache or {}
     if cache[name] then return cache[name] end
-    local environment = { require = function(dependency)
+    local environment = {
+        --Resolves an imported Lua module through the isolated test loader.
+        --@param dependency string Source module requested from the isolated loader.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
+        require = function(dependency)
         return load_module(dependency, cache)
     end }
     environment._G = environment
+    --@metatable environment Test-owned lookup and mutation contract for the current case.
+    --@field __index any Fallback table or function used for missing fixture keys.
     setmetatable(environment, { __index = _ENV })
     local chunk, load_error = loadfile(
         YACA_TEST_ROOT .. "/src/" .. name .. ".lua",
@@ -26,6 +36,9 @@ local function load_module(name, cache)
     return value
 end
 
+--Loads a repository Lua module as a test support value.
+--@param relative_path string Repository-relative Lua source path to load.
+--@return any module Test support module export loaded from the repository.
 local function load_table(relative_path)
     local chunk, load_error = loadfile(YACA_TEST_ROOT .. "/" .. relative_path, "t", _ENV)
     A.truthy(chunk, load_error)
@@ -52,20 +65,39 @@ local REBOUND = "/other/Task.xml"
 local PREVIOUS = TARGET .. ".yaca-prev"
 local LOCK = TARGET .. ".yaca-lock"
 
+--Constructs an incremental SHA-256 port backed by the reference digest.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return any port Incremental SHA-256 fixture port.
 local function hash_port()
     local port = {}
+    --Starts a fake incremental SHA-256 handle.
+    --@param none No arguments; this closure uses its captured fixture state.
+    --@return table handle New incremental SHA-256 fixture handle.
     function port.sha256_start() return { parts = {} } end
+    --Adds bytes to the fake incremental SHA-256 handle.
+    --@param handle table|integer Fake resource handle whose state is inspected.
+    --@param bytes string Byte chunk supplied to the fake I/O port.
+    --@return boolean accepted Whether the fixture accepted the byte chunk.
     function port.sha256_update(handle, bytes)
         handle.parts[#handle.parts + 1] = bytes
         return true
     end
+    --Finalizes the fake SHA-256 handle using the reference digest.
+    --@param handle table|integer Fake resource handle whose state is inspected.
+    --@return any digest Hexadecimal digest of the accumulated fixture bytes.
     function port.sha256_finish(handle)
         return sha256.digest(table.concat(handle.parts))
     end
+    --Closes the fake SHA-256 handle and records its state.
+    --@param none No arguments; this closure uses its captured fixture state.
+    --@return boolean closed Whether the fixture handle was closed.
     function port.sha256_close() return true end
     return port
 end
 
+--Constructs the path service service used by this suite.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return any observed path service value observed by the scenario assertion.
 local function path_service()
     return assert(modules.path.new(hash_port(), {
         maximum_path_bytes = 2048,
@@ -75,6 +107,13 @@ local function path_service()
     }))
 end
 
+--Supplies candidate for behavior required by this suite.
+--@param fixture table Test fixture state shared by this helper.
+--@param physical_path string Physical file path supplied to the fixture.
+--@param logical_path string Logical Context path supplied to the fixture.
+--@param state table|string Current state observed by the fixture.
+--@param changes table Proposed changes exercised by the case.
+--@return any observed Selected fixture value returned by the fixture.
 local function candidate_for(fixture, physical_path, logical_path, state, changes)
     local name = assert(logical_path:match("/([^/]+)%.xml$"))
     local value = {
@@ -92,18 +131,37 @@ local function candidate_for(fixture, physical_path, logical_path, state, change
     return value
 end
 
+--Supplies index service behavior required by this suite.
+--@param observations any The observations supplied to the fake service for this scenario.
+--@param rings any The rings supplied to the fake service for this scenario.
+--@return any observed index service value observed by the scenario assertion.
 local function index_service(observations, rings)
     local scanner = {}
+    --Simulates the begin transition of a fake activity port for this suite.
+    --@param none No arguments; this closure uses its captured fixture state.
+    --@return boolean accepted Whether begin succeeds in the fixture.
+    --@return table secondary2 Structured fixture record with index.
     function scanner.begin()
         return true, { index = 1 }
     end
+    --Supplies next ring behavior required by this suite.
+    --@param handle table|integer Fake resource handle whose state is inspected.
+    --@return boolean accepted Whether next ring succeeds in the fixture.
+    --@return any secondary2 Selected fixture value returned by the fixture.
     function scanner.next_ring(handle)
         local value = (rings or {})[handle.index]
         handle.index = handle.index + 1
         return true, value
     end
+    --Simulates the close transition of a fake activity port for this suite.
+    --@param none No arguments; this closure uses its captured fixture state.
+    --@return boolean accepted Whether close succeeds in the fixture.
     function scanner.close() return true end
     local verifier = {}
+    --Supplies observe behavior required by this suite.
+    --@param request table Request delivered to the fake component.
+    --@return boolean|any observed observe value observed by the scenario assertion.
+    --@return table|any|nil secondary2 Additional status or structured error from the fixture operation.
     function verifier.observe(request)
         local value = observations[request.physical_path]
         if type(value) == "function" then return value(request) end
@@ -122,6 +180,11 @@ local function index_service(observations, rings)
     }))
 end
 
+--Supplies lifecycle behavior required by this suite.
+--@param fixture table Test fixture state shared by this helper.
+--@param base table|string Original state used to build the candidate.
+--@param mutation any The mutation supplied to the fake service for this scenario.
+--@return any observed Context document returned by the fixture.
 local function lifecycle(fixture, base, mutation)
     local document, mutation_error = fixture.schema.lifecycle_document(base, mutation)
     A.truthy(document, mutation_error and mutation_error.code)
@@ -129,6 +192,13 @@ local function lifecycle(fixture, base, mutation)
     return document
 end
 
+--Supplies rename document behavior required by this suite.
+--@param fixture table Test fixture state shared by this helper.
+--@param base table|string Original state used to build the candidate.
+--@param new_name any The new name supplied to the fake service for this scenario.
+--@param manual any The manual supplied to the fake service for this scenario.
+--@param updated_at any The updated at supplied to the fake service for this scenario.
+--@return any observed rename document value observed by the scenario assertion.
 local function rename_document(fixture, base, new_name, manual, updated_at)
     return lifecycle(fixture, base, {
         kind = "rename",
@@ -146,10 +216,16 @@ return {
     cases = {
         {
             name = "read-only inspection rejects a replaced path or late writer before returning data",
+            --Verifies read-only inspection rejects a replaced path or late writer before returning data.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify read-only inspection rejects a replaced path or late writer before returning data.
             run = function()
                 for _, mutation in ipairs({ "replace", "lock" }) do
                     local fixture = harness.new(modules, { [TARGET] = harness.minimal("Task") })
                     local before = fixture.controls.bytes(TARGET)
+                    --Supplies fs close behavior required by the 'read-only inspection rejects a replaced path or late writer before returning data' case.
+                    --@param none No arguments; this closure uses its captured fixture state.
+                    --@return nil No value; assertions verify read-only inspection rejects a replaced path or late writer before returning data.
                     fixture.hooks.after.fs_close = function()
                         if mutation == "replace" then
                             fixture.controls.external_replace(TARGET, before)
@@ -167,6 +243,9 @@ return {
         },
         {
             name = "target verifier binds the selected row and never resolves a substitute",
+            --Verifies target verifier binds the selected row and never resolves a substitute.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify target verifier binds the selected row and never resolves a substitute.
             run = function()
                 local fixture = harness.new(modules, { [TARGET] = harness.minimal("Task") })
                 local observed = candidate_for(fixture, TARGET, "/C/work/Task.xml")
@@ -178,6 +257,9 @@ return {
                 A.equal(verified.tag, "Verified", verified.reason)
                 A.equal(verified.purpose, "mutation")
                 A.deep_equal(verified.credential.observed_stat, observed.observed_stat)
+                --Executes the action expected to raise in the 'target verifier binds the selected row and never resolves a substitute' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify target verifier binds the selected row and never resolves a substitute.
                 A.raises(function() verified.credential.observed_stat.object = "other" end,
                     "cannot be modified")
 
@@ -215,6 +297,9 @@ return {
         },
         {
             name = "manual rename publishes one complete generation no-replace and invalidates hash",
+            --Verifies manual rename publishes one complete generation no-replace and invalidates hash.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify manual rename publishes one complete generation no-replace and invalidates hash.
             run = function()
                 local initial = harness.minimal("Task")
                 local fixture = harness.new(modules, { [TARGET] = initial })
@@ -317,6 +402,9 @@ return {
         },
         {
             name = "rebind is a distinct cross-directory transaction and restores on publish failure",
+            --Verifies rebind is a distinct cross-directory transaction and restores on publish failure.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify rebind is a distinct cross-directory transaction and restores on publish failure.
             run = function()
                 local fixture = harness.new(modules, { [TARGET] = harness.minimal("Task") })
                 local writer, base = assert(fixture.store.open_writer(TARGET, fixture.metadata()))
@@ -359,9 +447,16 @@ return {
                     view_manifest_digest = "sha256:rebind-failed",
                 })
                 local old_bytes = failed.controls.bytes(TARGET)
+                --Supplies fs rename no replace behavior required by the 'rebind is a distinct cross-directory transaction and restores on publish failure' case.
+                --@param _ any Unused callback argument supplied by the port.
+                --@param destination string|table Publication destination selected by the case.
+                --@return nil No value; assertions verify rebind is a distinct cross-directory transaction and restores on publish failure.
                 failed.hooks.before.fs_rename_no_replace = function(_, destination)
                     if destination == REBOUND then failed.controls.faults.rename = true end
                 end
+                --Supplies fs rename no replace behavior required by the 'rebind is a distinct cross-directory transaction and restores on publish failure' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify rebind is a distinct cross-directory transaction and restores on publish failure.
                 failed.hooks.after.fs_rename_no_replace = function()
                     failed.controls.faults.rename = false
                 end
@@ -382,6 +477,9 @@ return {
         },
         {
             name = "in-place import is read-only first and mapping cannot activate old approvals",
+            --Verifies in-place import is read-only first and mapping cannot activate old approvals.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify in-place import is read-only first and mapping cannot activate old approvals.
             run = function()
                 local fixture = harness.new(modules, {
                     [TARGET] = harness.unresolved("Task"),
@@ -441,6 +539,9 @@ return {
         },
         {
             name = "catalog inspection stops after Header and never reads through a writer lock",
+            --Verifies catalog inspection stops after Header and never reads through a writer lock.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify catalog inspection stops after Header and never reads through a writer lock.
             run = function()
                 local fixture = harness.new(modules, { [TARGET] = harness.minimal("Task") })
                 local writer = assert(fixture.store.open_writer(TARGET, fixture.metadata()))
@@ -471,6 +572,9 @@ return {
         },
         {
             name = "permanent delete reports all four known targets and preserves changed residue",
+            --Verifies permanent delete reports all four known targets and preserves changed residue.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify permanent delete reports all four known targets and preserves changed residue.
             run = function()
                 local temporary = TARGET .. ".yaca-tmp-deletecase"
                 local fixture = harness.new(modules, { [TARGET] = harness.minimal("Task") })
@@ -517,6 +621,11 @@ return {
                     raced.metadata()
                 ))
                 local replaced = false
+                --Supplies fs stat identity behavior required by the 'permanent delete reports all four known targets and preserves changed residue' case.
+                --@param ok boolean Success status returned by the fake operation.
+                --@param _ any Unused callback argument supplied by the port.
+                --@param subject any The subject supplied to the fake service for this scenario.
+                --@return nil No value; assertions verify permanent delete reports all four known targets and preserves changed residue.
                 raced.hooks.after.fs_stat_identity = function(ok, _, subject)
                     if ok and not replaced and type(subject) == "table"
                         and subject.path == PREVIOUS
@@ -568,6 +677,9 @@ return {
         },
         {
             name = "typed repair plans are read-only and restore a missing or damaged official in one publication",
+            --Verifies typed repair plans are read-only and restore a missing or damaged official in one publication.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify typed repair plans are read-only and restore a missing or damaged official in one publication.
             run = function()
                 for _, damaged in ipairs({ false, true }) do
                     local fixture = harness.new(modules)
@@ -604,6 +716,9 @@ return {
         },
         {
             name = "typed repair rejects stale sources destinations and live locks before changing files",
+            --Verifies typed repair rejects stale sources destinations and live locks before changing files.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify typed repair rejects stale sources destinations and live locks before changing files.
             run = function()
                 for _, changed in ipairs({ "previous", "official", "lock", "under-lease" }) do
                     local fixture = harness.new(modules)
@@ -619,6 +734,11 @@ return {
                     elseif changed == "official" then fixture.controls.external_replace(TARGET, "replacement")
                     elseif changed == "lock" then fixture.controls.external_replace(LOCK, "old-looking lock")
                     else
+                        --Supplies fs create new behavior required by the 'typed repair rejects stale sources destinations and live locks before changing files' case.
+                        --@param ok boolean Success status returned by the fake operation.
+                        --@param _ any Unused callback argument supplied by the port.
+                        --@param target table|string Target selected for the exercised operation.
+                        --@return nil No value; assertions verify typed repair rejects stale sources destinations and live locks before changing files.
                         fixture.hooks.after.fs_create_new = function(ok, _, target)
                             if ok and target == LOCK then fixture.controls.external_replace(PREVIOUS, old_bytes) end
                         end
@@ -636,6 +756,9 @@ return {
         },
         {
             name = "typed repair retains the recovery source on publish and cleanup failures",
+            --Verifies typed repair retains the recovery source on publish and cleanup failures.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify typed repair retains the recovery source on publish and cleanup failures.
             run = function()
                 for _, stage in ipairs({ "write", "publish", "flush", "cleanup", "release" }) do
                     local fixture = harness.new(modules)
@@ -650,16 +773,28 @@ return {
                     if stage == "write" then
                         fixture.controls.faults.write = true
                     elseif stage == "publish" then
+                        --Supplies fs rename no replace verified behavior required by the 'typed repair retains the recovery source on publish and cleanup failures' case.
+                        --@param none No arguments; this closure uses its captured fixture state.
+                        --@return nil No value; assertions verify typed repair retains the recovery source on publish and cleanup failures.
                         fixture.hooks.before.fs_rename_no_replace_verified = function() error("synthetic publication exception") end
                     elseif stage == "flush" then
+                        --Supplies fs rename no replace verified behavior required by the 'typed repair retains the recovery source on publish and cleanup failures' case.
+                        --@param ok boolean Success status returned by the fake operation.
+                        --@return nil No value; assertions verify typed repair retains the recovery source on publish and cleanup failures.
                         fixture.hooks.after.fs_rename_no_replace_verified = function(ok)
                             if ok then fixture.controls.faults.flush_directory = true end
                         end
                     elseif stage == "cleanup" then
+                        --Supplies fs delete verified behavior required by the 'typed repair retains the recovery source on publish and cleanup failures' case.
+                        --@param target table|string Target selected for the exercised operation.
+                        --@return nil No value; assertions verify typed repair retains the recovery source on publish and cleanup failures.
                         fixture.hooks.before.fs_delete_verified = function(target)
                             if target == PREVIOUS then error("synthetic cleanup exception") end
                         end
                     else
+                        --Supplies fs delete verified behavior required by the 'typed repair retains the recovery source on publish and cleanup failures' case.
+                        --@param target table|string Target selected for the exercised operation.
+                        --@return nil No value; assertions verify typed repair retains the recovery source on publish and cleanup failures.
                         fixture.hooks.before.fs_delete_verified = function(target)
                             if target == LOCK then error("synthetic lease release exception") end
                         end
@@ -679,6 +814,9 @@ return {
         },
         {
             name = "typed repair cleans an obsolete previous but refuses conflicting histories and active locks",
+            --Verifies typed repair cleans an obsolete previous but refuses conflicting histories and active locks.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify typed repair cleans an obsolete previous but refuses conflicting histories and active locks.
             run = function()
                 local fixture = harness.new(modules, { [TARGET] = harness.minimal("Task") })
                 local old_bytes = fixture.controls.bytes(TARGET)
@@ -712,6 +850,9 @@ return {
         },
         {
             name = "repair uses only previous-valid evidence and never breaks a stale lock",
+            --Verifies repair uses only previous-valid evidence and never breaks a stale lock.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify repair uses only previous-valid evidence and never breaks a stale lock.
             run = function()
                 local fixture = harness.new(modules)
                 local first = harness.minimal("Task")
@@ -777,6 +918,9 @@ return {
         },
         {
             name = "active writer blocks external rename rebind delete import and repair",
+            --Verifies active writer blocks external rename rebind delete import and repair.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify active writer blocks external rename rebind delete import and repair.
             run = function()
                 local fixture = harness.new(modules, { [TARGET] = harness.minimal("Task") })
                 local writer = assert(fixture.store.open_writer(TARGET, fixture.metadata(10)))

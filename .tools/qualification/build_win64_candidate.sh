@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# Author: WaterRun
+# Date: 2026-09-23
+# File: build_win64_candidate.sh
+# Description: Builds and audits Windows x64 candidate payloads from pinned source inputs.
+
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
@@ -15,6 +20,9 @@ if [[ ${YACA_WINDOWS_BUILD_RESOURCE_GUARD_HELD:-0} != 1 ]]; then
     env YACA_WINDOWS_BUILD_RESOURCE_GUARD_HELD=1 bash "$0" "$@"
 fi
 
+# Stop the Win64 candidate build with its failing precondition.
+#@param ... string Diagnostic words joined by the shell.
+#@return void Exits with failure status 1.
 die() { echo "Windows win64 candidate: $*" >&2; exit 1; }
 [[ $# == 2 ]] || die "usage: $0 SOURCE_CACHE NEW_OUTPUT_DIRECTORY"
 SOURCE_CACHE=$(cd "$1" && pwd -P)
@@ -34,6 +42,10 @@ YACA_SOURCE="$WORK_ROOT/yaca"
 BUILDER_ROOT="$WORK_ROOT/luainstaller"
 LUA_SOURCE="$WORK_ROOT/lua-5.5.1/src"
 
+# Check a locked Win64 source file against its pinned SHA-256 digest.
+#@param 1 string Source file path.
+#@param 2 string Expected lowercase SHA-256 digest.
+#@return int Zero on a match; failure exits through die.
 verify() {
   [[ -f "$1" ]] || die "missing locked input: $1"
   [[ $(sha256sum "$1" | awk '{print $1}') == "$2" ]] || die "SHA-256 mismatch: $1"

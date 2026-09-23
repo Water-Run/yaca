@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# Author: WaterRun
+# Date: 2026-09-23
+# File: qualify_windows_target.sh
+# Description: Transfers a candidate over SSH and collects offline and configured online Windows evidence.
+
 # Windows target qualification driver (run from the Linux build host).
 #
 # usage: qualify_windows_target.sh SSH_HOST TARGET_ID PACKAGE_ZIP [WORKDIR]
@@ -25,6 +30,10 @@ EVIDENCE=${EVIDENCE_DIR:-qual-$TARGET_ID-$(date +%Y%m%d-%H%M%S)}
 mkdir -p "$EVIDENCE"
 sha256sum "$PACKAGE_ZIP" | tee "$EVIDENCE/package-sha256.txt"
 
+# Run a target-side qualification command over the selected SSH host.
+#@param ... string Remote command and arguments passed directly to ssh.
+#@return int Exit status of ssh or the remote command.
+#@effect Executes a command on SSH_HOST and forwards its output.
 remote() { ssh -o BatchMode=yes "$SSH_HOST" "$@"; }
 
 echo "[1/7] distributing package"

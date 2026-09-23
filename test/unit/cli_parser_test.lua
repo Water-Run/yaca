@@ -1,19 +1,29 @@
 --[[
-File: cli_parser_test.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-09-23
+File: cli_parser_test.lua
 Description: Verifies registry-generated argv, line, help, machine, and exit projections.
 ]]
 
 local A = assert(loadfile(YACA_TEST_ROOT .. "/test/support/assert.lua", "t", _ENV))()
 
+--Loads a source module into an isolated per-case environment.
+--@param name string Module, Model, or resource name selected by the case.
+--@param cache table Per-case module cache preserving isolated imports.
+--@return any module Module export loaded in the isolated source environment.
 local function load_module(name, cache)
     cache = cache or {}
     if cache[name] then return cache[name] end
-    local environment = { require = function(dependency)
+    local environment = {
+        --Resolves an imported Lua module through the isolated test loader.
+        --@param dependency string Source module requested from the isolated loader.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
+        require = function(dependency)
         return load_module(dependency, cache)
     end }
     environment._G = environment
+    --@metatable environment Test-owned lookup and mutation contract for the current case.
+    --@field __index any Fallback table or function used for missing fixture keys.
     setmetatable(environment, { __index = _ENV })
     local chunk, load_error = loadfile(
         YACA_TEST_ROOT .. "/src/" .. name .. ".lua",
@@ -26,12 +36,18 @@ local function load_module(name, cache)
     return value
 end
 
+--Loads a repository Lua module as a test support value.
+--@param relative_path string Repository-relative Lua source path to load.
+--@return any module Test support module export loaded from the repository.
 local function load_table(relative_path)
     local chunk, load_error = loadfile(YACA_TEST_ROOT .. "/" .. relative_path, "t", _ENV)
     A.truthy(chunk, load_error)
     return chunk()
 end
 
+--Reads read file for this test scenario.
+--@param relative_path string Repository-relative Lua source path to load.
+--@return any bytes Bytes read from the selected fixture file.
 local function read_file(relative_path)
     local handle, open_error = io.open(YACA_TEST_ROOT .. "/" .. relative_path, "rb")
     A.truthy(handle, open_error)
@@ -47,6 +63,9 @@ local contract = load_table(".develope-docs/contracts/actions.lua")
 local diagnostics = load_table(".develope-docs/contracts/diagnostics.lua")
 local fixtures = load_table(".develope-docs/contracts/fixtures/argv.lua")
 
+--Constructs the json codec service used by this suite.
+--@param none No arguments; this closure uses its captured fixture state.
+--@return any observed json codec value observed by the scenario assertion.
 local function json_codec()
     return assert(json.new({
         maximum_bytes = 65536,
@@ -57,6 +76,10 @@ local function json_codec()
     }))
 end
 
+--Constructs new service for this test scenario.
+--@param platform any The platform supplied to the fake service for this scenario.
+--@param machine any The machine supplied to the fake service for this scenario.
+--@return any created Constructed new service fixture value.
 local function new_service(platform, machine)
     return assert(cli.new({
         platform = platform or "linux",
@@ -64,6 +87,11 @@ local function new_service(platform, machine)
     }))
 end
 
+--Checks assert subset against this test expectation.
+--@param expected any Expected value used by the assertion.
+--@param actual any Observed value compared by the assertion.
+--@param path string File or Context path exercised by the case.
+--@return nil No value; the fake port or test assertion observes this callback's effects.
 local function assert_subset(expected, actual, path)
     path = path or "value"
     if type(expected) ~= "table" then
@@ -76,6 +104,9 @@ local function assert_subset(expected, actual, path)
     end
 end
 
+--Reads parse fixture for this test scenario.
+--@param case any The case supplied to the fake service for this scenario.
+--@return any decoded parse fixture data supplied to the assertion.
 local function parse_fixture(case)
     local platform = case.platform == "windows" and "windows" or "linux"
     local service = new_service(platform)
@@ -86,6 +117,13 @@ local function parse_fixture(case)
     return service.parse_context_repl(case.line, { tty = case.tty })
 end
 
+--Checks assert parse error against this test expectation.
+--@param service table Service port exercised by the case.
+--@param method string Port method selected by the scenario.
+--@param source string|table Source content or object under test.
+--@param expected any Expected value used by the assertion.
+--@param facts table Platform or file-descriptor facts supplied to the case.
+--@return any observed assert parse error value observed by the scenario assertion.
 local function assert_parse_error(service, method, source, expected, facts)
     local result, parse_error = service[method](source, facts)
     A.falsy(result)
@@ -93,6 +131,9 @@ local function assert_parse_error(service, method, source, expected, facts)
     return parse_error
 end
 
+--Supplies without final newline behavior required by this suite.
+--@param value any Candidate whose acceptance or transformation the test checks.
+--@return any observed without final newline value observed by the scenario assertion.
 local function without_final_newline(value)
     return (value:gsub("\n$", ""))
 end
@@ -102,6 +143,9 @@ return {
     cases = {
         {
             name = "Model commands bind rows and save to the displayed generation",
+            --Verifies model commands bind rows and save to the displayed generation.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify model commands bind rows and save to the displayed generation.
             run = function()
                 local service = new_service()
                 local id = "model-edit-3"
@@ -126,6 +170,9 @@ return {
         },
         {
             name = "invalid config repair keeps source off argv and binds save to the exact revision",
+            --Verifies invalid config repair keeps source off argv and binds save to the exact revision.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify invalid config repair keeps source off argv and binds save to the exact revision.
             run = function()
                 local service = new_service()
                 local id = "config-repair-3"
@@ -149,6 +196,9 @@ return {
         },
         {
             name = "config editor parses exact revisions and keeps values off command lines",
+            --Verifies config editor parses exact revisions and keeps values off command lines.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify config editor parses exact revisions and keeps values off command lines.
             run = function()
                 local service = new_service()
                 local id = "config-edit-3"
@@ -175,6 +225,9 @@ return {
         },
         {
             name = "Prompt editor controls require exact identity and preserve literal submissions",
+            --Verifies prompt editor controls require exact identity and preserve literal submissions.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify prompt editor controls require exact identity and preserve literal submissions.
             run = function()
                 local service = new_service()
                 local id = "prompt-edit-1"
@@ -204,6 +257,9 @@ return {
         },
         {
             name = "runtime registry is an exact enriched projection of all 39 actions",
+            --Verifies runtime registry is an exact enriched projection of all 39 actions.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify runtime registry is an exact enriched projection of all 39 actions.
             run = function()
                 local registry = cli.registry()
                 A.equal(registry.contract_version, contract.contract_version)
@@ -241,11 +297,17 @@ return {
                 local descriptor = assert(service.action("run-chat"))
                 descriptor.id = "changed-again"
                 A.equal(assert(service.action("run-chat")).id, "run-chat")
+                --Executes the action expected to raise in the 'runtime registry is an exact enriched projection of all 39 actions' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify runtime registry is an exact enriched projection of all 39 actions.
                 A.raises(function() service.extra = true end, "cannot be modified")
             end,
         },
         {
             name = "frozen argv chat and Context fixtures normalize or fail exactly",
+            --Verifies frozen argv chat and Context fixtures normalize or fail exactly.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify frozen argv chat and Context fixtures normalize or fail exactly.
             run = function()
                 for _, case in ipairs(fixtures.cases) do
                     local request, parse_error = parse_fixture(case)
@@ -264,6 +326,9 @@ return {
         },
         {
             name = "all top aliases select one action and end-of-options preserves paths",
+            --Verifies frozen argv chat and Context fixtures normalize or fail exactly.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify frozen argv chat and Context fixtures normalize or fail exactly.
             run = function()
                 local linux = new_service("linux")
                 local windows = new_service("windows")
@@ -329,6 +394,9 @@ return {
         },
         {
             name = "self-test options are typed repeatable and consent is invocation-local",
+            --Verifies self-test options are typed repeatable and consent is invocation-local.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify self-test options are typed repeatable and consent is invocation-local.
             run = function()
                 local service = new_service()
                 local request = assert(service.parse_argv({
@@ -388,6 +456,9 @@ return {
         },
         {
             name = "fd matrix keeps human pipes explicit and gates interactive surfaces",
+            --Verifies fd matrix keeps human pipes explicit and gates interactive surfaces.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify fd matrix keeps human pipes explicit and gates interactive surfaces.
             run = function()
                 local service = new_service()
                 local redirected = {
@@ -436,6 +507,9 @@ return {
         },
         {
             name = "chat grammar projects every command without accepting legacy spelling",
+            --Verifies chat grammar projects every command without accepting legacy spelling.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify chat grammar projects every command without accepting legacy spelling.
             run = function()
                 local service = new_service()
                 local cases = {
@@ -447,7 +521,7 @@ return {
                     { ".queue edit #2 replacement text", "queue-edit", "message", "replacement text" },
                     { ".queue clear", "queue-clear" },
                     { ".immediate fix it", "steer", "message", "fix it" },
-                    { ".side explain it", "side", "message", "explain it" },
+                    { ".ask explain it", "ask", "message", "explain it" },
                     { ".multiline", "multiline" },
                     { ".cancel", "cancel" },
                     { ".cautious", "cautious", "operation", "status" },
@@ -473,7 +547,7 @@ return {
                 )
                 for _, line in ipairs({
                     ".immidiate fix it", ".queue delete #0", ".queue list extra",
-                    ".cautious maybe", ".status extra", ".unknown",
+                    ".cautious maybe", ".status extra", ".unknown", ".side explain it",
                 }) do
                     assert_parse_error(
                         service,
@@ -494,6 +568,9 @@ return {
         },
         {
             name = "Context REPL grammar preserves selectors names paths and confirmation",
+            --Verifies context REPL grammar preserves selectors names paths and confirmation.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify context REPL grammar preserves selectors names paths and confirmation.
             run = function()
                 local service = new_service()
                 local cases = {
@@ -572,6 +649,9 @@ return {
         },
         {
             name = "help and completion are deterministic registry projections",
+            --Verifies help and completion are deterministic registry projections.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify help and completion are deterministic registry projections.
             run = function()
                 local linux = new_service("linux")
                 local windows = new_service("windows")
@@ -613,6 +693,9 @@ return {
         },
         {
             name = "machine JSON and JSONL use canonical fields and a required final outcome",
+            --Verifies machine JSON and JSONL use canonical fields and a required final outcome.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify machine JSON and JSONL use canonical fields and a required final outcome.
             run = function()
                 local codec = json_codec()
                 local service = assert(cli.new({
@@ -681,6 +764,9 @@ return {
         },
         {
             name = "exit classes and broken stdout fail closed from the registry",
+            --Verifies exit classes and broken stdout fail closed from the registry.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify exit classes and broken stdout fail closed from the registry.
             run = function()
                 local service = new_service()
                 local expected = {
@@ -715,16 +801,25 @@ return {
                 end
 
                 local observed
+                --Records the emit effect observed by the 'exit classes and broken stdout fail closed from the registry' case.
+                --@param bytes string Byte chunk supplied to the fake I/O port.
+                --@return boolean accepted Whether the fake callback accepts this scenario.
                 A.truthy(service.emit(function(bytes)
                     observed = bytes
                     return true
                 end, "payload\n"))
                 A.equal(observed, "payload\n")
+                --Records the emit effect observed by the 'exit classes and broken stdout fail closed from the registry' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return boolean accepted Whether the fake callback accepts this scenario.
                 local emitted, output_error = service.emit(function() return false end, "x")
                 A.falsy(emitted)
                 A.equal(output_error.code, "BrokenStdout")
                 A.truthy(output_error.close_required)
                 A.equal(service.exit_code(output_error), 1)
+                --Records the emit effect observed by the 'exit classes and broken stdout fail closed from the registry' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify exit classes and broken stdout fail closed from the registry.
                 local raised, raised_error = service.emit(function()
                     error("closed")
                 end, "x")
@@ -734,6 +829,9 @@ return {
         },
         {
             name = "invalid construction argv encoding and fd facts never guess",
+            --Verifies invalid construction argv encoding and fd facts never guess.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify invalid construction argv encoding and fd facts never guess.
             run = function()
                 local invalid, invalid_error = cli.new({ platform = "other" })
                 A.falsy(invalid)

@@ -1,7 +1,7 @@
 --[[
-File: config.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-09-23
+File: config.lua
 Description: Validates typed configuration generations and publishes safe INI edits.
 ]]
 
@@ -9,12 +9,23 @@ local ini = require("ini")
 local json = require("json")
 local safety = require("safety")
 local text = require("text")
+local filesystem_util = require("fs")
 
 local M = {}
 
+--@metatable draft_states Associates configuration edit proxies with their private source, generation and proposed changes.
+--@field __mode string Fixed k mode: keys are weak; entries remain mutable within their owning module.
 local draft_states = setmetatable({}, { __mode = "k" })
+--@metatable repair_states Associates repair proxies with their private original source and bounded line edits.
+--@field __mode string Fixed k mode: keys are weak; entries remain mutable within their owning module.
 local repair_states = setmetatable({}, { __mode = "k" })
 
+-- Construct a structured diagnostic without throwing or formatting its optional fields.
+--@param code string Stable diagnostic code used by callers to choose recovery behavior.
+--@param message string Human-readable summary supplied by the failing operation.
+--@param reason string|nil Optional machine-readable cause or validation rule.
+--@param detail any|nil Optional underlying cause or contextual diagnostic data; retained as supplied.
+--@return table New diagnostic record; optional non-nil fields are retained without deep copying.
 local function failure(code, message, reason, detail)
     local result = { code = code, message = message }
     if reason ~= nil then result.reason = reason end
@@ -22,15 +33,39 @@ local function failure(code, message, reason, detail)
     return result
 end
 
+-- Create a shallow read-only view without copying the backing table.
+--@param values table Backing fields retained by reference; the caller owns their stability.
+--@param label string|nil Diagnostic label; defaults to "readonly value".
+--@return table Empty proxy exposing the backing fields through its locked metatable.
+--@ownership Retains values by reference; nested values and the backing table are not frozen.
 local function readonly(values, label)
+    --@metatable readonly_proxy Forwards reads and iteration; ordinary assignments raise an error.
+    --@field __index table Backing values used for missing-key reads.
+    --@field __newindex function Rejects ordinary assignments without changing the backing values.
+    --@field __pairs function Enumerates the backing table with next.
+    --@field __len function Reports the backing table sequence length.
+    --@field __metatable string Hides this metatable behind the fixed "locked" marker.
     return setmetatable({}, {
         __index = values,
+        -- Reject a write through the proxy before it can create an ordinary field.
+        --@param _ table Proxy receiving the assignment; its contents are not consulted.
+        --@param key any Attempted field name included in the diagnostic.
+        --@return nil Does not return normally.
+        --@error Always raises a read-only assignment error at the caller frame.
         __newindex = function(_, key)
             error((label or "readonly value") .. " cannot be modified: " .. tostring(key), 2)
         end,
+        -- Iterate the backing fields instead of the empty proxy table.
+        --@param none The proxy argument supplied by pairs is ignored.
+        --@return function The standard next iterator.
+        --@return table Backing values used as iterator state.
+        --@return nil Initial key used to start iteration.
         __pairs = function()
             return next, values, nil
         end,
+        -- Forward sequence-length queries to the backing table.
+        --@param none The proxy operand supplied by Lua is ignored.
+        --@return integer Length of the backing sequence under the Lua length operator.
         __len = function()
             return #values
         end,
@@ -38,10 +73,17 @@ local function readonly(values, label)
     })
 end
 
+-- Check the Lua integer subtype and the caller's inclusive lower bound.
+--@param value any Candidate value; floats and non-numeric values are rejected.
+--@param minimum integer Inclusive minimum accepted by this check.
+--@return boolean True only for an integer at least minimum.
 local function valid_integer(value, minimum)
     return math.type(value) == "integer" and value >= minimum
 end
 
+-- Count a dense one-based array while rejecting holes and extra key kinds.
+--@param values any Candidate table; every key must belong to the sequence 1 through count.
+--@return integer|nil Sequence length, including zero for an empty table; nil for an invalid shape.
 local function dense_count(values)
     if type(values) ~= "table" then return nil end
     local count = 0
@@ -55,6 +97,15 @@ local function dense_count(values)
     return count
 end
 
+-- Declare one typed INI field and its release defaults.
+--@param id string Stable catalog field identity.
+--@param section string Exact section or section-family prefix.
+--@param key string INI key spelling.
+--@param type_name string Decoder type.
+--@param form string INI token or text representation.
+--@param default any Default when optional key is absent.
+--@param extra table|nil Required, enum, hard-limit, or secret metadata.
+--@return table Field descriptor with extra metadata copied by key.
 local function field(id, section, key, type_name, form, default, extra)
     local result = {
         id = id,
@@ -215,17 +266,31 @@ local MIGRATIONS = {
         "diagnostic-explicit-missing-or-value-choice-required",
 }
 
+-- Convert a known config key spelling to its public snake_case field.
+--@param value string Catalog key name.
+--@return string Lowercase underscore-separated projection name.
 local function snake_case(value)
     return (value:gsub("(%l)(%u)", "%1_%2"):gsub("(%u)(%u%l)", "%1_%2"):lower())
 end
 
+-- Fold only ASCII capitals, preserving all non-ASCII resource-name bytes.
+--@param value string Logical Model or Permission name.
+--@return string ASCII-folded comparison key.
 local function ascii_fold(value)
+    -- Convert one matched ASCII capital to its lowercase byte.
+    --@param character string Single uppercase ASCII character.
+    --@return string Corresponding lowercase character.
     return (value:gsub("[A-Z]", function(character)
         return string.char(character:byte() + 32)
     end))
 end
 
----Resolves a full logical name using only ASCII case folding, never aliases.
+-- Resolve a full logical resource name using only ASCII case folding.
+--@param generation table Config generation with Model and Permission maps.
+--@param family string Model or Permission resource family.
+--@param selector string Caller-supplied full resource name.
+--@return string|nil Exact stored spelling on success.
+--@return table|nil Invalid, ambiguous, or absent resource error.
 function M.resolve_resource(generation, family, selector)
     local collection = type(generation) == "table" and
         (family == "Model" and generation.models or family == "Permission" and generation.permissions)
@@ -243,16 +308,28 @@ function M.resolve_resource(generation, family, selector)
     return found
 end
 
+-- Construct a ConfigInvalid diagnostic with a stable reason.
+--@param reason string Machine-readable configuration failure rule.
+--@param message string|nil Public explanation, with default.
+--@param detail any|nil Optional context retained in the diagnostic.
+--@return table Structured configuration error.
 local function config_failure(reason, message, detail)
     return failure("ConfigInvalid", message or "configuration is invalid", reason, detail)
 end
 
+-- Accept bounded strict UTF-8 text without an embedded NUL scalar.
+--@param value any Candidate text.
+--@param maximum_bytes integer Maximum encoded byte count.
+--@return boolean True for accepted text, including empty text.
 local function valid_text(value, maximum_bytes)
     if type(value) ~= "string" or #value > maximum_bytes then return false end
     local valid, metadata = text.validate_utf8(value)
     return valid and not metadata.contains_nul
 end
 
+-- Recognize a nonempty POSIX, drive, or UNC absolute physical path.
+--@param value any Candidate path without NUL bytes.
+--@return boolean True when the path has an absolute prefix.
 local function valid_absolute_path(value)
     if type(value) ~= "string" or value == "" or value:find("\0", 1, true) then return false end
     local normalized = value:gsub("\\", "/")
@@ -261,6 +338,10 @@ local function valid_absolute_path(value)
         or normalized:match("^//[^/]+/[^/]+") ~= nil
 end
 
+-- Parse the scheme and authority of an HTTP(S) config URL.
+--@param value any Candidate URL without whitespace, controls, or fragment.
+--@return string|nil HTTP or HTTPS scheme.
+--@return string|nil Original authority including optional user-info.
 local function url_parts(value)
     if type(value) ~= "string" or value:find("[%c%s]") or value:find("#", 1, true) then
         return nil
@@ -282,8 +363,9 @@ local function url_parts(value)
     return scheme, authority
 end
 
--- Projects only a normalized origin/path. The config owner alone sees the
--- credential-bearing URL; query names and values never reach this disclosure.
+-- Project only normalized proxy origin/path and whether query data exists.
+--@param value string Configuration proxy URL or empty disabled value.
+--@return string|nil Secret-free route projection or nil for malformed URL.
 local function proxy_route(value)
     if value == "" then return "" end
     local scheme, authority = url_parts(value)
@@ -307,6 +389,9 @@ local function proxy_route(value)
         .. (route:find("?", 1, true) and "?configured" or "")
 end
 
+-- Validate a comma-separated NoProxy host-pattern list.
+--@param value string Candidate list, empty for no entries.
+--@return boolean True when each trimmed pattern uses the allowed grammar.
 local function valid_host_patterns(value)
     if value == "" then return true end
     for item in (value .. ","):gmatch("([^,]*),") do
@@ -316,6 +401,10 @@ local function valid_host_patterns(value)
     return true
 end
 
+-- Reject resource names with unsafe edge spaces or section/path delimiters.
+--@param value any Candidate Model or Permission name.
+--@param maximum_bytes integer Name byte cap.
+--@return boolean True for a nonempty valid logical name.
 local function valid_name(value, maximum_bytes)
     if not valid_text(value, maximum_bytes) or value == ""
         or value:match("^[%s]") or value:match("[%s]$")
@@ -328,6 +417,11 @@ local function valid_name(value, maximum_bytes)
     return true
 end
 
+-- Parse a canonical decimal integer within an inclusive range.
+--@param token any Candidate ASCII decimal token.
+--@param minimum integer Lower bound.
+--@param maximum integer Upper bound.
+--@return integer|nil Accepted integer or nil for malformed/out-of-range text.
 local function parse_integer(token, minimum, maximum)
     if type(token) ~= "string"
         or not (token == "0" or token:match("^[1-9][0-9]*$"))
@@ -339,12 +433,19 @@ local function parse_integer(token, minimum, maximum)
     return value
 end
 
+-- Convert a declared enum sequence into an allowed-value lookup.
+--@param values table|nil Enum strings, or nil for empty.
+--@return table Set of permitted values.
 local function enum_set(values)
     local result = {}
     for _, value in ipairs(values or {}) do result[value] = true end
     return result
 end
 
+-- Validate provider-specific adapter option declarations.
+--@param input any Optional protocol-to-field schema map.
+--@return table|nil Copied schema with normalized secret flags.
+--@return table|nil InvalidConfigOptions error on failure.
 local function validate_adapter_schemas(input)
     if input == nil then return {} end
     if type(input) ~= "table" then
@@ -388,6 +489,11 @@ local function validate_adapter_schemas(input)
     return result
 end
 
+-- Validate config schema, INI bounds, runtime hard limits, and adapter schemas.
+--@param options any Candidate release-owned configuration limits.
+--@return table|nil Admitted options with copied top-level and adapter schema fields.
+--@return table|nil InvalidConfigOptions error on failure.
+--@ownership Retains INI, hard-limit, and runtime-default tables by reference.
 local function validate_options(options)
     if type(options) ~= "table" then
         return nil, failure("InvalidConfigOptions", "configuration options are required")
@@ -490,6 +596,10 @@ local function validate_options(options)
     }
 end
 
+-- Require SHA-256 and optionally a bounded direct filesystem port.
+--@param ports any Candidate dependency map.
+--@return table|nil Admitted port references.
+--@return table|nil InvalidConfigPorts error on failure.
 local function validate_ports(ports)
     if type(ports) ~= "table" then
         return nil, failure("InvalidConfigPorts", "configuration ports are required")
@@ -528,6 +638,10 @@ local function validate_ports(ports)
     return { sha256 = ports.sha256, filesystem = ports.filesystem }
 end
 
+-- Build the strict INI codec from the typed field catalog.
+--@param limits table Release INI line, value, and total caps.
+--@return table|nil INI codec on success.
+--@return table|nil INI construction error on failure.
 local function build_ini_schema(limits)
     local grouped = {}
     for _, name in ipairs(GROUP_ORDER) do grouped[name] = {} end
@@ -554,6 +668,10 @@ local function build_ini_schema(limits)
     })
 end
 
+-- Build a bounded JSON codec for adapter option values.
+--@param maximum_bytes integer Adapter option byte cap.
+--@return table|nil JSON codec on success.
+--@return table|nil JSON construction error on failure.
 local function build_json_codec(maximum_bytes)
     return json.new({
         maximum_bytes = maximum_bytes,
@@ -564,6 +682,9 @@ local function build_json_codec(maximum_bytes)
     })
 end
 
+-- Index typed field descriptors by exact section or section family.
+--@param none No parameters.
+--@return table Section-to-ordered-fields and key lookup map.
 local function descriptors_by_section()
     local result = {}
     for _, descriptor in ipairs(CATALOG) do
@@ -580,6 +701,9 @@ end
 
 local DESCRIPTORS = descriptors_by_section()
 
+-- Resolve an exact section or dynamic Model/Permission section family.
+--@param name any Candidate INI section name.
+--@return string|nil Catalog family key.
 local function section_family(name)
     if DESCRIPTORS[name] then return name end
     if type(name) == "string" and name:sub(1, 11) == "Permission." then
@@ -589,6 +713,9 @@ local function section_family(name)
     return nil
 end
 
+-- Scan raw INI headers for repeated exact section spellings.
+--@param source string Candidate INI bytes, optionally UTF-8 BOM-prefixed.
+--@return string|nil First duplicated section name.
 local function duplicate_section(source)
     local seen = {}
     source = source:gsub("^\239\187\191", "", 1)
@@ -604,10 +731,17 @@ local function duplicate_section(source)
     return nil
 end
 
+-- Detect known obsolete keys without mutating the source text.
+--@param source any Raw INI bytes.
+--@return table Ordered unique migration-advice records.
 local function migration_advice(source)
     if type(source) ~= "string" then return {} end
     local result, seen = {}, {}
     local current
+    -- Add a known migration rule once in source encounter order.
+    --@param source_id string Known obsolete field identity.
+    --@return nil No return value.
+    --@effect Updates result and seen tables.
     local function add(source_id)
         if seen[source_id] then return end
         seen[source_id] = true
@@ -651,6 +785,10 @@ local function migration_advice(source)
     return result
 end
 
+-- Resolve a catalog default that may depend on release-owned options.
+--@param descriptor table Field catalog entry.
+--@param options table Validated configuration options.
+--@return any Literal, CA-path, or runtime-retry default.
 local function default_value(descriptor, options)
     if descriptor.default == "release-ca" then return options.release_ca_path end
     if descriptor.default == "runtime-retry" then
@@ -659,6 +797,13 @@ local function default_value(descriptor, options)
     return descriptor.default
 end
 
+-- Decode a Model's adapter JSON into public and secret option maps.
+--@param source string AdapterOptions JSON text, possibly empty.
+--@param protocol string Model protocol selecting the allowed schema.
+--@param options table Validated option limits and schemas.
+--@param json_codec table Bounded JSON codec.
+--@return table|nil Public typed options with secret markers.
+--@return table|nil Secret values on success, ConfigInvalid error on failure.
 local function decode_adapter_map(source, protocol, options, json_codec)
     if source == "" then return {}, {} end
     if #source > options.maximum_adapter_options_bytes then
@@ -700,6 +845,15 @@ local function decode_adapter_map(source, protocol, options, json_codec)
     return public, secret_values
 end
 
+-- Decode one typed INI field or supply its release default.
+--@param wrapped any INI value wrapper or nil when absent.
+--@param descriptor table Typed field declaration.
+--@param section string Source section name for error details.
+--@param options table Validated configuration options.
+--@param json_codec table Bounded adapter JSON codec.
+--@param protocol string|nil Model protocol for adapter-map fields.
+--@return any|nil Decoded scalar or public adapter map.
+--@return table|nil Secret adapter values for adapter-map, otherwise error on failure.
 local function decode_field(wrapped, descriptor, section, options, json_codec, protocol)
     if wrapped == nil then
         if descriptor.required then return nil, config_failure("required-field") end
@@ -768,6 +922,10 @@ local function decode_field(wrapped, descriptor, section, options, json_codec, p
     })
 end
 
+-- Project a parsed section with secret values replaced by configured flags.
+--@param values table Decoded section fields.
+--@param secret_keys table|nil Set of source keys containing secrets.
+--@return table Public snake_case section copy.
 local function copy_public_section(values, secret_keys)
     local result = {}
     for key, value in pairs(values) do
@@ -781,6 +939,9 @@ local function copy_public_section(values, secret_keys)
     return result
 end
 
+-- Bind ordered Context override fields into an unambiguous byte signature.
+--@param overrides table Validated Context override map.
+--@return string NUL-separated typed field signature.
 local function context_signature(overrides)
     local parts = {}
     for _, key in ipairs({
@@ -800,6 +961,11 @@ local function context_signature(overrides)
     return table.concat(parts, "\0")
 end
 
+-- Validate and copy only the supported Context override keys.
+--@param overrides any Optional Context override map.
+--@param maximum_text_bytes integer Per-text byte cap.
+--@return table|nil Copied accepted overrides.
+--@return table|nil ConfigInvalid error on failure.
 local function validate_overrides(overrides, maximum_text_bytes)
     if overrides == nil then return {} end
     if type(overrides) ~= "table" then return nil, config_failure("context-overrides-type") end
@@ -829,6 +995,10 @@ local function validate_overrides(overrides, maximum_text_bytes)
     return result
 end
 
+-- Compare complete filesystem identities before config publication.
+--@param left any Expected identity.
+--@param right any Current identity.
+--@return boolean True when all tracked fields match.
 local function identity_equal(left, right)
     if type(left) ~= "table" or type(right) ~= "table" then return false end
     for _, key in ipairs({ "kind", "volume", "object", "size", "modified" }) do
@@ -837,6 +1007,9 @@ local function identity_equal(left, right)
     return true
 end
 
+-- Find a physical path's parent without changing separator spelling.
+--@param path any Candidate absolute path.
+--@return string|nil Parent directory, including root when appropriate.
 local function directory_of(path)
     if type(path) ~= "string" then return nil end
     local index
@@ -853,12 +1026,21 @@ local function directory_of(path)
     return path:sub(1, index - 1)
 end
 
+-- Require two physical paths to share a spelled parent directory.
+--@param left string First path.
+--@param right string Second path.
+--@return boolean True when slash-normalized parents match exactly.
 local function same_directory(left, right)
     local left_directory, right_directory = directory_of(left), directory_of(right)
     if not left_directory or not right_directory then return false end
     return left_directory:gsub("\\", "/") == right_directory:gsub("\\", "/")
 end
 
+-- Bind a read-only draft handle to mutable private state and its owner.
+--@param owner table Configuration service that created the draft.
+--@param state table Initial private draft state.
+--@return table Read-only draft handle.
+--@effect Registers state in the weak-key draft map.
 local function new_draft(owner, state)
     local draft = readonly({}, "configuration draft")
     state.owner = owner
@@ -866,13 +1048,11 @@ local function new_draft(owner, state)
     return draft
 end
 
----Creates the strict v0.1 typed configuration service.
--- Runtime hard maxima are mandatory injected values; the user INI can only
--- select values at or below them. No ambient environment or project file is read.
--- @param ports table SHA-256 port and optional narrow filesystem service.
--- @param options table Schema, INI, text, secret, and Runtime hard limits.
--- @return table|nil service Immutable configuration service.
--- @return table|nil err Structured construction failure.
+-- Create the strict typed configuration service with release-owned hard caps.
+--@param ports table SHA-256 port and optional narrow filesystem service.
+--@param options table Schema, INI, text, secret, and Runtime hard limits.
+--@return table|nil Read-only configuration service.
+--@return table|nil Structured construction error.
 function M.new(ports, options)
     local admitted_ports, ports_error = validate_ports(ports)
     if not admitted_ports then return nil, ports_error end
@@ -892,15 +1072,30 @@ function M.new(ports, options)
     local generation_number = 0
     local current_generation
     local current_binding
+    --@metatable generation_secrets Associates admitted configuration generations with private typed secret values.
+    --@field __mode string Fixed k mode: keys are weak; entries remain mutable within their owning module.
     local generation_secrets = setmetatable({}, { __mode = "k" })
     local service = {}
 
+    -- Freeze an internally validated value, treating freeze failure as invariant break.
+    --@param value any Public configuration value to freeze.
+    --@param label string Proxy write-error label.
+    --@return any Frozen value from the safety service.
+    --@error Raises when an internal value cannot be frozen.
     local function freeze(value, label)
         local frozen, freeze_error = safety_service.freeze(value, label)
         if not frozen then error(freeze_error.message, 2) end
         return frozen
     end
 
+    -- Parse one full INI source into a public generation and private secrets.
+    --@param source any Complete INI bytes.
+    --@param context_overrides table|nil Context session overrides.
+    --@param publish_number integer Prospective generation serial.
+    --@return table|nil Read-only public generation facade.
+    --@return table|nil Parsed INI document on success, structured error on failure.
+    --@return table|nil Validated override copy on success.
+    --@effect Registers secret values privately for a successful generation.
     local function parse_generation(source, context_overrides, publish_number)
         if type(source) ~= "string" then return nil, config_failure("source-type") end
         local overrides, override_error = validate_overrides(
@@ -959,6 +1154,13 @@ function M.new(ports, options)
             permission_order = permission_order,
             model_order = model_order,
         }
+        -- Register a nonempty private secret with typed consumer destinations.
+        --@param id string Stable configuration secret identity.
+        --@param class string Secret classification.
+        --@param value string Raw secret bytes; empty values are skipped.
+        --@param destinations table Allowed consumer identities.
+        --@return nil No return value.
+        --@effect Adds secret registry input and private lookup/value entries.
         local function add_secret(id, class, value, destinations)
             if value == "" then return end
             secret_entries[#secret_entries + 1] = {
@@ -1151,6 +1353,11 @@ function M.new(ports, options)
 
         local registry, registry_error = safety_service.secret_registry(secret_entries)
         if not registry then return nil, registry_error end
+        -- Detect any registered secret embedded in a proposed public projection.
+        --@param value any Public scalar or nested table to scan.
+        --@param visited table Visited table set for shared graph protection.
+        --@return boolean True when a registered secret occurs in a key or value.
+        --@effect Marks visited tables during recursive traversal.
         local function public_secret_match(value, visited)
             if type(value) == "string" then
                 return #assert(registry.scan(value)) > 0
@@ -1171,11 +1378,11 @@ function M.new(ports, options)
         local facade = {}
         for key, value in pairs(frozen_public) do facade[key] = value end
 
-        ---Looks up one exact catalog value without exposing registered secrets.
-        -- @param section string Exact singleton or family section name.
-        -- @param key string Exact PascalCase field key.
-        -- @return any value Immutable scalar or adapter map.
-        -- @return table|nil err Unknown or secret-field failure.
+        -- Look up one exact catalog value without exposing registered secrets.
+        --@param section string Exact singleton or family section name.
+        --@param key string Exact PascalCase field key.
+        --@return any|nil Immutable scalar or adapter map, nil when absent.
+        --@return table|nil Unknown-selector or registered-secret error.
         function facade.get(section, key)
             if type(section) ~= "string" or type(key) ~= "string" then
                 return nil, failure("InvalidConfigSelector", "config selector must be strings")
@@ -1194,24 +1401,27 @@ function M.new(ports, options)
             return values[key]
         end
 
-        ---Reveals a registered value only to its exact private destination.
+        -- Reveal a registered value only to its exact private destination.
+        --@param id string Registered secret identity.
+        --@param destination string Authorized consumer identity.
+        --@return string|nil Raw secret bytes for an admitted consumer.
+        --@return table|nil Registry rejection error.
         function facade.reveal_secret(id, destination)
             return registry.reveal(id, destination)
         end
 
-        ---Returns non-secret registry descriptors for diagnostics and scanners.
+        -- Return non-secret registry descriptors for diagnostics and scanners.
+        --@param none No parameters.
+        --@return table Read-only typed secret descriptors.
         function facade.secret_descriptors()
             return registry.descriptors()
         end
 
-        ---Compares a selected Model's private credentials across generations.
-        -- Only generations from this config service are admitted. Values and
-        -- reusable secret digests stay private; callers receive equality only.
-        -- Public definition and network policy checks remain the caller's duty.
-        -- @param previous table Earlier immutable generation from this service.
-        -- @param name string Exact selected Model name.
-        -- @return boolean|nil matched Whether all scoped secrets still match.
-        -- @return table|nil err Unknown generation or Model selector failure.
+        -- Compare a selected Model's private credentials across owned generations.
+        --@param previous table Earlier immutable generation from this service.
+        --@param name string Exact selected Model name.
+        --@return boolean|nil Whether all scoped secrets still match.
+        --@return table|nil Unknown generation or Model selector error.
         function facade.matches_model_secrets(previous, name)
             local prior = generation_secrets[previous]
             if not prior or type(name) ~= "string" or not public.models[name]
@@ -1223,6 +1433,9 @@ function M.new(ports, options)
                 )
             end
             local prefix = "Model." .. name .. "."
+            -- Select this Model's secret IDs and the shared proxy route secret.
+            --@param id string Registered secret identity.
+            --@return boolean True when the secret affects the selected Model.
             local function scoped(id)
                 return id == "Network.ProxyUrl" or id:sub(1, #prefix) == prefix
             end
@@ -1235,14 +1448,17 @@ function M.new(ports, options)
             return true
         end
 
-        ---Scans ordinary bytes against release-eligible registered values.
+        -- Scan ordinary bytes against release-eligible registered values.
+        --@param bytes string Candidate ordinary output or request bytes.
+        --@return table|nil Registered-secret hit sequence.
+        --@return table|nil Scanner error on failure.
         function facade.scan_registered_secrets(bytes)
             return registry.scan(bytes)
         end
 
-        ---Creates the cross-chunk scanner used by bounded process output. Raw
-        -- bytes remain private to the scanner until it proves the terminal
-        -- ToolResult contains no registered configuration secret.
+        -- Create a cross-chunk scanner for bounded process output.
+        --@param none No parameters.
+        --@return table Stream scanner retaining raw bytes privately until checked.
         function facade.new_stream_scanner()
             return registry.new_stream_scanner()
         end
@@ -1252,6 +1468,11 @@ function M.new(ports, options)
         return result, document, overrides
     end
 
+    -- Read complete bounded INI bytes from a stable file handle.
+    --@param path string Absolute configuration path.
+    --@return string|nil Exact file bytes.
+    --@return table|nil Opened file identity on success, filesystem error on failure.
+    --@effect Opens, reads, verifies, and closes a direct filesystem handle.
     local function read_file(path)
         local filesystem = admitted_ports.filesystem
         if not filesystem then
@@ -1310,12 +1531,21 @@ function M.new(ports, options)
         return table.concat(parts), identity_or_error
     end
 
+    -- Compute a private source digest for draft stale checks.
+    --@param source string Complete INI bytes.
+    --@return string|nil SHA-256 digest.
+    --@return table|nil Digest error on failure.
     local function private_digest(source)
         local result, digest_error = safety_service.digest(source)
         if not result then return nil, digest_error end
         return result
     end
 
+    -- Re-read the original config and require identical bytes and file identity.
+    --@param state table Private replace-draft state.
+    --@return boolean|nil True when its base remains current.
+    --@return table|nil Read, digest, or stale error.
+    --@effect Reads the original file before publication.
     local function check_edit_base(state)
         local source, identity_or_error = read_file(state.path)
         if not source then return nil, identity_or_error end
@@ -1332,6 +1562,11 @@ function M.new(ports, options)
         return true
     end
 
+    -- Prove a create target is absent without overwriting an existing file.
+    --@param path string Absolute target path.
+    --@return boolean|nil True if absent, false if present, nil on inspection error.
+    --@return table|nil Conflict or filesystem error when not absent.
+    --@effect Opens and closes an existing target to distinguish conflicts.
     local function target_absent(path)
         local filesystem = admitted_ports.filesystem
         if not filesystem then
@@ -1349,18 +1584,44 @@ function M.new(ports, options)
         return nil, handle_or_error
     end
 
+    -- Remove a failed temporary only while its path still names the object this write created.
+    --@param path string Absolute create-new configuration temporary path.
+    --@param identity table|nil Identity captured from that creation handle; nil prevents deletion.
+    --@return nil Cleanup is best effort and does not replace the caller's primary error.
+    --@effect May delete the original temporary after verifying its object identity; leaves replacements untouched.
     local function cleanup_temporary(path, identity)
+        if not identity then return end
         local filesystem = admitted_ports.filesystem
         local stated, observed = filesystem.stat_identity(path)
-        if stated then identity = observed end
-        if identity then filesystem.delete_verified(path, identity) end
+        if stated
+            and identity.kind == observed.kind
+            and identity.volume == observed.volume
+            and identity.object == observed.object
+        then
+            filesystem.delete_verified(path, observed)
+        end
     end
 
+    -- Write a new configuration temporary and verify its bytes after close.
+    --@param path string Absolute create-new temporary path.
+    --@param source string Exact INI bytes accepted by the configuration draft.
+    --@return table|nil Post-close file identity, or nil on failure.
+    --@return table|nil Structured write, flush, close or verification failure.
+    --@effect Creates and flushes the temporary; attempts cleanup on failure only after binding its created object.
     local function write_temporary(path, source)
         local filesystem = admitted_ports.filesystem
         local created, handle_or_error = filesystem.create_new(path, 384)
         if not created then return nil, handle_or_error end
         local handle = handle_or_error
+        local bound, created_identity = filesystem.stat_identity(handle)
+        if not bound or created_identity.kind ~= "file" then
+            filesystem.close(handle)
+            return nil, failure(
+                "ConfigTemporaryMismatch",
+                "created temporary identity could not be bound",
+                bound and "invalid-type" or created_identity.code
+            )
+        end
         local offset = 1
         while offset <= #source do
             local bytes = source:sub(
@@ -1370,7 +1631,7 @@ function M.new(ports, options)
             local written, write_error = filesystem.stream_write(handle, bytes)
             if not written then
                 filesystem.close(handle)
-                cleanup_temporary(path)
+                cleanup_temporary(path, created_identity)
                 return nil, write_error
             end
             offset = offset + #bytes
@@ -1378,23 +1639,35 @@ function M.new(ports, options)
         local flushed, flush_error = filesystem.flush_file(handle)
         if not flushed then
             filesystem.close(handle)
-            cleanup_temporary(path)
+            cleanup_temporary(path, created_identity)
             return nil, flush_error
         end
         local stated, identity_or_error = filesystem.stat_identity(handle)
         if not stated then
             filesystem.close(handle)
-            cleanup_temporary(path)
+            cleanup_temporary(path, created_identity)
             return nil, identity_or_error
         end
         local closed, close_error = filesystem.close(handle)
         if not closed then
-            cleanup_temporary(path, identity_or_error)
+            cleanup_temporary(path, created_identity)
             return nil, close_error
         end
-        return identity_or_error
+        local final_identity, final_error = filesystem_util.observe_closed_write(filesystem, path, identity_or_error, source)
+        if not final_identity then
+            cleanup_temporary(path, created_identity)
+            return nil, failure("ConfigTemporaryMismatch", "temporary config changed at close", final_error.code)
+        end
+        return final_identity
     end
 
+    -- Re-read a written temporary and validate its exact bytes as a generation.
+    --@param path string Absolute temporary path.
+    --@param expected string Candidate INI bytes.
+    --@param context_overrides table Validated Context overrides.
+    --@return table|nil Current temporary file identity.
+    --@return table|nil Read, mismatch, or parse error.
+    --@effect Reads temporary through the filesystem port.
     local function verify_temporary(path, expected, context_overrides)
         local observed, identity_or_error = read_file(path)
         if not observed then return nil, identity_or_error end
@@ -1410,11 +1683,20 @@ function M.new(ports, options)
         return identity_or_error
     end
 
+    -- Resolve a typed field declaration from an exact section and key.
+    --@param section string Exact or family INI section name.
+    --@param key string Field key.
+    --@return table|nil Matching catalog descriptor.
     local function descriptor_for(section, key)
         local family = section_family(section)
         return family and DESCRIPTORS[family].by_key[key] or nil
     end
 
+    -- Encode a semantic edit value into its INI text or token wrapper.
+    --@param descriptor table Typed catalog field declaration.
+    --@param value any Candidate typed field value.
+    --@return table|nil INI value wrapper.
+    --@return table|nil Type or wrapper-construction error.
     local function encode_change(descriptor, value)
         if descriptor.form == "text" then
             if type(value) ~= "string" then return nil, config_failure("edit-value-type") end
@@ -1436,6 +1718,10 @@ function M.new(ports, options)
         return ini.token(value)
     end
 
+    -- Build a complete INI source from typed section value records.
+    --@param sections any Nonempty ordered section array.
+    --@return string|nil Serialized full configuration source.
+    --@return table|nil Shape, field, encoding, or INI error.
     local function build_values_source(sections)
         local count = dense_count(sections)
         if not count or count == 0 then
@@ -1500,7 +1786,11 @@ function M.new(ports, options)
         return source
     end
 
-    ---Parses a complete candidate without changing the service's current generation.
+    -- Parse a complete candidate without publishing a current generation.
+    --@param source string Complete INI bytes.
+    --@param context_overrides table|nil Context override map.
+    --@return table|nil Read-only candidate generation.
+    --@return table|nil Structured validation error.
     function service.parse(source, context_overrides)
         local generation, generation_or_error = parse_generation(
             source,
@@ -1511,7 +1801,12 @@ function M.new(ports, options)
         return generation
     end
 
-    ---Publishes one validated immutable generation, reusing an identical binding.
+    -- Publish one validated generation, reusing an identical source/override binding.
+    --@param source string Complete INI bytes.
+    --@param context_overrides table|nil Context override map.
+    --@return table|nil Current read-only generation.
+    --@return table|nil Digest or validation error.
+    --@effect Advances generation serial only for a new valid binding.
     function service.reload(source, context_overrides)
         local overrides, override_error = validate_overrides(
             context_overrides,
@@ -1531,24 +1826,38 @@ function M.new(ports, options)
         return generation
     end
 
-    ---Reads and validates the complete INI bytes at a top-level turn boundary.
+    -- Read and publish the complete INI file at a top-level turn boundary.
+    --@param path string Absolute configuration path.
+    --@param context_overrides table|nil Context override map.
+    --@return table|nil Current read-only generation.
+    --@return table|nil Read, digest, or validation error.
+    --@effect Reads the file and may advance the current generation.
     function service.reload_file(path, context_overrides)
         local source, read_error = read_file(path)
         if not source then return nil, read_error end
         return service.reload(source, context_overrides)
     end
 
-    ---Returns the last successfully published generation, if any.
+    -- Return the last successfully published generation, if any.
+    --@param none No parameters.
+    --@return table|nil Current read-only generation.
     function service.current()
         return current_generation
     end
 
-    ---Returns only typed migration actions; no source values are projected.
+    -- Return typed migration actions without source values.
+    --@param source any Raw INI bytes to inspect.
+    --@return table Frozen migration-advice sequence.
     function service.migration_advice(source)
         return freeze(migration_advice(source), "configuration migration advice")
     end
 
-    ---Begins a stale-bound edit of an existing complete configuration file.
+    -- Begin a stale-bound edit of an existing complete configuration file.
+    --@param path string Absolute source path.
+    --@param context_overrides table|nil Context override map.
+    --@return table|nil Private replace-draft handle.
+    --@return table|nil Path, read, parse, or digest error.
+    --@effect Reads and binds exact source bytes and file identity.
     function service.begin_edit(path, context_overrides)
         if not valid_absolute_path(path) then
             return nil, failure("InvalidConfigPath", "config edit path must be absolute")
@@ -1576,7 +1885,13 @@ function M.new(ports, options)
         })
     end
 
-    ---Begins a no-replace transaction for a complete new configuration.
+    -- Begin a no-replace transaction for a complete new configuration.
+    --@param path string Absolute target path.
+    --@param source string Complete candidate INI bytes.
+    --@param context_overrides table|nil Context override map.
+    --@return table|nil Private create-draft handle.
+    --@return table|nil Path, conflict, or parse error.
+    --@effect Checks target absence without writing a file.
     function service.begin_new(path, source, context_overrides)
         if not valid_absolute_path(path) then
             return nil, failure("InvalidConfigPath", "new config path must be absolute")
@@ -1600,20 +1915,26 @@ function M.new(ports, options)
         })
     end
 
-    ---Begins a no-replace transaction from typed semantic section values.
-    -- Secret fields remain values inside the draft and are never returned in a
-    -- public generation or diagnostic. The complete candidate must validate
-    -- before a draft handle is issued.
+    -- Begin a no-replace draft from typed section values.
+    --@param path string Absolute new configuration target.
+    --@param sections table Typed section and field values.
+    --@param context_overrides table|nil Context override map.
+    --@return table|nil Private create-draft handle.
+    --@return table|nil Build, conflict, or validation error.
     function service.begin_new_values(path, sections, context_overrides)
         local source, source_error = build_values_source(sections)
         if not source then return nil, source_error end
         return service.begin_new(path, source, context_overrides)
     end
 
-    ---Begins a replace transaction only when an invalid bootstrap source still
-    -- matches exact caller-owned bytes. This narrow path lets the offline setup
-    -- flow replace its own repair template without accepting or discarding an
-    -- arbitrary invalid user configuration.
+    -- Begin replacement only for an exact caller-owned invalid bootstrap source.
+    --@param path string Absolute template path.
+    --@param expected_source string Exact bytes previously written by setup.
+    --@param sections table Typed replacement section values.
+    --@param context_overrides table|nil Context override map.
+    --@return table|nil Private replace-draft handle.
+    --@return table|nil Path, mismatch, build, parse, or digest error.
+    --@effect Reads and binds existing template bytes and identity without writing.
     function service.begin_exact_repair_values(
         path,
         expected_source,
@@ -1660,6 +1981,10 @@ function M.new(ports, options)
         })
     end
 
+    -- Resolve an unconsumed repair handle issued by this service.
+    --@param draft any Candidate repair handle.
+    --@return table|nil Private repair state.
+    --@return table|nil Stale or foreign draft error.
     local function repair_state(draft)
         local state = repair_states[draft]
         if not state or state.owner ~= owner or state.consumed then
@@ -1668,12 +1993,19 @@ function M.new(ports, options)
         return state
     end
 
+    -- Bind a read-only repair handle to private line-edit state.
+    --@param state table Private repair state.
+    --@return table Read-only repair handle.
+    --@effect Registers state in the weak-key repair map.
     local function repair_handle(state)
         local draft = readonly({}, "private configuration repair")
         repair_states[draft] = state
         return draft
     end
 
+    -- Reassemble a repair draft while preserving untouched bytes and endings.
+    --@param state table Private BOM and physical line records.
+    --@return string Candidate full INI bytes.
     local function repair_source(state)
         local parts = { state.bom }
         for _, line in ipairs(state.lines) do
@@ -1683,8 +2015,11 @@ function M.new(ports, options)
         return table.concat(parts)
     end
 
-    ---Captures an invalid file for explicit, private line edits. Unparsed bytes
-    -- never enter a public draft or projection, and opening performs no writes.
+    -- Capture an invalid file for private, explicit line edits.
+    --@param path string Absolute invalid configuration path.
+    --@return table|nil Private repair handle.
+    --@return table|nil Path, read, parse-state, digest, or line-limit error.
+    --@effect Reads and binds original bytes/identity without writing.
     function service.begin_repair(path)
         if not valid_absolute_path(path) then
             return nil, failure("InvalidConfigPath", "config repair path must be absolute")
@@ -1728,8 +2063,11 @@ function M.new(ports, options)
         })
     end
 
-    ---Returns line locations and schema labels, never source values, comments,
-    -- resource names, or raw parser messages from an invalid configuration.
+    -- Project repair line locations and schema labels without source values.
+    --@param draft table Live repair handle.
+    --@param page integer|nil One-based page, default one.
+    --@return table|nil Frozen repair status and bounded line labels.
+    --@return table|nil Handle or page error.
     function service.repair_status(draft, page)
         local state, state_error = repair_state(draft)
         if not state then return nil, state_error end
@@ -1775,8 +2113,13 @@ function M.new(ports, options)
         }, "configuration repair status")
     end
 
-    ---Changes exactly one physical line while retaining every untouched byte.
-    -- Intermediate candidates may remain invalid; only commit can publish.
+    -- Change exactly one physical line while retaining untouched bytes.
+    --@param draft table Live repair handle.
+    --@param operation string Replace, insert, or delete.
+    --@param number integer One-based physical line location.
+    --@param value string|nil New bounded line bytes, absent for delete.
+    --@return table|nil New private repair handle; original remains unchanged.
+    --@return table|nil Handle, grammar, or resource-limit error.
     function service.edit_repair(draft, operation, number, value)
         local state, state_error = repair_state(draft)
         if not state then return nil, state_error end
@@ -1829,8 +2172,12 @@ function M.new(ports, options)
         return repair_handle(next_state)
     end
 
-    ---Validates the complete repaired candidate before creating a temporary,
-    -- then reuses the ordinary exact-source and atomic-publication transaction.
+    -- Validate a repaired source and publish through the ordinary exact transaction.
+    --@param draft table Live repair handle.
+    --@param temporary_path string Distinct same-directory temporary path.
+    --@return table|nil Published read-only generation.
+    --@return table|nil Handle, validation, or publication error.
+    --@effect May replace the file and consume the repair handle after publication.
     function service.commit_repair(draft, temporary_path)
         local state, state_error = repair_state(draft)
         if not state then return nil, state_error end
@@ -1849,7 +2196,11 @@ function M.new(ports, options)
         return published, publish_error
     end
 
-    ---Applies a bounded transaction-sized set of typed semantic changes.
+    -- Apply a bounded transaction of typed semantic field changes.
+    --@param draft table Live configuration draft.
+    --@param changes table Nonempty ordered change records.
+    --@return table|nil New private draft with a fully validated candidate.
+    --@return table|nil Handle, field, INI, or full-schema error.
     function service.edit_draft(draft, changes)
         local state = draft_states[draft]
         if not state or state.owner ~= owner or state.consumed then
@@ -1917,7 +2268,10 @@ function M.new(ports, options)
         return new_draft(owner, next_state)
     end
 
-    ---Checks the shared resource-name grammar without constructing a Model.
+    -- Check the shared resource-name grammar without constructing a Model.
+    --@param name any Candidate Model name.
+    --@return string|nil Accepted name.
+    --@return table|nil InvalidConfigEdit error.
     function service.validate_model_name(name)
         if not valid_name(name, admitted.maximum_name_bytes) then
             return nil, failure("InvalidConfigEdit", "Model name is invalid")
@@ -1925,8 +2279,12 @@ function M.new(ports, options)
         return name
     end
 
-    ---Adds one blank-origin typed Model; an existing section is never reused
-    -- or cloned. The complete candidate must validate before a draft is issued.
+    -- Add a blank-origin typed Model and validate the complete draft.
+    --@param draft table Live configuration draft.
+    --@param name string New Model name.
+    --@param values table Typed initial Model fields.
+    --@return table|nil New private draft.
+    --@return table|nil Name conflict, field, or full-schema error.
     function service.add_model(draft, name, values)
         local state = draft_states[draft]
         if not state or state.owner ~= owner or state.consumed then
@@ -1955,9 +2313,13 @@ function M.new(ports, options)
         return service.edit_draft(draft, changes)
     end
 
-    ---Renames, deletes, or moves a Model in one fully validated draft. Rename
-    -- updates exact INI reviewer references in the same transaction; Context
-    -- references and historical snapshots are deliberately not rewritten.
+    -- Rename, delete, or move a Model in one validated draft.
+    --@param draft table Live configuration draft.
+    --@param operation string Rename, delete, or move.
+    --@param name string Exact existing Model name.
+    --@param destination string|integer|nil New name or one-based position.
+    --@return table|nil New private draft.
+    --@return table|nil Handle, conflict, operation, or validation error.
     function service.manage_model(draft, operation, name, destination)
         local state = draft_states[draft]
         if not state or state.owner ~= owner or state.consumed then
@@ -2037,7 +2399,10 @@ function M.new(ports, options)
         return new_draft(owner, next_state)
     end
 
-    ---Returns the immutable non-secret generation represented by a draft.
+    -- Return the read-only non-secret generation represented by a draft.
+    --@param draft table Live configuration draft.
+    --@return table|nil Candidate generation.
+    --@return table|nil Stale or foreign draft error.
     function service.draft_generation(draft)
         local state = draft_states[draft]
         if not state or state.owner ~= owner or state.consumed then
@@ -2046,12 +2411,10 @@ function M.new(ports, options)
         return state.generation
     end
 
-    ---Lists editable sections from the schema and the draft's physical families.
-    -- Singleton sections are included even when all their values use defaults.
-    -- This reads only the owned draft; it performs no filesystem or network I/O.
-    -- @param draft table Live draft handle issued by this service.
-    -- @return table|nil sections Immutable exact section names in schema/family order.
-    -- @return table|nil err Stale or foreign draft failure.
+    -- List editable singleton and resource-family sections of the draft.
+    --@param draft table Live draft handle issued by this service.
+    --@return table|nil Frozen exact section names in schema/family order.
+    --@return table|nil Stale or foreign draft error.
     function service.draft_sections(draft)
         local generation, draft_error = service.draft_generation(draft)
         if not generation then return nil, draft_error end
@@ -2065,14 +2428,11 @@ function M.new(ports, options)
         return freeze(sections, "editable configuration sections")
     end
 
-    ---Projects one section's field types and effective values without secrets.
-    -- Key, ProxyUrl, and AdapterOptions always use hidden input and projection,
-    -- including empty values and options that might later register a secret.
-    -- No source bytes, secret values, or reusable source digests are returned.
-    -- @param draft table Live draft handle issued by this service.
-    -- @param section string Exact existing family or schema singleton section.
-    -- @return table|nil fields Immutable catalog-ordered field records.
-    -- @return table|nil err Invalid draft or unknown section failure.
+    -- Project one section's field types and non-secret effective values.
+    --@param draft table Live draft handle issued by this service.
+    --@param section string Exact existing family or schema singleton section.
+    --@return table|nil Frozen catalog-ordered field records.
+    --@return table|nil Invalid draft or unknown-section error.
     function service.draft_fields(draft, section)
         local generation, draft_error = service.draft_generation(draft)
         if not generation then return nil, draft_error end
@@ -2104,16 +2464,13 @@ function M.new(ports, options)
         return freeze(fields, "editable configuration fields")
     end
 
-    ---Edits one existing field from the same INI value grammar as the main file.
-    -- Quoted text supports the codec's exact escapes; token fields retain their
-    -- schema types. Physical newlines cannot introduce additional assignments.
-    -- The complete candidate is validated before issuing a replacement draft.
-    -- @param draft table Live draft handle; unchanged if the candidate fails.
-    -- @param section string Exact schema singleton or existing family section.
-    -- @param key string Exact catalog key.
-    -- @param source string One bounded INI value, excluding physical line endings.
-    -- @return table|nil edited New private draft handle; no file is written.
-    -- @return table|nil err Typed selector, syntax, schema, or full validation failure.
+    -- Edit one field using the same INI value grammar as the main file.
+    --@param draft table Live draft handle; unchanged if the candidate fails.
+    --@param section string Exact schema singleton or existing family section.
+    --@param key string Exact catalog key.
+    --@param source string One bounded INI value, excluding physical line endings.
+    --@return table|nil New private draft handle; no file is written.
+    --@return table|nil Selector, syntax, schema, or full validation error.
     function service.edit_draft_value(draft, section, key, source)
         local fields, fields_error = service.draft_fields(draft, section)
         if not fields then return nil, fields_error end
@@ -2141,7 +2498,14 @@ function M.new(ports, options)
         return service.edit_draft(draft, { { section = section, key = key, value = value } })
     end
 
-    ---Publishes a same-directory temporary after revalidation and stale checks.
+    -- Publish a same-directory temporary after exact source and admission checks.
+    --@param draft table Live create or replace draft.
+    --@param temporary_path string Distinct same-directory absolute temporary path.
+    --@param admission_guard function|nil External precondition rechecked before publication.
+    --@return table|nil Newly published read-only generation.
+    --@return table|nil Validation, stale, filesystem, or durability-unknown error.
+    --@effect Creates and verifies a temporary, publishes it, flushes directory,
+    -- and consumes the draft once replacement succeeds.
     function service.commit_draft(draft, temporary_path, admission_guard)
         local state = draft_states[draft]
         if not state or state.owner ~= owner or state.consumed then
@@ -2159,6 +2523,11 @@ function M.new(ports, options)
         if admission_guard ~= nil and type(admission_guard) ~= "function" then
             return nil, failure("InvalidConfigEdit", "configuration admission guard must be callable")
         end
+        -- Invoke an optional caller guard before and after staging bytes.
+        --@param none No parameters.
+        --@return boolean|nil True when admission remains valid.
+        --@return table|nil Precondition error on failure.
+        --@effect Calls the supplied guard under pcall when present.
         local function reverify_admission()
             if not admission_guard then return true end
             local called, verified, verify_error = pcall(admission_guard)
@@ -2194,18 +2563,18 @@ function M.new(ports, options)
             return nil, verify_error
         end
         if not identity_equal(temporary_identity, verified_identity) then
-            cleanup_temporary(temporary_path, verified_identity)
+            cleanup_temporary(temporary_path, temporary_identity)
             return nil, failure("ConfigTemporaryMismatch", "temporary config identity changed")
         end
         admitted_write, admission_error = reverify_admission()
         if not admitted_write then
-            cleanup_temporary(temporary_path, verified_identity)
+            cleanup_temporary(temporary_path, temporary_identity)
             return nil, admission_error
         end
         if state.mode == "replace" then
             local unchanged, stale_error = check_edit_base(state)
             if not unchanged then
-                cleanup_temporary(temporary_path, verified_identity)
+                cleanup_temporary(temporary_path, temporary_identity)
                 return nil, stale_error
             end
         end
@@ -2215,10 +2584,7 @@ function M.new(ports, options)
         if not restated
             or not identity_equal(verified_identity, final_temporary_or_error)
         then
-            cleanup_temporary(
-                temporary_path,
-                restated and final_temporary_or_error or verified_identity
-            )
+            cleanup_temporary(temporary_path, temporary_identity)
             return nil, restated and failure(
                 "ConfigTemporaryMismatch",
                 "temporary config identity changed before publication"
@@ -2237,7 +2603,7 @@ function M.new(ports, options)
             )
         end
         if not published then
-            cleanup_temporary(temporary_path, verified_identity)
+            cleanup_temporary(temporary_path, temporary_identity)
             return nil, publish_error
         end
         state.consumed = true

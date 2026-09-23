@@ -1,7 +1,7 @@
 --[[
-File: process.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-09-23
+File: process.lua
 Description: Builds bounded foreground shell and internal component AsyncPorts.
 ]]
 
@@ -56,16 +56,40 @@ local FORBIDDEN_ENVIRONMENT_NAMES = {
     NETRC = true,
 }
 
+-- Construct a structured diagnostic without throwing or formatting its optional fields.
+--@param code string Stable diagnostic code used by callers to choose recovery behavior.
+--@param message string Human-readable summary supplied by the failing operation.
+--@return table New diagnostic record; optional non-nil fields are retained without deep copying.
 local function failure(code, message)
     return { code = code, message = message }
 end
 
+-- Create a shallow read-only view without copying the backing table.
+--@param values table Backing fields retained by reference; the caller owns their stability.
+--@param label string|nil Diagnostic label; defaults to "readonly value".
+--@return table Empty proxy exposing the backing fields through its locked metatable.
+--@ownership Retains values by reference; nested values and the backing table are not frozen.
 local function readonly(values, label)
+    --@metatable readonly_proxy Forwards reads and iteration; ordinary assignments raise an error.
+    --@field __index table Backing values used for missing-key reads.
+    --@field __newindex function Rejects ordinary assignments without changing the backing values.
+    --@field __pairs function Enumerates the backing table with next.
+    --@field __metatable string Hides this metatable behind the fixed "locked" marker.
     return setmetatable({}, {
         __index = values,
+        -- Reject a write through the proxy before it can create an ordinary field.
+        --@param _ table Proxy receiving the assignment; its contents are not consulted.
+        --@param key any Attempted field name included in the diagnostic.
+        --@return nil Does not return normally.
+        --@error Always raises a read-only assignment error at the caller frame.
         __newindex = function(_, key)
             error((label or "readonly value") .. " cannot be modified: " .. tostring(key), 2)
         end,
+        -- Iterate the backing fields instead of the empty proxy table.
+        --@param none The proxy argument supplied by pairs is ignored.
+        --@return function The standard next iterator.
+        --@return table Backing values used as iterator state.
+        --@return nil Initial key used to start iteration.
         __pairs = function()
             return next, values, nil
         end,
@@ -73,10 +97,17 @@ local function readonly(values, label)
     })
 end
 
+-- Check the Lua integer subtype and the caller's inclusive lower bound.
+--@param value any Candidate value; floats and non-numeric values are rejected.
+--@param minimum integer Inclusive minimum accepted by this check.
+--@return boolean True only for an integer at least minimum.
 local function valid_integer(value, minimum)
     return math.type(value) == "integer" and value >= minimum
 end
 
+-- Admit a NUL-free absolute POSIX, drive, or UNC executable path spelling.
+--@param path any Candidate platform path.
+--@return boolean valid Whether the spelling is absolute and non-empty.
 local function valid_absolute_path(path)
     if type(path) ~= "string" or path == "" or path:find("\0", 1, true) then
         return false
@@ -87,6 +118,10 @@ local function valid_absolute_path(path)
         or normalized:match("^//[^/]+/[^/]+") ~= nil
 end
 
+-- Preserve a typed native error or replace an invalid native error contract.
+--@param value any Error value returned by the native process method.
+--@param operation string Native method name used in the fallback diagnostic.
+--@return table err Structured process error.
 local function typed_native_error(value, operation)
     if type(value) == "table"
         and type(value.code) == "string"
@@ -99,6 +134,13 @@ local function typed_native_error(value, operation)
     return failure("NativeContract", "native process returned an invalid " .. operation .. " error")
 end
 
+-- Invoke a native process method under exception and return-shape containment.
+--@param native table Native process port containing the selected method.
+--@param method string Native method name to invoke.
+--@param ... any Arguments forwarded to the native method in order.
+--@return boolean ok True only when the native method returns true status.
+--@return any value Native result on success or typed diagnostic on failure.
+--@effect Calls the selected native method, which may start or mutate an OS process.
 local function call_native(native, method, ...)
     local called, ok, value = pcall(native[method], ...)
     if not called then
@@ -109,22 +151,43 @@ local function call_native(native, method, ...)
     return false, failure("NativeContract", "native process returned an invalid status")
 end
 
+-- Raise a typed native error at the requested public caller frame.
+--@param native_error table Diagnostic containing code and message.
+--@param level integer|nil Caller-frame offset; defaults to one.
+--@return nil Does not return normally.
+--@error Always raises a formatted native process error.
 local function raise_native(native_error, level)
     error(native_error.code .. ": " .. native_error.message, (level or 1) + 1)
 end
 
+-- Copy the contiguous array prefix while retaining element references.
+--@param values table Sequence copied with ipairs.
+--@return table New sequence containing the original element values through the first hole.
+--@ownership Copies the outer table only; nested objects retain their original owners.
 local function copy_array(values)
     local result = {}
     for index, value in ipairs(values) do result[index] = value end
     return result
 end
 
+-- Fold environment variable names with ASCII-only Windows comparison rules.
+--@param value string Environment key whose non-ASCII bytes remain unchanged.
+--@return string folded Uppercase ASCII key.
 local function ascii_upper(value)
+    -- Map one lowercase ASCII byte to its uppercase equivalent.
+    --@param character string One lowercase ASCII byte matched by gsub.
+    --@return string upper Corresponding uppercase ASCII byte.
     return (value:gsub("[a-z]", function(character)
         return string.char(character:byte() - 32)
     end))
 end
 
+-- Copy an environment map after rejecting ambiguity and unsafe inherited names.
+--@param values table|nil Candidate string-to-string environment map.
+--@param mode string minimal or inherit_filtered selection policy.
+--@param shell_kind string windows or linux, used for key comparison semantics.
+--@return table|nil environment Independent admitted environment map.
+--@return table|nil err Structured invalid-entry or duplicate-name failure.
 local function sanitize_environment(values, mode, shell_kind)
     if values == nil then return {} end
     if type(values) ~= "table" then
@@ -158,6 +221,9 @@ local function sanitize_environment(values, mode, shell_kind)
     return result
 end
 
+-- Match the backend shell against exact fixed command-interpreter arguments.
+--@param shell table Candidate platform shell descriptor.
+--@return table|nil descriptor Independent validated shell descriptor.
 local function validate_shell(shell)
     if type(shell) ~= "table"
         or type(shell.kind) ~= "string"
@@ -190,6 +256,9 @@ local function validate_shell(shell)
     }
 end
 
+-- Allocate bounded head-and-tail retention state for one output channel.
+--@param limit integer Maximum retained bytes for this channel.
+--@return table accumulator Mutable output retention state.
 local function new_accumulator(limit)
     return {
         limit = limit,
@@ -201,6 +270,11 @@ local function new_accumulator(limit)
     }
 end
 
+-- Record a new observed chunk while retaining deterministic head and tail bytes.
+--@param accumulator table Mutable channel retention state.
+--@param bytes string Newly observed bytes in native event order.
+--@return nil No result; the accumulator tracks total and retained bytes.
+--@effect Mutates accumulator total, head, and tail.
 local function append_bytes(accumulator, bytes)
     accumulator.total = accumulator.total + #bytes
     local head_room = accumulator.head_limit - #accumulator.head
@@ -213,11 +287,20 @@ local function append_bytes(accumulator, bytes)
     end
 end
 
+-- Read the retained bytes and whether the channel exceeded its quota.
+--@param accumulator table Completed or in-progress channel retention state.
+--@return string bytes Retained head followed by retained tail.
+--@return boolean truncated Whether more than the quota was observed.
 local function accumulated_bytes(accumulator)
     return accumulator.head .. accumulator.tail,
         accumulator.total > accumulator.limit
 end
 
+-- Admit one native process output or terminal observation without event provenance.
+--@param observation any Native observation record.
+--@param maximum_poll_bytes integer Maximum bytes admitted for one output event.
+--@return table|nil admitted Original valid observation record.
+--@return table|nil err Structured native contract failure.
 local function validate_observation(observation, maximum_poll_bytes)
     if type(observation) ~= "table" or type(observation.kind) ~= "string" then
         return nil, failure("NativeContract", "native process observation is invalid")
@@ -237,6 +320,10 @@ local function validate_observation(observation, maximum_poll_bytes)
     return nil, failure("NativeContract", "native process observation kind is invalid")
 end
 
+-- Check the native joined-process result before projecting public evidence.
+--@param result any Candidate terminal result record.
+--@return table|nil admitted Original valid native result.
+--@return table|nil err Structured native result contract failure.
 local function validate_result(result)
     if type(result) ~= "table" or not TERMINAL_OUTCOMES[result.outcome] then
         return nil, failure("NativeContract", "native process result has no terminal outcome")
@@ -259,6 +346,9 @@ local function validate_result(result)
     return result
 end
 
+-- Count a dense one-based array while rejecting holes and extra key kinds.
+--@param values any Candidate table; every key must belong to the sequence 1 through count.
+--@return integer|nil Sequence length, including zero for an empty table; nil for an invalid shape.
 local function dense_count(values)
     if type(values) ~= "table" then return nil end
     local count = 0
@@ -272,6 +362,15 @@ local function dense_count(values)
     return count
 end
 
+-- Admit a trusted internal argv process with bounded stdin, arguments, and output.
+--@param spec table Candidate component executable, argv, cwd, env, and stdin.
+--@param maximum_output_bytes integer Service output cap.
+--@param maximum_stdin_bytes integer Service stdin byte cap.
+--@param maximum_arguments integer Service argv element cap.
+--@param maximum_argument_bytes integer Service total argv byte cap.
+--@param shell_kind string Platform kind used for environment-name admission.
+--@return table|nil admitted Independent validated component request facts.
+--@return table|nil err Structured component, path, argument, or limit failure.
 local function validate_component_spec(
     spec,
     maximum_output_bytes,
@@ -343,6 +442,13 @@ local function validate_component_spec(
     }
 end
 
+-- Create a five-method process port with fixed output quotas and handle lifecycle.
+--@param native table Validated native process callbacks.
+--@param request_factory function Builds the native start request from a monotonic start time.
+--@param output_limit_bytes integer Combined retained stdout/stderr byte cap.
+--@param maximum_poll_bytes integer Maximum native output chunk bytes per poll event.
+--@return table port Mutable AsyncPort in created state; caller owns start through close.
+--@ownership Port owns its native handle after successful start and releases it on close.
 local function new_async_port(native, request_factory, output_limit_bytes, maximum_poll_bytes)
     local state = "created"
     local handle
@@ -357,6 +463,12 @@ local function new_async_port(native, request_factory, output_limit_bytes, maxim
     local observed_sequence = 0
     local port = {}
 
+    -- Start the native process exactly once from the created state.
+    --@param self table This AsyncPort and its captured lifecycle state.
+    --@param now integer Nonnegative monotonic start timestamp.
+    --@return boolean started True after a valid native handle is obtained.
+    --@error Raises for invalid state/time or native process failure.
+    --@effect Starts an OS process and takes ownership of its handle.
     function port:start(now)
         if state ~= "created" then error("process port is " .. state, 2) end
         if not valid_integer(now, 0) then error("process start time is invalid", 2) end
@@ -369,6 +481,13 @@ local function new_async_port(native, request_factory, output_limit_bytes, maxim
         return true
     end
 
+    -- Project bounded native observations to ordered progress or terminal events.
+    --@param self table Started AsyncPort whose native handle remains owned.
+    --@param now integer Nonnegative monotonic observation timestamp.
+    --@param budget integer Maximum event count accepted from this poll.
+    --@return table events Ordered validated progress/terminal event sequence.
+    --@error Raises on invalid state, arguments, or native contract violation.
+    --@effect Polls the OS process and updates output quotas and terminal state.
     function port:poll(now, budget)
         if state ~= "started" then error("process port is " .. state, 2) end
         if terminal_outcome then return {} end
@@ -438,6 +557,12 @@ local function new_async_port(native, request_factory, output_limit_bytes, maxim
         return events
     end
 
+    -- Request cancellation of a live process before a terminal observation.
+    --@param self table Started AsyncPort owning the process handle.
+    --@param now integer Nonnegative monotonic cancellation timestamp.
+    --@return boolean accepted Native cancellation acceptance; false if already terminal.
+    --@error Raises on invalid state/time or native process failure.
+    --@effect Requests native process-tree cancellation.
     function port:cancel(now)
         if state ~= "started" then error("process port is " .. state, 2) end
         if terminal_outcome then return false end
@@ -453,6 +578,12 @@ local function new_async_port(native, request_factory, output_limit_bytes, maxim
         return accepted
     end
 
+    -- Join the process and combine its terminal result with bounded output evidence.
+    --@param self table Started AsyncPort owning the process handle.
+    --@param deadline integer|nil Optional nonnegative monotonic join deadline.
+    --@return table result Terminal outcome, exit data, output retention, and stop proof.
+    --@error Raises on invalid state/deadline or contradictory native result.
+    --@effect Waits for process completion and transitions the port to joined.
     function port:join(deadline)
         if state ~= "started" then error("process port is " .. state, 2) end
         if deadline ~= nil and not valid_integer(deadline, 0) then
@@ -496,6 +627,11 @@ local function new_async_port(native, request_factory, output_limit_bytes, maxim
         }
     end
 
+    -- Release a started or joined native process handle exactly once.
+    --@param self table AsyncPort owning the process handle.
+    --@return boolean closed True after native close succeeds.
+    --@error Raises on invalid state or native close failure.
+    --@effect Closes the native handle and transitions the port to closed.
     function port:close()
         if state ~= "started" and state ~= "joined" then
             error("process port is " .. state, 2)
@@ -509,6 +645,12 @@ local function new_async_port(native, request_factory, output_limit_bytes, maxim
     return port
 end
 
+-- Admit one opaque shell command with a bounded output and filtered environment.
+--@param spec table Candidate command, cwd, environment mode, and output cap.
+--@param maximum_output_bytes integer Service output cap.
+--@param shell_kind string Platform kind used for environment-name admission.
+--@return table|nil admitted Independent validated command request facts.
+--@return table|nil err Structured command, path, environment, or limit failure.
 local function validate_spec(spec, maximum_output_bytes, shell_kind)
     if type(spec) ~= "table"
         or type(spec.command) ~= "string"
@@ -546,10 +688,10 @@ end
 ---Creates a foreground process factory for one fixed platform shell.
 -- The shell executable and fixed arguments come only from the selected backend;
 -- callers provide one opaque command and cannot substitute the internal shell.
--- @param native table Native process implementation.
--- @param options table Fixed shell and release hard caps.
--- @return table|nil service Immutable process service.
--- @return table|nil err Structured construction failure.
+--@param native table Native process implementation.
+--@param options table Fixed shell and release hard caps.
+--@return table|nil service Immutable process service.
+--@return table|nil err Structured construction failure.
 function M.new(native, options)
     if type(native) ~= "table" then
         return nil, failure("InvalidProcessPort", "native process port is required")
@@ -584,9 +726,9 @@ function M.new(native, options)
     local service = {}
 
     ---Creates a five-method AsyncPort for one non-interactive shell command.
-    -- @param spec table Opaque command, cwd, environment mode, and output cap.
-    -- @return table|nil port AsyncPort in the created state.
-    -- @return table|nil err Structured validation failure.
+    --@param spec table Opaque command, cwd, environment mode, and output cap.
+    --@return table|nil port AsyncPort in the created state.
+    --@return table|nil err Structured validation failure.
     function service.new_port(spec)
         local validated, spec_error = validate_spec(
             spec,
@@ -595,6 +737,9 @@ function M.new(native, options)
         )
         if not validated then return nil, spec_error end
 
+        -- Build the fixed-shell native start request from validated command facts.
+        --@param now integer Nonnegative monotonic start timestamp.
+        --@return table request Native shell process request with closed stdin.
         return new_async_port(native, function(now)
             return {
                 shell = {
@@ -616,9 +761,9 @@ function M.new(native, options)
     -- This method is a composition-layer primitive, not a model tool surface.
     -- Its environment is always constructed from a strict allowlist and its
     -- bounded stdin bytes are represented as an anonymous native pipe request.
-    -- @param spec table Absolute executable, argv, clean environment, and stdin.
-    -- @return table|nil port AsyncPort in the created state.
-    -- @return table|nil err Structured validation failure.
+    --@param spec table Absolute executable, argv, clean environment, and stdin.
+    --@return table|nil port AsyncPort in the created state.
+    --@return table|nil err Structured validation failure.
     function service.new_component_port(spec)
         local validated, spec_error = validate_component_spec(
             spec,
@@ -629,6 +774,9 @@ function M.new(native, options)
             shell_snapshot.kind
         )
         if not validated then return nil, spec_error end
+        -- Build the native argv request with bounded anonymous-pipe stdin.
+        --@param now integer Nonnegative monotonic start timestamp.
+        --@return table request Native component process request.
         return new_async_port(native, function(now)
             return {
                 mode = "argv",

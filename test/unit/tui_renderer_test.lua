@@ -1,19 +1,29 @@
 --[[
-File: tui_renderer_test.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-09-23
+File: tui_renderer_test.lua
 Description: Verifies bounded append-only transcript and capability projections.
 ]]
 
 local A = assert(loadfile(YACA_TEST_ROOT .. "/test/support/assert.lua", "t", _ENV))()
 
+--Loads a source module into an isolated per-case environment.
+--@param name string Module, Model, or resource name selected by the case.
+--@param cache table Per-case module cache preserving isolated imports.
+--@return any module Module export loaded in the isolated source environment.
 local function load_module(name, cache)
     cache = cache or {}
     if cache[name] then return cache[name] end
-    local environment = { require = function(dependency)
+    local environment = {
+        --Resolves an imported Lua module through the isolated test loader.
+        --@param dependency string Source module requested from the isolated loader.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
+        require = function(dependency)
         return load_module(dependency, cache)
     end }
     environment._G = environment
+    --@metatable environment Test-owned lookup and mutation contract for the current case.
+    --@field __index any Fallback table or function used for missing fixture keys.
     setmetatable(environment, { __index = _ENV })
     local chunk, load_error = loadfile(
         YACA_TEST_ROOT .. "/src/" .. name .. ".lua",
@@ -26,12 +36,18 @@ local function load_module(name, cache)
     return value
 end
 
+--Loads a repository Lua module as a test support value.
+--@param relative_path string Repository-relative Lua source path to load.
+--@return any module Test support module export loaded from the repository.
 local function load_table(relative_path)
     local chunk, load_error = loadfile(YACA_TEST_ROOT .. "/" .. relative_path, "t", _ENV)
     A.truthy(chunk, load_error)
     return chunk()
 end
 
+--Reads read file for this test scenario.
+--@param relative_path string Repository-relative Lua source path to load.
+--@return any bytes Bytes read from the selected fixture file.
 local function read_file(relative_path)
     local handle, open_error = io.open(YACA_TEST_ROOT .. "/" .. relative_path, "rb")
     A.truthy(handle, open_error)
@@ -47,6 +63,11 @@ local tui = load_module("tui", cache)
 local contract = load_table(".develope-docs/contracts/tui.lua")
 local fixtures = load_table(".develope-docs/contracts/fixtures/tui-transcripts.lua")
 
+--Checks assert subset against this test expectation.
+--@param expected any Expected value used by the assertion.
+--@param actual any Observed value compared by the assertion.
+--@param path string File or Context path exercised by the case.
+--@return nil No value; the fake port or test assertion observes this callback's effects.
 local function assert_subset(expected, actual, path)
     path = path or "value"
     if type(expected) ~= "table" then
@@ -59,6 +80,9 @@ local function assert_subset(expected, actual, path)
     end
 end
 
+--Builds the capabilities values used by this suite.
+--@param overrides table|nil Per-case overrides of default fixture behavior.
+--@return any observed capabilities value observed by the scenario assertion.
 local function capabilities(overrides)
     local result = {
         ansi = false,
@@ -76,6 +100,9 @@ local function capabilities(overrides)
     return result
 end
 
+--Constructs new renderer for this test scenario.
+--@param overrides table|nil Per-case overrides of default fixture behavior.
+--@return any created Constructed new renderer fixture value.
 local function new_renderer(overrides)
     local options = {
         width = 40,
@@ -88,6 +115,9 @@ local function new_renderer(overrides)
     return assert(tui.new(options))
 end
 
+--Supplies visibility behavior required by this suite.
+--@param enabled boolean Whether the selected feature is enabled.
+--@return any observed visibility value observed by the scenario assertion.
 local function visibility(enabled)
     local result = {
         slogan = false,
@@ -106,6 +136,9 @@ local function visibility(enabled)
     return result
 end
 
+--Supplies startup plain behavior required by this suite.
+--@param renderer table Transcript renderer under test.
+--@return any observed startup plain value observed by the scenario assertion.
 local function startup_plain(renderer)
     return assert(renderer.render_startup({
         version = "0.1.0",
@@ -121,6 +154,9 @@ local function startup_plain(renderer)
     }), "chat"))
 end
 
+--Constructs fixture outputs for this test scenario.
+--@param renderer table Transcript renderer under test.
+--@return table observed Structured fixture record selected by the exercised branch.
 local function fixture_outputs(renderer)
     return {
         ["startup-plain"] = startup_plain(renderer),
@@ -166,10 +202,18 @@ local function fixture_outputs(renderer)
     }
 end
 
+--Supplies strip ansi behavior required by this suite.
+--@param value any Candidate whose acceptance or transformation the test checks.
+--@return any observed strip ansi value observed by the scenario assertion.
 local function strip_ansi(value)
     return (value:gsub("\27%[[0-9;]*m", ""))
 end
 
+--Checks assert render error against this test expectation.
+--@param renderer table Transcript renderer under test.
+--@param block table|string Transcript or storage block under test.
+--@param expected any Expected value used by the assertion.
+--@return any observed assert render error value observed by the scenario assertion.
 local function assert_render_error(renderer, block, expected)
     local rendered, render_error = renderer.render_block(block)
     A.falsy(rendered)
@@ -182,6 +226,9 @@ return {
     cases = {
         {
             name = "TUI registry exactly enriches the frozen semantic projection",
+            --Verifies tUI registry exactly enriches the frozen semantic projection.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify tUI registry exactly enriches the frozen semantic projection.
             run = function()
                 local registry = tui.registry()
                 assert_subset(contract, registry, "tui")
@@ -203,11 +250,17 @@ return {
                 registry.prompts.chat.text = "changed"
                 A.equal(tui.registry().prompts.chat.text, ">>")
                 local renderer = new_renderer()
+                --Executes the action expected to raise in the 'TUI registry exactly enriches the frozen semantic projection' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify tUI registry exactly enriches the frozen semantic projection.
                 A.raises(function() renderer.extra = true end, "cannot be modified")
             end,
         },
         {
             name = "all frozen 40-column transcripts match their golden bytes",
+            --Verifies all frozen 40-column transcripts match their golden bytes.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify all frozen 40-column transcripts match their golden bytes.
             run = function()
                 A.equal(fixtures.width, 40)
                 local outputs = fixture_outputs(new_renderer())
@@ -227,11 +280,14 @@ return {
         },
         {
             name = "all block kinds use fixed headers and exact canonical ID rules",
+            --Verifies all frozen 40-column transcripts match their golden bytes.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify all frozen 40-column transcripts match their golden bytes.
             run = function()
                 local renderer = new_renderer()
                 local registry = tui.registry()
                 for _, kind in ipairs({
-                    "user", "assistant", "tool", "side", "status", "queue", "steer",
+                    "user", "assistant", "tool", "ask", "status", "queue", "steer",
                     "notice", "warning", "error", "recovery", "details", "action",
                 }) do
                     local specification = registry.block_kinds[kind]
@@ -271,6 +327,9 @@ return {
         },
         {
             name = "untrusted controls Unicode controls and forged chrome become visible",
+            --Verifies untrusted controls Unicode controls and forged chrome become visible.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify untrusted controls Unicode controls and forged chrome become visible.
             run = function()
                 local renderer = new_renderer()
                 local c1 = assert(text.encode_scalar(0x009B))
@@ -301,6 +360,9 @@ return {
         },
         {
             name = "basic color changes no semantic text and never trusts input ANSI",
+            --Verifies basic color changes no semantic text and never trusts input ANSI.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify basic color changes no semantic text and never trusts input ANSI.
             run = function()
                 local plain = new_renderer()
                 local colored = new_renderer({
@@ -338,9 +400,15 @@ return {
         },
         {
             name = "append writes complete increasing blocks and faults on broken stdout",
+            --Verifies append writes complete increasing blocks and faults on broken stdout.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify append writes complete increasing blocks and faults on broken stdout.
             run = function()
                 local chunks = {}
                 local renderer = new_renderer({
+                    --Captures writer bytes in the append writes complete increasing blocks and faults on broken stdout scenario.
+                    --@param bytes string Byte chunk supplied to the fake I/O port.
+                    --@return boolean accepted Whether the fake callback accepts this scenario.
                     writer = function(bytes)
                         chunks[#chunks + 1] = bytes
                         return true
@@ -370,7 +438,11 @@ return {
                 A.falsy(closed)
                 A.equal(closed_error.code, "RendererClosed")
 
-                local broken = new_renderer({ writer = function() return false end })
+                local broken = new_renderer({
+                    --Captures writer bytes in the append writes complete increasing blocks and faults on broken stdout scenario.
+                    --@param none No arguments; this closure uses its captured fixture state.
+                    --@return boolean accepted Whether the fake callback accepts this scenario.
+                    writer = function() return false end })
                 local emitted, output_error = broken.append({
                     kind = "error", id = "StorageError", text = "failed",
                 })
@@ -386,6 +458,9 @@ return {
         },
         {
             name = "startup fields are independent ordered and cannot recreate a master switch",
+            --Verifies startup fields are independent ordered and cannot recreate a master switch.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify startup fields are independent ordered and cannot recreate a master switch.
             run = function()
                 local renderer = new_renderer()
                 A.equal(startup_plain(renderer), read_file("test/golden/tui/startup-plain"))
@@ -414,13 +489,16 @@ return {
         },
         {
             name = "input capability hints retain every shared text fallback",
+            --Verifies input capability hints retain every shared text fallback.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify input capability hints retain every shared text fallback.
             run = function()
                 local renderer = new_renderer()
                 local expected = {
                     ["submit-or-queue"] = { "Enter", true, "queue-add", ".queue <message>" },
                     steer = { "Ctrl+Enter", false, "steer", ".immediate <message>" },
                     newline = { "Shift+Enter", false, "multiline", ".multiline" },
-                    side = { "Alt+Enter", false, "side", ".side <message>" },
+                    ask = { "Alt+Enter", false, "ask", ".ask <message>" },
                     cancel = { "Esc", false, "cancel", ".cancel" },
                 }
                 for intent, values in pairs(expected) do
@@ -437,6 +515,9 @@ return {
         },
         {
             name = "renderer schemas and injected limits fail before truncating facts",
+            --Verifies renderer schemas and injected limits fail before truncating facts.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify renderer schemas and injected limits fail before truncating facts.
             run = function()
                 local invalid, options_error = tui.new({})
                 A.falsy(invalid)
@@ -489,6 +570,9 @@ return {
         },
         {
             name = "every focus uses the frozen ASCII prompt with safe draft projection",
+            --Verifies every focus uses the frozen ASCII prompt with safe draft projection.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify every focus uses the frozen ASCII prompt with safe draft projection.
             run = function()
                 local renderer = new_renderer()
                 local expected = {

@@ -1,7 +1,7 @@
 --[[
-File: check_documentation_truth.lua
-Date: 2026-09-19
 Author: WaterRun
+Date: 2026-09-19
+File: check_documentation_truth.lua
 Description: C34 guard: public statements must only describe released
 capability. While Release Gate R is closed every public document must carry
 the pending-qualification markers and none may claim release authorization
@@ -36,6 +36,9 @@ local FORBIDDEN_PHRASES = {
 
 --- Extracts the truth signals the checker keys on.
 -- readiness: contracts/readiness.lua value; manifest: release/manifest.lua.
+--@param readiness table Loaded readiness contract with gates and source_start state.
+--@param manifest table Loaded release manifest with its ordered target qualification records.
+--@return table Gate state, release-authorization flag, phase and pending target identifiers used by document checks.
 function M.signals(readiness, manifest)
     local signals = {}
     signals.gate_r_closed = readiness.gates.R.status ~= "passed"
@@ -55,6 +58,10 @@ end
 
 --- Decides whether one public document's text is truthful for the signals.
 -- Returns an array of findings (empty when truthful).
+--@param relative_path string Repository-relative public document name selecting required status wording.
+--@param text string Exact document contents searched for required and forbidden literal phrases.
+--@param signals table State produced by signals; gate_r_closed controls pending-status requirements.
+--@return table Ordered finding strings; an empty array means the implemented wording checks found no conflict.
 function M.document_findings(relative_path, text, signals)
     local findings = {}
     for _, phrase in ipairs(FORBIDDEN_PHRASES) do
@@ -93,8 +100,17 @@ function M.document_findings(relative_path, text, signals)
     return findings
 end
 
+-- Compare public document wording with the loaded readiness and release contracts.
+--@param repo_root string Repository directory containing the contracts and public documents.
+--@return integer Number of completed state/document checks; missing documents still count as checks.
+--@return table Ordered loading, state-consistency and document-wording findings.
+--@effect Reads contract and document files and executes the two repository-owned contract chunks.
 function M.run(repo_root)
     local checks, failures = 0, {}
+    -- Load one repository-owned Lua contract and record failures for the enclosing audit.
+    --@param relative string Contract path relative to repo_root.
+    --@return any Contract chunk's first return value, or nil when loading or execution fails.
+    --@effect Reads and executes the contract; appends a finding when loadfile or protected execution fails.
     local function load(relative)
         local chunk, load_error = loadfile(
             repo_root .. "/" .. relative, "t", _ENV)
@@ -140,6 +156,10 @@ end
 
 ----------------------------------------------------------------------------
 
+-- Run the documentation audit as a CLI and render its findings and summary.
+--@param argv table Argument array whose first element names the repository directory.
+--@return integer Zero for nonempty passing checks, one for findings/no checks, or 64 for missing arguments.
+--@effect Reads the repository through run and writes findings to stderr or a passing summary to stdout.
 local function main(argv)
     local repo_root = argv[1]
     if not repo_root then

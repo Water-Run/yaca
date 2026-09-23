@@ -1,0 +1,29 @@
+--- a/windows/utils/registry.c
++++ b/windows/utils/registry.c
+@@ -7,6 +7,12 @@
+ 
+ HKEY open_regkey_fn(bool create, bool write, HKEY hk, const char *path, ...)
+ {
++#ifdef YACA_PORTABLE_TOOLS
++    if (hk == HKEY_CURRENT_USER) {
++        SetLastError(ERROR_ACCESS_DENIED);
++        return NULL;
++    }
++#endif
+     HKEY toret = NULL;
+     bool hk_needs_close = false;
+     va_list ap;
+--- a/windows/storage.c
++++ b/windows/storage.c
+@@ -559,6 +559,11 @@
+ 
+ static HANDLE access_random_seed(int action)
+ {
++#ifdef YACA_PORTABLE_TOOLS
++    /* Each process seeds from Windows entropy; no persistent seed file. */
++    (void)action;
++    return INVALID_HANDLE_VALUE;
++#endif
+     HANDLE rethandle;
+ 
+     /*

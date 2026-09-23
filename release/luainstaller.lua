@@ -1,7 +1,7 @@
 --[[
-File: luainstaller.lua
-Date: 2026-08-30
 Author: WaterRun
+Date: 2026-09-23
+File: luainstaller.lua
 Description: Plans deterministic minimal packages without authorizing release.
 ]]
 
@@ -111,12 +111,22 @@ local PATCH_FIELDS = {
     base_file_sha256 = true,
 }
 
+---Builds a structured release-planner failure without a successful value.
+--@param code string Stable failure code.
+--@param message string Operator-readable failure summary.
+--@param detail any|nil Optional diagnostic detail.
+--@return nil result No planner result.
+--@return table err Structured validation failure.
 local function failure(code, message, detail)
     local result = { code = code, message = message }
     if detail ~= nil then result.detail = detail end
     return nil, result
 end
 
+---Copies a release policy value while rejecting cyclic tables.
+--@param value any Scalar or table policy value.
+--@param visiting table|nil Active-table set for cycle detection.
+--@return any|nil copied Independent value or nil for a cycle.
 local function copy(value, visiting)
     if type(value) ~= "table" then return value end
     visiting = visiting or {}
@@ -135,6 +145,9 @@ local function copy(value, visiting)
     return result
 end
 
+---Counts only a dense one-based array with no other keys.
+--@param values table|any Candidate array.
+--@return integer|nil count Element count, or nil for a sparse or invalid array.
 local function dense_count(values)
     if type(values) ~= "table" then return nil end
     local count = 0
@@ -148,6 +161,12 @@ local function dense_count(values)
     return count
 end
 
+---Rejects unknown keys in a package-policy record.
+--@param value table|any Record under validation.
+--@param allowed table Allowlisted field-name set.
+--@param label string Record label for diagnostics.
+--@return boolean|nil valid Whether every field is allowed.
+--@return string|nil err Validation detail when rejected.
 local function known_fields(value, allowed, label)
     if type(value) ~= "table" then
         return nil, label .. " must be a table"
@@ -160,23 +179,36 @@ local function known_fields(value, allowed, label)
     return true
 end
 
+---Checks the lowercase 64-character SHA-256 text form.
+--@param value any Candidate digest.
+--@return boolean valid Whether the digest has the pinned text form.
 local function is_sha256(value)
     return type(value) == "string"
         and #value == 64
         and value:match("^[0-9a-f]+$") ~= nil
 end
 
+---Checks the full lowercase 40-character Git revision form.
+--@param value any Candidate revision.
+--@return boolean valid Whether the revision is fully pinned.
 local function is_revision(value)
     return type(value) == "string"
         and #value == 40
         and value:match("^[0-9a-f]+$") ~= nil
 end
 
+---Normalizes package path separators without resolving traversal.
+--@param value any Candidate path.
+--@return string|nil path Slash-normalized path, or nil for non-text input.
 local function normalize_path(value)
     if type(value) ~= "string" then return nil end
     return value:gsub("\\", "/")
 end
 
+---Rejects ambiguous package paths and historical bin inputs.
+--@param value any Candidate source or destination path.
+--@param source boolean Whether historical bin segments are forbidden.
+--@return boolean safe Whether the path uses only admitted segments.
 local function safe_path(value, source)
     value = normalize_path(value)
     if not value or value == "" or value:find("\0", 1, true)
@@ -193,6 +225,10 @@ local function safe_path(value, source)
     return true
 end
 
+---Compares two dense arrays by element identity and order.
+--@param left table|any First candidate array.
+--@param right table|any Second candidate array.
+--@return boolean equal Whether both arrays contain the same ordered values.
 local function same_array(left, right)
     local left_count = dense_count(left)
     local right_count = dense_count(right)
@@ -203,10 +239,18 @@ local function same_array(left, right)
     return true
 end
 
+---Checks that a value is an empty dense array.
+--@param values table|any Candidate array.
+--@return boolean empty Whether the value is a valid empty array.
 local function is_empty_array(values)
     return dense_count(values) == 0
 end
 
+---Validates a dense array of distinct nonempty strings.
+--@param values table|any Candidate ordered string array.
+--@param label string Record label for diagnostics.
+--@return table|nil seen Set of admitted string values.
+--@return string|nil err Validation detail when rejected.
 local function unique_array(values, label)
     local count = dense_count(values)
     if not count then return nil, label .. " must be a dense array" end
@@ -221,6 +265,10 @@ local function unique_array(values, label)
     return seen
 end
 
+---Compares two string-keyed policy maps in both directions.
+--@param left table|any First candidate map.
+--@param right table|any Second candidate map.
+--@return boolean equal Whether both maps have identical key values.
 local function same_string_map(left, right)
     if type(left) ~= "table" or type(right) ~= "table" then return false end
     for key, value in pairs(left) do
@@ -232,6 +280,13 @@ local function same_string_map(left, right)
     return true
 end
 
+---Checks exact downstream patch bytes and source binding metadata.
+--@param name string Locked dependency component name.
+--@param patches table Candidate downstream patch list.
+--@param binding_field string Revision or source-hash binding field.
+--@param binding_value string Exact locked source identity.
+--@return boolean|nil valid Whether every patch remains pinned.
+--@return string|nil err Specific patch-policy mismatch.
 local function validate_pinned_patches(name, patches, binding_field, binding_value)
     local expected_patches = PINNED_PATCHES[name]
     if dense_count(patches) ~= #expected_patches then
@@ -288,6 +343,10 @@ local function validate_pinned_patches(name, patches, binding_field, binding_val
     return true
 end
 
+---Compares downstream patch records including targets and base hashes.
+--@param left table First patch list.
+--@param right table Second patch list.
+--@return boolean equal Whether both patch lists describe the same pins.
 local function same_patches(left, right)
     local left_count, right_count = dense_count(left), dense_count(right)
     if not left_count or left_count ~= right_count then return false end
@@ -318,6 +377,10 @@ local function same_patches(left, right)
     return true
 end
 
+---Checks dependency source pins and pending target-qualification policy.
+--@param lock table Loaded dependency lock document.
+--@return boolean|nil valid Whether the lock satisfies the release policy.
+--@return string|nil err Specific lock mismatch.
 local function validate_lock(lock)
     if type(lock) ~= "table" or lock.schema_version ~= "yaca-dependency-lock-v1" then
         return nil, "unexpected dependency lock schema"
@@ -431,6 +494,11 @@ local function validate_lock(lock)
     return true
 end
 
+---Checks that the release manifest agrees with the admitted dependency lock.
+--@param manifest table Loaded release manifest.
+--@param lock table Validated dependency lock.
+--@return boolean|nil valid Whether manifest fields agree with the lock.
+--@return string|nil err Specific manifest mismatch.
 local function validate_manifest(manifest, lock)
     local authorized = lock.release_authorized == true
     if type(manifest) ~= "table"
@@ -451,6 +519,13 @@ local function validate_manifest(manifest, lock)
         or manifest.packaging.package_assembly ~= "explicit-files-only"
         or manifest.packaging.historical_bin_copy ~= false
         or manifest.packaging.compression_of_native_inputs ~= false
+        or manifest.packaging.same_core_for_all_editions ~= true
+        or manifest.packaging.companion_notices ~= true
+        or manifest.packaging.tool_catalog ~= "release/tool-bundles.json"
+        or dense_count(manifest.packaging.editions) ~= 3
+        or manifest.packaging.editions[1] ~= "clean"
+        or manifest.packaging.editions[2] ~= "std"
+        or manifest.packaging.editions[3] ~= "full"
     then
         return nil, "release manifest has an unsafe package policy"
     end
@@ -495,6 +570,14 @@ local function validate_manifest(manifest, lock)
     return true
 end
 
+---Validates one target artifact against the pinned component profile.
+--@param role string Artifact role in the candidate package.
+--@param artifact table Hashed artifact metadata.
+--@param target table Selected target policy.
+--@param lock table Validated dependency lock.
+--@param product_version string Expected yaca version.
+--@return boolean|nil valid Whether the artifact matches its role and target.
+--@return string|nil err Specific artifact mismatch.
 local function validate_artifact(role, artifact, target, lock, product_version)
     local fields_ok, fields_error = known_fields(artifact, ARTIFACT_FIELDS, role)
     if not fields_ok then return nil, fields_error end
@@ -549,6 +632,12 @@ local function validate_artifact(role, artifact, target, lock, product_version)
     return true
 end
 
+---Checks one outer package file's source, hash, and destination.
+--@param file table Candidate package file record.
+--@param destination string|nil Required exact destination, if fixed.
+--@param label string File role for diagnostics.
+--@return boolean|nil valid Whether the file can enter a package plan.
+--@return string|nil err Specific file-policy mismatch.
 local function validate_package_file(file, destination, label)
     local fields_ok, fields_error = known_fields(file, PACKAGE_FILE_FIELDS, label)
     if not fields_ok then return nil, fields_error end
@@ -570,6 +659,11 @@ local function validate_package_file(file, destination, label)
     return true
 end
 
+---Checks the complete outer-file set and destination uniqueness.
+--@param files table Installer, README, license, and document records.
+--@param target table Selected target policy.
+--@return boolean|nil valid Whether outer files satisfy the package layout.
+--@return string|nil err Specific layout mismatch.
 local function validate_package_files(files, target)
     local allowed = { installer = true, readme = true, license = true, documents = true }
     local fields_ok, fields_error = known_fields(files, allowed, "package_files")
@@ -617,6 +711,11 @@ local function validate_package_files(files, target)
     return true
 end
 
+---Maps a runtime payload role to its private package destination.
+--@param role string Native module, transport, or CA-bundle role.
+--@param target table Selected target policy.
+--@param manifest table Admitted release manifest.
+--@return string destination Relative package path for the role.
 local function destination_for_payload(role, target, manifest)
     if role == "yaca_native" then
         return ".luai/native/" .. manifest.native_module_filenames[target.id].yaca_native
@@ -628,6 +727,11 @@ local function destination_for_payload(role, target, manifest)
     return ".luai/components/cacert.pem"
 end
 
+---Builds a source-pinned SPDX package entry for one component.
+--@param name string Dependency component key.
+--@param component table Locked component metadata.
+--@param source_revision string Exact yaca source revision.
+--@return table package SPDX package record with downstream patch references.
 local function spdx_package(name, component, source_revision)
     local package = {
         name = component.name,
@@ -666,10 +770,10 @@ end
 ---Creates a release planner from snapshotted manifest and dependency lock data.
 -- The planner performs no filesystem or network operation.  Every result stays
 -- explicitly unqualified until C32 supplies independent target evidence.
--- @param manifest table Loaded release/manifest.lua value.
--- @param lock table Loaded release/dependencies.lock value.
--- @return table|nil planner Candidate package planner.
--- @return table|nil err Structured validation failure.
+--@param manifest table Loaded release/manifest.lua value.
+--@param lock table Loaded release/dependencies.lock value.
+--@return table|nil planner Candidate package planner.
+--@return table|nil err Structured validation failure.
 function M.new(manifest, lock)
     local lock_ok, lock_error = validate_lock(lock)
     if not lock_ok then return failure("InvalidDependencyLock", lock_error) end
@@ -683,14 +787,16 @@ function M.new(manifest, lock)
 
     local targets = {}
     for _, target in ipairs(admitted_manifest.targets) do targets[target.id] = target end
+    --@metatable owned_plans Weak-key ownership map for exact plans from this planner; values are private.
+    --@field __mode string Weak-key retention so released plan objects leave the ownership map.
     local owned_plans = setmetatable({}, { __mode = "k" })
     local service = {}
 
     ---Plans one exact candidate archive from already-built, hashed inputs.
-    -- @param target_id string One of the three release target IDs.
-    -- @param inputs table Exact source revision, runtime artifacts, and outer files.
-    -- @return table|nil plan Plain deterministic assembly plan.
-    -- @return table|nil err Structured validation failure.
+    --@param target_id string One of the three release target IDs.
+    --@param inputs table Exact source revision, runtime artifacts, and outer files.
+    --@return table|nil plan Plain deterministic assembly plan.
+    --@return table|nil err Structured validation failure.
     function service.plan(target_id, inputs)
         local target = targets[target_id]
         if not target then return failure("UnknownTarget", "unknown release target") end
@@ -761,9 +867,10 @@ function M.new(manifest, lock)
                 sha256 = inputs.artifacts.launcher.sha256,
             },
         }
+        local companion_files = {}
         for _, name in ipairs({ "installer", "readme", "license" }) do
             local file = inputs.package_files[name]
-            package_files[#package_files + 1] = {
+            companion_files[#companion_files + 1] = {
                 role = name,
                 source_path = normalize_path(file.source_path),
                 destination_path = file.destination_path,
@@ -771,11 +878,15 @@ function M.new(manifest, lock)
             }
         end
         local documents = copy(inputs.package_files.documents)
+        ---Orders companion documents by their deterministic package paths.
+        --@param left table First companion document record.
+        --@param right table Second companion document record.
+        --@return boolean before Whether the first destination sorts earlier.
         table.sort(documents, function(left, right)
             return left.destination_path < right.destination_path
         end)
         for _, file in ipairs(documents) do
-            package_files[#package_files + 1] = {
+            companion_files[#companion_files + 1] = {
                 role = "documentation",
                 source_path = normalize_path(file.source_path),
                 destination_path = file.destination_path,
@@ -803,6 +914,7 @@ function M.new(manifest, lock)
             schema_version = "yaca-package-plan-v1",
             policy_id = "yaca-minimal-package-v0.1.0",
             product_version = admitted_manifest.product_version,
+            edition = "clean",
             source_revision = inputs.source_revision,
             target_id = target_id,
             target_os = target.os,
@@ -815,6 +927,9 @@ function M.new(manifest, lock)
             target_qualification_complete = admitted_lock.target_artifacts_qualified == true,
             root_entries = root_entries,
             package_files = package_files,
+            companion_files = companion_files,
+            same_core_for_all_editions = true,
+            tool_catalog = admitted_manifest.packaging.tool_catalog,
             outer_runtime_components = {},
             inner_payload = inner_payload,
             dependency_patches = dependency_patches,
@@ -867,6 +982,10 @@ function M.new(manifest, lock)
         return plan
     end
 
+    ---Copies only a plan issued by this planner's private ownership map.
+    --@param plan table Candidate plan value.
+    --@return table|nil canonical Independent canonical plan copy.
+    --@return table|nil err Structured foreign-plan or cycle failure.
     local function admitted_plan(plan)
         local canonical = owned_plans[plan]
         if not canonical then return failure("UnknownPackagePlan", "plan was not created by this planner") end
@@ -874,9 +993,9 @@ function M.new(manifest, lock)
     end
 
     ---Projects a deterministic SPDX 2.3 source-component SBOM for one plan.
-    -- @param plan table Plan returned by this planner.
-    -- @return table|nil sbom JSON-compatible SPDX document data.
-    -- @return table|nil err Structured validation failure.
+    --@param plan table Plan returned by this planner.
+    --@return table|nil sbom JSON-compatible SPDX document data.
+    --@return table|nil err Structured validation failure.
     function service.sbom(plan)
         local canonical, plan_error = admitted_plan(plan)
         if not canonical then return nil, plan_error end
@@ -932,9 +1051,9 @@ function M.new(manifest, lock)
     end
 
     ---Projects the source, license, and delivery manifest for one candidate.
-    -- @param plan table Plan returned by this planner.
-    -- @return table|nil manifest Plain deterministic license data.
-    -- @return table|nil err Structured validation failure.
+    --@param plan table Plan returned by this planner.
+    --@return table|nil manifest Plain deterministic license data.
+    --@return table|nil err Structured validation failure.
     function service.license_manifest(plan)
         local canonical, plan_error = admitted_plan(plan)
         if not canonical then return nil, plan_error end
@@ -973,6 +1092,7 @@ function M.new(manifest, lock)
                 admitted_lock.license_policy.required_license_ids
             ),
             notices_in_archive = admitted_lock.license_policy.notices_in_archive,
+            notices_in_companion = admitted_lock.license_policy.notices_in_companion,
             corresponding_source_reference_required = admitted_lock.license_policy
                 .corresponding_source_reference_required,
         }

@@ -1,12 +1,15 @@
 --[[
-File: package_layout_test.lua
-Date: 2026-08-30
 Author: WaterRun
+Date: 2026-09-23
+File: package_layout_test.lua
 Description: Verifies exact minimal candidate package assembly policy.
 ]]
 
 local A = assert(loadfile(YACA_TEST_ROOT .. "/test/support/assert.lua", "t", _ENV))()
 
+--Reads load value for this test scenario.
+--@param relative_path string Repository-relative Lua source path to load.
+--@return any module Lua module value loaded for this case.
 local function load_value(relative_path)
     local chunk, load_error = loadfile(YACA_TEST_ROOT .. "/" .. relative_path, "t", _ENV)
     A.truthy(chunk, load_error)
@@ -15,6 +18,9 @@ local function load_value(relative_path)
     return value
 end
 
+--Clones test data before it is handed to the exercised service.
+--@param value any Candidate whose acceptance or transformation the test checks.
+--@return any clone Independent clone of the source fixture value.
 local function clone(value)
     if type(value) ~= "table" then return value end
     local result = {}
@@ -33,31 +39,40 @@ local TARGETS = {
         executable = "yaca.exe",
         installer = "Install.cmd",
         curl = "curl.exe",
-        archive = "yaca-0.1.0-win32-x86.zip",
-        root = { "yaca.exe", "Install.cmd", "README.txt", "LICENSE", "docs/" },
+        archive = "yaca-0.1.0-win32-x86-clean.zip",
+        root = { "yaca.exe" },
     },
     ["win64-x86_64"] = {
         object_format = "PE32+-x86-64",
         executable = "yaca.exe",
         installer = "Install.cmd",
         curl = "curl.exe",
-        archive = "yaca-0.1.0-win64-x86_64.zip",
-        root = { "yaca.exe", "Install.cmd", "README.txt", "LICENSE", "docs/" },
+        archive = "yaca-0.1.0-win64-x86_64-clean.zip",
+        root = { "yaca.exe" },
     },
     ["linux-x86_64"] = {
         object_format = "ELF64-x86-64",
         executable = "yaca",
         installer = "Install.sh",
         curl = "curl",
-        archive = "yaca-0.1.0-linux-x86_64.zip",
-        root = { "yaca", "Install.sh", "README.txt", "LICENSE", "docs/" },
+        archive = "yaca-0.1.0-linux-x86_64-clean.zip",
+        root = { "yaca" },
     },
 }
 
+--Supplies hash behavior required by this suite.
+--@param byte integer Single byte being encoded or inspected.
+--@return any observed hash value observed by the scenario assertion.
 local function hash(byte)
     return string.rep(byte, 64)
 end
 
+--Supplies artifact behavior required by this suite.
+--@param target_id string|integer Identity of the selected fake target.
+--@param role any The role supplied to the fake service for this scenario.
+--@param version string Version value reported by the fake platform.
+--@param digest string Expected or computed hexadecimal digest.
+--@return table observed Structured fixture record selected by the exercised branch.
 local function artifact(target_id, role, version, digest)
     local target = assert(TARGETS[target_id])
     local suffixes = {
@@ -79,6 +94,12 @@ local function artifact(target_id, role, version, digest)
     }
 end
 
+--Supplies package file behavior required by this suite.
+--@param target_id string|integer Identity of the selected fake target.
+--@param source_name any The source name supplied to the fake service for this scenario.
+--@param destination string|table Publication destination selected by the case.
+--@param digest string Expected or computed hexadecimal digest.
+--@return table observed Structured fixture record with source_path, destination_path, sha256, qualification.
 local function package_file(target_id, source_name, destination, digest)
     return {
         source_path = "build/package-inputs/" .. target_id .. "/" .. source_name,
@@ -88,6 +109,9 @@ local function package_file(target_id, source_name, destination, digest)
     }
 end
 
+--Supplies inputs behavior required by this suite.
+--@param target_id string|integer Identity of the selected fake target.
+--@return table observed Structured fixture record selected by the exercised branch.
 local function inputs(target_id)
     local target = assert(TARGETS[target_id])
     local launcher = artifact(target_id, "launcher", "0.1.0", hash("1"))
@@ -146,6 +170,9 @@ return {
     cases = {
         {
             name = "three targets have exact independent archive roots",
+            --Verifies three targets have exact independent archive roots.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify three targets have exact independent archive roots.
             run = function()
                 A.deep_equal(planner.target_order, {
                     "win32-x86", "win64-x86_64", "linux-x86_64",
@@ -155,13 +182,16 @@ return {
                     A.equal(plan.archive, expected.archive)
                     A.deep_equal(plan.root_entries, expected.root)
                     A.equal(plan.package_files[1].destination_path, expected.executable)
-                    A.equal(plan.package_files[2].destination_path, expected.installer)
-                    A.equal(plan.package_files[3].destination_path, "README.txt")
-                    A.equal(plan.package_files[4].destination_path, "LICENSE")
+                    A.equal(#plan.package_files, 1)
+                    A.equal(plan.edition, "clean")
+                    A.truthy(plan.same_core_for_all_editions)
+                    A.equal(plan.companion_files[1].destination_path, expected.installer)
+                    A.equal(plan.companion_files[2].destination_path, "README.txt")
+                    A.equal(plan.companion_files[3].destination_path, "LICENSE")
                     A.equal(#plan.outer_runtime_components, 0)
-                    A.equal(plan.status, "released")
-                    A.truthy(plan.release_authorized)
-                    A.truthy(plan.target_qualification_complete)
+                    A.equal(plan.status, "candidate-unqualified")
+                    A.falsy(plan.release_authorized)
+                    A.falsy(plan.target_qualification_complete)
                     if target_id == "win32-x86" then
                         A.deep_equal(
                             plan.dependency_patches.curl,
@@ -181,6 +211,9 @@ return {
         },
         {
             name = "onedir prerequisite and onefile payload are explicit and minimal",
+            --Verifies onedir prerequisite and onefile payload are explicit and minimal.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify onedir prerequisite and onefile payload are explicit and minimal.
             run = function()
                 local plan = assert(planner.plan("linux-x86_64", inputs("linux-x86_64")))
                 A.equal(plan.luainstaller.version, "1.3.0")
@@ -248,6 +281,9 @@ return {
         },
         {
             name = "package planning snapshots inputs and sorts documentation",
+            --Verifies package planning snapshots inputs and sorts documentation.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify package planning snapshots inputs and sorts documentation.
             run = function()
                 local candidate = inputs("win32-x86")
                 candidate.package_files.documents[1], candidate.package_files.documents[3]
@@ -256,13 +292,16 @@ return {
                 candidate.artifacts.curl.source_path = "bin/curl.exe"
                 candidate.package_files.documents[1].destination_path = "docs/changed.txt"
                 A.equal(plan.inner_payload[3].source_path, "build/candidates/win32-x86/curl.exe")
-                A.equal(plan.package_files[5].destination_path, "docs/SBOM.spdx.json")
-                A.equal(plan.package_files[6].destination_path, "docs/THIRD_PARTY_NOTICES.txt")
-                A.equal(plan.package_files[7].destination_path, "docs/USAGE.txt")
+                A.equal(plan.companion_files[4].destination_path, "docs/SBOM.spdx.json")
+                A.equal(plan.companion_files[5].destination_path, "docs/THIRD_PARTY_NOTICES.txt")
+                A.equal(plan.companion_files[6].destination_path, "docs/USAGE.txt")
             end,
         },
         {
             name = "unknown extra missing and cross-target artifacts fail closed",
+            --Verifies unknown extra missing and cross-target artifacts fail closed.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify unknown extra missing and cross-target artifacts fail closed.
             run = function()
                 local no_target, no_target_error = planner.plan("macos-arm64", inputs("win32-x86"))
                 A.falsy(no_target)
@@ -290,6 +329,9 @@ return {
         },
         {
             name = "historical bin globs and compressed artifacts are never admitted",
+            --Verifies historical bin globs and compressed artifacts are never admitted.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify historical bin globs and compressed artifacts are never admitted.
             run = function()
                 for _, source_path in ipairs({
                     "bin/curl.exe",
@@ -312,6 +354,9 @@ return {
         },
         {
             name = "transport protocol or runtime dependency creep is rejected",
+            --Verifies transport protocol or runtime dependency creep is rejected.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify transport protocol or runtime dependency creep is rejected.
             run = function()
                 local protocol = inputs("linux-x86_64")
                 protocol.artifacts.curl.protocols[3] = "ftp"
@@ -331,6 +376,9 @@ return {
         },
         {
             name = "documentation cannot conceal runtime files or duplicate destinations",
+            --Verifies transport protocol or runtime dependency creep is rejected.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify transport protocol or runtime dependency creep is rejected.
             run = function()
                 local hidden = inputs("win64-x86_64")
                 hidden.package_files.documents[1].destination_path = "docs/curl.exe"
@@ -350,6 +398,9 @@ return {
         },
         {
             name = "manifest and lock mutation cannot alter an admitted planner",
+            --Verifies documentation cannot conceal runtime files or duplicate destinations.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify documentation cannot conceal runtime files or duplicate destinations.
             run = function()
                 manifest.packaging.historical_bin_copy = true
                 lock.components.curl.version = "0"

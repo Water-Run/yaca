@@ -1,19 +1,29 @@
 --[[
-File: ini_test.lua
-Date: 2026-08-29
 Author: WaterRun
+Date: 2026-09-23
+File: ini_test.lua
 Description: Verifies strict schema-bound INI parsing and safe concrete writing.
 ]]
 
 local A = assert(loadfile(YACA_TEST_ROOT .. "/test/support/assert.lua", "t", _ENV))()
 
+--Loads a source module into an isolated per-case environment.
+--@param name string Module, Model, or resource name selected by the case.
+--@param cache table Per-case module cache preserving isolated imports.
+--@return any module Module export loaded in the isolated source environment.
 local function load_module(name, cache)
     cache = cache or {}
     if cache[name] then return cache[name] end
-    local environment = { require = function(dependency)
+    local environment = {
+        --Resolves an imported Lua module through the isolated test loader.
+        --@param dependency string Source module requested from the isolated loader.
+        --@return any value Callback value consumed by the enclosing scenario assertion.
+        require = function(dependency)
         return load_module(dependency, cache)
     end }
     environment._G = environment
+    --@metatable environment Test-owned lookup and mutation contract for the current case.
+    --@field __index any Fallback table or function used for missing fixture keys.
     setmetatable(environment, { __index = _ENV })
     local chunk, load_error = loadfile(
         YACA_TEST_ROOT .. "/src/" .. name .. ".lua",
@@ -26,6 +36,9 @@ local function load_module(name, cache)
     return value
 end
 
+--Loads a repository Lua module as a test support value.
+--@param relative_path string Repository-relative Lua source path to load.
+--@return any module Test support module export loaded from the repository.
 local function load_table(relative_path)
     local chunk, load_error = loadfile(YACA_TEST_ROOT .. "/" .. relative_path, "t", _ENV)
     A.truthy(chunk, load_error)
@@ -35,6 +48,9 @@ end
 local ini = load_module("ini")
 local fixtures = load_table(".develope-docs/contracts/fixtures/config.lua")
 
+--Builds validated options for this suite's component fixture.
+--@param overrides table|nil Per-case overrides of default fixture behavior.
+--@return any options options used to configure the component under test.
 local function options(overrides)
     local result = {
         maximum_bytes = 8192,
@@ -78,10 +94,19 @@ local function options(overrides)
     return result
 end
 
+--Constructs the codec service used by the 'Text' case.
+--@param overrides table|nil Per-case overrides of default fixture behavior.
+--@return any fixture Constructed codec service used by this suite.
 local function codec(overrides)
     return assert(ini.new(options(overrides)))
 end
 
+--Transforms decoded data used by the 'Text' case.
+--@param service table Service port exercised by the case.
+--@param document table Parsed Context or configuration document under test.
+--@param section string INI section selected for the operation.
+--@param key string|integer Lookup key selected by the operation.
+--@return any observed decoded value observed by the scenario assertion.
 local function decoded(service, document, section, key)
     return assert(ini.value(assert(service.get(document, section, key))))
 end
@@ -91,6 +116,9 @@ return {
     cases = {
         {
             name = "section transactions preserve concrete blocks and materialize pending field edits",
+            --Verifies section transactions preserve concrete blocks and materialize pending field edits.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify section transactions preserve concrete blocks and materialize pending field edits.
             run = function()
                 local service = codec()
                 local preamble = "\239\187\191; file preamble\r\n"
@@ -115,6 +143,9 @@ return {
         },
         {
             name = "section edits reject conflicts incomplete permutations repeated headers and limits",
+            --Verifies section edits reject conflicts incomplete permutations repeated headers and limits.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify section edits reject conflicts incomplete permutations repeated headers and limits.
             run = function()
                 local service = codec()
                 local document = assert(service.parse("[Model.One]\nProtocol = openai-chat\n[Model.Two]\n"))
@@ -137,6 +168,9 @@ return {
         },
         {
             name = "additions and removals retain CRLF comments physical family order and EOF boundaries",
+            --Verifies additions and removals retain CRLF comments physical family order and EOF boundaries.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify additions and removals retain CRLF comments physical family order and EOF boundaries.
             run = function()
                 local service = codec()
                 local source = '\239\187\191; keep\r\n[Model.Z]\r\nEnabled=true ; last choice\r\n'
@@ -171,6 +205,9 @@ return {
         },
         {
             name = "config string fixtures have one exact quoted grammar",
+            --Verifies config string fixtures have one exact quoted grammar.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify config string fixtures have one exact quoted grammar.
             run = function()
                 local service = codec()
                 for _, case in ipairs(fixtures.string_vectors) do
@@ -190,6 +227,9 @@ return {
         },
         {
             name = "comments stay outside quotes and scalar forms remain explicit",
+            --Verifies config string fixtures have one exact quoted grammar.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify config string fixtures have one exact quoted grammar.
             run = function()
                 local service = codec()
                 local source = table.concat({
@@ -210,6 +250,9 @@ return {
         },
         {
             name = "repeated sections merge only while every key stays unique",
+            --Verifies repeated sections merge only while every key stays unique.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify repeated sections merge only while every key stays unique.
             run = function()
                 local service = codec()
                 local merged = assert(service.parse(table.concat({
@@ -234,6 +277,9 @@ return {
         },
         {
             name = "unknown sections keys and case variants fail closed",
+            --Verifies unknown sections keys and case variants fail closed.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify unknown sections keys and case variants fail closed.
             run = function()
                 local service = codec()
                 local cases = {
@@ -254,6 +300,9 @@ return {
         },
         {
             name = "reader accepts one BOM and LF or CRLF but rejects unsafe syntax",
+            --Verifies reader accepts one BOM and LF or CRLF but rejects unsafe syntax.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify reader accepts one BOM and LF or CRLF but rejects unsafe syntax.
             run = function()
                 local service = codec()
                 local accepted = "\239\187\191[General]\r\nLogLevel = info\r\n"
@@ -277,6 +326,9 @@ return {
         },
         {
             name = "semantic writer follows schema field and family order",
+            --Verifies semantic writer follows schema field and family order.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify semantic writer follows schema field and family order.
             run = function()
                 local service = codec()
                 local document = assert(service.build({
@@ -327,6 +379,9 @@ return {
         },
         {
             name = "safe edits preserve untouched bytes comments BOM and line endings",
+            --Verifies safe edits preserve untouched bytes comments BOM and line endings.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify safe edits preserve untouched bytes comments BOM and line endings.
             run = function()
                 local service = codec()
                 local source = table.concat({
@@ -358,6 +413,9 @@ return {
         },
         {
             name = "structural additions preserve existing concrete records",
+            --Verifies structural additions preserve existing concrete records.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify structural additions preserve existing concrete records.
             run = function()
                 local service = codec()
                 local document = assert(service.parse("[General]\nLogLevel = info\n"))
@@ -376,6 +434,9 @@ return {
         },
         {
             name = "limits schemas wrappers and document handles reject ambiguity",
+            --Verifies structural additions preserve existing concrete records.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify structural additions preserve existing concrete records.
             run = function()
                 local byte_codec = codec({
                     maximum_bytes = 24,
@@ -399,8 +460,14 @@ return {
                 A.equal(value_error.reason, "value-bytes")
                 A.falsy(ini.token("has space"))
                 A.falsy(ini.text("nul\0text"))
+                --Executes the action expected to raise in the 'limits schemas wrappers and document handles reject ambiguity' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify structural additions preserve existing concrete records.
                 A.raises(function() service.limits.maximum_bytes = 1 end, "cannot be modified")
                 local valid_document = assert(service.parse("[Text]\nValue = \"ok\""))
+                --Executes the action expected to raise in the 'limits schemas wrappers and document handles reject ambiguity' case.
+                --@param none No arguments; this closure uses its captured fixture state.
+                --@return nil No value; assertions verify structural additions preserve existing concrete records.
                 A.raises(function() valid_document.extra = true end, "cannot be modified")
 
                 local other_service = codec({ maximum_value_bytes = 4 })

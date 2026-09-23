@@ -1,9 +1,20 @@
+--[[
+Author: WaterRun
+Date: 2026-09-23
+File: release.lua
+Description: Defines target packages, dependency provenance and release admission requirements.
+]]
+
 return {
   contract_version = "0.1.0-readiness.1",
   release_contract_version = "yaca-release-v0.1.0-readiness.1",
   decision_refs = { "D-003", "D-004", "D-007", "D-009", "D-056", "D-069", "D-070" },
 
   packaging = {
+    editions = { "clean", "std", "full" },
+    same_core_for_all_editions = true,
+    tool_catalog = "release/tool-bundles.json",
+    companion_notices = true,
     luainstaller = { version = "1.3.0", tag = "v1.3.0", commit = "97192d1" },
     targets = { "win32-x86", "win64-x86_64", "linux-x86_64" },
     target_qualification = "independent-full-matrix-before-release",
@@ -46,11 +57,11 @@ return {
 
   shipped_component_allowlist = {
     "launcher+embedded-lua", "yaca-lua-sources", "yaca-native", "lxp+static-expat",
-    "curl", "ca-bundle", "Install-script", "README.txt", "LICENSE", "docs",
+    "curl", "ca-bundle", "optional-edition-tools",
   },
   build_only_components = { "compiler-toolchain", "cmake", "archive-tool", "test-runner" },
   forbidden_shipped_components = {
-    "sqlite3", "jq", "7za", "web-server", "browser-assets", "media-codec",
+    "web-server", "browser-assets", "media-codec",
     "speech-runtime", "remote-controller", "plugin-loader", "mcp-client",
     "telemetry-client", "update-client",
   },

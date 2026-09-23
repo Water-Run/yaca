@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# Author: WaterRun
+# Date: 2026-09-23
+# File: build_win32_xp_https_candidate.sh
+# Description: Builds the pinned curl TLS carrier against the Windows XP x86 compatibility floor.
+
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
@@ -9,11 +14,17 @@ if [[ ${YACA_TEST_RESOURCE_GUARD_HELD:-0} != 1 ]]; then
   exec "$REPO_ROOT/.tools/run_with_resource_guard.sh" bash "$0" "$@"
 fi
 
+# Report the required source cache and fresh output directory.
+#@param none No arguments.
+#@return void Exits with usage status 64.
 usage() {
   echo "usage: $0 SOURCE_CACHE OUTPUT" >&2
   exit 64
 }
 
+# Stop an XP HTTPS carrier build with a specific diagnostic.
+#@param ... string Diagnostic words joined by the shell.
+#@return void Exits with failure status 1.
 die() {
   echo "win32 XP HTTPS candidate build: $*" >&2
   exit 1
@@ -52,6 +63,10 @@ MBEDTLS_ARCHIVE="$SOURCE_CACHE/mbedtls-3.6.7.tar.bz2"
 CURL_PATCH="$REPO_ROOT/release/patches/curl-8.21.0-winxp.patch"
 MBEDTLS_PATCH="$REPO_ROOT/release/patches/mbedtls-3.6.7-winxp.patch"
 
+# Verify one locked source archive or patch before cross-compilation.
+#@param 1 string Input file path.
+#@param 2 string Expected lowercase SHA-256 digest.
+#@return int Zero on a match; failure exits through die.
 verify_sha256() {
   local path=$1
   local expected=$2
@@ -110,6 +125,11 @@ patch --batch --forward --fuzz=0 -d "$CURL_SOURCE" -p1 -i "$CURL_PATCH" \
 patch --batch --forward --fuzz=0 -d "$MBEDTLS_SOURCE" -p1 -i "$MBEDTLS_PATCH" \
   >"$LOG_ROOT/mbedtls-patch.log" 2>&1
 
+# Require one pinned curl source grammar pattern before patching.
+#@param 1 string Locked source file path.
+#@param 2 string Extended regular expression to match.
+#@param 3 string Description included in the failure diagnostic.
+#@return int Zero when the source contains the pattern; failure exits through die.
 require_source_pattern() {
   local path=$1
   local pattern=$2
