@@ -1,165 +1,112 @@
-# yaca: Yet Another Coding Agent
+# yaca — Yet Another Coding Agent
 
-[English](./README.md)
+[English](README.md)
 
-yaca 是一款简单、单 Agent、terminal-only 的通用 Agent 设计，以 GPL v3
-许可开源。软件开发是一级且常见的工作负载，但不是唯一用途。
+yaca 是一个通用终端 Agent。一个聊天界面、一个 Agent、同时只有一个 Context，工具一个接一个执行。写代码是常见工作，其他任务也同样。以 GPL v3 许可开源。
 
-> **项目状态（2026-09-19）：v0.1 已按 D-072 在三个实测环境通过资格并发布。** win32-x86 于 Server 2008 实机、win64-x86_64 于 Windows 11 实机、linux-x86_64 于 CentOS 7.9（glibc 2.17、GCC 4.8.5）容器，均含资格构建、全测试、真实服务商旅程与干净机旅程。真实 XP SP3、Windows 7 SP1 与裸机 CentOS 7 断电/文件系统资格属于后续增强，边界如实记录。Gate A/B 保持通过，Release Gate R 已通过。
+> **发行：** v0.1 为三个目标各提供一个便携压缩包。从 [Windows 首次使用](release/WINDOWS-QUICKSTART.md) 或 [Linux 首次使用](release/LINUX-QUICKSTART.md) 开始。真实的 XP SP3、Windows 7 SP1，以及裸机 CentOS 7 的断电检查不在这一版里。
 
-## 支持的发行目标
+## 支持的平台
 
-v0.1 计划只发布三个彼此独立构建、独立验收的便携 zip：
+三个压缩包，各自单独构建：
 
-- Win32 x86：Windows XP SP3 至 Windows 11；
-- Win64 x86_64：Windows 7 SP1 至 Windows 11；
-- Linux x86_64：CentOS 7 是最低硬基线。
+- Win32 x86：Windows XP SP3 至 Windows 11
+- Win64 x86_64：Windows 7 SP1 至 Windows 11
+- Linux x86_64：CentOS 7 是最低基线
 
-每个包嵌入 Lua 5.5，不依赖系统 Lua。Windows zip 根包含 `yaca.exe`、`Install.cmd`、`README.txt`、`LICENSE`、`docs/`；Linux 对应使用 `yaca` 与 `Install.sh`。薄安装脚本只可把解压目录加入 `PATH`，不复制程序，也不建立安装数据库。
+每个包内嵌 Lua 5.5，不需要系统里的 Lua。Windows 的 zip 里有 `yaca.exe`、`Install.cmd`、`README.txt`、`LICENSE` 和 `docs/`。Linux 使用 `yaca` 和 `Install.sh`。安装脚本可以把解压目录加入 `PATH`。它不复制程序，也不建立安装数据库。
 
-长期数据根始终是实际 executable 相邻的 `__yaca__`，不随调用者 cwd 漂移。v0.1 没有内建更新器，也不承诺代码签名。三个目标的发行包均已提供，见 [Windows 首次使用](release/WINDOWS-QUICKSTART.md) 与 [Linux 首次使用](release/LINUX-QUICKSTART.md)。Server 2008 / DeepSeek 的真实旅程见 [最新预览记录](.develope-docs/BASIC-USABILITY-ACCEPTANCE-2026-09-16.md)；资格已按 D-072 于三个实测环境通过；真实 XP/Win7 与裸机 CentOS 7 证据属后续增强。
+长期数据放在实际可执行文件旁边的 `__yaca__` 里，不随启动目录变化。v0.1 没有内建更新器，也不做代码签名。
 
-## 产品形态
+## 工具与权限
 
-- 一套逐行 TUI、一个 active Context、一个 active main turn，工具全部串行。
-- 每个 Context 恰好一个 workspace root；它由 XML 在 `__yaca__/CONTEXT/` 镜像树中的父目录解码，XML 字段不能覆盖。
-- 长期用户事实只允许 `__yaca__/config.ini` 与每个 Context 的一个完整 XML。没有长期 WAL、索引数据库、独立日志、备份历史、trash 或通用 undo。
-- 正式 Model adapter 只有 `openai-chat` 与 `anthropic-messages`。每个 Model 是显式完整连接记录；失败时不静默切换到另一 Model。
-- 新 chat 在第一条 main 消息前只是内存草稿；必须先建立并 durable 发布初始 XML，之后才允许 Model 请求或副作用。
+Agent 的工具是固定的：`list`、`read`、`search`、`write`、`patch`、`rename`、`delete`、`exec`。`exec` 走较宽的 `Shell` 能力。yaca 不会从命令文本推断或沙箱化它对文件和网络的影响。
 
-Context XML 是 yaca 内部版本化存储，不是稳定第三方 API；人类或其他工具的互操作主路径是 export。
+发行包带两套权限配置：
 
-## 配置与安全
-
-主 INI 每次作为一个完整 typed generation 校验。每个新顶层 main/side turn 都观察整份文件；候选无效、不可读或半写时阻断新 turn，不静默回退。一个 turn 及其 retry、工具、review 和 compaction 始终使用 admission 时冻结的 immutable generation。
-
-`yaca --config-repl` 对有效 INI 打开离线字段编辑器。`list [页码]` 列出区域，
-`show General` 查看字段；例如输入 `set General LogLevel`，再在值提示符处
-输入 `debug`。文本值沿用 INI 双引号及 `\n` 转义，Key、ProxyUrl 和
-AdapterOptions 使用隐藏输入。`unset <区域> <字段>` 恢复可选字段的默认值。
-`preview` 查看改动，`save config-edit-N` 保存界面显示的版本并退出。
-`reset` 恢复打开时的草稿，`reload` 丢弃编辑并重新读取文件；`quit`、`cancel`、
-Esc 或 EOF 丢弃未保存编辑。外部并发修改会阻止保存，需显式 reload。
-新增或移除字段会保留其他字段、注释、区域顺序、BOM 与换行格式。
-
-发行模板包含两个 Permission profile：
-
-| Profile | Read | Write | Delete | Shell | OutsideWorkspace |
+| 配置 | Read | Write | Delete | Shell | OutsideWorkspace |
 | --- | --- | --- | --- | --- | --- |
 | Std（默认） | allow | confirm | confirm | confirm | confirm |
 | Readonly | allow | deny | deny | deny | deny |
 
-固定 Agent 工具集是 `list`、`read`、`search`、`write`、`patch`、`rename`、`delete`、`exec`。raw `exec` 只由宽能力 `Shell` 管理；yaca 不声称能从命令文本推断或沙箱化其文件系统/网络副作用。Permission 名称、Description 与 Prompt 都不授权。
+权限名和提示只是在说明行为，本身不授予能力。工具的相对路径按当前 Context 的工作目录解析，并做同样的权限和保留目录检查。
 
-`DoubleCheck` 开启时控制可选的高风险 action review，并强制 finish review。`.cautious [status|on|off|toggle|reset]` 只修改当前 Context 的覆盖值，不是 Permission profile。第一条消息前它只修改未保存的内存草稿；Context 已保存时，覆盖值与刷新后的 ModelView 原子发布，Runtime 采纳其精确回执，新值从下一轮生效，不改变当前轮冻结的配置快照。
+## 配置
 
-`.prompt [show|set|clear] [text]` 通过同一个 turn 边界查看或修改当前
-`ContextPrompt`；`set` 接受有界单行文本，`clear` 选择空 Prompt。第一条消息前
-改动只留在未保存草稿中；Context 保存后，Session 与刷新后的 ModelView
-原子发布，审计事件只携带新旧值摘要，新 Prompt 从下一 turn 生效。
+设置写在可执行文件旁边的 `__yaca__/config.ini`。模型适配器是 `openai-chat` 和 `anthropic-messages`。每个模型是一条明确的连接；请求失败时设计上不会改去另一个模型。
 
-`.prompt edit` 打开内置的有界多行编辑器，初始内容为当前 Prompt。逐行输入会
-追加文本，`.clear` 清空，`.reset` 恢复打开时的内容，`.show` 查看草稿。
-使用界面显示的 `.save prompt-edit-N` 保存；`.cancel`、Esc 或退出会丢弃
-未保存编辑。以 `..` 开头可输入字面量前导点，空行和空格均保留。保存时重新
-核对原 Session 与配置，再沿用上述下一轮生效边界；秘密值、超限或保存失败
-不会覆盖最后一份安全草稿，可修改后重试。编辑器不启动外部程序。
+整份配置作为一份来校验：文件无效、读不了或只写了一半时，新的回合会停下来，而不是悄悄退回旧配置。正在进行的回合一直用它开始时的那份配置。
 
-`.model` 最多列出 64 个 enabled/native-tool 候选，`.model <精确名称>` 选择
-目标。预览会核对当前历史、Prompt、工具/control schema 与输出预留是否能放入
-目标窗口；跨 endpoint、credential、协议或能力边界时需显式确认，空回答默认
-拒绝。列表和确认显示去 userinfo、隐藏 query 值的规范代理地址。保存态 apply
-重载配置后还会在进程内精确比较目标 Key、secret adapter option 与代理凭据；
-仅秘密值变化也使旧预览失效，且在 Context 写入前拒绝。未保存选择从第一 turn
-生效，保存态从下一 turn 生效；公开信息不携带秘密值或可复用的秘密摘要。
+`yaca --config-repl` 为已有的有效 INI 打开离线编辑器。`list [页码]` 列出区段，`show General` 查看字段，`set General LogLevel` 会提示输入值，`unset <区段> <键>` 把字段恢复成默认。`preview` 看未保存的改动；`save config-edit-N` 保存并退出；`reset`、`reload`、`quit`、`cancel`、Esc 或 EOF 丢掉未保存的编辑。Key、ProxyUrl 和 AdapterOptions 用隐藏输入。文件无效时改为逐行修复草稿：`list`、`replace <行>`、`insert <行>`、`delete <行>`，然后 `preview`/`validate`，再用 `save config-repair-N` 保存。编辑器保留未改动的字节、注释、区段顺序、BOM 和换行；文件在外面被改过时，要先 reload 再保存。
+
+`yaca --model-repl` 管理模型定义：`list [页码]`、`show <row-id>`、`set`/`unset <row-id> <键>`、`add`、`rename <row-id> <名称>`、`delete <row-id>`、`move <row-id> <位置>`，以及 `test <row-id>`。最后这个要在明确确认联网之后，才测试已保存的模型；编辑会清掉观察到的状态。`preview` 显示改动、新的默认模型，以及受影响的 Context；`save model-edit-N` 确认这份预览，并重新核对配置和 Context 身份。在 `--config-repl` 里模型只显示摘要，要到 `--model-repl` 里改。权限配置可以在那里改已有字段；新增、改名、删除或调整顺序请直接改 INI。
+
+模型和权限的名字按不区分大小写匹配（只折叠 ASCII）；存下来的仍是你配置时的拼写。
 
 ## Context
 
-Context 文件位于镜像树，例如 `__yaca__/CONTEXT/C/Program Files/我的任务.xml`。包含 XML 文件名的当前逻辑路径产生一个用户可见的 16 位大写十六进制 hash。没有永久 Context ID：rename 或 rebind 后路径/hash 立即改变，旧 hash 失效。
+每次对话存成 `__yaca__/CONTEXT/` 镜像树里的一份完整 XML，例如 `__yaca__/CONTEXT/C/Program Files/我的任务.xml`。路径会显示成 16 位大写十六进制哈希，选择时用它。没有永久的 Context ID：重命名或重新绑定后，路径和哈希马上改变。工作区根目录由 XML 在树里的位置决定，XML 自己改不了它。
 
-历史只通过显式动作打开。短名称按既定 scope/distance 顺序选择首个可用命中；hash 是精准 selector，必须唯一。rename、rebind、永久 delete、import mapping 和 metadata 修改都会复核目标。活动 writer 会阻止第二进程读取 XML 正文或修改该 Context；绝不只按锁龄破锁。
+打开历史都要显式操作。短名称按范围和距离挑第一个可用的匹配；哈希必须精确且唯一。打开记录在另一个工作区里的 Context 时，会同时显示两条路径，输入 `CONTINUE <哈希>` 后才继续。没做完的回合、队列里的项和待压缩的内容不会自动重放，需要明确恢复。已有写入者时，别的进程不能读或改这份 XML；锁也不会只因为放得久就被拆掉。
 
-`--continue <selector>` 解析并复核精确目标。跨工作目录时先显示当前目录与记录目录，输入 `CONTINUE <hash>` 后才取得 writer；取消不打开 Context。接受后在记录目录进入 Idle Agent，恢复 durable event/config/ModelView 和各类标识符水位。unfinished turn、active queue item、未决 operation/tool、unknown terminal outcome 或 pending compaction 仍须显式恢复，不自动重放。确认的目录身份贯穿后续 turn 与 Tools，目录被替换会拒绝继续；XML 位置和进程工作目录不变。
+`yaca --continue <选择器>` 重新打开一个精确目标。`yaca --context-repl recent|full` 打开离线管理器：`list`、`inspect <选择器>`、`search <查询>`、`refresh`、`rename`、`set-auto-rename-disabled`、`delete [--yes]`（要求精确哈希）、`rebind`、`import`、`repair`、`export`、`select` 和 `quit`。会改数据的操作会再次核对目标，并要求按提示输入确认（`REBIND <哈希>`、`IMPORT <哈希>`、`REPAIR <哈希>`）。
 
-chat 中无 selector 的 `.context` 显示有界 recent 列表；`.context <selector>` 绑定精确 hash、文件凭据与两个目录身份。跨目录也需输入 `CONTINUE <hash>`；`.cancel` 或其他答复保留旧 owner。接受且 queue、side lane、approval 与 compaction 均安全后才关闭旧 owner，新 owner 再复核原选择。关闭后发生竞态会结束本次 invocation，不打开替代对象。
+Context XML 是 yaca 自己的版本化存储，不是给外部当稳定接口用的。交换数据走导出。
 
-每个交互式 coordinator 错误都会取得当前进程内的 `error-N` 标识；`.details` 显示最新保留项，`.details error-N` 精确选择一项。固定环最多保留 64 条经清理的 code/message/suggestion；过期标识 fail-closed，且这个表面不保留原始 exception 对象、Tool body 或 transport payload。
+每个交互式协调错误在本进程里有一个 `error-N` 标识。`.details` 显示最新保留的一条，`.details error-N` 指定一条。环里最多留 64 条清理过的记录；过期标识会直接拒绝。
 
-## 已实现的命令 grammar
+## 聊天
 
-解析器已识别以下拼写；目前仍没有可下载且通过目标资格验证的 executable：
+聊天用系统自带的行编辑：输入命令，按 Enter。新聊天在第一条 main 消息之前只是草稿；调用模型或做出改动之前，yaca 会先把 Context 写下来。文本命令有 `.queue`（`list|delete|move|edit|clear`）、`.immediate`、`.side`、`.multiline`、`.cancel`、`.cautious`、`.model`、`.context`、`.status`、`.help`、`.details`、`.prompt`、`.compact` 和 `.quit`。它们和终端快捷键是同一组动作。yaca 不提供远程或无界面控制器。
+
+- `.side` 根据已提交的上下文回答，不调用工具，也不改当前任务。
+- `.multiline` 逐行收集原文；`.submit` 提交任务，`.side` 提交旁路问题。`.show`、`.clear`、`.cancel` 用来查看、清空或放弃草稿；以 `..` 开头的行表示一个字面点号。
+- `.cautious [status|on|off|toggle|reset]` 开关当前 Context 的高风险动作复查；打开 `DoubleCheck` 时，结束复查是必须的。这是 Context 上的覆盖，不是权限配置，从下一回合起生效。
+- `.prompt [show|set|clear] [文本]` 查看或修改当前 Context 的提示词。`.prompt edit` 打开有长度限制的多行编辑器；用它显示的 `.save prompt-edit-N` 保存，用 `.cancel` 离开。改动从下一回合起生效。
+- `.model` 最多列出 64 个已启用的模型，`.model <精确名称>` 选定一个。改动端点、凭据、协议或能力上限时会要求确认；空回答视为拒绝。密钥设计上不会显示出来，已保存的改动从下一回合起生效。
+- `.status` 检查当前持有的 Context，显示哈希和有效的会话设置；Context 文件在磁盘上变了就会停下来。
+
+## 命令行
+
+解析器认识这些写法，每个发行包都带上对应的可执行文件：
 
 ```text
 yaca [directory]
-yaca --help [topic]                 (-h，Windows /h)
-yaca --version                      (-v，Windows /v)
-yaca --self-test [options]          (-st，Windows /st)
-yaca --model-repl                   (-mr，Windows /mr)
-yaca --config-repl                  (-cfg，Windows /cfg)
-yaca --context-repl recent|full     (-ctx，Windows /ctx)
-yaca --continue <selector>          (-c，Windows /c)
-yaca --export [selector]            (-ex，Windows /ex)
-yaca --status                       (-stt，Windows /stt)
+yaca --help [topic]                 (-h, Windows /h)
+yaca --version                      (-v, Windows /v)
+yaca --self-test [options]          (-st, Windows /st)
+yaca --model-repl                   (-mr, Windows /mr)
+yaca --config-repl                  (-cfg, Windows /cfg)
+yaca --context-repl recent|full     (-ctx, Windows /ctx)
+yaca --continue <selector>          (-c, Windows /c)
+yaca --export [selector]            (-ex, Windows /ex)
+yaca --status                       (-stt, Windows /stt)
 ```
 
-`--status` 只读报告当前进程与配置状态，不扫描历史、不创建数据。chat `.status`
-复核当前 writer 的 Context，显示最新 hash 与有效 Session 参数；文件变化后显示
-stale 和原因并停止执行。
+裸 `yaca` 就是 `yaca .`。`--` 结束选项解析，所以以 `-` 开头的目录仍然可以写。在 Linux 上，以 `/` 开头的路径不会被当成选项。
 
-`--export <selector>` 只读输出经复核的 Markdown，不申请 writer、不恢复或重放
-历史、不调用 Model；配置缺失或无效也可执行。新进程省略 selector 会报告未打开
-Context。有效配置中已登记的秘密值，包括二进制字段解码后的内容，均在输出前
-扫描并拒绝。既有 TTY 要求保持不变。
+- `--status` 报告当前这次运行和配置，不扫描历史，也不创建数据。
+- `--export [选择器]` 输出核对过的 Context Markdown，不取得写入者，不恢复历史，也不调用模型。有效配置里登记过的密钥会在输出前被拒绝。需要 TTY。
+- `--self-test` 的第 2、3 阶段使用正式的模型和传输。它们需要真实的交互 TTY，以及本次运行的 `--i-accept-online-self-test`；管道即使带了这个标志也不支持。在线探测不运行产品工具，也不修改配置，第 3 阶段的结果只供参考。
 
-管理交互仍有 controller 缺口。
-`--config-repl` 已支持有效配置的 catalog 字段编辑，缺文件时仍创建修复模板；
-无效配置进入私有行修复：`list [page]` 显示位置与字段标签，`replace <line>` /
-`insert <line>` 单独读取完整隐藏 INI 行，`delete <line>` 精确删除一行。`preview` /
-`validate` 检查整份候选，只有有效草稿才能用 `save config-repair-N` 保存。
-未修改字节、BOM 和换行保留；未知记录不会自动丢弃。原始值、注释与资源名称均隐藏，
-沿用现有字节/行数上限；`reset` / `reload` / `cancel` / `quit` 均需显式操作，
-外部修改要求重载，发布 unknown 时停止。`--model-repl` 已支持有效配置的
-`list [page]`、`show <row-id>`、`set`/`unset <row-id> <key>`、`add`、
-`rename <row-id> <name>`、`delete <row-id>` 和 `move <row-id> <position>`。
-使用当前 `model-edit-N:序号`；编辑后旧行号失效。新增从空白草稿开始，支持 `.back`、
-隐藏 Key 输入。`preview` 展示变更、默认模型和受影响 Context，`save model-edit-N`
-确认该预览后复核配置及 Context 身份。历史不改写，缺失模型需在继续时显式映射；
-占用、损坏或扫描不完整会阻断涉及引用的保存。`reset` / `reload` / `cancel` / `quit`
-丢弃未保存变更。配置 REPL 中 Model 只显示摘要；Permission 按首版选定范围编辑现有字段，
-新增、改名、删除和排序通过手工 INI。`test <row-id>` 在明确确认联网范围后测试已保存的 Model；编辑后清除观察结果。`--context-repl recent|full` 已接通离线管理器，支持
-`list [recent|full]`、`inspect <selector>`、`search <query>`、`refresh`、
-`help` 和 `quit`。列表与搜索使用有界快照，刷新时显式重扫；检查时复核精确目标，
-目标变化即拒绝，不读取不可用 Context 的正文。Esc/EOF 恢复终端并退出。
-现已支持 `rename <selector> <new-name>`、`set-auto-rename-disabled <selector> <true|false>`
-和 `delete <selector> [--yes]`。重命名不覆盖目标，保留可重建的模型历史；删除需精确 hash
-确认，确认后再次复核同一文件，损坏 XML 也可显式删除。busy/替换对象拒绝，unknown 或
-部分清理立即停止管理。`rebind <selector> <target-root>` 先预览已存在的目标工作目录、
-新路径/hash，输入 `REBIND <旧hash>` 后重新核对 XML 和目录身份，以不覆盖方式迁移。
-成功后从新目录使用新 hash 继续。`import <in-place-xml-path>` 校验已放入正确镜像位置的 XML，
-预览本机 Model/Permission 映射，输入 `IMPORT <hash>` 后一起保存有效选择及其快照。
-确认期间配置或目标变化会拒绝保存；历史审批只作审计，未完成工作不会重放。
-`repair <selector>` 只读预览有效 previous 的恢复或清理，输入 `REPAIR <hash>` 后
-复核精确文件，再保存修复记录和真实 ModelView。缺失/损坏 XML 只从其有效命名副本恢复；
-不会破锁或重放未完成操作。`export <selector>` 输出与 `--export` 相同的已校验 Markdown；
-`select <selector>` 关闭管理终端后继续精确目标，跨目录复用上述确认，取消则留在管理器。
-在线 self-test Stage 2/3 已接通生产 Model 和传输端口。Stage 1 先验证隔离文件的发布往返；在线检查不执行产品工具、不修改配置，Stage 3 仅提出建议。
+## v0.1 不做的事
 
-裸 `yaca` 与 `yaca .` 完全等价。`--` 结束选项解析，因此以 `-` 开头的目录仍可表达。Linux 永远不把 `/...` 当选项。self-test Stage 2/3 必须使用真实交互 TTY，并显式带本次 invocation 的 `--i-accept-online-self-test`；普通管道即使带同意标志也不支持。
+不做 Web UI、图像或音频输入、转写、语音合成、公共的远程或无界面 API、MCP、插件/钩子/技能运行时、子 Agent、Context 分支、多根 Context、遥测、诊断上传、内建更新、通用撤销，以及直接的 HTTP Agent 工具。这些都不进入 v0.1 的配置、帮助、schema、运行时、依赖和发行包。本地网页界面也不在 v0.1 里。
 
-chat 文本后备包括 `.queue`（`list|delete|move|edit|clear`）、`.immediate`、`.side`、`.multiline`、`.cancel`、`.cautious`、`.model`、`.context`、`.status`、`.help`、`.details`、`.prompt`、`.compact`、`.quit`。它们与终端快捷键投影同一 semantic action，不形成 remote/headless controller。
+## 开发
 
-## v0.1 明确排除
-
-v0.1 不提供 Web UI、图像/音频输入、transcription、TTS、公共 remote/headless API、MCP、plugin/hook/skills runtime、子 Agent、Context 分支、multi-root Context、telemetry、诊断上传、内建更新、通用 undo 或 direct HTTP Agent 工具。这些排除项在配置、help、schema、Runtime、依赖与发行包中都必须为零表面。
-
-未来本机 Web 产品线目前只是设计预留，不授权在 v0.1 中加入 Web 组件。
-
-## 开发资料
-
-建议先读[当前状态](.develope-docs/CURRENT-STATE.md)、[Gate A/B/R 审计](.develope-docs/GATE-AUDIT-2026-08-29.md)、[全程序实施计划](.develope-docs/IMPLEMENTATION-PLAN.md)、[机读契约](.develope-docs/contracts/README.md)和[技术证明清单](.develope-docs/TECHNICAL-PROOF-BACKLOG.md)。从仓库根运行完整编码就绪检查：
+开发文档在 `.develope-docs/`，从[当前状态](.develope-docs/CURRENT-STATE.md)、[实施计划](.develope-docs/IMPLEMENTATION-PLAN.md)和[机读契约](.develope-docs/contracts/README.md)看起。在仓库根目录运行完整的编码就绪检查：
 
 ```sh
 bash .tools/run_coding_readiness.sh
 ```
 
-Model 与 Permission 按完整名称匹配，仅折叠 ASCII 大小写，持久数据保留配置中的正式拼写。工具相对路径以当前 Context 的工作目录为基准，仍执行原有 Permission 与保留目录检查。
+就绪检查会取得当前用户的测试锁；主机内存、负载或内存压力不安全时拒绝启动（退出码 75）。Lua 测试套件走同一道保护：
+
+```sh
+bash .tools/run_with_resource_guard.sh bin/lua55 test/run.lua
+```
+
+## 许可
+
+[yaca 以 GPL v3 许可开源](LICENSE)。

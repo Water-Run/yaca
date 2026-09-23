@@ -1,118 +1,74 @@
-# yaca: Yet Another Coding Agent
+# yaca — Yet Another Coding Agent
 
-[中文](./README-zh.md)
+[中文](README-zh.md)
 
-yaca is the design for a simple, single-agent, terminal-only general Agent,
-licensed under GPL v3. Software development is a first-class common workload,
-not its exclusive purpose.
+yaca is a general-purpose terminal agent. One chat, one agent, one Context at a time, and tools run one after another. Coding is a common job for it, and so are other tasks. Licensed under GPL v3.
 
-> **Project status (2026-09-19): v0.1 qualified and released on its three tested environments per D-072.** win32-x86 passed on a real Server 2008, win64-x86_64 on a real Windows 11 machine, and linux-x86_64 in a CentOS 7.9 (glibc 2.17, GCC 4.8.5) container — each with a qualification build, full tests, real-provider journeys and clean-machine journeys. Real XP SP3, Windows 7 SP1 and bare-metal CentOS 7 power-loss/filesystem qualification remain future enhancements and are honestly out of scope. Gate A/B remain passed and Release Gate R is passed.
+> **Release:** v0.1 publishes a portable archive for each of the three targets. Start with the [Windows quickstart](release/WINDOWS-QUICKSTART.md) or the [Linux quickstart](release/LINUX-QUICKSTART.md). Real XP SP3, Windows 7 SP1, and bare-metal CentOS 7 power-loss checks are outside this release.
 
-## Supported release targets
+## Supported platforms
 
-v0.1 is planned as exactly three independently built and qualified portable archives:
+Three archives, each built on its own:
 
-- Win32 x86: Windows XP SP3 through Windows 11;
-- Win64 x86_64: Windows 7 SP1 through Windows 11;
-- Linux x86_64: CentOS 7 is the minimum hard baseline.
+- Win32 x86: Windows XP SP3 through Windows 11
+- Win64 x86_64: Windows 7 SP1 through Windows 11
+- Linux x86_64: CentOS 7 is the hard minimum
 
-Each archive embeds Lua 5.5 and does not depend on a system Lua installation. Windows archives contain `yaca.exe`, `Install.cmd`, `README.txt`, `LICENSE`, and `docs/`; Linux uses `yaca` and `Install.sh` with the same outer shape. The thin install helper may add the extracted directory to `PATH`; it does not copy the program or create an install database.
+Each archive embeds Lua 5.5 and doesn't need a system Lua. A Windows zip contains `yaca.exe`, `Install.cmd`, `README.txt`, `LICENSE`, and `docs/`. Linux uses `yaca` and `Install.sh`. The install helper can add the extracted directory to `PATH`. It doesn't copy the program or create an install database.
 
-The durable data root is always `__yaca__` next to the actual executable, regardless of the caller's current directory. v0.1 has no built-in updater or code-signing promise. Release archives exist for all three targets; see the [Windows quickstart](release/WINDOWS-QUICKSTART.md) and the [Linux quickstart](release/LINUX-QUICKSTART.md). The real Server 2008 / DeepSeek journey is recorded in the [latest preview report](.develope-docs/BASIC-USABILITY-ACCEPTANCE-2026-09-16.md). Qualification per D-072 passed on the three tested environments; real XP/Win7 and bare-metal CentOS 7 evidence remains a future enhancement.
+Durable data lives in `__yaca__` next to the actual executable, whatever directory you start from. v0.1 has no built-in updater and makes no code-signing promise.
 
-## Product shape
+## Tools and permissions
 
-- One terminal UI, one active Context, one active main turn, and serial tools.
-- One workspace root per Context. It is derived from the Context XML's parent in the `__yaca__/CONTEXT/` mirror tree; XML cannot override it.
-- Long-lived user facts are limited to `__yaca__/config.ini` and one complete XML per Context. There is no persistent WAL, index database, standalone log, backup history, trash, or general undo system.
-- Two Model adapters are in scope: `openai-chat` and `anthropic-messages`. A Model is an explicit full connection record; yaca never silently switches to another Model after failure.
-- A new chat remains an in-memory unsaved draft until its first main message. That message must create and durably publish the initial XML before any Model request or side effect.
+The agent tool set is fixed: `list`, `read`, `search`, `write`, `patch`, `rename`, `delete`, and `exec`. `exec` runs under the broad `Shell` capability. yaca doesn't infer or sandbox what a command does to files or the network.
 
-The internal Context XML is versioned yaca storage, not a stable third-party API. Export is the human/tool interoperability path.
-
-## Configuration and safety
-
-The complete INI is validated as one typed generation. Every new top-level main or side turn observes the whole file; an invalid, unreadable, or half-written candidate blocks the new turn instead of falling back silently. A turn and all of its retries, tools, reviews, and compaction work keep the immutable generation admitted with that turn.
-
-`yaca --config-repl` opens the offline field editor for an existing valid INI.
-Use `list [page]` for sections, `show General` for fields, and `set General
-LogLevel` followed by `debug` at the value prompt. Text fields use quoted INI
-values, including `\n` escapes; Key, ProxyUrl, and AdapterOptions use hidden
-input. `unset <section> <key>` restores an optional field's default. `preview`
-shows the changes; `save config-edit-N` saves the displayed revision and exits.
-`reset` returns to the opening draft, `reload` discards it and reads the file
-again, and `quit`, `cancel`, Esc, or EOF discards unsaved edits. Concurrent file
-changes prevent saving until an explicit reload. Additions and removals retain
-other fields, comments, section order, BOM, and line endings.
-
-The distribution defines two Permission profiles:
+Two permission profiles ship with the distribution:
 
 | Profile | Read | Write | Delete | Shell | OutsideWorkspace |
 | --- | --- | --- | --- | --- | --- |
 | Std (default) | allow | confirm | confirm | confirm | confirm |
 | Readonly | allow | deny | deny | deny | deny |
 
-The fixed Agent tool set is `list`, `read`, `search`, `write`, `patch`, `rename`, `delete`, and `exec`. Raw `exec` is governed by the broad `Shell` capability; yaca does not claim to infer or sandbox its filesystem/network effects from command text. Permission names, descriptions, and prompts never grant capabilities.
+Permission names and prompts describe behavior; they don't grant capabilities by themselves. Relative tool paths resolve against the current Context workspace and keep the same permission and reserved-tree checks.
 
-`DoubleCheck` controls optional high-risk action review and mandatory finish review when enabled. `.cautious [status|on|off|toggle|reset]` changes only the current Context override; it is not a Permission profile. Before the first message it changes only the unsaved in-memory draft. In a saved Context the override and refreshed ModelView are published atomically, the Runtime adopts their exact receipt, and the new value applies at the next turn without changing the active turn's immutable configuration snapshot.
+## Configuration
 
-`.prompt [show|set|clear] [text]` inspects or changes the current
-`ContextPrompt` through the same turn boundary. `set` accepts bounded one-line
-text and `clear` selects the empty prompt. Before the first message the change
-stays in the unsaved draft; afterward the Context and refreshed ModelView are
-published atomically, the audit event contains only old/new digests, and the
-new prompt applies from the next turn.
+Settings live in `__yaca__/config.ini`, next to the executable. The model adapters are `openai-chat` and `anthropic-messages`. Each model is one explicit connection, and a failed request doesn't switch to another model.
 
-`.prompt edit` opens the built-in bounded multiline editor with the current
-prompt. Enter lines to append text, `.clear` to start over, `.reset` to restore
-the opening value, or `.show` to inspect the draft. Save with the displayed
-`.save prompt-edit-N` command. `.cancel`, Esc, or exit discards unsaved edits;
-lines beginning with `..` insert a literal leading dot. Blank lines and spaces
-are preserved. Saving checks the original Session and configuration again and
-uses the same next-turn publication boundary. Secret, size, or save errors
-retain the last safe draft for correction or retry. No external editor starts.
+The whole config file is validated as one unit: an invalid, unreadable, or half-written file blocks new turns instead of falling back silently, and a running turn keeps the configuration it started with.
 
-`.model` lists at most 64 enabled native-tool Models as plain bounded lines;
-`.model <exact-name>` submits the same typed selection without requiring ANSI,
-completion, Unicode, or an enhanced console. Before the first message, an
-accepted selection changes only the unsaved draft and applies to the first
-turn. For a saved Context, yaca binds the preview to the exact config
-generation, Context generation/event waterline, active ModelView manifest,
-Prompt authority layers, tool/control schemas, and target definition. A target
-that cannot carry all of those inputs plus its output and transition reserves
-is rejected before configuration or Context mutation; history, tools, and
-Prompt layers are never silently reduced. A change in endpoint route,
-credential slot/policy, protocol, remote usage source, Model prompt, adapter or
-streaming policy, or a capability limit opens a `model-change-N` disclosure
-whose empty answer is deny. Only `confirm model-change-N`, `deny
-model-change-N`, or `details model-change-N` resolves that instance. Safe
-same-boundary changes stage directly. Saved changes atomically publish the
-selector and refreshed ModelView for the next turn, while the active turn keeps
-its immutable snapshot; a changed waterline, manifest, Prompt environment, or
-reloaded target definition makes the preview stale. Displays identify
-credential slots but never reveal registered secret values, and configured URL
-query values are shown only as `?configured`. The picker and confirmation also
-show the normalized proxy origin/path with userinfo removed. After a saved
-selection reloads configuration, yaca compares the selected Model Key, secret
-adapter options, and proxy credentials privately against the preview's
-generation. A value-only change makes that preview stale before Context
-publication; no secret value or reusable secret digest enters the disclosure.
+`yaca --config-repl` opens an offline editor for an existing valid INI. `list [page]` lists sections, `show General` shows fields, `set General LogLevel` prompts for the value, and `unset <section> <key>` restores a field's default. `preview` shows pending changes; `save config-edit-N` saves and exits; `reset`, `reload`, `quit`, `cancel`, Esc, or EOF discard unsaved edits. Key, ProxyUrl, and AdapterOptions use hidden input. If the file is invalid, a private line-repair draft opens instead: `list`, `replace <line>`, `insert <line>`, `delete <line>`, then `preview`/`validate` and `save config-repair-N`. The editor preserves unmodified bytes, comments, section order, BOM, and line endings; external changes to the file require a reload before saving.
+
+`yaca --model-repl` manages model definitions: `list [page]`, `show <row-id>`, `set`/`unset <row-id> <key>`, `add`, `rename <row-id> <name>`, `delete <row-id>`, `move <row-id> <position>`, and `test <row-id>` — the last checks a saved model after an explicit online confirmation, and edits clear the observed status. `preview` shows changes, the new default, and affected Contexts; `save model-edit-N` confirms the preview and rechecks configuration and Context identities. In `--config-repl`, models appear as summaries; edit them in `--model-repl`. Permission profiles support editing existing fields there — add, rename, delete, or reorder profiles by hand in the INI.
+
+Model and permission names match case-insensitively (ASCII-only folding); stored data keeps the spelling you configured.
 
 ## Contexts
 
-Context files live in a mirror tree such as `__yaca__/CONTEXT/C/Program Files/My Task.xml`. The current logical path, including the XML filename, produces a displayed 16-character uppercase hexadecimal hash. There is no permanent Context ID: rename or rebind changes the path and hash immediately.
+Each conversation is stored as one complete XML file in a mirror tree under `__yaca__/CONTEXT/` — for example `__yaca__/CONTEXT/C/Program Files/My Task.xml`. Its path produces a displayed 16-character uppercase hex hash, which is how you select it. There is no permanent Context ID: rename or rebind changes the path and the hash immediately. The workspace root is derived from where the XML sits in the tree; the XML itself can't override it.
 
-Opening history is always explicit. A short name selects the first usable match by the specified scope/distance order; a hash is the precise selector and must be unique. Rename, rebind, permanent delete, import mapping, and metadata changes reverify the selected target. A live writer blocks another process from reading the XML body or mutating it; stale locks are never broken by age alone.
+Opening history is always explicit. A short name selects the first usable match by scope and distance; a hash selects exactly and must be unique. Opening a Context recorded in a different workspace displays both paths and requires `CONTINUE <hash>` before proceeding. Unfinished turns, queued items, and pending compaction aren't replayed automatically — they ask for explicit recovery. A live writer blocks other processes from reading or mutating the XML, and locks aren't broken by age alone.
 
-`--continue <selector>` resolves and reverifies one exact target. If its workspace differs from the current one, it displays both paths and requires `CONTINUE <hash>` before acquiring a writer. Acceptance opens an Idle Agent in the recorded workspace; cancellation opens nothing. It restores durable event/config/ModelView and identifier waterlines without replaying unfinished work. Unfinished turns, active queue items, unresolved operations or tools, unknown terminal outcomes, and pending compaction still require explicit recovery. The confirmed directory identity remains bound to subsequent turns and Tools; a replacement is refused. This changes the Agent workspace without moving XML or changing the process working directory.
+`yaca --continue <selector>` reopens one exact target. `yaca --context-repl recent|full` opens the offline manager: `list`, `inspect <selector>`, `search <query>`, `refresh`, `rename`, `set-auto-rename-disabled`, `delete [--yes]` (asks for the exact hash), `rebind`, `import`, `repair`, `export`, `select`, and `quit`. Destructive actions reverify the target and ask for typed confirmation (`REBIND <hash>`, `IMPORT <hash>`, `REPAIR <hash>`).
 
-Within chat, `.context` without a selector shows a bounded recent list. `.context <selector>` binds the precise hash, file credential, and both directory identities. Cross-workspace switching requires the same `CONTINUE <hash>` response; `.cancel` or another response keeps the current owner. The old owner closes only after acceptance and safe queue, side lane, approval, and compaction checks. The new owner reverifies the original selection. A post-close race ends the invocation without opening a replacement match.
+Context XML is yaca's internal versioned storage, not a stable third-party API. Export is the interchange path.
 
-Each interactive coordinator error receives a process-local `error-N` identity. `.details` shows the newest retained error and `.details error-N` selects one explicitly. The fixed ring retains at most 64 sanitized code/message/suggestion/next-action records; expired identities fail closed, and raw exception objects, Tool bodies, and transport payloads are not retained by this surface.
+Each interactive coordinator error gets a process-local `error-N` identity. `.details` shows the newest retained error, `.details error-N` selects one. The ring keeps at most 64 sanitized records; expired identities fail closed.
 
-## Implemented command grammar
+## Chat
 
-The parser recognizes these spellings; target-qualified executables are delivered per archive:
+The chat interface uses the host line editor: type a command, press Enter. A new chat stays a draft until the first main message; yaca writes the Context before it calls a model or makes a change. Text fallbacks cover `.queue` (`list|delete|move|edit|clear`), `.immediate`, `.side`, `.multiline`, `.cancel`, `.cautious`, `.model`, `.context`, `.status`, `.help`, `.details`, `.prompt`, `.compact`, and `.quit`. They mirror the terminal shortcuts. yaca doesn't offer a remote or headless controller.
+
+- `.side` answers from committed context without tools and doesn't change the current task.
+- `.multiline` collects literal lines; `.submit` sends a task and `.side` sends a side question. `.show`, `.clear`, and `.cancel` inspect, clear, or discard the draft; a line starting with `..` inserts a literal dot.
+- `.cautious [status|on|off|toggle|reset]` toggles high-risk action review for the current Context; with `DoubleCheck` on, the finish review is mandatory. It's a Context override, not a permission profile, and applies from the next turn.
+- `.prompt [show|set|clear] [text]` inspects or changes the current Context prompt. `.prompt edit` opens a bounded multiline editor; save with the `.save prompt-edit-N` command it shows, or leave with `.cancel`. Changes apply from the next turn.
+- `.model` lists up to 64 enabled models, and `.model <exact-name>` selects one. Changes that alter the endpoint, credentials, protocol, or capability limits ask for confirmation; an empty answer denies. Secrets aren't displayed, and a saved change applies from the next turn.
+- `.status` checks the owned Context, shows its hash and effective session settings, and stops if the Context file changed on disk.
+
+## Command line
+
+The parser recognizes these spellings, and each archive includes its executable:
 
 ```text
 yaca [directory]
@@ -127,92 +83,30 @@ yaca --export [selector]            (-ex, Windows /ex)
 yaca --status                       (-stt, Windows /stt)
 ```
 
-`--status` reports the current invocation and configuration without scanning history
-or creating data. Chat `.status` checks the owned Context and stops execution if
-its file has changed; it also shows the current hash and effective Session settings.
+Bare `yaca` is exactly `yaca .`. `--` ends option parsing, so a directory beginning with `-` stays expressible. On Linux, a path starting with `/` isn't treated as an option.
 
-`--export <selector>` returns verified Markdown without opening a writer,
-recovering history, or calling a Model. Missing or invalid configuration does not
-block this read-only action. A fresh invocation with no selector reports that no
-Context is open. Registered secrets from a valid configuration are rejected before
-output, including secrets in decoded binary fields. The TTY requirement remains.
+- `--status` reports the current invocation and configuration without scanning history or creating data.
+- `--export [selector]` prints verified Markdown for a Context without opening a writer, recovering history, or calling a model. Registered secrets in a valid configuration are rejected before output. A TTY is required.
+- `--self-test` stages 2/3 use the production model and transport. They need a real interactive TTY plus the current-invocation flag `--i-accept-online-self-test`; a pipe isn't supported even with the flag. Online probes don't run product tools or modify configuration, and stage 3 findings are advisory.
 
-Controller gaps remain in management interactions.
-`--config-repl` edits catalog fields in valid configurations and still creates
-a repair template when the file is missing. Invalid bounded files open a private
-line repair draft: `list [page]` shows locations and schema labels; `replace <line>`
-and `insert <line>` read a complete hidden INI line, while `delete <line>` removes
-only that line. `preview`/`validate` check the whole candidate, and `save config-repair-N`
-publishes only the exact valid draft. Unmodified bytes, BOM and line endings are
-preserved; unknown records are never silently discarded. `reset`, `reload`,
-`cancel` and `quit` retain their explicit meanings. External changes require reload;
-uncertain publication stops the editor. Source values, comments and resource names
-are hidden throughout repair, and existing byte/line/input limits still apply.
-`--model-repl` now manages valid configuration with `list [page]`, `show <row-id>`,
-`set`/`unset <row-id> <key>`, `add`, `rename <row-id> <name>`, `delete <row-id>`,
-and `move <row-id> <position>`. Use the current `model-edit-N:ordinal` row identity;
-changes invalidate old rows. Add starts a blank guided draft with `.back` and hidden
-Key input. `preview` shows changes, the new default, and affected Context references;
-`save model-edit-N` confirms that preview and rechecks configuration and Context identities.
-Context history is preserved; missing Models require explicit mapping on continuation.
-Busy, corrupt or incompletely scanned Contexts block reference-changing saves.
-`reset`, `reload`, `cancel` and `quit` discard unsaved changes. Model definitions are
-summaries in `--config-repl`; edit them in `--model-repl`. Permission profiles support
-existing-field editing; add/rename/delete/reorder them manually in INI, as selected
-for v0.1. `test <row-id>` checks a saved Model after an explicit, bounded online confirmation; edits clear the observed test status. `--context-repl recent|full` opens the offline Context manager. It
-shows the requested initial catalog and accepts `list [recent|full]`,
-`inspect <selector>`, `search <query>`, `refresh`, `help`, and `quit`.
-List and search use a bounded snapshot; `refresh` rescans it explicitly.
-Inspection resolves and reverifies one exact target before displaying metadata;
-a changed target is refused and unavailable Contexts never have their bodies
-opened. Incomplete scans are labelled. Esc or EOF closes the manager and restores
-the terminal. `rename <selector> <new-name>` preserves the reconstructable Model
-history and never replaces an existing destination. `set-auto-rename-disabled
-<selector> <true|false>` updates the dedicated metadata. `delete <selector> [--yes]`
-requires exact hash confirmation, reverifies the same target, and can explicitly
-delete corrupt XML. Busy or replaced targets are refused; uncertain publication
-or partial cleanup stops management. `rebind <selector> <target-root>` previews an
-existing workspace and the new Context path/hash, requires `REBIND <old-hash>`,
-and reverifies both the selected XML and workspace before moving without replacement.
-Continue from the new workspace using the new hash. `import <in-place-xml-path>`
-validates an XML already in its intended mirror, previews explicit local Model and
-Permission mappings, and writes both effective selectors and their snapshots after
-`IMPORT <hash>` confirmation. Configuration or target changes abort the import;
-historical approvals remain audit-only and unfinished work is never replayed.
-`repair <selector>` previews a validated previous-file recovery or cleanup, then
-requires `REPAIR <hash>` and reverifies the exact files before publishing a repair
-record and refreshed ModelView. It restores missing/corrupt XML only from its valid
-named previous file, never breaks a writer lock or replays unfinished operations.
-`export <selector>` prints the same verified Markdown as `--export`. `select <selector>`
-closes the manager terminal and continues the exact selection, using the same workspace
-confirmation when needed. A cancelled confirmation stays in management.
-Online self-test Stage 2/3 use the production Model and transport adapters. Stage 1 first verifies an isolated filesystem publication round-trip. Online probes never execute product tools or modify configuration; Stage 3 findings are advisory.
+## Out of scope for v0.1
 
-Bare `yaca` is exactly `yaca .`. `--` ends option parsing, so a directory beginning with `-` remains expressible. Linux never treats `/...` as an option. Self-test Stage 2 or 3 requires a real interactive TTY and the current-invocation flag `--i-accept-online-self-test`; a pipe remains unsupported even with consent.
+No Web UI, image/audio input, transcription, TTS, public remote/headless API, MCP, plugin/hook/skills runtime, sub-agents, Context branching, multi-root Contexts, telemetry, diagnostic upload, built-in update, general undo, or direct HTTP agent tool. v0.1 leaves them out of configuration, help, schemas, the runtime, dependencies, and the release archives. A local web interface isn't part of v0.1.
 
-Chat text fallbacks are `.queue` (`list|delete|move|edit|clear`), `.immediate`, `.side`, `.multiline`, `.cancel`, `.cautious`, `.model`, `.context`, `.status`, `.help`, `.details`, `.prompt`, `.compact`, and `.quit`. They project the same semantic actions as terminal shortcuts and do not create a remote/headless controller.
+## Development
 
-## Explicitly out of scope for v0.1
-
-There is no Web UI, image/audio input, transcription, TTS, public remote/headless API, MCP, plugin/hook/skills runtime, sub-agent, Context branching, multi-root Context, telemetry, diagnostic upload, built-in update, general undo, or direct HTTP Agent tool. These exclusions must have zero surface in configuration, help, schemas, runtime, dependencies, and release archives.
-
-Future local Web product lines are design reservations only; they do not authorize a Web component in v0.1.
-
-## Development documents
-
-Start with the [current state](.develope-docs/CURRENT-STATE.md), [Gate A/B/R audit](.develope-docs/GATE-AUDIT-2026-08-29.md), [implementation plan](.develope-docs/IMPLEMENTATION-PLAN.md), [machine contracts](.develope-docs/contracts/README.md), and [technical proof backlog](.develope-docs/TECHNICAL-PROOF-BACKLOG.md). From the repository root, run the full coding-readiness check with:
+Development documents (Chinese) live in `.develope-docs/` — start from the [current state](.develope-docs/CURRENT-STATE.md), the [implementation plan](.develope-docs/IMPLEMENTATION-PLAN.md), and the [machine contracts](.develope-docs/contracts/README.md). From the repository root, run the full coding-readiness check with:
 
 ```sh
 bash .tools/run_coding_readiness.sh
 ```
 
-The readiness and heavyweight proof entrypoints acquire one per-user yaca test
-lock and fail with exit 75 before starting when effective host/cgroup memory,
-load, or Linux memory pressure is unsafe. Run an isolated full Lua suite through
-the same guard instead of invoking it unguarded:
+The readiness entrypoints take a per-user test lock and refuse to start (exit 75) when host memory, load, or memory pressure is unsafe. Run the Lua suite under the same guard:
 
 ```sh
 bash .tools/run_with_resource_guard.sh bin/lua55 test/run.lua
 ```
 
-Model and Permission selectors match full logical names with ASCII-only case folding; persisted names retain their configured spelling. Relative tool paths resolve against the current Context workspace and retain the same Permission and reserved-tree checks.
+## License
+
+[yaca is licensed under GPL v3](LICENSE).
