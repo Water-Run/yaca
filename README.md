@@ -2,106 +2,160 @@
 
 [中文](README-zh.md)
 
-yaca is a general-purpose terminal agent. One chat, one agent, one Context at a time, and tools run one after another. Coding is a common job for it, and so are other tasks. Licensed under GPL v3.
+yaca is a general-purpose AI agent for the terminal that runs on old
+machines. Windows XP, Server 2008, CentOS 7: places where today's agents
+won't even start.
 
-> **Release:** v0.1 publishes a portable archive for each of the three targets. Start with the [Windows quickstart](release/WINDOWS-QUICKSTART.md) or the [Linux quickstart](release/LINUX-QUICKSTART.md). Real XP SP3, Windows 7 SP1, and bare-metal CentOS 7 power-loss checks are outside this release.
+Put it on a USB stick, plug it into the machine that's misbehaving, and
+ask. There's nothing to install. It can write code over a long session
+too, but it's built for the everyday job of walking up to a system and
+fixing something.
 
-## Supported platforms
+> [!NOTE]
+> yaca isn't released yet. The core works; target qualification pending on
+> the three platforms below.
 
-Three archives, each built on its own:
+## Why yaca
 
-- Win32 x86: Windows XP SP3 through Windows 11
-- Win64 x86_64: Windows 7 SP1 through Windows 11
-- Linux x86_64: CentOS 7 is the hard minimum
+**It runs where others don't.** Most current coding agents need Node.js,
+Python or a recent OS, and many won't run on anything older than Windows 10
+1809. yaca goes back to Windows XP SP3. It brings its own HTTPS client and
+certificate list, so an old system's outdated TLS doesn't stop it from
+reaching the model.
 
-Each archive embeds Lua 5.5 and doesn't need a system Lua. A Windows zip contains `yaca.exe`, `Install.cmd`, `README.txt`, `LICENSE`, and `docs/`. Linux uses `yaca` and `Install.sh`. The install helper can add the extracted directory to `PATH`. It doesn't copy the program or create an install database.
+**It's portable.** yaca is a single executable. Settings and history live in
+a `__yaca__` folder right next to it, wherever you start it from, so the
+whole thing moves with the USB stick.
 
-Durable data lives in `__yaca__` next to the actual executable, whatever directory you start from. v0.1 has no built-in updater and makes no code-signing promise.
+**It's simple.** One conversation, one agent, one tool at a time. It asks
+before it writes, deletes or runs anything, and shows you what it's about
+to do.
 
-## Tools and permissions
+| Platform | Oldest system |
+|---|---|
+| Windows 32-bit (x86) | Windows XP SP3 |
+| Windows 64-bit (x86_64) | Windows 7 SP1 |
+| Linux x86_64 | CentOS 7 (glibc 2.17) |
 
-The agent tool set is fixed: `list`, `read`, `search`, `write`, `patch`, `rename`, `delete`, and `exec`. `exec` runs under the broad `Shell` capability. yaca doesn't infer or sandbox what a command does to files or the network.
+## Editions
 
-Two permission profiles ship with the distribution:
+Each platform comes in three sizes. The yaca inside is identical; only the
+extra tools differ.
 
-| Profile | Read | Write | Delete | Shell | OutsideWorkspace |
-| --- | --- | --- | --- | --- | --- |
-| Std (default) | allow | confirm | confirm | confirm | confirm |
-| Readonly | allow | deny | deny | deny | deny |
+| Edition | Contents | Good for |
+|---|---|---|
+| **clean** | `yaca` only | Machines that already have the tools you need |
+| **std** | + Python 2.7, SSH/SCP/SFTP, curl, 7-Zip | Most troubleshooting (recommended) |
+| **full** | + Git, Python 3, compilers, SQLite, jq and more | Fixing and building code on a bare machine |
 
-Permission names and prompts describe behavior; they don't grant capabilities by themselves. Relative tool paths resolve against the current Context workspace and keep the same permission and reserved-tree checks.
+The extra tools sit in a `tools/` folder next to yaca. yaca tells the agent
+they're there; it doesn't need them to start. Lua 5.5 is built into yaca
+itself, in every edition.
 
-## Configuration
+## Getting started
 
-Settings live in `__yaca__/config.ini`, next to the executable. The model adapters are `openai-chat` and `anthropic-messages`. Each model is one explicit connection, and a failed request doesn't switch to another model.
+Unzip anywhere you can write to, then run it:
 
-The whole config file is validated as one unit: an invalid, unreadable, or half-written file blocks new turns instead of falling back silently, and a running turn keeps the configuration it started with.
-
-`yaca --config-repl` opens an offline editor for an existing valid INI. `list [page]` lists sections, `show General` shows fields, `set General LogLevel` prompts for the value, and `unset <section> <key>` restores a field's default. `preview` shows pending changes; `save config-edit-N` saves and exits; `reset`, `reload`, `quit`, `cancel`, Esc, or EOF discard unsaved edits. Key, ProxyUrl, and AdapterOptions use hidden input. If the file is invalid, a private line-repair draft opens instead: `list`, `replace <line>`, `insert <line>`, `delete <line>`, then `preview`/`validate` and `save config-repair-N`. The editor preserves unmodified bytes, comments, section order, BOM, and line endings; external changes to the file require a reload before saving.
-
-`yaca --model-repl` manages model definitions: `list [page]`, `show <row-id>`, `set`/`unset <row-id> <key>`, `add`, `rename <row-id> <name>`, `delete <row-id>`, `move <row-id> <position>`, and `test <row-id>` — the last checks a saved model after an explicit online confirmation, and edits clear the observed status. `preview` shows changes, the new default, and affected Contexts; `save model-edit-N` confirms the preview and rechecks configuration and Context identities. In `--config-repl`, models appear as summaries; edit them in `--model-repl`. Permission profiles support editing existing fields there — add, rename, delete, or reorder profiles by hand in the INI.
-
-Model and permission names match case-insensitively (ASCII-only folding); stored data keeps the spelling you configured.
-
-## Contexts
-
-Each conversation is stored as one complete XML file in a mirror tree under `__yaca__/CONTEXT/` — for example `__yaca__/CONTEXT/C/Program Files/My Task.xml`. Its path produces a displayed 16-character uppercase hex hash, which is how you select it. There is no permanent Context ID: rename or rebind changes the path and the hash immediately. The workspace root is derived from where the XML sits in the tree; the XML itself can't override it.
-
-Opening history is always explicit. A short name selects the first usable match by scope and distance; a hash selects exactly and must be unique. Opening a Context recorded in a different workspace displays both paths and requires `CONTINUE <hash>` before proceeding. Unfinished turns, queued items, and pending compaction aren't replayed automatically — they ask for explicit recovery. A live writer blocks other processes from reading or mutating the XML, and locks aren't broken by age alone.
-
-`yaca --continue <selector>` reopens one exact target. `yaca --context-repl recent|full` opens the offline manager: `list`, `inspect <selector>`, `search <query>`, `refresh`, `rename`, `set-auto-rename-disabled`, `delete [--yes]` (asks for the exact hash), `rebind`, `import`, `repair`, `export`, `select`, and `quit`. Destructive actions reverify the target and ask for typed confirmation (`REBIND <hash>`, `IMPORT <hash>`, `REPAIR <hash>`).
-
-Context XML is yaca's internal versioned storage, not a stable third-party API. Export is the interchange path.
-
-Each interactive coordinator error gets a process-local `error-N` identity. `.details` shows the newest retained error, `.details error-N` selects one. The ring keeps at most 64 sanitized records; expired identities fail closed.
-
-## Chat
-
-The chat interface uses the host line editor: type a command, press Enter. A new chat stays a draft until the first main message; yaca writes the Context before it calls a model or makes a change. Text fallbacks cover `.queue` (`list|delete|move|edit|clear`), `.immediate`, `.side`, `.multiline`, `.cancel`, `.cautious`, `.model`, `.context`, `.status`, `.help`, `.details`, `.prompt`, `.compact`, and `.quit`. They mirror the terminal shortcuts. yaca doesn't offer a remote or headless controller.
-
-- `.side` answers from committed context without tools and doesn't change the current task.
-- `.multiline` collects literal lines; `.submit` sends a task and `.side` sends a side question. `.show`, `.clear`, and `.cancel` inspect, clear, or discard the draft; a line starting with `..` inserts a literal dot.
-- `.cautious [status|on|off|toggle|reset]` toggles high-risk action review for the current Context; with `DoubleCheck` on, the finish review is mandatory. It's a Context override, not a permission profile, and applies from the next turn.
-- `.prompt [show|set|clear] [text]` inspects or changes the current Context prompt. `.prompt edit` opens a bounded multiline editor; save with the `.save prompt-edit-N` command it shows, or leave with `.cancel`. Changes apply from the next turn.
-- `.model` lists up to 64 enabled models, and `.model <exact-name>` selects one. Changes that alter the endpoint, credentials, protocol, or capability limits ask for confirmation; an empty answer denies. Secrets aren't displayed, and a saved change applies from the next turn.
-- `.status` checks the owned Context, shows its hash and effective session settings, and stops if the Context file changed on disk.
-
-## Command line
-
-The parser recognizes these spellings, and each archive includes its executable:
-
-```text
-yaca [directory]
-yaca --help [topic]                 (-h, Windows /h)
-yaca --version                      (-v, Windows /v)
-yaca --self-test [options]          (-st, Windows /st)
-yaca --model-repl                   (-mr, Windows /mr)
-yaca --config-repl                  (-cfg, Windows /cfg)
-yaca --context-repl recent|full     (-ctx, Windows /ctx)
-yaca --continue <selector>          (-c, Windows /c)
-yaca --export [selector]            (-ex, Windows /ex)
-yaca --status                       (-stt, Windows /stt)
+```bat
+C:\yaca\yaca.exe
 ```
 
-Bare `yaca` is exactly `yaca .`. `--` ends option parsing, so a directory beginning with `-` stays expressible. On Linux, a path starting with `/` isn't treated as an option.
+The first run walks you through connecting a model. yaca speaks the
+OpenAI Chat Completions and Anthropic Messages APIs, so most providers and
+local servers work. You'll need:
 
-- `--status` reports the current invocation and configuration without scanning history or creating data.
-- `--export [selector]` prints verified Markdown for a Context without opening a writer, recovering history, or calling a model. Registered secrets in a valid configuration are rejected before output. A TTY is required.
-- `--self-test` stages 2/3 use the production model and transport. They need a real interactive TTY plus the current-invocation flag `--i-accept-online-self-test`; a pipe isn't supported even with the flag. Online probes don't run product tools or modify configuration, and stage 3 findings are advisory.
+- the full endpoint URL (including the API path, not just the host name)
+- the model name, for a model that supports tool calling
+- an API key, if your provider uses one
 
-## Out of scope for v0.1
+Then open a folder and talk to it:
 
-No Web UI, image/audio input, transcription, TTS, public remote/headless API, MCP, plugin/hook/skills runtime, sub-agents, Context branching, multi-root Contexts, telemetry, diagnostic upload, built-in update, general undo, or direct HTTP agent tool. v0.1 leaves them out of configuration, help, schemas, the runtime, dependencies, and the release archives. A local web interface isn't part of v0.1.
+```bat
+C:\yaca\yaca.exe C:\work\broken-service
+```
+
+Try "why won't this service start?" or "free up space on drive D". Step-by-step
+guides: [Windows](release/WINDOWS-QUICKSTART.md) ·
+[Linux](release/LINUX-QUICKSTART.md).
+
+## What the agent can do
+
+It has nine tools: `list`, `read`, `search`, `write`, `patch`, `rename`,
+`delete`, `exec` (run a command) and `lua` (run Lua code).
+
+What it may do without asking depends on the permission profile:
+
+| Profile | Read | Write / delete | Run commands | Outside the folder |
+|---|---|---|---|---|
+| **Std** (default) | yes | asks | asks | asks |
+| **Readonly** | yes | no | no | no |
+
+> [!IMPORTANT]
+> A command or Lua script runs with your own user rights, like any program
+> you start yourself. yaca asks before running one but doesn't sandbox it.
+> Read the command before you approve it.
+
+## In the chat
+
+Type normally to give a task. Commands start with a dot:
+
+| Command | |
+|---|---|
+| `.help` | All commands |
+| `.ask` | Ask a quick question without tools and without changing the task |
+| `.multiline` | Enter several lines at once |
+| `.cancel` | Stop the current turn |
+| `.status` | Current conversation, model and settings |
+| `.model` | Switch model |
+| `.context` | Switch to another saved conversation |
+| `.compact` | Summarize the history to save space |
+| `.quit` | Exit |
+
+Every conversation is saved automatically. `.status` shows its short hash;
+`yaca --continue <hash>` picks it up again later.
+
+<details>
+<summary><b>Command-line options</b></summary>
+
+| Command | |
+|---|---|
+| `yaca [folder]` | Start a chat in a folder (default: current folder) |
+| `yaca --continue <name or hash>` | Continue a saved conversation |
+| `yaca --context-repl recent` | Browse, rename, delete or export conversations |
+| `yaca --model-repl` | Add, edit or test models |
+| `yaca --config-repl` | Edit other settings, or repair a broken config |
+| `yaca --export <hash>` | Print a conversation as Markdown |
+| `yaca --self-test` | Check that this machine and your model work |
+| `yaca --status` | Show configuration status without opening a chat |
+| `yaca --lua ...` | Run the built-in Lua 5.5 interpreter |
+| `yaca --help [topic]` | Help |
+
+On Windows, `/h`, `/c` and the other short forms also work.
+
+</details>
+
+## Settings and data
+
+Everything lives in `__yaca__` next to the executable:
+
+- `config.ini` holds models, permissions and network settings. Edit it
+  with `--model-repl` and `--config-repl`, or by hand. A proxy goes under
+  `[Network]` as `ProxyUrl`.
+- `CONTEXT/` holds saved conversations, one file each.
+
+To upgrade, quit yaca, back up `__yaca__`, and replace the executable.
+There's no auto-update.
+
+## Not included
+
+No web UI, image or audio input, MCP, plugins, sub-agents, telemetry or
+automatic updates. yaca is a terminal program and stays small.
 
 ## Development
 
-Development documents (Chinese) live in `.develope-docs/` — start from the [current state](.develope-docs/CURRENT-STATE.md), the [implementation plan](.develope-docs/IMPLEMENTATION-PLAN.md), and the [machine contracts](.develope-docs/contracts/README.md). From the repository root, run the full coding-readiness check with:
-
-```sh
-bash .tools/run_coding_readiness.sh
-```
-
-The readiness entrypoints take a per-user test lock and refuse to start (exit 75) when host memory, load, or memory pressure is unsafe. Run the Lua suite under the same guard:
+Development notes (in Chinese) are in [.develope-docs/](.develope-docs/),
+starting with [the current state](.develope-docs/CURRENT-STATE.md). Run the
+tests from the repository root:
 
 ```sh
 bash .tools/run_with_resource_guard.sh bin/lua55 test/run.lua
@@ -109,4 +163,4 @@ bash .tools/run_with_resource_guard.sh bin/lua55 test/run.lua
 
 ## License
 
-[yaca is licensed under GPL v3](LICENSE).
+[GPL v3](LICENSE).

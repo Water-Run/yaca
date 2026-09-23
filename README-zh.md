@@ -2,111 +2,150 @@
 
 [English](README.md)
 
-yaca 是一个通用终端 Agent。一个聊天界面、一个 Agent、同时只有一个 Context，工具一个接一个执行。写代码是常见工作，其他任务也同样。以 GPL v3 许可开源。
+yaca 是一个能在老机器上跑的通用终端 AI Agent。Windows XP、Server 2008、
+CentOS 7——如今的 Agent 在这些系统上连启动都做不到。
 
-> **发行：** v0.1 为三个目标各提供一个便携压缩包。从 [Windows 首次使用](release/WINDOWS-QUICKSTART.md) 或 [Linux 首次使用](release/LINUX-QUICKSTART.md) 开始。真实的 XP SP3、Windows 7 SP1，以及裸机 CentOS 7 的断电检查不在这一版里。
+把它放进 U 盘，插到出问题的机器上，直接开问，什么都不用装。它也能陪你
+长时间写代码，但它更擅长的是日常那种事：走到一台机器前，把问题修好。
 
-## 支持的平台
+> [!NOTE]
+> yaca 还没有正式发布。核心功能已经可用，下面三个平台的目标资格验证待完成。
 
-三个压缩包，各自单独构建：
+## 为什么是 yaca
 
-- Win32 x86：Windows XP SP3 至 Windows 11
-- Win64 x86_64：Windows 7 SP1 至 Windows 11
-- Linux x86_64：CentOS 7 是最低基线
+**别人跑不了的地方，它能跑。** 现在的编程 Agent 大多要 Node.js、Python 或者
+较新的系统，很多连 Windows 10 1809 都跑不起来。yaca 一路兼容到 Windows XP SP3。
+它自带 HTTPS 客户端和证书列表，老系统的 TLS 再旧，也不影响连上模型。
 
-每个包内嵌 Lua 5.5，不需要系统里的 Lua。Windows 的 zip 里有 `yaca.exe`、`Install.cmd`、`README.txt`、`LICENSE` 和 `docs/`。Linux 使用 `yaca` 和 `Install.sh`。安装脚本可以把解压目录加入 `PATH`。它不复制程序，也不建立安装数据库。
+**便携。** yaca 就一个可执行文件。配置和历史放在它旁边的 `__yaca__` 文件夹里，
+不管从哪个目录启动都一样，所以整套东西跟着 U 盘走。
 
-长期数据放在实际可执行文件旁边的 `__yaca__` 里，不随启动目录变化。v0.1 没有内建更新器，也不做代码签名。
+**简单。** 一个对话，一个 Agent，工具一次只跑一个。写入、删除、执行命令之前
+都会先问你，并告诉你它打算做什么。
 
-## 工具与权限
+| 平台 | 最低系统 |
+|---|---|
+| Windows 32 位（x86） | Windows XP SP3 |
+| Windows 64 位（x86_64） | Windows 7 SP1 |
+| Linux x86_64 | CentOS 7（glibc 2.17） |
 
-Agent 的工具是固定的：`list`、`read`、`search`、`write`、`patch`、`rename`、`delete`、`exec`。`exec` 走较宽的 `Shell` 能力。yaca 不会从命令文本推断或沙箱化它对文件和网络的影响。
+## 版本
 
-发行包带两套权限配置：
+每个平台分三档。里面的 yaca 完全相同，区别只在附带的工具。
 
-| 配置 | Read | Write | Delete | Shell | OutsideWorkspace |
-| --- | --- | --- | --- | --- | --- |
-| Std（默认） | allow | confirm | confirm | confirm | confirm |
-| Readonly | allow | deny | deny | deny | deny |
+| 档位 | 内容 | 适合 |
+|---|---|---|
+| **clean** | 只有 `yaca` | 机器上已经有你要用的工具 |
+| **std** | + Python 2.7、SSH/SCP/SFTP、curl、7-Zip | 大多数排障场景（推荐） |
+| **full** | + Git、Python 3、编译器、SQLite、jq 等 | 在一台什么都没有的机器上改代码、编译 |
 
-权限名和提示只是在说明行为，本身不授予能力。工具的相对路径按当前 Context 的工作目录解析，并做同样的权限和保留目录检查。
+附带工具放在 yaca 旁边的 `tools/` 文件夹里。yaca 会告诉 Agent 有哪些工具可用，
+但启动并不依赖它们。Lua 5.5 直接内置在 yaca 里，三档都有。
 
-## 配置
+## 开始使用
 
-设置写在可执行文件旁边的 `__yaca__/config.ini`。模型适配器是 `openai-chat` 和 `anthropic-messages`。每个模型是一条明确的连接；请求失败时设计上不会改去另一个模型。
+解压到任意有写权限的位置，然后运行：
 
-整份配置作为一份来校验：文件无效、读不了或只写了一半时，新的回合会停下来，而不是悄悄退回旧配置。正在进行的回合一直用它开始时的那份配置。
-
-`yaca --config-repl` 为已有的有效 INI 打开离线编辑器。`list [页码]` 列出区段，`show General` 查看字段，`set General LogLevel` 会提示输入值，`unset <区段> <键>` 把字段恢复成默认。`preview` 看未保存的改动；`save config-edit-N` 保存并退出；`reset`、`reload`、`quit`、`cancel`、Esc 或 EOF 丢掉未保存的编辑。Key、ProxyUrl 和 AdapterOptions 用隐藏输入。文件无效时改为逐行修复草稿：`list`、`replace <行>`、`insert <行>`、`delete <行>`，然后 `preview`/`validate`，再用 `save config-repair-N` 保存。编辑器保留未改动的字节、注释、区段顺序、BOM 和换行；文件在外面被改过时，要先 reload 再保存。
-
-`yaca --model-repl` 管理模型定义：`list [页码]`、`show <row-id>`、`set`/`unset <row-id> <键>`、`add`、`rename <row-id> <名称>`、`delete <row-id>`、`move <row-id> <位置>`，以及 `test <row-id>`。最后这个要在明确确认联网之后，才测试已保存的模型；编辑会清掉观察到的状态。`preview` 显示改动、新的默认模型，以及受影响的 Context；`save model-edit-N` 确认这份预览，并重新核对配置和 Context 身份。在 `--config-repl` 里模型只显示摘要，要到 `--model-repl` 里改。权限配置可以在那里改已有字段；新增、改名、删除或调整顺序请直接改 INI。
-
-模型和权限的名字按不区分大小写匹配（只折叠 ASCII）；存下来的仍是你配置时的拼写。
-
-## Context
-
-每次对话存成 `__yaca__/CONTEXT/` 镜像树里的一份完整 XML，例如 `__yaca__/CONTEXT/C/Program Files/我的任务.xml`。路径会显示成 16 位大写十六进制哈希，选择时用它。没有永久的 Context ID：重命名或重新绑定后，路径和哈希马上改变。工作区根目录由 XML 在树里的位置决定，XML 自己改不了它。
-
-打开历史都要显式操作。短名称按范围和距离挑第一个可用的匹配；哈希必须精确且唯一。打开记录在另一个工作区里的 Context 时，会同时显示两条路径，输入 `CONTINUE <哈希>` 后才继续。没做完的回合、队列里的项和待压缩的内容不会自动重放，需要明确恢复。已有写入者时，别的进程不能读或改这份 XML；锁也不会只因为放得久就被拆掉。
-
-`yaca --continue <选择器>` 重新打开一个精确目标。`yaca --context-repl recent|full` 打开离线管理器：`list`、`inspect <选择器>`、`search <查询>`、`refresh`、`rename`、`set-auto-rename-disabled`、`delete [--yes]`（要求精确哈希）、`rebind`、`import`、`repair`、`export`、`select` 和 `quit`。会改数据的操作会再次核对目标，并要求按提示输入确认（`REBIND <哈希>`、`IMPORT <哈希>`、`REPAIR <哈希>`）。
-
-Context XML 是 yaca 自己的版本化存储，不是给外部当稳定接口用的。交换数据走导出。
-
-每个交互式协调错误在本进程里有一个 `error-N` 标识。`.details` 显示最新保留的一条，`.details error-N` 指定一条。环里最多留 64 条清理过的记录；过期标识会直接拒绝。
-
-## 聊天
-
-聊天用系统自带的行编辑：输入命令，按 Enter。新聊天在第一条 main 消息之前只是草稿；调用模型或做出改动之前，yaca 会先把 Context 写下来。文本命令有 `.queue`（`list|delete|move|edit|clear`）、`.immediate`、`.side`、`.multiline`、`.cancel`、`.cautious`、`.model`、`.context`、`.status`、`.help`、`.details`、`.prompt`、`.compact` 和 `.quit`。它们和终端快捷键是同一组动作。yaca 不提供远程或无界面控制器。
-
-- `.side` 根据已提交的上下文回答，不调用工具，也不改当前任务。
-- `.multiline` 逐行收集原文；`.submit` 提交任务，`.side` 提交旁路问题。`.show`、`.clear`、`.cancel` 用来查看、清空或放弃草稿；以 `..` 开头的行表示一个字面点号。
-- `.cautious [status|on|off|toggle|reset]` 开关当前 Context 的高风险动作复查；打开 `DoubleCheck` 时，结束复查是必须的。这是 Context 上的覆盖，不是权限配置，从下一回合起生效。
-- `.prompt [show|set|clear] [文本]` 查看或修改当前 Context 的提示词。`.prompt edit` 打开有长度限制的多行编辑器；用它显示的 `.save prompt-edit-N` 保存，用 `.cancel` 离开。改动从下一回合起生效。
-- `.model` 最多列出 64 个已启用的模型，`.model <精确名称>` 选定一个。改动端点、凭据、协议或能力上限时会要求确认；空回答视为拒绝。密钥设计上不会显示出来，已保存的改动从下一回合起生效。
-- `.status` 检查当前持有的 Context，显示哈希和有效的会话设置；Context 文件在磁盘上变了就会停下来。
-
-## 命令行
-
-解析器认识这些写法，每个发行包都带上对应的可执行文件：
-
-```text
-yaca [directory]
-yaca --help [topic]                 (-h, Windows /h)
-yaca --version                      (-v, Windows /v)
-yaca --self-test [options]          (-st, Windows /st)
-yaca --model-repl                   (-mr, Windows /mr)
-yaca --config-repl                  (-cfg, Windows /cfg)
-yaca --context-repl recent|full     (-ctx, Windows /ctx)
-yaca --continue <selector>          (-c, Windows /c)
-yaca --export [selector]            (-ex, Windows /ex)
-yaca --status                       (-stt, Windows /stt)
+```bat
+C:\yaca\yaca.exe
 ```
 
-裸 `yaca` 就是 `yaca .`。`--` 结束选项解析，所以以 `-` 开头的目录仍然可以写。在 Linux 上，以 `/` 开头的路径不会被当成选项。
+第一次运行会引导你连接模型。yaca 支持 OpenAI Chat Completions 和
+Anthropic Messages 两种接口，大多数服务商和本地模型服务都能用。你需要准备：
 
-- `--status` 报告当前这次运行和配置，不扫描历史，也不创建数据。
-- `--export [选择器]` 输出核对过的 Context Markdown，不取得写入者，不恢复历史，也不调用模型。有效配置里登记过的密钥会在输出前被拒绝。需要 TTY。
-- `--self-test` 的第 2、3 阶段使用正式的模型和传输。它们需要真实的交互 TTY，以及本次运行的 `--i-accept-online-self-test`；管道即使带了这个标志也不支持。在线探测不运行产品工具，也不修改配置，第 3 阶段的结果只供参考。
+- 完整的接口地址（要包含 API 路径，不能只填域名）
+- 模型名称，模型需要支持工具调用
+- API key（服务商要求的话）
 
-## v0.1 不做的事
+然后打开一个文件夹，开始对话：
 
-不做 Web UI、图像或音频输入、转写、语音合成、公共的远程或无界面 API、MCP、插件/钩子/技能运行时、子 Agent、Context 分支、多根 Context、遥测、诊断上传、内建更新、通用撤销，以及直接的 HTTP Agent 工具。这些都不进入 v0.1 的配置、帮助、schema、运行时、依赖和发行包。本地网页界面也不在 v0.1 里。
+```bat
+C:\yaca\yaca.exe C:\work\broken-service
+```
+
+比如问它“这个服务为什么起不来？”或者“帮我清理一下 D 盘空间”。
+分步指南：[Windows](release/WINDOWS-QUICKSTART.md) ·
+[Linux](release/LINUX-QUICKSTART.md)。
+
+## Agent 能做什么
+
+它有九个工具：`list`、`read`、`search`、`write`、`patch`、`rename`、
+`delete`、`exec`（执行命令）和 `lua`（运行 Lua 代码）。
+
+哪些操作不用问你，由权限配置决定：
+
+| 配置 | 读取 | 写入 / 删除 | 执行命令 | 工作目录以外 |
+|---|---|---|---|---|
+| **Std**（默认） | 允许 | 先问 | 先问 | 先问 |
+| **Readonly** | 允许 | 不允许 | 不允许 | 不允许 |
+
+> [!IMPORTANT]
+> 命令和 Lua 脚本以你自己的用户权限运行，和你亲手启动的程序一样。yaca
+> 运行前会问你，但不会把它关进沙箱。批准之前请看清命令。
+
+## 聊天里
+
+直接输入就是下达任务。命令以点开头：
+
+| 命令 | |
+|---|---|
+| `.help` | 全部命令 |
+| `.ask` | 顺手问个问题，不用工具，也不影响当前任务 |
+| `.multiline` | 一次输入多行 |
+| `.cancel` | 停止当前这一轮 |
+| `.status` | 当前对话、模型和设置 |
+| `.model` | 切换模型 |
+| `.context` | 切换到另一个已保存的对话 |
+| `.compact` | 压缩历史，节省上下文 |
+| `.quit` | 退出 |
+
+每个对话都会自动保存。`.status` 会显示它的短 hash，之后用
+`yaca --continue <hash>` 接着聊。
+
+<details>
+<summary><b>命令行选项</b></summary>
+
+| 命令 | |
+|---|---|
+| `yaca [文件夹]` | 在某个文件夹里开始对话（默认当前文件夹） |
+| `yaca --continue <名称或 hash>` | 继续一个已保存的对话 |
+| `yaca --context-repl recent` | 浏览、重命名、删除或导出对话 |
+| `yaca --model-repl` | 添加、编辑或测试模型 |
+| `yaca --config-repl` | 修改其他设置，或修复损坏的配置 |
+| `yaca --export <hash>` | 把对话导出为 Markdown |
+| `yaca --self-test` | 检查这台机器和你的模型是否正常 |
+| `yaca --status` | 不进入聊天，查看配置状态 |
+| `yaca --lua ...` | 运行内置的 Lua 5.5 解释器 |
+| `yaca --help [主题]` | 帮助 |
+
+在 Windows 上，`/h`、`/c` 等短写法也可以用。
+
+</details>
+
+## 设置和数据
+
+所有东西都在可执行文件旁边的 `__yaca__` 里：
+
+- `config.ini` 保存模型、权限和网络设置。可以用 `--model-repl`、
+  `--config-repl` 修改，也可以手动编辑。代理写在 `[Network]` 的 `ProxyUrl`。
+- `CONTEXT/` 保存对话，每个对话一个文件。
+
+升级时先退出 yaca，备份 `__yaca__`，再替换可执行文件。没有自动更新。
+
+## 不包含的功能
+
+没有 Web 界面、图片或语音输入、MCP、插件、子 Agent、遥测和自动更新。
+yaca 是一个终端程序，保持小巧。
 
 ## 开发
 
-开发文档在 `.develope-docs/`，从[当前状态](.develope-docs/CURRENT-STATE.md)、[实施计划](.develope-docs/IMPLEMENTATION-PLAN.md)和[机读契约](.develope-docs/contracts/README.md)看起。在仓库根目录运行完整的编码就绪检查：
-
-```sh
-bash .tools/run_coding_readiness.sh
-```
-
-就绪检查会取得当前用户的测试锁；主机内存、负载或内存压力不安全时拒绝启动（退出码 75）。Lua 测试套件走同一道保护：
+开发文档（中文）在 [.develope-docs/](.develope-docs/)，从
+[当前状态](.develope-docs/CURRENT-STATE.md) 开始看。在仓库根目录运行测试：
 
 ```sh
 bash .tools/run_with_resource_guard.sh bin/lua55 test/run.lua
 ```
 
-## 许可
+## 许可证
 
-[yaca 以 GPL v3 许可开源](LICENSE)。
+[GPL v3](LICENSE)。
