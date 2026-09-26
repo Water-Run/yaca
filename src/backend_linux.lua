@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-08-30
+Date: 2026-09-26
 File: backend_linux.lua
 Description: Composes Linux x86_64 narrow native services.
 ]]
@@ -8,6 +8,7 @@ Description: Composes Linux x86_64 narrow native services.
 local fs = require("fs")
 local process = require("process")
 local terminal = require("terminal")
+local textcodec = require("textcodec")
 
 local M = {}
 
@@ -192,6 +193,7 @@ function M.new(native, identity, options)
         clock_port = clock_port,
         system = system_port,
         new_terminal = new_terminal,
+        text = textcodec.new(native, "posix"),
         qualification = "pending-target-evidence",
     }, "Linux backend")
 end

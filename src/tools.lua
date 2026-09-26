@@ -1,11 +1,12 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-09-26
 File: tools.lua
 Description: Defines the closed tool registry and verified direct-file operations.
 ]]
 
 local text = require("text")
+local textcodec = require("textcodec")
 local json = require("json")
 
 local M = {}
@@ -317,6 +318,9 @@ local SCHEMAS = {
             path = { type = "string" },
             start_line = { type = "integer", minimum = 1 },
             max_lines = { type = "integer", minimum = 1 },
+            from_end = { type = "boolean" },
+            encoding = { type = "string" },
+            continuation = { type = "string" },
         },
     },
     search = {
@@ -333,6 +337,7 @@ local SCHEMAS = {
             },
             case_sensitive = { type = "boolean" },
             page_size = { type = "integer", minimum = 1 },
+            encoding = { type = "string" },
             continuation = { type = "string" },
         },
     },
@@ -343,12 +348,7 @@ local SCHEMAS = {
             path = { type = "string" },
             mode = { type = "string", enum = schema_array({ "create", "replace" }) },
             content = { type = "string" },
-            encoding = {
-                type = "string",
-                enum = schema_array({
-                    "utf-8", "utf-8-bom", "utf-16le-bom", "utf-16be-bom",
-                }),
-            },
+            encoding = { type = "string" },
             newline_policy = {
                 type = "string",
                 enum = schema_array({ "preserve", "lf", "crlf", "cr" }),
@@ -367,6 +367,7 @@ local SCHEMAS = {
             expected_identity = IDENTITY_SCHEMA,
             expected_raw_digest = { type = "string" },
             hunks = { type = "array", items = HUNK_SCHEMA },
+            encoding = { type = "string" },
         },
     },
     rename = {
@@ -413,10 +414,18 @@ local SCHEMAS = {
 
 local DESCRIPTIONS = {
     list = "Bounded stable no-follow directory enumeration.",
-    read = "Read a line range from one verified ordinary text file.",
-    search = "Bounded versioned text search without a host grep command.",
-    write = "Create no-replace or replace one verified ordinary text file.",
-    patch = "Apply versioned structured hunks to one verified text file.",
+    read = "Read a line range from one verified ordinary text file. from_end=true counts start_line "
+        .. "backward from the last line (1 = last line) and returns the page in file order. "
+        .. "encoding defaults to auto (BOM, UTF-8, then the system code page); pass a label such as "
+        .. "cp936, gbk, gb18030, cp1252 or latin1 to decode legacy text. Files larger than the "
+        .. "whole-file limit are read as ranges: pass the returned continuation to read further.",
+    search = "Bounded versioned text search of a directory tree or one file without a host grep "
+        .. "command. encoding works as in read; large files are scanned within a byte budget.",
+    write = "Create no-replace or replace one verified ordinary text file. encoding is utf-8, "
+        .. "utf-8-bom, utf-16le-bom, utf-16be-bom or a legacy code page such as cp936; legacy "
+        .. "writes are refused when a character cannot be represented exactly.",
+    patch = "Apply versioned structured hunks to one verified text file. The file keeps its "
+        .. "encoding; pass the encoding used to read it when it is not detected automatically.",
     rename = "Rename one verified source without replacing a target.",
     delete = "Permanently delete one verified file or empty directory.",
     exec = "Run one opaque foreground command through the fixed platform shell.",
@@ -663,6 +672,7 @@ local function validate_options(options)
         workspace_path = true,
         reserved_paths = true,
         lua_executable = true,
+        maximum_scan_bytes = true,
     }
     for _, name in ipairs(numeric) do allowed[name] = true end
     for key in pairs(options) do
@@ -687,6 +697,12 @@ local function validate_options(options)
         or result.maximum_exec_output_bytes > result.maximum_result_bytes
     then
         return nil, failure("InvalidToolOptions", "tool sub-limits are inconsistent")
+    end
+    result.maximum_scan_bytes = options.maximum_scan_bytes or result.maximum_file_bytes * 8
+    if not valid_integer(result.maximum_scan_bytes, 1)
+        or result.maximum_scan_bytes < result.maximum_file_bytes
+    then
+        return nil, failure("InvalidToolOptions", "maximum_scan_bytes is invalid")
     end
     if options.platform_kind ~= "posix" and options.platform_kind ~= "windows" then
         return nil, failure("InvalidToolOptions", "platform_kind must be posix or windows")
@@ -733,8 +749,16 @@ local function validate_dependencies(dependencies)
         authorization = true,
         processes = true,
         operations = true,
+        text_codec = true,
     }) then
         return nil, failure("InvalidToolDependencies", "tool dependencies are ambiguous")
+    end
+    local codec = dependencies.text_codec or false
+    if codec ~= false and (type(codec.decode) ~= "function"
+        or type(codec.encode) ~= "function"
+        or type(codec.facts) ~= "table")
+    then
+        return nil, failure("InvalidToolDependencies", "text codec is incomplete")
     end
     local filesystem = dependencies.filesystem
     for _, name in ipairs({
@@ -808,6 +832,7 @@ local function validate_dependencies(dependencies)
         authorization = authorization,
         processes = processes,
         operations = operations,
+        text_codec = codec,
     }
 end
 
@@ -1039,6 +1064,11 @@ function M.new(dependencies, options)
                 state.pattern ~= normalized.pattern
                 or state.dialect ~= normalized.dialect
                 or state.case_sensitive ~= normalized.case_sensitive
+                or state.encoding ~= (normalized.encoding or "auto")
+            ))
+            or (tool == "read" and (
+                state.requested_encoding ~= (normalized.encoding or "auto")
+                or normalized.from_end == true
             ))
         then
             return nil, failure("InvalidContinuation", "continuation arguments changed")
@@ -1160,6 +1190,45 @@ function M.new(dependencies, options)
         return ports.path.from_logical(logical, limits.platform_kind)
     end
 
+    -- Normalize an optional encoding argument; ansi, oem and system resolve to observed code pages.
+    --@param value any Candidate encoding label from tool arguments.
+    --@param allow_auto boolean Whether auto (and an absent value) is acceptable.
+    --@return string|nil Canonical label, "auto", or nil when absent and auto is not allowed.
+    --@return table|nil InvalidToolArguments or EncodingUnavailable diagnostic.
+    local function normalize_encoding(value, allow_auto)
+        if value == nil then return allow_auto and "auto" or nil end
+        if type(value) ~= "string" or #value == 0 or #value > 64 then
+            return nil, failure("InvalidToolArguments", "encoding must be a short label")
+        end
+        local lowered = value:lower()
+        if lowered == "auto" then
+            if allow_auto then return "auto" end
+            return nil, failure("InvalidToolArguments", "encoding auto is only valid for reading")
+        end
+        local codec = ports.text_codec
+        if lowered == "ansi" or lowered == "oem" or lowered == "system" then
+            local facts = codec and codec.facts or {}
+            local resolved
+            if facts.platform == "windows" then
+                resolved = (lowered == "oem" and facts.oem) or facts.ansi
+            else
+                resolved = facts.locale
+            end
+            if type(resolved) ~= "string" then
+                return nil, failure("EncodingUnavailable", "encoding " .. lowered .. " is unavailable here")
+            end
+            return resolved
+        end
+        local normalized, normalize_error = textcodec.normalize(value)
+        if not normalized then
+            return nil, failure("InvalidToolArguments", normalize_error.message)
+        end
+        if textcodec.is_legacy(normalized) and not codec then
+            return nil, failure("EncodingUnavailable", "legacy code page conversion is unavailable")
+        end
+        return normalized
+    end
+
     -- Validate one closed tool schema and capture its direct targets before admission.
     --@param tool string Name from the registered tool set.
     --@param arguments table Plain values decoded from canonical JSON.
@@ -1195,7 +1264,10 @@ function M.new(dependencies, options)
             if arguments.continuation ~= nil and not continuation then return nil, continuation_error end
             return normalized, { target }, continuation
         elseif tool == "read" then
-            if not exact_fields(arguments, { path = true, start_line = true, max_lines = true }) then
+            if not exact_fields(arguments, {
+                path = true, start_line = true, max_lines = true,
+                from_end = true, encoding = true, continuation = true,
+            }) then
                 return nil, failure("InvalidToolArguments", "read arguments contain unknown fields")
             end
             local path, path_error = resolve_tool_path(arguments.path, "read path")
@@ -1203,22 +1275,38 @@ function M.new(dependencies, options)
             if not valid_integer(arguments.start_line, 1)
                 or not valid_integer(arguments.max_lines, 1)
                 or arguments.max_lines > limits.maximum_page_entries
+                or (arguments.from_end ~= nil and type(arguments.from_end) ~= "boolean")
             then
                 return nil, failure("InvalidToolArguments", "read line range is invalid")
             end
+            if arguments.from_end == true and arguments.continuation ~= nil then
+                return nil, failure("InvalidToolArguments", "from_end reads do not accept a continuation")
+            end
+            local encoding, encoding_error = normalize_encoding(arguments.encoding, true)
+            if not encoding then return nil, encoding_error end
             local target, target_error = inspect_path(path)
             if not target then return nil, target_error end
             target, target_error = require_direct_target(target, "read", "file")
             if not target then return nil, target_error end
-            return {
+            local normalized = {
                 path = target.snapshot.canonical_path,
                 start_line = arguments.start_line,
                 max_lines = arguments.max_lines,
-            }, { target }
+            }
+            if arguments.from_end ~= nil then normalized.from_end = arguments.from_end end
+            if arguments.encoding ~= nil then normalized.encoding = encoding end
+            if arguments.continuation ~= nil then normalized.continuation = arguments.continuation end
+            local continuation, continuation_error = continuation_for(
+                "read",
+                arguments.continuation,
+                normalized
+            )
+            if arguments.continuation ~= nil and not continuation then return nil, continuation_error end
+            return normalized, { target }, continuation
         elseif tool == "search" then
             if not exact_fields(arguments, {
                 path = true, pattern = true, dialect = true, case_sensitive = true,
-                page_size = true, continuation = true,
+                page_size = true, encoding = true, continuation = true,
             }) then
                 return nil, failure("InvalidToolArguments", "search arguments contain unknown fields")
             end
@@ -1244,9 +1332,11 @@ function M.new(dependencies, options)
                     )
                 end
             end
+            local encoding, encoding_error = normalize_encoding(arguments.encoding, true)
+            if not encoding then return nil, encoding_error end
             local target, target_error = inspect_path(path)
             if not target then return nil, target_error end
-            target, target_error = require_direct_target(target, "search", "directory")
+            target, target_error = require_direct_target(target, "search", nil)
             if not target then return nil, target_error end
             local normalized = {
                 path = target.snapshot.canonical_path,
@@ -1255,6 +1345,7 @@ function M.new(dependencies, options)
                 case_sensitive = arguments.case_sensitive,
                 page_size = arguments.page_size,
             }
+            if arguments.encoding ~= nil then normalized.encoding = encoding end
             if arguments.continuation ~= nil then normalized.continuation = arguments.continuation end
             local continuation, continuation_error = continuation_for(
                 "search",
@@ -1281,13 +1372,13 @@ function M.new(dependencies, options)
             if not content then return nil, content_error end
             content, content_error = ordinary_text(content, "write content")
             if not content then return nil, content_error end
-            local encodings = {
-                ["utf-8"] = true, ["utf-8-bom"] = true,
-                ["utf-16le-bom"] = true, ["utf-16be-bom"] = true,
-            }
             local newline_policies = { preserve = true, lf = true, crlf = true, cr = true }
+            local encoding, encoding_error = normalize_encoding(arguments.encoding, false)
+            if not encoding then
+                return nil, encoding_error
+                    or failure("InvalidToolArguments", "write encoding is required")
+            end
             if (arguments.mode ~= "create" and arguments.mode ~= "replace")
-                or not encodings[arguments.encoding]
                 or not newline_policies[arguments.newline_policy]
             then
                 return nil, failure("InvalidToolArguments", "write mode/encoding/newline is invalid")
@@ -1301,7 +1392,7 @@ function M.new(dependencies, options)
                 path = target.snapshot.canonical_path,
                 mode = arguments.mode,
                 content = content,
-                encoding = arguments.encoding,
+                encoding = encoding,
                 newline_policy = arguments.newline_policy,
             }
             if arguments.mode == "create" then
@@ -1337,9 +1428,12 @@ function M.new(dependencies, options)
         elseif tool == "patch" then
             if not exact_fields(arguments, {
                 path = true, expected_identity = true, expected_raw_digest = true, hunks = true,
+                encoding = true,
             }) then
                 return nil, failure("InvalidToolArguments", "patch arguments contain unknown fields")
             end
+            local encoding, encoding_error = normalize_encoding(arguments.encoding, true)
+            if not encoding then return nil, encoding_error end
             local path, path_error = resolve_tool_path(arguments.path, "patch path")
             if not path then return nil, path_error end
             local target, target_error = inspect_path(path)
@@ -1361,12 +1455,14 @@ function M.new(dependencies, options)
             if not digest then return nil, digest_error end
             local hunks, hunks_error = normalize_hunks(arguments.hunks)
             if not hunks then return nil, hunks_error end
-            return {
+            local normalized = {
                 path = target.snapshot.canonical_path,
                 expected_identity = expected,
                 expected_raw_digest = digest,
                 hunks = hunks,
-            }, { target }
+            }
+            if arguments.encoding ~= nil then normalized.encoding = encoding end
+            return normalized, { target }
         elseif tool == "rename" then
             if not exact_fields(arguments, {
                 source = true, target = true, expected_identity = true,
@@ -1986,32 +2082,30 @@ function M.new(dependencies, options)
         return table.concat(output)
     end
 
+    local NEWLINE_TEXT = { lf = "\n", crlf = "\r\n", cr = "\r", none = "" }
+
     -- Split decoded text into records while retaining each exact line terminator.
-    --@param value string Decoded UTF-8 document content.
+    --@param value string Decoded UTF-8 document content, or ASCII-compatible raw bytes.
     --@return table Ordered text/newline records.
     --@return string Aggregate newline kind: none, uniform kind, or mixed.
     --@return boolean Whether the final record has a terminator.
     local function split_records(value)
         local records, kinds = {}, {}
-        local start, index = 1, 1
-        while index <= #value do
-            local byte = value:byte(index)
-            if byte == 0x0A or byte == 0x0D then
-                local kind, finish = "lf", index
-                if byte == 0x0D then
-                    if value:byte(index + 1) == 0x0A then
-                        kind, finish = "crlf", index + 1
-                    else
-                        kind = "cr"
-                    end
+        local start = 1
+        while true do
+            local at = value:find("[\r\n]", start)
+            if not at then break end
+            local kind, finish = "lf", at
+            if value:byte(at) == 0x0D then
+                if value:byte(at + 1) == 0x0A then
+                    kind, finish = "crlf", at + 1
+                else
+                    kind = "cr"
                 end
-                records[#records + 1] = { text = value:sub(start, index - 1), newline = kind }
-                kinds[kind] = true
-                index = finish + 1
-                start = index
-            else
-                index = index + 1
             end
+            records[#records + 1] = { text = value:sub(start, at - 1), newline = kind }
+            kinds[kind] = true
+            start = finish + 1
         end
         if start <= #value then records[#records + 1] = { text = value:sub(start), newline = "none" } end
         local kind_count, only = 0
@@ -2020,36 +2114,98 @@ function M.new(dependencies, options)
         return records, newline_kind, #records > 0 and records[#records].newline ~= "none"
     end
 
+    -- Report whether strict UTF-8 contains a scalar that ordinary tool text rejects.
+    --@param value string Strict UTF-8 text.
+    --@return boolean True for C0 controls other than TAB/LF/CR, U+FFFE or U+FFFF.
+    local function has_forbidden_scalar(value)
+        return value:find("[\0-\8\11\12\14-\31]") ~= nil
+            or value:find("\239\191[\190\191]") ~= nil
+    end
+
+    -- Replace scalars that ordinary tool text rejects with U+FFFD for display.
+    --@param value string Strict UTF-8 text.
+    --@return string Text containing only ordinary scalars.
+    --@return integer Number of replaced scalars.
+    local function replace_forbidden_scalars(value)
+        local cleaned, controls = value:gsub("[\0-\8\11\12\14-\31]", "\239\191\189")
+        local final, specials = cleaned:gsub("\239\191[\190\191]", "\239\191\189")
+        return final, controls + specials
+    end
+
+    -- Decode legacy bytes through the platform codec, optionally accepting replacements.
+    --@param label string Canonical cp<N> label.
+    --@param bytes string Raw bytes in that code page.
+    --@param allow_lossy boolean Whether replacement decoding is acceptable.
+    --@return string|nil UTF-8 text.
+    --@return boolean|string True when exact, false when lossy, or a failure classification.
+    local function decode_legacy(label, bytes, allow_lossy)
+        local codec = ports.text_codec
+        if not codec then return nil, "encoding-unavailable" end
+        local converted, exact = codec.decode(label, bytes, false)
+        if converted then return converted, true end
+        if type(exact) == "table" and exact.code == "EncodingUnavailable" then
+            return nil, "encoding-unavailable"
+        end
+        if not allow_lossy then return nil, "invalid-encoding" end
+        converted, exact = codec.decode(label, bytes, true)
+        if not converted then return nil, "invalid-encoding" end
+        return converted, exact == true
+    end
+
     -- Classify a byte stream as supported ordinary text or a non-text document.
+    -- auto uses a BOM, then strict UTF-8, then the system file code page. Explicit
+    -- UTF labels require that family; explicit legacy labels decode as requested.
     --@param bytes string Raw file content including any BOM.
-    --@return table|nil Encoding, text, record, and newline metadata for valid ordinary text.
-    --@return string|nil invalid-encoding or binary-content classification.
-    local function decode_document(bytes)
-        local encoding, decoded, bom_bytes
-        if bytes:sub(1, 3) == "\239\187\191" then
-            encoding, decoded, bom_bytes = "utf-8-bom", bytes:sub(4), 3
-            if text.validate_utf8(decoded) ~= true then return nil, "invalid-encoding" end
-        elseif bytes:sub(1, 2) == "\255\254" then
-            encoding, decoded, bom_bytes = "utf-16le-bom", decode_utf16(bytes:sub(3), true), 2
-            if not decoded then return nil, "invalid-encoding" end
-        elseif bytes:sub(1, 2) == "\254\255" then
-            encoding, decoded, bom_bytes = "utf-16be-bom", decode_utf16(bytes:sub(3), false), 2
-            if not decoded then return nil, "invalid-encoding" end
+    --@param requested string|nil auto, a UTF label, or a canonical cp<N> label.
+    --@param allow_lossy boolean|nil Whether display decoding may replace invalid input.
+    --@return table|nil Encoding, basis, text, record, and newline metadata for text.
+    --@return string|nil invalid-encoding, encoding-mismatch, encoding-unavailable or binary-content.
+    local function decode_document(bytes, requested, allow_lossy)
+        requested = requested or "auto"
+        local encoding, decoded, bom_bytes, basis, lossy = nil, nil, 0, nil, false
+        if textcodec.is_legacy(requested) then
+            local converted, exact = decode_legacy(requested, bytes, allow_lossy == true)
+            if not converted then return nil, exact end
+            encoding, decoded, basis, lossy = requested, converted, "requested", exact ~= true
         else
-            encoding, decoded, bom_bytes = "utf-8", bytes, 0
-            if text.validate_utf8(decoded) ~= true then return nil, "invalid-encoding" end
+            if bytes:sub(1, 3) == "\239\187\191" then
+                encoding, decoded, bom_bytes = "utf-8-bom", bytes:sub(4), 3
+            elseif bytes:sub(1, 2) == "\255\254" then
+                encoding, decoded, bom_bytes = "utf-16le-bom", decode_utf16(bytes:sub(3), true), 2
+                if not decoded then return nil, "invalid-encoding" end
+            elseif bytes:sub(1, 2) == "\254\255" then
+                encoding, decoded, bom_bytes = "utf-16be-bom", decode_utf16(bytes:sub(3), false), 2
+                if not decoded then return nil, "invalid-encoding" end
+            else
+                encoding, decoded = "utf-8", bytes
+            end
+            if (encoding == "utf-8" or encoding == "utf-8-bom")
+                and text.validate_utf8(decoded) ~= true
+            then
+                local fallback = ports.text_codec and ports.text_codec.facts.file_default
+                if requested == "auto" and encoding == "utf-8" and fallback then
+                    local converted = decode_legacy(fallback, bytes, false)
+                    if not converted then return nil, "invalid-encoding" end
+                    encoding, decoded, basis = fallback, converted, "system-default"
+                elseif allow_lossy and requested ~= "auto" then
+                    decoded, lossy = text.repair_utf8(decoded), true
+                else
+                    return nil, "invalid-encoding"
+                end
+            end
+            if requested ~= "auto" and requested ~= encoding
+                and not (requested == "utf-8" and encoding == "utf-8-bom")
+            then
+                return nil, "encoding-mismatch"
+            end
+            basis = basis or (requested == "auto" and "detected" or "requested")
         end
-        local codepoints = assert(text.decode_utf8(decoded))
-        for _, codepoint in ipairs(codepoints) do
-            local safe = codepoint == 0x09 or codepoint == 0x0A or codepoint == 0x0D
-                or (codepoint >= 0x20 and codepoint <= 0xD7FF)
-                or (codepoint >= 0xE000 and codepoint <= 0xFFFD)
-                or (codepoint >= 0x10000 and codepoint <= 0x10FFFF)
-            if not safe then return nil, "binary-content" end
-        end
+        if has_forbidden_scalar(decoded) then return nil, "binary-content" end
         local records, newline_kind, final_newline = split_records(decoded)
         return {
             encoding = encoding,
+            basis = basis,
+            lossy = lossy,
             text = decoded,
             bom_bytes = bom_bytes,
             records = records,
@@ -2058,13 +2214,51 @@ function M.new(dependencies, options)
         }
     end
 
+    -- Count the UTF-16 code units of strict UTF-8 text without encoding it.
+    --@param value string Strict UTF-8 text.
+    --@return integer Number of UTF-16 code units.
+    local function utf16_units(value)
+        local units = 0
+        for _, codepoint in utf8.codes(value) do
+            units = units + (codepoint > 0xFFFF and 2 or 1)
+        end
+        return units
+    end
+
+    -- Compute each record's raw byte span in the original file.
+    -- Byte-oriented encodings are split again on raw CR/LF bytes, which is exact for
+    -- UTF-8 and every supported ASCII-compatible code page, including lossy decodes.
+    --@param document table Decoded document.
+    --@param raw string Original file bytes including any BOM.
+    --@return table|nil Array of {first, last} zero-based spans, or nil when records disagree.
+    local function document_spans(document, raw)
+        local spans, offset = {}, document.bom_bytes
+        if document.encoding == "utf-16le-bom" or document.encoding == "utf-16be-bom" then
+            for index, record in ipairs(document.records) do
+                local length = (utf16_units(record.text) + #NEWLINE_TEXT[record.newline]) * 2
+                spans[index] = { first = offset, last = offset + length }
+                offset = offset + length
+            end
+            return spans
+        end
+        local raw_records = split_records(raw:sub(document.bom_bytes + 1))
+        if #raw_records ~= #document.records then return nil end
+        for index, record in ipairs(raw_records) do
+            if record.newline ~= document.records[index].newline then return nil end
+            local length = #record.text + #NEWLINE_TEXT[record.newline]
+            spans[index] = { first = offset, last = offset + length }
+            offset = offset + length
+        end
+        return spans
+    end
+
     -- Apply a requested newline policy without discarding final-newline state.
     --@param value string Decoded UTF-8 content.
     --@param policy string preserve, lf, crlf, or cr.
     --@return string Content with the selected line terminators.
     local function normalize_newlines(value, policy)
         if policy == "preserve" then return value end
-        local separator = ({ lf = "\n", crlf = "\r\n", cr = "\r" })[policy]
+        local separator = NEWLINE_TEXT[policy]
         local records = split_records(value)
         local output = {}
         for _, record in ipairs(records) do
@@ -2074,12 +2268,12 @@ function M.new(dependencies, options)
         return table.concat(output)
     end
 
-    -- Encode validated ordinary text under its newline policy and requested BOM.
+    -- Encode validated ordinary text under its newline policy and requested encoding.
     --@param value string Strict UTF-8 content.
-    --@param encoding string Supported UTF-8 or BOM-marked UTF-16 encoding.
+    --@param encoding string UTF label or canonical cp<N> label.
     --@param newline_policy string Requested line terminator conversion.
     --@return string|nil Final bytes to write.
-    --@return table|nil Encoding or invalid-UTF-8 error.
+    --@return table|nil Encoding, lossy-encoding or invalid-UTF-8 error.
     local function encode_document(value, encoding, newline_policy)
         value = normalize_newlines(value, newline_policy)
         if encoding == "utf-8" then return value end
@@ -2093,6 +2287,21 @@ function M.new(dependencies, options)
             local encoded, encode_error = encode_utf16(value, false)
             if not encoded then return nil, encode_error end
             return "\254\255" .. encoded
+        end
+        if textcodec.is_legacy(encoding) then
+            if not ports.text_codec then
+                return nil, failure("EncodingUnavailable", "legacy code page conversion is unavailable")
+            end
+            local encoded, encode_error = ports.text_codec.encode(encoding, value)
+            if not encoded then
+                return nil, failure(
+                    encode_error.code == "EncodingLossy" and "EncodingLossy" or "EncodingUnavailable",
+                    encode_error.code == "EncodingLossy"
+                        and ("content contains characters that " .. encoding .. " cannot represent")
+                        or "legacy code page conversion failed"
+                )
+            end
+            return encoded
         end
         return nil, failure("InvalidEncoding", "direct text encoding is unknown")
     end
@@ -2122,27 +2331,6 @@ function M.new(dependencies, options)
             count = count + #encoded
         end
         return table.concat(output), true
-    end
-
-    -- Encode one record's terminator for raw byte-offset accounting.
-    --@param kind string lf, crlf, cr, or none.
-    --@param encoding string Document encoding.
-    --@return string Terminator bytes without a BOM.
-    local function newline_bytes(kind, encoding)
-        local value = ({ lf = "\n", crlf = "\r\n", cr = "\r", none = "" })[kind]
-        if encoding == "utf-16le-bom" then return assert(encode_utf16(value, true)) end
-        if encoding == "utf-16be-bom" then return assert(encode_utf16(value, false)) end
-        return value
-    end
-
-    -- Encode one decoded record for raw byte-offset accounting.
-    --@param value string Record text in UTF-8.
-    --@param encoding string Document encoding.
-    --@return string Record bytes without a BOM or terminator.
-    local function text_bytes(value, encoding)
-        if encoding == "utf-16le-bom" then return assert(encode_utf16(value, true)) end
-        if encoding == "utf-16be-bom" then return assert(encode_utf16(value, false)) end
-        return value
     end
 
     -- Mint and retain a bounded pagination token bound to one walk generation.
@@ -2324,12 +2512,581 @@ function M.new(dependencies, options)
         }
     end
 
+    -- Bound the decoded text of one read or search page inside the durable result limit.
+    --@param none Uses the admitted result limit.
+    --@return integer Maximum decoded text bytes per page.
+    local function page_text_budget()
+        return math.max(1024, limits.maximum_result_bytes // 2)
+    end
+
+    -- Report whether an encoding uses two-byte UTF-16 code units.
+    --@param encoding string Canonical encoding label.
+    --@return integer Code unit width in bytes.
+    --@return boolean Whether UTF-16 units are big-endian.
+    local function unit_layout(encoding)
+        if encoding == "utf-16le-bom" then return 2, false end
+        if encoding == "utf-16be-bom" then return 2, true end
+        return 1, false
+    end
+
+    -- Find the first complete line terminator in a raw buffer at or after init.
+    --@param buffer string Raw bytes whose position init starts a code unit.
+    --@param init integer One-based search start aligned to a code unit.
+    --@param width integer Code unit width.
+    --@param big_endian boolean UTF-16 byte order.
+    --@param eof boolean Whether no more bytes follow the buffer.
+    --@return integer|nil First terminator byte index, or nil when none is certain yet.
+    --@return integer|string|nil Last terminator byte index, or "pending" when a CR ends the buffer.
+    --@return string|nil lf, crlf or cr.
+    local function find_terminator(buffer, init, width, big_endian, eof)
+        if width == 1 then
+            local at = buffer:find("[\r\n]", init)
+            if not at then return nil end
+            if buffer:byte(at) == 0x0A then return at, at, "lf" end
+            if at == #buffer then
+                if eof then return at, at, "cr" end
+                return nil, "pending"
+            end
+            if buffer:byte(at + 1) == 0x0A then return at, at + 1, "crlf" end
+            return at, at, "cr"
+        end
+        local pattern = big_endian and "\0[\r\n]" or "[\r\n]\0"
+        local position = init
+        while true do
+            local at = buffer:find(pattern, position)
+            if not at then return nil end
+            if (at - init) % 2 == 0 then
+                local unit = big_endian and buffer:byte(at + 1) or buffer:byte(at)
+                if unit == 0x0A then return at, at + 1, "lf" end
+                if at + 1 == #buffer then
+                    if eof then return at, at + 1, "cr" end
+                    return nil, "pending"
+                end
+                local following = buffer:sub(at + 2, at + 3) == (big_endian and "\0\n" or "\n\0")
+                if following then return at, at + 3, "crlf" end
+                return at, at + 1, "cr"
+            end
+            position = at + 1
+        end
+    end
+
+    -- Split a raw buffer that starts at a line boundary into terminated records.
+    --@param buffer string Raw bytes beginning at a line start and ending at end of file.
+    --@param width integer Code unit width.
+    --@param big_endian boolean UTF-16 byte order.
+    --@return table Records {raw, newline, offset, length} with zero-based offsets into buffer.
+    local function split_raw_lines(buffer, width, big_endian)
+        local records, cursor = {}, 1
+        while cursor <= #buffer do
+            local first, last, kind = find_terminator(buffer, cursor, width, big_endian, true)
+            if not first then
+                local finish = #buffer - (#buffer - cursor + 1) % width
+                records[#records + 1] = {
+                    raw = buffer:sub(cursor, finish), newline = "none",
+                    offset = cursor - 1, length = finish - cursor + 1,
+                }
+                break
+            end
+            records[#records + 1] = {
+                raw = buffer:sub(cursor, first - 1), newline = kind,
+                offset = cursor - 1, length = last - cursor + 1,
+            }
+            cursor = last + 1
+        end
+        return records
+    end
+
+    -- Close a range stream handle once.
+    --@param stream table Range stream.
+    --@return boolean|nil True when closed.
+    --@return table|nil Close error.
+    --@effect Releases the native read handle.
+    local function close_stream(stream)
+        if stream.closed then return true end
+        stream.closed = true
+        return ports.filesystem.close(stream.handle)
+    end
+
+    -- Read one more raw chunk into a range stream, charging the scan budget.
+    --@param stream table Range stream.
+    --@return boolean|nil True after the read, including EOF.
+    --@return table|string|nil Filesystem error, or "scan-limit" when the budget is spent.
+    --@effect Advances the native handle.
+    local function fill_stream(stream)
+        if stream.budget.remaining <= 0 then return nil, "scan-limit" end
+        local amount = math.min(limits.filesystem_chunk_bytes, stream.budget.remaining)
+        local read_ok, chunk = ports.filesystem.stream_read(stream.handle, amount)
+        if not read_ok then return nil, chunk end
+        stream.budget.remaining = stream.budget.remaining - #chunk.bytes
+        stream.buffer = stream.buffer .. chunk.bytes
+        if chunk.eof or #chunk.bytes == 0 then stream.eof = true end
+        return true
+    end
+
+    -- Open a direct file for bounded forward line streaming from an absolute offset.
+    --@param snapshot table Admitted file snapshot.
+    --@param offset integer Absolute byte offset of a line start.
+    --@param encoding string Canonical encoding label deciding the code unit layout.
+    --@param budget table Mutable scan budget {remaining = integer} shared by the call.
+    --@return table|nil Range stream state.
+    --@return table|string|nil Filesystem error or "scan-limit".
+    --@ownership The caller closes the returned stream with close_stream.
+    local function open_stream(snapshot, offset, encoding, budget)
+        local opened, handle = ports.filesystem.direct_open_read(snapshot)
+        if not opened then return nil, handle end
+        local width, big_endian = unit_layout(encoding)
+        local stream = {
+            handle = handle, position = offset, buffer = "", eof = false, closed = false,
+            width = width, big_endian = big_endian, budget = budget,
+        }
+        if offset > 0 then
+            local seek = ports.filesystem.stream_seek
+            if type(seek) == "function" and ports.filesystem.capabilities.seek_candidate then
+                local seek_ok, seek_error = seek(handle, offset)
+                if not seek_ok then close_stream(stream); return nil, seek_error end
+            else
+                local skipped = 0
+                while skipped < offset do
+                    if budget.remaining <= 0 then close_stream(stream); return nil, "scan-limit" end
+                    local amount = math.min(limits.filesystem_chunk_bytes, offset - skipped, budget.remaining)
+                    local read_ok, chunk = ports.filesystem.stream_read(handle, amount)
+                    if not read_ok then close_stream(stream); return nil, chunk end
+                    if #chunk.bytes == 0 then
+                        close_stream(stream)
+                        return nil, failure("TargetChanged", "file ended before the requested offset")
+                    end
+                    skipped = skipped + #chunk.bytes
+                    budget.remaining = budget.remaining - #chunk.bytes
+                end
+            end
+        end
+        return stream
+    end
+
+    -- Return the next raw line from a range stream, retaining at most maximum_line_bytes.
+    --@param stream table Open range stream.
+    --@return table|boolean|nil Line {start, finish, raw, newline, truncated}, false at EOF, or nil.
+    --@return table|string|nil Filesystem error or "scan-limit".
+    --@effect Reads further chunks from the native handle.
+    local function next_stream_line(stream)
+        local start, retained, line_bytes, truncated = stream.position, {}, 0, false
+        local retained_bytes, cap = 0, limits.maximum_line_bytes
+        -- Keep a bounded prefix of line content while counting every content byte.
+        --@param content string Raw line content bytes taken from the buffer.
+        --@return nil Updates the enclosing line state.
+        local function retain(content)
+            line_bytes = line_bytes + #content
+            if truncated then return end
+            local room = cap - retained_bytes
+            if #content > room then
+                room = room - room % stream.width
+                retained[#retained + 1] = content:sub(1, room)
+                retained_bytes = retained_bytes + room
+                truncated = true
+            else
+                retained[#retained + 1] = content
+                retained_bytes = retained_bytes + #content
+            end
+        end
+        while true do
+            local first, last, kind = find_terminator(
+                stream.buffer, 1, stream.width, stream.big_endian, stream.eof
+            )
+            if first then
+                retain(stream.buffer:sub(1, first - 1))
+                local terminator = last - first + 1
+                stream.buffer = stream.buffer:sub(last + 1)
+                stream.position = start + line_bytes + terminator
+                return {
+                    start = start, finish = stream.position, raw = table.concat(retained),
+                    newline = kind, truncated = truncated,
+                }
+            end
+            if stream.eof then
+                local remaining = #stream.buffer - #stream.buffer % stream.width
+                if remaining == 0 and line_bytes == 0 then return false end
+                retain(stream.buffer:sub(1, remaining))
+                stream.buffer = ""
+                stream.position = start + line_bytes
+                return {
+                    start = start, finish = stream.position, raw = table.concat(retained),
+                    newline = "none", truncated = truncated,
+                }
+            end
+            local keep = stream.width * 2
+            if #stream.buffer > cap + keep then
+                local move = #stream.buffer - keep
+                move = move - move % stream.width
+                retain(stream.buffer:sub(1, move))
+                stream.buffer = stream.buffer:sub(move + 1)
+            end
+            local filled, fill_error = fill_stream(stream)
+            if not filled then return nil, fill_error end
+        end
+    end
+
+    -- Decode one raw range line for display, reporting any replacement.
+    --@param raw string Raw line content without its terminator.
+    --@param encoding string Canonical encoding label.
+    --@return string Ordinary UTF-8 text.
+    --@return boolean Whether any byte or scalar was replaced.
+    local function decode_range_line(raw, encoding)
+        local decoded, lossy = nil, false
+        local width, big_endian = unit_layout(encoding)
+        if width == 2 then
+            decoded = decode_utf16(raw:sub(1, #raw - #raw % 2), not big_endian)
+            if not decoded then decoded, lossy = "\239\191\189", true end
+        elseif textcodec.is_legacy(encoding) then
+            local converted, exact = decode_legacy(encoding, raw, true)
+            if converted then
+                decoded, lossy = converted, exact ~= true
+            else
+                decoded, lossy = text.repair_utf8(raw), true
+            end
+        elseif text.validate_utf8(raw) == true then
+            decoded = raw
+        else
+            decoded, lossy = text.repair_utf8(raw), true
+        end
+        local cleaned, replaced = replace_forbidden_scalars(decoded)
+        return cleaned, lossy or replaced > 0
+    end
+
+    -- Choose the encoding of a file too large for whole-file decoding from its prefix.
+    --@param snapshot table Admitted file snapshot.
+    --@param requested string auto, UTF label or canonical cp<N> label.
+    --@param budget table Mutable scan budget.
+    --@return table|nil {encoding, bom_bytes, basis}.
+    --@return table|string|nil Filesystem error or encoding classification.
+    local function detect_range_encoding(snapshot, requested, budget)
+        local stream, open_error = open_stream(snapshot, 0, "utf-8", budget)
+        if not stream then return nil, open_error end
+        local sample_bytes = math.min(65536, math.max(4096, limits.maximum_scan_bytes // 8))
+        while #stream.buffer < sample_bytes and not stream.eof do
+            local filled, fill_error = fill_stream(stream)
+            if not filled then close_stream(stream); return nil, fill_error end
+        end
+        local closed, close_error = close_stream(stream)
+        if not closed then return nil, close_error end
+        local sample = stream.buffer
+        local bom_encoding, bom_bytes = nil, 0
+        if sample:sub(1, 3) == "\239\187\191" then
+            bom_encoding, bom_bytes = "utf-8-bom", 3
+        elseif sample:sub(1, 2) == "\255\254" then
+            bom_encoding, bom_bytes = "utf-16le-bom", 2
+        elseif sample:sub(1, 2) == "\254\255" then
+            bom_encoding, bom_bytes = "utf-16be-bom", 2
+        end
+        if textcodec.is_legacy(requested) then
+            if not ports.text_codec then return nil, "encoding-unavailable" end
+            return { encoding = requested, bom_bytes = 0, basis = "requested" }
+        end
+        if requested ~= "auto" then
+            local expected = bom_encoding or "utf-8"
+            if requested ~= expected and not (requested == "utf-8" and expected == "utf-8-bom") then
+                return nil, "encoding-mismatch"
+            end
+            return { encoding = expected, bom_bytes = bom_bytes, basis = "requested" }
+        end
+        if bom_encoding then
+            return { encoding = bom_encoding, bom_bytes = bom_bytes, basis = "detected" }
+        end
+        local complete = sample
+        if not stream.eof then
+            local last_newline = sample:match(".*()\n")
+            complete = last_newline and sample:sub(1, last_newline) or ""
+        end
+        if text.validate_utf8(complete) == true then
+            return { encoding = "utf-8", bom_bytes = 0, basis = "detected" }
+        end
+        local fallback = ports.text_codec and ports.text_codec.facts.file_default
+        if fallback and decode_legacy(fallback, complete, false) then
+            return { encoding = fallback, bom_bytes = 0, basis = "system-default" }
+        end
+        return { encoding = "utf-8", bom_bytes = 0, basis = "detected-invalid-utf-8" }
+    end
+
+    -- Convert a range failure marker into a structured tool error.
+    --@param value table|string Filesystem error or a classification string.
+    --@return table Structured error.
+    local function range_failure(value)
+        if type(value) == "table" then return value end
+        if value == "scan-limit" then
+            return failure("ScanLimit", "the file prefix exceeds the per-call scan budget")
+        end
+        if value == "encoding-mismatch" then
+            return failure("EncodingMismatch", "the requested encoding contradicts the file's byte order mark")
+        end
+        if value == "encoding-unavailable" then
+            return failure("EncodingUnavailable", "legacy code page conversion is unavailable")
+        end
+        return failure("UnsupportedOrInvalidTextEncoding", tostring(value))
+    end
+
+    -- Build one read result line with optional truncation and replacement markers.
+    --@param number integer|boolean Line number when known, otherwise false.
+    --@param text_value string Ordinary UTF-8 line text.
+    --@param newline string Terminator kind.
+    --@param first integer Zero-based raw start offset.
+    --@param last integer Zero-based raw end offset (exclusive).
+    --@param truncated boolean Whether the line text was shortened.
+    --@param lossy boolean Whether decoding replaced any input.
+    --@return table Result line object.
+    local function result_line(number, text_value, newline, first, last, truncated, lossy)
+        local line = {
+            number = number,
+            text = text_value,
+            newline = newline,
+            raw_start = first,
+            raw_end = last,
+        }
+        if truncated then line.truncated = true end
+        if lossy then line.lossy = true end
+        return line
+    end
+
+    -- Hint for a file whose text encoding could not be established automatically.
+    --@param none Uses the observed code page facts.
+    --@return string Short retry hint for the model.
+    local function encoding_hint()
+        local facts = ports.text_codec and ports.text_codec.facts or {}
+        local examples = "cp936, gb18030, cp1252 or latin1"
+        if type(facts.file_default) == "string" then
+            examples = facts.file_default .. ", " .. examples
+        end
+        return "The bytes are not strict UTF-8. Retry read with encoding set to the file's code page, "
+            .. "for example " .. examples .. "; lossy decodes are marked."
+    end
+
+    -- Read a bounded range of a file too large for whole-file decoding, or continue a range read.
+    --@param state table Admitted read call with snapshot, arguments and optional continuation.
+    --@return table|nil Range page with line offsets, observed digest and continuation.
+    --@return table|nil Filesystem, encoding, scan or changed-target error.
+    local function execute_read_range(state)
+        local arguments, target = state.arguments, state.targets[1]
+        local snapshot = target.snapshot
+        local continuation = state.continuation
+        local budget = { remaining = limits.maximum_scan_bytes }
+        local object_key = assert(ports.safety.digest(identity_key(snapshot.identity)))
+        local layout
+        if continuation then
+            consume_continuation(arguments.continuation)
+            if continuation.generation ~= object_key then
+                return nil, failure("TargetChanged", "the file was replaced since the previous page")
+            end
+            if snapshot.identity.size < continuation.offset then
+                return nil, failure("TargetChanged", "the file shrank below the previous page; it may have been rotated")
+            end
+            layout = continuation.layout
+        else
+            local detected, detect_error = detect_range_encoding(
+                snapshot, arguments.encoding or "auto", budget
+            )
+            if not detected then return nil, range_failure(detect_error) end
+            layout = detected
+        end
+        local width = unit_layout(layout.encoding)
+        local lines, observed = array({}), {}
+        local text_budget, used = page_text_budget(), 0
+        local scan_limited, eof, next_offset, next_number = false, false, false, false
+        local last_number = false
+        if arguments.from_end then
+            local seek = ports.filesystem.stream_seek
+            if type(seek) ~= "function" or not ports.filesystem.capabilities.seek_candidate then
+                return nil, failure("RangeReadUnsupported", "reading from the end requires a seekable file")
+            end
+            local big_endian = layout.encoding == "utf-16be-bom"
+            local lower = layout.bom_bytes
+            local size = snapshot.identity.size
+            local position = size - (size - lower) % width
+            local need = arguments.start_line - 1 + arguments.max_lines
+            local memory_cap = limits.maximum_file_bytes
+            local opened, handle = ports.filesystem.direct_open_read(snapshot)
+            if not opened then return nil, handle end
+            local stream = { handle = handle, closed = false }
+            local data, records, base = "", {}, position
+            while true do
+                local split_at
+                if position <= lower then
+                    split_at = 1
+                else
+                    local first, last = find_terminator(data, 1, width, big_endian, true)
+                    if first then split_at = last + 1 end
+                end
+                if split_at then
+                    records = split_raw_lines(data:sub(split_at), width, big_endian)
+                    base = position + split_at - 1
+                    if #records >= need or position <= lower then break end
+                end
+                if budget.remaining <= 0 or #data >= memory_cap then
+                    scan_limited = true
+                    break
+                end
+                local step = math.min(limits.filesystem_chunk_bytes, position - lower, budget.remaining)
+                step = math.max(width, step - step % width)
+                position = position - step
+                local seek_ok, seek_error = seek(handle, position)
+                if not seek_ok then close_stream(stream); return nil, seek_error end
+                local parts, got = {}, 0
+                while got < step do
+                    local read_ok, chunk = ports.filesystem.stream_read(handle, step - got)
+                    if not read_ok then close_stream(stream); return nil, chunk end
+                    if #chunk.bytes == 0 then break end
+                    parts[#parts + 1] = chunk.bytes
+                    got = got + #chunk.bytes
+                end
+                if got ~= step then
+                    close_stream(stream)
+                    return nil, failure("TargetChanged", "file shrank while being read from the end")
+                end
+                budget.remaining = budget.remaining - step
+                data = table.concat(parts) .. data
+            end
+            local stated, final_identity = ports.filesystem.stat_identity(handle)
+            local closed, close_error = close_stream(stream)
+            if not stated then return nil, final_identity end
+            if not closed then return nil, close_error end
+            if identity_key(final_identity) ~= identity_key(snapshot.identity) then
+                return nil, failure("TargetChanged", "file was replaced while being read")
+            end
+            local finish = #records - (arguments.start_line - 1)
+            local first_index = math.max(1, finish - arguments.max_lines + 1)
+            local known = position <= lower
+            local reversed = {}
+            for index = finish, first_index, -1 do
+                local record = records[index]
+                local raw_text, truncated = record.raw, false
+                if #raw_text > limits.maximum_line_bytes then
+                    raw_text = raw_text:sub(1, limits.maximum_line_bytes - limits.maximum_line_bytes % width)
+                    truncated = true
+                end
+                local decoded, lossy = decode_range_line(raw_text, layout.encoding)
+                if used + #decoded > text_budget and #reversed > 0 then break end
+                used = used + #decoded
+                observed[#observed + 1] = raw_text
+                local first_byte = base + record.offset
+                local line = result_line(known and index or false, decoded, record.newline,
+                    first_byte, first_byte + record.length, truncated, lossy)
+                line.from_end = #records - index + 1
+                reversed[#reversed + 1] = line
+            end
+            for index = #reversed, 1, -1 do lines[#lines + 1] = reversed[index] end
+            eof = true
+            last_number = (known and finish >= 1) and finish or false
+        else
+            local offset, number = layout.bom_bytes, 1
+            if continuation then
+                offset, number = continuation.offset, continuation.next_number
+            end
+            local stream, open_error = open_stream(snapshot, offset, layout.encoding, budget)
+            if not stream then return nil, range_failure(open_error) end
+            local skip = continuation and 0 or (arguments.start_line - 1)
+            while skip > 0 do
+                local line, line_error = next_stream_line(stream)
+                if line == nil then
+                    if line_error == "scan-limit" then scan_limited = true; break end
+                    close_stream(stream)
+                    return nil, line_error
+                end
+                if line == false then eof = true; break end
+                skip, number = skip - 1, number + 1
+            end
+            while not eof and not scan_limited and #lines < arguments.max_lines do
+                local mark = stream.position
+                local line, line_error = next_stream_line(stream)
+                if line == nil then
+                    if line_error == "scan-limit" then scan_limited = true; break end
+                    close_stream(stream)
+                    return nil, line_error
+                end
+                if line == false then eof = true; break end
+                local decoded, lossy = decode_range_line(line.raw, layout.encoding)
+                if used + #decoded > text_budget and #lines > 0 then
+                    next_offset, next_number = mark, number
+                    break
+                end
+                used = used + #decoded
+                observed[#observed + 1] = line.raw
+                lines[#lines + 1] = result_line(number, decoded, line.newline,
+                    line.start, line.finish, line.truncated, lossy)
+                last_number = number
+                number = number + 1
+            end
+            if not eof and not next_offset then
+                if not scan_limited and #stream.buffer == 0 and not stream.eof then
+                    local filled = fill_stream(stream)
+                    if not filled then scan_limited = true end
+                end
+                if #stream.buffer == 0 and stream.eof then eof = true end
+                next_offset, next_number = stream.position, number
+            end
+            local stated, final_identity = ports.filesystem.stat_identity(stream.handle)
+            local closed, close_error = close_stream(stream)
+            if not stated then return nil, final_identity end
+            if not closed then return nil, close_error end
+            if identity_key(final_identity) ~= identity_key(snapshot.identity) then
+                return nil, failure("TargetChanged", "file was replaced while being read")
+            end
+            if final_identity.size < (next_offset or 0) then
+                return nil, failure("TargetChanged", "file shrank while being read")
+            end
+            if eof then next_offset = false end
+        end
+        local observed_bytes = table.concat(observed)
+        local hits, scan_error = scan_result(observed_bytes)
+        if not hits then return nil, scan_error end
+        if #hits > 0 then
+            return {
+                classification = "registered-secret-redacted",
+                mode = "range",
+                raw_size = snapshot.identity.size,
+                raw_digest = false,
+                hit_count = #hits,
+                lines = array({}),
+                eof = eof,
+            }
+        end
+        local token = false
+        if next_offset and not arguments.from_end then
+            local token_error
+            token, token_error = issue_continuation({
+                tool = "read",
+                path = arguments.path,
+                requested_encoding = arguments.encoding or "auto",
+                generation = object_key,
+                offset = next_offset,
+                next_number = next_number,
+                layout = layout,
+            })
+            if not token then return nil, token_error end
+        end
+        return {
+            classification = "text",
+            mode = "range",
+            encoding = layout.encoding,
+            encoding_basis = layout.basis,
+            raw_size = snapshot.identity.size,
+            raw_digest = false,
+            observed_digest = assert(ports.safety.digest(observed_bytes)),
+            observed_bytes = #observed_bytes,
+            lines = lines,
+            next_line = (not arguments.from_end and token ~= false) and next_number or false,
+            continuation = token,
+            eof = eof,
+            scan_limited = scan_limited,
+            last_line = last_number,
+        }
+    end
+
     -- Read a bounded text page or return a redacted/non-text classification.
     --@param state table Admitted call state with a direct file snapshot and line range.
     --@return table|nil Text lines with raw offsets and digest, or safe classification.
     --@return table|nil Read, scan, or changed-target error.
     local function execute_read(state)
         local arguments, target = state.arguments, state.targets[1]
+        if state.continuation or target.snapshot.identity.size > limits.maximum_file_bytes then
+            return execute_read_range(state)
+        end
         local read, read_error = read_bytes(target.snapshot)
         if not read then return nil, read_error end
         local hits, scan_error = scan_result(read.bytes)
@@ -2348,37 +3105,56 @@ function M.new(dependencies, options)
                 eof = true,
             }
         end
-        local document, classification = decode_document(read.bytes)
-        if not document then
-            return {
-                classification = classification,
+        local document, classification = decode_document(read.bytes, arguments.encoding, true)
+        local spans = document and document_spans(document, read.bytes)
+        if not document or not spans then
+            local result = {
+                classification = document and "invalid-encoding" or classification,
                 raw_size = #read.bytes,
                 raw_digest = read.digest,
                 lines = array({}),
                 eof = true,
             }
+            if result.classification == "invalid-encoding" then result.hint = encoding_hint() end
+            return result
         end
-        local first = arguments.start_line
-        local last = math.min(#document.records, first + arguments.max_lines - 1)
-        local lines, raw_offset = array({}), document.bom_bytes
-        local spans = {}
-        for index, record in ipairs(document.records) do
-            local bytes = text_bytes(record.text, document.encoding)
-                .. newline_bytes(record.newline, document.encoding)
-            spans[index] = { first = raw_offset, last = raw_offset + #bytes }
-            raw_offset = raw_offset + #bytes
+        local total = #document.records
+        local first, last
+        if arguments.from_end then
+            last = total - arguments.start_line + 1
+            first = math.max(1, last - arguments.max_lines + 1)
+        else
+            first = arguments.start_line
+            last = math.min(total, first + arguments.max_lines - 1)
         end
-        for index = first, last do
+        local selected = {}
+        local text_budget, used = page_text_budget(), 0
+        local step = arguments.from_end and -1 or 1
+        local from, to = first, last
+        if arguments.from_end then from, to = last, first end
+        for index = from, to, step do
             local record = document.records[index]
-            lines[#lines + 1] = {
-                number = index,
-                text = record.text,
-                newline = record.newline,
-                raw_start = spans[index].first,
-                raw_end = spans[index].last,
-            }
+            local line_text, truncated = record.text, false
+            if #line_text > limits.maximum_line_bytes then
+                line_text, truncated = truncate_utf8(line_text, limits.maximum_line_bytes)
+            end
+            if used + #line_text > text_budget and #selected > 0 then break end
+            used = used + #line_text
+            selected[#selected + 1] = result_line(index, line_text, record.newline,
+                spans[index].first, spans[index].last, truncated, false)
         end
-        return {
+        local lines = array({})
+        if arguments.from_end then
+            for index = #selected, 1, -1 do lines[#lines + 1] = selected[index] end
+        else
+            for _, line in ipairs(selected) do lines[#lines + 1] = line end
+        end
+        if #lines > 0 then
+            first, last = lines[1].number, lines[#lines].number
+        else
+            last = math.min(last, total)
+        end
+        local result = {
             classification = "text",
             encoding = document.encoding,
             newline = document.newline_kind,
@@ -2386,9 +3162,18 @@ function M.new(dependencies, options)
             raw_size = #read.bytes,
             raw_digest = read.digest,
             lines = lines,
-            next_line = last < #document.records and last + 1 or false,
-            eof = last >= #document.records,
+            next_line = last < total and last + 1 or false,
+            eof = last >= total,
         }
+        if document.basis ~= "detected" then result.encoding_basis = document.basis end
+        if document.lossy then result.lossy = true end
+        if arguments.from_end then
+            result.total_lines = total
+            result.next_line = false
+            result.eof = true
+            result.previous_line = (#lines > 0 and lines[1].number > 1) and lines[1].number - 1 or false
+        end
+        return result
     end
 
     -- Fold ASCII capitals for deterministic case-insensitive literal matching.
@@ -2428,125 +3213,207 @@ function M.new(dependencies, options)
         return offset
     end
 
-    -- Search a stable bounded walk and paginate only safe text matches.
+    -- Search a stable bounded walk, or one file, and paginate only safe text matches.
     --@param state table Admitted search arguments, target, and optional continuation.
     --@return table|nil Match page and skip/redaction/completeness metadata.
     --@return table|nil Walk, read, scan, pattern, or continuation error.
     local function execute_search(state)
         local arguments, target = state.arguments, state.targets[1]
         local continuation = state.continuation
-        local walk, walk_error = ensure_walk_generation(
-            continuation,
-            target,
-            limits.maximum_list_depth
-        )
-        if not walk then
-            consume_continuation(arguments.continuation)
-            return nil, walk_error
+        local single_file = target.snapshot.identity.kind == "file"
+        local walk
+        if single_file then
+            walk = {
+                generation = assert(ports.safety.digest(
+                    "single-file\0" .. identity_key(target.snapshot.identity)
+                        .. "\0" .. tostring(target.snapshot.identity.size)
+                        .. "\0" .. target.snapshot.identity.modified
+                )),
+                entries = {},
+                complete = true,
+                partial_reason = false,
+            }
+            if continuation and continuation.generation ~= walk.generation then
+                consume_continuation(arguments.continuation)
+                return nil, failure("ContinuationStale", "searched file changed")
+            end
+        else
+            local walk_error
+            walk, walk_error = ensure_walk_generation(
+                continuation,
+                target,
+                limits.maximum_list_depth
+            )
+            if not walk then
+                consume_continuation(arguments.continuation)
+                return nil, walk_error
+            end
         end
         local page_state = continuation
         if not page_state then
             local matches, skipped_binary, skipped_large, redacted = {}, 0, 0, 0
+            local lossy_files = 0
+            local budget = { remaining = limits.maximum_scan_bytes }
+            local stopped, stop_reason = false, false
+            local needle = arguments.case_sensitive and arguments.pattern or ascii_fold(arguments.pattern)
+            local requested = arguments.encoding or "auto"
+
+            -- Record every match of the pattern in one decoded line.
+            --@param relative_path string File path relative to the searched root.
+            --@param line_number integer One-based line number.
+            --@param line_text string Ordinary UTF-8 line text.
+            --@return boolean True when the match limit stopped the search.
+            local function match_line(relative_path, line_number, line_text)
+                local haystack = arguments.case_sensitive and line_text or ascii_fold(line_text)
+                local offset, boundaries = 1, nil
+                while offset <= #haystack + 1 do
+                    local first, last = haystack:find(needle, offset, arguments.dialect == "literal")
+                    if not first then break end
+                    boundaries = boundaries or scalar_boundaries(line_text)
+                    local after = last >= first and last + 1 or first
+                    if boundaries[first] and boundaries[after] then
+                        local snippet, truncated = truncate_utf8(line_text, limits.maximum_line_bytes)
+                        matches[#matches + 1] = {
+                            file = relative_path,
+                            line = line_number,
+                            column = boundaries[first],
+                            snippet = snippet,
+                            truncated = truncated,
+                        }
+                        if #matches >= limits.maximum_search_matches then return true end
+                    end
+                    offset = next_scalar_boundary(
+                        boundaries,
+                        math.max(first + 1, last + 1),
+                        #haystack + 1
+                    )
+                end
+                return false
+            end
+
+            -- Stream one oversized file line by line inside the shared scan budget.
+            --@param relative_path string File path relative to the searched root.
+            --@param snapshot table Admitted file snapshot.
+            --@return boolean|nil True after the file was fully scanned or the match limit was hit.
+            --@return table|string|nil Filesystem error, or "scan-limit"/encoding classification.
+            local function search_large(relative_path, snapshot)
+                local layout, layout_error = detect_range_encoding(snapshot, requested, budget)
+                if not layout then return nil, layout_error end
+                local stream, open_error = open_stream(snapshot, layout.bom_bytes, layout.encoding, budget)
+                if not stream then return nil, open_error end
+                local number, any_lossy = 0, false
+                while true do
+                    local line, line_error = next_stream_line(stream)
+                    if line == nil then close_stream(stream); return nil, line_error end
+                    if line == false then break end
+                    number = number + 1
+                    local decoded, lossy = decode_range_line(line.raw, layout.encoding)
+                    any_lossy = any_lossy or lossy
+                    if match_line(relative_path, number, decoded) then
+                        stopped, stop_reason = true, "match-limit"
+                        break
+                    end
+                end
+                local closed, close_error = close_stream(stream)
+                if not closed then return nil, close_error end
+                if any_lossy then lossy_files = lossy_files + 1 end
+                return true
+            end
+
             local entries = {}
-            for _, entry in ipairs(walk.entries) do entries[#entries + 1] = entry end
-            table.sort(entries,
-                -- Search files in deterministic relative-path order.
-                --@param left table Walk entry.
-                --@param right table Walk entry.
-                --@return boolean True when left precedes right.
-                function(left, right) return left.relative_path < right.relative_path end)
-            local stopped = false
+            if single_file then
+                local name = target.snapshot.canonical_path:match("([^/\\]+)$") or target.snapshot.canonical_path
+                entries[1] = { relative_path = name, classified = target }
+            else
+                for _, entry in ipairs(walk.entries) do entries[#entries + 1] = entry end
+                table.sort(entries,
+                    -- Search files in deterministic relative-path order.
+                    --@param left table Walk entry.
+                    --@param right table Walk entry.
+                    --@return boolean True when left precedes right.
+                    function(left, right) return left.relative_path < right.relative_path end)
+            end
             for _, entry in ipairs(entries) do
                 if stopped then break end
-                local classified, classify_error = classify_walk_entry(entry)
-                if not classified then return nil, classify_error end
+                local classified = entry.classified
+                if not classified then
+                    local classify_error
+                    classified, classify_error = classify_walk_entry(entry)
+                    if not classified then return nil, classify_error end
+                end
                 if classified.reserved then
                     return nil, failure(
                         "ReservedTreeExcluded",
                         "bounded search encountered the reserved tree"
                     )
                 end
-                if classified.snapshot.identity.kind == "file" then
-                    if classified.snapshot.identity.size > limits.maximum_file_bytes then
-                        skipped_large = skipped_large + 1
+                local snapshot = classified.snapshot
+                if snapshot.identity.kind == "file" then
+                    if snapshot.identity.size > limits.maximum_file_bytes then
+                        if budget.remaining <= 0 then
+                            skipped_large = skipped_large + 1
+                        else
+                            local searched, search_error = search_large(entry.relative_path, snapshot)
+                            if not searched then
+                                if search_error == "scan-limit" then
+                                    skipped_large = skipped_large + 1
+                                    stopped, stop_reason = true, "scan-limit"
+                                elseif type(search_error) == "string" then
+                                    skipped_binary = skipped_binary + 1
+                                else
+                                    return nil, search_error
+                                end
+                            end
+                        end
                     else
-                        local read, read_error = read_bytes(classified.snapshot)
+                        local read, read_error = read_bytes(snapshot)
                         if not read then return nil, read_error end
+                        budget.remaining = budget.remaining - #read.bytes
                         local hits, scan_error = scan_result(read.bytes)
                         if not hits then return nil, scan_error end
                         if #hits > 0 then
                             redacted = redacted + 1
                         else
-                            local document = decode_document(read.bytes)
+                            local document = decode_document(read.bytes, requested, requested ~= "auto")
                             if not document then
                                 skipped_binary = skipped_binary + 1
                             else
+                                if document.lossy then lossy_files = lossy_files + 1 end
                                 for line_number, record in ipairs(document.records) do
-                                    local haystack, needle = record.text, arguments.pattern
-                                    local boundaries = scalar_boundaries(record.text)
-                                    if not arguments.case_sensitive then
-                                        haystack, needle = ascii_fold(haystack), ascii_fold(needle)
+                                    if match_line(entry.relative_path, line_number, record.text) then
+                                        stopped, stop_reason = true, "match-limit"
+                                        break
                                     end
-                                    local offset = 1
-                                    while offset <= #haystack + 1 do
-                                        local first, last
-                                        if arguments.dialect == "literal" then
-                                            first, last = haystack:find(needle, offset, true)
-                                        else
-                                            first, last = haystack:find(needle, offset, false)
-                                        end
-                                        if not first then break end
-                                        local after = last >= first and last + 1 or first
-                                        if boundaries[first] and boundaries[after] then
-                                            local snippet, truncated = truncate_utf8(
-                                                record.text,
-                                                limits.maximum_line_bytes
-                                            )
-                                            matches[#matches + 1] = {
-                                                file = entry.relative_path,
-                                                line = line_number,
-                                                column = boundaries[first],
-                                                snippet = snippet,
-                                                truncated = truncated,
-                                            }
-                                            if #matches >= limits.maximum_search_matches then
-                                                stopped = true
-                                                break
-                                            end
-                                        end
-                                        offset = next_scalar_boundary(
-                                            boundaries,
-                                            math.max(first + 1, last + 1),
-                                            #haystack + 1
-                                        )
-                                    end
-                                    if stopped then break end
                                 end
                             end
                         end
                     end
                 end
             end
-            local confirmed, confirmation_error = confirm_walk_generation(
-                target,
-                limits.maximum_list_depth,
-                walk.generation
-            )
-            if not confirmed then return nil, confirmation_error end
+            if not single_file then
+                local confirmed, confirmation_error = confirm_walk_generation(
+                    target,
+                    limits.maximum_list_depth,
+                    walk.generation
+                )
+                if not confirmed then return nil, confirmation_error end
+            end
             page_state = {
                 tool = "search",
                 path = arguments.path,
                 pattern = arguments.pattern,
                 dialect = arguments.dialect,
                 case_sensitive = arguments.case_sensitive,
+                encoding = requested,
                 generation = walk.generation,
                 items = matches,
                 offset = 1,
                 complete = walk.complete and not stopped,
-                partial_reason = stopped and "match-limit" or walk.partial_reason,
+                partial_reason = stopped and stop_reason or walk.partial_reason,
                 skipped_binary = skipped_binary,
                 skipped_large = skipped_large,
                 redacted = redacted,
+                lossy_files = lossy_files,
             }
         end
         local page, next_token = page_items(
@@ -2555,7 +3422,7 @@ function M.new(dependencies, options)
             arguments.continuation
         )
         if not page then return nil, next_token end
-        return {
+        local result = {
             matches = page,
             continuation = next_token,
             complete = page_state.complete and next_token == false,
@@ -2565,6 +3432,8 @@ function M.new(dependencies, options)
             skipped_large = page_state.skipped_large,
             redacted_files = page_state.redacted,
         }
+        if page_state.lossy_files > 0 then result.lossy_files = page_state.lossy_files end
+        return result
     end
 
     -- Extract the parent directory while preserving platform root syntax.
@@ -2872,7 +3741,8 @@ function M.new(dependencies, options)
         if old.digest ~= arguments.expected_raw_digest then
             return nil, failure("TargetChanged", "write base digest no longer matches")
         end
-        local document, classification = decode_document(old.bytes)
+        local base_encoding = textcodec.is_legacy(arguments.encoding) and arguments.encoding or "auto"
+        local document, classification = decode_document(old.bytes, base_encoding, false)
         if not document then
             return nil, failure(
                 classification == "binary-content" and "BinaryContentDenied"
@@ -2896,7 +3766,7 @@ function M.new(dependencies, options)
         end
         local published, publish_error = publish_replace(state, target, bytes)
         if not published then return nil, publish_error end
-        local new_document = assert(decode_document(bytes))
+        local new_document = assert(decode_document(bytes, base_encoding, false))
         return {
             mode = "replace",
             changed = true,
@@ -2977,12 +3847,13 @@ function M.new(dependencies, options)
         if old.digest ~= arguments.expected_raw_digest then
             return nil, failure("TargetChanged", "patch base digest no longer matches")
         end
-        local document, classification = decode_document(old.bytes)
+        local document, classification = decode_document(old.bytes, arguments.encoding or "auto", false)
         if not document then
             return nil, failure(
                 classification == "binary-content" and "BinaryContentDenied"
+                    or classification == "encoding-unavailable" and "EncodingUnavailable"
                     or "UnsupportedOrInvalidTextEncoding",
-                "patch base is not supported ordinary text"
+                "patch base is not supported ordinary text in the requested encoding"
             )
         end
         local candidate_text, output_or_error = apply_hunks(document, arguments.hunks)
@@ -3485,20 +4356,62 @@ function M.new(dependencies, options)
         return table.concat(output)
     end
 
-    -- Accept process output as text only when it is strict ordinary UTF-8.
+    -- Recognize UTF-16LE process output such as wmic writes to pipes.
     --@param bytes string Retained process channel bytes.
-    --@return string|nil Original bytes, or nil when binary representation is required.
-    local function strict_output_text(bytes)
-        local codepoints = text.decode_utf8(bytes)
-        if not codepoints then return nil end
-        for _, codepoint in ipairs(codepoints) do
-            local safe = codepoint == 0x09 or codepoint == 0x0A or codepoint == 0x0D
-                or (codepoint >= 0x20 and codepoint <= 0xD7FF)
-                or (codepoint >= 0xE000 and codepoint <= 0xFFFD)
-                or (codepoint >= 0x10000 and codepoint <= 0x10FFFF)
-            if not safe then return nil end
+    --@return string|nil UTF-8 text when the bytes are BOM-marked or clearly UTF-16LE.
+    local function utf16_output_text(bytes)
+        local body = bytes
+        if body:sub(1, 2) == "\255\254" then
+            body = body:sub(3)
+        else
+            if #body < 4 or #body % 2 ~= 0 then return nil end
+            local zeros = 0
+            for index = 2, #body, 2 do
+                if body:byte(index) == 0 then zeros = zeros + 1 end
+            end
+            if zeros * 10 < (#body // 2) * 9 then return nil end
         end
-        return bytes
+        return decode_utf16(body:sub(1, #body - #body % 2), true)
+    end
+
+    -- Project process output as ordinary text when it is readable in a known encoding.
+    -- UTF-16LE comes first, then strict UTF-8, then the platform output code page, then
+    -- display repair. Output with too many replacements stays binary.
+    --@param bytes string Retained process channel bytes.
+    --@param decoder string Declared default decoder label.
+    --@return string|nil Ordinary UTF-8 text, or nil when a binary projection is required.
+    --@return string Decoder label actually used.
+    --@return integer Number of replaced bytes or scalars.
+    local function output_text(bytes, decoder)
+        if #bytes == 0 then return "", decoder, 0 end
+        local decoded, used, replaced = nil, decoder, 0
+        -- UTF-16LE ASCII is also valid UTF-8 (with NUL bytes), so its shape is checked first.
+        decoded = utf16_output_text(bytes)
+        if decoded then
+            used = "utf-16le"
+        elseif text.validate_utf8(bytes) == true then
+            decoded = bytes
+        else
+            local label = ports.text_codec and ports.text_codec.facts.output_default
+            if label then
+                local converted, exact = decode_legacy(label, bytes, true)
+                if converted then
+                    decoded, used = converted, label
+                    if exact ~= true then
+                        local _, count = converted:gsub("\239\191\189", "")
+                        replaced = math.max(1, count)
+                    end
+                end
+            end
+            if not decoded then
+                decoded, replaced = text.repair_utf8(bytes)
+                used = "utf-8-repaired"
+            end
+        end
+        local cleaned, controls = replace_forbidden_scalars(decoded)
+        replaced = replaced + controls
+        if replaced * 8 > #bytes then return nil, "binary", replaced end
+        return cleaned, used, replaced
     end
 
     -- Check a frozen process policy against admitted config and hard output/deadline bounds.
@@ -3577,7 +4490,7 @@ function M.new(dependencies, options)
         end
         local digest, digest_error = ports.safety.digest(bytes)
         if not digest then return nil, digest_error end
-        local decoded = strict_output_text(bytes)
+        local decoded, used_decoder, replaced = output_text(bytes, decoder)
         return {
             stream = name,
             representation = decoded and "text" or "base64",
@@ -3590,8 +4503,8 @@ function M.new(dependencies, options)
             truncated = process_result[prefix .. "truncated"],
             truncation_reason = process_result[prefix .. "truncated"]
                 and "combined-fixed-channel-quota" or false,
-            decoder = decoded and decoder or "binary",
-            replacement_count = 0,
+            decoder = decoded and used_decoder or "binary",
+            replacement_count = decoded and replaced or 0,
             digest = digest,
             digest_scope = "retained-raw-bytes",
             registered_secret_hits = 0,
@@ -4598,14 +5511,13 @@ function M.new_agent_port(ports, options)
     return readonly(adapter, "Runtime Tool port")
 end
 
----Describes optional local programs without executing or registering any of them.
--- Paths are quoted data, not shell commands. A toolbox needs no manifest and
--- can be supplied by the user; its contents never become Prompt instructions.
---@param filesystem table Filesystem port exposing stat_identity.
---@param layout table Resolved outer executable and application root.
+---Describes the embedded interpreter, optional tools directory and text encodings for the Prompt.
+--@param filesystem table Filesystem service used to test for the tools directory.
+--@param layout table Application layout with application_root.
 --@param platform_kind string windows or posix.
---@return string Bounded environment facts for the Agent's Prompt.
-function M.describe_environment(filesystem, layout, platform_kind)
+--@param text_codec table|boolean|nil Observed code page facts, or false when unavailable.
+--@return string Bounded environment description lines.
+function M.describe_environment(filesystem, layout, platform_kind, text_codec)
     local lines = {
         "The running yaca includes the same Lua interpreter used by its core.",
         "Use the built-in lua tool: supply code, optional args, cwd and deadline_ms. No shell quoting is needed.",
@@ -4615,6 +5527,20 @@ function M.describe_environment(filesystem, layout, platform_kind)
     lines[#lines + 1] = platform_kind == "windows"
         and "exec uses Windows cmd.exe command syntax, even when yaca was started from Cygwin."
         or "exec uses POSIX /bin/sh command syntax."
+    local facts = type(text_codec) == "table" and text_codec.facts or nil
+    if facts and platform_kind == "windows" then
+        lines[#lines + 1] = "Windows code pages: ANSI " .. tostring(facts.ansi or "unknown")
+            .. ", OEM " .. tostring(facts.oem or "unknown")
+            .. ", console output " .. tostring(facts.console_output or "none") .. "."
+    elseif facts then
+        lines[#lines + 1] = "Locale charset: " .. tostring(facts.locale or "unknown") .. "."
+    end
+    if facts and facts.output_default then
+        lines[#lines + 1] = "Command output that is not UTF-8 is decoded from " .. facts.output_default
+            .. "; read and search fall back to " .. tostring(facts.file_default or "UTF-8")
+            .. " for files that are not UTF-8."
+    end
+    lines[#lines + 1] = "read and search accept an encoding label for legacy text; large files are read in ranges."
     local separator = platform_kind == "windows" and "\\" or "/"
     local root = layout.application_root
     if type(root) == "string" and #root <= 4096 then

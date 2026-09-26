@@ -1,6 +1,58 @@
 # 当前状态分析
 
-更新日期：2026-09-23
+更新日期：2026-09-26
+
+## 2026-09-26 暂停点：旧编码与大文件读取
+
+负责人要求在此暂停，不再开启新工作项。本轮实现路线 F4 中「大文件和旧编码」部分，
+代码停在完整测试通过的状态；尚未重建目标产物，也没有在测试机上运行新代码。
+
+**已完成**
+
+- 原生层新增 `text_facts`、`text_convert` 与 `fs_seek`（`native/yaca_text.h`、
+  `native/yaca_native.c`）。Windows 通过 MultiByteToWideChar / WideCharToMultiByte
+  转换并做往返校验，GB18030 单独处理标志位；Linux 通过 iconv 转换。seek 使用
+  XP 可用的 SetFilePointerEx 与 lseek。gcc、i686/x86_64 MinGW 语法检查无告警；
+  Linux 原生冒烟覆盖 GBK 解码、不可映射字符拒绝、有损替换和 seek。
+- `src/textcodec.lua`：编码标签规范化（`cp<N>`、gbk、gb18030、big5、shift_jis、
+  latin1、iso-8859-N、windows-125N、koi8 等），以及 Windows ANSI/OEM/控制台代码页、
+  POSIX 语言环境字符集事实。已登记到 manifest、platform/release 契约与 C24。
+- `read`：新增 `encoding`、`from_end`、`continuation`。自动判断依次为 BOM、严格
+  UTF-8、系统代码页；显式标签可有损显示并标记 `lossy`。超过 16 MiB 的文件走区间
+  模式：定位读取、续页令牌、从尾部倒读、超长行截断，单次扫描预算 256 MiB，
+  结果不含整文件摘要。页面文本限制为结果上限的一半。
+- `search`：可直接搜索单个文件，接受 `encoding`，大文件在同一扫描预算内逐行搜索。
+- `write`/`patch`：可按旧代码页无损写回，含无法表示的字符时拒绝写入。
+- `exec` 输出：依次识别 UTF-16LE（如 wmic）、严格 UTF-8、控制台/OEM 代码页，
+  替换过多时仍为 base64；返回实际 `decoder` 与 `replacement_count`。
+- Prompt 环境说明加入代码页事实与编码用法。
+- 验证：完整 Lua suite **646/646**（新增 14 项），design-contract **7687**、
+  coding-readiness **562** 条断言、文档真值 **5** 项通过。全仓注释结构检查
+  **206 文件、5056 声明、0 缺项**，检查器反例 **14/14**。下文 09-23 记录的
+  11030 条缺项已过时，结构覆盖在 8841212 提交前已归零。
+
+**下一步**
+
+1. 用当前源码重建 win32/win64/linux 核心（包含本轮原生改动及 R21/R22 修复），
+   在 XP、Win7、CentOS 7 客体以及 Server 2008、蓝机（Windows Server 2025）、
+   红机（Debian 13）实测：中文 Windows 上 `dir`/`ipconfig` 输出、GBK 日志读取、
+   GiB 级日志尾部读取与续页（验收 A08/A09）。
+2. 真实模型旅程确认 Agent 会使用 `encoding`、`from_end` 与续页令牌。
+3. win64/linux 的 std 与三个目标的 full 工具闭包，接续 C32--C34。
+4. 继续注释与实现的一致性语义 Review。
+
+**遗留问题**
+
+- `validate_proof_evidence.lua` 报 TP-010 源码摘要漂移：8841212 的注释补全修改了
+  `.tools/proofs/tp010_xml.lua`，证明 manifest 未更新。按不改写历史证据的原则
+  未处理，需要重跑 TP-010 或另行决定。
+- 注释检查器在 `out/code-comment-audit-20260923/wheels` 中的 tree-sitter 0.26.0 下
+  段错误；requirements 固定的 0.25.2 可正常运行。Fedora 无法直连 PyPI，本次从
+  本机下载 0.25.2 wheel 后安装。
+- 持续增长的日志若在接纳与执行之间变化，`direct_reverify` 会报 TargetChanged，
+  需要重试；尚未放宽。
+- 区间模式不计算整文件摘要，超过 16 MiB 的文件仍不能 write/patch（设计如此）。
+- Windows 版代码页转换与 seek 只有编译证据，缺目标机运行证据。
 
 ## 当前方向与复核
 
@@ -34,7 +86,7 @@ D-074 已补为正式内置 `lua` 工具（同版本内嵌解释器，Shell 权�
 readiness **559 条断言**与公开文档真值检查 **5 项**通过；这些只证明当前源码回归，
 不证明九个发行包已经建成或目标资格已通过。D-076 新增全仓代码注释规范，
 见[编码规范](CODING-STANDARD.md)及[Review 记录](CODE-REVIEW-2026-09-22.md)。
-当前结构检查仍报告 **11030 条缺项**，因此注释验收尚未通过。R21 的 FAT32
+当时结构检查报告 **11030 条缺项**（此后已归零，见 2026-09-26 暂停点），语义 Review 仍待完成。R21 的 FAT32
 关闭后时间戳竞争与 R22 的替换清理竞争已修复并有定向回归，重建目标产物后的复验仍待做。
 
 [最初复核](BASELINE-REVIEW-2026-09-22.md)记录的是历史 N13，不能代表新候选。

@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-09-26
 File: readiness.lua
 Description: Maps implementation and release gates to required artifacts and proof tasks.
 ]]
@@ -183,7 +183,7 @@ return {
     task("C21", "M6", { "C20" }, { "src/model.lua" }, { "test/golden/provider_wire", "test/integration/model_adapter_test.lua" }, "feat: add canonical model adapters"),
     task("C22", "M6", { "C10", "C21" }, { "src/prompt.lua", "src/model.lua" }, { "test/golden/prompts", "test/unit/control_mapping_test.lua" }, "feat: add versioned prompt and control bundles"),
     task("C23", "M7", { "C10", "C15" }, { "src/permission.lua", "src/safety.lua" }, { "test/unit/permission_test.lua" }, "feat: add permission admission service"),
-    task("C24", "M7", { "C04", "C09", "C23" }, { "src/tools.lua", "src/fs.lua" }, { "test/integration/direct_tools_test.lua", "test/fault/target_reverify_test.lua" }, "feat: add verified direct tools"),
+    task("C24", "M7", { "C04", "C09", "C23" }, { "src/tools.lua", "src/fs.lua", "src/textcodec.lua" }, { "test/integration/direct_tools_test.lua", "test/fault/target_reverify_test.lua", "test/unit/textcodec_test.lua" }, "feat: add verified direct tools"),
     task("C25", "M7", { "C17", "C19", "C23", "C24" }, { "src/tools.lua", "src/process.lua", "src/context.lua" }, { "test/integration/exec_tool_test.lua", "test/fault/operation_outcome_test.lua" }, "feat: add raw exec and durable operations"),
     task("C26", "M8", { "C03", "C18", "C22", "C25" }, { "src/runtime.lua" }, { "test/golden/agentloop", "test/fault/agentloop_test.lua" }, "feat: connect typed agent loop"),
     task("C27", "M8", { "C26" }, { "src/runtime.lua", "src/session.lua" }, { "test/integration/review_queue_ask_test.lua" }, "feat: add reviews queue and ask turns"),

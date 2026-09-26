@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-09-26
 File: release.lua
 Description: Defines target packages, dependency provenance and release admission requirements.
 ]]
@@ -51,7 +51,7 @@ return {
     yaca_native = {
       version = "same-as-product",
       linkage = "target-built-native-module",
-      owns = { "event-wait", "filesystem-primitives", "process", "terminal", "clock", "sha256" },
+      owns = { "event-wait", "filesystem-primitives", "process", "terminal", "clock", "sha256", "text-codepage" },
     },
   },
 
@@ -70,7 +70,7 @@ return {
     "backend_linux", "backend_windows", "cli", "clock", "compact", "config",
     "context", "diagnostics", "fs", "index", "ini", "json", "main", "model",
     "network", "path", "permission", "platform", "process", "prompt", "runtime",
-    "safety", "session", "terminal", "text", "tools", "tui", "xml",
+    "safety", "session", "terminal", "text", "textcodec", "tools", "tui", "xml",
   },
   initial_skeleton_modules = {
     "cli", "compact", "config", "context", "index", "ini", "json", "main",

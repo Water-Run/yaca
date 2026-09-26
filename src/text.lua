@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-08-29
+Date: 2026-09-26
 File: text.lua
 Description: Validates strict UTF-8 and keeps text, binary, and display bytes separate.
 ]]
@@ -318,6 +318,29 @@ function M.decode_utf8(value)
     local inspection, validation_error = inspect_utf8(value, true)
     if not inspection then return nil, validation_error end
     return inspection.codepoints
+end
+
+---Repairs arbitrary bytes into strict UTF-8 for display, replacing each invalid byte with U+FFFD.
+-- Valid scalars are copied unchanged; the caller keeps the original bytes for digests.
+--@param value string Raw candidate bytes.
+--@return string repaired Strict UTF-8 text.
+--@return integer replaced Number of invalid bytes that were replaced.
+function M.repair_utf8(value)
+    local output, index, replaced, start = {}, 1, 0, 1
+    while index <= #value do
+        local codepoint, next_index = decode_one(value, index)
+        if codepoint == nil then
+            output[#output + 1] = value:sub(start, index - 1)
+            output[#output + 1] = "\239\191\189"
+            replaced = replaced + 1
+            index = index + 1
+            start = index
+        else
+            index = next_index
+        end
+    end
+    output[#output + 1] = value:sub(start)
+    return table.concat(output), replaced
 end
 
 ---Encodes one Unicode scalar without normalization.

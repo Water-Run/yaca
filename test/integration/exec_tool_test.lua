@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-09-26
 File: exec_tool_test.lua
 Description: Verifies raw exec transport, output, cancellation, and durable barriers.
 ]]
@@ -314,6 +314,7 @@ local function fixture(settings)
         authorization = authorization,
         processes = processes,
         operations = operations,
+        text_codec = settings.text_codec,
     }, tool_options()))
     return {
         tools = tools,
@@ -569,6 +570,63 @@ return {
                     A.falsy(event.bytes)
                     A.equal(event.content, "withheld-until-terminal-secret-scan")
                 end
+            end,
+        },
+        {
+            name = "legacy code page and UTF-16LE output are decoded to text with the decoder named",
+            --Verifies legacy code page and UTF-16LE output are decoded to text with the decoder named.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify decoded output projections.
+            run = function()
+                local codec = {
+                    facts = { platform = "windows", file_default = "cp936", output_default = "cp936" },
+                    --Decodes the fixture GBK bytes for 中文.
+                    --@param label string Canonical label.
+                    --@param bytes string Input bytes.
+                    --@return string|nil text Decoded text.
+                    --@return boolean|table exact Exact flag or error.
+                    decode = function(label, bytes)
+                        A.equal(label, "cp936")
+                        if bytes == "\214\208\206\196\r\n" then return "中文\r\n", true end
+                        return nil, { code = "InvalidEncoding", message = "invalid" }
+                    end,
+                    --Refuses all encoding in this output-only fixture.
+                    --@param none Arguments are ignored.
+                    --@return nil text No output.
+                    --@return table err EncodingLossy error.
+                    encode = function() return nil, { code = "EncodingLossy", message = "unused" } end,
+                }
+                local legacy = fixture({
+                    text_codec = codec,
+                    batches = { {
+                        { kind = "stdout", bytes = "\214\208\206\196\r\n" },
+                        { kind = "terminal", outcome = "completed" },
+                    } },
+                })
+                local _, legacy_token = exec_call(legacy, { command = "dir" }, "legacy")
+                local legacy_joined = drive(assert(legacy.tools:execution_port(
+                    legacy_token,
+                    policy({ output_limit_bytes = 64 })
+                )))
+                local stdout = legacy_joined.tool_result.payload.stdout
+                A.equal(stdout.representation, "text")
+                A.equal(stdout.text, "中文\r\n")
+                A.equal(stdout.decoder, "cp936")
+                A.equal(stdout.replacement_count, 0)
+
+                local wide = fixture({
+                    batches = { {
+                        { kind = "stdout", bytes = "O\0K\0\r\0\n\0" },
+                        { kind = "terminal", outcome = "completed" },
+                    } },
+                })
+                local _, wide_token = exec_call(wide, { command = "wmic" }, "wide")
+                local wide_joined = drive(assert(wide.tools:execution_port(
+                    wide_token,
+                    policy({ output_limit_bytes = 64 })
+                )))
+                A.equal(wide_joined.tool_result.payload.stdout.text, "OK\r\n")
+                A.equal(wide_joined.tool_result.payload.stdout.decoder, "utf-16le")
             end,
         },
         {

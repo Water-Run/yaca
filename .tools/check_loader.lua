@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-09-26
 File: check_loader.lua
 Description: Validates and constructs the manifest-only secure module loader.
 ]]
@@ -60,7 +60,7 @@ function M.validate_manifest(manifest)
     if not lua_set then return nil, lua_error end
     local native_set, native_error = as_set(manifest.native_modules, "native_modules")
     if not native_set then return nil, native_error end
-    if #manifest.lua_modules ~= 28 then return nil, "manifest must list exactly 28 Lua modules" end
+    if #manifest.lua_modules ~= 29 then return nil, "manifest must list exactly 29 Lua modules" end
     if #manifest.native_modules ~= 2 or not native_set.yaca_native or not native_set.lxp then
         return nil, "manifest must list yaca_native and lxp only"
     end

@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-09-26
 File: platform.lua
 Description: Defines supported platform identities, capability probes and compatibility floors.
 ]]
@@ -23,13 +23,13 @@ return {
       "backend_linux", "backend_windows", "cli", "clock", "compact", "config",
       "context", "diagnostics", "fs", "index", "ini", "json", "main", "model",
       "network", "path", "permission", "platform", "process", "prompt", "runtime",
-      "safety", "session", "terminal", "text", "tools", "tui", "xml",
+      "safety", "session", "terminal", "text", "textcodec", "tools", "tui", "xml",
     },
     planned_lua_module_allowlist = {
       "backend_linux", "backend_windows", "cli", "clock", "compact", "config",
       "context", "diagnostics", "fs", "index", "ini", "json", "main", "model",
       "network", "path", "permission", "platform", "process", "prompt", "runtime",
-      "safety", "session", "terminal", "text", "tools", "tui", "xml",
+      "safety", "session", "terminal", "text", "textcodec", "tools", "tui", "xml",
     },
     native_module_allowlist = { "yaca_native", "lxp" },
     lua_search_source = "embedded-release-manifest-only",

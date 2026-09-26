@@ -1,8 +1,8 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-09-26
 File: direct_tools_test.lua
-Description: Verifies the closed registry and all seven direct tool contracts.
+Description: Verifies the closed registry, direct tool contracts, legacy encodings and range reads.
 ]]
 
 local A = assert(loadfile(YACA_TEST_ROOT .. "/test/support/assert.lua", "t", _ENV))()
@@ -254,6 +254,7 @@ local function fixture(settings)
         authorization = authorization,
         processes = false,
         operations = operations,
+        text_codec = settings.text_codec,
     }, options(settings.options)))
     return tools, controls, authorization_controls, {
         modules = modules,
@@ -320,6 +321,84 @@ end
 --@return any observed identity value observed by the scenario assertion.
 local function identity(controls, path)
     return assert(controls.identity(path))
+end
+
+--Builds a fake legacy codec that knows two GBK characters and ASCII.
+--@param file_default string|boolean File fallback label, or false.
+--@param output_default string|boolean Process output fallback label, or false.
+--@return table codec Fake codec with facts, decode and encode.
+local function fake_codec(file_default, output_default)
+    local to_utf8 = { ["\214\208"] = "中", ["\206\196"] = "文" }
+    local from_utf8 = { ["中"] = "\214\208", ["文"] = "\206\196" }
+    return {
+        facts = {
+            platform = "windows", ansi = file_default or "cp1252", oem = "cp437",
+            console_output = false, file_default = file_default or false,
+            output_default = output_default or false,
+        },
+        --Decodes ASCII and the two known GBK characters.
+        --@param _ string Canonical label, ignored by the fake.
+        --@param bytes string Input bytes.
+        --@param lossy boolean Whether unknown bytes may become U+FFFD.
+        --@return string|nil text Decoded text.
+        --@return boolean|table exact Exact flag or InvalidEncoding error.
+        decode = function(_, bytes, lossy)
+            local output, index, exact = {}, 1, true
+            while index <= #bytes do
+                local byte = bytes:byte(index)
+                local pair = to_utf8[bytes:sub(index, index + 1)]
+                if byte < 0x80 then
+                    output[#output + 1] = string.char(byte); index = index + 1
+                elseif pair then
+                    output[#output + 1] = pair; index = index + 2
+                elseif lossy then
+                    output[#output + 1] = "\239\191\189"; index = index + 1; exact = false
+                else
+                    return nil, { code = "InvalidEncoding", message = "invalid" }
+                end
+            end
+            return table.concat(output), exact
+        end,
+        --Encodes ASCII and the two known characters, refusing everything else.
+        --@param _ string Canonical label, ignored by the fake.
+        --@param value string UTF-8 text.
+        --@return string|nil bytes Encoded bytes.
+        --@return boolean|table exact True or EncodingLossy error.
+        encode = function(_, value)
+            local output = {}
+            for _, codepoint in utf8.codes(value) do
+                local character = utf8.char(codepoint)
+                if codepoint < 0x80 then
+                    output[#output + 1] = character
+                elseif from_utf8[character] then
+                    output[#output + 1] = from_utf8[character]
+                else
+                    return nil, { code = "EncodingLossy", message = "unmappable" }
+                end
+            end
+            return table.concat(output), true
+        end,
+    }
+end
+
+--Builds numbered ASCII log lines of exactly ten bytes each.
+--@param count integer Number of lines.
+--@return string bytes Log content "line 0001\n"...
+local function numbered_lines(count)
+    local parts = {}
+    for index = 1, count do parts[index] = string.format("line %04d\n", index) end
+    return table.concat(parts)
+end
+
+--Encodes ASCII or BMP text as UTF-16LE for fixtures.
+--@param value string UTF-8 text without supplementary characters.
+--@return string bytes UTF-16LE bytes without a BOM.
+local function utf16le(value)
+    local output = {}
+    for _, codepoint in utf8.codes(value) do
+        output[#output + 1] = string.char(codepoint % 256, codepoint // 256)
+    end
+    return table.concat(output)
 end
 
 return {
@@ -756,6 +835,235 @@ return {
                 A.equal(replay_error.code, "AuthorizationConsumed")
                 A.equal(authorization.admits, 1)
                 A.equal(authorization.reverifies, 1)
+            end,
+        },
+        {
+            name = "legacy code page files decode automatically with exact raw offsets",
+            --Verifies legacy code page files decode automatically with exact raw offsets.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify system-default decoding and offsets.
+            run = function()
+                local initial = { ["/work/gbk.txt"] = "a\214\208\r\n\206\196b\n" }
+                local service = fixture({ initial = initial, text_codec = fake_codec("cp936") })
+                local read = run(service, "read", { path = "/work/gbk.txt", start_line = 1, max_lines = 5 }, "gbk")
+                A.equal(read.outcome, "success")
+                A.equal(read.payload.encoding, "cp936")
+                A.equal(read.payload.encoding_basis, "system-default")
+                A.equal(read.payload.lines[1].text, "a中")
+                A.equal(read.payload.lines[1].raw_start, 0)
+                A.equal(read.payload.lines[1].raw_end, 5)
+                A.equal(read.payload.lines[2].text, "文b")
+                A.equal(read.payload.lines[2].raw_start, 5)
+                A.equal(read.payload.lines[2].raw_end, 9)
+                local plain = fixture({ initial = initial })
+                local undecoded = run(plain, "read", { path = "/work/gbk.txt", start_line = 1, max_lines = 5 }, "plain")
+                A.equal(undecoded.payload.classification, "invalid-encoding")
+                A.contains(undecoded.payload.hint, "encoding")
+                local refused, refused_error = call(plain, "read", {
+                    path = "/work/gbk.txt", start_line = 1, max_lines = 1, encoding = "gbk",
+                }, "no-codec")
+                A.falsy(refused)
+                A.equal(refused_error.code, "EncodingUnavailable")
+            end,
+        },
+        {
+            name = "explicit encodings decode legacy bytes and repair invalid UTF-8 for display",
+            --Verifies explicit encodings decode legacy bytes and repair invalid UTF-8 for display.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify requested and lossy decoding.
+            run = function()
+                local service = fixture({
+                    initial = { ["/work/gbk.txt"] = "\214\208\n", ["/work/bad.txt"] = "ok\255\n" },
+                    text_codec = fake_codec(false),
+                })
+                local read = run(service, "read", {
+                    path = "/work/gbk.txt", start_line = 1, max_lines = 1, encoding = "GBK",
+                }, "gbk")
+                A.equal(read.payload.encoding, "cp936")
+                A.equal(read.payload.encoding_basis, "requested")
+                A.equal(read.payload.lines[1].text, "中")
+                local repaired = run(service, "read", {
+                    path = "/work/bad.txt", start_line = 1, max_lines = 1, encoding = "utf-8",
+                }, "bad")
+                A.equal(repaired.payload.lossy, true)
+                A.equal(repaired.payload.lines[1].text, "ok\239\191\189")
+                A.equal(repaired.payload.lines[1].raw_end, 4)
+                local invalid, invalid_error = call(service, "read", {
+                    path = "/work/bad.txt", start_line = 1, max_lines = 1, encoding = "utf-7",
+                }, "label")
+                A.falsy(invalid)
+                A.equal(invalid_error.code, "InvalidToolArguments")
+            end,
+        },
+        {
+            name = "legacy writes and patches round-trip and refuse unrepresentable characters",
+            --Verifies legacy writes and patches round-trip and refuse unrepresentable characters.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify exact legacy bytes on disk.
+            run = function()
+                local service, controls = fixture({
+                    initial = { ["/work/gbk.txt"] = "a\214\208\r\n\206\196b\r\n" },
+                    text_codec = fake_codec("cp936"),
+                })
+                local created = run(service, "write", {
+                    path = "/work/new.txt", mode = "create", content = "中文\n",
+                    encoding = "cp936", newline_policy = "preserve",
+                }, "create")
+                A.equal(created.outcome, "success")
+                A.equal(controls.bytes("/work/new.txt"), "\214\208\206\196\n")
+                local lossy = run(service, "write", {
+                    path = "/work/emoji.txt", mode = "create", content = "😀\n",
+                    encoding = "cp936", newline_policy = "preserve",
+                }, "emoji")
+                A.equal(lossy.outcome, "failed")
+                A.equal(lossy.error.code, "EncodingLossy")
+                A.falsy(controls.exists("/work/emoji.txt"))
+                local read = run(service, "read", { path = "/work/gbk.txt", start_line = 1, max_lines = 2 }, "base")
+                local patched = run(service, "patch", {
+                    path = "/work/gbk.txt",
+                    expected_identity = identity(controls, "/work/gbk.txt"),
+                    expected_raw_digest = read.payload.raw_digest,
+                    hunks = arr({ {
+                        start_line = 2, context_before = arr({ "a中" }), delete_lines = arr({ "文b" }),
+                        insert_lines = arr({ "中文c" }), context_after = arr({}),
+                        newline = "crlf", final_newline = true,
+                    } }),
+                }, "patch")
+                A.equal(patched.outcome, "success")
+                A.equal(controls.bytes("/work/gbk.txt"), "a\214\208\r\n\214\208\206\196c\r\n")
+            end,
+        },
+        {
+            name = "from_end reads count lines backward on whole files",
+            --Verifies from_end reads count lines backward on whole files.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify the backward page.
+            run = function()
+                local service = fixture()
+                local read = run(service, "read", {
+                    path = "/work/a.txt", start_line = 1, max_lines = 1, from_end = true,
+                }, "tail")
+                A.equal(#read.payload.lines, 1)
+                A.equal(read.payload.lines[1].text, "beta")
+                A.equal(read.payload.lines[1].number, 2)
+                A.equal(read.payload.total_lines, 2)
+                A.equal(read.payload.previous_line, 1)
+            end,
+        },
+        {
+            name = "large files are read as ranges with continuations, skips and seeks from the end",
+            --Verifies large files are read as ranges with continuations, skips and seeks from the end.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify range pages and offsets.
+            run = function()
+                local service, controls = fixture({ initial = { ["/work/big.log"] = numbered_lines(4000) } })
+                local first = run(service, "read", { path = "/work/big.log", start_line = 1, max_lines = 16 }, "r1")
+                A.equal(first.payload.mode, "range")
+                A.equal(first.payload.raw_digest, false)
+                A.equal(#first.payload.lines, 16)
+                A.equal(first.payload.lines[16].text, "line 0016")
+                A.equal(first.payload.lines[16].raw_start, 150)
+                A.equal(first.payload.next_line, 17)
+                A.type(first.payload.continuation, "string")
+                local second = run(service, "read", {
+                    path = "/work/big.log", start_line = 1, max_lines = 16,
+                    continuation = first.payload.continuation,
+                }, "r2")
+                A.equal(second.payload.lines[1].text, "line 0017")
+                A.equal(second.payload.lines[1].number, 17)
+                A.equal(second.payload.lines[1].raw_start, 160)
+                local stale, stale_error = call(service, "read", {
+                    path = "/work/big.log", start_line = 1, max_lines = 16,
+                    continuation = first.payload.continuation,
+                }, "r-stale")
+                A.falsy(stale)
+                A.equal(stale_error.code, "InvalidContinuation")
+                local skipped = run(service, "read", { path = "/work/big.log", start_line = 3990, max_lines = 2 }, "skip")
+                A.equal(skipped.payload.lines[1].text, "line 3990")
+                A.equal(skipped.payload.lines[2].number, 3991)
+                local tail = run(service, "read", {
+                    path = "/work/big.log", start_line = 2, max_lines = 3, from_end = true,
+                }, "tail")
+                A.equal(#tail.payload.lines, 3)
+                A.equal(tail.payload.lines[3].text, "line 3999")
+                A.equal(tail.payload.lines[3].from_end, 2)
+                A.equal(tail.payload.lines[3].number, false)
+                A.equal(tail.payload.lines[3].raw_start, 39980)
+                A.truthy(controls.seeks > 0)
+            end,
+        },
+        {
+            name = "the scan budget stops a large read with a resumable continuation",
+            --Verifies the scan budget stops a large read with a resumable continuation.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify scan-limited pages resume.
+            run = function()
+                local service = fixture({
+                    initial = { ["/work/big.log"] = numbered_lines(4000) },
+                    options = { maximum_scan_bytes = 32768 },
+                })
+                local limited = run(service, "read", { path = "/work/big.log", start_line = 3500, max_lines = 2 }, "limit")
+                A.equal(limited.payload.scan_limited, true)
+                A.equal(#limited.payload.lines, 0)
+                A.type(limited.payload.continuation, "string")
+                local resumed = run(service, "read", {
+                    path = "/work/big.log", start_line = 1, max_lines = 1,
+                    continuation = limited.payload.continuation,
+                }, "resume")
+                local number = limited.payload.next_line
+                A.equal(resumed.payload.lines[1].number, number)
+                A.equal(resumed.payload.lines[1].text, string.format("line %04d", number))
+            end,
+        },
+        {
+            name = "UTF-16 large files split on aligned code units",
+            --Verifies UTF-16 large files split on aligned code units.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify UTF-16 range decoding.
+            run = function()
+                local body = "\255\254" .. string.rep(utf16le("ab中\r\n"), 3500)
+                local service = fixture({ initial = { ["/work/wide.log"] = body } })
+                local read = run(service, "read", { path = "/work/wide.log", start_line = 1, max_lines = 2 }, "wide")
+                A.equal(read.payload.encoding, "utf-16le-bom")
+                A.equal(read.payload.lines[1].text, "ab中")
+                A.equal(read.payload.lines[1].newline, "crlf")
+                A.equal(read.payload.lines[1].raw_start, 2)
+                A.equal(read.payload.lines[1].raw_end, 12)
+                local tail = run(service, "read", {
+                    path = "/work/wide.log", start_line = 1, max_lines = 1, from_end = true,
+                }, "wide-tail")
+                A.equal(tail.payload.lines[1].text, "ab中")
+                A.equal(tail.payload.lines[1].raw_end, #body)
+            end,
+        },
+        {
+            name = "search covers single files, legacy text and large files",
+            --Verifies search covers single files, legacy text and large files.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify search coverage.
+            run = function()
+                local service = fixture({
+                    initial = {
+                        ["/work/big.log"] = numbered_lines(4000),
+                        ["/work/gbk.txt"] = "a\214\208\n",
+                    },
+                    text_codec = fake_codec("cp936"),
+                })
+                local single = run(service, "search", {
+                    path = "/work/big.log", pattern = "line 3999", dialect = "literal",
+                    case_sensitive = true, page_size = 4,
+                }, "single")
+                A.equal(single.outcome, "success")
+                A.equal(#single.payload.matches, 1)
+                A.equal(single.payload.matches[1].line, 3999)
+                A.equal(single.payload.skipped_large, 0)
+                local tree = run(service, "search", {
+                    path = "/work", pattern = "中", dialect = "literal",
+                    case_sensitive = true, page_size = 8,
+                }, "tree")
+                A.equal(#tree.payload.matches, 1)
+                A.equal(tree.payload.matches[1].file, "gbk.txt")
+                A.equal(tree.payload.matches[1].column, 2)
             end,
         },
     },

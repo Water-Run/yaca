@@ -197,7 +197,7 @@ M6 hard gate：bundled target curl/TLS/proxy/CA 与真实 provider wire 通过�
 | Task | Files | Tests 与唯一退出条件 | Commit |
 | --- | --- | --- | --- |
 | C23 | `src/permission.lua`, `src/safety.lua` | `permission_test.lua`；8 tools×5 capabilities×Std/Readonly、OutsideWorkspace fold、prompt 不授权、approval snapshot/staleness 全通过 | `feat: add permission admission service` |
-| C24 | `src/tools.lua`, `src/fs.lua` | `direct_tools_test.lua`, `target_reverify_test.lua`；list/read/search/write/patch/rename/delete exact schema、path identity、reserved tree 与 side-effect 前复核 | `feat: add verified direct tools` |
+| C24 | `src/tools.lua`, `src/fs.lua`, `src/textcodec.lua` | `direct_tools_test.lua`, `target_reverify_test.lua`；list/read/search/write/patch/rename/delete exact schema、path identity、reserved tree 与 side-effect 前复核；旧代码页严格往返、大文件分段读取与有界搜索 | `feat: add verified direct tools` |
 | C25 | `src/tools.lua`, `src/process.lua`, `src/context.lua` | `exec_tool_test.lua`, `operation_outcome_test.lua`；opaque shell command、closed stdin、minimal/filtered env、bounded dual output、durable intent/result、unknown 不重放 | `feat: add raw exec and durable operations` |
 
 M7 hard gate：目标进程树取消、pipe backpressure、shell dialect、filesystem identity/fault injection 通过；无法证明停止时只能报告 unknown。

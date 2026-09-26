@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-09-26
 File: fs.lua
 Description: Validates and exposes narrow filesystem native primitives.
 ]]
@@ -662,6 +662,27 @@ function M.new(native, options)
         return true, { bytes = value.bytes, eof = value.eof }
     end
 
+    ---Moves a read handle to an absolute byte offset when the native port supports it.
+    --@param handle any Opaque native read handle.
+    --@param offset integer Non-negative absolute byte offset.
+    --@return boolean ok Whether the handle now reads from offset.
+    --@return any position_or_err New absolute position or structured error.
+    --@effect Changes only the position of the caller-owned handle.
+    function service.stream_seek(handle, offset)
+        if type(native.fs_seek) ~= "function" then
+            return false, failure("Unsupported", "native filesystem cannot seek")
+        end
+        if not valid_integer(offset, 0) then
+            return false, failure("Limit", "seek offset must be a non-negative integer")
+        end
+        local ok, value = invoke(native, "fs_seek", handle, offset)
+        if not ok then return false, value end
+        if value ~= offset then
+            return false, failure("NativeContract", "native filesystem reported a different position")
+        end
+        return true, value
+    end
+
     ---Writes one bounded binary chunk completely or returns an error.
     --@param handle any Opaque native write handle.
     --@param bytes string Exact bytes to write.
@@ -1209,6 +1230,7 @@ function M.new(native, options)
         maximum_chunk_bytes = maximum_chunk_bytes,
         maximum_lease_bytes = maximum_lease_bytes,
         directory_create_candidate = type(native.fs_make_directory) == "function",
+        seek_candidate = type(native.fs_seek) == "function",
         verified_direct_candidate = direct_available,
         maximum_direct_entries = maximum_direct_entries,
     }, "filesystem capabilities")

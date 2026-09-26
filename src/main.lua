@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-09-26
 File: main.lua
 Description: Routes the offline bootstrap lifecycle from the unique composition root.
 ]]
@@ -2362,6 +2362,7 @@ local function tool_options(composed, generation, workspace_path)
         maximum_number_bytes = 64,
         maximum_exec_output_bytes = output_limit,
         maximum_exec_deadline_ms = deadline,
+        maximum_scan_bytes = 256 * 1024 * 1024,
         platform_kind = composed.identity.os == "windows" and "windows" or "posix",
         workspace_path = workspace_path,
         -- Use the running inner payload: XP/Win7 cannot nest the outer
@@ -2482,6 +2483,7 @@ local function build_turn_ports(composed, shared, turn)
         authorization = authorization,
         processes = composed.backend.processes,
         operations = shared.operations,
+        text_codec = composed.backend.text or false,
     }, admitted_tool_options)
     if not tool_service then return nil, tool_error end
     if tool_service.registry_digest ~= turn.tool_registry_snapshot then
@@ -3936,7 +3938,12 @@ local function build_context_services(native, filesystem, data_root, platform_ki
     if not path_service then return nil, path_error end
     local prompt_service, prompt_error = prompt.new({
         digest = safety_service.digest,
-        environment = layout and tools.describe_environment(filesystem, layout, platform_kind) or nil,
+        environment = layout and tools.describe_environment(
+            filesystem,
+            layout,
+            platform_kind,
+            require("textcodec").new(native, platform_kind)
+        ) or nil,
     }, {
         maximum_component_bytes = 32768,
         maximum_quoted_bytes = 16384,

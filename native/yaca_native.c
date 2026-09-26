@@ -1,8 +1,8 @@
 /*
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-09-26
 File: yaca_native.c
-Description: Portable narrow native ports for filesystem, process, terminal, system identity, clocks, and SHA-256.
+Description: Portable narrow native ports for filesystem, process, terminal, system identity, clocks, text code pages, and SHA-256.
 */
 
 #if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
@@ -1962,6 +1962,53 @@ static int l_fs_read(lua_State *L)
   lua_pushboolean(L, received == 0);
   lua_setfield(L, -2, "eof");
   free(buffer);
+  return return_success(L);
+}
+
+/*
+** Lua:
+**   ok, position_or_error = module.fs_seek(handle, offset)
+*/
+/* Moves an open read handle to an absolute byte offset for bounded range reads.
+ * @param L lua_State* Lua state receiving arguments and result values.
+ * @return int result true and the new absolute position, or false and a typed error.
+ * @effect Changes only the position of the caller-owned handle.
+ */
+static int l_fs_seek(lua_State *L)
+{
+  yaca_file *file;
+  lua_Integer offset;
+
+  file = check_file(L, 1);
+  offset = luaL_checkinteger(L, 2);
+  if (offset < 0)
+  {
+    return push_failure(L, "Limit", "filesystem seek offset is invalid");
+  }
+#if defined(_WIN32)
+  {
+    LARGE_INTEGER requested;
+    LARGE_INTEGER position;
+
+    requested.QuadPart = (LONGLONG)offset;
+    if (!SetFilePointerEx(file->handle, requested, &position, FILE_BEGIN))
+    {
+      return push_windows_failure(L, GetLastError(), "filesystem seek failed");
+    }
+    lua_pushinteger(L, (lua_Integer)position.QuadPart);
+  }
+#else
+  {
+    off_t position;
+
+    position = lseek(file->descriptor, (off_t)offset, SEEK_SET);
+    if (position == (off_t)-1)
+    {
+      return push_failure(L, errno_code(errno), "filesystem seek failed");
+    }
+    lua_pushinteger(L, (lua_Integer)position);
+  }
+#endif
   return return_success(L);
 }
 
@@ -11943,6 +11990,8 @@ static int l_sha256_close(lua_State *L)
   return 1;
 }
 
+#include "yaca_text.h"
+
 /* Implements the Lua abi version native port.
  * @param L lua_State* Lua state receiving arguments and result values.
  * @return int result Number of Lua results pushed for success or typed failure.
@@ -12114,6 +12163,8 @@ static int l_utc_now(lua_State *L)
 static const luaL_Reg yaca_native_functions[] = {
   { "abi_version", l_abi_version },
   { "platform_identity", l_platform_identity },
+  { "text_facts", l_text_facts },
+  { "text_convert", l_text_convert },
   { "executable_paths", l_executable_paths },
   { "stdio_facts", l_stdio_facts },
   { "console_write", l_console_write },
@@ -12132,6 +12183,7 @@ static const luaL_Reg yaca_native_functions[] = {
   { "fs_create_new", l_fs_create_new },
   { "fs_stat_identity", l_fs_stat_identity },
   { "fs_read", l_fs_read },
+  { "fs_seek", l_fs_seek },
   { "fs_write", l_fs_write },
   { "fs_flush_file", l_fs_flush_file },
   { "fs_flush_directory", l_fs_flush_directory },

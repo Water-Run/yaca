@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-09-26
 File: manifest.lua
 Description: Declares the versioned runtime and release assembly manifest.
 ]]
@@ -26,7 +26,7 @@ return {
         "backend_linux", "backend_windows", "cli", "clock", "compact", "config",
         "context", "diagnostics", "fs", "index", "ini", "json", "main", "model",
         "network", "path", "permission", "platform", "process", "prompt", "runtime",
-        "safety", "session", "terminal", "text", "tools", "tui", "xml",
+        "safety", "session", "terminal", "text", "textcodec", "tools", "tui", "xml",
     },
     native_modules = { "yaca_native", "lxp" },
     native_module_filenames = {

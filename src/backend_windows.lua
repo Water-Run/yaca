@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-08-30
+Date: 2026-09-26
 File: backend_windows.lua
 Description: Composes Win32 and Win64 narrow native services.
 ]]
@@ -8,6 +8,7 @@ Description: Composes Win32 and Win64 narrow native services.
 local fs = require("fs")
 local process = require("process")
 local terminal = require("terminal")
+local textcodec = require("textcodec")
 
 local M = {}
 
@@ -199,6 +200,7 @@ function M.new(native, identity, options)
         clock_port = clock_port,
         system = system_port,
         new_terminal = new_terminal,
+        text = textcodec.new(native, "windows"),
         qualification = "pending-target-evidence",
     }, "Windows backend")
 end

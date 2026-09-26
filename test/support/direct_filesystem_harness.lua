@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-09-26
 File: direct_filesystem_harness.lua
 Description: Supplies a no-follow identity-aware direct filesystem test port.
 ]]
@@ -254,6 +254,20 @@ function M.new(initial)
         local bytes = handle.node.bytes:sub(handle.offset, handle.offset + maximum - 1)
         handle.offset = handle.offset + #bytes
         return true, { bytes = bytes, eof = handle.offset > #handle.node.bytes }
+    end
+
+    --Simulates fs seek in this test fixture by moving a read handle to an absolute offset.
+    --@param handle table|integer Fake resource handle whose state is inspected.
+    --@param offset integer Zero-based absolute byte offset.
+    --@return boolean accepted Whether fs seek succeeds in the fixture.
+    --@return integer|table secondary2 New position or structured error from the fixture operation.
+    function native.fs_seek(handle, offset)
+        if type(handle) ~= "table" or handle.closed or handle.mode ~= "read" then
+            return false, failure("InvalidHandle")
+        end
+        controls.seeks = (controls.seeks or 0) + 1
+        handle.offset = offset + 1
+        return true, offset
     end
 
     --Simulates fs write in this test fixture.
