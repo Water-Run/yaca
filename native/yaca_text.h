@@ -23,6 +23,7 @@ Description: Legacy text code page facts and strict or lossy conversion between 
 /* @struct text_resources Owns native conversion resources across one protected Lua call.
  * @field wide void* Windows UTF-16 allocation, or NULL when not acquired.
  * @field bytes void* Windows encoded/output allocation, or NULL when not acquired.
+ * @field allocation_failed int Windows buffer allocation failure recorded until the outer result is returned.
  * @field converter iconv_t POSIX conversion descriptor, or (iconv_t)-1 when closed.
  * @ownership Lives in the outer C frame; cleanup runs directly after lua_pcall, including allocation failures.
  */
@@ -30,6 +31,7 @@ typedef struct text_resources {
 #if defined(_WIN32)
   void *wide;
   void *bytes;
+  int allocation_failed;
 #else
   iconv_t converter;
 #endif
@@ -58,15 +60,35 @@ static void text_release_resources(text_resources *owned)
 
 #if defined(_WIN32)
 
+/* Allocates a Windows conversion buffer while preserving allocation failure separately from encoding errors.
+ * @param owned text_resources* Outer owner retaining the allocation failure flag.
+ * @param size size_t Positive allocation size already bounded by the input and conversion API.
+ * @return void* New allocation, or NULL after any allocation failure in this call.
+ * @effect Sets allocation_failed when malloc fails; subsequent requests fail without retrying.
+ * @ownership The caller records the returned buffer in an owner slot or frees it before calling Lua.
+ */
+static void *text_allocate(text_resources *owned, size_t size)
+{
+  void *buffer;
+  if (owned->allocation_failed) return NULL;
+  buffer = malloc(size);
+  if (buffer == NULL) owned->allocation_failed = 1;
+  return buffer;
+}
+
 /* Decodes code page bytes into an allocated UTF-16 buffer.
+ * @param owned text_resources* Outer owner retaining allocation failures separately from invalid input.
  * @param codepage UINT Windows code page identifier.
  * @param bytes const_char* Input bytes in the selected code page.
  * @param length size_t Number of input bytes; must be positive.
  * @param flags DWORD MultiByteToWideChar flags.
  * @param count int* Receives the number of UTF-16 units on success.
  * @return WCHAR*|NULL result New buffer that the caller frees, or NULL when conversion fails.
+ * @effect May set owned->allocation_failed; no Lua API is called while the allocation is unowned.
+ * @ownership Transfers a successful buffer to the caller, otherwise frees it before returning.
  */
 static WCHAR *text_codepage_to_wide(
+  text_resources *owned,
   UINT codepage,
   const char *bytes,
   size_t length,
@@ -86,7 +108,7 @@ static WCHAR *text_codepage_to_wide(
   {
     return NULL;
   }
-  wide = (WCHAR *)malloc((size_t)required * sizeof(WCHAR));
+  wide = (WCHAR *)text_allocate(owned, (size_t)required * sizeof(WCHAR));
   if (wide == NULL)
   {
     return NULL;
@@ -101,6 +123,7 @@ static WCHAR *text_codepage_to_wide(
 }
 
 /* Encodes UTF-16 units into an allocated code page byte buffer.
+ * @param owned text_resources* Outer owner retaining allocation failures separately from unmappable input.
  * @param codepage UINT Windows code page identifier.
  * @param wide const_WCHAR* UTF-16 input units.
  * @param count int Number of input units; must be positive.
@@ -108,8 +131,11 @@ static WCHAR *text_codepage_to_wide(
  * @param used_default BOOL* Receives whether the default character replaced input; may be NULL when strict is zero.
  * @param length int* Receives the number of output bytes on success.
  * @return char*|NULL result New buffer that the caller frees, or NULL when conversion fails.
+ * @effect May set owned->allocation_failed; no Lua API is called while the allocation is unowned.
+ * @ownership Transfers a successful buffer to the caller, otherwise frees it before returning.
  */
 static char *text_wide_to_codepage(
+  text_resources *owned,
   UINT codepage,
   const WCHAR *wide,
   int count,
@@ -132,7 +158,7 @@ static char *text_wide_to_codepage(
   {
     return NULL;
   }
-  bytes = (char *)malloc((size_t)required);
+  bytes = (char *)text_allocate(owned, (size_t)required);
   if (bytes == NULL)
   {
     return NULL;
@@ -153,7 +179,7 @@ static char *text_wide_to_codepage(
  * @param wide const_WCHAR* UTF-16 units to convert.
  * @param count int Number of units; zero pushes an empty string.
  * @return int success One when the string was pushed, zero when conversion failed.
- * @effect Pushes one string onto the Lua stack only on success.
+ * @effect Pushes one string onto the Lua stack only on success; records native allocation failure in owned.
  * @error Lua allocation failure unwinds to the protected outer call, which retains every native buffer.
  * @ownership The outer call releases the UTF-8 allocation after protected execution ends.
  */
@@ -172,7 +198,7 @@ static int text_push_wide_utf8(lua_State *L, text_resources *owned, const WCHAR 
   {
     return 0;
   }
-  owned->bytes = utf8 = (char *)malloc((size_t)required);
+  owned->bytes = utf8 = (char *)text_allocate(owned, (size_t)required);
   if (utf8 == NULL)
   {
     return 0;
@@ -231,15 +257,15 @@ static int text_decode_windows(
   int again_length;
   int exact;
 
-  owned->wide = wide = text_codepage_to_wide(codepage, bytes, length, MB_ERR_INVALID_CHARS, &count);
+  owned->wide = wide = text_codepage_to_wide(owned, codepage, bytes, length, MB_ERR_INVALID_CHARS, &count);
   exact = wide != NULL;
   if (wide == NULL)
   {
-    if (!lossy)
+    if (!lossy || owned->allocation_failed)
     {
       return push_failure(L, "InvalidEncoding", "bytes are not valid in the selected code page");
     }
-    owned->wide = wide = text_codepage_to_wide(codepage, bytes, length, 0, &count);
+    owned->wide = wide = text_codepage_to_wide(owned, codepage, bytes, length, 0, &count);
     if (wide == NULL)
     {
       return push_failure(L, "InvalidEncoding", "code page conversion failed");
@@ -249,12 +275,12 @@ static int text_decode_windows(
   {
     /* Some code pages accept undefined bytes silently. Only an exact
     ** re-encoding proves the decoded text represents the original bytes. */
-    again = text_wide_to_codepage(codepage, wide, count, 0, NULL, &again_length);
+    again = text_wide_to_codepage(owned, codepage, wide, count, 0, NULL, &again_length);
     exact = again != NULL
       && (size_t)again_length == length
       && memcmp(again, bytes, length) == 0;
     free(again);
-    if (!exact && !lossy)
+    if (!exact && (!lossy || owned->allocation_failed))
     {
       return push_failure(L, "InvalidEncoding", "code page decoding does not round-trip");
     }
@@ -275,7 +301,7 @@ static int text_decode_windows(
  * @param codepage UINT Validated Windows code page.
  * @param bytes const_char* Strict UTF-8 input.
  * @param length size_t Positive input length.
- * @return int result true and the encoded bytes, or false and a typed error.
+ * @return int result Three results (true, encoded bytes, true), or two results (false, typed error).
  * @effect Records native buffers in the outer owner's fields for cleanup after protected execution.
  * @error Lua allocation failure propagates through the protected caller after resource cleanup.
  */
@@ -290,7 +316,7 @@ static int text_encode_windows(lua_State *L, text_resources *owned, UINT codepag
   BOOL used_default;
   int exact;
 
-  owned->wide = wide = text_codepage_to_wide(CP_UTF8, bytes, length, MB_ERR_INVALID_CHARS, &count);
+  owned->wide = wide = text_codepage_to_wide(owned, CP_UTF8, bytes, length, MB_ERR_INVALID_CHARS, &count);
   if (wide == NULL)
   {
     return push_failure(L, "InvalidEncoding", "text is not strict UTF-8");
@@ -300,17 +326,18 @@ static int text_encode_windows(lua_State *L, text_resources *owned, UINT codepag
     /* GB18030 rejects WC_NO_BEST_FIT_CHARS and the default-character probe;
     ** it maps all Unicode scalars, and the round trip below stays mandatory. */
     used_default = FALSE;
-    owned->bytes = encoded = text_wide_to_codepage(codepage, wide, count, 0, NULL, &encoded_length);
+    owned->bytes = encoded = text_wide_to_codepage(owned, codepage, wide, count, 0, NULL, &encoded_length);
   }
   else
   {
-    owned->bytes = encoded = text_wide_to_codepage(codepage, wide, count, 1, &used_default, &encoded_length);
+    owned->bytes = encoded = text_wide_to_codepage(owned, codepage, wide, count, 1, &used_default, &encoded_length);
   }
   if (encoded == NULL || used_default)
   {
     return push_failure(L, "EncodingLossy", "text contains characters the code page cannot represent");
   }
   again = text_codepage_to_wide(
+    owned,
     codepage,
     encoded,
     (size_t)encoded_length,
@@ -326,7 +353,8 @@ static int text_encode_windows(lua_State *L, text_resources *owned, UINT codepag
   }
   lua_pushboolean(L, 1);
   lua_pushlstring(L, encoded, (size_t)encoded_length);
-  return 2;
+  lua_pushboolean(L, 1);
+  return 3;
 }
 
 #else
@@ -574,15 +602,7 @@ static int text_convert_protected(lua_State *L)
     {
       return text_decode_windows(L, owned, (UINT)codepage, bytes, length, lossy);
     }
-    {
-      int result = text_encode_windows(L, owned, (UINT)codepage, bytes, length);
-      if (result == 2)
-      {
-        lua_pushboolean(L, 1);
-        return 3;
-      }
-      return result;
-    }
+    return text_encode_windows(L, owned, (UINT)codepage, bytes, length);
   }
 #else
   {
@@ -598,7 +618,7 @@ static int text_convert_protected(lua_State *L)
 
 /* Runs conversion behind a Lua error barrier and releases resources without relying on a Lua cleanup callback.
  * @param L lua_State* State receiving the public direction, target, bytes and optional lossy arguments.
- * @return int Number of conversion results, preserving the true/output/exact or false/error convention.
+ * @return int Number of conversion results, preserving true/output/exact or false/error; native allocation failure is OutOfMemory.
  * @effect Executes one protected conversion and unconditionally releases its native allocations/descriptors.
  * @error Re-raises the original Lua argument or memory error only after native cleanup has completed.
  * @ownership The stack-local owner remains alive across lua_pcall; the protected function cannot yield.
@@ -611,6 +631,7 @@ static int l_text_convert(lua_State *L)
 #if defined(_WIN32)
   owned.wide = NULL;
   owned.bytes = NULL;
+  owned.allocation_failed = 0;
 #else
   owned.converter = (iconv_t)-1;
 #endif
@@ -620,6 +641,13 @@ static int l_text_convert(lua_State *L)
   status = lua_pcall(L, arguments, LUA_MULTRET, 0);
   text_release_resources(&owned);
   if (status != LUA_OK) return lua_error(L);
+#if defined(_WIN32)
+  if (owned.allocation_failed)
+  {
+    lua_settop(L, 0);
+    return push_failure(L, "OutOfMemory", "text conversion buffer allocation failed");
+  }
+#endif
   return lua_gettop(L);
 }
 

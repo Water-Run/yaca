@@ -1,8 +1,8 @@
 # 当前状态
 
-更新日期：2026-09-28。当前源码基线为 `18adc05`，包含
-[R23--R36](CODE-REVIEW-2026-09-28.md) 的修复。
-既有开发内容均已提交；本次整理仅更新文档，提交脉络见[开发历程](DEVELOPMENT-HISTORY.md)。
+更新日期：2026-09-28。接续已整理的 `8c21dd4`，完成
+[R37--R38](CODE-REVIEW-2026-09-28.md#r37--r38-windows-原生分配与错误返回)
+原生内存错误分类和编码返回值修复。提交脉络见[开发历程](DEVELOPMENT-HISTORY.md)。
 
 **核心已实现，目标资格验证待完成。** 机读阶段为 `implemented-unqualified`，
 Release Gate R 为 `closed`，`release_authorized=false`。
@@ -27,26 +27,26 @@ Release Gate R 为 `closed`，`release_authorized=false`。
 当前 API 的 `partial_start` 标明尾部片段，`truncated_lines` 标明搜索遗漏的长行内容。
 分页保留预算内的内容与续页信息，读取失败和文件版本变化返回明确错误。
 原生转换器在 Lua 内存错误后释放已持有的缓冲和转换句柄；Windows 原生 malloc
-失败的错误分类仍待复核，不把这两类分配失败混为一项已完成验收。
+失败返回 OutOfMemory，错误结果为 false/error，成功才返回 exact 标志。
 
 ## 最新基线复核
 
 开发机为 Fedora 44 / x86_64，内核 `7.2.7-200.fc44.x86_64`。
-完整测试在资源守卫下串行运行。原生审查及对应回归日志保存在
-`out/native-codec-review-20260928/`；此前日志保留在
+完整测试在资源守卫下串行运行。最新原生审查及回归日志保存在
+`out/codec-errors-20260928/`；此前日志保留在 `out/native-codec-review-20260928/`、
 `out/range-stability-20260928/`、`out/page-review-20260928/`、
 `out/f4-review-20260928/` 与 `out/development-reset-20260928/`。
 这些是开发机复核记录，不是发行目标资格。
 
-资料整理后，在相同源码上重跑完整 suite 和 coding readiness，均退出 0；
-计数与下表一致，日志为 `out/handoff-baseline-20260928/full.log`、`readiness.log`。
-改动文档的 91 个本地文件链接均存在。此次未重跑原生故障探针或目标机资格。
+资料整理的独立复核在 `out/handoff-baseline-20260928/`，当次源码为 `18adc05`。
+后续原生修复重新构建并执行探针和 readiness；本批没有推进目标机资格。
 
 | 检查 | 2026-09-28 结果 |
 | --- | --- |
 | 完整 Lua suite | 663/663 通过；本批原生故障探针独立计数 |
-| 全仓注释结构 | 208 个文件、5098 个声明、0 缺项；tree-sitter 0.25.2 |
-| 原生分配失败与恢复 | Linux 编码/解码各 18 个位置，Wine Win32/Win64 各 4 个位置；全部通过，无原生资源遗留或重复释放 |
+| 全仓注释结构 | 208 个文件、5101 个声明、0 缺项；tree-sitter 0.25.2 |
+| Lua 分配失败与恢复 | Linux 编码/解码各 18 个位置，Wine Win32/Win64 各 4 个位置；全部通过，无原生资源遗留或重复释放 |
+| Windows 原生分配失败与恢复 | Wine Win32/Win64 各九个位置，覆盖严格/有损解码及编码；返回 OutOfMemory、清理与同状态恢复通过 |
 | 原生构建与编码 smoke | Linux/Win32/Win64 完整 native 构建通过；Linux 12 组、Wine 两架构各 11 组，cp54936 不可用单列 |
 | TP-003 / TP-010 | 重跑通过；453 / 5,564,743 条断言 |
 | 注释检查器反例 | 14/14 通过 |
@@ -83,7 +83,7 @@ seek 仍待真实旧目标复验；两者均不能沿用旧包的目标资格。
 
 ## 尚未完成
 
-- 全仓人工语义 Review；接续 R23--R36 审查 Windows 分配错误分类、有损路径、Lua 层不可用代码页传播和编码别名。
+- 全仓人工语义 Review；接续 R23--R38 审查 Windows 有损路径、Lua 层不可用代码页传播和编码别名。
 - 当前源码的三目标完整构建、目标回归、网络故障、恢复与容量矩阵。
 - A08/A09 的 GiB 级日志、增长/轮转、旧代码页及真实模型读取旅程。
 - 工具来源、许可证、依赖闭包及三目标 clean/std/full 共九包验收（C32--C34）。

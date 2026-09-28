@@ -2,7 +2,7 @@
 Author: WaterRun
 Date: 2026-09-28
 File: text_codec_faults.c
-Description: Injects Lua allocation failures into the production text converter and checks native resource ownership.
+Description: Injects Lua and Windows buffer allocation failures into the production text converter and checks errors, cleanup and recovery.
 */
 
 #include <errno.h>
@@ -20,7 +20,7 @@ Description: Injects Lua allocation failures into the production text converter 
 #endif
 
 /* @struct fault_allocator Tracks allocation attempts made inside one protected conversion.
- * @field calls size_t Growing allocations observed since arming.
+ * @field calls size_t Growing Lua allocations or native buffer requests observed since arming.
  * @field fail_at size_t First allocation attempt to reject, including emergency-GC retries.
  * @field armed int Nonzero only while the protected conversion is running.
  */
@@ -79,14 +79,27 @@ static int observe_release(void *pointer)
 }
 
 #if defined(_WIN32)
-/* Records malloc buffers allocated by the production Windows conversion code.
+static fault_allocator native_allocator = { 0U, SIZE_MAX, 0 };
+
+/* Records Windows conversion buffers and rejects requests at the armed native failure threshold.
  * @param size size_t Requested buffer bytes.
- * @return void* Allocated buffer or NULL from the system allocator.
+ * @return void* Allocated buffer, or NULL on injected/system allocation failure.
+ * @effect Counts armed requests and sets errno to ENOMEM for injected failure.
  * @ownership Transfers allocation ownership to the converter; tracked_free observes its release.
  */
 static void *tracked_malloc(size_t size)
 {
-  void *pointer = malloc(size);
+  void *pointer;
+  if (native_allocator.armed)
+  {
+    ++native_allocator.calls;
+    if (native_allocator.calls >= native_allocator.fail_at)
+    {
+      errno = ENOMEM;
+      return NULL;
+    }
+  }
+  pointer = malloc(size);
   if (pointer != NULL) observe_acquire(pointer);
   return pointer;
 }
@@ -298,9 +311,116 @@ static size_t check_conversion(
   return calls;
 }
 
-/* Runs ordinary, unavailable-empty-input and every observed Lua allocation-failure position.
+#if defined(_WIN32)
+/* Verifies native allocation error classification, immediate cleanup and reuse after removing the fault.
+ * @param direction const_char* Either decode or encode; both use representable CP1252 text.
+ * @param lossy int Whether decode may replace invalid bytes; allocation failure must still reject the call.
+ * @param fail_at size_t Native malloc failure threshold; SIZE_MAX observes the ordinary call.
+ * @return size_t Number of native allocation attempts while the fault was armed.
+ * @effect Creates/closes one Lua state, arms the native allocator and reports failures to stderr.
+ * @error Aborts if initial unarmed Lua memory cannot be allocated.
+ */
+static size_t check_native_allocation(const char *direction, int lossy, size_t fail_at)
+{
+  lua_State *L = luaL_newstate();
+  int status;
+  int decode = strcmp(direction, "decode") == 0;
+  size_t calls;
+  size_t index;
+  const char *code = NULL;
+  if (L == NULL || !lua_checkstack(L, 32)) abort();
+  lua_pushcfunction(L, l_text_convert);
+  lua_pushstring(L, direction);
+  lua_pushinteger(L, 1252);
+  lua_pushstring(L, decode ? "\xE9" : "\xC3\xA9");
+  lua_pushboolean(L, lossy);
+  native_allocator.calls = 0U;
+  native_allocator.fail_at = fail_at;
+  native_allocator.armed = 1;
+  status = lua_pcall(L, 4, LUA_MULTRET, 0);
+  native_allocator.armed = 0;
+  calls = native_allocator.calls;
+  if (calls >= fail_at)
+  {
+    int results = lua_gettop(L);
+    if (lua_istable(L, 2))
+    {
+      lua_getfield(L, 2, "code");
+      code = lua_tostring(L, -1);
+    }
+    if (status != LUA_OK || results != 2 || lua_toboolean(L, 1)
+        || code == NULL || strcmp(code, "OutOfMemory") != 0 || live_resources != 0U)
+    {
+      fprintf(stderr, "native=%s lossy=%d fail_at=%zu status=%d results=%d code=%s live=%zu\n",
+        direction, lossy, fail_at, status, results, code == NULL ? "missing" : code, live_resources);
+      ++failures;
+    }
+  }
+  else if (status != LUA_OK || lua_gettop(L) != 3 || !lua_toboolean(L, 1)
+      || !lua_toboolean(L, 3) || live_resources != 0U)
+  {
+    ++failures;
+  }
+  lua_settop(L, 0);
+  lua_pushcfunction(L, l_text_convert);
+  lua_pushliteral(L, "decode");
+  lua_pushinteger(L, 1252);
+  lua_pushliteral(L, "\xE9");
+  lua_pushboolean(L, 0);
+  status = lua_pcall(L, 4, LUA_MULTRET, 0);
+  if (status != LUA_OK || lua_gettop(L) != 3 || !lua_toboolean(L, 1)
+      || !lua_isstring(L, 2) || strcmp(lua_tostring(L, 2), "\xC3\xA9") != 0
+      || !lua_toboolean(L, 3) || live_resources != 0U)
+  {
+    fprintf(stderr, "native-recovery=%s lossy=%d fail_at=%zu failed\n", direction, lossy, fail_at);
+    ++failures;
+  }
+  lua_close(L);
+  for (index = 0U; index < 32U; ++index)
+    if (resources[index] != NULL) tracked_free(resources[index]);
+  return calls;
+}
+
+/* Checks that ordinary Windows encoding rejection returns exactly false and a typed error.
+ * @param input const_char* NUL-terminated UTF-8 or deliberately invalid UTF-8 fixture.
+ * @param expected const_char* Required error code for the fixture.
+ * @return void No value; increments failures when status, arity, code or cleanup differs.
+ * @effect Creates/closes a Lua state and invokes the production CP1252 encoder without injected failures.
+ * @error Aborts if the initial Lua state or stack cannot be allocated.
+ */
+static void check_encoding_rejection(const char *input, const char *expected)
+{
+  lua_State *L = luaL_newstate();
+  int status;
+  int results;
+  const char *code = NULL;
+  if (L == NULL || !lua_checkstack(L, 32)) abort();
+  lua_pushcfunction(L, l_text_convert);
+  lua_pushliteral(L, "encode");
+  lua_pushinteger(L, 1252);
+  lua_pushstring(L, input);
+  lua_pushboolean(L, 0);
+  status = lua_pcall(L, 4, LUA_MULTRET, 0);
+  results = lua_gettop(L);
+  if (lua_istable(L, 2))
+  {
+    lua_getfield(L, 2, "code");
+    code = lua_tostring(L, -1);
+  }
+  if (status != LUA_OK || results != 2 || lua_toboolean(L, 1)
+      || code == NULL || strcmp(code, expected) != 0 || live_resources != 0U)
+  {
+    fprintf(stderr, "encoding-rejection expected=%s results=%d code=%s live=%zu\n",
+      expected, results, code == NULL ? "missing" : code, live_resources);
+    ++failures;
+  }
+  lua_close(L);
+}
+#endif
+
+/* Runs ordinary, unavailable-empty-input and every observed Lua/native allocation-failure position.
  * @param none No command-line arguments are consumed.
- * @return int Zero only when both conversion directions clean up every owned resource and reject unavailable charsets.
+ * @return int Zero only when conversion, error classification, result arity, resource cleanup and recovery checks all pass.
  * @effect Prints proof counters and failure details; allocates only temporary probe states and buffers.
  * @error Aborts if an initial unarmed Lua state or observation capacity cannot be provided.
  */
@@ -327,6 +447,23 @@ int main(void)
   check_conversion("encode", "", 0U, SIZE_MAX, 1);
   check_conversion("decode", "", 0U, SIZE_MAX, 0);
   check_conversion("encode", "", 0U, SIZE_MAX, 0);
+#if defined(_WIN32)
+  {
+    size_t native_decode = check_native_allocation("decode", 0, SIZE_MAX);
+    size_t native_lossy = check_native_allocation("decode", 1, SIZE_MAX);
+    size_t native_encode = check_native_allocation("encode", 0, SIZE_MAX);
+    for (index = 1U; index <= native_decode + 1U; ++index)
+      check_native_allocation("decode", 0, index);
+    for (index = 1U; index <= native_lossy + 1U; ++index)
+      check_native_allocation("decode", 1, index);
+    for (index = 1U; index <= native_encode + 1U; ++index)
+      check_native_allocation("encode", 0, index);
+    printf("native-allocation-sites decode=%zu lossy=%zu encode=%zu\n",
+      native_decode, native_lossy, native_encode);
+    check_encoding_rejection("\xFF", "InvalidEncoding");
+    check_encoding_rejection("\xE4\xB8\xAD", "EncodingLossy");
+  }
+#endif
   printf("text-codec-faults decode_sites=%zu encode_sites=%zu failures=%zu ownership_errors=%zu\n",
     decode_calls, encode_calls, failures, ownership_errors);
   return failures == 0U && ownership_errors == 0U ? 0 : 1;

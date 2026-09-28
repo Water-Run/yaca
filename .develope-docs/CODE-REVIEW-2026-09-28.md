@@ -23,6 +23,8 @@ R29 已提交为 `f3a69f2`，R30--R33 已提交为 `d2bc3a9`；R34--R36 已提�
 | R34 | Windows malloc 缓冲和 POSIX iconv 描述符跨越可抛出内存错误的 Lua API；异常跳转绕过 free/iconv_close | 外层 C 调用持有资源，受保护转换返回后直接清理，再传播原错误。Linux 原实现复现 24 个未释放位置；修复后 Linux 和两个 Windows 架构的全部观测分配位置均通过，错误后同一 Lua 状态可继续转换 |
 | R35 | POSIX 空输入绕过 iconv_open，未安装的代码页也返回成功；与非空输入和 Windows 的可用性语义不一致 | 空输入同样检查转换器。编码、解码的不可用空输入原先都错误接受，修复后均返回 EncodingUnavailable；有效代码页的空输入仍成功 |
 | R36 | iconv 失败后先调用 Lua 缓冲 API，再读取 errno；后续分配可能覆盖真实 E2BIG/EILSEQ/EINVAL | iconv 返回后立即保存 errno，再追加 Lua 缓冲。分配器在成功分配后改写 errno 的反例使合法 CP1252 编码和解码失败，修复后输出逐字节相符 |
+| R37 | Windows 原生 malloc 失败被误报为 InvalidEncoding 或 EncodingLossy；有损路径可能继续尝试转换 | 外层资源记录保留分配失败，后续原生分配不再重试；先释放已有资源，再统一返回 OutOfMemory。严格解码、有损解码、编码各三个分配位置均先复现错误，修正后两种 Windows 架构通过 |
+| R38 | Windows 编码器成功和失败均返回两个值，调用者一律追加 exact=true，导致错误结果变成 false/error/true | 编码器直接返回成功三值或失败两值，外层不再按值数量猜测成功；非法 UTF-8、不可映射文字和原生内存不足均验证错误码与返回数量 |
 
 `read`/`search` 的模型可见工具说明已同步续页、尾部片段及搜索不完整的含义。
 没有新增配置项或运行依赖。
@@ -129,9 +131,32 @@ Windows XP 在未使用 MB_ERR_INVALID_CHARS 时可能丢弃非法序列，仍�
 依据 [Microsoft MultiByteToWideChar 文档](https://learn.microsoft.com/en-us/windows/win32/api/stringapiset/nf-stringapiset-multibytetowidechar)，
 不能从现代 Windows 或 Wine 的行为推出 XP 的替换语义。
 
+## R37--R38 Windows 原生分配与错误返回
+
+接续 `8c21dd4`，修改涉及 `native/yaca_text.h` 与原生故障探针。
+`out/codec-errors-20260928/malloc-before.log` 保留九个分配位置的原始错误分类；
+其中三个编码错误还带有多余的第三个返回值。
+
+- `text_resources` 单独记录原生分配失败，避免依赖 errno 或 Windows last-error。
+  UTF-16、目标代码页和 UTF-8 输出的分配均经同一窄函数；失败后不重试原生分配。
+- 外层受保护调用结束后先清理，再生成 OutOfMemory；Lua 自身的异常仍保留原异常传播。
+  编码成功直接返回 true/bytes/true，失败只返回 false/error。
+- Windows 探针覆盖严格解码、有损解码、编码各三个 malloc 位置及超出最后位置的正常调用，
+  每次随后在同一 Lua 状态重新转换；无资源遗留或重复释放。
+  非故障注入的非法 UTF-8、不可映射文字另外验证两值错误返回。
+- 人工核对本批所有新增/修改函数与结构体的参数、返回值、失败标志和缓冲所有权注释。
+  这不代表全仓语义 Review 已完成。
+
+Linux、Win32、Win64 完整 native 构建通过。Linux 探针仍覆盖 Lua 分配各 18 个位置，
+Wine 两种架构各 4 个位置；Windows 的九个原生 malloc 位置均通过。
+编码 smoke 为 Linux 12 组、Wine 两架构各 11 组；后者 cp54936 不可用单列。
+完整 readiness 通过，注释结构 208 文件、5101 声明、0 缺项。
+日志为 `out/codec-errors-20260928/` 的 `*-faults.log`、`*-codec.log`、`native-*-build.log`
+及 `readiness.log`。XP/Win7 目标资格以及 Lua 层错误传播仍待完成。
+
 ## 继续审查与目标验证
 
-1. Windows 原生分配失败的错误分类、旧系统的有损替换、转换器不可用时 Lua 层的错误传播与编码别名；不能以 Wine 替代旧目标。
+1. 旧系统的有损替换、转换器不可用时 Lua 层的错误传播与编码别名；不能以 Wine 替代旧目标。
 2. 重建三目标产物，把本批修正与 R21/R22 一同用于 XP/Win7/CentOS 7 以及指定 Server 2008 的实测。
 3. A08/A09 的真实 GiB 级文件、中文命令、编码写回与模型续页旅程。现有小规模注入用例不能替代这些目标证据。
 
