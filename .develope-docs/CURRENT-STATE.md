@@ -1,8 +1,8 @@
 # 当前状态
 
 更新日期：2026-09-28。产品基线 `32d053e`，资料整理节点 `9aed60f`；
-`9724797` 完成 R23--R28，`f3a69f2` 完成 R29；本轮修正
-[R30--R33 范围读取的错误与版本检查](CODE-REVIEW-2026-09-28.md#r30--r33-验证与人工-review)。
+`d2bc3a9` 已完成 R23--R33；本轮修正
+[R34--R36 原生转换资源和错误处理](CODE-REVIEW-2026-09-28.md#r34--r36-原生复核)。
 
 **核心已实现，目标资格验证待完成。** 机读阶段为 `implemented-unqualified`，
 Release Gate R 为 `closed`，`release_authorized=false`。
@@ -18,7 +18,7 @@ Release Gate R 为 `closed`，`release_authorized=false`。
 | 工具面 | 原八个工具加正式 `lua` 工具；与核心同版本的内嵌解释器，共用权限、预算、取消和收尾 | `src/tools.lua`、`process.lua`、`release/launcher.lua` |
 | 便携发行 | clean/std/full 装配；同平台核心相同；可选 tools 的位置与能力说明 | [工具清单](../release/TOOL-BUNDLES.md)、`release/tool-bundles.json` |
 | 旧终端与原生层 | Cygwin PTY、Unicode 路径/参数/输出、异步 stdin、进程树回收及 FAT32 修复 | [便携实现](PORTABLE-IMPLEMENTATION-2026-09-22.md)、[R01--R22](CODE-REVIEW-2026-09-22.md) |
-| 旧编码 | 原生代码页转换、编码规范化、read/search 解码、write/patch 无损编码、exec 输出解码与环境事实 | `native/yaca_text.h`、`src/textcodec.lua`、`tools.lua`、`prompt.lua` |
+| 旧编码 | 原生代码页转换、编码规范化、read/search 解码、write/patch 无损编码、exec 输出解码与环境事实；Lua 内存错误后的原生资源清理 | `native/yaca_text.h`、`src/textcodec.lua`、`tools.lua`、`prompt.lua` |
 | 大文件 | 超过 16 MiB 时区间读取、有界搜索、`from_end`、续页令牌和超长行截断 | `native/yaca_native.c` 的 seek、`src/tools.lua` |
 | 结果分页 | read/search/list 按最终 JSON 字节预算选取记录；超大显示片段在 UTF-8 边界截断 | [R29](CODE-REVIEW-2026-09-28.md#r29-验证与人工-review)、`src/tools.lua` |
 | 范围一致性 | 页结束时核对完整身份与路径，续页绑定大小/修改时间；读错误和模式异常明确失败并清理句柄 | [R30--R33](CODE-REVIEW-2026-09-28.md#r30--r33-验证与人工-review)、`src/tools.lua` |
@@ -28,21 +28,24 @@ Release Gate R 为 `closed`，`release_authorized=false`。
 随后修正编码映射、UTF-16 分块/修复、超长行续页/尾读、长首行编码采样及搜索完整性。
 当前 API 的 `partial_start` 标明尾部片段，`truncated_lines` 标明搜索遗漏的长行内容。
 分页修复避免 JSON 转义膨胀导致整页内容和续页信息一起被省略。
-本轮进一步修正无进展读取、页末预读失败、文件变化后的结果与续页，以及搜索模式异常的句柄清理。
+无进展读取、页末预读失败、文件变化后的结果与续页，以及搜索模式异常的句柄清理已修正。
+本轮补齐转换器在 Lua 内存错误后的释放，统一空输入的代码页可用性检查，并保存 iconv 的原始 errno。
 
 ## 本轮基线复核
 
 开发机为 Fedora 44 / x86_64，内核 `7.2.7-200.fc44.x86_64`。
 完整测试在资源守卫下串行运行。日志保存在
-`out/range-stability-20260928/`；此前的分页、编码及资料整理日志保留在
-`out/page-review-20260928/`、`out/f4-review-20260928/` 与 `out/development-reset-20260928/`。
+`out/native-codec-review-20260928/`；此前日志保留在
+`out/range-stability-20260928/`、`out/page-review-20260928/`、
+`out/f4-review-20260928/` 与 `out/development-reset-20260928/`。
 这些是开发机复核记录，不是发行目标资格。
 
 | 检查 | 2026-09-28 结果 |
 | --- | --- |
-| 完整 Lua suite | 663/663 通过；本批新增 6 项，覆盖 38 组错误和版本变化组合 |
-| 全仓注释结构 | 207 个文件、5084 个声明、0 缺项；tree-sitter 0.25.2 |
-| 原生编码探针 | 沿用本日 F4 记录：当前 native 构建通过，Linux 12 组往返及严格拒绝通过；R29--R33 未改原生层 |
+| 完整 Lua suite | 663/663 通过；本批原生故障探针独立计数 |
+| 全仓注释结构 | 208 个文件、5098 个声明、0 缺项；tree-sitter 0.25.2 |
+| 原生分配失败与恢复 | Linux 编码/解码各 18 个位置，Wine Win32/Win64 各 4 个位置；全部通过，无原生资源遗留或重复释放 |
+| 原生构建与编码 smoke | Linux/Win32/Win64 完整 native 构建通过；Linux 12 组、Wine 两架构各 11 组，cp54936 不可用单列 |
 | TP-003 / TP-010 | 重跑通过；453 / 5,564,743 条断言 |
 | 注释检查器反例 | 14/14 通过 |
 | 契约 / 证明登记 / readiness | 7687 / 56 / 562 条断言通过 |
@@ -74,12 +77,12 @@ YACA_PROOF_SOURCE_CACHE="$PWD/out/qualification/sources" \
 | std/full 工具 | win32 std 的部分构建/运行证据；三目标候选版本和装配约束 | win64/Linux std、三个 full 的完整工具闭包与目标运行 |
 
 详细路径、失败记录与适用候选见[Review 记录](CODE-REVIEW-2026-09-22.md)和
-[开发历程](DEVELOPMENT-HISTORY.md)。Windows 新编码转换与 seek 目前只有交叉编译证据；
-旧包的运行结果不覆盖这些改动。
+[开发历程](DEVELOPMENT-HISTORY.md)。Windows 新编码转换已有交叉编译和 Wine 探针，
+seek 仍待真实旧目标复验；两者均不能沿用旧包的目标资格。
 
 ## 尚未完成
 
-- 全仓人工语义 Review；接续 R23--R33 审查原生转换资源、代码页可用性及旧 Windows 有损路径。
+- 全仓人工语义 Review；接续 R23--R36 审查 Windows 分配错误分类、有损路径、Lua 层不可用代码页传播和编码别名。
 - 当前源码的三目标完整构建、目标回归、网络故障、恢复与容量矩阵。
 - A08/A09 的 GiB 级日志、增长/轮转、旧代码页及真实模型读取旅程。
 - 工具来源、许可证、依赖闭包及三目标 clean/std/full 共九包验收（C32--C34）。

@@ -1,7 +1,7 @@
 # 编码与区间读取 Review
 
 日期：2026-09-28。R23--R28 接续 `9aed60f`，已提交为 `9724797`；
-R29 的分页预算修复已提交为 `f3a69f2`；R30--R33 接续范围读取的错误、版本与资源收尾审查。
+R29 已提交为 `f3a69f2`，R30--R33 已提交为 `d2bc3a9`；R34--R36 接续原生转换器审查。
 接续 [R01--R22](CODE-REVIEW-2026-09-22.md)，本轮集中审查旧编码与区间读取，
 不代表全仓人工语义 Review 或目标资格已完成。
 
@@ -20,6 +20,9 @@ R29 的分页预算修复已提交为 `f3a69f2`；R30--R33 接续范围读取的
 | R31 | 范围读取只比较对象标识，大文件搜索没有完成时的身份复核；同对象等长改写、增长、截断或路径替换可能仍产出成功结果 | 共用结束检查比较句柄的完整身份，关闭后复核命名路径和祖先；覆盖读取及搜索 EOF、匹配上限、扫描上限退出。20 组外部修改组合返回 TargetChanged；结束 stat/close 的 8 组故障均保留原错误并只关闭一次 |
 | R32 | read 续页只绑定对象，不绑定大小和修改时间；文件改变后仍会复用旧编码判定与缓存的半行 | 续页绑定完整身份摘要，发现改变时消费旧令牌并返回 TargetChanged；模型工具说明要求重新读取。等长改写、增长、截断三个用例均在新读取前拒绝复用缓存 |
 | R33 | Lua 模式对空字符串的验证不能发现所有语法错误；模式的坏后缀在真实内容上才触发异常，绕过大文件句柄关闭 | 对实际匹配做受保护调用，返回 InvalidSearchPattern 并关闭流；大小文件都验证错误后的下一次读取仍可成功。反例 `alpha[` 在 `alpha` 上触发，旧实现实测留下未关闭句柄 |
+| R34 | Windows malloc 缓冲和 POSIX iconv 描述符跨越可抛出内存错误的 Lua API；异常跳转绕过 free/iconv_close | 外层 C 调用持有资源，受保护转换返回后直接清理，再传播原错误。Linux 原实现复现 24 个未释放位置；修复后 Linux 和两个 Windows 架构的全部观测分配位置均通过，错误后同一 Lua 状态可继续转换 |
+| R35 | POSIX 空输入绕过 iconv_open，未安装的代码页也返回成功；与非空输入和 Windows 的可用性语义不一致 | 空输入同样检查转换器。编码、解码的不可用空输入原先都错误接受，修复后均返回 EncodingUnavailable；有效代码页的空输入仍成功 |
+| R36 | iconv 失败后先调用 Lua 缓冲 API，再读取 errno；后续分配可能覆盖真实 E2BIG/EILSEQ/EINVAL | iconv 返回后立即保存 errno，再追加 Lua 缓冲。分配器在成功分配后改写 errno 的反例使合法 CP1252 编码和解码失败，修复后输出逐字节相符 |
 
 `read`/`search` 的模型可见工具说明已同步续页、尾部片段及搜索不完整的含义。
 没有新增配置项或运行依赖。
@@ -88,9 +91,47 @@ Windows 缺失可选 NLS 代码页会单列 unavailable，不计入通过的转�
 持续增长的日志可能要求重试；保留原时间戳的等长外部修改和旧文件系统时间精度仍属
 A08/A09 目标验证范围。本轮未改原生层，也未增加对热写文件无重试读取的承诺。
 
+## R34--R36 原生复核
+
+新增 [text_codec_faults.c](../.tools/qualification/text_codec_faults.c)，直接包含当前
+`native/yaca_text.h`，使用真实 Lua 5.5.1 和系统转换器。逐个拒绝观测到的 Lua 增长分配，
+持续拒绝紧急 GC 后的重试；在受保护调用刚返回时检查原生资源已释放，再解除故障，
+在同一 Lua 状态完成一次转换。输出按实际字节及 exact 标记核对，重复释放单独计数。
+
+| 环境 / 探针 | 结果 | 范围 |
+| --- | --- | --- |
+| Linux 分配失败与恢复 | 编码、解码各 18 个分配位置；0 失败，0 所有权错误 | 当前转换实现；有效/不可用代码页的空输入及 errno 覆盖同时验证 |
+| Wine Win32 / Win64 分配失败与恢复 | 各架构编码、解码各 4 个分配位置；0 失败，0 所有权错误 | 当前 Windows C 分支，配各架构已有 Lua 5.5.1 DLL；不等于 XP/Win7 资格 |
+| 完整原生模块构建 | Linux、Win32、Win64 均以 `-Wall -Wextra -Werror` 通过 | Windows 编译底线分别为 0x0501 / 0x0601 |
+| 当前原生模块编码 smoke | Linux 12 组；Wine 两架构各 11 组，另报 cp54936 unavailable | 严格拒绝非法 GBK 和不可映射输出通过；不可用项不计为通过 |
+| 全仓 | suite 663/663；注释 208 文件、5098 声明、0 缺项；完整 readiness 通过 | 原生故障探针独立计数，不加入 Lua suite 数字 |
+
+本机复现 Linux 故障探针：
+
+```sh
+mkdir -p out/native-codec-review-20260928
+.tools/run_with_resource_guard.sh gcc -std=c99 -Wall -Wextra -Werror -O2 \
+  -Iout/qualification/runtime-deps/lua-5.5.1/src \
+  .tools/qualification/text_codec_faults.c \
+  out/qualification/runtime-deps/lua-5.5.1/src/liblua.a -lm -ldl \
+  -o out/native-codec-review-20260928/text_codec_faults
+.tools/run_with_resource_guard.sh out/native-codec-review-20260928/text_codec_faults
+```
+
+日志在 `out/native-codec-review-20260928/`。`fault-before.log` 保留原实现的资源泄漏和
+空输入失败，`errno-before.log` 保留 errno 覆盖反例。最终结果为 `fault-final.log`、
+`win32-faults-final.log`、`win64-faults-final.log`、`linux-codec.log`、`win32-codec-final.log`、
+`win64-codec.log`、`full.log`、`readiness.log`。
+
+人工语义核对了转换资源的获取/释放顺序、Lua 错误边界、往返缓冲的有效期、
+空输入处理、errno 保存及新探针的观察与清理。全仓语义 Review 仍未完成。
+Windows XP 在未使用 MB_ERR_INVALID_CHARS 时可能丢弃非法序列，仍须修正并实测；
+依据 [Microsoft MultiByteToWideChar 文档](https://learn.microsoft.com/en-us/windows/win32/api/stringapiset/nf-stringapiset-multibytetowidechar)，
+不能从现代 Windows 或 Wine 的行为推出 XP 的替换语义。
+
 ## 继续审查与目标验证
 
-1. 原生转换器的内存/句柄生命周期、不可用代码页及有损路径；特别是 Lua 内存错误跳转时的 malloc/iconv 清理、空输入的转换器可用性和旧 Windows 的替换行为。
+1. Windows 原生分配失败的错误分类、旧系统的有损替换、转换器不可用时 Lua 层的错误传播与编码别名；不能以 Wine 替代旧目标。
 2. 重建三目标产物，把本批修正与 R21/R22 一同用于 XP/Win7/CentOS 7 以及指定 Server 2008 的实测。
 3. A08/A09 的真实 GiB 级文件、中文命令、编码写回与模型续页旅程。现有小规模注入用例不能替代这些目标证据。
 
