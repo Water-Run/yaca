@@ -1,6 +1,6 @@
 # 剩余开发与验收
 
-更新日期：2026-09-28。接续 `d2bc3a9` 与 R34--R36 原生转换修复；当前结果见 [CURRENT-STATE.md](CURRENT-STATE.md)。
+更新日期：2026-09-28。从 `18adc05` 接续；当前结果见 [CURRENT-STATE.md](CURRENT-STATE.md)。
 
 核心、内嵌 Lua、`.ask`、可选工具说明、三档装配、旧编码和大文件读取已有实现。
 继续在当前代码上收尾。C01--C31 是已有实现的任务映射，不重新从 C01 开工；
@@ -11,9 +11,12 @@
 [R23--R36](CODE-REVIEW-2026-09-28.md) 已修正编码、范围读取及转换器异常清理的
 已复现问题。接续 `native/yaca_text.h` 和 `src/textcodec.lua`：
 
-- 注入 Windows malloc 失败，确认不被误报为非法编码或不可映射文字。
-- 修正并在 XP/Win7 验证有损替换，保持严格写入的无损往返要求。
-- 核对不可用代码页在 read/search 中的传播，以及 Big5-HKSCS 等别名是否与实际转换器一致。
+| 顺序 | 审查入口 | 完成条件 |
+| --- | --- | --- |
+| 1 | `native/yaca_text.h`、`.tools/qualification/text_codec_faults.c` | 注入 Windows malloc 失败；返回正确的资源错误，释放已有资源，错误后可继续转换；不能只用 Lua 分配失败代替 |
+| 2 | Windows 有损解码及 `.tools/qualification/text_codec_smoke.lua` | XP/Win7 上非法序列有明确替换结果，周围有效文字保留；严格写入仍要求无损往返 |
+| 3 | `src/textcodec.lua`、`src/tools.lua` 的 read/search | 小文件和区间路径均传播不可用代码页及资源错误；不能改标 UTF-8 或当作普通二进制跳过；补故障回归 |
+| 4 | `src/textcodec.lua` 的编码名称表 | Big5-HKSCS 等别名与实际转换器能力一致；不支持的名称明确拒绝，以原生转换结果校验 |
 
 Lua 分配失败、空输入可用性和 errno 覆盖已经过故障注入；新增
 `text_codec_faults.c` 应随后续原生改动复跑。以上剩余路径仍待完成。
@@ -48,7 +51,6 @@ F 分类和 A01--A15 场景来源于[实施候选](MAJOR-REDESIGN-PLAN-2026-09-2
 
 ## 记录交接
 
-整理已收口源码回归、注释结构、证明摘要和未提交的分页修复。
 当前结果只在 [CURRENT-STATE.md](CURRENT-STATE.md) 维护，缺陷证据在日期 Review 文档中归档。
 
 后续每完成一项，更新当前快照、删去或缩小本队列中的相应剩余项。

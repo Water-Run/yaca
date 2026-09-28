@@ -1,8 +1,8 @@
 # 当前状态
 
-更新日期：2026-09-28。产品基线 `32d053e`，资料整理节点 `9aed60f`；
-`d2bc3a9` 已完成 R23--R33；本轮修正
-[R34--R36 原生转换资源和错误处理](CODE-REVIEW-2026-09-28.md#r34--r36-原生复核)。
+更新日期：2026-09-28。当前源码基线为 `18adc05`，包含
+[R23--R36](CODE-REVIEW-2026-09-28.md) 的修复。
+既有开发内容均已提交；本次整理仅更新文档，提交脉络见[开发历程](DEVELOPMENT-HISTORY.md)。
 
 **核心已实现，目标资格验证待完成。** 机读阶段为 `implemented-unqualified`，
 Release Gate R 为 `closed`，`release_authorized=false`。
@@ -24,21 +24,23 @@ Release Gate R 为 `closed`，`release_authorized=false`。
 | 范围一致性 | 页结束时核对完整身份与路径，续页绑定大小/修改时间；读错误和模式异常明确失败并清理句柄 | [R30--R33](CODE-REVIEW-2026-09-28.md#r30--r33-验证与人工-review)、`src/tools.lua` |
 | 注释约束 | 文件头与函数/类型全量结构检查已接入 readiness；人工语义 Review 尚未完成 | [编码规范](CODING-STANDARD.md) |
 
-9 月 26 日新增的编码和大文件实现已提交。恢复基线的资料整理已提交为 `9aed60f`；
-随后修正编码映射、UTF-16 分块/修复、超长行续页/尾读、长首行编码采样及搜索完整性。
 当前 API 的 `partial_start` 标明尾部片段，`truncated_lines` 标明搜索遗漏的长行内容。
-分页修复避免 JSON 转义膨胀导致整页内容和续页信息一起被省略。
-无进展读取、页末预读失败、文件变化后的结果与续页，以及搜索模式异常的句柄清理已修正。
-本轮补齐转换器在 Lua 内存错误后的释放，统一空输入的代码页可用性检查，并保存 iconv 的原始 errno。
+分页保留预算内的内容与续页信息，读取失败和文件版本变化返回明确错误。
+原生转换器在 Lua 内存错误后释放已持有的缓冲和转换句柄；Windows 原生 malloc
+失败的错误分类仍待复核，不把这两类分配失败混为一项已完成验收。
 
-## 本轮基线复核
+## 最新基线复核
 
 开发机为 Fedora 44 / x86_64，内核 `7.2.7-200.fc44.x86_64`。
-完整测试在资源守卫下串行运行。日志保存在
+完整测试在资源守卫下串行运行。原生审查及对应回归日志保存在
 `out/native-codec-review-20260928/`；此前日志保留在
 `out/range-stability-20260928/`、`out/page-review-20260928/`、
 `out/f4-review-20260928/` 与 `out/development-reset-20260928/`。
 这些是开发机复核记录，不是发行目标资格。
+
+资料整理后，在相同源码上重跑完整 suite 和 coding readiness，均退出 0；
+计数与下表一致，日志为 `out/handoff-baseline-20260928/full.log`、`readiness.log`。
+改动文档的 91 个本地文件链接均存在。此次未重跑原生故障探针或目标机资格。
 
 | 检查 | 2026-09-28 结果 |
 | --- | --- |
@@ -52,9 +54,8 @@ Release Gate R 为 `closed`，`release_authorized=false`。
 | 公开文档真值 | 5 项通过 |
 | 完整 coding readiness 链 | TP-003/006/008/010、RP-001 全部通过，退出码 0 |
 
-初次证明校验发现 TP-003 与 TP-010 的源码摘要已过期。两项均已实际重跑，
-随后更新[证明清单](proofs/modern-2026-08-29/manifest.lua)和检查器固定摘要；
-旧记录由 Git 保留。注释结构零缺项仅说明覆盖，不能代替语义 Review。
+TP-003 与 TP-010 已重跑，[证明清单](proofs/modern-2026-08-29/manifest.lua)
+与检查器摘要相符。注释结构零缺项仅说明覆盖，不能代替语义 Review。
 
 复核使用 Python 3.13 及固定解析器；本机复现命令如下，其他构建机按
 `.tools/comment_check_requirements.txt` 安装相同依赖，并提供自己的锁定源码缓存：

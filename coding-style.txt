@@ -1,5 +1,12 @@
 coding-style.txt
 
+Current repository rules:
+Read AGENTS.md and .develope-docs/CODING-STANDARD.md before editing.
+This file retains general style guidance. The current coding standard takes
+precedence for file headers, complete function/type comments and acceptance.
+Historical references to documenting public functions do not exempt local,
+nested or anonymous functions, callbacks, methods, metatables or test code.
+
 Project coding style for LLM coding agents
 
 Target project:
