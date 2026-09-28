@@ -149,12 +149,13 @@ local function options(overrides)
     return result
 end
 
---Constructs the suite's isolated runtime fixture and observation ports.
---@param settings table|nil Fixture settings and scenario overrides.
---@return any fixture Constructed fixture service used by this suite.
---@return any secondary2 Configured control actions returned by the fixture.
---@return any secondary3 Additional status or structured error from the fixture operation.
---@return table secondary4 Structured fixture record with modules, safety, filesystem, operations.
+-- Construct isolated direct tools with optional encoding and native-read fault injection.
+--@param settings table|nil Initial files, limits, secret, codec and read_hook overrides; defaults to empty.
+--@return table Tool service bound to the fixture workspace and reserved directory.
+--@return table Filesystem controls for external changes and operation observations.
+--@return table Authorization controls and invocation counts.
+--@return table Dependencies containing modules, native ports, safety, filesystem and operation observations.
+--@error Raises if constructing a filesystem, path, safety or tool service fails.
 local function fixture(settings)
     settings = settings or {}
     local initial = {
@@ -168,6 +169,18 @@ local function fixture(settings)
     }
     for path, value in pairs(settings.initial or {}) do initial[path] = value end
     local native, controls = direct_harness.new(initial)
+    if settings.read_hook then
+        local original_read = native.fs_read
+        -- Run the scenario's read interception with access to the original native operation.
+        --@param handle table Live fake read handle owned by the filesystem service.
+        --@param maximum integer Maximum raw bytes requested by the service.
+        --@return boolean Whether the intercepted read succeeded.
+        --@return table Raw {bytes, eof} result or the injected structured error.
+        --@effect Invokes read_hook, which may advance the handle or mutate fixture files.
+        native.fs_read = function(handle, maximum)
+            return settings.read_hook(controls, original_read, handle, maximum)
+        end
+    end
     local modules = {}
     local filesystem = assert(load_module("fs", modules).new(native, {
         maximum_chunk_bytes = 7,
@@ -258,6 +271,7 @@ local function fixture(settings)
     }, options(settings.options)))
     return tools, controls, authorization_controls, {
         modules = modules,
+        native = native,
         safety = safety,
         filesystem = filesystem,
         operations = operation_controls,
@@ -1034,6 +1048,298 @@ return {
                 }, "wide-tail")
                 A.equal(tail.payload.lines[1].text, "ab中")
                 A.equal(tail.payload.lines[1].raw_end, #body)
+            end,
+        },
+        {
+            name = "range reads reject empty chunks without EOF and release their handles",
+            -- A native read that makes no progress must remain an error in sampling, reading and searching.
+            --@param none Injects an empty non-EOF chunk into each range operation phase.
+            --@return nil Assertions require FilesystemContract and closure of all observed read handles.
+            --@error Raises on a false success, a wrong diagnostic or an unclosed read handle.
+            run = function()
+                for _, phase in ipairs({ "sample", "forward", "tail", "search" }) do
+                    local first, handles, injected = nil, {}, false
+                    local service = fixture({
+                        initial = { ["/work/big.log"] = numbered_lines(4000) },
+                        -- Inject once in the sampler or the subsequent content reader.
+                        --@param _ table Unused filesystem controls; the bytes stay unchanged.
+                        --@param read function Original native read operation.
+                        --@param handle table Read handle whose phase and closure are observed.
+                        --@param maximum integer Requested byte limit.
+                        --@return boolean Whether the delegated or injected read succeeded.
+                        --@return table Read result with bytes/eof.
+                        --@effect Records handles and advances only delegated reads.
+                        read_hook = function(_, read, handle, maximum)
+                            first = first or handle
+                            handles[handle] = true
+                            if not injected and (phase == "sample" or handle ~= first) then
+                                injected = true
+                                return true, { bytes = "", eof = false }
+                            end
+                            return read(handle, maximum)
+                        end,
+                    })
+                    local arguments = { path = "/work/big.log", start_line = 1, max_lines = 1,
+                        from_end = phase == "tail" }
+                    if phase == "search" then
+                        arguments = { path = "/work/big.log", pattern = "absent", dialect = "literal",
+                            case_sensitive = true, page_size = 1 }
+                    end
+                    local result = run(service, phase == "search" and "search" or "read", arguments, phase)
+                    A.equal(injected, true)
+                    A.equal(result.outcome, "failed", phase)
+                    A.equal(result.error.code, "FilesystemContract", phase)
+                    for handle in pairs(handles) do A.equal(handle.closed, true, phase) end
+                end
+            end,
+        },
+        {
+            name = "range page lookahead preserves the native read error",
+            -- A failure after the requested last line must not become a successful scan-limited page.
+            --@param none Uses a first line matching the seven-byte chunk size and fails its lookahead.
+            --@return nil Assertions require InjectedRead and closure of sampler and content handles.
+            --@error Raises if the native read error is hidden or a handle remains open.
+            run = function()
+                local first, handles, injected = nil, {}, false
+                local service = fixture({
+                    initial = { ["/work/big.log"] = "first!\n" .. numbered_lines(4000) },
+                    -- Fail the second content read after one full line has already been consumed.
+                    --@param _ table Unused filesystem controls.
+                    --@param read function Original native read operation.
+                    --@param handle table Read handle with a one-based byte offset.
+                    --@param maximum integer Requested byte limit.
+                    --@return boolean False for the injected read, otherwise the delegated status.
+                    --@return table InjectedRead error or raw read result.
+                    --@effect Records handles and advances successful delegated reads.
+                    read_hook = function(_, read, handle, maximum)
+                        first = first or handle
+                        handles[handle] = true
+                        if handle ~= first and handle.offset > 1 then
+                            injected = true
+                            return false, { code = "InjectedRead", message = "lookahead failed" }
+                        end
+                        return read(handle, maximum)
+                    end,
+                })
+                local result = run(service, "read", {
+                    path = "/work/big.log", start_line = 1, max_lines = 1,
+                }, "lookahead")
+                A.equal(injected, true)
+                A.equal(result.outcome, "failed")
+                A.equal(result.error.code, "InjectedRead")
+                for handle in pairs(handles) do A.equal(handle.closed, true) end
+            end,
+        },
+        {
+            name = "range reads and all large-search exits reject concurrent file changes",
+            -- Version checks must run for forward/tail reads and search EOF, match-limit and scan-limit exits.
+            --@param none Injects equal-size rewrites, growth, truncation and replacement during content reads.
+            --@return nil Assertions require TargetChanged and closure of every observed handle.
+            --@error Raises when a changed file produces success or cleanup misses a handle.
+            run = function()
+                local body = numbered_lines(4000)
+                for _, mode in ipairs({ "forward", "tail", "search-eof", "search-match", "search-scan" }) do
+                    for _, change in ipairs({ "rewrite", "grow", "truncate", "replace" }) do
+                        local first, handles, injected = nil, {}, false
+                        local service = fixture({
+                            initial = { ["/work/big.log"] = body },
+                            options = { maximum_search_matches = 1,
+                                maximum_scan_bytes = mode == "search-scan" and 32768 or 262144 },
+                            -- Change the backing file after the first content chunk has been returned.
+                            --@param controls table Filesystem mutation controls.
+                            --@param read function Original native read operation.
+                            --@param handle table Read handle retained to verify cleanup.
+                            --@param maximum integer Requested byte limit.
+                            --@return boolean Status from the delegated read.
+                            --@return table Original raw read result.
+                            --@effect Advances the handle, records it and mutates or replaces the file once.
+                            read_hook = function(controls, read, handle, maximum)
+                                first = first or handle
+                                handles[handle] = true
+                                local ok, chunk = read(handle, maximum)
+                                if handle ~= first and not injected then
+                                    injected = true
+                                    if change == "replace" then
+                                        controls.external_replace("/work/big.log", body)
+                                    else
+                                        local changed = change == "grow" and body .. "new\n"
+                                            or change == "truncate" and body:sub(1, #body - 10)
+                                            or body:gsub("line", "LINE")
+                                        controls.external_write("/work/big.log", changed)
+                                    end
+                                end
+                                return ok, chunk
+                            end,
+                        })
+                        local searching = mode:sub(1, 6) == "search"
+                        local arguments = searching and {
+                            path = "/work/big.log", pattern = mode == "search-match" and "line" or "absent",
+                            dialect = "literal", case_sensitive = true, page_size = 1,
+                        } or { path = "/work/big.log", start_line = 1, max_lines = 1,
+                            from_end = mode == "tail" }
+                        local result = run(service, searching and "search" or "read", arguments, mode .. change)
+                        A.equal(injected, true)
+                        A.equal(result.outcome, "failed", mode .. change)
+                        A.equal(result.error.code, "TargetChanged", mode .. change)
+                        for handle in pairs(handles) do A.equal(handle.closed, true, mode .. change) end
+                    end
+                end
+            end,
+        },
+        {
+            name = "content-dependent Lua pattern errors close streams and leave tools usable",
+            -- Empty-string validation can miss malformed suffixes reached only while matching real content.
+            --@param none Applies a trailing malformed bracket after a matching prefix in large and small files.
+            --@return nil Assertions require a typed pattern error, closed handles and a succeeding follow-up read.
+            --@error Raises if matching errors leak a handle, lose their typed code or poison later calls.
+            run = function()
+                for _, large in ipairs({ true, false }) do
+                    local handles = {}
+                    local service = fixture({
+                        initial = { ["/work/pattern.log"] = "alpha\n" .. (large and string.rep("x\n", 20000) or "") },
+                        -- Observe all reads without changing their bytes or native result.
+                        --@param _ table Unused filesystem controls.
+                        --@param read function Original native read operation.
+                        --@param handle table Read handle whose eventual close is checked.
+                        --@param maximum integer Requested byte limit.
+                        --@return boolean Delegated read status.
+                        --@return table Raw read result or native error.
+                        --@effect Records handles and delegates their offset advancement.
+                        read_hook = function(_, read, handle, maximum)
+                            handles[handle] = true
+                            return read(handle, maximum)
+                        end,
+                    })
+                    local result = run(service, "search", {
+                        path = "/work/pattern.log", pattern = "alpha[", dialect = "lua-pattern-v1",
+                        case_sensitive = true, page_size = 1,
+                    }, "bad-pattern")
+                    A.equal(result.outcome, "failed")
+                    for handle in pairs(handles) do A.equal(handle.closed, true) end
+                    A.equal(result.error.code, "InvalidSearchPattern")
+                    local recovered = run(service, "read", {
+                        path = "/work/pattern.log", start_line = 1, max_lines = 1,
+                    }, "after-pattern")
+                    A.equal(recovered.outcome, "success")
+                    A.equal(recovered.payload.lines[1].text, "alpha")
+                end
+            end,
+        },
+        {
+            name = "range cleanup propagates final stat and close failures",
+            -- Every successful or partial range observation must honor errors discovered while finishing its handle.
+            --@param none Injects failures at sampler/read/tail/search completion using the native ports.
+            --@return nil Assertions require the original error code and exactly one close for each opened handle.
+            --@error Raises on swallowed finalization errors, an open handle or a repeated close.
+            run = function()
+                for _, phase in ipairs({ "sample", "forward", "tail", "search" }) do
+                    for _, fault in ipairs({ "stat", "close" }) do
+                        local first, active, handles, closes = nil, nil, {}, {}
+                        local service, _, _, dependencies = fixture({
+                            initial = { ["/work/big.log"] = numbered_lines(4000) },
+                            options = { maximum_scan_bytes = 32768 },
+                            -- Observe the handle whose completion operation should fail.
+                            --@param _ table Unused filesystem controls.
+                            --@param read function Original native read operation.
+                            --@param handle table Live read handle.
+                            --@param maximum integer Requested byte limit.
+                            --@return boolean Status from the delegated read.
+                            --@return table Raw read result or filesystem error.
+                            --@effect Records each handle, selects the fault target and advances its offset.
+                            read_hook = function(_, read, handle, maximum)
+                                first = first or handle
+                                handles[handle] = true
+                                if phase == "sample" or handle ~= first then active = handle end
+                                return read(handle, maximum)
+                            end,
+                        })
+                        local native = dependencies.native
+                        local stat, close = native.fs_stat_identity, native.fs_close
+                        -- Fail the final stat of the selected handle while preserving ordinary path observations.
+                        --@param reference table|string Read handle or path accepted by the native stat port.
+                        --@return boolean False for the injected stat; otherwise delegated status.
+                        --@return table InjectedStat error or observed filesystem identity.
+                        native.fs_stat_identity = function(reference)
+                            if fault == "stat" and reference == active then
+                                return false, { code = "InjectedStat", message = "final stat failed" }
+                            end
+                            return stat(reference)
+                        end
+                        -- Release each handle and optionally report a failure from its close operation.
+                        --@param handle table Native fake handle being released.
+                        --@return boolean False for the injected close; otherwise delegated status.
+                        --@return table|boolean InjectedClose error or true after an ordinary close.
+                        --@effect Closes the native handle and counts every attempt, including failures.
+                        native.fs_close = function(handle)
+                            closes[handle] = (closes[handle] or 0) + 1
+                            local ok, value = close(handle)
+                            if fault == "close" and handle == active then
+                                return false, { code = "InjectedClose", message = "close failed" }
+                            end
+                            return ok, value
+                        end
+                        local arguments = phase == "search" and {
+                            path = "/work/big.log", pattern = "absent", dialect = "literal",
+                            case_sensitive = true, page_size = 1,
+                        } or { path = "/work/big.log", start_line = 1, max_lines = 1,
+                            from_end = phase == "tail" }
+                        local result = run(service, phase == "search" and "search" or "read", arguments, phase .. fault)
+                        A.equal(result.outcome, "failed", phase .. fault)
+                        A.equal(result.error.code, fault == "stat" and "InjectedStat" or "InjectedClose")
+                        for handle in pairs(handles) do
+                            A.equal(handle.closed, true)
+                            A.equal(closes[handle], 1)
+                        end
+                    end
+                end
+            end,
+        },
+        {
+            name = "range continuations reject changed versions before reusing partial lines",
+            -- Cached long-line prefixes must not combine with a later file version, even on the same object.
+            --@param none Uses a scan-limited half-line followed by equal-size, growth and shrink changes.
+            --@return nil Assertions require TargetChanged, one-use token consumption and no new reads.
+            --@error Raises if stale cached data is reused, a token is replayed or fresh reads precede rejection.
+            run = function()
+                local body = string.rep("x", 70000) .. "\nend\n"
+                for _, change in ipairs({ "rewrite", "grow", "truncate" }) do
+                    local reads = 0
+                    local service, controls = fixture({
+                        initial = { ["/work/big.log"] = body },
+                        options = { maximum_scan_bytes = 32768 },
+                        -- Count actual reads so stale cached state cannot start a new content stream.
+                        --@param _ table Unused filesystem controls.
+                        --@param read function Original native read operation.
+                        --@param handle table Current read handle.
+                        --@param maximum integer Requested byte limit.
+                        --@return boolean Status from the delegated read.
+                        --@return table Raw read result or filesystem error.
+                        --@effect Increments reads and advances the delegated handle.
+                        read_hook = function(_, read, handle, maximum)
+                            reads = reads + 1
+                            return read(handle, maximum)
+                        end,
+                    })
+                    local first = run(service, "read", {
+                        path = "/work/big.log", start_line = 1, max_lines = 1,
+                    }, "version-first")
+                    A.equal(first.payload.scan_limited, true)
+                    A.equal(#first.payload.lines, 0)
+                    local changed = change == "grow" and body .. "extra\n"
+                        or change == "truncate" and body:sub(1, #body - 5)
+                        or body:gsub("x", "y")
+                    controls.external_write("/work/big.log", changed)
+                    local before = reads
+                    local arguments = { path = "/work/big.log", start_line = 1, max_lines = 1,
+                        continuation = first.payload.continuation }
+                    local resumed = run(service, "read", arguments, "version-next")
+                    A.equal(resumed.outcome, "failed", change)
+                    A.equal(resumed.error.code, "TargetChanged", change)
+                    A.equal(reads, before)
+                    local replay, replay_error = call(service, "read", arguments, "version-replay")
+                    A.falsy(replay)
+                    A.equal(replay_error.code, "InvalidContinuation")
+                end
             end,
         },
         {

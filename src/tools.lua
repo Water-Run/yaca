@@ -419,7 +419,8 @@ local DESCRIPTIONS = {
         .. "encoding defaults to auto (BOM, UTF-8, then the system code page); pass a label such as "
         .. "cp936, gbk, gb18030, cp1252 or latin1 to decode legacy text. Files larger than the "
         .. "whole-file limit are read as ranges: pass the returned continuation to read further, "
-        .. "including after an empty scan_limited page. truncated marks shortened lines; "
+        .. "including after an empty scan_limited page. On TargetChanged, restart without a "
+        .. "continuation to read the current file version. truncated marks shortened lines; "
         .. "partial_start marks a tail fragment whose line begins before the returned raw_start.",
     search = "Bounded versioned text search of a directory tree or one file without a host grep "
         .. "command. encoding works as in read; all files share a byte budget. complete=false "
@@ -2673,19 +2674,42 @@ function M.new(dependencies, options)
         return ports.filesystem.close(stream.handle)
     end
 
+    -- Finish a range observation only if its handle and named path still match the admitted file version.
+    --@param stream table Open range stream whose handle is owned by the caller.
+    --@param snapshot table Admitted direct snapshot including size, modification time and ancestry.
+    --@return boolean|nil True after close and successful identity/path revalidation.
+    --@return table|nil Stat, close, changed-target or direct revalidation error.
+    --@effect Stats and closes the handle even on stat failure, then reinspects the named path on success.
+    --@ownership Consumes the stream handle; callers must not read it after this call.
+    local function finish_stream(stream, snapshot)
+        local stated, final_identity = ports.filesystem.stat_identity(stream.handle)
+        local closed, close_error = close_stream(stream)
+        if not stated then return nil, final_identity end
+        if not closed then return nil, close_error end
+        if not same_identity(final_identity, snapshot.identity) then
+            return nil, failure("TargetChanged", "file changed while being read; restart the read")
+        end
+        local verified, verify_error = ports.filesystem.direct_reverify(snapshot)
+        if not verified then return nil, verify_error end
+        return true
+    end
+
     -- Read one more raw chunk into a range stream, charging the scan budget.
     --@param stream table Range stream.
     --@return boolean|nil True after the read, including EOF.
-    --@return table|string|nil Filesystem error, or "scan-limit" when the budget is spent.
-    --@effect Advances the native handle.
+    --@return table|string|nil Filesystem/contract error, or "scan-limit" when the budget is spent.
+    --@effect Advances the native handle and updates the buffer, EOF flag and remaining scan budget.
     local function fill_stream(stream)
         if stream.budget.remaining <= 0 then return nil, "scan-limit" end
         local amount = math.min(limits.filesystem_chunk_bytes, stream.budget.remaining)
         local read_ok, chunk = ports.filesystem.stream_read(stream.handle, amount)
         if not read_ok then return nil, chunk end
+        if #chunk.bytes == 0 and not chunk.eof then
+            return nil, failure("FilesystemContract", "range read made no progress")
+        end
         stream.budget.remaining = stream.budget.remaining - #chunk.bytes
         stream.buffer = stream.buffer .. chunk.bytes
-        if chunk.eof or #chunk.bytes == 0 then stream.eof = true end
+        if chunk.eof then stream.eof = true end
         return true
     end
 
@@ -2696,6 +2720,7 @@ function M.new(dependencies, options)
     --@param budget table Mutable scan budget {remaining = integer} shared by the call.
     --@return table|nil Range stream state.
     --@return table|string|nil Filesystem error or "scan-limit".
+    --@effect Opens a read handle and seeks or consumes bounded bytes; closes the handle if positioning fails.
     --@ownership The caller closes the returned stream with close_stream.
     local function open_stream(snapshot, offset, encoding, budget)
         local opened, handle = ports.filesystem.direct_open_read(snapshot)
@@ -2719,6 +2744,9 @@ function M.new(dependencies, options)
                     if not read_ok then close_stream(stream); return nil, chunk end
                     if #chunk.bytes == 0 then
                         close_stream(stream)
+                        if not chunk.eof then
+                            return nil, failure("FilesystemContract", "range offset read made no progress")
+                        end
                         return nil, failure("TargetChanged", "file ended before the requested offset")
                     end
                     skipped = skipped + #chunk.bytes
@@ -2844,6 +2872,7 @@ function M.new(dependencies, options)
     --@param budget table Mutable scan budget.
     --@return table|nil {encoding, bom_bytes, basis}.
     --@return table|string|nil Filesystem error or encoding classification.
+    --@effect Samples through a temporary read handle, charges the budget and verifies the file version before decoding.
     local function detect_range_encoding(snapshot, requested, budget)
         local stream, open_error = open_stream(snapshot, 0, "utf-8", budget)
         if not stream then return nil, open_error end
@@ -2852,8 +2881,8 @@ function M.new(dependencies, options)
             local filled, fill_error = fill_stream(stream)
             if not filled then close_stream(stream); return nil, fill_error end
         end
-        local closed, close_error = close_stream(stream)
-        if not closed then return nil, close_error end
+        local finished, finish_error = finish_stream(stream, snapshot)
+        if not finished then return nil, finish_error end
         local sample = stream.buffer
         local bom_encoding, bom_bytes = nil, 0
         if sample:sub(1, 3) == "\239\187\191" then
@@ -2966,20 +2995,18 @@ function M.new(dependencies, options)
     --@param state table Admitted read call with snapshot, arguments and optional continuation.
     --@return table|nil Range page with line offsets, observed digest and continuation.
     --@return table|nil Filesystem, encoding, scan or changed-target error.
+    --@effect Reads and verifies a single file version; consumes an old token and may retain bounded continuation data.
     local function execute_read_range(state)
         local arguments, target = state.arguments, state.targets[1]
         local snapshot = target.snapshot
         local continuation = state.continuation
         local budget = { remaining = limits.maximum_scan_bytes }
-        local object_key = assert(ports.safety.digest(identity_key(snapshot.identity)))
+        local file_generation = assert(ports.safety.digest(identity_bytes(snapshot.identity)))
         local layout
         if continuation then
             consume_continuation(arguments.continuation)
-            if continuation.generation ~= object_key then
-                return nil, failure("TargetChanged", "the file was replaced since the previous page")
-            end
-            if snapshot.identity.size < continuation.offset then
-                return nil, failure("TargetChanged", "the file shrank below the previous page; it may have been rotated")
+            if continuation.generation ~= file_generation then
+                return nil, failure("TargetChanged", "file changed since the previous page; restart the read")
             end
             layout = continuation.layout
         else
@@ -3045,6 +3072,10 @@ function M.new(dependencies, options)
                 while got < step do
                     local read_ok, chunk = ports.filesystem.stream_read(handle, step - got)
                     if not read_ok then close_stream(stream); return nil, chunk end
+                    if #chunk.bytes == 0 and not chunk.eof then
+                        close_stream(stream)
+                        return nil, failure("FilesystemContract", "tail read made no progress")
+                    end
                     if #chunk.bytes == 0 then break end
                     parts[#parts + 1] = chunk.bytes
                     got = got + #chunk.bytes
@@ -3056,13 +3087,8 @@ function M.new(dependencies, options)
                 budget.remaining = budget.remaining - step
                 data = table.concat(parts) .. data
             end
-            local stated, final_identity = ports.filesystem.stat_identity(handle)
-            local closed, close_error = close_stream(stream)
-            if not stated then return nil, final_identity end
-            if not closed then return nil, close_error end
-            if identity_key(final_identity) ~= identity_key(snapshot.identity) then
-                return nil, failure("TargetChanged", "file was replaced while being read")
-            end
+            local finished, finish_error = finish_stream(stream, snapshot)
+            if not finished then return nil, finish_error end
             local finish = #records - (arguments.start_line - 1)
             local first_index = math.max(1, finish - arguments.max_lines + 1)
             local known = position <= lower
@@ -3142,22 +3168,21 @@ function M.new(dependencies, options)
             end
             if not eof and not next_offset then
                 if not scan_limited and #stream.buffer == 0 and not stream.eof then
-                    local filled = fill_stream(stream)
-                    if not filled then scan_limited = true end
+                    local filled, fill_error = fill_stream(stream)
+                    if not filled then
+                        if fill_error == "scan-limit" then
+                            scan_limited = true
+                        else
+                            close_stream(stream)
+                            return nil, fill_error
+                        end
+                    end
                 end
                 if #stream.buffer == 0 and stream.eof then eof = true end
                 next_offset, next_number = stream.position, number
             end
-            local stated, final_identity = ports.filesystem.stat_identity(stream.handle)
-            local closed, close_error = close_stream(stream)
-            if not stated then return nil, final_identity end
-            if not closed then return nil, close_error end
-            if identity_key(final_identity) ~= identity_key(snapshot.identity) then
-                return nil, failure("TargetChanged", "file was replaced while being read")
-            end
-            if final_identity.size < (next_offset or 0) then
-                return nil, failure("TargetChanged", "file shrank while being read")
-            end
+            local finished, finish_error = finish_stream(stream, snapshot)
+            if not finished then return nil, finish_error end
             partial_line = stream.partial_line
             if eof then next_offset = false end
         end
@@ -3182,7 +3207,7 @@ function M.new(dependencies, options)
                 tool = "read",
                 path = arguments.path,
                 requested_encoding = arguments.encoding or "auto",
-                generation = object_key,
+                generation = file_generation,
                 offset = next_offset,
                 next_number = next_number,
                 layout = layout,
@@ -3394,12 +3419,18 @@ function M.new(dependencies, options)
             --@param relative_path string File path relative to the searched root.
             --@param line_number integer One-based line number.
             --@param line_text string Ordinary UTF-8 line text.
-            --@return boolean True when the match limit stopped the search.
+            --@return boolean|nil True at the match limit, false after the line, or nil when pattern matching fails.
+            --@return table|nil InvalidSearchPattern if Lua rejects the pattern while matching real content.
+            --@effect Appends bounded matches to the enclosing result list.
             local function match_line(relative_path, line_number, line_text)
                 local haystack = arguments.case_sensitive and line_text or ascii_fold(line_text)
                 local offset, boundaries = 1, nil
                 while offset <= #haystack + 1 do
-                    local first, last = haystack:find(needle, offset, arguments.dialect == "literal")
+                    local matched, first, last = pcall(string.find,
+                        haystack, needle, offset, arguments.dialect == "literal")
+                    if not matched then
+                        return nil, failure("InvalidSearchPattern", "lua-pattern-v1 failed while matching file content")
+                    end
                     if not first then break end
                     boundaries = boundaries or scalar_boundaries(line_text)
                     local after = last >= first and last + 1 or first
@@ -3423,33 +3454,41 @@ function M.new(dependencies, options)
                 return false
             end
 
-            -- Stream one oversized file line by line inside the shared scan budget.
+            -- Stream one oversized file within the shared budget and verify its version at every partial/successful exit.
             --@param relative_path string File path relative to the searched root.
             --@param snapshot table Admitted file snapshot.
             --@return boolean|nil True after the file was fully scanned or the match limit was hit.
             --@return table|string|nil Filesystem error, or "scan-limit"/encoding classification.
+            --@effect Opens and closes read handles, charges the budget, appends matches and updates partial-result counters.
             local function search_large(relative_path, snapshot)
                 local layout, layout_error = detect_range_encoding(snapshot, requested, budget)
                 if not layout then return nil, layout_error end
                 local stream, open_error = open_stream(snapshot, layout.bom_bytes, layout.encoding, budget)
                 if not stream then return nil, open_error end
-                local number, any_lossy = 0, false
+                local number, any_lossy, scan_limited = 0, false, false
                 while true do
                     local line, line_error = next_stream_line(stream)
-                    if line == nil then close_stream(stream); return nil, line_error end
+                    if line == nil then
+                        if line_error == "scan-limit" then scan_limited = true; break end
+                        close_stream(stream)
+                        return nil, line_error
+                    end
                     if line == false then break end
                     number = number + 1
                     if line.truncated then truncated_lines = truncated_lines + 1 end
                     local decoded, lossy = decode_range_line(line.raw, layout.encoding)
                     any_lossy = any_lossy or lossy
-                    if match_line(relative_path, number, decoded) then
+                    local at_limit, match_error = match_line(relative_path, number, decoded)
+                    if at_limit == nil then close_stream(stream); return nil, match_error end
+                    if at_limit then
                         stopped, stop_reason = true, "match-limit"
                         break
                     end
                 end
-                local closed, close_error = close_stream(stream)
-                if not closed then return nil, close_error end
+                local finished, finish_error = finish_stream(stream, snapshot)
+                if not finished then return nil, finish_error end
                 if any_lossy then lossy_files = lossy_files + 1 end
+                if scan_limited then return nil, "scan-limit" end
                 return true
             end
 
@@ -3517,7 +3556,9 @@ function M.new(dependencies, options)
                             else
                                 if document.lossy then lossy_files = lossy_files + 1 end
                                 for line_number, record in ipairs(document.records) do
-                                    if match_line(entry.relative_path, line_number, record.text) then
+                                    local at_limit, match_error = match_line(entry.relative_path, line_number, record.text)
+                                    if at_limit == nil then return nil, match_error end
+                                    if at_limit then
                                         stopped, stop_reason = true, "match-limit"
                                         break
                                     end

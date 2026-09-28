@@ -1,7 +1,8 @@
 # 当前状态
 
 更新日期：2026-09-28。产品基线 `32d053e`，资料整理节点 `9aed60f`；
-`9724797` 已完成 R23--R28，本轮收口 [R29 分页预算修正](CODE-REVIEW-2026-09-28.md#r29-验证与人工-review)。
+`9724797` 完成 R23--R28，`f3a69f2` 完成 R29；本轮修正
+[R30--R33 范围读取的错误与版本检查](CODE-REVIEW-2026-09-28.md#r30--r33-验证与人工-review)。
 
 **核心已实现，目标资格验证待完成。** 机读阶段为 `implemented-unqualified`，
 Release Gate R 为 `closed`，`release_authorized=false`。
@@ -20,26 +21,28 @@ Release Gate R 为 `closed`，`release_authorized=false`。
 | 旧编码 | 原生代码页转换、编码规范化、read/search 解码、write/patch 无损编码、exec 输出解码与环境事实 | `native/yaca_text.h`、`src/textcodec.lua`、`tools.lua`、`prompt.lua` |
 | 大文件 | 超过 16 MiB 时区间读取、有界搜索、`from_end`、续页令牌和超长行截断 | `native/yaca_native.c` 的 seek、`src/tools.lua` |
 | 结果分页 | read/search/list 按最终 JSON 字节预算选取记录；超大显示片段在 UTF-8 边界截断 | [R29](CODE-REVIEW-2026-09-28.md#r29-验证与人工-review)、`src/tools.lua` |
+| 范围一致性 | 页结束时核对完整身份与路径，续页绑定大小/修改时间；读错误和模式异常明确失败并清理句柄 | [R30--R33](CODE-REVIEW-2026-09-28.md#r30--r33-验证与人工-review)、`src/tools.lua` |
 | 注释约束 | 文件头与函数/类型全量结构检查已接入 readiness；人工语义 Review 尚未完成 | [编码规范](CODING-STANDARD.md) |
 
 9 月 26 日新增的编码和大文件实现已提交。恢复基线的资料整理已提交为 `9aed60f`；
 随后修正编码映射、UTF-16 分块/修复、超长行续页/尾读、长首行编码采样及搜索完整性。
 当前 API 的 `partial_start` 标明尾部片段，`truncated_lines` 标明搜索遗漏的长行内容。
-本轮收口的分页修复避免 JSON 转义膨胀导致整页内容和续页信息一起被省略。
+分页修复避免 JSON 转义膨胀导致整页内容和续页信息一起被省略。
+本轮进一步修正无进展读取、页末预读失败、文件变化后的结果与续页，以及搜索模式异常的句柄清理。
 
 ## 本轮基线复核
 
 开发机为 Fedora 44 / x86_64，内核 `7.2.7-200.fc44.x86_64`。
 完整测试在资源守卫下串行运行。日志保存在
-`out/page-review-20260928/`；此前的编码复核和资料整理日志分别保留在
-`out/f4-review-20260928/` 与 `out/development-reset-20260928/`。
+`out/range-stability-20260928/`；此前的分页、编码及资料整理日志保留在
+`out/page-review-20260928/`、`out/f4-review-20260928/` 与 `out/development-reset-20260928/`。
 这些是开发机复核记录，不是发行目标资格。
 
 | 检查 | 2026-09-28 结果 |
 | --- | --- |
-| 完整 Lua suite | 657/657 通过；R23--R28 新增 8 项，R29 新增 3 项 |
-| 全仓注释结构 | 207 个文件、5068 个声明、0 缺项；tree-sitter 0.25.2 |
-| 原生编码探针 | 沿用本日 F4 记录：当前 native 构建通过，Linux 12 组往返及严格拒绝通过；R29 未改原生层 |
+| 完整 Lua suite | 663/663 通过；本批新增 6 项，覆盖 38 组错误和版本变化组合 |
+| 全仓注释结构 | 207 个文件、5084 个声明、0 缺项；tree-sitter 0.25.2 |
+| 原生编码探针 | 沿用本日 F4 记录：当前 native 构建通过，Linux 12 组往返及严格拒绝通过；R29--R33 未改原生层 |
 | TP-003 / TP-010 | 重跑通过；453 / 5,564,743 条断言 |
 | 注释检查器反例 | 14/14 通过 |
 | 契约 / 证明登记 / readiness | 7687 / 56 / 562 条断言通过 |
@@ -76,13 +79,14 @@ YACA_PROOF_SOURCE_CACHE="$PWD/out/qualification/sources" \
 
 ## 尚未完成
 
-- 全仓人工语义 Review；新编码/区间读取的文件变化、错误路径与原生资源生命周期接续 R23--R29 审查。
+- 全仓人工语义 Review；接续 R23--R33 审查原生转换资源、代码页可用性及旧 Windows 有损路径。
 - 当前源码的三目标完整构建、目标回归、网络故障、恢复与容量矩阵。
 - A08/A09 的 GiB 级日志、增长/轮转、旧代码页及真实模型读取旅程。
 - 工具来源、许可证、依赖闭包及三目标 clean/std/full 共九包验收（C32--C34）。
 
 已知行为边界：大文件单次扫描预算为 256 MiB，不计算整文件摘要；
-超过 16 MiB 的文件不能 write/patch。文件在接纳与执行之间增长仍可能得到
-`TargetChanged`，需要重试；不把这一边界记作已解决。
+超过 16 MiB 的文件不能 write/patch。文件在接纳、读取或续页之间的身份变化返回
+`TargetChanged`，需要重新读取。身份复核不是文件系统快照；持续增长与旧文件系统时间精度
+仍需实际目标验收，不把这些边界记作已解决。
 
 下一步和逐项完成条件统一放在 [TRACKING.md](TRACKING.md)。
