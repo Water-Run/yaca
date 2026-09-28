@@ -1,17 +1,17 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-09-28
 File: manifest.lua
 Description: Indexes modern-host feasibility evidence and its limits for target qualification.
 ]]
 
 return {
-  evidence_version = "modern-2026-08-29.3",
-  observed_at = "2026-09-23",
+  evidence_version = "modern-2026-08-29.4",
+  observed_at = "2026-09-28",
   design_baseline_commit = "a169dd0",
   host = {
     os = "Fedora Linux 44 (Workstation Edition)",
-    kernel = "Linux 7.2.6-200.fc44.x86_64",
+    kernel = "Linux 7.2.7-200.fc44.x86_64",
     architecture = "x86_64",
   },
   source_pins = {
@@ -38,7 +38,7 @@ return {
       scope = "deterministic-fake-port-core",
       command = "bin/lua55 .tools/proofs/tp003_event_pump.lua",
       assertions = 453,
-      source_sha256 = "8a7ead513c41dea5463555602f7dc5e3c04959133ebc9c3cfaaa4c2f993d44db",
+      source_sha256 = "669c6fa4ac43c2d7b087083dc6b61c9cc4d839413e9becadfb8a1bcc4595a246",
       target_pending = { "Win32 console/wait adapter", "CentOS wait adapter", "real process/network I/O", "suspend/resume" },
     },
     {
@@ -71,7 +71,7 @@ return {
       assertions = 5564743,
       source_sha256 = {
         build = "8199ac07ea85ee5c404d6b97515ea94252239301cc981d701cda9016546de5c3",
-        corpus = "b31f2d3747df5244ba11e90f77572e35125932573b89b6a66a033becff0f8dd1",
+        corpus = "75dedcd8f2cf58c4d65c3697cfe6754be6dcc0673623ca51c77d0796cefb5ecf",
       },
       target_pending = { "Win32 x86 build/load", "Win64 build/load", "CentOS 7 runtime", "target resource limits" },
     },

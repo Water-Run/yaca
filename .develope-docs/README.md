@@ -1,101 +1,41 @@
-# yaca 开发设计追踪区
+# yaca 开发入口
 
-此目录用于追踪 yaca 的分析、讨论、设计、编码计划、验证和决策。
+更新日期：2026-09-28。
 
-**编码约束：**[编码规范与注释约束](CODING-STANDARD.md)适用于全部自有代码，要求固定文件头，
-函数、回调、元表及类型完整注释，不得遗漏；当前正在补全已有实现并建立全量检查。
+当前源码基线为 `32d053e`。yaca 已有通用 Agent 实现，正在补齐 Review、目标环境验收和
+三档发行物；阶段为 `implemented-unqualified`，Release Gate R 关闭。
 
-**2026-09-22 当前入口：**[通用 Agent 定位与路线](PRODUCT-ROADMAP-2026-09-22.md)、
-[大改实施蓝图](MAJOR-REDESIGN-PLAN-2026-09-22.md)、
-[三档发行与默认工具清单](../release/TOOL-BUNDLES.md)、
-[本轮实现与验收](PORTABLE-IMPLEMENTATION-2026-09-22.md)、
-[MiniMax Code / ZCode / DeepSeek 源码对照](references/agent-loop-source-review-2026-09-22.md)、
-[指定服务器复核](BASELINE-REVIEW-2026-09-22.md)。负责人方向归档为 D-072 / D-073。
-内嵌 Lua、可选工具信息、首次引导、PTY 修复与三档装配已经落地，机读契约同步；
-继续完成目标工具闭包与 C32--C34，Gate R 仍关闭。
+## 从这里继续
 
-## 目录性质
+| 资料 | 用途 |
+| --- | --- |
+| [编码规范与注释约束](CODING-STANDARD.md) | 修改前必读；文件头、全部函数/类型注释及语义 Review 要求 |
+| [当前状态](CURRENT-STATE.md) | 当前已有能力、最新复核结果、证据边界 |
+| [剩余工作](TRACKING.md) | 下一项、执行顺序和完成条件 |
+| [开发历程与历史资料](DEVELOPMENT-HISTORY.md) | 已完成工作的索引、旧候选和旧决策的适用范围 |
+| [实施计划](IMPLEMENTATION-PLAN.md) | C01--C34 的文件、依赖和退出条件 |
+| [机读契约](contracts/README.md) | 接口、平台、发行与阶段门的可执行约束 |
 
-- 本目录是项目正式的设计与开发追踪资料，纳入 Git 版本控制。
-- 设计资料按完整批次维护；D-071 的推送授权属于当时任务，本次 D-072 不新增远端写授权。
-- 这里可以持续修订；项目源码和公开用户文档只有在相关设计确认后才修改。
-- Gate A/B 已在 2026-08-29 通过；首版核心/controller 已闭合，Server 2008 控制台与真实服务商已有验收。当前先推进通用 Agent 路线，再接续 C32--C34。未完成的 target qualification 继续阻止 Gate R/发布，现代机 proof 不能替代目标证据。
+## 已确定的方向
 
-## 工作方式
+yaca 是通用终端 Agent。老设备兼容、单文件便携和开箱即用是产品特性；
+U 盘排障是典型场景。延续现有核心，按实际缺陷修补，不以重写架构作为收尾前提。
 
-1. 先建立覆盖全产品的设计决策清单，避免只深入局部实现细节。
-2. 先讨论用户可感知的机制、数据生命周期、失败恢复、安全和交互，再讨论接口与文件布局。
-3. 确认项目级目标、兼容性范围、子系统边界和依赖关系。
-4. 默认每次深入一个决策主题；项目负责人要求集中盘点时，可以先给出带依赖顺序的综合决策包，再把回复逐项归档。
-5. 每个子系统依次完成：现状分析、方案比较、设计确认、验收标准。
-6. 全部关键设计确认后编写并机器校验实施计划；当前这一步已完成。
-7. 实施阶段按当前路线逐项完成，不并行铺开半成品；保留 C01--C34 的历史实现与发行资格边界。
+- `lua` 是正式内置工具，调用 yaca 内嵌的同版本解释器。
+- `.ask` 为纯问答；未发布接口直接整理，不增加旧名称别名或迁移层。
+- `tools/` 可选。每个平台提供 clean、std、full；full 是开发工具箱。
+- 保持 XP SP3 x86、Win7 SP1 x64、CentOS 7 x86_64 的兼容底线。
+- 完整代码 Review、注释结构检查和人工语义 Review 都属于验收。
 
-## 文件索引
+原始要求见 [D-072--D-076](DECISIONS.md#d-072-通用-agent旧设备兼容与可选工具2026-09-22)；
+工具候选见 [默认工具清单](../release/TOOL-BUNDLES.md)。
 
-- `TRACKING.md`：阶段、子系统状态和下一步。
-- [2026-09-16 基本可用验收](BASIC-USABILITY-ACCEPTANCE-2026-09-16.md)：N13 交付、575 项测试及真实代码修复与两次恢复审批。
-- [2026-09-16 Windows 收尾记录](WINDOWS-PREVIEW-CLOSEOUT-2026-09-16.md)：N11 包、源码哈希和 Server 2008 / DeepSeek 真实验收。
-- `HANDOFF-AUTO-2026-08-10.md`：2026-08-10 离线自动规格硬化交接笔记（D-070）。
-- `DECISIONS.md` D-071：2026-08-29 编码就绪收尾、modern proof 与当时核心节点推送授权；本次方向及边界见 D-072。
-- `OWNER-QUESTIONS-01.md`：已经回答并冻结的负责人集中问卷；保留 29 题收到回复时的候选语境。
-- `DECISION-PROJECTION-BATCH-06.md`：把集中答复确定展开为 248 个 atomic `PR-006-*` 传播记录。
-- `CURRENT-STATE.md`：仓库与打包基础设施现状。
-- `SYSTEM-MAP.md`：子系统导航、依赖和建议顺序。
-- `DECISIONS.md`：已经确认的项目级决策。
-- `DESIGN-DECISION-ROADMAP.md`：解释原子题库、十个 owner packet、跨 packet 分批队列与实施就绪门的全局关系。
-- `DECISION-BATCH-QUEUE.md`：保留把全部正式问题按真实依赖重组后的 49 个旧原子审计批次；当前不再要求负责人逐批作答。
-- `ARCHITECTURE-READINESS.md`：区分题库、决定、规格与计划，列出进入实施计划前必须通过的 P0/P1 门和证据。
-- `GATE-AUDIT-2026-08-29.md`：Gate A/B/R 阶段拆分及 AR-P0-01..16 / AR-P1-01..12 的逐项审计。
-- `IMPLEMENTATION-PLAN.md`：M0--M10 / C01--C34 的全程序文件、依赖、测试、退出与提交边界。
-- `TOOL-PERMISSION-MATRIX.md`：W2-B tool×Permission 矩阵。
-- `MODEL-EVENT-SCHEMA.md`：W2-C canonical Model 事件/请求。
-- `ACTION-REGISTRY.md`：W2-A semantic action 注册表。
-- `contracts/`：2026-08-29 编码就绪机读真源；16 份 contract 冻结 product/config/runtime/action/tool/model/context/TUI/platform/diagnostics/formats/transport/Prompt/release/readiness/zero-surface 与 12 组 synthetic fixtures。
-- `.tools/validate_design_contracts.lua`：从仓库根用 `bin/lua55` 执行的跨契约校验器；当前覆盖 7,000+ 条集合、映射、状态、fixture、task graph 与零表面断言。
-- `.tools/validate_coding_readiness.lua`：校验 Gate A/B passed、Gate R closed、28 项 gate 路由、C01--C34 计划，以及当前 implementation phase 对应的源码与公开状态。
-- `PROOF-PLANS-P0.md`：TP-003/006/008 证明提纲。
-- `READINESS-GAP.md`：主线就绪差距与 Wave 工作包（从“决定已收口”到“可开发”的运营清单）。
-- `SPEC-FREEZE-QUEUE.md`：规格冻结问答（主队列已完成 → D-059..D-069）；再有缺口另开题，不默认续 SQ。
+## 记录规则
 
+`CURRENT-STATE.md` 只保留当前快照；`TRACKING.md` 只保留剩余工作。
+日期文档记录当时的设计、缺陷和证据，由[历史索引](DEVELOPMENT-HISTORY.md)导航。
+旧问卷、旧候选测试和旧 Gate R 结论不能替代当前源码与九个发行包的验收。
 
-- `DECISION-RESOLUTION-PROTOCOL.md`：规定负责人回复怎样逐项归档、消解冲突并提升为可实施规格。
-- `DECISION-REGISTER.md`：`decision-inventory-v9` 的 270 组正式问题唯一实时状态、条件、回复证据和决定/规格/gate 传播登记；从这里恢复当前进度。
-- `LIVE-DESIGN-COVERAGE.md`：当前 checklist/AQ 到负责人决定、已确认结论、技术规格/证明或排除重入的覆盖审计；不另存回复状态。
-- `DECISION-TRACEABILITY.md`：审计 checklist、AQ、决策组、owner、readiness gate 和未来权威规格之间的追踪缺口。
-- `TECHNICAL-PROOF-BACKLOG.md`：把不应由负责人凭偏好选择的兼容、性能和安全事实变成目标平台证明义务。
-- `FOURTH-ROUND-GAP-AUDIT.md`、`SUBSYSTEM-COVERAGE-AUDIT.md`、`CONFIG-COMPLETENESS-AUDIT.md`：第四轮敌对式查漏、23 子系统责任矩阵和完整配置面专项审计。
-- `CONFIG-SCHEMA-CANDIDATE.md`：完整配置逐字段候选、XML 覆盖、INI 往返、秘密生命周期与连续 `CV-001` 至 `CV-076` 跨字段校验底稿。
-- `DATA-CLASSIFICATION.md`：**W3-C 现行**数据分类与 Key 生命周期矩阵。
-- `DATA-CLASSIFICATION-CANDIDATE.md`：历史审阅底稿；冲突以 `DATA-CLASSIFICATION.md` 为准。
-- `QUESTIONS.md`：`AQ-001` 至 `AQ-437` 原子设计决策题库；用于防遗漏和追踪，不再直接作为主要问答页面。
-- `DESIGN-CHECKLIST.md`：覆盖全产品的设计主题与历史讨论顺序；现行选择只看 register/decisions。
-- `DISCUSSION-BATCH-01.md`：首批 20 个高杠杆综合问题及项目负责人的原始回复；保留为决策证据，不把其中的推荐自动视为确认。
-- `DISCUSSION-BATCH-02.md`：正式 PJ/CX 首轮回复原话、编号解释与原子断言。
-- `DISCUSSION-BATCH-03.md`：`PJ-18` 单 root、镜像父目录权威来源，以及 `AutoRenameDisabled` 手工名称优先级补缝的原话与断言。
-- `DISCUSSION-BATCH-04.md`：本轮增量批注原话；无启动头 master、`.model` picker/direct、逐 turn 配置 generation、Context 排序/self-test/锁，以及仍待细化的 Permission/DoubleCheck 目标。
-- `DISCUSSION-BATCH-05.md`：luainstaller x86 证据口径修正，以及“原子登记不再直接充当负责人问卷”的流程决定。
-- `DISCUSSION-BATCH-06.md`：集中问卷原话、逐项确认、条件重算和冲突归一；负责人产品补问现为零。
-- `decision-packets/02-*.md` 至 `10-*.md`：九个通俗、成套、带 ASCII 页面/状态/替代方案的主决策包。
-- `decision-packets/11-cross-system-operational-seams.md`：持续收口跨系统外改、等待、恢复、秘密删除、管理事务、扩展关闭及其后续运行接缝。
-- `references/agent-loop-reference-study.md`：五个开源 AgentLoop 固定提交的源码核对与可借鉴问题。
-- `subsystems/00-*.md` 至 `22-*.md`：每个子系统各自的讨论与设计文档；编号用于稳定引用，不等于当前讨论顺序。
-- `subsystems/TEMPLATE.md`：单个子系统的统一设计模板。
-- `web-tracks/`：未来本机 Web 产品族空预留（`yaca-web` / `yaca-ie6`，D-058）；不进入 v0.1 实现。
-
-## 状态定义
-
-- `候选`：只完成初步识别，边界尚未确认。
-- `讨论中`：正在和项目负责人逐项确认。
-- `设计已确认`：目标、接口、错误、兼容性和验收标准已经确认。
-- `计划已确认`：实施顺序和任务拆分已经确认，但尚未编码。
-- `实现中`：已有代码但对应退出条件尚未全部完成。
-- `已验证`：须注明验证范围；平台无关 suite、现代机证明与真实目标资格分别记录。
-
-## 当前阅读入口
-
-当前先读[通用 Agent 路线](PRODUCT-ROADMAP-2026-09-22.md)、[`TRACKING.md`](TRACKING.md)、[`CURRENT-STATE.md`](CURRENT-STATE.md)、[`IMPLEMENTATION-PLAN.md`](IMPLEMENTATION-PLAN.md) 与 [`contracts/README.md`](contracts/README.md)；阶段门见 [`GATE-AUDIT-2026-08-29.md`](GATE-AUDIT-2026-08-29.md)，历史选择恢复再读 `DECISION-REGISTER.md`/`DECISIONS.md`。`OWNER-QUESTIONS-01.md` 的 29 题已经全部答复，原 `decision-inventory-v9` 为 `unanswered=0`；270 组、384 个 checklist ID、`AQ-001..AQ-437`、`CV-001..CV-076` 和 49 个旧批次继续保留为审计证据。这不代表 2026-09-22 新增要求已经完成机读传播。核心实现已推进至 M9，目标平台证明仍只在对应 milestone/Gate R 通过后成立。
-
-本轮新增拆分把 composer 输入召回、配置秘密文件权限、raw shell 继承环境、完整 model-yield 后续接、direct 文件属性、ignore/隐藏项、`exec` cwd、输出解码与 canonical 保留、active XML 外改恢复等交给独立 owner。M05-57..59、AL06-50/51 与 TS-40 等原子组也已随 Batch 06 收口；旧 packet 中的推荐仍只是收到回复前的历史候选，现行选择只看登记表和 D-049 至 D-057。
-
-2026-08-10：D-058 登记本机 Web 双线预留（[`web-tracks/`](web-tracks/README.md)、[`subsystems/17-web.md`](subsystems/17-web.md)）：`yaca-web`=**Java 8**，`yaca-ie6`=**PHP 5.4** + IE6。这不改变 v0.1 零 Web 表面，也不授权 Web 实现。
+修改实现时同步相关契约和测试。构建、完整测试、虚拟机通过
+`.tools/run_with_resource_guard.sh` 串行执行。现代开发机通过、目标机通过、
+最终发行包通过分别记录；注释覆盖通过也不能写成人工 Review 完成。

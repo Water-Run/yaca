@@ -1,4 +1,4 @@
-# Modern-host proof evidence — 2026-08-29 (refreshed 2026-09-23)
+# Modern-host proof evidence — 2026-08-29 (refreshed 2026-09-28)
 
 Status: TP-003, TP-006, TP-008, and TP-010 have reproducible
 `proven-modern` evidence for the scopes below. No result in this directory is
@@ -14,12 +14,18 @@ complete run is:
 ## Observation environment
 
 - Design baseline before adding the proof pack: `a169dd0`.
-- Fedora Linux 44 Workstation, Linux `7.2.6-200.fc44.x86_64`, x86_64.
+- Fedora Linux 44 Workstation, Linux `7.2.7-200.fc44.x86_64`, x86_64.
 - GCC 16.2.1, curl 8.18.0, xmllint/libxml 2.12.10.
 - Repository Lua runner: Lua 5.5.0 for contract/TP-003 checks.
 - TP-010 isolated build: Lua 5.5.1, Expat 2.8.2, LuaExpat 1.5.2 from the pinned hashes in the manifest.
 - TP-010 was rerun on 2026-08-30 after its entrypoint gained the serialized resource preflight; the proof body and conclusions are unchanged.
-- All four proofs were rerun under the resource guard on 2026-09-23 after source-comment changes. The manifest pins the exact rerun source hashes; all assertion counts passed again. This modern-host rerun does not qualify any release target.
+- The 2026-09-28 baseline check found stale source pins for TP-003 and TP-010. Both proofs were rerun before updating the manifest and validator pins. The full guarded readiness run then passed all four proofs and RP-001; assertion counts are unchanged. Earlier observations remain in Git history.
+
+The rerun used Python 3.13 with the versions in
+`.tools/comment_check_requirements.txt` and SHA-256-verified source archives via
+`YACA_PROOF_SOURCE_CACHE`. Local logs are in
+`out/development-reset-20260928/{proof-rerun,readiness}.log`.
+This rerun does not qualify a release target or complete the source-comment semantic review.
 
 ## Result summary
 
@@ -33,8 +39,11 @@ complete run is:
 ## Normalized successful output
 
 ```text
-design-contract validation PASS: 7660 assertions across 16 contracts and 12 fixture sets
+comment coverage: files=206 declarations=5056 violations=0 PASS
+design-contract validation PASS: 7687 assertions across 16 contracts and 12 fixture sets
 proof-evidence validation PASS: 56 assertions across 4 modern proofs
+coding-readiness validation PASS: 562 assertions; Gate A/B passed, Release Gate R closed per D-073
+documentation-truth validation PASS: 5 public documents consistent with Gate R state
 
 proof=TP-003
 scope=modern-host-deterministic-fake-ports
@@ -80,7 +89,7 @@ status=PASS
 
 proof=TP-010
 scope=modern-linux-pinned-source-build-and-corpus
-host=Linux 7.2.6-200.fc44.x86_64 x86_64
+host=Linux 7.2.7-200.fc44.x86_64 x86_64
 compiler=gcc (GCC) 16.2.1 20260819 (Red Hat 16.2.1-2)
 source_lua=5.5.1 sha256=1c4b4068d67061f2a2231ad2b5422e77acea1487ea9890f6320af614f4373dce
 source_expat=2.8.2 sha256=ef7d1994f533c9e7343d6c19f31064fc8ebbcbcaa144be3812b4f43052a05f4c

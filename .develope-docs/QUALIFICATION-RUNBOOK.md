@@ -1,5 +1,10 @@
 # C32 目标机资格执行手册（就绪件）
 
+> 这是 2026-09-19 的旧候选执行记录，保留供流程复用。下文包名、根目录布局、
+> 手工 winpty 和三包门禁不再代表当前实现；D-073 要求三目标各 clean/std/full。
+> 执行前核对当前脚本参数、[工具清单](../release/TOOL-BUNDLES.md)及
+> [剩余工作](TRACKING.md)，最终以 [readiness](contracts/readiness.lua) 判定资格。
+
 日期：2026-09-19。本手册与 `qualify_windows_target.sh` 是拿到目标机后的
 立即可执行件。所有脚本已在 win2008（Server 2008）、evader-admin
 （Windows 11）与 CentOS 7 容器上以同型流程预演通过；正式资格以目标机

@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-09-28
 File: validate_proof_evidence.lua
 Description: Checks proof manifests, declared artifacts and evidence admission requirements.
 ]]
@@ -50,9 +50,9 @@ end
 local expected = {
   ["TP-003"] = {
     files = {
-      [root .. "/.tools/proofs/tp003_event_pump.lua"] = "8a7ead513c41dea5463555602f7dc5e3c04959133ebc9c3cfaaa4c2f993d44db",
+      [root .. "/.tools/proofs/tp003_event_pump.lua"] = "669c6fa4ac43c2d7b087083dc6b61c9cc4d839413e9becadfb8a1bcc4595a246",
     },
-    recorded = "8a7ead513c41dea5463555602f7dc5e3c04959133ebc9c3cfaaa4c2f993d44db",
+    recorded = "669c6fa4ac43c2d7b087083dc6b61c9cc4d839413e9becadfb8a1bcc4595a246",
   },
   ["TP-006"] = {
     files = {
@@ -69,11 +69,11 @@ local expected = {
   ["TP-010"] = {
     files = {
       [root .. "/.tools/proofs/tp010_build.sh"] = "8199ac07ea85ee5c404d6b97515ea94252239301cc981d701cda9016546de5c3",
-      [root .. "/.tools/proofs/tp010_xml.lua"] = "b31f2d3747df5244ba11e90f77572e35125932573b89b6a66a033becff0f8dd1",
+      [root .. "/.tools/proofs/tp010_xml.lua"] = "75dedcd8f2cf58c4d65c3697cfe6754be6dcc0673623ca51c77d0796cefb5ecf",
     },
     recorded = {
       build = "8199ac07ea85ee5c404d6b97515ea94252239301cc981d701cda9016546de5c3",
-      corpus = "b31f2d3747df5244ba11e90f77572e35125932573b89b6a66a033becff0f8dd1",
+      corpus = "75dedcd8f2cf58c4d65c3697cfe6754be6dcc0673623ca51c77d0796cefb5ecf",
     },
   },
 }

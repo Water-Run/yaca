@@ -1,5 +1,9 @@
 # Gate A / B 编码就绪审计
 
+> 历史审计：保留 8 月 29 日的 Gate A/B 结论及 9 月 19 日追加的旧候选资格记录。
+> 后者不覆盖 D-073 三档发行、后续修复或当前源码；当前 Gate R 为 **closed**。
+> 现行门禁以 [readiness](contracts/readiness.lua) 为准，进度见 [当前状态](CURRENT-STATE.md)。
+
 审计日期：2026-08-29
 基线：`main@157f59c` + 本节点的 contracts / fixtures / plan 变更
 结论：**Gate A 通过；Gate B 通过；Release Gate R 通过（2026-09-19 按 D-072 放宽为三个实测环境资格）**

@@ -1,233 +1,49 @@
-# 开发追踪
+# 剩余开发与验收
 
-更新日期：2026-09-26
+更新日期：2026-09-28。起点：`32d053e`；当前结果见 [CURRENT-STATE.md](CURRENT-STATE.md)。
 
-## 2026-09-26 暂停：旧编码与大文件读取
+核心、内嵌 Lua、`.ask`、可选工具说明、三档装配、旧编码和大文件读取已有实现。
+继续在当前代码上收尾。C01--C31 是已有实现的任务映射，不重新从 C01 开工；
+原设计问卷已答完，不作为当前待办。
 
-按负责人要求在此暂停。完成内容、验证数字、下一步与遗留问题见
-[CURRENT-STATE 暂停点](CURRENT-STATE.md#2026-09-26-暂停点旧编码与大文件读取)。
+## 下一项
 
-| 范围 | 状态 |
-| --- | --- |
-| F4 旧编码（read/search/write/patch/exec 输出） | 源码与测试完成；目标机未运行 |
-| F4 大文件区间读取与搜索 | 源码与测试完成；GiB 级实测未做 |
-| 原生 `text_convert`/`fs_seek` | 三编译器语法检查、Linux 冒烟通过；Windows 待实测 |
-| 注释结构检查 | 全仓 0 缺项（tree-sitter 0.25.2）；语义 Review 待续 |
-| 目标产物与 C32--C34 | 未开始重建；Gate R 关闭 |
+先 Review 9 月 26 日新增的 `native/yaca_text.h`、`src/textcodec.lua`、
+`src/tools.lua` 及相关 native/backend/prompt 接缝，再重建当前源码的三目标产物。
+重点核对代码页往返、无损写回、区间偏移/续页/尾读、增长文件，以及有界资源和注释语义。
 
-## 2026-09-22 定位收口与开发排序
+## 执行队列
 
-新主线是 [通用 Agent F0--F6](PRODUCT-ROADMAP-2026-09-22.md)：
-契约对齐 → 直接启动 → 网络闭环 → 内置 Lua/可选 tools → 文件/容量/恢复 → 核心收敛 → 原发行资格。
-负责人明确的方向登记为 D-072；具体技术建议与未完成工作在路线中分开标记。
-后续澄清已纳入：产品是通用 Agent，旧设备/U 盘为典型场景；仅 Lua 为必带 Agent 工具，
-Python/SSH 等选配。架构、兼容迁移与可判定验收见[大改蓝图](MAJOR-REDESIGN-PLAN-2026-09-22.md)。
-
-后续范围收敛：原版已是通用 Agent，定位与主体架构保持；明确增量为 Lua 和可选工具说明。
-F 编号保留作分类，既有能力按缺陷修补和目标验收推进。onedir、exec 新 schema、
-改默认值、拆 main、格式迁移均移出必做范围，不先进行全面重构/规格重写。
-
-D-073 最新增量：Lua 内嵌 yaca，通过程序自身解释器入口调用；每目标 clean/std/full，
-三档使用同一核心。full 已选开发工具箱，Git/Python 3/编译工具按平台取舍；
-默认版本与来源见[发行分档清单](../release/TOOL-BUNDLES.md)。独立 Lua 文件/onedir 候选撤回。
-
-完成：[三个上游固定提交源码对照](references/agent-loop-source-review-2026-09-22.md)、
-首次 575/575 基线与[指定服务器离线复核](BASELINE-REVIEW-2026-09-22.md)、产品入口同步。
-随后已实现内嵌解释器、可选工具信息、首次引导、Cygwin PTY 修复、三档装配及工具
-输入锁定。新增用例后 CentOS 7 完整 suite **581/581** 通过；Server 2008 真实 PTY
-识别、隐藏输入和恢复通过。详情见[本轮实现记录](PORTABLE-IMPLEMENTATION-2026-09-22.md)。
-
-代码、goldens、机读契约随实现更新，release gate 不变。大文件/旧编码、跨层容量、
-目标故障矩阵与各目标实际 full 工具闭包仍待完成；C32--C34 仍是正式发行资格工作。
-
-## 2026-09-16 实现基线
-
-本轮接续 ZCode 的 N8 在线自检实现，完成 Model 管理器显式联网测试、
-Stage 1 实际文件发布探针、在线 Stage 2/3 的生产组合，以及 M05-57
-资源 selector 语义复核。配置/映射/`.model` 统一使用完整 logical name，
-只折叠 ASCII 大小写，保留原始 UTF-8 拼写和 Model/Permission 独立命名空间。
-
-在用户指定的 Server 2008 非 R2 x64 上，以真实 DeepSeek 服务继续验收。
-已修复相对工具路径、聚合 SSE 响应的事件上限、action review 的 Permission
-审计值、自检提示冲突/主动取消误判，以及恢复历史后审批编号冲突。N13 从历史
-approvalId 最大编号继续分配，并明确显示未决 review 的恢复方式。最新交付与实测见
-[基本可用验收](BASIC-USABILITY-ACCEPTANCE-2026-09-16.md)；此前 N8--N11 记录保留在
-[本轮早期收尾记录](WINDOWS-PREVIEW-CLOSEOUT-2026-09-16.md)。
-
-首版功能收口与正式发行资格分开记录。C32--C34 的 XP SP3 x86、Win7 SP1 x64、
-CentOS 7 x64 完整资格仍待执行，Release Gate R 保持关闭。
-Permission 按 M05-48 已选 B 编辑现有字段，生命周期通过手工 INI。
-Windows 程序只在用户指定远端运行。
-
-## 当前阶段
-
-**平台无关核心与首版 controller 已闭合，Windows 可用预览已验收；正式目标资格待完成。**
-C01--C31 已有核心实现、测试 harness、最小发行规划和现代 Linux 候选证据；
-这不表示全部目标相关 hard gate 已完成。机读阶段维持
-`implemented-unqualified`，Gate A/B 已通过，Release Gate R 关闭。
-
-本轮开发起点为 `289a3c8`（2026-08-30 暂停交接）；此前核心节点
-`95a0e9c` 的完整串行 suite 为 **442/442**。本轮变更与验证记录见下表。
-原来的“源码 0%、从 C01 开始”是 2026-08-29 编码前快照，已被现有代码取代。
-
-## 进度与证据
-
-| 范围 | 已有结果 | 仍需完成 |
+| 顺序 / 对应任务 | 要做的工作 | 完成条件 |
 | --- | --- | --- |
-| 产品决策与契约 | D-001--D-071；16 contracts、12 fixture sets；无未答产品分支 | 实现变化持续同步契约与负向用例 |
-| M0 / C01 | 测试发现与隔离、loader allowlist、release manifest | 最终 zip 零表面检查 |
-| M1 / C02--C04 | 平台 identity、event pump、native ports；现代 Linux 探针与 Windows 交叉编译 | 真实旧 Windows / CentOS wait、console、process 资格 |
-| M2 / C05--C09 | UTF-8、JSON、INI、XML、路径/hash 核心与测试 | 三目标 native XML ABI 和资源校准 |
-| M3--M4 / C10--C14 | immutable config、bootstrap、action/CLI、兼容 TUI/editor | 三目标完整旧终端资格 |
-| M5 / C15--C18 | 单 XML、索引、writer/lock、publication/recovery、管理事务核心 | 目标文件系统 replace/lock/崩溃矩阵；previous 修复及跨 workspace 确认已接通 |
-| M6 / C19--C22 | curl/SSE/retry/cancel、双 Model 协议、Prompt/control；XP HTTPS 静态候选 | 真实目标 TLS/CA/代理、provider wire 和取消证据 |
-| M7--M8 / C23--C28 | 8 Tools、Permission、operation、AgentLoop、queue/side/review、手工/自动 compaction | 目标进程树/路径/资源上限验证 |
-| M9 / C29--C30 | typed diagnostics、self-test 调度/Stage 1、`.details` | 已接通 Stage 2/3；三目标完整端到端资格待执行 |
-| M10 / C31 | 最小包 allowlist、依赖锁/license/SBOM、资源 overlay、候选构建脚本 | C32--C34 |
-| C32 | 三目标资格计划与部分候选工具 | XP SP3 x86、Win7 SP1 x64、CentOS 7 x64 真实构建/运行/完整测试 |
-| C33 | 发行旅程与零表面契约；D-073 增补三档 | 三目标各 clean/std/full 的包布局、配置、新建/恢复、退出、升级、卸载与工具资格 |
-| C34 | 文档与 evidence 布局规划 | 最终 SHA-256/license/SBOM/build/test evidence，公开声明复核 |
+| 1 · D-075/D-076、F4/F5 | 完成新增路径 Review，接续全仓实现及注释语义 Review；逐项核对 R01--R22 的剩余验证 | 每个审查范围有结论和缺陷处理；结构检查与人工语义审查均通过，不用覆盖数字替代人工结论 |
+| 2 · F4、C32 | 用同一源码快照重建 win32-x86、win64-x86_64、linux-x86_64；包含 R21/R22、新编码与 seek | 记录源码/依赖/产物哈希；XP、Win7、CentOS 7 完整回归和原生探针通过；指定 Server 2008 直接入口复验 |
+| 3 · F2/F4、C32 | 当前产物执行真实网络、取消/进程树、容量、发布/恢复与文件系统故障矩阵；补 A08/A09 | A05--A13 各有实际证据及明确范围；旧编码、GiB 日志、轮转/截断和真实模型使用续页通过；失败记录保留 |
+| 4 · F3、C33 | 补 win64/Linux std 及三个 full 的工具构建、来源和依赖闭包；复核已有 win32 std | 默认版本实际可运行；许可证、源码、哈希、目标兼容范围齐全；删去 tools 后核心与 Lua 仍可用 |
+| 5 · C33 | 装配三平台各 clean/std/full，执行最终包干净机旅程 | 九包布局与零表面检查通过；同平台核心一致；首次配置、Ask/工具、多轮任务、恢复、移动/升级/卸载有证据 |
+| 6 · C34 | 汇总最终证据与用户文档，复核发布门 | SHA-256、许可证、SBOM、构建和测试记录与最终包一致；目标资格齐全后再评审 Gate R |
 
-已接通的近期 controller 包括 `--continue`、跨 workspace `.context`、
-`.details`、`.cautious`、`.prompt show|set|clear|edit`、`.model`、`--status`、chat `.status`
-和 `--export <selector>`。
-显式 rebind、管理器 export/select 和三个续接入口的跨 workspace 确认均已接通。
+F 分类和 A01--A15 场景来源于[实施候选](MAJOR-REDESIGN-PLAN-2026-09-22.md#6-必须形成的新验收证据)，
+任务依赖与发布门以 [readiness](contracts/readiness.lua) 为准。A01--A04、A14/A15
+随目标启动、三档旅程一并执行；历史设计中的迁移候选不扩展 D-075 的未发布实现范围。
+[原资格手册](QUALIFICATION-RUNBOOK.md)保留旧流程；执行前按当前工具参数和三档布局核对。
 
-`config-repl` 已接通有效 INI 的 catalog 字段编辑、预览、精确版本保存和重载；
-缺文件时仍提供修复模板；无效源的交互修复已接通。Model 管理器包含离线编辑与
-需单独确认的 `test <row-id>` 联网测试；`context-repl` 的 12 项投影均已接通。
-在线 self-test Stage 2/3 已使用真实生产 Model adapter，Stage 3 仅报告建议。
+## 执行约束
 
-## 本轮推进（2026-09-07）
+- 修改前读 [编码规范](CODING-STANDARD.md)，新增和改动代码同步完整注释。
+- 构建、完整测试、虚拟机均通过 `.tools/run_with_resource_guard.sh` 串行执行。
+- 注释检查使用 Python 3.13 及 `.tools/comment_check_requirements.txt` 的固定依赖。
+  本机已验证的解析器目录为 `out/code-comment-audit-20260923/site313`；
+  tree-sitter 0.26.0 曾发生段错误，不替代固定的 0.25.2。
+- 证明构建可用 `YACA_PROOF_SOURCE_CACHE` 指向锁定源码缓存；仍逐个验证 SHA-256。
+- 现代机测试、旧候选证据、当前源码目标证据、最终发行包证据分别记录。
+- 只按实测缺陷调整实现；保留通用 Agent 定位、既有核心和平台兼容底线。
 
-代码节点：`87ea74f`（模型切换秘密复核与代理展示）、`c828830`
-（Linux qualification 资源门槛与动态测试证据）。
+## 记录交接
 
-| 工作项 | 改动 | 验证状态 |
-| --- | --- | --- |
-| 模型切换代理展示 | config 生成去 userinfo、隐藏 query 值的规范代理 route；picker/确认详情展示 | 定向 54/54、完整 449/449 通过 |
-| 凭据变更复核 | 保存态 apply 重载后，在同一 config service 内比较目标 Key、secret adapter option、代理凭据的精确值；不公开秘密或摘要 | 公开 shape 不变的轮换与 stale-before-publication 用例通过 |
-| Linux 构建资源 | 所有 make 串行；至少 5120 MiB 可用内存；已有较低级别 guard 也重新检查 builder 门槛 | 语法/静态契约及 4 组模拟 admission 边界通过 |
-| 构建测试证据 | 从唯一、正数、全通过的 SUMMARY 动态取数；拒绝重复/缺失/畸形/失败摘要 | 完整 suite 与摘要正负用例通过 |
-| 进度整理 | TRACKING、CURRENT-STATE、实施计划、开发入口和中英文 README 统一状态 | 补记 production 入口缺口，Gate R 仍关闭 |
-| 只读状态入口 | `--status` 显示当前进程、workspace 和配置状态；不查历史、不建目录/XML，缺失或无效配置也可查看 | production/TTY/零副作用测试通过 |
-| chat 状态准确性 | 显示最新 writer 的 Context hash 和有效 Model/Permission/DoubleCheck；只复核当前 XML 的身份与规范文档，失效后关闭 admission 与 publication | 外部替换/写入/删除/读后换路径、sticky fail-stop 和同批后续输入阻断测试通过 |
-| Markdown export | 精确 selector → 只读校验 → 既有 Markdown → 最终目标复核；缺失/无效配置仍可导出，不启动 writer/恢复/Model | production CLI、TTY gate、竞态和 registered-secret 零输出测试通过；解码后与最终 Markdown 均扫描 |
+本次已重新核对源码回归与注释结构，并重跑 TP-003/TP-010 修复证明摘要漂移。
+具体结果只在 [CURRENT-STATE.md](CURRENT-STATE.md) 维护。
 
-验证：design-contract **7612**、proof-evidence **56**、coding-readiness **553**
-条断言通过；TP-003/006/008/010 与 RP-001 全部通过。readiness 首次运行在
-TP-010 下载 Lua 源码时遭遇 TLS EOF，随后 TP-010/RP-001 使用 SHA-256 与锁
-完全一致的本地源码包重新构建并通过；下载来源切换已单独记录，未关闭校验。
-本轮日志在 `out/development-2026-09-07-sTXXIy/`，属于本机可丢弃证据，
-不作为三目标资格或发布授权。
-
-状态 controller 节点：完整 suite **457/457**，coding readiness 入口及上述五项
-modern proofs 全部通过；构建证明沿用每次复核 SHA-256 的锁定源码缓存。
-日志为同目录的 `status-full-suite.log` 与 `status-readiness.log`。
-
-导出 controller 节点：完整 suite **462/462**，coding readiness 入口及五项
-modern proofs 全部通过；日志为 `export-full-suite.log` 与 `export-readiness.log`。
-同样使用校验后的锁定源码缓存，不代表 XP/Win7/CentOS 7 已通过资格验证。
-
-## Prompt 编辑器节点（2026-09-08）
-
-`.prompt edit` 已接入内置有界多行事务：以当前 Prompt 初始化，追加文本保留
-空白，`.show|clear|reset` 操作草稿，`.save prompt-edit-N` 绑定本次编辑实例。
-保存前复核原 Session owner、Prompt 与 ConfigGeneration，并复用原有完整配置
-重载、secret scan、Context/ModelView 原子发布及下一 turn 生效边界。错误保留
-安全草稿供显式重试；取消、Esc、EOF、退出与新 Tool approval 均丢弃未保存编辑。
-不新增域动作、不调用外部编辑器、不在首条消息前创建 Context。
-
-定向 suite **62/62**、bootstrap suite **27/27**、完整 suite **471/471** 通过。
-完整 coding readiness 入口与 TP-003/006/008/010、RP-001 全部通过，三项 validator
-仍为 **7612/56/553** 条断言。构建证明使用逐次 SHA-256 校验的锁定源码缓存；
-日志仍位于上述可丢弃目录，前缀为 `prompt-editor-`，不作为三目标资格。
-
-## 配置编辑器节点（2026-09-08）
-
-有效 INI 的 `--config-repl` 已接入同一 schema/catalog：分页 section 列表、
-字段查看、单独 INI value 输入、set/unset、变更预览、`save config-edit-N`、
-reset/reload/cancel/quit。每次编辑先完整验证候选，失败不替换安全草稿；
-Key/ProxyUrl/AdapterOptions 一律隐藏输入和投影，旧/新 generation 都扫描显示值。
-save 复用 private source digest/identity 复核、同目录临时文件验证和原子发布；
-已知失败保留草稿，`ConfigPublishUnknown` 立即停止。未保存编辑不创建目录/XML，
-整个入口零 Model/Tool 请求。
-
-INI structural edit 改为保留未修改 physical records；插入字段按 schema 顺序，
-新 section 追加且不改变原 Model/Permission 默认顺序，移除字段保留其行尾注释，
-BOM/CRLF 与字节/行数上限持续生效。共享终端输入保留同批 cooked 命令，在切换
-到隐藏输入时拒绝已有缓冲文本，时钟失效后仍执行原生终端恢复与关闭。
-
-定向 **75/75**、完整 **481/481** 通过；覆盖 synthetic Linux/旧 CMD production
-composition、外部替换/reload、保存失败重试和未知持久性停止。完整 coding readiness
-与 TP-003/006/008/010、RP-001 全部通过，validators 为 **7612/56/553** 条断言；
-源码缓存逐次验 SHA-256。可丢弃日志前缀 `config-editor-`，不作为三目标资格。
-
-## 下一步顺序
-
-1. 保持已闭合的 Model 联网测试、资源 selector 和 Stage 2/3 回归；继续积累真实目标证据。
-2. 在真实目标验收已接通的 rebind/import/repair 与跨 workspace 继续，保留精确目标/目录/writer 复核。
-3. 在真实目标环境执行 C32；只有完整目标证据通过后才推进 C33/C34 和 Gate R。
-4. Web 继续只维护预留文档，核心 v0.1 不增加 Web 实现。
-
-## 持续约束
-
-- 单 Agent、terminal-only、单 Context/workspace、工具串行；实现主体 Lua 5.5。
-- 三个独立发行目标：Win32 x86（XP SP3 至 Windows 11）、Win64 x86_64
-  （Windows 7 SP1 至 11）、Linux x86_64（CentOS 7 硬基线）。
-- 现代 Linux、fake adapter、交叉编译和静态 import 结果不能替代真实目标资格。
-- 长期用户数据只有主 INI 与各 Context 的完整 XML；不引入 WAL、备份历史或 undo。
-- Std/Readonly、严格审批、secret 隔离、unknown 不自动重放和零扩展表面保持不变。
-- 历史 `bin/` 是候选输入，不能整体复制到发行包；相邻 `luainstaller`
-  1.3.0 的 upstream 证据不能替代 yaca-specific qualification。
-- 开发沿用 `main` 和 D-071 的核心节点约定；验证未闭合不标记为完成。
-- 每次验证重新查看内存、memory pressure 和遗留 runner；守住资源门禁，串行执行
-  targeted → full suite → coding readiness/proofs，不复用旧的 preflight 数字。
-
-## 阅读入口与历史
-
-当前实现细节见 [CURRENT-STATE.md](CURRENT-STATE.md)，任务退出条件见
-[IMPLEMENTATION-PLAN.md](IMPLEMENTATION-PLAN.md)，阶段门见
-[GATE-AUDIT-2026-08-29.md](GATE-AUDIT-2026-08-29.md)，机读真源见
-[contracts/README.md](contracts/README.md)。
-
-设计讨论、问卷与旧 Wave 快照保留在 `DISCUSSION-BATCH-*.md`、
-`DECISIONS.md`、`READINESS-GAP.md` 和
-[HANDOFF-AUTO-2026-08-10.md](HANDOFF-AUTO-2026-08-10.md)。
-这些历史记录不再充当当前源码进度。
-
-## Context REPL 前置修复（2026-09-14）
-
-本轮只做下一节点的前置准备，未实现 Context 交互回路。
-
-| 项目 | 结论 |
-| --- | --- |
-| 入口现状复核 | `--context-repl` 只做一次目录快照；`default_runtime_dispatch` 无该分支，`parse_context_repl` 无生产调用方 |
-| 注册表 | 10 个 `context-repl` 面动作已声明；`export-context`/`select-context` 共用同一行类，合计 12 个投影 |
-| 已修复 | `new_model_setup_input` 的 `cancel_code` 改为显式标签映射并 fail closed（`7a34715`），由 `6bee8da` 直接覆盖 |
-| 测试夹具 | `test/integration/repl_input_surface_test.lua` 首次以端口替身驱动 main.lua 交互回路，N1 可直接复用 |
-| 计划 | [Context 管理交互实现计划](CONTEXT-REPL-PLAN.md)，切分为 N1 只读 / N2 就地写 / N3 跨界写 |
-
-验证：完整 suite **482/482**；design-contract **7612**、proof-evidence **56**、
-coding-readiness **553** 条断言 PASS；TP-003/006/008 PASS。
-
-两处须如实记录：
-
-- **design-contract 计数依赖 `xmllint` 是否在 PATH 上**：缺失时为 **7611**，
-  存在时为 **7612**。原记录的 7612 正确；本轮一度误判其"过时"，已更正。
-  报数时须同时说明 `xmllint` 状态，否则数字无法比对。
-- 本机原本缺 `xmllint`，已用官方 Ubuntu 源的 `libxml2-utils`
-  （2.9.14+dfsg-1.3ubuntu3.8，与系统 `libxml2.so.2.9.14` 同版）
-  `apt-get download` + `dpkg-deb -x` 到 scratch 目录并加入 PATH，未装进系统。
-  TP-008 随即 **PASS**（321 条断言）。
-- **TP-010 / RP-001 本机无法运行**：需要 `gcc` 与 `cmake`，本机两者都没有，
-  且无 passwordless sudo；TP-010 的下载步骤另有 `curl (35) Recv failure`。
-  这是环境限制而非回归。
-
-`cancel_code` 修复已由 `test/integration/repl_input_surface_test.lua`
-直接覆盖（见下方端口替身说明）。
-
-但实测澄清了缺口范围：`src/main.lua:9590` 的 `YACA_TEST_ROOT` 守卫使
-main.lua 本就可按普通模块加载，导出含 `run_config_repl` / `run_model_repl`
-/ `run_interactive_chat`。**无需新建加载器**，N1 只需补 terminal/clock/
-stdout/config 端口替身。详见 [实现计划](CONTEXT-REPL-PLAN.md)。
+后续每完成一项，更新当前快照、删去或缩小本队列中的相应剩余项。
+缺陷与目标证据进入对应日期记录；不继续往当前文档追加历史流水。
+历史索引见 [DEVELOPMENT-HISTORY.md](DEVELOPMENT-HISTORY.md)。

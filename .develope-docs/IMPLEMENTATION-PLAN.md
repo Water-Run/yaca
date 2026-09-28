@@ -1,62 +1,31 @@
 # yaca v0.1 全程序实施计划
 
-版本：2026-09-22.1
+版本：2026-09-28.1
 状态：**计划已确认 / Gate B passed / 平台无关核心已实现至 M9 / 目标资格验证待完成**
-当前主线：**按通用 Agent 路线补齐可用性，再接续 C32--C34**
 
-2026-09-22 负责人明确了通用 Agent、旧设备兼容、开箱即用、内置同版本可调用 Lua
-及可选 tools 的方向；U 盘排障是典型场景，不限定产品用途。
-新增实施顺序、文件影响面与退出条件见
-[F0--F6 路线](PRODUCT-ROADMAP-2026-09-22.md)。其中 F0 对齐契约，
-F1 首先解决指定 Cygwin SSH 环境直接启动；网络、Lua/可选工具、文件/容量/恢复顺序跟进。
-架构、兼容迁移、回退和新增验收见[大改蓝图](MAJOR-REDESIGN-PLAN-2026-09-22.md)。
-按后续说明收紧：本轮延续原产品与架构，Lua/可选 tools 是明确增量，其余按已有
-承诺的缺口修补和验收推进。F0 只同步实际变更；打包改型、改默认值、拆模块及新 schema
-都不是前置条件。F0--F6 保留为工作分类，不意味着每项都要新增机制。
-D-073 指定 Lua 内嵌与每目标 clean/std/full 三档；F3 改为内嵌解释器入口及分档装配，
-full 为开发工具箱。默认版本与平台差异见[工具清单](../release/TOOL-BUNDLES.md)。
-撤回独立 Lua 文件/onedir 候选；新增 CLI 与发行契约仅在对应实现批次同步。
-本轮已落地内嵌解释器、三档装配、首次引导与 Cygwin PTY 修复，相关契约同步。
-实际证据及未完成边界见[实现记录](PORTABLE-IMPLEMENTATION-2026-09-22.md)，
-不把旧 Gate B 的通过当作新增机制已经完成目标资格的证明。
-下文 C01--C34 保留为已确认实现基线与目标资格清单，未完成的发行门不因此放宽。
+本文保留 C01--C34 的任务定义、文件、依赖和退出条件。当前源码已实现内嵌 Lua 工具、
+`.ask`、可选 tools、三档装配、首次引导、PTY 修复，以及旧编码和大文件读取。
+当前结果只在 [CURRENT-STATE.md](CURRENT-STATE.md) 维护，剩余执行顺序只在
+[TRACKING.md](TRACKING.md) 维护；历史节点见 [DEVELOPMENT-HISTORY.md](DEVELOPMENT-HISTORY.md)。
 
-## 当前实施位置
+产品保持通用 Agent、单文件便携与旧设备兼容。D-073 规定每目标 clean/std/full，
+同平台使用相同核心；full 为开发工具箱，默认候选见[工具清单](../release/TOOL-BUNDLES.md)。
+D-074 明确工具面 Lua 和纯问答 `.ask`，D-075/D-076 要求完整实现与注释 Review。
+现有核心继续按实测缺陷修补，旧实施候选中的架构重写、旧接口迁移不作为前置工作。
 
-C01--C31 的平台无关核心、测试与发行规划已落地；下文保留各 task 的原始
-退出条件与提交边界，不能把这些清单视为全部目标 hard gate 已通过。
-最新进度和验证记录集中在 [TRACKING.md](TRACKING.md)。
-
-2026-09-07 推进暂停交接中已定位的两项修复：模型切换的规范代理展示与秘密值
-TOCTOU 复核，以及 Linux builder 的串行/5 GiB guard floor/动态 suite 摘要。
-只读 status/export controller 与活动 Context 失效后的 fail-stop 已接通。
-2026-09-08 接通内置有界 `.prompt edit`，精确实例保存并复用既有 Session
-publication 与 turn boundary；取消/退出不保存，错误保留安全草稿。
-有效 INI 的配置字段 REPL 也已接通，复用 schema 与完整配置事务，支持隐藏输入、
-set/unset、预览、精确版本保存和显式重载；INI structural edit 保留未改记录。
-2026-09-14 已完成 Context 管理器全部 12 项投影，包括 rebind/import/repair、
-export/select 与跨 workspace 继续确认，见 [N4 检查点](CONTEXT-CONTINUE-2026-09-14.md)。
-N5 已接通无效源的私有行修复与完整配置事务，见 [N5 检查点](CONFIG-REPAIR-2026-09-14.md)。
-N6 已接通离线 Model 区域管理、引用预览和精确保存，见
-[N6 检查点](MODEL-MANAGEMENT-2026-09-14.md)。Permission 按已选 M05-48 B 编辑现有字段，
-不扩展生命周期操作。2026-09-16 已完成 Model 联网测试、资源 selector 语义复核
-和在线 self-test Stage 2/3 生产组合；真实三目标完整资格仍待执行，见
-[本轮收尾记录](WINDOWS-PREVIEW-CLOSEOUT-2026-09-16.md)。
-N7 已在用户新提供的 Server 2008 SP2 非 R2 环境定位并修复 ReadConsoleW 大请求失败，
-中文首次配置、隐藏输入与配置事务的源码实测通过，见
-[N7 检查点](SERVER2008-CONSOLE-2026-09-14.md)。
-机读 phase 保持 `implemented-unqualified`，Release Gate R 保持关闭。
+C01--C31 已有实现与测试，不等于其中所有目标 hard gate 已通过。
+当前接续 Review、目标重建、工具闭包和 C32--C34；Release Gate R 保持关闭。
 
 ## 1. 计划边界
 
-下文记录 D-001..D-071 的 terminal-only v0.1 实现基线；D-072 明确通用 Agent 与可用性方向，
-新增要求的机读传播由 F0 完成。Web、media、remote/headless、MCP/plugin、telemetry/upload/update、通用 undo/WAL、multi-root 和 plan-state 均不进入本轮实现。
+下文记录 terminal-only v0.1 的实现任务；产品要求按 D-001..D-076 及对应机读契约执行。
+Web、media、remote/headless、MCP/plugin、telemetry/upload/update、通用 undo/WAL、multi-root 和 plan-state 均不进入本轮实现。
 
 权威输入按优先级为：
 
 1. [`DECISIONS.md`](DECISIONS.md) 的现行产品保证；
 2. [`contracts/`](contracts/README.md) 的 16 份 machine contract 与 12 组 fixtures；
-3. [`GATE-AUDIT-2026-08-29.md`](GATE-AUDIT-2026-08-29.md) 的阶段门；
+3. [`contracts/readiness.lua`](contracts/readiness.lua) 的现行阶段门；旧 Gate 审计仅作历史证据；
 4. 本文的文件、依赖、测试、退出和提交边界；
 5. 子系统文档只解释 rationale，不得覆盖上述 machine truth。
 
@@ -78,11 +47,16 @@ src/
   process.lua         prompt.lua
   runtime.lua         safety.lua
   session.lua         terminal.lua
-  text.lua            tools.lua
-  tui.lua             xml.lua
+  text.lua            textcodec.lua
+  tools.lua           tui.lua
+  xml.lua
 
 native/
   yaca_native.c       lxp_build.lua
+  yaca_entry.c        yaca_onefile_entry.c
+  yaca_lua_windows.h  yaca_onefile_windows.h
+  yaca_pty.h          yaca_supervisor.h
+  yaca_text.h
 
 release/
   manifest.lua        luainstaller.lua
@@ -97,7 +71,7 @@ test/
   release/
 ```
 
-加载器只接受 `release/manifest.lua` 列出的 28 个 Lua 模块与 `yaca_native`/`lxp` 两个 native 模块；cwd、`LUA_PATH`、`LUA_CPATH`、用户目录和动态 extension discovery 永远不参与查找。
+加载器只接受 `release/manifest.lua` 列出的 Lua 模块与 `yaca_native`/`lxp` 两个 native 模块；cwd、`LUA_PATH`、`LUA_CPATH`、用户目录和动态 extension discovery 不参与查找。
 
 ## 3. 里程碑依赖
 
@@ -196,7 +170,7 @@ M6 hard gate：bundled target curl/TLS/proxy/CA 与真实 provider wire 通过�
 
 | Task | Files | Tests 与唯一退出条件 | Commit |
 | --- | --- | --- | --- |
-| C23 | `src/permission.lua`, `src/safety.lua` | `permission_test.lua`；8 tools×5 capabilities×Std/Readonly、OutsideWorkspace fold、prompt 不授权、approval snapshot/staleness 全通过 | `feat: add permission admission service` |
+| C23 | `src/permission.lua`, `src/safety.lua` | `permission_test.lua`；9 tools×5 capabilities×Std/Readonly、OutsideWorkspace fold、prompt 不授权、approval snapshot/staleness 全通过 | `feat: add permission admission service` |
 | C24 | `src/tools.lua`, `src/fs.lua`, `src/textcodec.lua` | `direct_tools_test.lua`, `target_reverify_test.lua`；list/read/search/write/patch/rename/delete exact schema、path identity、reserved tree 与 side-effect 前复核；旧代码页严格往返、大文件分段读取与有界搜索 | `feat: add verified direct tools` |
 | C25 | `src/tools.lua`, `src/process.lua`, `src/context.lua` | `exec_tool_test.lua`, `operation_outcome_test.lua`；opaque shell command、closed stdin、minimal/filtered env、bounded dual output、durable intent/result、unknown 不重放 | `feat: add raw exec and durable operations` |
 
@@ -257,7 +231,9 @@ C02 必须在同一提交把 `contracts/readiness.lua` 的 phase 从 `pre-coding
 - commit 只覆盖该 task 的 file boundary；需要跨 task 修正时先更新 machine dependency；
 - target-bound task 的 hard gate 未通过时明确标成 in-progress，不以 modern result 完成 milestone。
 
-## 17. 核心节点提交与推送
+## 17. 原始核心节点提交与推送约定
+
+下表保留最初实施阶段的节点规划，不新增远端写授权，也不作为重复提交已完成任务的要求。
 
 每个 C task 独立 commit；以下 milestone 在全量自检后作为核心节点推送 `main`：
 

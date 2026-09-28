@@ -1,6 +1,6 @@
 # Coding-readiness machine contracts
 
-Updated: 2026-08-29
+Updated: 2026-09-28
 
 This directory is the machine-readable implementation boundary for yaca v0.1. The prose subsystem documents explain intent and rationale; these Lua tables freeze stable IDs, exact sets, mappings, and fixture expectations so the first implementation plan does not invent a second contract.
 
@@ -8,7 +8,8 @@ Contract version: 0.1.0-readiness.1. These files are design inputs, not product 
 
 ## Authority and proof boundary
 
-- Product choices come from D-001 through D-071. D-071 authorizes readiness closeout and discardable proofs, but does not change the selected product guarantees.
+- Product choices come from D-001 through D-076. D-072--D-076 cover the general Agent scope, embedded Lua tool, optional tools and three editions, `.ask`, implementation review, and complete source comments.
+- Current implementation progress is recorded in [CURRENT-STATE.md](../CURRENT-STATE.md). Gate R is closed: current source, target evidence, and all nine edition packages still need qualification. Historical gate audits do not change `readiness.lua`.
 - A value marked proof_required or sourced from a TP remains a measured release/implementation constant. A developer must not replace it with an INI/XML field or an unlimited sentinel.
 - context.rng plus context.lua form the internal Context schema: RNG owns XML structure; context.lua owns event payload types and cross-event relations.
 - CLI projection means a local argv, chat command line, or management-REPL command line. It does not create a daemon, IPC/RPC endpoint, or unattended approval bypass.
@@ -36,7 +37,7 @@ It requires Gate A/B to be passed, Release Gate R to remain closed, all 28 readi
 | config.lua | exact INI fields, XML whitelist, secret and tightening rules |
 | runtime.lua | AgentLoop identities, states, outcomes, controls and transitions |
 | actions.lua | argv/chat/REPL semantic action registry |
-| tools.lua | eight tools, five capabilities and permission fold |
+| tools.lua | nine tools including embedded Lua, five capabilities and permission fold |
 | model.lua | normalized request/event/response and control mapping |
 | context.lua / context.rng | internal XML/event contract |
 | tui.lua | prompts, input fallback and renderer states |
