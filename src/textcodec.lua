@@ -28,16 +28,16 @@ for _, codepage in ipairs({
     SUPPORTED_CODEPAGES[codepage] = true
 end
 
--- Common charset names mapped to their Windows code page numbers.
+-- Windows code page names and their conventional aliases. Distinct HKSCS,
+-- EUC and TIS-620 encodings are not implemented by these converters.
 local ALIASES = {
-    gbk = 936, gb2312 = 936, ["euc-cn"] = 936, euccn = 936, ["x-gbk"] = 936,
+    gbk = 936, gb2312 = 936, ["x-gbk"] = 936,
     gb18030 = 54936,
-    big5 = 950, ["big5-hkscs"] = 950,
+    big5 = 950,
     ["shift_jis"] = 932, ["shift-jis"] = 932, sjis = 932, ["windows-31j"] = 932,
-    ["euc-kr"] = 949, euckr = 949, uhc = 949, ["ks_c_5601-1987"] = 949,
+    uhc = 949, ["ks_c_5601-1987"] = 949,
     latin1 = 28591, ["latin-1"] = 28591,
     ["koi8-r"] = 20866, koi8r = 20866, ["koi8-u"] = 21866, koi8u = 21866,
-    ["tis-620"] = 874,
 }
 
 -- iconv names used on POSIX for code pages whose "CP<N>" alias is not portable.

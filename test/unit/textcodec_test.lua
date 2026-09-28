@@ -57,7 +57,7 @@ return {
     cases = {
         {
             name = "labels normalize to UTF names or supported cp numbers",
-            --Verifies labels normalize to UTF names or supported cp numbers.
+            --Verifies UTF and Windows code page names while rejecting distinct unsupported charset variants.
             --@param none No arguments; this closure uses its captured fixture state.
             --@return nil No value; assertions verify the normalization table.
             run = function()
@@ -66,12 +66,17 @@ return {
                     GBK = "cp936", gb2312 = "cp936", CP936 = "cp936", GB18030 = "cp54936",
                     ["windows-1252"] = "cp1252", ["ISO-8859-1"] = "cp28591", latin1 = "cp28591",
                     ["iso8859-15"] = "cp28605", Big5 = "cp950", ["Shift_JIS"] = "cp932",
-                    ["koi8-r"] = "cp20866", ibm866 = "cp866", ["euc-kr"] = "cp949",
+                    ["koi8-r"] = "cp20866", ibm866 = "cp866", uhc = "cp949",
+                    ["ks_c_5601-1987"] = "cp949", ["windows-31j"] = "cp932",
+                    ["x-gbk"] = "cp936", ["windows-874"] = "cp874",
                 }
                 for label, canonical in pairs(expected) do
                     A.equal(textcodec.normalize(label), canonical, label)
                 end
-                for _, label in ipairs({ "", "cp65001", "cp1200", "iso-2022-jp", "utf-7", "ebcdic", 12 }) do
+                for _, label in ipairs({
+                    "", "cp65001", "cp1200", "iso-2022-jp", "utf-7", "ebcdic", 12,
+                    "big5-hkscs", "BIG5-HKSCS", "euc-cn", "euccn", "euc-kr", "euckr", "tis-620",
+                }) do
                     local normalized, err = textcodec.normalize(label)
                     A.falsy(normalized, tostring(label))
                     A.equal(err.code, "InvalidEncoding")

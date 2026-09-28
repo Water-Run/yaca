@@ -2,7 +2,8 @@
 
 日期：2026-09-28。R23--R28 接续 `9aed60f`，已提交为 `9724797`；
 R29 已提交为 `f3a69f2`，R30--R33 已提交为 `d2bc3a9`；R34--R36 已提交为 `18adc05`，
-R37--R38 已提交为 `4b54dc8`，R39--R41 已提交为 `ca6d7c5`；随后接续 XP 原生转换复验。
+R37--R38 已提交为 `4b54dc8`，R39--R41 已提交为 `ca6d7c5`，R42--R44 已提交为 `8af7397`；
+随后接续编码名称映射审查。
 接续 [R01--R22](CODE-REVIEW-2026-09-22.md)，本轮集中审查旧编码与区间读取，
 不代表全仓人工语义 Review 或目标资格已完成。
 
@@ -32,6 +33,7 @@ R37--R38 已提交为 `4b54dc8`，R39--R41 已提交为 `ca6d7c5`；随后接续
 | R42 | XP 的 flag-zero 有损解码丢弃非法字节，可能同时丢掉周围有效文字；CP932 重复映射旁的错误也受影响 | 显式检查合法序列并逐字节替换无法解码的输入；保留有效重复映射；7 组损坏 GBK、2 组 CP932 重复映射与分配失败恢复均通过 XP 实测 |
 | R43 | XP 已安装 GB18030，但 MultiByteToWideChar 拒绝 MB_ERR_INVALID_CHARS，合法补充字符编码/解码都失败 | GB18030 使用 XP 支持的零标志，并保留严格往返校验；有损逐段解码同样检查往返，避免静默丢字；XP 正常往返和损坏后保留补充字符通过 |
 | R44 | XP 的严格 UTF-8 API 仍接受孤立代理项等非法形式，导致写入错误分类随系统变化 | 在原生编码入口和 Windows UTF-8 输出增加无分配的标量校验；穷举 1,114,113 个候选、截断前缀与非法形式；XP 的 8 组非法输入均明确返回 InvalidEncoding |
+| R45 | Big5-HKSCS、EUC-CN、EUC-KR、TIS-620 被直接映射到语义不同的 Windows 代码页，可能错误解码或写出所选编码不支持的文字 | 删除六个错误别名（含缩写）；未实现的名称返回 InvalidEncoding，保留实际支持的 Windows 代码页名称及惯用别名；glibc 实际转换对照与规范化回归通过 |
 
 `read`/`search` 的模型可见工具说明已同步续页、尾部片段及搜索不完整的含义。
 没有新增配置项或运行依赖。
@@ -224,9 +226,31 @@ XP 最终结果在 `xp/evidence-final/`；`new-codec.exit`、`new-faults.exit`�
 没有执行 guest 探针。保留 `win7/login-retry.png`、`win7/selected-user.png` 与运行日志后
 正常关机；本批 Win64 证据限于交叉构建和 Wine，不把该启动尝试计为 Win7 通过。
 
+## R45 不同字符集的名称边界
+
+接续 `8af7397`，审查 `src/textcodec.lua` 名称表及其全部引用。
+实际系统 iconv 对照记录在 `out/codec-alias-20260928/native-alias-before.log`：
+CP950 拒绝 `88 62`，Big5-HKSCS 将其解码为 U+00CA U+0304；CP936 / CP874
+将 `80` 解码为欧元符号，EUC-CN / TIS-620 拒绝；CP949 将 `81 41` 解码为 U+AC02，
+本机 EUC-KR 转换器返回 U+0081 和 ASCII A。它们不是可互换的转换器。
+
+[IANA Big5-HKSCS 注册](https://www.iana.org/assignments/charset-reg/Big5-HKSCS)
+明确其为 Big5 的扩展；[Microsoft 代码页表](https://learn.microsoft.com/en-us/windows/win32/intl/code-page-identifiers)
+也将 EUC-CN / EUC-KR 与 Windows 936 / 949 分列。
+实现仍以 Windows 代码页为规范名称；gb2312、shift_jis、ks_c_5601-1987 保留其
+Microsoft 代码页名称含义，不据此声明实现了同名标准的所有独立变体。
+
+删除 big5-hkscs、euc-cn、euccn、euc-kr、euckr、tis-620 的错误映射。
+现有规范化用例增加这些拒绝项及大小写检查，同时核对 UHC、Windows-31J、x-gbk、
+Windows-874 仍可用。`before.log` 保留原实现错误接受 HKSCS 的反例；
+修改后的完整 suite **667/667**，日志为 `full.log`。
+完整 readiness 通过，日志为 `readiness.log`；注释结构仍为 208 文件、5115 声明、0 缺项。
+人工核对名称表、POSIX locale 回退和工具参数接纳路径：不支持的显式名称会被拒绝；
+不支持的 locale 不再错误宣称另一套代码页。未增加运行依赖或扩大支持编码范围。
+
 ## 继续审查与目标验证
 
-1. Win7 当前原生转换复验、编码别名及 exec 输出降级的语义 Review；不能以 Wine 替代旧目标。
+1. Win7 当前原生转换复验及 exec 输出降级的语义 Review；不能以 Wine 替代旧目标。
 2. 重建三目标产物，把本批修正与 R21/R22 一同用于 XP/Win7/CentOS 7 以及指定 Server 2008 的实测。
 3. A08/A09 的真实 GiB 级文件、中文命令、编码写回与模型续页旅程。现有小规模注入用例不能替代这些目标证据。
 
