@@ -13,7 +13,7 @@
 | 2026-09-22，范围澄清与调研 | 明确通用 Agent、内嵌 Lua、可选 tools、clean/std/full；阅读三个上游固定提交 | [定位路线](PRODUCT-ROADMAP-2026-09-22.md)、[实施候选](MAJOR-REDESIGN-PLAN-2026-09-22.md)、[上游源码对照](references/agent-loop-source-review-2026-09-22.md)；设计建议中的“待实现”是当日状态 |
 | 2026-09-22 至 09-23，便携实现与 Review | Lua 工具、`.ask`、首次引导、PTY/Unicode、进程回收、容量预留、FAT32/身份竞争修复；注释规范与结构覆盖 | [实现记录](PORTABLE-IMPLEMENTATION-2026-09-22.md)、[R01--R22](CODE-REVIEW-2026-09-22.md)；主要落在 `8841212`，最终目标复验和语义 Review 未完成 |
 | 2026-09-26，`32d053e` | 原生代码页转换/seek、旧编码读写及输出、区间读取/续页/尾读/搜索 | 当前源码与测试；当次记录完整 suite 646/646，尚未重建目标包 |
-| 2026-09-28，恢复基线 | 分离当前快照、剩余工作与历史资料；重新验证；修复证明摘要漂移 | [当前复核](CURRENT-STATE.md#本轮基线复核)、[现代机证明](proofs/modern-2026-08-29/README.md)；不提升发行资格 |
+| 2026-09-28，恢复基线与 F4 Review | `9aed60f` 整理资料并修复证明摘要漂移；随后修正编码、UTF-16、长行续页/尾读和搜索完整性 | [当前复核](CURRENT-STATE.md#本轮基线复核)、[R23--R28](CODE-REVIEW-2026-09-28.md)、[现代机证明](proofs/modern-2026-08-29/README.md)；不提升发行资格 |
 
 ## 如何解释旧结论
 

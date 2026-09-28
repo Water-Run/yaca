@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-26
+Date: 2026-09-28
 File: tools.lua
 Description: Defines the closed tool registry and verified direct-file operations.
 ]]
@@ -418,9 +418,12 @@ local DESCRIPTIONS = {
         .. "backward from the last line (1 = last line) and returns the page in file order. "
         .. "encoding defaults to auto (BOM, UTF-8, then the system code page); pass a label such as "
         .. "cp936, gbk, gb18030, cp1252 or latin1 to decode legacy text. Files larger than the "
-        .. "whole-file limit are read as ranges: pass the returned continuation to read further.",
+        .. "whole-file limit are read as ranges: pass the returned continuation to read further, "
+        .. "including after an empty scan_limited page. truncated marks shortened lines; "
+        .. "partial_start marks a tail fragment whose line begins before the returned raw_start.",
     search = "Bounded versioned text search of a directory tree or one file without a host grep "
-        .. "command. encoding works as in read; large files are scanned within a byte budget.",
+        .. "command. encoding works as in read; all files share a byte budget. complete=false "
+        .. "means partial coverage; line-limit reports omitted suffixes of oversized lines.",
     write = "Create no-replace or replace one verified ordinary text file. encoding is utf-8, "
         .. "utf-8-bom, utf-16le-bom, utf-16be-bom or a legacy code page such as cp936; legacy "
         .. "writes are refused when a character cannot be represented exactly.",
@@ -2015,13 +2018,15 @@ function M.new(dependencies, options)
         return { bytes = bytes, digest = digest }
     end
 
-    -- Decode BOM-stripped UTF-16 while rejecting odd lengths and invalid surrogate pairs.
+    -- Decode BOM-stripped UTF-16, optionally repairing only the malformed units for display.
     --@param bytes string UTF-16 content bytes without the BOM.
     --@param little_endian boolean Whether each code unit uses little-endian order.
+    --@param allow_lossy boolean|nil Replace unpaired surrogates and a dangling byte; defaults to false.
     --@return string|nil Strict UTF-8 text, or nil for malformed UTF-16.
-    local function decode_utf16(bytes, little_endian)
-        if #bytes % 2 ~= 0 then return nil end
-        local codepoints, index = {}, 1
+    --@return boolean|nil Whether display repair replaced input; nil when strict decoding fails.
+    local function decode_utf16(bytes, little_endian, allow_lossy)
+        if #bytes % 2 ~= 0 and not allow_lossy then return nil end
+        local codepoints, index, repaired = {}, 1, false
         -- Read one complete code unit at a validated byte offset.
         --@param at integer One-based offset of the unit's first byte.
         --@return integer Decoded 16-bit code unit.
@@ -2031,23 +2036,34 @@ function M.new(dependencies, options)
             return first * 0x100 + second
         end
         while index <= #bytes do
+            if index == #bytes then
+                codepoints[#codepoints + 1] = 0xFFFD
+                repaired = true
+                break
+            end
             local current = unit(index)
             index = index + 2
             if current >= 0xD800 and current <= 0xDBFF then
-                if index > #bytes then return nil end
-                local following = unit(index)
-                if following < 0xDC00 or following > 0xDFFF then return nil end
-                codepoints[#codepoints + 1] = 0x10000
-                    + (current - 0xD800) * 0x400
-                    + following - 0xDC00
-                index = index + 2
+                local following = index < #bytes and unit(index) or nil
+                if following and following >= 0xDC00 and following <= 0xDFFF then
+                    codepoints[#codepoints + 1] = 0x10000
+                        + (current - 0xD800) * 0x400
+                        + following - 0xDC00
+                    index = index + 2
+                else
+                    if not allow_lossy then return nil end
+                    codepoints[#codepoints + 1] = 0xFFFD
+                    repaired = true
+                end
             elseif current >= 0xDC00 and current <= 0xDFFF then
-                return nil
+                if not allow_lossy then return nil end
+                codepoints[#codepoints + 1] = 0xFFFD
+                repaired = true
             else
                 codepoints[#codepoints + 1] = current
             end
         end
-        return text.encode_utf8(codepoints)
+        return text.encode_utf8(codepoints), repaired
     end
 
     -- Encode strict UTF-8 text as BOM-free UTF-16 code units.
@@ -2558,8 +2574,7 @@ function M.new(dependencies, options)
             if (at - init) % 2 == 0 then
                 local unit = big_endian and buffer:byte(at + 1) or buffer:byte(at)
                 if unit == 0x0A then return at, at + 1, "lf" end
-                if at + 1 == #buffer then
-                    if eof then return at, at + 1, "cr" end
+                if at + 3 > #buffer and not eof then
                     return nil, "pending"
                 end
                 local following = buffer:sub(at + 2, at + 3) == (big_endian and "\0\n" or "\n\0")
@@ -2580,7 +2595,7 @@ function M.new(dependencies, options)
         while cursor <= #buffer do
             local first, last, kind = find_terminator(buffer, cursor, width, big_endian, true)
             if not first then
-                local finish = #buffer - (#buffer - cursor + 1) % width
+                local finish = #buffer
                 records[#records + 1] = {
                     raw = buffer:sub(cursor, finish), newline = "none",
                     offset = cursor - 1, length = finish - cursor + 1,
@@ -2625,7 +2640,7 @@ function M.new(dependencies, options)
 
     -- Open a direct file for bounded forward line streaming from an absolute offset.
     --@param snapshot table Admitted file snapshot.
-    --@param offset integer Absolute byte offset of a line start.
+    --@param offset integer Absolute byte offset of unread input; a resumed partial line starts earlier.
     --@param encoding string Canonical encoding label deciding the code unit layout.
     --@param budget table Mutable scan budget {remaining = integer} shared by the call.
     --@return table|nil Range stream state.
@@ -2663,14 +2678,19 @@ function M.new(dependencies, options)
         return stream
     end
 
-    -- Return the next raw line from a range stream, retaining at most maximum_line_bytes.
-    --@param stream table Open range stream.
+    -- Return the next raw line, retaining a bounded prefix across scan-limited continuations.
+    --@param stream table Open range stream with optional partial_line state from the previous page.
     --@return table|boolean|nil Line {start, finish, raw, newline, truncated}, false at EOF, or nil.
     --@return table|string|nil Filesystem error or "scan-limit".
-    --@effect Reads further chunks from the native handle.
+    --@effect Reads further chunks; updates position and partial_line so a scan limit can resume without rescanning.
     local function next_stream_line(stream)
-        local start, retained, line_bytes, truncated = stream.position, {}, 0, false
-        local retained_bytes, cap = 0, limits.maximum_line_bytes
+        local partial = stream.partial_line
+        local start = partial and partial.start or stream.position
+        local retained = partial and { partial.raw } or {}
+        local line_bytes = partial and partial.bytes or 0
+        local truncated = partial and partial.truncated or false
+        local retained_bytes = partial and #partial.raw or 0
+        local cap = limits.maximum_line_bytes
         -- Keep a bounded prefix of line content while counting every content byte.
         --@param content string Raw line content bytes taken from the buffer.
         --@return nil Updates the enclosing line state.
@@ -2697,17 +2717,19 @@ function M.new(dependencies, options)
                 local terminator = last - first + 1
                 stream.buffer = stream.buffer:sub(last + 1)
                 stream.position = start + line_bytes + terminator
+                stream.partial_line = nil
                 return {
                     start = start, finish = stream.position, raw = table.concat(retained),
                     newline = kind, truncated = truncated,
                 }
             end
             if stream.eof then
-                local remaining = #stream.buffer - #stream.buffer % stream.width
+                local remaining = #stream.buffer
                 if remaining == 0 and line_bytes == 0 then return false end
                 retain(stream.buffer:sub(1, remaining))
                 stream.buffer = ""
                 stream.position = start + line_bytes
+                stream.partial_line = nil
                 return {
                     start = start, finish = stream.position, raw = table.concat(retained),
                     newline = "none", truncated = truncated,
@@ -2721,7 +2743,21 @@ function M.new(dependencies, options)
                 stream.buffer = stream.buffer:sub(move + 1)
             end
             local filled, fill_error = fill_stream(stream)
-            if not filled then return nil, fill_error end
+            if not filled then
+                if fill_error == "scan-limit" then
+                    -- Leave possible split CRLF/code units unread, and retain the rest once.
+                    local move = math.max(0, #stream.buffer - keep)
+                    move = move - move % stream.width
+                    retain(stream.buffer:sub(1, move))
+                    stream.buffer = stream.buffer:sub(move + 1)
+                    stream.position = start + line_bytes
+                    stream.partial_line = {
+                        start = start, raw = table.concat(retained), bytes = line_bytes,
+                        truncated = truncated,
+                    }
+                end
+                return nil, fill_error
+            end
         end
     end
 
@@ -2734,8 +2770,7 @@ function M.new(dependencies, options)
         local decoded, lossy = nil, false
         local width, big_endian = unit_layout(encoding)
         if width == 2 then
-            decoded = decode_utf16(raw:sub(1, #raw - #raw % 2), not big_endian)
-            if not decoded then decoded, lossy = "\239\191\189", true end
+            decoded, lossy = decode_utf16(raw, not big_endian, true)
         elseif textcodec.is_legacy(encoding) then
             local converted, exact = decode_legacy(encoding, raw, true)
             if converted then
@@ -2791,17 +2826,31 @@ function M.new(dependencies, options)
         if bom_encoding then
             return { encoding = bom_encoding, bom_bytes = bom_bytes, basis = "detected" }
         end
-        local complete = sample
-        if not stream.eof then
-            local last_newline = sample:match(".*()\n")
-            complete = last_newline and sample:sub(1, last_newline) or ""
+        local valid_utf8, utf8_error = text.validate_utf8(sample)
+        if not valid_utf8 and not stream.eof and utf8_error.reason == "truncated" then
+            -- The sample may stop inside one scalar. Check that the partial scalar
+            -- can be completed without ignoring an already-invalid continuation byte.
+            local tail = sample:sub(utf8_error.offset)
+            local first = tail:byte(1)
+            local expected = first < 0xE0 and 2 or (first < 0xF0 and 3 or 4)
+            while #tail < expected do
+                local byte = #tail == 1 and (first == 0xE0 and 0xA0 or first == 0xF0 and 0x90) or 0x80
+                tail = tail .. string.char(byte)
+            end
+            valid_utf8 = text.validate_utf8(tail)
         end
-        if text.validate_utf8(complete) == true then
+        if valid_utf8 then
             return { encoding = "utf-8", bom_bytes = 0, basis = "detected" }
         end
         local fallback = ports.text_codec and ports.text_codec.facts.file_default
-        if fallback and decode_legacy(fallback, complete, false) then
-            return { encoding = fallback, bom_bytes = 0, basis = "system-default" }
+        if fallback then
+            -- Legacy encodings may also have an incomplete final unit (up to four
+            -- bytes for GB18030). Validate a real prefix even without a sampled LF.
+            for trim = 0, stream.eof and 0 or math.min(3, #sample - 1) do
+                if decode_legacy(fallback, sample:sub(1, #sample - trim), false) then
+                    return { encoding = fallback, bom_bytes = 0, basis = "system-default" }
+                end
+            end
         end
         return { encoding = "utf-8", bom_bytes = 0, basis = "detected-invalid-utf-8" }
     end
@@ -2890,6 +2939,7 @@ function M.new(dependencies, options)
         local text_budget, used = page_text_budget(), 0
         local scan_limited, eof, next_offset, next_number = false, false, false, false
         local last_number = false
+        local partial_line
         if arguments.from_end then
             local seek = ports.filesystem.stream_seek
             if type(seek) ~= "function" or not ports.filesystem.capabilities.seek_candidate then
@@ -2898,13 +2948,14 @@ function M.new(dependencies, options)
             local big_endian = layout.encoding == "utf-16be-bom"
             local lower = layout.bom_bytes
             local size = snapshot.identity.size
-            local position = size - (size - lower) % width
+            local position = size
             local need = arguments.start_line - 1 + arguments.max_lines
             local memory_cap = limits.maximum_file_bytes
             local opened, handle = ports.filesystem.direct_open_read(snapshot)
             if not opened then return nil, handle end
             local stream = { handle = handle, closed = false }
             local data, records, base = "", {}, position
+            local partial_start = false
             while true do
                 local split_at
                 if position <= lower then
@@ -2920,11 +2971,19 @@ function M.new(dependencies, options)
                 end
                 if budget.remaining <= 0 or #data >= memory_cap then
                     scan_limited = true
+                    -- The first record starts before this window. Keep its suffix
+                    -- available, and label that boundary instead of claiming an empty tail.
+                    records = split_raw_lines(data, width, big_endian)
+                    base, partial_start = position, position > lower
                     break
                 end
-                local step = math.min(limits.filesystem_chunk_bytes, position - lower, budget.remaining)
-                step = math.max(width, step - step % width)
-                position = position - step
+                local step = math.min(limits.filesystem_chunk_bytes, position - lower,
+                    budget.remaining, memory_cap - #data)
+                local start = position - step
+                start = start + (width - (start - lower) % width) % width
+                step = position - start
+                if step == 0 then scan_limited = true; break end
+                position = start
                 local seek_ok, seek_error = seek(handle, position)
                 if not seek_ok then close_stream(stream); return nil, seek_error end
                 local parts, got = {}, 0
@@ -2956,8 +3015,16 @@ function M.new(dependencies, options)
             for index = finish, first_index, -1 do
                 local record = records[index]
                 local raw_text, truncated = record.raw, false
+                local omitted = 0
+                local fragment = partial_start and index == 1
                 if #raw_text > limits.maximum_line_bytes then
-                    raw_text = raw_text:sub(1, limits.maximum_line_bytes - limits.maximum_line_bytes % width)
+                    if fragment then
+                        omitted = #raw_text - limits.maximum_line_bytes
+                        omitted = omitted + (width - omitted % width) % width
+                        raw_text = raw_text:sub(omitted + 1)
+                    else
+                        raw_text = raw_text:sub(1, limits.maximum_line_bytes - limits.maximum_line_bytes % width)
+                    end
                     truncated = true
                 end
                 local decoded, lossy = decode_range_line(raw_text, layout.encoding)
@@ -2966,7 +3033,8 @@ function M.new(dependencies, options)
                 observed[#observed + 1] = raw_text
                 local first_byte = base + record.offset
                 local line = result_line(known and index or false, decoded, record.newline,
-                    first_byte, first_byte + record.length, truncated, lossy)
+                    first_byte + omitted, first_byte + record.length, truncated or fragment, lossy)
+                if fragment then line.partial_start = true end
                 line.from_end = #records - index + 1
                 reversed[#reversed + 1] = line
             end
@@ -2980,6 +3048,7 @@ function M.new(dependencies, options)
             end
             local stream, open_error = open_stream(snapshot, offset, layout.encoding, budget)
             if not stream then return nil, range_failure(open_error) end
+            stream.partial_line = continuation and continuation.partial_line or nil
             local skip = continuation and 0 or (arguments.start_line - 1)
             while skip > 0 do
                 local line, line_error = next_stream_line(stream)
@@ -3030,6 +3099,7 @@ function M.new(dependencies, options)
             if final_identity.size < (next_offset or 0) then
                 return nil, failure("TargetChanged", "file shrank while being read")
             end
+            partial_line = stream.partial_line
             if eof then next_offset = false end
         end
         local observed_bytes = table.concat(observed)
@@ -3057,6 +3127,7 @@ function M.new(dependencies, options)
                 offset = next_offset,
                 next_number = next_number,
                 layout = layout,
+                partial_line = partial_line,
             })
             if not token then return nil, token_error end
         end
@@ -3252,7 +3323,7 @@ function M.new(dependencies, options)
         local page_state = continuation
         if not page_state then
             local matches, skipped_binary, skipped_large, redacted = {}, 0, 0, 0
-            local lossy_files = 0
+            local lossy_files, truncated_lines = 0, 0
             local budget = { remaining = limits.maximum_scan_bytes }
             local stopped, stop_reason = false, false
             local needle = arguments.case_sensitive and arguments.pattern or ascii_fold(arguments.pattern)
@@ -3307,6 +3378,7 @@ function M.new(dependencies, options)
                     if line == nil then close_stream(stream); return nil, line_error end
                     if line == false then break end
                     number = number + 1
+                    if line.truncated then truncated_lines = truncated_lines + 1 end
                     local decoded, lossy = decode_range_line(line.raw, layout.encoding)
                     any_lossy = any_lossy or lossy
                     if match_line(relative_path, number, decoded) then
@@ -3352,6 +3424,7 @@ function M.new(dependencies, options)
                     if snapshot.identity.size > limits.maximum_file_bytes then
                         if budget.remaining <= 0 then
                             skipped_large = skipped_large + 1
+                            stopped, stop_reason = true, "scan-limit"
                         else
                             local searched, search_error = search_large(entry.relative_path, snapshot)
                             if not searched then
@@ -3365,6 +3438,9 @@ function M.new(dependencies, options)
                                 end
                             end
                         end
+                    elseif snapshot.identity.size > budget.remaining then
+                        stopped, stop_reason = true, "scan-limit"
+                        break
                     else
                         local read, read_error = read_bytes(snapshot)
                         if not read then return nil, read_error end
@@ -3408,12 +3484,14 @@ function M.new(dependencies, options)
                 generation = walk.generation,
                 items = matches,
                 offset = 1,
-                complete = walk.complete and not stopped,
-                partial_reason = stopped and stop_reason or walk.partial_reason,
+                complete = walk.complete and not stopped and truncated_lines == 0,
+                partial_reason = stopped and stop_reason
+                    or (truncated_lines > 0 and "line-limit") or walk.partial_reason,
                 skipped_binary = skipped_binary,
                 skipped_large = skipped_large,
                 redacted = redacted,
                 lossy_files = lossy_files,
+                truncated_lines = truncated_lines,
             }
         end
         local page, next_token = page_items(
@@ -3433,6 +3511,7 @@ function M.new(dependencies, options)
             redacted_files = page_state.redacted,
         }
         if page_state.lossy_files > 0 then result.lossy_files = page_state.lossy_files end
+        if page_state.truncated_lines > 0 then result.truncated_lines = page_state.truncated_lines end
         return result
     end
 

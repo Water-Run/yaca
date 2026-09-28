@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-26
+Date: 2026-09-28
 File: direct_tools_test.lua
 Description: Verifies the closed registry, direct tool contracts, legacy encodings and range reads.
 ]]
@@ -1034,6 +1034,182 @@ return {
                 }, "wide-tail")
                 A.equal(tail.payload.lines[1].text, "ab中")
                 A.equal(tail.payload.lines[1].raw_end, #body)
+            end,
+        },
+        {
+            name = "a long legacy first line uses the system encoding without needing a newline sample",
+            -- Auto detection must inspect the prefix bytes even when the first newline is beyond the sample.
+            --@param none Uses a large GBK line and the Windows CP936 file default.
+            --@return nil Assertions require legacy decoding and its explicit basis instead of UTF-8 repair.
+            run = function()
+                local service = fixture({
+                    initial = { ["/work/gbk.log"] = string.rep("\214\208", 18000) .. "\n" },
+                    text_codec = fake_codec("cp936"),
+                })
+                local result = run(service, "read", {
+                    path = "/work/gbk.log", start_line = 1, max_lines = 1,
+                }, "long-gbk")
+                A.equal(result.outcome, "success")
+                A.equal(result.payload.encoding, "cp936")
+                A.equal(result.payload.encoding_basis, "system-default")
+                A.equal(result.payload.lines[1].text:sub(1, 9), "中中中")
+                A.falsy(result.payload.lines[1].lossy)
+            end,
+        },
+        {
+            name = "search reports omitted long-line content and enforces the shared scan budget",
+            -- A prefix-only match pass cannot claim complete coverage, and small files share the same I/O budget.
+            --@param none Uses one truncated record and two individually small files exceeding the combined budget.
+            --@return nil Assertions require line-limit and scan-limit results instead of false completeness.
+            run = function()
+                local service = fixture({ initial = {
+                    ["/work/long.log"] = string.rep("x", 5000) .. "NEEDLE\n" .. string.rep("padding\n", 4000),
+                    ["/work/many"] = { kind = "directory" },
+                    ["/work/many/1.log"] = string.rep("short\n", 4500),
+                    ["/work/many/2.log"] = string.rep("short\n", 4500),
+                }, options = { maximum_scan_bytes = 50000 } })
+                local long = run(service, "search", {
+                    path = "/work/long.log", pattern = "NEEDLE", dialect = "literal",
+                    case_sensitive = true, page_size = 2,
+                }, "search-long")
+                A.equal(long.outcome, "success")
+                A.equal(long.payload.complete, false)
+                A.equal(long.payload.partial_reason, "line-limit")
+                A.equal(long.payload.truncated_lines, 1)
+                local many = run(service, "search", {
+                    path = "/work/many", pattern = "NEEDLE", dialect = "literal",
+                    case_sensitive = true, page_size = 2,
+                }, "search-budget")
+                A.equal(many.outcome, "success")
+                A.equal(many.payload.complete, false)
+                A.equal(many.payload.partial_reason, "scan-limit")
+            end,
+        },
+        {
+            name = "tail reads return a marked suffix when a line exceeds the retained window",
+            -- A huge final line must yield useful bounded content rather than an empty end-of-file page.
+            --@param none Uses a final record larger than the tail window, with and without a terminator.
+            --@return nil Assertions require the suffix, raw byte range and explicit partial-start marker.
+            run = function()
+                for _, ending in ipairs({ "", "\r\n" }) do
+                    local body = string.rep("x", 70000) .. "TAIL" .. ending
+                    local service = fixture({ initial = { ["/work/long.log"] = body } })
+                    local result = run(service, "read", {
+                        path = "/work/long.log", start_line = 1, max_lines = 1, from_end = true,
+                    }, "long-tail")
+                    A.equal(result.outcome, "success")
+                    A.equal(#result.payload.lines, 1)
+                    local line = result.payload.lines[1]
+                    A.equal(line.text:sub(-4), "TAIL")
+                    A.equal(#line.text, 4096)
+                    A.equal(line.partial_start, true)
+                    A.equal(line.truncated, true)
+                    A.equal(line.from_end, 1)
+                    A.equal(line.raw_start, #body - #ending - 4096)
+                    A.equal(line.raw_end, #body)
+                    A.equal(line.newline, ending == "" and "none" or "crlf")
+                    A.equal(result.payload.scan_limited, true)
+                end
+            end,
+        },
+        {
+            name = "oversized lines resume beyond a scan budget without repeating the same prefix",
+            -- A long record needs several bounded reads, then yields its prefix once and continues to the next line.
+            --@param none Uses a line larger than two scan budgets followed by a short record.
+            --@return nil Assertions require bounded progress, correct raw extent and the following record.
+            run = function()
+                local long = string.rep("x", 70000)
+                local service = fixture({
+                    initial = { ["/work/long.log"] = long .. "\nafter\n" },
+                    options = { maximum_scan_bytes = 32768 },
+                })
+                local token, long_line, after = nil, nil, nil
+                for index = 1, 4 do
+                    local result = run(service, "read", {
+                        path = "/work/long.log", start_line = 1, max_lines = 2, continuation = token,
+                    }, "long-" .. tostring(index))
+                    A.equal(result.outcome, "success")
+                    for _, line in ipairs(result.payload.lines) do
+                        if line.number == 1 then
+                            A.falsy(long_line, "long record must be emitted once")
+                            long_line = line
+                        elseif line.number == 2 then
+                            after = line
+                        end
+                    end
+                    token = result.payload.continuation
+                    if token == false then break end
+                end
+                A.truthy(long_line, "scan continuation did not finish the long record")
+                A.equal(long_line.text, string.rep("x", 4096))
+                A.equal(long_line.truncated, true)
+                A.equal(long_line.raw_start, 0)
+                A.equal(long_line.raw_end, #long + 1)
+                A.truthy(after)
+                A.equal(after.text, "after")
+                A.equal(token, false)
+            end,
+        },
+        {
+            name = "UTF-16 range CRLF stays one terminator across odd chunk boundaries",
+            -- Read enough UTF-16 lines to exercise every CRLF alignment in seven-byte reads.
+            --@param none Uses a large BOM-marked file with identical CRLF records.
+            --@return nil Assertions require exact text, terminators and raw spans on all selected lines.
+            run = function()
+                local body = "\255\254" .. string.rep(utf16le("ab中\r\n"), 3500)
+                local service = fixture({ initial = { ["/work/wide.log"] = body } })
+                local result = run(service, "read", {
+                    path = "/work/wide.log", start_line = 1, max_lines = 16,
+                }, "crlf-boundary")
+                A.equal(result.outcome, "success")
+                A.equal(#result.payload.lines, 16)
+                for index, line in ipairs(result.payload.lines) do
+                    A.equal(line.text, "ab中", tostring(index))
+                    A.equal(line.newline, "crlf", tostring(index))
+                    A.equal(line.raw_start, 2 + (index - 1) * 10)
+                    A.equal(line.raw_end, 2 + index * 10)
+                end
+            end,
+        },
+        {
+            name = "UTF-16 range reads retain and mark an incomplete final code unit",
+            -- Check that a malformed final byte is neither silently dropped nor reported as lossless.
+            --@param none Uses a large UTF-16 file with one dangling byte after its last newline.
+            --@return nil Assertions require a replacement line covering the final byte for forward and tail reads.
+            run = function()
+                local prefix = "\255\254" .. string.rep(utf16le("ok\n"), 5500)
+                local service = fixture({ initial = { ["/work/odd.log"] = prefix .. "x" } })
+                for _, from_end in ipairs({ false, true }) do
+                    local result = run(service, "read", {
+                        path = "/work/odd.log", start_line = from_end and 1 or 5501,
+                        max_lines = 1, from_end = from_end,
+                    }, from_end and "odd-tail" or "odd-forward")
+                    A.equal(result.outcome, "success")
+                    A.equal(#result.payload.lines, 1)
+                    local line = result.payload.lines[1]
+                    A.equal(line.text, "\239\191\189")
+                    A.equal(line.lossy, true)
+                    A.equal(line.raw_start, #prefix)
+                    A.equal(line.raw_end, #prefix + 1)
+                    A.equal(result.payload.eof, true)
+                end
+            end,
+        },
+        {
+            name = "range decoding keeps valid UTF-16 around an isolated surrogate",
+            -- Preserve readable text when a single invalid UTF-16 unit requires display repair.
+            --@param none Uses a large file ending in a line with an unpaired high surrogate.
+            --@return nil Assertions require local replacement without discarding surrounding text.
+            run = function()
+                local body = "\255\254" .. string.rep(utf16le("ok\n"), 5500)
+                    .. utf16le("before") .. "\0\216" .. utf16le("after\n")
+                local service = fixture({ initial = { ["/work/wide.log"] = body } })
+                local result = run(service, "read", {
+                    path = "/work/wide.log", start_line = 1, max_lines = 1, from_end = true,
+                }, "surrogate")
+                A.equal(result.outcome, "success")
+                A.equal(result.payload.lines[1].text, "before\239\191\189after")
+                A.equal(result.payload.lines[1].lossy, true)
             end,
         },
         {

@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-26
+Date: 2026-09-28
 File: textcodec_test.lua
 Description: Verifies encoding label normalization, code page facts, and native codec adaptation.
 ]]
@@ -161,6 +161,25 @@ return {
                     --@return string|nil value Configured value.
                     function(name) return name == "LANG" and "C" or nil end)
                 A.equal(plain.facts.locale, false)
+            end,
+        },
+        {
+            name = "POSIX legacy names preserve ISO pages and Windows Thai and Big5 variants",
+            -- Keep Windows code page semantics when choosing the system iconv converter.
+            --@param none Uses a recording native fixture without performing native conversion.
+            --@return nil Assertions require exact iconv names for every ISO page and both Windows variants.
+            run = function()
+                local calls = {}
+                local codec = textcodec.new(fake_native({ kind = "iconv" }, calls), "posix")
+                local expected = { cp874 = "CP874", cp950 = "CP950" }
+                for _, part in ipairs({ 1, 2, 3, 4, 5, 6, 7, 8, 9, 13, 15 }) do
+                    local label = assert(textcodec.normalize("iso-8859-" .. tostring(part)))
+                    expected[label] = "ISO-8859-" .. tostring(part)
+                end
+                for label, target in pairs(expected) do
+                    codec.decode(label, "\214\208")
+                    A.equal(calls[#calls][2], target, label)
+                end
             end,
         },
         {

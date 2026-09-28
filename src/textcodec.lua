@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-26
+Date: 2026-09-28
 File: textcodec.lua
 Description: Normalizes text encoding labels and adapts native code page conversion for tools.
 ]]
@@ -42,10 +42,11 @@ local ALIASES = {
 
 -- iconv names used on POSIX for code pages whose "CP<N>" alias is not portable.
 local ICONV_NAMES = {
-    [932] = "CP932", [936] = "CP936", [949] = "CP949", [950] = "BIG5",
-    [874] = "TIS-620", [20866] = "KOI8-R", [21866] = "KOI8-U",
+    [932] = "CP932", [936] = "CP936", [949] = "CP949", [950] = "CP950",
+    [874] = "CP874", [20866] = "KOI8-R", [21866] = "KOI8-U",
     [28603] = "ISO-8859-13", [28605] = "ISO-8859-15", [54936] = "GB18030",
 }
+for part = 1, 9 do ICONV_NAMES[28590 + part] = "ISO-8859-" .. tostring(part) end
 
 -- Map a numeric code page to its canonical label when it is supported.
 --@param codepage integer|nil Candidate Windows code page number.

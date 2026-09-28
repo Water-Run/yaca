@@ -2,7 +2,8 @@
 
 更新日期：2026-09-28。
 
-当前源码基线为 `32d053e`。yaca 已有通用 Agent 实现，正在补齐 Review、目标环境验收和
+当前实现接续 `32d053e`，最近的修正见 [R23--R28](CODE-REVIEW-2026-09-28.md)。
+yaca 已有通用 Agent 实现，正在补齐 Review、目标环境验收和
 三档发行物；阶段为 `implemented-unqualified`，Release Gate R 关闭。
 
 ## 从这里继续
