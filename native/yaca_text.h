@@ -20,6 +20,49 @@ Description: Legacy text code page facts and strict or lossy conversion between 
 #include <iconv.h>
 #endif
 
+/* Validate Unicode-scalar UTF-8 without relying on older Windows conversion permissiveness.
+ * @param bytes const_char* Exact input bytes, including any embedded NUL.
+ * @param length size_t Input byte count.
+ * @return int One for strict UTF-8, zero for truncation, overlong forms, surrogates or out-of-range scalars.
+ */
+static int text_valid_utf8(const char *bytes, size_t length)
+{
+  size_t position = 0U;
+  while (position < length)
+  {
+    unsigned char first = (unsigned char)bytes[position];
+    size_t width;
+    size_t index;
+    unsigned char second_minimum = 0x80U;
+    unsigned char second_maximum = 0xBFU;
+    if (first < 0x80U) { ++position; continue; }
+    if (first >= 0xC2U && first <= 0xDFU) width = 2U;
+    else if (first >= 0xE0U && first <= 0xEFU)
+    {
+      width = 3U;
+      if (first == 0xE0U) second_minimum = 0xA0U;
+      if (first == 0xEDU) second_maximum = 0x9FU;
+    }
+    else if (first >= 0xF0U && first <= 0xF4U)
+    {
+      width = 4U;
+      if (first == 0xF0U) second_minimum = 0x90U;
+      if (first == 0xF4U) second_maximum = 0x8FU;
+    }
+    else return 0;
+    if (length - position < width) return 0;
+    for (index = 1U; index < width; ++index)
+    {
+      unsigned char byte = (unsigned char)bytes[position + index];
+      unsigned char minimum = index == 1U ? second_minimum : 0x80U;
+      unsigned char maximum = index == 1U ? second_maximum : 0xBFU;
+      if (byte < minimum || byte > maximum) return 0;
+    }
+    position += width;
+  }
+  return 1;
+}
+
 /* @struct text_resources Owns native conversion resources across one protected Lua call.
  * @field wide void* Windows UTF-16 allocation, or NULL when not acquired.
  * @field bytes void* Windows encoded/output allocation, or NULL when not acquired.
@@ -81,7 +124,7 @@ static void *text_allocate(text_resources *owned, size_t size)
  * @param codepage UINT Windows code page identifier.
  * @param bytes const_char* Input bytes in the selected code page.
  * @param length size_t Number of input bytes; must be positive.
- * @param flags DWORD MultiByteToWideChar flags.
+ * @param flags DWORD MultiByteToWideChar flags; GB18030 uses zero for XP compatibility and requires caller round-trip checks.
  * @param count int* Receives the number of UTF-16 units on success.
  * @return WCHAR*|NULL result New buffer that the caller frees, or NULL when conversion fails.
  * @effect May set owned->allocation_failed; no Lua API is called while the allocation is unowned.
@@ -99,6 +142,7 @@ static WCHAR *text_codepage_to_wide(
   WCHAR *wide;
 
   *count = 0;
+  if (codepage == 54936U) flags = 0;
   if (length > (size_t)INT_MAX)
   {
     return NULL;
@@ -207,6 +251,7 @@ static int text_push_wide_utf8(lua_State *L, text_resources *owned, const WCHAR 
   {
     return 0;
   }
+  if (!text_valid_utf8(utf8, (size_t)required)) return 0;
   lua_pushlstring(L, utf8, (size_t)required);
   return 1;
 }
@@ -230,6 +275,89 @@ static int l_text_facts(lua_State *L)
   lua_pushinteger(L, (lua_Integer)GetConsoleOutputCP());
   lua_setfield(L, -2, "console_output");
   return 1;
+}
+
+/* Repairs invalid legacy byte sequences explicitly, including on XP where flag-zero decoding drops bytes.
+ * @param L lua_State* Protected conversion state receiving the UTF-8 result.
+ * @param codepage UINT Installed single-byte, double-byte or GB18030 code page.
+ * @param bytes const_char* Raw input; embedded NUL is treated as an ordinary byte.
+ * @param length size_t Positive input byte count within the public conversion bound.
+ * @return int Three values (true, repaired UTF-8, false), or two values (false, typed error).
+ * @effect Uses fixed native scratch arrays and a Lua-owned output buffer; replaces each undecodable byte with U+FFFD.
+ * @error Lua buffer allocation failure unwinds through the outer protected call.
+ * @ownership No native allocations escape this function; Lua owns its output buffer throughout.
+ */
+static int text_decode_lossy_windows(lua_State *L, UINT codepage, const char *bytes, size_t length)
+{
+  CPINFO info;
+  WCHAR wide[128];
+  char probe[128];
+  char again[64];
+  char utf8[64];
+  luaL_Buffer output;
+  size_t position = 0U;
+  int ascii = 1;
+  int index;
+  DWORD flags = codepage == 54936U ? 0 : MB_ERR_INVALID_CHARS;
+
+  if (!GetCPInfo(codepage, &info) || info.MaxCharSize == 0U || info.MaxCharSize > 4U)
+    return push_failure(L, "EncodingUnavailable", "lossy decoding requires a supported stateless code page");
+  for (index = 0; index < 128; ++index) probe[index] = (char)index;
+  if (MultiByteToWideChar(codepage, flags, probe, 128, wide, 128) != 128)
+    ascii = 0;
+  else for (index = 0; index < 128; ++index)
+    if (wide[index] != (WCHAR)index) { ascii = 0; break; }
+
+  luaL_buffinit(L, &output);
+  while (position < length)
+  {
+    size_t width;
+    int accepted = 0;
+    if (ascii && (unsigned char)bytes[position] < 0x80U)
+    {
+      size_t start = position;
+      while (position < length && (unsigned char)bytes[position] < 0x80U) ++position;
+      luaL_addlstring(&output, bytes + start, position - start);
+      continue;
+    }
+    for (width = 1U; width <= info.MaxCharSize && width <= length - position; ++width)
+    {
+      int count = MultiByteToWideChar(codepage, flags,
+        bytes + position, (int)width, wide, 128);
+      int utf8_length;
+      if (count == 0)
+      {
+        if (GetLastError() != ERROR_NO_UNICODE_TRANSLATION)
+          return push_failure(L, "NativeFailure", "code page decoder failed during replacement");
+        continue;
+      }
+      if (flags == 0)
+      {
+        int returned = WideCharToMultiByte(codepage, 0, wide, count, again, (int)sizeof(again), NULL, NULL);
+        if (returned == 0)
+          return push_failure(L, "NativeFailure", "GB18030 round-trip check failed during replacement");
+        if ((size_t)returned != width || memcmp(again, bytes + position, width) != 0) continue;
+      }
+      utf8_length = WideCharToMultiByte(CP_UTF8, 0, wide, count, utf8, (int)sizeof(utf8), NULL, NULL);
+      if (utf8_length == 0)
+        return push_failure(L, "NativeFailure", "UTF-8 conversion failed during replacement");
+      if (!text_valid_utf8(utf8, (size_t)utf8_length)) continue;
+      luaL_addlstring(&output, utf8, (size_t)utf8_length);
+      position += width;
+      accepted = 1;
+      break;
+    }
+    if (!accepted)
+    {
+      luaL_addlstring(&output, "\xEF\xBF\xBD", 3U);
+      ++position;
+    }
+  }
+  luaL_pushresult(&output);
+  lua_pushboolean(L, 1);
+  lua_insert(L, -2);
+  lua_pushboolean(L, 0);
+  return 3;
 }
 
 /* Decodes code page bytes to UTF-8, verifying an exact round trip unless lossy output is allowed.
@@ -265,11 +393,7 @@ static int text_decode_windows(
     {
       return push_failure(L, "InvalidEncoding", "bytes are not valid in the selected code page");
     }
-    owned->wide = wide = text_codepage_to_wide(owned, codepage, bytes, length, 0, &count);
-    if (wide == NULL)
-    {
-      return push_failure(L, "InvalidEncoding", "code page conversion failed");
-    }
+    return text_decode_lossy_windows(L, codepage, bytes, length);
   }
   if (exact)
   {
@@ -284,11 +408,21 @@ static int text_decode_windows(
     {
       return push_failure(L, "InvalidEncoding", "code page decoding does not round-trip");
     }
+    if (!exact && codepage == 54936U)
+    {
+      text_release_resources(owned);
+      return text_decode_lossy_windows(L, codepage, bytes, length);
+    }
   }
   lua_pushboolean(L, 1);
   if (!text_push_wide_utf8(L, owned, wide, count))
   {
     lua_pop(L, 1);
+    if (lossy && !owned->allocation_failed)
+    {
+      text_release_resources(owned);
+      return text_decode_lossy_windows(L, codepage, bytes, length);
+    }
     return push_failure(L, "InvalidEncoding", "decoded text cannot be represented as UTF-8");
   }
   lua_pushboolean(L, exact);
@@ -583,6 +717,8 @@ static int text_convert_protected(lua_State *L)
   {
     return push_failure(L, "TextTooLarge", "text conversion input exceeds its bound");
   }
+  if (!decode && !text_valid_utf8(bytes, length))
+    return push_failure(L, "InvalidEncoding", "text is not strict Unicode-scalar UTF-8");
 #if defined(_WIN32)
   {
     lua_Integer codepage = luaL_checkinteger(L, 2);

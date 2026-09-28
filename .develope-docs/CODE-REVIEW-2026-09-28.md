@@ -2,7 +2,7 @@
 
 日期：2026-09-28。R23--R28 接续 `9aed60f`，已提交为 `9724797`；
 R29 已提交为 `f3a69f2`，R30--R33 已提交为 `d2bc3a9`；R34--R36 已提交为 `18adc05`，
-R37--R38 已提交为 `4b54dc8`；随后接续 Lua 工具层的错误传播。
+R37--R38 已提交为 `4b54dc8`，R39--R41 已提交为 `ca6d7c5`；随后接续 XP 原生转换复验。
 接续 [R01--R22](CODE-REVIEW-2026-09-22.md)，本轮集中审查旧编码与区间读取，
 不代表全仓人工语义 Review 或目标资格已完成。
 
@@ -29,6 +29,9 @@ R37--R38 已提交为 `4b54dc8`；随后接续 Lua 工具层的错误传播。
 | R39 | read/search 把不可用代码页或资源失败变成内容分类、跳过二进制文件，或改用 UTF-8 修复；有损重试还会覆盖原错误 | 只对 InvalidEncoding 重试有损解码；其余结构化错误保留并向上传播。整文件、采样、正向/尾读和搜索均覆盖，范围错误先关闭句柄；后续读取可恢复 |
 | R40 | Lua codec 把所有原生异常或异常返回都报 EncodingUnavailable，且把非精确的严格转换当成成功 | 原生异常为 NativeFailure，格式/精确性违约为 NativeContract，原生结构化错误保留；严格解码与编码拒绝非精确成功 |
 | R41 | write(replace) 在原子替换后才解码新内容计算行数；此时转换器失败会抛错，但原文件已经被改变 | 候选解码移到替换前，和旧内容解码/patch 一样保留资源错误；故障回归要求原字节和完整身份不变，旧源码复现候选解码失败后原字节已改变 |
+| R42 | XP 的 flag-zero 有损解码丢弃非法字节，可能同时丢掉周围有效文字；CP932 重复映射旁的错误也受影响 | 显式检查合法序列并逐字节替换无法解码的输入；保留有效重复映射；7 组损坏 GBK、2 组 CP932 重复映射与分配失败恢复均通过 XP 实测 |
+| R43 | XP 已安装 GB18030，但 MultiByteToWideChar 拒绝 MB_ERR_INVALID_CHARS，合法补充字符编码/解码都失败 | GB18030 使用 XP 支持的零标志，并保留严格往返校验；有损逐段解码同样检查往返，避免静默丢字；XP 正常往返和损坏后保留补充字符通过 |
+| R44 | XP 的严格 UTF-8 API 仍接受孤立代理项等非法形式，导致写入错误分类随系统变化 | 在原生编码入口和 Windows UTF-8 输出增加无分配的标量校验；穷举 1,114,113 个候选、截断前缀与非法形式；XP 的 8 组非法输入均明确返回 InvalidEncoding |
 
 `read`/`search` 的模型可见工具说明已同步续页、尾部片段及搜索不完整的含义。
 没有新增配置项或运行依赖。
@@ -179,9 +182,51 @@ Linux 真实 native 编码 smoke 仍为 12 组通过。
 改动函数与测试的注释逐项核对。exec 输出显示的降级策略未在本批改变，仍需后续语义 Review。
 本批不扩展为全仓 Review 或旧目标资格完成。
 
+## R42--R44 XP 原生转换与目标对照
+
+接续 `ca6d7c5`，修改仅涉及原生文本转换及两个资格探针。使用独立 qcow2 覆盖盘和
+FAT 便携介质，在 Windows XP SP3 x86（5.1.2600，活动代码页 936）运行旧/新原生组件对照。
+旧组件为 `4b54dc8` 当次构建；Lua 包装源码为 `ca6d7c5`，新组件包含本批修正。
+当次介质输入及 SHA-256 保存在 `out/codec-xp-20260928/xp/media/` 和 `payload-final.sha256`。
+
+旧组件在最终探针中复现 **12 项失败**，覆盖 GB18030 双方向、7 个 GBK 替换场景、
+CP932 有效重复映射旁的坏字节，以及两类 UTF-8 错误分类。新组件全部通过。
+原始 NLS API 探针同时记录 GB18030 严格标志返回 ERROR_INVALID_FLAGS（1004），
+以及 XP 严格 UTF-8 接受孤立代理项的行为。依据与实测相符：
+[Microsoft MultiByteToWideChar](https://learn.microsoft.com/en-us/windows/win32/api/stringapiset/nf-stringapiset-multibytetowidechar)。
+
+| 检查 | 当前结果 |
+| --- | --- |
+| Linux / Win32 / Win64 native 构建 | 均以 `-Wall -Wextra -Werror` 通过，Windows 底线仍为 XP / Win7 |
+| Linux 编码 smoke | 13 组往返、7 组 GBK 替换、2 组 CP932 重复映射、8 组非法 UTF-8、1 组 GB18030 修复通过 |
+| Wine Win32 / Win64 编码 smoke | 各 12 组往返及相同替换/UTF-8 检查通过；GB18030 不可用单列 |
+| XP 当前 native 编码 smoke | 13 组往返及全部替换/UTF-8/GB18030 检查通过，0 不可用项 |
+| Lua 分配失败与恢复 | Linux 解码/编码/有损各 18 个位置；Wine Win32 为 4/4/20，Win64 为 4/4/18；XP 为 4/4/20；0 失败、0 所有权错误 |
+| Windows malloc 故障 | Wine 两架构及 XP 各九个位置，清理、OutOfMemory 与同状态恢复通过 |
+| UTF-8 标量校验 | 上述各环境均检查 1,114,113 个候选及多字节截断前缀，另有 8 组非法形式；全部通过 |
+| XP 完整 Lua suite | 667/667，通过当前 Lua 源码与新 native 介质执行 |
+| 全仓 readiness | 完整链通过；注释结构 208 文件、5115 声明、0 缺项；检查器反例 14/14 |
+
+日志根目录为 `out/codec-xp-20260928/`，开发机最终记录为 `*-final.log`、
+`win32-codec-xp-final.log`、`win64-codec-xp-final.log` 和 `readiness-final.log`。
+XP 最终结果在 `xp/evidence-final/`；`new-codec.exit`、`new-faults.exit`、`core-suite.exit`
+均为 0，旧组件失败日志也保留。前两轮在 `xp/evidence/`、`xp/evidence-api/`：
+首轮 suite 的相对根路径含 `..`，被安全加载器拒绝，造成夹具失败；改为进入规范源码目录
+启动后完整通过，未为夹具调整产品路径校验。中间轮仍有两个 GB18030 失败，最终修复后通过。
+
+人工语义 Review 核对了无分配 UTF-8 校验的边界、ASCII 快路径的真实代码页探测、
+逐段替换与 CP932 多对一映射、GB18030 往返、Lua 缓冲所有权及异常收尾；
+新增/修改函数的注释与签名、返回值、分配和副作用逐项核对。
+此次 XP 证据覆盖当前原生组件和源码 suite；尚未重建最终单文件和三档发行包，
+不等于整个平台资格完成。全仓语义 Review 与其余目标矩阵继续保留为未完成。
+
+同批 Win7 独立覆盖盘已启动，但两个已有账户均停在密码入口，未获得可用登录上下文，
+没有执行 guest 探针。保留 `win7/login-retry.png`、`win7/selected-user.png` 与运行日志后
+正常关机；本批 Win64 证据限于交叉构建和 Wine，不把该启动尝试计为 Win7 通过。
+
 ## 继续审查与目标验证
 
-1. 旧系统的有损替换、编码别名及 exec 输出降级的语义 Review；不能以 Wine 替代旧目标。
+1. Win7 当前原生转换复验、编码别名及 exec 输出降级的语义 Review；不能以 Wine 替代旧目标。
 2. 重建三目标产物，把本批修正与 R21/R22 一同用于 XP/Win7/CentOS 7 以及指定 Server 2008 的实测。
 3. A08/A09 的真实 GiB 级文件、中文命令、编码写回与模型续页旅程。现有小规模注入用例不能替代这些目标证据。
 

@@ -202,12 +202,13 @@ static void *fault_allocate(void *opaque, void *pointer, size_t previous, size_t
  * @param length size_t Input byte count.
  * @param fail_at size_t Allocation failure threshold; SIZE_MAX observes an ordinary call.
  * @param missing int Nonzero requests an unavailable converter.
+ * @param lossy int Nonzero selects CP936 invalid-byte replacement; input must consist of 0xFF bytes.
  * @return size_t Number of armed Lua allocation attempts.
  * @effect Creates/closes a Lua state, runs the production converter and reports failures to stderr.
  * @error Aborts if the probe cannot create its initial unarmed Lua state.
  */
 static size_t check_conversion(
-  const char *direction, const char *input, size_t length, size_t fail_at, int missing)
+  const char *direction, const char *input, size_t length, size_t fail_at, int missing, int lossy)
 {
   fault_allocator allocator = { 0U, fail_at, 0 };
   lua_State *L = lua_newstate(fault_allocate, &allocator, 0U);
@@ -220,12 +221,12 @@ static size_t check_conversion(
   lua_pushcfunction(L, l_text_convert);
   lua_pushstring(L, direction);
 #if defined(_WIN32)
-  lua_pushinteger(L, missing ? 65534 : 1252);
+  lua_pushinteger(L, missing ? 65534 : (lossy ? 936 : 1252));
 #else
-  lua_pushstring(L, missing ? "YACA-MISSING-CHARSET" : "CP1252");
+  lua_pushstring(L, missing ? "YACA-MISSING-CHARSET" : (lossy ? "CP936" : "CP1252"));
 #endif
   lua_pushlstring(L, input, length);
-  lua_pushboolean(L, 0);
+  lua_pushboolean(L, lossy);
   allocator.armed = 1;
   status = lua_pcall(L, 4, LUA_MULTRET, 0);
   allocator.armed = 0;
@@ -262,11 +263,12 @@ static size_t check_conversion(
       size_t output_length;
       const unsigned char *output = (const unsigned char *)lua_tolstring(L, 2, &output_length);
       int decode = strcmp(direction, "decode") == 0;
-      size_t expected = decode ? length * 2U : length / 2U;
-      if (output == NULL || output_length != expected || !lua_toboolean(L, 3)) ++failures;
+      size_t expected = lossy ? length * 3U : (decode ? length * 2U : length / 2U);
+      if (output == NULL || output_length != expected || lua_toboolean(L, 3) == lossy) ++failures;
       else for (index = 0; index < output_length; ++index)
       {
-        unsigned char wanted = decode ? (index % 2U == 0U ? 0xC3U : 0xA9U) : 0xE9U;
+        unsigned char wanted = lossy ? (unsigned char)"\xEF\xBF\xBD"[index % 3U]
+          : (decode ? (index % 2U == 0U ? 0xC3U : 0xA9U) : 0xE9U);
         if (output[index] != wanted) { ++failures; break; }
       }
     }
@@ -418,7 +420,59 @@ static void check_encoding_rejection(const char *input, const char *expected)
 }
 #endif
 
-/* Runs ordinary, unavailable-empty-input and every observed Lua/native allocation-failure position.
+/* Check every Unicode scalar, the surrogate interval and representative malformed UTF-8 byte forms.
+ * @param none Generates bounded UTF-8 fixtures without invoking the Lua allocator.
+ * @return void No value; increments failures if the production validator disagrees with scalar validity.
+ * @effect Prints the exhaustive scalar and malformed-input counts.
+ */
+static void check_utf8_scalars(void)
+{
+  unsigned long scalar;
+  size_t index;
+  const char *invalid[] = {
+    "\x80", "\xC0\xAF", "\xC1\xBF", "\xE0\x80\xAF", "\xF0\x80\x80\xAF",
+    "\xF5\x80\x80\x80", "\xE2\x82", "\xE2\x28\xA1"
+  };
+  for (scalar = 0UL; scalar <= 0x110000UL; ++scalar)
+  {
+    char bytes[4];
+    size_t length;
+    int expected = scalar <= 0x10FFFFUL && !(scalar >= 0xD800UL && scalar <= 0xDFFFUL);
+    if (scalar < 0x80UL)
+    {
+      bytes[0] = (char)scalar;
+      length = 1U;
+    }
+    else if (scalar < 0x800UL)
+    {
+      bytes[0] = (char)(0xC0UL | (scalar >> 6));
+      bytes[1] = (char)(0x80UL | (scalar & 0x3FUL));
+      length = 2U;
+    }
+    else if (scalar < 0x10000UL)
+    {
+      bytes[0] = (char)(0xE0UL | (scalar >> 12));
+      bytes[1] = (char)(0x80UL | ((scalar >> 6) & 0x3FUL));
+      bytes[2] = (char)(0x80UL | (scalar & 0x3FUL));
+      length = 3U;
+    }
+    else
+    {
+      bytes[0] = (char)(0xF0UL | (scalar >> 18));
+      bytes[1] = (char)(0x80UL | ((scalar >> 12) & 0x3FUL));
+      bytes[2] = (char)(0x80UL | ((scalar >> 6) & 0x3FUL));
+      bytes[3] = (char)(0x80UL | (scalar & 0x3FUL));
+      length = 4U;
+    }
+    if (text_valid_utf8(bytes, length) != expected) ++failures;
+    if (length > 1U && text_valid_utf8(bytes, length - 1U)) ++failures;
+  }
+  for (index = 0U; index < sizeof(invalid) / sizeof(invalid[0]); ++index)
+    if (text_valid_utf8(invalid[index], strlen(invalid[index]))) ++failures;
+  printf("utf8-scalar-candidates=1114113 malformed-cases=%zu\n", sizeof(invalid) / sizeof(invalid[0]));
+}
+
+/* Runs scalar validation, ordinary/empty conversion and every observed Lua/native allocation-failure position.
  * @param none No command-line arguments are consumed.
  * @return int Zero only when conversion, error classification, result arity, resource cleanup and recovery checks all pass.
  * @effect Prints proof counters and failure details; allocates only temporary probe states and buffers.
@@ -431,22 +485,28 @@ int main(void)
   size_t index;
   size_t decode_calls;
   size_t encode_calls;
+  size_t lossy_calls;
+  check_utf8_scalars();
   memset(legacy, 0xE9, sizeof(legacy));
   for (index = 0; index < sizeof(unicode); index += 2U)
   {
     unicode[index] = (char)0xC3;
     unicode[index + 1U] = (char)0xA9;
   }
-  decode_calls = check_conversion("decode", legacy, sizeof(legacy), SIZE_MAX, 0);
-  encode_calls = check_conversion("encode", unicode, sizeof(unicode), SIZE_MAX, 0);
+  decode_calls = check_conversion("decode", legacy, sizeof(legacy), SIZE_MAX, 0, 0);
+  encode_calls = check_conversion("encode", unicode, sizeof(unicode), SIZE_MAX, 0, 0);
   for (index = 1U; index <= decode_calls + 1U; ++index)
-    check_conversion("decode", legacy, sizeof(legacy), index, 0);
+    check_conversion("decode", legacy, sizeof(legacy), index, 0, 0);
   for (index = 1U; index <= encode_calls + 1U; ++index)
-    check_conversion("encode", unicode, sizeof(unicode), index, 0);
-  check_conversion("decode", "", 0U, SIZE_MAX, 1);
-  check_conversion("encode", "", 0U, SIZE_MAX, 1);
-  check_conversion("decode", "", 0U, SIZE_MAX, 0);
-  check_conversion("encode", "", 0U, SIZE_MAX, 0);
+    check_conversion("encode", unicode, sizeof(unicode), index, 0, 0);
+  check_conversion("decode", "", 0U, SIZE_MAX, 1, 0);
+  check_conversion("encode", "", 0U, SIZE_MAX, 1, 0);
+  check_conversion("decode", "", 0U, SIZE_MAX, 0, 0);
+  check_conversion("encode", "", 0U, SIZE_MAX, 0, 0);
+  memset(legacy, 0xFF, sizeof(legacy));
+  lossy_calls = check_conversion("decode", legacy, sizeof(legacy), SIZE_MAX, 0, 1);
+  for (index = 1U; index <= lossy_calls + 1U; ++index)
+    check_conversion("decode", legacy, sizeof(legacy), index, 0, 1);
 #if defined(_WIN32)
   {
     size_t native_decode = check_native_allocation("decode", 0, SIZE_MAX);
@@ -464,7 +524,7 @@ int main(void)
     check_encoding_rejection("\xE4\xB8\xAD", "EncodingLossy");
   }
 #endif
-  printf("text-codec-faults decode_sites=%zu encode_sites=%zu failures=%zu ownership_errors=%zu\n",
-    decode_calls, encode_calls, failures, ownership_errors);
+  printf("text-codec-faults decode_sites=%zu encode_sites=%zu lossy_sites=%zu failures=%zu ownership_errors=%zu\n",
+    decode_calls, encode_calls, lossy_calls, failures, ownership_errors);
   return failures == 0U && ownership_errors == 0U ? 0 : 1;
 }

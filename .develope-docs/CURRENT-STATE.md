@@ -1,8 +1,9 @@
 # 当前状态
 
-更新日期：2026-09-28。接续 `4b54dc8`，完成
-[R39--R41](CODE-REVIEW-2026-09-28.md#r39--r41-工具层错误传播与写入顺序)
-解码错误传播、原生端口结果校验与写入前候选校验。提交脉络见[开发历程](DEVELOPMENT-HISTORY.md)。
+更新日期：2026-09-28。接续 `ca6d7c5`，完成
+[R42--R44](CODE-REVIEW-2026-09-28.md#r42--r44-xp-原生转换与目标对照)
+XP 有损替换、GB18030 与严格 UTF-8 修复，并通过 XP 当前组件对照。
+提交脉络见[开发历程](DEVELOPMENT-HISTORY.md)。
 
 **核心已实现，目标资格验证待完成。** 机读阶段为 `implemented-unqualified`，
 Release Gate R 为 `closed`，`release_authorized=false`。
@@ -29,26 +30,30 @@ Release Gate R 为 `closed`，`release_authorized=false`。
 原生转换器在 Lua 内存错误后释放已持有的缓冲和转换句柄；Windows 原生 malloc
 失败返回 OutOfMemory，错误结果为 false/error，成功才返回 exact 标志。
 read/search 保留转换器不可用与资源错误；write/patch 解码失败在文件发布前返回。
+XP 显式替换非法旧编码字节，保留周围有效文字；GB18030 使用目标支持的标志并校验往返。
+原生编码入口校验 UTF-8 标量，不依赖旧 Windows 的宽松转换行为。
 
 ## 最新基线复核
 
 开发机为 Fedora 44 / x86_64，内核 `7.2.7-200.fc44.x86_64`。
-完整测试在资源守卫下串行运行。最新工具层回归日志为 `out/codec-propagation-20260928/`；
+完整测试在资源守卫下串行运行。最新原生与 XP 回归日志为 `out/codec-xp-20260928/`；
+工具层回归日志为 `out/codec-propagation-20260928/`；
 原生分配审查在 `out/codec-errors-20260928/`，此前日志保留在 `out/native-codec-review-20260928/`、
 `out/range-stability-20260928/`、`out/page-review-20260928/`、
 `out/f4-review-20260928/` 与 `out/development-reset-20260928/`。
-这些是开发机复核记录，不是发行目标资格。
+开发机复核和 XP 当前组件证据分别记录，均不代表最终发行包资格。
 
 资料整理的独立复核在 `out/handoff-baseline-20260928/`，当次源码为 `18adc05`。
-后续原生修复重新构建并执行探针和 readiness；本批没有推进目标机资格。
+后续原生修复重新构建并执行探针和 readiness；本批新增 XP 当前组件实测，完整目标资格仍待完成。
 
 | 检查 | 2026-09-28 结果 |
 | --- | --- |
-| 完整 Lua suite | 667/667 通过；原生故障探针独立计数 |
-| 全仓注释结构 | 208 个文件、5111 个声明、0 缺项；tree-sitter 0.25.2 |
-| Lua 分配失败与恢复 | Linux 编码/解码各 18 个位置，Wine Win32/Win64 各 4 个位置；全部通过，无原生资源遗留或重复释放 |
-| Windows 原生分配失败与恢复 | Wine Win32/Win64 各九个位置，覆盖严格/有损解码及编码；返回 OutOfMemory、清理与同状态恢复通过 |
-| 原生构建与编码 smoke | Linux/Win32/Win64 完整 native 构建通过；Linux 12 组、Wine 两架构各 11 组，cp54936 不可用单列 |
+| 完整 Lua suite | 开发机及 XP 均 667/667 通过；原生故障探针独立计数 |
+| 全仓注释结构 | 208 个文件、5115 个声明、0 缺项；tree-sitter 0.25.2 |
+| Lua 分配失败与恢复 | Linux 解码/编码/有损各 18 个位置；Wine Win32 4/4/20、Win64 4/4/18，XP 4/4/20；0 资源错误 |
+| Windows 原生分配失败与恢复 | Wine Win32/Win64 和 XP 各九个位置，覆盖严格/有损解码及编码；返回 OutOfMemory、清理与同状态恢复通过 |
+| 原生构建与编码 smoke | 三平台 native 构建通过；Linux/XP 各 13 组、Wine 各 12 组往返；新增坏字节/重复映射/UTF-8 拒绝检查通过；Wine cp54936 不可用单列 |
+| UTF-8 标量校验 | Linux、Wine 两架构及 XP 各 1,114,113 个候选、截断前缀及 8 组非法形式全部通过 |
 | TP-003 / TP-010 | 重跑通过；453 / 5,564,743 条断言 |
 | 注释检查器反例 | 14/14 通过 |
 | 契约 / 证明登记 / readiness | 7687 / 56 / 562 条断言通过 |
@@ -72,19 +77,19 @@ YACA_PROOF_SOURCE_CACHE="$PWD/out/qualification/sources" \
 
 | 环境 | 已有证据 | 当前缺口 |
 | --- | --- | --- |
-| XP SP3 x86 | N23 核心、NTFS/FAT32、Unicode、Lua 工具及控制台旅程 | 重建当前源码；纳入 R21/R22 与新编码/seek 后复验 |
+| XP SP3 x86 | 当前 native 编码、错误注入及源码 suite 667/667；历史 N23 核心/NTFS/FAT32/控制台旅程 | 重建当前单文件与三档包；完整目标矩阵和新 seek 复验 |
 | Win7 SP1 x64 | N4 核心与原生探针；R21 修正 Lua 源码配旧原生组件的复验 | 当前源码完整单文件产物与全套目标复验 |
 | CentOS 7 x86_64 | 历史候选、3.10 内核下的进程监督及模型旅程 | 当前源码构建、完整资格与最终包 |
 | 指定 Server 2008 / Cygwin SSH | 直接交互、中文 Ask、真实 Lua/模型等旧候选证据 | 当前候选复验；旧 SSH 外层 255 与握手失败记录仍须分辨 |
 | std/full 工具 | win32 std 的部分构建/运行证据；三目标候选版本和装配约束 | win64/Linux std、三个 full 的完整工具闭包与目标运行 |
 
 详细路径、失败记录与适用候选见[Review 记录](CODE-REVIEW-2026-09-22.md)和
-[开发历程](DEVELOPMENT-HISTORY.md)。Windows 新编码转换已有交叉编译和 Wine 探针，
-seek 仍待真实旧目标复验；两者均不能沿用旧包的目标资格。
+[开发历程](DEVELOPMENT-HISTORY.md)。Windows 新编码转换已有交叉编译、Wine 和 XP 探针，
+Win7 当前组件及 seek 仍待真实旧目标复验；不能沿用旧包的目标资格。
 
 ## 尚未完成
 
-- 全仓人工语义 Review；接续 R23--R41 审查 Windows 有损路径、编码别名和 exec 输出降级。
+- 全仓人工语义 Review；接续 R23--R44 审查编码别名和 exec 输出降级，补 Win7 当前原生转换实测。
 - 当前源码的三目标完整构建、目标回归、网络故障、恢复与容量矩阵。
 - A08/A09 的 GiB 级日志、增长/轮转、旧代码页及真实模型读取旅程。
 - 工具来源、许可证、依赖闭包及三目标 clean/std/full 共九包验收（C32--C34）。
