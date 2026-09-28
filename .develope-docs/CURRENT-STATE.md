@@ -1,9 +1,10 @@
 # 当前状态
 
-更新日期：2026-09-28。本轮实现基线为 `5384b8e`，已完成
-[R37--R48](CODE-REVIEW-2026-09-28.md)：旧编码、错误传播、进程输出与文件读取资源修复，
-以及 XP 当前源码和 NTFS/FAT32 seek 探针复验。按负责人安排，本日开发在北京时间 12:00 暂停。
-构建与测试已结束；恢复开发从 [TRACKING.md](TRACKING.md) 的原生 I/O 资源审查继续。
+更新日期：2026-09-28。本轮实现基线为 `5384b8e` 加 R49--R50 原生 I/O 资源修复，
+已完成 [R37--R50](CODE-REVIEW-2026-09-28.md)：旧编码、错误传播、进程输出、
+文件读取、open/create 句柄顺序与进程流缓冲所有权，
+以及 XP 当前源码和 NTFS/FAT32 seek 探针复验。
+恢复开发从 [TRACKING.md](TRACKING.md) 的 Win7 当前组件实测继续。
 提交脉络见[开发历程](DEVELOPMENT-HISTORY.md)。
 
 **核心已实现，目标资格验证待完成。** 机读阶段为 `implemented-unqualified`，
@@ -21,6 +22,7 @@ Release Gate R 为 `closed`，`release_authorized=false`。
 | 便携发行 | clean/std/full 装配；同平台核心相同；可选 tools 的位置与能力说明 | [工具清单](../release/TOOL-BUNDLES.md)、`release/tool-bundles.json` |
 | 旧终端与原生层 | Cygwin PTY、Unicode 路径/参数/输出、异步 stdin、进程树回收及 FAT32 修复 | [便携实现](PORTABLE-IMPLEMENTATION-2026-09-22.md)、[R01--R22](CODE-REVIEW-2026-09-22.md) |
 | 旧编码 | 原生代码页转换、编码规范化、read/search 解码、write/patch 无损编码、exec 输出解码与环境事实；Lua 内存错误后的原生资源清理 | `native/yaca_text.h`、`src/textcodec.lua`、`tools.lua`、`prompt.lua` |
+| 原生 I/O 资源 | open/create 先建 userdata 再取句柄；进程流读取缓冲由 Lua 持有；错误码跨缓冲收口保存恢复 | [R49--R50](CODE-REVIEW-2026-09-28.md#r49--r50-原生-opencreate-与进程流读取资源)、`native/yaca_native.c` |
 | 大文件 | 超过 16 MiB 时区间读取、有界搜索、`from_end`、续页令牌和超长行截断 | `native/yaca_native.c` 的 seek、`src/tools.lua` |
 | 结果分页 | read/search/list 按最终 JSON 字节预算选取记录；超大显示片段在 UTF-8 边界截断 | [R29](CODE-REVIEW-2026-09-28.md#r29-验证与人工-review)、`src/tools.lua` |
 | 范围一致性 | 页结束时核对完整身份与路径，续页绑定大小/修改时间；读错误和模式异常明确失败并清理句柄 | [R30--R33](CODE-REVIEW-2026-09-28.md#r30--r33-验证与人工-review)、`src/tools.lua` |
@@ -62,6 +64,7 @@ Lua 名称回归日志为 `out/codec-alias-20260928/`，
 | 原生构建与编码 smoke | 三平台 native 构建通过；Linux/XP 各 13 组、Wine 各 12 组往返；新增坏字节/重复映射/UTF-8 拒绝检查通过；Wine cp54936 不可用单列 |
 | UTF-8 标量校验 | Linux、Wine 两架构及 XP 各 1,114,113 个候选、截断前缀及 8 组非法形式全部通过 |
 | 原生文件读取异常 | Linux、Wine 两架构和 XP 各 13 个分配位置，0 原生泄漏；同句柄恢复、OS 读错误收尾通过 |
+| 原生 open/create 与进程流 | 三环境各 4 端口 0 句柄泄漏；进程流 Linux 20 个、Wine 两架构各 11 个分配位置 0 缓冲泄漏；同状态恢复与终端监督通过 |
 | 原生字节偏移 | Linux、Wine 两架构、XP NTFS/FAT32 的 12 偏移通过，覆盖 2 GiB / 4 GiB 边界与 EOF；不代替真实大文件扫描 |
 | TP-003 / TP-010 | 重跑通过；453 / 5,564,743 条断言 |
 | 注释检查器反例 | 14/14 通过 |
@@ -98,7 +101,7 @@ XP 已补原生 seek 探针，Win7 当前组件仍待实测；不能沿用旧包
 
 ## 尚未完成
 
-- 全仓人工语义 Review；R23--R48 修改范围已逐项核对，接续原生 open/create 与进程流临时资源审查。
+- 全仓人工语义 Review；R23--R50 修改范围已逐项核对，接续其余原生端口与未审区域。
 - Win7 当前原生组件和真实旧终端输出旅程；现有 VM 登录上下文待补。
 - 当前源码的三目标完整构建、目标回归、网络故障、恢复与容量矩阵。
 - A08/A09 的 GiB 级日志、增长/轮转、旧代码页及真实模型读取旅程。

@@ -1664,6 +1664,8 @@ static int l_fs_make_directory(lua_State *L)
 /* Implements the Lua fs open read native port.
  * @param L lua_State* Lua state receiving arguments and result values.
  * @return int result Number of Lua results pushed for success or typed failure.
+ * @ownership The userdata owner is created before the operating-system handle is opened,
+ *   so a Lua allocation failure can never strand an opened handle outside Lua ownership.
  */
 static int l_fs_open_read(lua_State *L)
 {
@@ -1687,9 +1689,13 @@ static int l_fs_open_read(lua_State *L)
     HANDLE handle;
     DWORD error_value;
 
+    /* Allocate the Lua owner before opening; a Lua allocation failure must
+    ** never strand an open operating-system handle outside the userdata. */
+    file = push_file(L);
     wide_path = utf8_to_wide(path, length);
     if (wide_path == NULL)
     {
+      lua_pop(L, 1);
       return push_failure(L, "InvalidEncoding", "filesystem path is not strict UTF-8");
     }
     handle = CreateFileW(
@@ -1704,9 +1710,9 @@ static int l_fs_open_read(lua_State *L)
     free(wide_path);
     if (handle == INVALID_HANDLE_VALUE)
     {
+      lua_pop(L, 1);
       return push_windows_failure(L, error_value, "cannot open file for reading");
     }
-    file = push_file(L);
     file->handle = handle;
   }
 #else
@@ -1714,13 +1720,16 @@ static int l_fs_open_read(lua_State *L)
     int descriptor;
     int error_value;
 
+    /* Allocate the Lua owner before opening; a Lua allocation failure must
+    ** never strand an open descriptor outside the userdata. */
+    file = push_file(L);
     descriptor = open(path, O_RDONLY);
     error_value = errno;
     if (descriptor < 0)
     {
+      lua_pop(L, 1);
       return push_failure(L, errno_code(error_value), "cannot open file for reading");
     }
-    file = push_file(L);
     file->descriptor = descriptor;
   }
 #endif
@@ -1734,6 +1743,8 @@ static int l_fs_open_read(lua_State *L)
 /* Implements the Lua fs create new native port.
  * @param L lua_State* Lua state receiving arguments and result values.
  * @return int result Number of Lua results pushed for success or typed failure.
+ * @ownership The userdata owner is created before the operating-system handle is created,
+ *   so a Lua allocation failure can never strand a created handle outside Lua ownership.
  */
 static int l_fs_create_new(lua_State *L)
 {
@@ -1763,9 +1774,13 @@ static int l_fs_create_new(lua_State *L)
     HANDLE handle;
     DWORD error_value;
 
+    /* Allocate the Lua owner before creating; a Lua allocation failure must
+    ** never strand a created operating-system handle outside the userdata. */
+    file = push_file(L);
     wide_path = utf8_to_wide(path, length);
     if (wide_path == NULL)
     {
+      lua_pop(L, 1);
       return push_failure(L, "InvalidEncoding", "filesystem path is not strict UTF-8");
     }
     handle = CreateFileW(
@@ -1780,9 +1795,9 @@ static int l_fs_create_new(lua_State *L)
     free(wide_path);
     if (handle == INVALID_HANDLE_VALUE)
     {
+      lua_pop(L, 1);
       return push_windows_failure(L, error_value, "cannot create new file");
     }
-    file = push_file(L);
     file->handle = handle;
   }
 #else
@@ -1790,13 +1805,16 @@ static int l_fs_create_new(lua_State *L)
     int descriptor;
     int error_value;
 
+    /* Allocate the Lua owner before creating; a Lua allocation failure must
+    ** never strand a created descriptor outside the userdata. */
+    file = push_file(L);
     descriptor = open(path, O_CREAT | O_EXCL | O_RDWR, (mode_t)permissions);
     error_value = errno;
     if (descriptor < 0)
     {
+      lua_pop(L, 1);
       return push_failure(L, errno_code(error_value), "cannot create new file");
     }
-    file = push_file(L);
     file->descriptor = descriptor;
   }
 #endif
@@ -3921,6 +3939,8 @@ static int windows_handle_matches_lua(lua_State *L, int index, HANDLE handle)
 /* Implements the Lua fs open read verified native port.
  * @param L lua_State* Lua state receiving arguments and result values.
  * @return int result Number of Lua results pushed for success or typed failure.
+ * @ownership The userdata owner is created before the verified target handle is adopted,
+ *   so a Lua allocation failure can never strand the snapshot handle outside Lua ownership.
  */
 static int l_fs_open_read_verified(lua_State *L)
 {
@@ -3936,8 +3956,12 @@ static int l_fs_open_read_verified(lua_State *L)
     return 2;
   }
   luaL_checktype(L, 2, LUA_TTABLE);
+  /* Allocate the Lua owner before inspecting; a Lua allocation failure must
+  ** never strand the verified operating-system handle outside the userdata. */
+  file = push_file(L);
   if (!inspect_windows_path(path, length, &snapshot, &code, &message))
   {
+    lua_pop(L, 1);
     return push_failure(L, code, message);
   }
   if (!snapshot.exists
@@ -3947,6 +3971,7 @@ static int l_fs_open_read_verified(lua_State *L)
       || !windows_handle_matches_lua(L, 2, snapshot.target_handle))
   {
     free_windows_snapshot(&snapshot);
+    lua_pop(L, 1);
     return push_failure(L, "TargetChanged", "direct Windows read target changed");
   }
   /* BackupRead/BackupSeek during stream inspection may leave this handle at EOF. */
@@ -3957,10 +3982,10 @@ static int l_fs_open_read_verified(lua_State *L)
     {
       DWORD error_value = GetLastError();
       free_windows_snapshot(&snapshot);
+      lua_pop(L, 1);
       return push_windows_failure(L, error_value, "direct Windows read rewind failed");
     }
   }
-  file = push_file(L);
   file->handle = snapshot.target_handle;
   snapshot.target_handle = INVALID_HANDLE_VALUE;
   free_windows_snapshot(&snapshot);
@@ -3970,6 +3995,8 @@ static int l_fs_open_read_verified(lua_State *L)
 /* Implements the Lua fs create new verified native port.
  * @param L lua_State* Lua state receiving arguments and result values.
  * @return int result Number of Lua results pushed for success or typed failure.
+ * @ownership The userdata owner is created before the verified file is created,
+ *   so a Lua allocation failure can never strand the created handle outside Lua ownership.
  */
 static int l_fs_create_new_verified(lua_State *L)
 {
@@ -3991,10 +4018,14 @@ static int l_fs_create_new_verified(lua_State *L)
   permissions = luaL_checkinteger(L, 3);
   if (permissions < 0 || permissions > 0777)
   {
-    return push_failure(L, "InvalidPermissions", "direct create permissions are invalid");
+    return push_failure(L, "InvalidPermissions", "direct Windows create permissions are invalid");
   }
+  /* Allocate the Lua owner before creating; a Lua allocation failure must
+  ** never strand the created operating-system handle outside the userdata. */
+  file = push_file(L);
   if (!inspect_windows_path(path, length, &snapshot, &code, &message))
   {
+    lua_pop(L, 1);
     return push_failure(L, code, message);
   }
   if (snapshot.exists
@@ -4002,6 +4033,7 @@ static int l_fs_create_new_verified(lua_State *L)
   {
     int existed = snapshot.exists;
     free_windows_snapshot(&snapshot);
+    lua_pop(L, 1);
     return push_failure(
       L,
       existed ? "DestinationExists" : "TargetChanged",
@@ -4019,9 +4051,9 @@ static int l_fs_create_new_verified(lua_State *L)
   free_windows_snapshot(&snapshot);
   if (handle == INVALID_HANDLE_VALUE)
   {
+    lua_pop(L, 1);
     return push_windows_failure(L, error_value, "direct Windows create failed");
   }
-  file = push_file(L);
   file->handle = handle;
   return return_success(L);
 }
@@ -7137,6 +7169,8 @@ static int stat_at_matches_lua(
 /* Implements the Lua fs open read verified native port.
  * @param L lua_State* Lua state receiving arguments and result values.
  * @return int result Number of Lua results pushed for success or typed failure.
+ * @ownership The userdata owner is created before the verified descriptor is opened,
+ *   so a Lua allocation failure can never strand the descriptor outside Lua ownership.
  */
 static int l_fs_open_read_verified(lua_State *L)
 {
@@ -7157,10 +7191,15 @@ static int l_fs_open_read_verified(lua_State *L)
     return push_failure(L, "InvalidPath", "direct read path must be absolute");
   }
   (void)length;
+  /* Allocate the Lua owner before opening; a Lua allocation failure must
+  ** never strand the verified descriptor outside the userdata. */
+  file = push_file(L);
   descriptor = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
   if (descriptor < 0)
   {
-    return push_failure(L, errno_code(errno), "direct read open failed");
+    int error_value = errno;
+    lua_pop(L, 1);
+    return push_failure(L, errno_code(error_value), "direct read open failed");
   }
   memset(&identity, 0, sizeof(identity));
   if (fstat(descriptor, &information) != 0
@@ -7169,9 +7208,9 @@ static int l_fs_open_read_verified(lua_State *L)
       || !identity_matches_lua(L, 2, &identity))
   {
     close(descriptor);
+    lua_pop(L, 1);
     return push_failure(L, "TargetChanged", "direct read target changed");
   }
-  file = push_file(L);
   file->descriptor = descriptor;
   return return_success(L);
 }
@@ -7179,6 +7218,8 @@ static int l_fs_open_read_verified(lua_State *L)
 /* Implements the Lua fs create new verified native port.
  * @param L lua_State* Lua state receiving arguments and result values.
  * @return int result Number of Lua results pushed for success or typed failure.
+ * @ownership The userdata owner is created before the verified file is created,
+ *   so a Lua allocation failure can never strand the created descriptor outside Lua ownership.
  */
 static int l_fs_create_new_verified(lua_State *L)
 {
@@ -7204,9 +7245,13 @@ static int l_fs_create_new_verified(lua_State *L)
     return push_failure(L, "InvalidPermissions", "direct create permissions are invalid");
   }
   (void)length;
+  /* Allocate the Lua owner before creating; a Lua allocation failure must
+  ** never strand the created descriptor outside the userdata. */
+  file = push_file(L);
   if (!open_posix_parent(
       path, &parent_descriptor, &parent, &name, &code, &message))
   {
+    lua_pop(L, 1);
     return push_failure(L, code, message);
   }
   if (!descriptor_matches_lua(L, 2, parent_descriptor))
@@ -7214,6 +7259,7 @@ static int l_fs_create_new_verified(lua_State *L)
     close(parent_descriptor);
     free(parent);
     free(name);
+    lua_pop(L, 1);
     return push_failure(L, "TargetChanged", "direct create parent changed");
   }
   descriptor = openat(
@@ -7227,12 +7273,12 @@ static int l_fs_create_new_verified(lua_State *L)
     close(parent_descriptor);
     free(parent);
     free(name);
+    lua_pop(L, 1);
     return push_failure(L, errno_code(error_value), "direct create failed");
   }
   close(parent_descriptor);
   free(parent);
   free(name);
-  file = push_file(L);
   file->descriptor = descriptor;
   return return_success(L);
 }
@@ -9144,6 +9190,8 @@ static void refresh_windows_process(yaca_process *process)
  * @param kind const_char* Selected error, stream, or operation category.
  * @param maximum size_t Maximum admitted byte count or item count.
  * @return int result 1 after pushing a chunk, 0 when none is ready, -1 on read failure.
+ * @ownership The read buffer is Lua-owned for the whole read; a Lua allocation failure
+ *   cannot leak native memory, and the caller keeps owning the stream handle.
  */
 static int read_windows_process_stream(
   lua_State *L,
@@ -9154,6 +9202,7 @@ static int read_windows_process_stream(
   DWORD available;
   DWORD count;
   DWORD requested;
+  luaL_Buffer output;
   char *buffer;
 
   if (*stream == INVALID_HANDLE_VALUE)
@@ -9187,18 +9236,14 @@ static int read_windows_process_stream(
   {
     requested = 0x7fffffffUL;
   }
-  buffer = (char *)malloc((size_t)requested);
-  if (buffer == NULL)
-  {
-    SetLastError(ERROR_NOT_ENOUGH_MEMORY);
-    return -1;
-  }
+  buffer = luaL_buffinitsize(L, &output, (size_t)requested);
   if (!ReadFile(*stream, buffer, requested, &count, NULL))
   {
     DWORD value;
 
     value = GetLastError();
-    free(buffer);
+    luaL_pushresultsize(&output, 0U);
+    lua_pop(L, 1);
     if (value == ERROR_BROKEN_PIPE)
     {
       CloseHandle(*stream);
@@ -9208,12 +9253,12 @@ static int read_windows_process_stream(
     SetLastError(value);
     return -1;
   }
+  luaL_pushresultsize(&output, (size_t)count);
   lua_createtable(L, 0, 2);
+  lua_insert(L, -2);
+  lua_setfield(L, -2, "bytes");
   lua_pushstring(L, kind);
   lua_setfield(L, -2, "kind");
-  lua_pushlstring(L, buffer, (size_t)count);
-  lua_setfield(L, -2, "bytes");
-  free(buffer);
   return 1;
 }
 
@@ -9511,6 +9556,8 @@ static void refresh_posix_process(yaca_process *process)
  * @param kind const_char* Selected error, stream, or operation category.
  * @param maximum size_t Maximum admitted byte count or item count.
  * @return int result 1 after pushing a chunk, 0 when none is ready, -1 on read failure.
+ * @ownership The read buffer is Lua-owned for the whole read; a Lua allocation failure
+ *   cannot leak native memory, and the caller keeps owning the stream descriptor.
  */
 static int read_posix_process_stream(
   lua_State *L,
@@ -9518,6 +9565,7 @@ static int read_posix_process_stream(
   const char *kind,
   size_t maximum)
 {
+  luaL_Buffer output;
   char *buffer;
   ssize_t count;
 
@@ -9525,12 +9573,7 @@ static int read_posix_process_stream(
   {
     return 0;
   }
-  buffer = (char *)malloc(maximum);
-  if (buffer == NULL)
-  {
-    errno = ENOMEM;
-    return -1;
-  }
+  buffer = luaL_buffinitsize(L, &output, maximum);
   do
   {
     count = read(*stream, buffer, maximum);
@@ -9538,27 +9581,33 @@ static int read_posix_process_stream(
   while (count < 0 && errno == EINTR);
   if (count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
   {
-    free(buffer);
+    luaL_pushresultsize(&output, 0U);
+    lua_pop(L, 1);
     return 0;
   }
   if (count < 0)
   {
-    free(buffer);
+    int error_value = errno;
+
+    luaL_pushresultsize(&output, 0U);
+    lua_pop(L, 1);
+    errno = error_value;
     return -1;
   }
   if (count == 0)
   {
-    free(buffer);
+    luaL_pushresultsize(&output, 0U);
+    lua_pop(L, 1);
     close(*stream);
     *stream = -1;
     return 0;
   }
+  luaL_pushresultsize(&output, (size_t)count);
   lua_createtable(L, 0, 2);
+  lua_insert(L, -2);
+  lua_setfield(L, -2, "bytes");
   lua_pushstring(L, kind);
   lua_setfield(L, -2, "kind");
-  lua_pushlstring(L, buffer, (size_t)count);
-  lua_setfield(L, -2, "bytes");
-  free(buffer);
   return 1;
 }
 

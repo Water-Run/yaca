@@ -65,6 +65,7 @@ git show 32d053e:.develope-docs/TRACKING.md
 | `709aa85`，XP 收尾复验 | `out/xp-closeout-20260928/` | 当前 Lua suite 670/670、同一当前 native 编码/故障探针通过；输入快照与 SHA-256 保留 |
 | 原生字节偏移 | `out/seek-qualification-20260928/` | 12 个偏移、负值/关闭拒绝、身份一致性；Linux/Wine/XP NTFS/FAT32 |
 | R48，文件读取资源 | `out/native-io-review-20260928/` | 旧实现五个缓冲泄漏位置；新 Lua 缓冲、分配故障、同句柄恢复及 OS 读取错误路径 |
+| R49--R50，open/create 与进程流资源 | `out/native-open-review-20260928/` | 旧实现三环境各 4 句柄 + 9 缓冲泄漏位置；修正后 0 泄漏、同状态恢复与终端监督通过；670/670 |
 
 XP、Win7、CentOS 7 及 Server 2008 的旧候选路径从各自日期记录查阅；
 不因本地仍留有可执行文件或虚拟机就认定当前版本已通过目标验收。

@@ -1,6 +1,7 @@
 # 编码与区间读取 Review
 
-日期：2026-09-28。R23--R28 接续 `9aed60f`，已提交为 `9724797`；
+日期：2026-09-28。R49--R50 见文末原生 open/create 与进程流一节。
+R23--R28 接续 `9aed60f`，已提交为 `9724797`；
 R29 已提交为 `f3a69f2`，R30--R33 已提交为 `d2bc3a9`；R34--R36 已提交为 `18adc05`，
 R37--R38 已提交为 `4b54dc8`，R39--R41 已提交为 `ca6d7c5`，R42--R44 已提交为 `8af7397`；
 R45 已提交为 `21eb615`，R46--R47 已提交为 `709aa85`；R48 与 seek 探针已提交为 `5384b8e`。
@@ -317,9 +318,52 @@ R48 最终开发机完整 suite **670/670**，完整 readiness 链通过；注�
 `read_windows_process_stream` / `read_posix_process_stream` 的临时缓冲跨 Lua 分配问题；
 这些尚未注入故障，不能从 R48 通过推出整个原生层已完成资源审查。
 
+## R49--R50 原生 open/create 与进程流读取资源
+
+接续 `5384b8e` 的下一项原生 I/O 审查。新增两个维护探针
+[filesystem_open_faults.c](../.tools/qualification/filesystem_open_faults.c) 与
+[process_stream_faults.c](../.tools/qualification/process_stream_faults.c)，
+直接包含生产原生模块并注入 Lua 分配失败。
+
+- R49：四个 open/create 端口在取得操作系统句柄**之后**才创建 userdata；
+  `lua_newuserdatauv` 抛出内存错误时句柄无处归属。Windows verified 变体在该位置
+  还持有整个 snapshot，泄漏更多。探针在 Linux 用 `/proc/self/fd` 差集、
+  Windows 用包装 `CreateFileW`/`CloseHandle` 的值级审计（Wine 的
+  GetProcessHandleCount 是未实现 stub，不能作为观测）。修正将 `push_file`
+  移到句柄获取之前，与 `l_process_start` 的既有范式对齐；各失败路径补 `lua_pop`
+  后返回类型化错误。恢复流程先释放引用并完全收集再删除 create 目标，
+  因为 Windows 句柄未关闭时 `DeleteFileW` 会失败。
+- R50：`read_windows_process_stream` 与 `read_posix_process_stream` 的原生
+  malloc 缓冲跨越 `lua_createtable`/`lua_pushstring`/`lua_pushlstring` 等
+  可抛分配，异常路径泄漏缓冲。修正改用 `luaL_Buffer`（Lua 持有），
+  错误码在缓冲收口前保存、收口后恢复（Windows 为 SetLastError，
+  POSIX 为 errno），句柄仍归调用方所有。
+
+| 检查 | 结果 |
+| --- | --- |
+| before 证据（`f5dd112` 原生源码） | Linux、Wine Win32/Win64 均 4 个 open/create 端口各泄漏 1 个句柄（Win32 verified open 为 2 个）；进程流首读各 9 个分配位置泄漏原生缓冲 |
+| 修正后 open/create | 三环境各 4 端口 0 句柄泄漏；同状态恢复调用含 write/seek/read 回读全部通过 |
+| 修正后进程流 | Linux 20 个、Wine 两架构各 11 个分配位置 0 缓冲泄漏；同一进程监督到 terminal 事件且 outcome=completed；基线两通道字节完整 |
+| R48 与编码回归 | fs_read 故障探针 13 位置 0 泄漏；text_codec_faults 解码/编码/有损各 18 位置 0 失败 0 所有权错误 |
+| 编码 smoke | Linux 13 组；Wine 两架构各 12 组加 cp54936 不可用单列 |
+| 原生模块构建 | Linux、Win32（0x0501）、Win64（0x0601）均 `-Wall -Wextra -Werror` 通过 |
+| 全仓 | 完整 suite **670/670**；注释结构 **212 文件、5163 声明、0 缺项**；完整 readiness 链通过，Gate R 继续关闭 |
+
+日志根目录 `out/native-open-review-20260928/`：`open-before.log`、`stream-before.log`
+为 Linux 旧实现失败；`open-win32-before.log`、`open-win64-before.log`、
+`stream-win32-before.log`、`stream-win64-before.log` 为 Wine 旧实现失败；
+`*-final.log` 与 `win32/win64` 下的结果为修正后证据；
+`recheck/` 为 R48 与编码探针复跑。旧代码对照探针对 `f5dd112` 的影子源码树构建。
+
+人工核对：六个函数的 userdata/句柄/缓冲所有权顺序与注释、各失败路径的
+`lua_pop` 与错误码保存、恢复段 write/seek/read 的栈序，以及两个探针每个
+函数、结构、包装器和阶段的注释与清理。`identity_matches_lua` 仅在
+yaca 自产普通字符串表上运行，其对带元表输入的理论抛错不在本批范围。
+本批未重建发行包；XP/Win7 当前组件实测仍未完成。
+
 ## 继续审查与目标验证
 
-1. 原生文件打开/创建与进程流读取的异常资源审查；Win7 当前组件复验；将新的输出路径纳入真实旧终端旅程。
+1. Win7 当前组件复验；将新的输出路径纳入真实旧终端旅程。
 2. 重建三目标产物，把本批修正与 R21/R22 一同用于 XP/Win7/CentOS 7 以及指定 Server 2008 的实测。
 3. A08/A09 的真实 GiB 级文件、中文命令、编码写回与模型续页旅程。现有小规模注入用例不能替代这些目标证据。
 
