@@ -1,8 +1,8 @@
 # 当前状态
 
-更新日期：2026-09-28。接续已整理的 `8c21dd4`，完成
-[R37--R38](CODE-REVIEW-2026-09-28.md#r37--r38-windows-原生分配与错误返回)
-原生内存错误分类和编码返回值修复。提交脉络见[开发历程](DEVELOPMENT-HISTORY.md)。
+更新日期：2026-09-28。接续 `4b54dc8`，完成
+[R39--R41](CODE-REVIEW-2026-09-28.md#r39--r41-工具层错误传播与写入顺序)
+解码错误传播、原生端口结果校验与写入前候选校验。提交脉络见[开发历程](DEVELOPMENT-HISTORY.md)。
 
 **核心已实现，目标资格验证待完成。** 机读阶段为 `implemented-unqualified`，
 Release Gate R 为 `closed`，`release_authorized=false`。
@@ -28,12 +28,13 @@ Release Gate R 为 `closed`，`release_authorized=false`。
 分页保留预算内的内容与续页信息，读取失败和文件版本变化返回明确错误。
 原生转换器在 Lua 内存错误后释放已持有的缓冲和转换句柄；Windows 原生 malloc
 失败返回 OutOfMemory，错误结果为 false/error，成功才返回 exact 标志。
+read/search 保留转换器不可用与资源错误；write/patch 解码失败在文件发布前返回。
 
 ## 最新基线复核
 
 开发机为 Fedora 44 / x86_64，内核 `7.2.7-200.fc44.x86_64`。
-完整测试在资源守卫下串行运行。最新原生审查及回归日志保存在
-`out/codec-errors-20260928/`；此前日志保留在 `out/native-codec-review-20260928/`、
+完整测试在资源守卫下串行运行。最新工具层回归日志为 `out/codec-propagation-20260928/`；
+原生分配审查在 `out/codec-errors-20260928/`，此前日志保留在 `out/native-codec-review-20260928/`、
 `out/range-stability-20260928/`、`out/page-review-20260928/`、
 `out/f4-review-20260928/` 与 `out/development-reset-20260928/`。
 这些是开发机复核记录，不是发行目标资格。
@@ -43,8 +44,8 @@ Release Gate R 为 `closed`，`release_authorized=false`。
 
 | 检查 | 2026-09-28 结果 |
 | --- | --- |
-| 完整 Lua suite | 663/663 通过；本批原生故障探针独立计数 |
-| 全仓注释结构 | 208 个文件、5101 个声明、0 缺项；tree-sitter 0.25.2 |
+| 完整 Lua suite | 667/667 通过；原生故障探针独立计数 |
+| 全仓注释结构 | 208 个文件、5111 个声明、0 缺项；tree-sitter 0.25.2 |
 | Lua 分配失败与恢复 | Linux 编码/解码各 18 个位置，Wine Win32/Win64 各 4 个位置；全部通过，无原生资源遗留或重复释放 |
 | Windows 原生分配失败与恢复 | Wine Win32/Win64 各九个位置，覆盖严格/有损解码及编码；返回 OutOfMemory、清理与同状态恢复通过 |
 | 原生构建与编码 smoke | Linux/Win32/Win64 完整 native 构建通过；Linux 12 组、Wine 两架构各 11 组，cp54936 不可用单列 |
@@ -83,7 +84,7 @@ seek 仍待真实旧目标复验；两者均不能沿用旧包的目标资格。
 
 ## 尚未完成
 
-- 全仓人工语义 Review；接续 R23--R38 审查 Windows 有损路径、Lua 层不可用代码页传播和编码别名。
+- 全仓人工语义 Review；接续 R23--R41 审查 Windows 有损路径、编码别名和 exec 输出降级。
 - 当前源码的三目标完整构建、目标回归、网络故障、恢复与容量矩阵。
 - A08/A09 的 GiB 级日志、增长/轮转、旧代码页及真实模型读取旅程。
 - 工具来源、许可证、依赖闭包及三目标 clean/std/full 共九包验收（C32--C34）。

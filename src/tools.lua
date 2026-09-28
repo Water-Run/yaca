@@ -2155,19 +2155,28 @@ function M.new(dependencies, options)
     --@param bytes string Raw bytes in that code page.
     --@param allow_lossy boolean Whether replacement decoding is acceptable.
     --@return string|nil UTF-8 text.
-    --@return boolean|string True when exact, false when lossy, or a failure classification.
+    --@return boolean|string|table Exact/lossy flag, invalid-encoding classification, or a codec infrastructure error.
     local function decode_legacy(label, bytes, allow_lossy)
         local codec = ports.text_codec
-        if not codec then return nil, "encoding-unavailable" end
-        local converted, exact = codec.decode(label, bytes, false)
-        if converted then return converted, true end
-        if type(exact) == "table" and exact.code == "EncodingUnavailable" then
-            return nil, "encoding-unavailable"
+        if not codec then
+            return nil, failure("EncodingUnavailable", "legacy code page conversion is unavailable")
         end
-        if not allow_lossy then return nil, "invalid-encoding" end
-        converted, exact = codec.decode(label, bytes, true)
-        if not converted then return nil, "invalid-encoding" end
-        return converted, exact == true
+        for attempt = 1, allow_lossy and 2 or 1 do
+            local converted, exact = codec.decode(label, bytes, attempt == 2)
+            if converted then
+                if type(converted) ~= "string" or type(exact) ~= "boolean"
+                    or (attempt == 1 and not exact)
+                then
+                    return nil, failure("NativeContract", "legacy decoder returned an invalid success")
+                end
+                return converted, exact
+            end
+            if type(exact) ~= "table" or type(exact.code) ~= "string" then
+                return nil, failure("NativeContract", "legacy decoder returned no diagnostic")
+            end
+            if exact.code ~= "InvalidEncoding" then return nil, exact end
+        end
+        return nil, "invalid-encoding"
     end
 
     -- Classify a byte stream as supported ordinary text or a non-text document.
@@ -2177,7 +2186,7 @@ function M.new(dependencies, options)
     --@param requested string|nil auto, a UTF label, or a canonical cp<N> label.
     --@param allow_lossy boolean|nil Whether display decoding may replace invalid input.
     --@return table|nil Encoding, basis, text, record, and newline metadata for text.
-    --@return string|nil invalid-encoding, encoding-mismatch, encoding-unavailable or binary-content.
+    --@return string|table|nil Content classification, or an unchanged codec infrastructure error.
     local function decode_document(bytes, requested, allow_lossy)
         requested = requested or "auto"
         local encoding, decoded, bom_bytes, basis, lossy = nil, nil, 0, nil, false
@@ -2202,8 +2211,8 @@ function M.new(dependencies, options)
             then
                 local fallback = ports.text_codec and ports.text_codec.facts.file_default
                 if requested == "auto" and encoding == "utf-8" and fallback then
-                    local converted = decode_legacy(fallback, bytes, false)
-                    if not converted then return nil, "invalid-encoding" end
+                    local converted, decode_error = decode_legacy(fallback, bytes, false)
+                    if not converted then return nil, decode_error end
                     encoding, decoded, basis = fallback, converted, "system-default"
                 elseif allow_lossy and requested ~= "auto" then
                     decoded, lossy = text.repair_utf8(decoded), true
@@ -2843,8 +2852,8 @@ function M.new(dependencies, options)
     -- Decode one raw range line for display, reporting any replacement.
     --@param raw string Raw line content without its terminator.
     --@param encoding string Canonical encoding label.
-    --@return string Ordinary UTF-8 text.
-    --@return boolean Whether any byte or scalar was replaced.
+    --@return string|nil Ordinary UTF-8 text, or nil when the selected decoder fails.
+    --@return boolean|string|table Replacement flag on success, otherwise a content classification or codec error.
     local function decode_range_line(raw, encoding)
         local decoded, lossy = nil, false
         local width, big_endian = unit_layout(encoding)
@@ -2855,7 +2864,7 @@ function M.new(dependencies, options)
             if converted then
                 decoded, lossy = converted, exact ~= true
             else
-                decoded, lossy = text.repair_utf8(raw), true
+                return nil, exact
             end
         elseif text.validate_utf8(raw) == true then
             decoded = raw
@@ -2871,7 +2880,7 @@ function M.new(dependencies, options)
     --@param requested string auto, UTF label or canonical cp<N> label.
     --@param budget table Mutable scan budget.
     --@return table|nil {encoding, bom_bytes, basis}.
-    --@return table|string|nil Filesystem error or encoding classification.
+    --@return table|string|nil Filesystem/codec error or encoding classification.
     --@effect Samples through a temporary read handle, charges the budget and verifies the file version before decoding.
     local function detect_range_encoding(snapshot, requested, budget)
         local stream, open_error = open_stream(snapshot, 0, "utf-8", budget)
@@ -2893,7 +2902,8 @@ function M.new(dependencies, options)
             bom_encoding, bom_bytes = "utf-16be-bom", 2
         end
         if textcodec.is_legacy(requested) then
-            if not ports.text_codec then return nil, "encoding-unavailable" end
+            local available, available_error = decode_legacy(requested, "", false)
+            if not available then return nil, available_error end
             return { encoding = requested, bom_bytes = 0, basis = "requested" }
         end
         if requested ~= "auto" then
@@ -2927,16 +2937,18 @@ function M.new(dependencies, options)
             -- Legacy encodings may also have an incomplete final unit (up to four
             -- bytes for GB18030). Validate a real prefix even without a sampled LF.
             for trim = 0, stream.eof and 0 or math.min(3, #sample - 1) do
-                if decode_legacy(fallback, sample:sub(1, #sample - trim), false) then
+                local converted, decode_error = decode_legacy(fallback, sample:sub(1, #sample - trim), false)
+                if converted then
                     return { encoding = fallback, bom_bytes = 0, basis = "system-default" }
                 end
+                if type(decode_error) == "table" then return nil, decode_error end
             end
         end
         return { encoding = "utf-8", bom_bytes = 0, basis = "detected-invalid-utf-8" }
     end
 
-    -- Convert a range failure marker into a structured tool error.
-    --@param value table|string Filesystem error or a classification string.
+    -- Convert a file-text or scan failure marker into a structured tool error.
+    --@param value table|string Filesystem/codec error or a classification string.
     --@return table Structured error.
     local function range_failure(value)
         if type(value) == "table" then return value end
@@ -2945,9 +2957,6 @@ function M.new(dependencies, options)
         end
         if value == "encoding-mismatch" then
             return failure("EncodingMismatch", "the requested encoding contradicts the file's byte order mark")
-        end
-        if value == "encoding-unavailable" then
-            return failure("EncodingUnavailable", "legacy code page conversion is unavailable")
         end
         return failure("UnsupportedOrInvalidTextEncoding", tostring(value))
     end
@@ -3109,6 +3118,7 @@ function M.new(dependencies, options)
                     truncated = true
                 end
                 local decoded, lossy = decode_range_line(raw_text, layout.encoding)
+                if not decoded then return nil, range_failure(lossy) end
                 local first_byte = base + record.offset
                 local line = result_line(known and index or false, decoded, record.newline,
                     first_byte + omitted, first_byte + record.length, truncated or fragment, lossy)
@@ -3153,6 +3163,7 @@ function M.new(dependencies, options)
                 end
                 if line == false then eof = true; break end
                 local decoded, lossy = decode_range_line(line.raw, layout.encoding)
+                if not decoded then close_stream(stream); return nil, range_failure(lossy) end
                 local fitted, line_bytes = fit_page_record(result_line(number, decoded, line.newline,
                     line.start, line.finish, line.truncated, lossy), "text", result_budget - 3)
                 if not fitted then close_stream(stream); return nil, line_bytes end
@@ -3236,7 +3247,7 @@ function M.new(dependencies, options)
     -- Read a bounded text page or return a redacted/non-text classification.
     --@param state table Admitted call state with a direct file snapshot and line range.
     --@return table|nil Text lines with raw offsets and digest, or safe classification.
-    --@return table|nil Read, scan, or changed-target error.
+    --@return table|nil Read, codec, scan, or changed-target error.
     local function execute_read(state)
         local arguments, target = state.arguments, state.targets[1]
         if state.continuation or target.snapshot.identity.size > limits.maximum_file_bytes then
@@ -3261,6 +3272,7 @@ function M.new(dependencies, options)
             }
         end
         local document, classification = decode_document(read.bytes, arguments.encoding, true)
+        if not document and type(classification) == "table" then return nil, classification end
         local spans = document and document_spans(document, read.bytes)
         if not document or not spans then
             local result = {
@@ -3458,7 +3470,7 @@ function M.new(dependencies, options)
             --@param relative_path string File path relative to the searched root.
             --@param snapshot table Admitted file snapshot.
             --@return boolean|nil True after the file was fully scanned or the match limit was hit.
-            --@return table|string|nil Filesystem error, or "scan-limit"/encoding classification.
+            --@return table|string|nil Filesystem/codec error, or "scan-limit"/encoding classification.
             --@effect Opens and closes read handles, charges the budget, appends matches and updates partial-result counters.
             local function search_large(relative_path, snapshot)
                 local layout, layout_error = detect_range_encoding(snapshot, requested, budget)
@@ -3477,6 +3489,7 @@ function M.new(dependencies, options)
                     number = number + 1
                     if line.truncated then truncated_lines = truncated_lines + 1 end
                     local decoded, lossy = decode_range_line(line.raw, layout.encoding)
+                    if not decoded then close_stream(stream); return nil, range_failure(lossy) end
                     any_lossy = any_lossy or lossy
                     local at_limit, match_error = match_line(relative_path, number, decoded)
                     if at_limit == nil then close_stream(stream); return nil, match_error end
@@ -3550,8 +3563,9 @@ function M.new(dependencies, options)
                         if #hits > 0 then
                             redacted = redacted + 1
                         else
-                            local document = decode_document(read.bytes, requested, requested ~= "auto")
+                            local document, decode_error = decode_document(read.bytes, requested, requested ~= "auto")
                             if not document then
+                                if type(decode_error) == "table" then return nil, decode_error end
                                 skipped_binary = skipped_binary + 1
                             else
                                 if document.lossy then lossy_files = lossy_files + 1 end
@@ -3927,6 +3941,7 @@ function M.new(dependencies, options)
         local base_encoding = textcodec.is_legacy(arguments.encoding) and arguments.encoding or "auto"
         local document, classification = decode_document(old.bytes, base_encoding, false)
         if not document then
+            if type(classification) == "table" then return nil, classification end
             return nil, failure(
                 classification == "binary-content" and "BinaryContentDenied"
                     or "UnsupportedOrInvalidTextEncoding",
@@ -3947,9 +3962,10 @@ function M.new(dependencies, options)
                 diff = { old_lines = #document.records, new_lines = #document.records },
             }
         end
+        local new_document, decode_error = decode_document(bytes, base_encoding, false)
+        if not new_document then return nil, range_failure(decode_error) end
         local published, publish_error = publish_replace(state, target, bytes)
         if not published then return nil, publish_error end
-        local new_document = assert(decode_document(bytes, base_encoding, false))
         return {
             mode = "replace",
             changed = true,
@@ -4032,9 +4048,9 @@ function M.new(dependencies, options)
         end
         local document, classification = decode_document(old.bytes, arguments.encoding or "auto", false)
         if not document then
+            if type(classification) == "table" then return nil, classification end
             return nil, failure(
                 classification == "binary-content" and "BinaryContentDenied"
-                    or classification == "encoding-unavailable" and "EncodingUnavailable"
                     or "UnsupportedOrInvalidTextEncoding",
                 "patch base is not supported ordinary text in the requested encoding"
             )

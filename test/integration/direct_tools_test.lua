@@ -948,6 +948,169 @@ return {
             end,
         },
         {
+            name = "codec availability and resource errors fail whole and range reads and searches",
+            -- Codec infrastructure errors must remain failures instead of empty text or skipped binary files.
+            --@param none Exercises both explicit and system-default code pages across three read/search modes.
+            --@return nil Assertions require the original diagnostic, one codec attempt and closed read handles.
+            run = function()
+                for _, code in ipairs({ "EncodingUnavailable", "OutOfMemory" }) do
+                    for _, large in ipairs({ false, true }) do
+                        for _, encoding in ipairs({ "cp936", "auto" }) do
+                            for _, mode in ipairs({ "read", "tail", "search" }) do
+                                local codec, attempts, handles = fake_codec("cp936"), 0, {}
+                                -- Fail every conversion, including an empty availability check.
+                                --@param label string Selected code page, unused by the fixture.
+                                --@param bytes string Input bytes, unused by the fixture.
+                                --@param lossy boolean Replacement mode; failures must not trigger a lossy retry.
+                                --@return nil No converted text.
+                                --@return table Selected infrastructure diagnostic.
+                                --@effect Counts conversion attempts.
+                                codec.decode = function(label, bytes, lossy)
+                                    attempts = attempts + 1
+                                    return nil, { code = code, message = "injected codec failure" }
+                                end
+                                local service = fixture({
+                                    text_codec = codec,
+                                    initial = { ["/work/legacy.txt"] = string.rep("\214\208\n", large and 64 or 1) },
+                                    options = { maximum_file_bytes = 128, maximum_scan_bytes = 8192 },
+                                    -- Observe handle ownership without changing the read result.
+                                    --@param _ table Unused filesystem controls.
+                                    --@param read function Original native read operation.
+                                    --@param handle table Read handle to observe.
+                                    --@param maximum integer Requested byte bound.
+                                    --@return boolean Whether the read succeeded.
+                                    --@return table Native read result.
+                                    --@effect Records each handle and advances the delegated read.
+                                    read_hook = function(_, read, handle, maximum)
+                                        handles[handle] = true
+                                        return read(handle, maximum)
+                                    end,
+                                })
+                                local arguments = { path = "/work/legacy.txt", start_line = 1, max_lines = 1,
+                                    from_end = mode == "tail", encoding = encoding }
+                                if mode == "search" then
+                                    arguments = { path = "/work/legacy.txt", pattern = "中", dialect = "literal",
+                                        case_sensitive = true, page_size = 1, encoding = encoding }
+                                end
+                                local result = run(service, mode == "search" and "search" or "read", arguments, "codec")
+                                A.equal(result.outcome, "failed", code .. "/" .. mode .. "/" .. encoding)
+                                A.equal(result.error.code, code)
+                                A.equal(attempts, 1)
+                                for handle in pairs(handles) do A.equal(handle.closed, true) end
+                            end
+                        end
+                    end
+                end
+            end,
+        },
+        {
+            name = "range line decoder failures close streams and permit later recovery",
+            -- Fail after a valid encoding sample, including the retry after strict invalid-byte rejection.
+            --@param none Exercises forward reads, tail reads and searches with strict/lossy decoder faults.
+            --@return nil Assertions require OutOfMemory, closed handles and successful subsequent reading.
+            run = function()
+                for _, retry in ipairs({ false, true }) do
+                    for _, mode in ipairs({ "read", "tail", "search" }) do
+                        local codec, armed, attempts, handles = fake_codec("cp936"), true, 0, {}
+                        local decode = codec.decode
+                        -- Permit empty probes and the sample; fail only while decoding a content line.
+                        --@param label string Canonical legacy label.
+                        --@param bytes string Raw input, with samples larger than one line.
+                        --@param lossy boolean Whether replacement decoding is requested.
+                        --@return string|nil Converted text, or nil for the injected failure.
+                        --@return boolean|table Exact flag or the injected diagnostic.
+                        --@effect Counts failing line attempts while armed.
+                        codec.decode = function(label, bytes, lossy)
+                            if armed and #bytes > 0 and #bytes <= 3 then
+                                attempts = attempts + 1
+                                return nil, { code = retry and not lossy and "InvalidEncoding" or "OutOfMemory",
+                                    message = "injected line failure" }
+                            end
+                            return decode(label, bytes, lossy)
+                        end
+                        local service = fixture({
+                            text_codec = codec,
+                            initial = { ["/work/legacy.txt"] = string.rep("\214\208\n", 64) },
+                            options = { maximum_file_bytes = 128, maximum_scan_bytes = 8192 },
+                            -- Record stream handles so the error exit cannot leave one open.
+                            --@param _ table Unused filesystem controls.
+                            --@param read function Original native read operation.
+                            --@param handle table Observed read handle.
+                            --@param maximum integer Requested byte bound.
+                            --@return boolean Whether the read succeeded.
+                            --@return table Native read result.
+                            --@effect Records handles and performs the original read.
+                            read_hook = function(_, read, handle, maximum)
+                                handles[handle] = true
+                                return read(handle, maximum)
+                            end,
+                        })
+                        local arguments = { path = "/work/legacy.txt", start_line = 1, max_lines = 1,
+                            from_end = mode == "tail", encoding = "auto" }
+                        if mode == "search" then
+                            arguments = { path = "/work/legacy.txt", pattern = "中", dialect = "literal",
+                                case_sensitive = true, page_size = 1, encoding = "auto" }
+                        end
+                        local result = run(service, mode == "search" and "search" or "read", arguments, "fault")
+                        A.equal(result.outcome, "failed", mode)
+                        A.equal(result.error.code, "OutOfMemory")
+                        A.equal(attempts, retry and 2 or 1)
+                        for handle in pairs(handles) do A.equal(handle.closed, true, mode) end
+                        armed = false
+                        local recovered = run(service, "read", {
+                            path = "/work/legacy.txt", start_line = 1, max_lines = 1, encoding = "cp936",
+                        }, "recovered")
+                        A.equal(recovered.outcome, "success")
+                        A.equal(recovered.payload.lines[1].text, "中")
+                        for handle in pairs(handles) do A.equal(handle.closed, true, mode) end
+                    end
+                end
+            end,
+        },
+        {
+            name = "write and patch decoder failures preserve the original file",
+            -- Resource failures during base or candidate decoding must happen before file publication.
+            --@param none Injects a base write, base patch and replacement-candidate decode failure.
+            --@return nil Assertions require OutOfMemory and unchanged original bytes and identity.
+            run = function()
+                for _, mode in ipairs({ "write-candidate", "write-base", "patch-base" }) do
+                    local codec = fake_codec("cp936")
+                    local decode = codec.decode
+                    -- Fail on the selected base or encoded replacement while leaving other conversions intact.
+                    --@param label string Canonical code page.
+                    --@param bytes string Base or candidate raw text.
+                    --@param lossy boolean Requested replacement mode.
+                    --@return string|nil Decoded text, or nil on injected resource failure.
+                    --@return boolean|table Exact flag or OutOfMemory diagnostic.
+                    codec.decode = function(label, bytes, lossy)
+                        if mode ~= "write-candidate" or bytes == "b\n" then
+                            return nil, { code = "OutOfMemory", message = "injected write decoder failure" }
+                        end
+                        return decode(label, bytes, lossy)
+                    end
+                    local service, controls = fixture({ initial = { ["/work/legacy.txt"] = "a\n" }, text_codec = codec })
+                    local before = identity(controls, "/work/legacy.txt")
+                    local arguments = {
+                        path = "/work/legacy.txt", encoding = "cp936",
+                        expected_identity = before, expected_raw_digest = sha256.hex("a\n"),
+                        mode = "replace", content = "b\n", newline_policy = "preserve",
+                    }
+                    if mode == "patch-base" then
+                        arguments.mode, arguments.content, arguments.newline_policy = nil, nil, nil
+                        arguments.hunks = arr({ { start_line = 1, context_before = arr({}),
+                            delete_lines = arr({ "a" }), insert_lines = arr({ "b" }), context_after = arr({}),
+                            newline = "lf", final_newline = true } })
+                    end
+                    local completed, result = pcall(run, service, mode == "patch-base" and "patch" or "write", arguments, mode)
+                    A.equal(controls.bytes("/work/legacy.txt"), "a\n", mode)
+                    A.deep_equal(identity(controls, "/work/legacy.txt"), before, mode)
+                    A.truthy(completed, result)
+                    A.equal(result.outcome, "failed", mode)
+                    A.equal(result.error.code, "OutOfMemory", mode)
+                end
+            end,
+        },
+        {
             name = "from_end reads count lines backward on whole files",
             --Verifies from_end reads count lines backward on whole files.
             --@param none No arguments; this closure uses its captured fixture state.

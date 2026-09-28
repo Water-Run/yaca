@@ -183,6 +183,49 @@ return {
             end,
         },
         {
+            name = "native failures and malformed successes retain distinct diagnostics",
+            -- Separate converter absence from resource failures, raised exceptions and broken port results.
+            --@param none Uses controlled native results for both conversion directions.
+            --@return nil Assertions require typed failures and rejection of non-exact strict successes.
+            run = function()
+                local mode = "resource"
+                local native = fake_native({ ansi = 936, oem = 437, console_output = 0 }, {})
+                -- Return the selected malformed result or injected resource/exception failure.
+                --@param direction string Conversion direction; both share the same injected result.
+                --@param target integer Native code page, unused by the fixture.
+                --@param bytes string Input bytes, unused by the fixture.
+                --@param lossy boolean Requested replacement mode, unused by the fixture.
+                --@return boolean|nil Native status, or nil for a malformed status.
+                --@return string|table|number Output or diagnostic, deliberately malformed in selected modes.
+                --@return boolean|nil Exact flag, deliberately missing in one mode.
+                --@error Raises a synthetic exception in throw mode.
+                native.text_convert = function(direction, target, bytes, lossy)
+                    if mode == "throw" then error("synthetic native fault") end
+                    if mode == "resource" then return false, { code = "OutOfMemory", message = "buffer" } end
+                    if mode == "status" then return nil, "bad" end
+                    if mode == "output" then return true, 12, true end
+                    if mode == "exact" then return true, "a" end
+                    return true, "a", false
+                end
+                local codec = assert(textcodec.new(native, "windows"))
+                for _, item in ipairs({
+                    { "resource", "OutOfMemory" }, { "throw", "NativeFailure" },
+                    { "status", "NativeContract" }, { "output", "NativeContract" },
+                    { "exact", "NativeContract" }, { "inexact", "NativeContract" },
+                }) do
+                    mode = item[1]
+                    for _, direction in ipairs({ "decode", "encode" }) do
+                        local result, err = codec[direction]("cp936", "a")
+                        A.falsy(result, mode .. "/" .. direction)
+                        A.equal(err.code, item[2], mode .. "/" .. direction)
+                    end
+                end
+                local result, exact = codec.decode("cp936", "a", true)
+                A.equal(result, "a")
+                A.equal(exact, false)
+            end,
+        },
+        {
             name = "missing native conversion yields no codec",
             --Verifies missing native conversion yields no codec.
             --@param none No arguments; this closure uses its captured fixture state.

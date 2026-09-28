@@ -163,33 +163,36 @@ function M.new(native, platform_kind, getenv)
         return ICONV_NAMES[number] or ("CP" .. tostring(number))
     end
 
-    -- Invoke the native converter and normalize its result shape.
+    -- Invoke the native converter, preserving typed errors and checking its success contract.
     --@param direction string decode or encode.
     --@param label string Canonical cp<N> label.
     --@param bytes string Input bytes.
     --@param lossy boolean Whether decoding may replace invalid input.
     --@return string|nil Converted bytes.
-    --@return boolean|table Exact flag on success, or a typed diagnostic.
+    --@return boolean|table Exact flag on success, or a native diagnostic/NativeFailure/NativeContract error.
     local function convert(direction, label, bytes, lossy)
         if type(bytes) ~= "string" then
             return nil, failure("InvalidEncoding", "text conversion input must be a string")
         end
         local target, target_error = native_target(label)
         if not target then return nil, target_error end
-        local invoked, ok, output, exact = pcall(native.text_convert, direction, target, bytes, lossy == true)
+        local allow_lossy = direction == "decode" and lossy == true
+        local invoked, ok, output, exact = pcall(native.text_convert, direction, target, bytes, allow_lossy)
         if not invoked then
-            return nil, failure("EncodingUnavailable", "native text conversion failed")
+            return nil, failure("NativeFailure", "native text conversion raised an exception")
         end
         if ok ~= true then
-            if type(output) == "table" and type(output.code) == "string" then
+            if ok == false and type(output) == "table" and type(output.code) == "string" then
                 return nil, failure(output.code, tostring(output.message))
             end
-            return nil, failure("EncodingUnavailable", "native text conversion failed")
+            return nil, failure("NativeContract", "native text conversion returned an invalid failure")
         end
-        if type(output) ~= "string" then
-            return nil, failure("EncodingUnavailable", "native text conversion returned no text")
+        if type(output) ~= "string" or type(exact) ~= "boolean"
+            or (not allow_lossy and not exact)
+        then
+            return nil, failure("NativeContract", "native text conversion returned an invalid success")
         end
-        return output, exact == true
+        return output, exact
     end
 
     --@metatable text_codec_facts Read-only view of the observed code page facts.
@@ -228,7 +231,7 @@ function M.new(native, platform_kind, getenv)
             --@param label string Canonical cp<N> label.
             --@param text string Strict UTF-8 text.
             --@return string|nil Encoded bytes.
-            --@return boolean|table True on success, or EncodingLossy/EncodingUnavailable diagnostic.
+            --@return boolean|table True on success, or an encoding, resource or native-port diagnostic.
             encode = function(label, text)
                 return convert("encode", label, text, false)
             end,
