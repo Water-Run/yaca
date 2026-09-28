@@ -1,6 +1,6 @@
 /*
 Author: WaterRun
-Date: 2026-09-26
+Date: 2026-09-28
 File: yaca_native.c
 Description: Portable narrow native ports for filesystem, process, terminal, system identity, clocks, text code pages, and SHA-256.
 */
@@ -1896,9 +1896,12 @@ static int l_fs_stat_identity(lua_State *L)
 ** Lua:
 **   ok, { bytes = string, eof = boolean } = module.fs_read(handle, maximum)
 */
-/* Implements the Lua fs read native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Reads bounded file bytes into a Lua-owned buffer before publishing the result table.
+ * @param L lua_State* State receiving the open file userdata and positive maximum byte count.
+ * @return int Two results: true and a bytes/eof table, or false and a typed read/limit error.
+ * @effect Advances the caller-owned file position by the bytes successfully read.
+ * @error Lua allocation/argument failure propagates with no unowned native read buffer.
+ * @ownership Lua owns the output buffer across every allocating API; the caller retains the file handle.
  */
 static int l_fs_read(lua_State *L)
 {
@@ -1906,6 +1909,8 @@ static int l_fs_read(lua_State *L)
   lua_Integer requested;
   char *buffer;
   size_t received;
+  luaL_Buffer output;
+  int result_index;
 
   file = check_file(L, 1);
   requested = luaL_checkinteger(L, 2);
@@ -1913,11 +1918,9 @@ static int l_fs_read(lua_State *L)
   {
     return push_failure(L, "Limit", "filesystem read size is invalid");
   }
-  buffer = (char *)malloc((size_t)requested);
-  if (buffer == NULL)
-  {
-    return push_failure(L, "Limit", "filesystem read buffer allocation failed");
-  }
+  lua_createtable(L, 0, 2);
+  result_index = lua_gettop(L);
+  buffer = luaL_buffinitsize(L, &output, (size_t)requested);
 #if defined(_WIN32)
   {
     DWORD count;
@@ -1931,7 +1934,8 @@ static int l_fs_read(lua_State *L)
       DWORD error_value;
 
       error_value = GetLastError();
-      free(buffer);
+      luaL_pushresultsize(&output, 0U);
+      lua_pop(L, 1);
       return push_windows_failure(L, error_value, "filesystem read failed");
     }
     received = (size_t)count;
@@ -1950,18 +1954,17 @@ static int l_fs_read(lua_State *L)
       int error_value;
 
       error_value = errno;
-      free(buffer);
+      luaL_pushresultsize(&output, 0U);
+      lua_pop(L, 1);
       return push_failure(L, errno_code(error_value), "filesystem read failed");
     }
     received = (size_t)count;
   }
 #endif
-  lua_createtable(L, 0, 2);
-  lua_pushlstring(L, buffer, received);
-  lua_setfield(L, -2, "bytes");
+  luaL_pushresultsize(&output, received);
+  lua_setfield(L, result_index, "bytes");
   lua_pushboolean(L, received == 0);
-  lua_setfield(L, -2, "eof");
-  free(buffer);
+  lua_setfield(L, result_index, "eof");
   return return_success(L);
 }
 
