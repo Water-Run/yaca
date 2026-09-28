@@ -1037,6 +1037,107 @@ return {
             end,
         },
         {
+            name = "read pages retain content after JSON escaping in both directions and file modes",
+            -- Paging must account for escaped JSON bytes instead of dropping a valid tool payload at serialization.
+            --@param none Uses backslash/TAB lines below and above the whole-file threshold.
+            --@return nil Assertions require complete forward pagination, the actual last line on tail reads and bounded JSON.
+            run = function()
+                local line = string.rep("\t\\", 8191)
+                for _, count in ipairs({ 2, 4 }) do
+                    local service = fixture({
+                        initial = { ["/work/escaped.log"] = string.rep(line .. "\n", count) },
+                        options = { maximum_line_bytes = 32768 },
+                    })
+                    for _, from_end in ipairs({ false, true }) do
+                        local token, next_line, finished = nil, 1, false
+                        for page = 1, count do
+                            local result, admitted = run(service, "read", {
+                                path = "/work/escaped.log", start_line = next_line, max_lines = 16,
+                                from_end = from_end, continuation = token,
+                            }, "escaped-" .. count .. tostring(from_end) .. "-" .. page)
+                            A.equal(result.outcome, "success")
+                            A.equal(result.payload.classification, "text")
+                            A.truthy(#result.payload.lines > 0)
+                            for _, observed in ipairs(result.payload.lines) do
+                                A.equal(observed.text, line)
+                                if not from_end then
+                                    A.equal(observed.number, next_line)
+                                    next_line = next_line + 1
+                                end
+                            end
+                            A.truthy(#assert(service:runtime_result(admitted)).body <= 65536)
+                            if from_end then
+                                local last = result.payload.lines[#result.payload.lines]
+                                A.equal(last.raw_end, (#line + 1) * count)
+                                finished = true
+                                break
+                            end
+                            if result.payload.eof then finished = true; break end
+                            A.equal(result.payload.next_line, next_line)
+                            token = result.payload.continuation
+                        end
+                        A.equal(finished, true)
+                        if not from_end then A.equal(next_line, count + 1) end
+                    end
+                end
+            end,
+        },
+        {
+            name = "search pagination preserves every match within the final JSON limit",
+            -- Large escaped snippets must move to later pages rather than erase the result and its continuation.
+            --@param none Uses 32 matching lines whose combined requested page exceeds the result limit.
+            --@return nil Assertions require each match exactly once and a bounded canonical result for every page.
+            run = function()
+                local line = "needle" .. string.rep("\\", 2040)
+                local service = fixture({ initial = { ["/work/matches.log"] = string.rep(line .. "\n", 32) } })
+                local token, next_line = nil, 1
+                for index = 1, 8 do
+                    local result, admitted = run(service, "search", {
+                        path = "/work/matches.log", pattern = "needle", dialect = "literal",
+                        case_sensitive = true, page_size = 16, continuation = token,
+                    }, "escaped-matches-" .. index)
+                    A.equal(result.outcome, "success")
+                    A.truthy(result.payload.matches, result.payload.classification)
+                    for _, match in ipairs(result.payload.matches) do
+                        A.equal(match.line, next_line)
+                        A.equal(match.snippet, line)
+                        next_line = next_line + 1
+                    end
+                    A.truthy(#assert(service:runtime_result(admitted)).body <= 65536)
+                    token = result.payload.continuation
+                    if not token then
+                        A.equal(result.payload.complete, true)
+                        break
+                    end
+                end
+                A.equal(next_line, 33)
+                A.equal(token, false)
+            end,
+        },
+        {
+            name = "a single oversized JSON snippet is shortened at a scalar boundary",
+            -- Even one escaped match needs room for the result envelope and pagination metadata.
+            --@param none Uses one long matching line with escaped and multibyte characters.
+            --@return nil Assertions require a useful truncated snippet and valid UTF-8 within the hard result limit.
+            run = function()
+                local service = fixture({
+                    initial = { ["/work/match.log"] = "needle" .. string.rep("\\你", 8190) },
+                    options = { maximum_result_bytes = 32768, maximum_line_bytes = 32768 },
+                })
+                local result, admitted = run(service, "search", {
+                    path = "/work/match.log", pattern = "needle", dialect = "literal",
+                    case_sensitive = true, page_size = 1,
+                }, "one-snippet")
+                A.equal(result.outcome, "success")
+                A.truthy(result.payload.matches, result.payload.classification)
+                local match = result.payload.matches[1]
+                A.equal(match.truncated, true)
+                A.equal(match.snippet:sub(1, 6), "needle")
+                A.truthy(utf8.len(match.snippet))
+                A.truthy(#assert(service:runtime_result(admitted)).body <= 32768)
+            end,
+        },
+        {
             name = "a long legacy first line uses the system encoding without needing a newline sample",
             -- Auto detection must inspect the prefix bytes even when the first newline is beyond the sample.
             --@param none Uses a large GBK line and the Windows CP936 file default.

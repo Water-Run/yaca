@@ -1782,6 +1782,7 @@ function M.new(dependencies, options)
             targets = targets,
             continuation = continuation,
             call_digest = call_digest,
+            result_envelope_bytes = #envelope_bytes,
             operation_handle = nil,
             operation_digest = nil,
             result = nil,
@@ -2349,6 +2350,53 @@ function M.new(dependencies, options)
         return table.concat(output), true
     end
 
+    -- Reserve the admitted envelope, digest and pagination metadata before selecting result records.
+    --@param state table Admitted call with the measured immutable result envelope size.
+    --@return integer Available canonical JSON bytes for the page array, including its brackets.
+    local function page_result_budget(state)
+        return limits.maximum_result_bytes - state.result_envelope_bytes - 4096
+    end
+
+    -- Fit one record within a canonical JSON budget, shortening only an optional display text field.
+    --@param record table Read line, search match or directory entry with validated scalar fields.
+    --@param text_field string|nil Field that may be shortened; nil keeps every field exact.
+    --@param maximum integer Maximum encoded record bytes, excluding page separators.
+    --@return table|nil Original or copied record with truncated=true when text was shortened.
+    --@return integer|table Encoded byte count on success, or ResultLimit when exact metadata cannot fit.
+    --@error Invalid internal record fields or non-UTF-8 display text raise a serialization or UTF-8 error.
+    local function fit_page_record(record, text_field, maximum)
+        local encoded = assert(canonical_json(record))
+        if #encoded <= maximum then return record, #encoded end
+        if not text_field then
+            return nil, failure("ResultLimit", "one page entry exceeds the result budget")
+        end
+        local fitted = {}
+        for key, value in pairs(record) do fitted[key] = value end
+        local source = fitted[text_field]
+        fitted[text_field], fitted.truncated = "", true
+        local overhead = #assert(canonical_json(fitted))
+        if overhead > maximum then
+            return nil, failure("ResultLimit", "page entry metadata exceeds the result budget")
+        end
+        local used, last = overhead, 0
+        for at, scalar in utf8.codes(source) do
+            local width = scalar < 0x80 and 1 or (scalar < 0x800 and 2 or (scalar < 0x10000 and 3 or 4))
+            local cost = width
+            if scalar == 0x22 or scalar == 0x5C
+                or scalar == 0x08 or scalar == 0x09 or scalar == 0x0A
+                or scalar == 0x0C or scalar == 0x0D
+            then
+                cost = 2
+            elseif scalar < 0x20 then
+                cost = 6
+            end
+            if used + cost > maximum then break end
+            used, last = used + cost, at + width - 1
+        end
+        fitted[text_field] = source:sub(1, last)
+        return fitted, used
+    end
+
     -- Mint and retain a bounded pagination token bound to one walk generation.
     --@param state table Saved page items, offset, tool, path, and generation.
     --@return string|nil Opaque continuation token.
@@ -2385,15 +2433,24 @@ function M.new(dependencies, options)
     --@param state table Saved ordered items and current one-based offset.
     --@param page_size integer Maximum entries to expose in this page.
     --@param old_token string|nil Token consumed for this page.
+    --@param maximum_bytes integer Canonical JSON budget for the page array.
+    --@param text_field string|nil Display field that may be shortened if a single record exceeds the budget.
     --@return table|nil Selected item array.
     --@return string|table|boolean Next token, false at end, or structured error on failure.
-    local function page_items(state, page_size, old_token)
-        consume_continuation(old_token)
+    --@effect Advances private pagination and invalidates old_token only after a page fits.
+    local function page_items(state, page_size, old_token, maximum_bytes, text_field)
         local first = state.offset
         local last = math.min(#state.items, first + page_size - 1)
-        local page = array({})
-        for index = first, last do page[#page + 1] = state.items[index] end
-        state.offset = last + 1
+        local page, used = array({}), 2
+        for index = first, last do
+            local item, item_bytes = fit_page_record(state.items[index], text_field, maximum_bytes - 3)
+            if not item then return nil, item_bytes end
+            if used + item_bytes + 1 > maximum_bytes then break end
+            page[#page + 1] = item
+            used = used + item_bytes + 1
+        end
+        consume_continuation(old_token)
+        state.offset = first + #page
         local token = false
         if state.offset <= #state.items then
             local token_error
@@ -2516,7 +2573,8 @@ function M.new(dependencies, options)
         local page, next_token = page_items(
             page_state,
             arguments.page_size,
-            arguments.continuation
+            arguments.continuation,
+            page_result_budget(state)
         )
         if not page then return nil, next_token end
         return {
@@ -2526,13 +2584,6 @@ function M.new(dependencies, options)
             partial_reason = page_state.partial_reason,
             generation = page_state.generation,
         }
-    end
-
-    -- Bound the decoded text of one read or search page inside the durable result limit.
-    --@param none Uses the admitted result limit.
-    --@return integer Maximum decoded text bytes per page.
-    local function page_text_budget()
-        return math.max(1024, limits.maximum_result_bytes // 2)
     end
 
     -- Report whether an encoding uses two-byte UTF-16 code units.
@@ -2872,7 +2923,7 @@ function M.new(dependencies, options)
         return failure("UnsupportedOrInvalidTextEncoding", tostring(value))
     end
 
-    -- Build one read result line with optional truncation and replacement markers.
+    -- Build one read result line, bounding decoded UTF-8 as well as any earlier raw-byte truncation.
     --@param number integer|boolean Line number when known, otherwise false.
     --@param text_value string Ordinary UTF-8 line text.
     --@param newline string Terminator kind.
@@ -2882,6 +2933,10 @@ function M.new(dependencies, options)
     --@param lossy boolean Whether decoding replaced any input.
     --@return table Result line object.
     local function result_line(number, text_value, newline, first, last, truncated, lossy)
+        if #text_value > limits.maximum_line_bytes then
+            text_value = truncate_utf8(text_value, limits.maximum_line_bytes)
+            truncated = true
+        end
         local line = {
             number = number,
             text = text_value,
@@ -2936,7 +2991,7 @@ function M.new(dependencies, options)
         end
         local width = unit_layout(layout.encoding)
         local lines, observed = array({}), {}
-        local text_budget, used = page_text_budget(), 0
+        local result_budget, used = page_result_budget(state), 2
         local scan_limited, eof, next_offset, next_number = false, false, false, false
         local last_number = false
         local partial_line
@@ -3028,15 +3083,17 @@ function M.new(dependencies, options)
                     truncated = true
                 end
                 local decoded, lossy = decode_range_line(raw_text, layout.encoding)
-                if used + #decoded > text_budget and #reversed > 0 then break end
-                used = used + #decoded
-                observed[#observed + 1] = raw_text
                 local first_byte = base + record.offset
                 local line = result_line(known and index or false, decoded, record.newline,
                     first_byte + omitted, first_byte + record.length, truncated or fragment, lossy)
                 if fragment then line.partial_start = true end
                 line.from_end = #records - index + 1
-                reversed[#reversed + 1] = line
+                local fitted, line_bytes = fit_page_record(line, "text", result_budget - 3)
+                if not fitted then return nil, line_bytes end
+                if used + line_bytes + 1 > result_budget then break end
+                used = used + line_bytes + 1
+                observed[#observed + 1] = raw_text
+                reversed[#reversed + 1] = fitted
             end
             for index = #reversed, 1, -1 do lines[#lines + 1] = reversed[index] end
             eof = true
@@ -3070,14 +3127,16 @@ function M.new(dependencies, options)
                 end
                 if line == false then eof = true; break end
                 local decoded, lossy = decode_range_line(line.raw, layout.encoding)
-                if used + #decoded > text_budget and #lines > 0 then
+                local fitted, line_bytes = fit_page_record(result_line(number, decoded, line.newline,
+                    line.start, line.finish, line.truncated, lossy), "text", result_budget - 3)
+                if not fitted then close_stream(stream); return nil, line_bytes end
+                if used + line_bytes + 1 > result_budget then
                     next_offset, next_number = mark, number
                     break
                 end
-                used = used + #decoded
+                used = used + line_bytes + 1
                 observed[#observed + 1] = line.raw
-                lines[#lines + 1] = result_line(number, decoded, line.newline,
-                    line.start, line.finish, line.truncated, lossy)
+                lines[#lines + 1] = fitted
                 last_number = number
                 number = number + 1
             end
@@ -3199,7 +3258,7 @@ function M.new(dependencies, options)
             last = math.min(total, first + arguments.max_lines - 1)
         end
         local selected = {}
-        local text_budget, used = page_text_budget(), 0
+        local result_budget, used = page_result_budget(state), 2
         local step = arguments.from_end and -1 or 1
         local from, to = first, last
         if arguments.from_end then from, to = last, first end
@@ -3209,10 +3268,12 @@ function M.new(dependencies, options)
             if #line_text > limits.maximum_line_bytes then
                 line_text, truncated = truncate_utf8(line_text, limits.maximum_line_bytes)
             end
-            if used + #line_text > text_budget and #selected > 0 then break end
-            used = used + #line_text
-            selected[#selected + 1] = result_line(index, line_text, record.newline,
-                spans[index].first, spans[index].last, truncated, false)
+            local fitted, line_bytes = fit_page_record(result_line(index, line_text, record.newline,
+                spans[index].first, spans[index].last, truncated, false), "text", result_budget - 3)
+            if not fitted then return nil, line_bytes end
+            if used + line_bytes + 1 > result_budget then break end
+            used = used + line_bytes + 1
+            selected[#selected + 1] = fitted
         end
         local lines = array({})
         if arguments.from_end then
@@ -3497,7 +3558,9 @@ function M.new(dependencies, options)
         local page, next_token = page_items(
             page_state,
             arguments.page_size,
-            arguments.continuation
+            arguments.continuation,
+            page_result_budget(state),
+            "snippet"
         )
         if not page then return nil, next_token end
         local result = {
