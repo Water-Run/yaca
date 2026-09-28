@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-26
+Date: 2026-09-28
 File: exec_tool_test.lua
 Description: Verifies raw exec transport, output, cancellation, and durable barriers.
 ]]
@@ -627,6 +627,171 @@ return {
                 )))
                 A.equal(wide_joined.tool_result.payload.stdout.text, "OK\r\n")
                 A.equal(wide_joined.tool_result.payload.stdout.decoder, "utf-16le")
+            end,
+        },
+        {
+            name = "codec failures retain raw output and completed process truth across recovery",
+            -- Keep decoder infrastructure failures separate from completed exec/Lua effects and retain exact bytes.
+            --@param none Exercises four failures at strict/lossy phases on both streams and process tools.
+            --@return nil Assertions verify Base64, error code, digest, durable status and the following successful call.
+            run = function()
+                local raw = "ascii-before \214\208 after\n"
+                local expected_base64 = "YXNjaWktYmVmb3JlINbQIGFmdGVyCg=="
+                for _, code in ipairs({ "OutOfMemory", "EncodingUnavailable", "NativeFailure", "NativeContract" }) do
+                    for _, fail_lossy in ipairs({ false, true }) do
+                        for _, stream in ipairs({ "stdout", "stderr" }) do
+                            for _, tool in ipairs({ "exec", "lua" }) do
+                                local active, calls = true, 0
+                                local codec = {
+                                    facts = { output_default = "cp936" },
+                                    -- Inject a selected conversion failure, then permit same-service recovery.
+                                    --@param label string Expected canonical cp936 label.
+                                    --@param bytes string Exact retained process bytes.
+                                    --@param lossy boolean Whether this is the explicit replacement retry.
+                                    --@return string|nil Decoded text only after the fault is removed.
+                                    --@return boolean|table Exact flag or the selected typed failure.
+                                    --@effect Increments the observed decode call count.
+                                    decode = function(label, bytes, lossy)
+                                        A.equal(label, "cp936")
+                                        A.equal(bytes, raw)
+                                        calls = calls + 1
+                                        if not active then return "ascii-before 中 after\n", true end
+                                        if fail_lossy and not lossy then
+                                            return nil, { code = "InvalidEncoding", message = "retry allowed" }
+                                        end
+                                        return nil, { code = code, message = "private decoder diagnostic" }
+                                    end,
+                                    -- Reject encoding because this fixture exercises process output only.
+                                    --@param none Encoding arguments are unused.
+                                    --@return nil No encoded bytes.
+                                    --@return table Typed unused-direction failure.
+                                    encode = function()
+                                        return nil, { code = "EncodingLossy", message = "unused" }
+                                    end,
+                                }
+                                local f = fixture({ text_codec = codec, batches = { {
+                                    { kind = stream, bytes = raw },
+                                    { kind = "terminal", outcome = "completed" },
+                                } } })
+                                local arguments = tool == "lua" and { code = "print('fixture')" }
+                                    or { command = "fixture" }
+                                local call, token = exec_call(f, arguments, "codec-fault", tool)
+                                local joined = drive(assert(f.tools:execution_port(token, policy({ output_limit_bytes = 64 }))))
+                                local channel = joined.tool_result.payload[stream]
+                                A.equal(joined.outcome, "completed")
+                                A.equal(joined.tool_result.outcome, "success")
+                                A.equal(joined.tool_result.payload.process_outcome, "completed")
+                                A.equal(channel.representation, "base64")
+                                A.equal(channel.base64, expected_base64)
+                                A.falsy(channel.text)
+                                A.equal(channel.decoder, "binary")
+                                A.equal(channel.decode_error, code)
+                                A.equal(channel.digest, sha256.hex(raw))
+                                A.equal(channel.retained_bytes, #raw)
+                                A.equal(channel.discarded_bytes, 0)
+                                A.equal(calls, fail_lossy and 2 or 1)
+                                local runtime_result = assert(f.tools:runtime_result(call))
+                                A.equal(runtime_result.kind, "real-success")
+                                A.falsy(runtime_result.body:find("private decoder diagnostic", 1, true))
+                                A.equal(#f.journal.results, 1)
+                                active = false
+                                f.process.batches = { {
+                                    { kind = stream, bytes = raw },
+                                    { kind = "terminal", outcome = "completed" },
+                                } }
+                                local _, recovered_token = exec_call(f, arguments, "codec-recovered", tool)
+                                local recovered = drive(assert(f.tools:execution_port(recovered_token,
+                                    policy({ output_limit_bytes = 64 }))))
+                                A.equal(recovered.outcome, "completed")
+                                A.equal(recovered.tool_result.payload[stream].text, "ascii-before 中 after\n")
+                                A.falsy(recovered.tool_result.payload[stream].decode_error)
+                                A.equal(f.process.starts, 2)
+                                A.equal(f.process.closes, 2)
+                                A.equal(#f.journal.results, 2)
+                            end
+                        end
+                    end
+                end
+            end,
+        },
+        {
+            name = "malformed UTF-16 output stays lossless and UTF-8 names its actual decoder",
+            -- Preserve dangling UTF-16 bytes and unpaired surrogates instead of dropping or reinterpreting them.
+            --@param none Exercises BOM-marked malformed output and strict UTF-8 with a different declared decoder.
+            --@return nil Assertions verify exact Base64, decoder diagnostics and unaffected completion.
+            run = function()
+                for _, item in ipairs({
+                    { "\255\254O\0K\0x", "//5PAEsAeA==" },
+                    { "\255\254O\0\0\216K\0", "//5PAADYSwA=" },
+                }) do
+                    local f = fixture({ batches = { {
+                        { kind = "stdout", bytes = item[1] },
+                        { kind = "terminal", outcome = "completed" },
+                    } } })
+                    local _, token = exec_call(f, { command = "wide-output" }, "malformed-wide")
+                    local joined = drive(assert(f.tools:execution_port(token, policy({ output_limit_bytes = 64 }))))
+                    local channel = joined.tool_result.payload.stdout
+                    A.equal(joined.outcome, "completed")
+                    A.equal(channel.representation, "base64")
+                    A.equal(channel.base64, item[2])
+                    A.equal(channel.decode_error, "InvalidEncoding")
+                    A.equal(channel.retained_bytes, #item[1])
+                    A.equal(channel.digest, sha256.hex(item[1]))
+                end
+                local utf8 = fixture({ batches = { {
+                    { kind = "stdout", bytes = "中文\n" },
+                    { kind = "terminal", outcome = "completed" },
+                } } })
+                local _, token = exec_call(utf8, { command = "utf8-output" }, "actual-decoder")
+                local joined = drive(assert(utf8.tools:execution_port(token,
+                    policy({ output_limit_bytes = 64, decoder = "cp936" }))))
+                A.equal(joined.tool_result.payload.stdout.text, "中文\n")
+                A.equal(joined.tool_result.payload.stdout.decoder, "utf-8")
+                A.falsy(joined.tool_result.payload.stdout.decode_error)
+            end,
+        },
+        {
+            name = "registered-secret redaction precedes failing output decoders",
+            -- A registered secret prevents both binary exposure and any codec invocation.
+            --@param none Emits a secret alongside invalid UTF-8 through a codec that must not run.
+            --@return nil Assertions verify redaction and zero conversion calls.
+            run = function()
+                local calls = 0
+                local f = fixture({
+                    secret = "canary-secret",
+                    text_codec = {
+                        facts = { output_default = "cp936" },
+                        -- Count unexpected decoding of a secret-bearing channel.
+                        --@param none All decode arguments are ignored because redaction must precede conversion.
+                        --@return nil No decoded text.
+                        --@return table Injected native error.
+                        --@effect Increments the forbidden decode invocation count.
+                        decode = function()
+                            calls = calls + 1
+                            return nil, { code = "OutOfMemory", message = "must not decode" }
+                        end,
+                        -- Reject encoding because this fixture exercises secret-bearing output only.
+                        --@param none Encoding arguments are unused.
+                        --@return nil No encoded bytes.
+                        --@return table Typed unused-direction failure.
+                        encode = function()
+                            return nil, { code = "EncodingLossy", message = "unused" }
+                        end,
+                    },
+                    batches = { {
+                        { kind = "stdout", bytes = "canary-secret\255" },
+                        { kind = "terminal", outcome = "completed" },
+                    } },
+                })
+                local _, token = exec_call(f, { command = "secret-output" }, "secret-codec")
+                local joined = drive(assert(f.tools:execution_port(token, policy({ output_limit_bytes = 64 }))))
+                local channel = joined.tool_result.payload.stdout
+                A.equal(joined.outcome, "completed")
+                A.equal(channel.representation, "registered-secret-redacted")
+                A.falsy(channel.text)
+                A.falsy(channel.base64)
+                A.falsy(channel.decode_error)
+                A.equal(calls, 0)
             end,
         },
         {

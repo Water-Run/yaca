@@ -4557,7 +4557,8 @@ function M.new(dependencies, options)
 
     -- Recognize UTF-16LE process output such as wmic writes to pipes.
     --@param bytes string Retained process channel bytes.
-    --@return string|nil UTF-8 text when the bytes are BOM-marked or clearly UTF-16LE.
+    --@return string|nil Strict UTF-8 text for recognized valid UTF-16LE, otherwise nil.
+    --@return table|nil InvalidEncoding for recognized malformed UTF-16LE; nil for valid or unrecognized input.
     local function utf16_output_text(bytes)
         local body = bytes
         if body:sub(1, 2) == "\255\254" then
@@ -4570,26 +4571,33 @@ function M.new(dependencies, options)
             end
             if zeros * 10 < (#body // 2) * 9 then return nil end
         end
-        return decode_utf16(body:sub(1, #body - #body % 2), true)
+        local decoded = decode_utf16(body, true)
+        if not decoded then
+            return nil, failure("InvalidEncoding", "process output contains malformed UTF-16LE")
+        end
+        return decoded
     end
 
     -- Project process output as ordinary text when it is readable in a known encoding.
     -- UTF-16LE comes first, then strict UTF-8, then the platform output code page, then
-    -- display repair. Output with too many replacements stays binary.
+    -- display repair. Decoder failures and output with too many replacements stay binary.
     --@param bytes string Retained process channel bytes.
     --@param decoder string Declared default decoder label.
     --@return string|nil Ordinary UTF-8 text, or nil when a binary projection is required.
     --@return string Decoder label actually used.
     --@return integer Number of replaced bytes or scalars.
+    --@return string|nil Diagnostic code when decoding failed; the caller retains the raw bytes separately.
     local function output_text(bytes, decoder)
         if #bytes == 0 then return "", decoder, 0 end
         local decoded, used, replaced = nil, decoder, 0
         -- UTF-16LE ASCII is also valid UTF-8 (with NUL bytes), so its shape is checked first.
-        decoded = utf16_output_text(bytes)
+        local wide_error
+        decoded, wide_error = utf16_output_text(bytes)
+        if wide_error then return nil, "binary", 0, wide_error.code end
         if decoded then
             used = "utf-16le"
         elseif text.validate_utf8(bytes) == true then
-            decoded = bytes
+            decoded, used = bytes, "utf-8"
         else
             local label = ports.text_codec and ports.text_codec.facts.output_default
             if label then
@@ -4600,6 +4608,8 @@ function M.new(dependencies, options)
                         local _, count = converted:gsub("\239\191\189", "")
                         replaced = math.max(1, count)
                     end
+                elseif type(exact) == "table" then
+                    return nil, "binary", 0, exact.code
                 end
             end
             if not decoded then
@@ -4647,7 +4657,7 @@ function M.new(dependencies, options)
     --@param process_result table Terminal process result with exact byte counters.
     --@param scanner_receipt table|boolean Secret scan receipt, or false when disabled.
     --@param decoder string Declared text decoder label.
-    --@return table|nil Safe stream projection with text or Base64 data.
+    --@return table|nil Safe stream projection with text or Base64 data; decode_error names display failures without changing process truth.
     --@return table|nil Accounting or digest error.
     local function channel_projection(name, process_result, scanner_receipt, decoder)
         local prefix = name .. "_"
@@ -4681,6 +4691,7 @@ function M.new(dependencies, options)
                 truncated = true,
                 truncation_reason = "registered-secret",
                 decoder = decoder,
+                decode_error = false,
                 replacement_count = 0,
                 digest = false,
                 digest_scope = "redacted-canonical",
@@ -4689,7 +4700,7 @@ function M.new(dependencies, options)
         end
         local digest, digest_error = ports.safety.digest(bytes)
         if not digest then return nil, digest_error end
-        local decoded, used_decoder, replaced = output_text(bytes, decoder)
+        local decoded, used_decoder, replaced, decode_error = output_text(bytes, decoder)
         return {
             stream = name,
             representation = decoded and "text" or "base64",
@@ -4703,6 +4714,7 @@ function M.new(dependencies, options)
             truncation_reason = process_result[prefix .. "truncated"]
                 and "combined-fixed-channel-quota" or false,
             decoder = decoded and used_decoder or "binary",
+            decode_error = decode_error or false,
             replacement_count = decoded and replaced or 0,
             digest = digest,
             digest_scope = "retained-raw-bytes",
