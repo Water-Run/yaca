@@ -50,14 +50,14 @@
   "git": {
    "directory": "git",
    "purpose": "Portable Git with its complete helper, script and TLS dependencies.",
-   "source_url": "https://www.kernel.org/pub/software/scm/git/git-2.39.5.tar.xz",
-   "version": "2.39.5"
+   "source_url": "https://git-scm.com/downloads",
+   "version": null
   },
   "python3": {
    "directory": "python3",
    "purpose": "Python 3 interpreter and standard library, built for this target.",
-   "source_url": "https://www.python.org/downloads/release/python-344/",
-   "version": "3.4.4"
+   "source_url": "https://www.python.org/downloads/",
+   "version": null
   },
   "sqlite": {
    "version": "3.53.4",
@@ -74,14 +74,14 @@
   "busybox": {
    "directory": "busybox",
    "purpose": "Text and shell utilities; invoke the executable followed by an applet name.",
-   "source_url": "https://busybox.net/downloads/busybox-1.36.1.tar.bz2",
-   "version": "1.36.1"
+   "source_url": "https://busybox.net/",
+   "version": null
   },
   "compiler": {
    "directory": "compiler",
    "purpose": "Relocatable C/C++ development tools including compiler, linker, headers, libraries and Make.",
    "source_url": "https://github.com/skeeto/w64devkit/releases/tag/v2.9.0",
-   "version": "2.0.0"
+   "version": null
   }
  },
  "targets": {

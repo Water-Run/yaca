@@ -451,6 +451,26 @@ compiler 六个附加工具的完整可移植闭包,仍为 Gate R 前最大剩�
 - 剩余:git 2.39.5、python3 3.4.4、w64devkit 2.0.0 三个大闭包的取得与三平台
   full 装配(本批启动,未完成);真实模型旅程仍待模型 API 凭证。
 
+
+## full 档闭包取得批次(2026-09-29,第二批)
+
+- 目录订正:tools[] 的通用版本字段回退为空,以各 target 的 versions 表为唯一权威
+  (win32:git 2.10.0/python3 3.4.10/busybox-w32 FRP-6075/w64devkit-2.9.0-x86;
+  win64:git 2.46.2/python3 3.8.20/busybox-w32 FRP-6075/w64devkit-2.9.0-x64;
+  linux:git 2.55.0/python3 3.14.7/busybox 1.37.0/GCC-13.5.0+Binutils-2.47+Make-4.4.1
+  含可重定位 sysroot)。
+- 已取得并 SHA 记录(`out/full-payloads-20260929/payloads.lock.json`):
+  PortableGit 2.10.0 32-bit 与 2.46.2 64-bit 官方便携包、w64devkit 2.9.0 x86/x64
+  官方发布包。
+- busybox-w32 FRP-6075-g169694ebd 以 mingw 双架构从标签源码构建:
+  mingw32/mingw64 defconfig,产物 PE32/PE32+,Wine 下 echo 与 --list(179 个
+  applet)通过。源码 tarball 入 full 锁。
+- 既有 out/python34-build-20260922 树经核为未完成的 configure 残骸(无 Makefile),
+  不能当 3.4.10 产物复用,win32/win64 的 python3 目标构建仍需从源码完整执行。
+- 剩余:win32 python3 3.4.10 与 win64 3.8.20 的源码构建、linux 侧 GCC13.5
+  sysroot 自举(git 2.55/python 3.14.7 依赖它)、三平台 full stager 与装配。
+  真实模型旅程仍待模型 API 凭证。
+
 ## 继续审查与目标验证
 
 1. Win7 当前组件复验；将新的输出路径纳入真实旧终端旅程。

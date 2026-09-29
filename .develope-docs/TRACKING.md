@@ -15,7 +15,7 @@ XP/Win7/CentOS/2008 实测、A08/A09 GiB 旅程与 clean×3+win32 std 装配（�
 | 顺序 | 审查入口 | 完成条件 |
 | --- | --- | --- |
 | 1 | Win7 fs-open 真机复跑与真实模型旅程 | 登录上下文已解决；补一次真机 fs-open 复跑，取得模型凭证后执行 XP/Win7/2008 真实模型旅程 |
-| 2 | 三个 full 的工具闭包 | 版本已钉定且 busybox/jq/sqlite 已于 C7 构建;余 git/python3/w64devkit 大闭包取得与三平台装配,九包齐全后进入最终发行旅程 |
+| 2 | 三个 full 的工具闭包 | git 便携包/w64devkit/busybox-w32 已取得或建成;余 win32 3.4.10、win64 3.8.20 python3 源码构建与 linux GCC13.5 sysroot 自举,再装配三平台 |
 | 3 | 当前源码的真实旧终端输出 | 将 R46--R47 纳入实际命令/内嵌 Lua 的中文、错误编码、受限输出及模型读取旅程 |
 
 Lua/Windows 原生分配失败、空输入可用性和 errno 覆盖已经过故障注入；
