@@ -538,7 +538,10 @@ compiler 六个附加工具的完整可移植闭包,仍为 Gate R 前最大剩�
   12 PASSED(干净机配置未初始化的 partial 为预期)、busybox/jq/sqlite/
   python3(含 ssl)/git --version/gcc 编译-链接-运行(exit=4)。
 - 剩余:win32/win64 full(Windows python3 构建主机阻塞)、真实模型旅程
-  (凭证阻塞)、发行旅程与 Gate R。
+  (凭证阻塞)、发行旅程与 Gate R。Win7 fs-open 探针于本批再次尝试真机复跑
+  (登录成功、Run 对话框键入命令),但 sendkey 回车多轮未提交,命令未执行,
+  证据文件未被触碰;该探针的真机复跑继续保留为待办,现有覆盖仍是 Wine
+  Win64 的 0 泄漏结果。
 
 ## 继续审查与目标验证
 
