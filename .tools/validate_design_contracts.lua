@@ -487,7 +487,7 @@ check(runtime.hard_caps and runtime.hard_caps.unlimited_sentinel == false and ru
 -- Semantic actions and all local command-line projections.
 local expected_actions = {
   "run-chat", "help", "version", "self-test", "model-repl", "config-repl", "context-repl", "continue", "export-context", "status",
-  "queue-add", "queue-list", "queue-delete", "queue-move", "queue-edit", "queue-clear", "steer", "ask", "multiline", "cancel", "cautious",
+  "queue-add", "queue-list", "queue-delete", "queue-move", "queue-edit", "queue-clear", "steer", "ask", "software", "multiline", "cancel", "cautious",
   "select-model", "select-context", "status-chat", "help-chat", "details", "prompt-edit", "compact-manual", "quit",
   "context-list", "context-inspect", "context-search", "context-rename", "context-rebind", "context-delete",
   "context-set-auto-rename-disabled", "context-import", "context-repair", "context-refresh",

@@ -264,6 +264,13 @@ local ACTIONS = {
     }, "tty-required", "none", CHAT_ACTIVE,
     { "accepted", "ask-busy", "error" },
     "Ask a question without tools or changing the current task."),
+    action("software", "chat", {
+        argument("question", "bounded-utf8-text", false),
+    }, {
+        chat(".software [question]", false),
+    }, "tty-required", "none", CHAT_ACTIVE,
+    { "accepted", "ask-busy", "error" },
+    "Show the bundled-software index or ask the model to match bundled software for a task."),
     action("multiline", "chat", {}, {
         chat(".multiline", "Shift+Enter"),
     }, "tty-required", "none", CHAT_ACTIVE,
@@ -702,7 +709,7 @@ for _, descriptor in ipairs(ACTIONS) do
         end
     end
 end
-if #ACTIONS ~= 39 then error("semantic action registry must contain exactly 39 actions") end
+if #ACTIONS ~= 40 then error("semantic action registry must contain exactly 40 actions") end
 
 for _, projections in pairs(LINE_PROJECTIONS) do
     -- Order line projections by priority, longest literal, then stable action ID.

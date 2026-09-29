@@ -67,7 +67,7 @@ return {
   },
 
   planned_lua_modules = {
-    "backend_linux", "backend_windows", "cli", "clock", "compact", "config",
+    "backend_linux", "backend_windows", "bundled", "cli", "clock", "compact", "config",
     "context", "diagnostics", "fs", "index", "ini", "json", "main", "model",
     "network", "path", "permission", "platform", "process", "prompt", "runtime",
     "safety", "session", "terminal", "text", "textcodec", "tools", "tui", "xml",

@@ -68,6 +68,21 @@
    "file": "gcc-13.5.0.tar.xz",
    "url": "https://ftp.gnu.org/gnu/gcc/gcc-13.5.0/gcc-13.5.0.tar.xz",
    "sha256": "ec3df0015ed01411f91f9a9cd5b4da3070eb1222b02fadf4133c30c090399855"
+  },
+  {
+   "file": "Python-3.14.7.tgz",
+   "url": "https://www.python.org/ftp/python/3.14.7/Python-3.14.7.tgz",
+   "sha256": "62859805f6fdf25e2bcbf3fa3217801e1996887ca33e6a2af80674bdfa2dbe07"
+  },
+  {
+   "file": "openssl-3.0.16.tar.gz",
+   "url": "https://github.com/openssl/openssl/releases/download/openssl-3.0.16/openssl-3.0.16.tar.gz",
+   "sha256": "57e03c50feab5d31b152af2b764f10379aecd8ee92f16c985983ce4a99f7ef86"
+  },
+  {
+   "file": "git-2.55.0.tar.xz",
+   "url": "https://www.kernel.org/pub/software/scm/git/git-2.55.0.tar.xz",
+   "sha256": "457fdb04dc8728e007d4688695e6912e6f680727920f2a40bf11eacc17505357"
   }
  ],
  "patches": []

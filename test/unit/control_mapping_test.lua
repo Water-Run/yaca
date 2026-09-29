@@ -269,11 +269,32 @@ return {
                     stat_identity = function(path)
                     observed = path
                     return true, { kind = "directory" }
-                end }
+                end,
+                    --Supplies the closed index read used by the 'toolbox discovery does not read execute or require optional files' case.
+                    --@param path string File or Context path exercised by the case.
+                    --@return boolean accepted Always false so no index bytes enter the description.
+                    --@return table secondary2 Typed error record with code NotFound.
+                    open_read = function(path)
+                        return false, { code = "NotFound" }
+                    end,
+                    --Supplies the closed stream read used by the 'toolbox discovery does not read execute or require optional files' case.
+                    --@param handle any Unused fake handle for this scenario.
+                    --@param maximum_bytes integer Unused read bound for this scenario.
+                    --@return boolean accepted Always false so no index bytes enter the description.
+                    --@return table secondary2 Typed error record with code NotFound.
+                    stream_read = function(handle, maximum_bytes)
+                        return false, { code = "NotFound" }
+                    end,
+                    --Supplies the no-op close used by the 'toolbox discovery does not read execute or require optional files' case.
+                    --@param handle any Unused fake handle for this scenario.
+                    --@return boolean accepted Always true for this scenario.
+                    close = function(handle)
+                        return true
+                    end }
                 local description = tools.describe_environment(fs, layout, "windows")
                 A.equal(observed, "C:\\My Apps\\tools")
                 A.contains(description, "built-in lua tool")
-                A.contains(description, "README.txt")
+                A.contains(description, "INDEX.txt")
                 A.falsy(description:find("inner.exe", 1, true))
                 A.contains(description, "cmd.exe")
                 A.falsy(description:find("yaca.exe", 1, true))

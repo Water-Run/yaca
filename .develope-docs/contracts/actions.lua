@@ -228,6 +228,10 @@ return {
       tty = "tty-required", confirm = "none", allowed_states = { "Idle", "Preparing", "RequestingModel", "Streaming", "DispatchingTools", "AwaitingApproval", "ExecutingTool", "EvaluatingAction", "EvaluatingTermination", "WaitingUser" }, results = { "accepted", "ask-busy", "error" },
     },
     {
+      id = "software", surface = "chat", args = { arg("question", "bounded-utf8-text", false) }, projections = { chat(".software [question]", false) },
+      tty = "tty-required", confirm = "none", allowed_states = { "Idle", "Preparing", "RequestingModel", "Streaming", "DispatchingTools", "AwaitingApproval", "ExecutingTool", "EvaluatingAction", "EvaluatingTermination", "WaitingUser" }, results = { "accepted", "ask-busy", "error" },
+    },
+    {
       id = "multiline", surface = "chat", args = {}, projections = { chat(".multiline", "Shift+Enter") },
       tty = "tty-required", confirm = "none", allowed_states = { "Idle", "Preparing", "RequestingModel", "Streaming", "DispatchingTools", "AwaitingApproval", "ExecutingTool", "EvaluatingAction", "EvaluatingTermination", "WaitingUser" }, results = { "input-mode-entered", "error" },
     },

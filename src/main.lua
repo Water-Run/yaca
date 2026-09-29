@@ -9961,6 +9961,55 @@ function M.new_application_coordinator(ports, options)
         return request
     end
 
+    ---Reads the bundled-software index beside the executable.
+    --Returns parsed entries or nil with a typed reason; the on-disk
+    --directory keeps the historical name tools/ for package compatibility.
+    --@param none No arguments; the composed layout supplies the root.
+    --@return table|nil Array of bundled index entries.
+    --@return table|nil Typed BundledIndex or filesystem failure.
+    local function bundled_entries()
+        local root = composed.layout and composed.layout.application_root
+        if type(root) ~= "string" then
+            return nil, failure("BundledIndex", "runtime layout is unavailable")
+        end
+        local separator = composed.identity.os == "windows" and "\\" or "/"
+        local directory = root:gsub("[/\\]+$", "") .. separator .. "tools"
+        --Probes the bundled directory identity without raising through the port.
+        --@param none No arguments; this closure reads the composed filesystem.
+        --@return table|nil Identity record when the directory states cleanly.
+        local stated, identity = pcall(function()
+            local ok, value = composed.backend.filesystem.stat_identity(directory)
+            return ok and value or nil
+        end)
+        if not stated or type(identity) ~= "table" or identity.kind ~= "directory" then
+            return nil, failure("BundledIndex", "bundled-software directory is absent")
+        end
+        local bundled = require("bundled")
+        local bytes, read_error = bundled.read_file(
+            composed.backend.filesystem, directory .. separator .. "INDEX.txt")
+        if not bytes then return nil, read_error end
+        return bundled.parse(bytes)
+    end
+
+    ---Handles the bundled-software chat action. Without a question it
+    --renders the index locally; with one it starts an advisory ask turn
+    --whose prompt embeds the index and the exec/lua boundary.
+    --@param request table Parsed software action with optional question.
+    --@return boolean|nil handled Whether the action completed.
+    --@return table|nil err Structured BundledIndex failure.
+    local function route_software_action(request)
+        local entries, entries_error = bundled_entries()
+        if not entries then return nil, entries_error end
+        if type(request.question) ~= "string" then
+            local rendered = require("bundled").render_context(entries)
+            return publish({ kind = "details", id = "bundled", text = rendered })
+        end
+        local message, message_error = require("bundled").render_question(entries, request.question)
+        if not message then return nil, message_error end
+        if agent then return stage_and_apply("ask", message) end
+        return start_first_agent(message, "ask")
+    end
+
     ---Routes one user line through the active approval, editor, or Agent lane.
     --@param source string Raw user input line.
     --@return boolean|nil handled Whether input was accepted.
@@ -10033,6 +10082,7 @@ function M.new_application_coordinator(ports, options)
         end
         if request.id == "help-chat" then return show_help(request.topic) end
         if request.id == "details" then return show_details(request.error_id) end
+        if request.id == "software" then return route_software_action(request) end
         if context_change then
             if request.id == "cancel" then
                 context_change = false

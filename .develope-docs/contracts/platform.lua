@@ -20,13 +20,13 @@ return {
 
   safe_loading = {
     lua_module_allowlist = {
-      "backend_linux", "backend_windows", "cli", "clock", "compact", "config",
+      "backend_linux", "backend_windows", "bundled", "cli", "clock", "compact", "config",
       "context", "diagnostics", "fs", "index", "ini", "json", "main", "model",
       "network", "path", "permission", "platform", "process", "prompt", "runtime",
       "safety", "session", "terminal", "text", "textcodec", "tools", "tui", "xml",
     },
     planned_lua_module_allowlist = {
-      "backend_linux", "backend_windows", "cli", "clock", "compact", "config",
+      "backend_linux", "backend_windows", "bundled", "cli", "clock", "compact", "config",
       "context", "diagnostics", "fs", "index", "ini", "json", "main", "model",
       "network", "path", "permission", "platform", "process", "prompt", "runtime",
       "safety", "session", "terminal", "text", "textcodec", "tools", "tui", "xml",

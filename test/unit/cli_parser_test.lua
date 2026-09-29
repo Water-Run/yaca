@@ -256,14 +256,14 @@ return {
             end,
         },
         {
-            name = "runtime registry is an exact enriched projection of all 39 actions",
-            --Verifies runtime registry is an exact enriched projection of all 39 actions.
+            name = "runtime registry is an exact enriched projection of all 40 actions",
+            --Verifies runtime registry is an exact enriched projection of all 40 actions.
             --@param none No arguments; this closure uses its captured fixture state.
-            --@return nil No value; assertions verify runtime registry is an exact enriched projection of all 39 actions.
+            --@return nil No value; assertions verify runtime registry is an exact enriched projection of all 40 actions.
             run = function()
                 local registry = cli.registry()
                 A.equal(registry.contract_version, contract.contract_version)
-                A.equal(#registry.actions, 39)
+                A.equal(#registry.actions, 40)
                 assert_subset(contract.parser, registry.parser, "parser")
                 assert_subset(contract.exit_classes, registry.exit_classes, "exit_classes")
                 assert_subset(contract.machine_output, registry.machine_output, "machine_output")
@@ -297,9 +297,9 @@ return {
                 local descriptor = assert(service.action("run-chat"))
                 descriptor.id = "changed-again"
                 A.equal(assert(service.action("run-chat")).id, "run-chat")
-                --Executes the action expected to raise in the 'runtime registry is an exact enriched projection of all 39 actions' case.
+                --Executes the action expected to raise in the 'runtime registry is an exact enriched projection of all 40 actions' case.
                 --@param none No arguments; this closure uses its captured fixture state.
-                --@return nil No value; assertions verify runtime registry is an exact enriched projection of all 39 actions.
+                --@return nil No value; assertions verify runtime registry is an exact enriched projection of all 40 actions.
                 A.raises(function() service.extra = true end, "cannot be modified")
             end,
         },
