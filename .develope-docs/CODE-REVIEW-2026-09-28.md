@@ -408,6 +408,31 @@ candidate-versions-not-qualified-artifacts。
 
 本批后完整套件 670/670,readiness 全链通过,注释结构 213 文件、5172 声明、0 缺项。
 
+
+## std 三平台装配批次(2026-09-29)
+
+接续资格批次,补齐 std 档的三个包。
+
+- Win64 std:新增 [build_win64_std.sh](../.tools/qualification/build_win64_std.sh) 与
+  [prepare_win64_std.py](../.tools/qualification/prepare_win64_std.py),复用 win32 管线:
+  amd64 Python 2.7.18 MSI(MSI 清单沿用 Win7 实机生成的 TSV)、putty 0.85 以
+  x86_64 mingw(WinVER 0x0601)构建、7-Zip extra 的 x64 控制台、核心构建的 x64 curl。
+  四工具在 Wine 下冒烟通过(python 2.7.18/maxsize 64 位、plink 64-bit x86、curl 8.21.0、7za)。
+  装配为 `out/editions-win64-20260929/` 的 std 包。
+- Linux std:在 CentOS 7 容器(vault/EPEL 存档,cmake3 3.17.5、gcc 4.8.5)内构建
+  putty CLI(64-bit Unix)、Python 2.7.18(zlib 可用;容器无 OpenSSL 头,_ssl 不含,
+  HTTPS 由 curl 承担)与 7zz 26.03(gcc4.8 需 -maes/-mpclmul/-mavx2 内建开关与去掉
+  -Werror;7-Zip 运行时分发保持 x86-64 基线);curl 复用 CentOS 资格构建的产物加
+  核心证书。新增 [prepare_linux_std.py](../.tools/qualification/prepare_linux_std.py)。
+  四工具在 CentOS 7 容器冒烟通过;装配为 `out/editions-linux-20260929/` 的 std 包。
+- win32 std 之前已用当前核心刷新;tool-sources.lock 增补 amd64 MSI 条目并将
+  target 标注为 win32-x86+win64-x86_64。
+
+九包现状:clean×3 + std×3 共六包齐;三个 full 需 git/python3/sqlite/jq/busybox/
+compiler 六个附加工具的完整可移植闭包,仍为 Gate R 前最大剩余项
+(compiler 在工具清单中尚无钉定版本)。本批后 readiness 全链通过,
+注释结构 216 文件、5183 声明、0 缺项。
+
 ## 继续审查与目标验证
 
 1. Win7 当前组件复验；将新的输出路径纳入真实旧终端旅程。

@@ -3,8 +3,8 @@
 更新日期：2026-09-29。实现基线为 `ce47834`（R37--R50 全部落盘），并完成
 目标资格批次：三目标产物重建、XP/Win7/CentOS 7/Server 2008 四环境当前组件实测、
 A08/A09 真实 2.3 GiB 旅程 10/10、clean 三平台与 win32 std 装配。
-Gate R 仍未开启：win64/Linux std 与三个 full 的工具闭包、真实模型旅程与
-最终干净机发行旅程待完成。详见
+Gate R 仍未开启：三个 full 的工具闭包(git/python3/sqlite/jq/busybox/compiler)、
+真实模型旅程与最终干净机发行旅程待完成;std 三平台已于 2026-09-29 装配齐。详见
 [资格批次记录](CODE-REVIEW-2026-09-28.md)与 [TRACKING.md](TRACKING.md)。
 提交脉络见[开发历程](DEVELOPMENT-HISTORY.md)。
 
@@ -103,7 +103,7 @@ XP 已补原生 seek 探针，Win7 当前组件仍待实测；不能沿用旧包
 ## 尚未完成
 
 - 全仓人工语义 Review；R23--R50 修改范围已逐项核对，接续其余原生端口与未审区域。
-- win64/Linux std 与三个 full 的可移植工具闭包构建及九包齐全的最终装配。
+- 三个 full(git/python3/sqlite/jq/busybox/compiler 六工具闭包)的构建与最终九包装配。
 - Win7 当前原生组件和真实旧终端输出旅程；现有 VM 登录上下文待补。
 - 当前源码的三目标完整构建、目标回归、网络故障、恢复与容量矩阵。
 - A08/A09 的 GiB 级日志、增长/轮转、旧代码页及真实模型读取旅程。
