@@ -68,6 +68,7 @@ git show 32d053e:.develope-docs/TRACKING.md
 | R49--R50，open/create 与进程流资源 | `out/native-open-review-20260928/` | 旧实现三环境各 4 句柄 + 9 缓冲泄漏位置；修正后 0 泄漏、同状态恢复与终端监督通过；670/670 |
 | 目标资格批次，四环境实测与 GiB 旅程 | `out/release-20260928/` 等 | 三目标重建、XP/Win7/CentOS/2008 当前组件实测、A08/A09 10/10、clean×3+win32 std 装配 |
 | std 三平台装配批次 | `out/editions-*-2026092*` | win64/Linux std 工具树构建+冒烟+装配;九包达六 |
+| full 档启动:版本钉定与 Linux 三小工具 | `out/linux-full-20260929/` | busybox 1.36.1/jq 1.8.2/sqlite 3.53.4 容器构建+冒烟;七源 SHA 锁 |
 
 XP、Win7、CentOS 7 及 Server 2008 的旧候选路径从各自日期记录查阅；
 不因本地仍留有可执行文件或虚拟机就认定当前版本已通过目标验收。

@@ -1,0 +1,39 @@
+{
+ "schema": "yaca-tool-sources-v1",
+ "target": "linux-x86_64+win32-x86+win64-x86_64",
+ "edition": "full",
+ "qualification": "pending",
+ "sources": [
+  {
+   "file": "jq-1.8.2.tar.gz",
+   "url": "https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-1.8.2.tar.gz",
+   "sha256": "71b8d6e8f5fe81f6c6d0d110e3892251f6ce76ed095abd315e26e6e1193af3af"
+  },
+  {
+   "file": "onig-6.9.10.tar.gz",
+   "url": "https://github.com/kkos/oniguruma/releases/download/v6.9.10/onig-6.9.10.tar.gz",
+   "sha256": "2a5cfc5ae259e4e97f86b68dfffc152cdaffe94e2060b770cb827238d769fc05"
+  },
+  {
+   "file": "sqlite-autoconf-3530400.tar.gz",
+   "url": "https://sqlite.org/2026/sqlite-autoconf-3530400.tar.gz",
+   "sha256": "0e9483900e92cd5de8fd48d16bf9200145a61f7fd5be542a5ac81d8a9516eb9c"
+  },
+  {
+   "file": "tcc-0.9.27.tar.bz2",
+   "url": "https://download.savannah.gnu.org/releases/tinycc/tcc-0.9.27.tar.bz2",
+   "sha256": "de23af78fca90ce32dff2dd45b3432b2334740bb9bb7b05bf60fdbfc396ceb9c"
+  },
+  {
+   "file": "git-2.39.5.tar.xz",
+   "url": "https://www.kernel.org/pub/software/scm/git/git-2.39.5.tar.xz",
+   "sha256": "c58da92c378df4a986ca33266897a7397e86c22ee266a284d8c2432c39066b59"
+  },
+  {
+   "file": "busybox-1.36.1.tar.bz2",
+   "url": "https://busybox.net/downloads/busybox-1.36.1.tar.bz2",
+   "sha256": "b8cc24c9574d809e7279c3be349795c5d5ceb6fdf19ca709f80cde50e47de314"
+  }
+ ],
+ "patches": []
+}

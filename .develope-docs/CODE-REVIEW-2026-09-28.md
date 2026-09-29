@@ -433,6 +433,24 @@ compiler 六个附加工具的完整可移植闭包,仍为 Gate R 前最大剩�
 (compiler 在工具清单中尚无钉定版本)。本批后 readiness 全链通过,
 注释结构 216 文件、5183 声明、0 缺项。
 
+
+## full 档启动批次(2026-09-29)
+
+- 版本钉定写入[工具清单](../release/tool-bundles.json):busybox 1.36.1、git 2.39.5、
+  python3 3.4.4(复用既有 python34 管线)、compiler=w64devkit 2.0.0(Windows 便携
+  C/C++ 全套,沿清单既定来源;jq 1.8.2 与 sqlite 3.53.4 原已钉定)。
+  新增 [full-tool-sources.lock.json](../release/full-tool-sources.lock.json)
+  (busybox/jq/oniguruma/sqlite autoconf+src/tcc/git 七源,SHA-256 全钉)。
+- Linux 三个小工具在 CentOS 7 容器(yaca/c7builder)构建完成并冒烟通过:
+  busybox 1.36.1(禁 seedrng——glibc 2.17 无 sys/random.h;401 个 applet、
+  sh/awk 可用)、jq 1.8.2(对 oniguruma 6.9.10 静态链接,UTF-8 与数组聚合通过)、
+  sqlite 3.53.4(sqlite3 + sqldiff,后者由 sqlite-src 拼包以 amalgamation 编出,
+  链接 -lpthread -ldl)。证据 `out/linux-full-20260929/smoke-c7.log`。
+- busybox 1.37.0 在 CentOS 7 头文件下不可编译(iplink 的 CAN 常量需新内核头),
+  故钉定回退到 1.36.1;该取舍连同 seedrng 禁用一并记录。
+- 剩余:git 2.39.5、python3 3.4.4、w64devkit 2.0.0 三个大闭包的取得与三平台
+  full 装配(本批启动,未完成);真实模型旅程仍待模型 API 凭证。
+
 ## 继续审查与目标验证
 
 1. Win7 当前组件复验；将新的输出路径纳入真实旧终端旅程。
