@@ -490,6 +490,26 @@ compiler 六个附加工具的完整可移植闭包,仍为 Gate R 前最大剩�
 - 剩余:python3 3.14.7 与 git 2.55.0 用该工具链构建;Windows python3 仍被
   交叉构建限制阻塞(见 BLOCKER.txt);真实模型旅程仍待模型 API 凭证。
 
+
+## Linux full 收官批次(2026-09-29,附带软件特性后)
+
+- 附带软件特性落地(`75548f4`):`src/bundled.lua` 解析/渲染 tools/INDEX.txt
+  (名称|简介|手册 URL|备注),环境描述把合法索引注入模型上下文并显式声明
+  「附带软件不是 Tool Calling,经 exec 或内嵌 lua 使用」;新增 `.software`
+  聊天命令(无参=本地渲染索引;带问题=ask 泳道嵌入索引让模型匹配并给出
+  exec/lua 调用形态)。动作注册表 40 项、模块清单 30 个、契约/计划/校验器
+  同步;完整套件 **676/676**,readiness 全链 PASS(218 文件/5213 声明 0 缺项)。
+- git 2.55.0 用自举 GCC-13.5 在 CentOS 7 容器构建完成:git 2.55 要求 C99,
+  以 `-std=gnu11` 通过;Rust 依赖(libgitcore)以 NO_RUST=1 排除;
+  CSPRNG_METHOD=openssl 使用自建 OpenSSL 3.0.16;系统 libcurl-devel 因
+  vault 瞬断不可得,本轮 NO_CURL=1(http 传输缺,文件/ssh 传输在)。
+  手工暂存树(libexec 198 个组件+templates)在全新 centos:7 容器通过
+  init/config/add/commit/log 冒烟(`git255-smoke.log`);源码入 full 锁。
+- python 3.14.7 前批已全模块验证(ssl=OpenSSL 3.0.16/sqlite 3.53.4/
+  ctypes=libffi 3.4.6,`compiler-smoke.log` 同目录)。
+- Linux full 六件闭包至此齐:busybox 1.37.0 待按目录 applet 子集重建外,
+  jq/sqlite/compiler/python3/git 均已建成并冒烟。
+
 ## 继续审查与目标验证
 
 1. Win7 当前组件复验；将新的输出路径纳入真实旧终端旅程。
