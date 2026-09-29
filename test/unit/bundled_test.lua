@@ -38,7 +38,7 @@ local function fixture(transform)
     return table.concat(lines, "\n") .. "\n"
 end
 
-add({
+cases[#cases + 1] = {
     name = "index parsing accepts bounded entries and preserves optional fields",
     --Verifies index parsing accepts bounded entries and preserves optional fields.
     --@param none No arguments; this closure uses its captured fixture state.
@@ -53,13 +53,13 @@ add({
         A.equal(entries[2].notes, false)
         A.equal(entries[2].url, "https://curl.se/docs/")
     end,
-})
+}
 
-add({
-    name = "index parsing rejects malformed lines, duplicates and oversize input",
-    --Verifies index parsing rejects malformed lines, duplicates and oversize input.
+cases[#cases + 1] = {
+    name = "index parsing rejects malformed lines and duplicates",
+    --Verifies index parsing rejects malformed lines and duplicates.
     --@param none No arguments; this closure uses its captured fixture state.
-    --@return nil No value; assertions verify index parsing rejects malformed lines, duplicates and oversize input.
+    --@return nil No value; assertions verify index parsing rejects malformed lines and duplicates.
     run = function()
         local bundled = load_module("bundled")
         local bad, bad_error = bundled.parse("onefield\n")
@@ -71,21 +71,49 @@ add({
             return "python2|duplicate|url|notes"
         end
         bad, bad_error = bundled.parse(fixture(duplicate_line))
-        A.truthy(bad_error.code == "BundledIndex")
+        A.truthy(bad == nil and bad_error.code == "BundledIndex")
+        bad, bad_error = bundled.parse("# only comments\n")
+        A.truthy(bad == nil and bad_error.code == "BundledIndex")
+    end,
+}
+
+--Supplies the CRLF fixture used by the tolerance case.
+--@param none No arguments; this closure returns a fixed CRLF index.
+--@return string Index bytes whose lines end with CRLF.
+local crlf_bytes = "n|s|u|notes\r\n"
+
+cases[#cases + 1] = {
+    name = "index parsing tolerates CRLF line endings without leaking CR",
+    --Verifies index parsing tolerates CRLF line endings without leaking CR.
+    --@param none No arguments; this closure uses its captured fixture state.
+    --@return nil No value; assertions verify index parsing tolerates CRLF line endings without leaking CR.
+    run = function()
+        local bundled = load_module("bundled")
+        local entries = assert(bundled.parse(crlf_bytes))
+        A.equal(entries[1].notes, "notes")
+        A.falsy(entries[1].notes:find("\r"))
+    end,
+}
+
+cases[#cases + 1] = {
+    name = "index parsing rejects an over-limit summary field",
+    --Verifies index parsing rejects an over-limit summary field.
+    --@param none No arguments; this closure uses its captured fixture state.
+    --@return nil No value; assertions verify index parsing rejects an over-limit summary field.
+    run = function()
+        local bundled = load_module("bundled")
         --Supplies the oversize summary used by the rejection case.
         --@param none No arguments; this closure returns a fixed over-limit entry line.
         --@return string Oversize index line for the fixture.
         local oversize_line = function()
             return "x|" .. string.rep("y", 300) .. "||"
         end
-        bad, bad_error = bundled.parse(fixture(oversize_line))
-        A.truthy(bad_error.code == "BundledIndex")
-        bad, bad_error = bundled.parse("# only comments\n")
-        A.truthy(bad_error.code == "BundledIndex")
+        local bad, bad_error = bundled.parse(fixture(oversize_line))
+        A.truthy(bad == nil and bad_error.code == "BundledIndex")
     end,
-})
+}
 
-add({
+cases[#cases + 1] = {
     name = "render round-trips parse and render_context separates tool calls",
     --Verifies render round-trips parse and render_context separates tool calls.
     --@param none No arguments; this closure uses its captured fixture state.
@@ -103,9 +131,9 @@ add({
         A.truthy(context:find("manual: https://docs.python.org/2/", 1, true))
         A.truthy(context:find("run via exec", 1, true))
     end,
-})
+}
 
-add({
+cases[#cases + 1] = {
     name = "render_question embeds the index and constrains the answer shape",
     --Verifies render_question embeds the index and constrains the answer shape.
     --@param none No arguments; this closure uses its captured fixture state.
@@ -122,9 +150,9 @@ add({
         bad, bad_error = bundled.render_question(entries, string.rep("q", 5000))
         A.truthy(bad_error.code == "BundledIndex")
     end,
-})
+}
 
-add({
+cases[#cases + 1] = {
     name = "merge_directory preserves fields and adds placeholders",
     --Verifies merge_directory preserves fields and adds placeholders.
     --@param none No arguments; this closure uses its captured fixture state.
@@ -139,9 +167,9 @@ add({
         local rendered = assert(bundled.render(merged))
         assert(bundled.parse(rendered))
     end,
-})
+}
 
-add({
+cases[#cases + 1] = {
     name = "read_file streams through the filesystem port and caps oversize indexes",
     --Verifies read_file streams through the filesystem port and caps oversize indexes.
     --@param none No arguments; this closure uses its captured fixture state.
@@ -192,7 +220,7 @@ add({
         local capped, capped_error = bundled.read_file(fs, "/x/INDEX.txt")
         A.truthy(capped == nil and capped_error.code == "BundledIndex")
     end,
-})
+}
 
 return {
     name = "unit/bundled",

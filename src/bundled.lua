@@ -71,8 +71,9 @@ function M.parse(bytes)
         return nil, failure("index contains NUL bytes")
     end
     local entries, seen = {}, {}
-    for line in bytes:gmatch("([^\n]+)") do
-        if line:sub(1, 1) ~= "#" then
+    for original in bytes:gmatch("([^\n]+)") do
+        local line = original:gsub("\r$", "")
+        if line ~= "" and line:sub(1, 1) ~= "#" then
             local entry, entry_error = parse_entry(line)
             if not entry then return nil, entry_error end
             if seen[entry.name] then
