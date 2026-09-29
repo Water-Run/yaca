@@ -1,10 +1,11 @@
 # 当前状态
 
-更新日期：2026-09-28。本轮实现基线为 `5384b8e` 加 R49--R50 原生 I/O 资源修复，
-已完成 [R37--R50](CODE-REVIEW-2026-09-28.md)：旧编码、错误传播、进程输出、
-文件读取、open/create 句柄顺序与进程流缓冲所有权，
-以及 XP 当前源码和 NTFS/FAT32 seek 探针复验。
-恢复开发从 [TRACKING.md](TRACKING.md) 的 Win7 当前组件实测继续。
+更新日期：2026-09-29。实现基线为 `ce47834`（R37--R50 全部落盘），并完成
+目标资格批次：三目标产物重建、XP/Win7/CentOS 7/Server 2008 四环境当前组件实测、
+A08/A09 真实 2.3 GiB 旅程 10/10、clean 三平台与 win32 std 装配。
+Gate R 仍未开启：win64/Linux std 与三个 full 的工具闭包、真实模型旅程与
+最终干净机发行旅程待完成。详见
+[资格批次记录](CODE-REVIEW-2026-09-28.md)与 [TRACKING.md](TRACKING.md)。
 提交脉络见[开发历程](DEVELOPMENT-HISTORY.md)。
 
 **核心已实现，目标资格验证待完成。** 机读阶段为 `implemented-unqualified`，
@@ -89,10 +90,10 @@ YACA_PROOF_SOURCE_CACHE="$PWD/out/qualification/sources" \
 
 | 环境 | 已有证据 | 当前缺口 |
 | --- | --- | --- |
-| XP SP3 x86 | 当前 native 编码、错误注入及源码 suite 670/670；新增 NTFS/FAT32 seek 边界探针；历史 N23 控制台旅程 | 重建当前单文件与三档包；完整目标矩阵和真实大文件旅程 |
-| Win7 SP1 x64 | N4 核心与原生探针；R21 修正 Lua 源码配旧原生组件的复验 | 当前源码完整单文件产物与全套目标复验 |
-| CentOS 7 x86_64 | 历史候选、3.10 内核下的进程监督及模型旅程 | 当前源码构建、完整资格与最终包 |
-| 指定 Server 2008 / Cygwin SSH | 直接交互、中文 Ask、真实 Lua/模型等旧候选证据 | 当前候选复验；旧 SSH 外层 255 与握手失败记录仍须分辨 |
+| XP SP3 x86 | 当前产物完整批次：三故障探针 0 泄漏、codec/seek smoke、源码 suite 670/670、onefile stage-1 自检通过 | 真实模型旅程与最终三档包 |
+| Win7 SP1 x64 | 登录上下文已解决；当前组件全套：codec/pstream/seek 探针、源码 suite 670/670、onefile stage-1 自检 | fs-open 探针真机复跑（现由 Wine Win64 覆盖）；真实模型旅程 |
+| CentOS 7 x86_64 | 当前源码原生构建 670/670、三故障探针 0 泄漏、codec/seek smoke、A08/A09 GiB 旅程 10/10、clean zip 装配 | std/full 工具闭包与最终发行旅程 |
+| 指定 Server 2008 / Cygwin SSH | 当前 win32 单文件 --version 与 stage-1 自检 12 PASSED/0 FAILED | 在线阶段、真实模型旅程；旧 SSH 外层 255 与握手失败记录仍须分辨 |
 | std/full 工具 | win32 std 的部分构建/运行证据；三目标候选版本和装配约束 | win64/Linux std、三个 full 的完整工具闭包与目标运行 |
 
 详细路径、失败记录与适用候选见[Review 记录](CODE-REVIEW-2026-09-22.md)和
@@ -102,6 +103,7 @@ XP 已补原生 seek 探针，Win7 当前组件仍待实测；不能沿用旧包
 ## 尚未完成
 
 - 全仓人工语义 Review；R23--R50 修改范围已逐项核对，接续其余原生端口与未审区域。
+- win64/Linux std 与三个 full 的可移植工具闭包构建及九包齐全的最终装配。
 - Win7 当前原生组件和真实旧终端输出旅程；现有 VM 登录上下文待补。
 - 当前源码的三目标完整构建、目标回归、网络故障、恢复与容量矩阵。
 - A08/A09 的 GiB 级日志、增长/轮转、旧代码页及真实模型读取旅程。

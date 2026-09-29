@@ -361,6 +361,53 @@ R48 最终开发机完整 suite **670/670**，完整 readiness 链通过；注�
 yaca 自产普通字符串表上运行，其对带元表输入的理论抛错不在本批范围。
 本批未重建发行包；XP/Win7 当前组件实测仍未完成。
 
+
+## 目标资格批次(2026-09-28/29)
+
+接续 `ce47834` 的三目标产物重建与四环境当前组件实测。
+
+### 产物与构建
+
+- Win32/Win64 单文件由 `build_windows_candidate.sh` 交叉构建,均产出 clean 版 zip、
+  notices zip 与 SHA256SUMS(`out/windows-candidate-20260928-n1/`、
+  `out/windows64-candidate-20260928-n1/`)。
+- Linux 单文件在 CentOS 7.9.2009 VM(gcc 4.8.5、glibc 2.17、内核 3.10.0-1160)原生构建:
+  `full_tests=670/670`,产物与摘要见 `out/centos7-20260928/`(VM 内 c32-linux-ce47834-r1),
+  zip 由 `package_linux_zip.py` 在构建机以 LC_ALL=C 装配(`out/linux-candidate-20260928-n1/`)。
+  VM 上的旧版构建脚本钉死 SUMMARY total=329,已替换为当前仓库脚本后通过。
+
+### 四环境当前组件实测
+
+| 环境 | 结果 | 缺口 |
+| --- | --- | --- |
+| XP SP3 x86 VM | 三故障探针 0 泄漏/0 失败、codec smoke 13 组、seek 12 偏移、完整套件 670/670、onefile stage-1 自检 DATA-ROOT 通过 | 无(自检 outcome=partial 为干净机未初始化配置的预期) |
+| Win7 SP1 x64 VM | 登录上下文解决(口令取自 autounattend 软盘);codec-faults/pstream/codec-smoke/seek 探针通过、完整套件 670/670、onefile stage-1 自检同上 | fs-open 探针因驱动脚本引用了不存在的短文件名未在真机执行;该二进制的 0 泄漏证据由 Wine Win64 覆盖 |
+| CentOS 7.9 VM | 上行构建全部产物;三故障探针 0 泄漏/0 失败、codec smoke 13 组、seek 12 偏移、完整套件 670/670 | 无 |
+| Server 2008 SP2 真机 | `yaca --version` 退出 0;stage-1 自检 12 PASSED/0 FAILED(仅配置未初始化与 SSH 管道 TTY 两项预期警告) | 在线阶段与真实模型旅程未执行 |
+
+证据目录:`out/xp-qual-20260928/`、`out/win7-qual-20260928/`、`out/centos7-20260928/`
+与 `out/release-20260928/`。Win7 首轮批次期间发生一次未归因的系统中途重启,FAT
+写缓存丢失该轮证据;后续批次以干净关机落盘复核。
+
+### A08/A09 真实 GiB 旅程
+
+新增维护的 [gib_log_journey.lua](../.tools/qualification/gib_log_journey.lua) 以生产形态的
+16 MiB 整文件上限驱动真实工具层。CentOS 7 上对 2344 MiB 真实文件 **10/10 通过**:
+首/尾区间、有界搜索(complete=false 按扫描预算如实报告)、2 GiB 后偏移读取、
+超限写入在接纳层拒绝、CP936 显式解码、auto 严格 UTF-8 拒绝(classification=
+invalid-encoding 带重试提示)、增长后尾部重读。开发过程证实:把整文件上限配置为
+4 GiB 时同一文件走整文件路径并在受限内存环境正确失败——与已记录行为边界一致,
+旅程已按生产边界修正。旅程在开发机小夹具与 CentOS 全尺寸夹具均通过。
+
+### 包矩阵现状
+
+clean 三平台全部装配(win32/win64 来自候选构建,Linux zip 另含 SBOM/许可/构建摘要);
+win32 std 以当前二进制刷新(`out/editions-win32-20260928/`)。win64/Linux std 与三个
+full 的可移植工具闭包未构建,仍为 Gate R 前剩余项;`tool-bundles.json` 状态本身即为
+candidate-versions-not-qualified-artifacts。
+
+本批后完整套件 670/670,readiness 全链通过,注释结构 213 文件、5172 声明、0 缺项。
+
 ## 继续审查与目标验证
 
 1. Win7 当前组件复验；将新的输出路径纳入真实旧终端旅程。
