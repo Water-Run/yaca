@@ -38,6 +38,36 @@
    "file": "busybox-w32-FRP-6075-g169694ebd.tar.gz",
    "url": "https://github.com/rmyorston/busybox-w32/archive/refs/tags/FRP-6075-g169694ebd.tar.gz",
    "sha256": "aa953010f16989cec8e165c5ffddaa9f6633f65670e20d5d7678c987d776f1d7"
+  },
+  {
+   "file": "binutils-2.47.tar.xz",
+   "url": "https://ftp.gnu.org/gnu/binutils/binutils-2.47.tar.xz",
+   "sha256": "154ab23b60070e8f27013c22977f1129425d67d1e8acd6e13010e617811e4cff"
+  },
+  {
+   "file": "make-4.4.1.tar.gz",
+   "url": "https://ftp.gnu.org/gnu/make/make-4.4.1.tar.gz",
+   "sha256": "dd16fb1d67bfab79a72f5e8390735c49e3e8e70b4945a15ab1f81ddb78658fb3"
+  },
+  {
+   "file": "gmp-6.3.0.tar.xz",
+   "url": "https://ftp.gnu.org/gmp/gmp-6.3.0.tar.xz",
+   "sha256": "a3c2b80201b89e68616f4ad30bc66aee4927c3ce50e33929ca819d5c43538898"
+  },
+  {
+   "file": "mpfr-4.2.1.tar.xz",
+   "url": "https://ftp.gnu.org/mpfr/mpfr-4.2.1.tar.xz",
+   "sha256": "277807353a6726978996945af13e52829e3abd7a9a5b7fb2793894e18f1fcbb2"
+  },
+  {
+   "file": "mpc-1.3.1.tar.gz",
+   "url": "https://ftp.gnu.org/gnu/mpc/mpc-1.3.1.tar.gz",
+   "sha256": "ab642492f5cf882b74aa0cb730cd410a81edcdbec895183ce930e706c1c759b8"
+  },
+  {
+   "file": "gcc-13.5.0.tar.xz",
+   "url": "https://ftp.gnu.org/gnu/gcc/gcc-13.5.0/gcc-13.5.0.tar.xz",
+   "sha256": "ec3df0015ed01411f91f9a9cd5b4da3070eb1222b02fadf4133c30c090399855"
   }
  ],
  "patches": []

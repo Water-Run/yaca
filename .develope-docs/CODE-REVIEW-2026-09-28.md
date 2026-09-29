@@ -471,6 +471,25 @@ compiler 六个附加工具的完整可移植闭包,仍为 Gate R 前最大剩�
   sysroot 自举(git 2.55/python 3.14.7 依赖它)、三平台 full stager 与装配。
   真实模型旅程仍待模型 API 凭证。
 
+
+## Linux full 编译器闭包自举(2026-09-29,第三批)
+
+- 依据工具清单 linux target 的钉定(GCC-13.5.0_Binutils-2.47_Make-4.4.1,
+  含可重定位 sysroot),在 CentOS 7 容器完成四阶段自举:gmp 6.3.0/mpfr 4.2.1/
+  mpc 1.3.1 → binutils 2.47 → make 4.4.1 → gcc 13.5.0(C/C++,--disable-bootstrap)。
+  全部源码入 full 锁(共 13 项)。
+- 可重定位布局:prefix/ 下 bin、lib/gcc、x86_64-pc-linux-gnu/{lib,include};
+  glibc 2.17 头与库(含 crt 对象、nonshared 归档)置于 gcc 默认搜索路径,
+  libc 等 linker script 改写为相对组。在全新 centos:7 容器验证:
+  gcc/g++/ld/make 版本正确,C 编译-链接-运行(exit=42)、C++(CPP_OK/exit=7)、
+  STL(-static-libstdc++ -static-libgcc,exit=2=vector 大小)全部通过
+  (`out/linux-full-20260929/compiler-smoke.log`)。动态 libstdc++ 需随包
+  LD_LIBRARY_PATH 或静态链接,装配时在 quickstart 注明。
+- 过程修复:gmp 需 m4(vault 瞬断时从 GNU 源码自建 m4 1.4.19 烘入镜像);
+  首版自举脚本的 ||/&& 优先级缺陷会伪造阶段标记,已重写为严格顺序并复跑。
+- 剩余:python3 3.14.7 与 git 2.55.0 用该工具链构建;Windows python3 仍被
+  交叉构建限制阻塞(见 BLOCKER.txt);真实模型旅程仍待模型 API 凭证。
+
 ## 继续审查与目标验证
 
 1. Win7 当前组件复验；将新的输出路径纳入真实旧终端旅程。
