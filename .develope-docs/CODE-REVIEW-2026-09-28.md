@@ -531,6 +531,12 @@ compiler 六个附加工具的完整可移植闭包,仍为 Gate R 前最大剩�
   git 需 GIT_CONFIG_GLOBAL/SYSTEM 指向可写位置(系统 /root 只读所致),
   quickstart 应注明。修正点:compiler 的 lib64 与 libgcc.a/libgcc_eh.a
   因通配 *.a 剪枝一度丢失,已改为按树区分剪枝并复装。
+- 修正两处装配缺陷后复验:python3.14 与其它 ELF 的 executable 标志改为按
+  文件魔数判定(此前按后缀漏判);compiler 的 glibc 归档(libc_nonshared.a
+  等)因首轮 *.a 剪枝缺失,已复装并入清单。重建 zip 后**干净 CentOS 7 机器
+  旅程全过**(`clean-machine-journey.log`):yaca --version、stage-1 自检
+  12 PASSED(干净机配置未初始化的 partial 为预期)、busybox/jq/sqlite/
+  python3(含 ssl)/git --version/gcc 编译-链接-运行(exit=4)。
 - 剩余:win32/win64 full(Windows python3 构建主机阻塞)、真实模型旅程
   (凭证阻塞)、发行旅程与 Gate R。
 

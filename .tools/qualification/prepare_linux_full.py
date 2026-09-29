@@ -179,7 +179,8 @@ def main():
                 payload.append({"source": str(path.relative_to(output)),
                                 "destination": str(path.relative_to(output)),
                                 "sha256": sha256(path),
-                                "executable": path.suffix in ("", ".so", ".py", ".7")})
+                                "executable": path.suffix in ("", ".so", ".py", ".7")
+                                    or path.read_bytes()[:4] == b"\x7fELF"})
         records.append({"id": identifier, "version": version,
                         "entry_points": [prefix + name for name in entries],
                         "license_id": license_id,
