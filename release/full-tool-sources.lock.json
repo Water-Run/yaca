@@ -30,11 +30,6 @@
    "sha256": "c58da92c378df4a986ca33266897a7397e86c22ee266a284d8c2432c39066b59"
   },
   {
-   "file": "busybox-1.36.1.tar.bz2",
-   "url": "https://busybox.net/downloads/busybox-1.36.1.tar.bz2",
-   "sha256": "b8cc24c9574d809e7279c3be349795c5d5ceb6fdf19ca709f80cde50e47de314"
-  },
-  {
    "file": "busybox-w32-FRP-6075-g169694ebd.tar.gz",
    "url": "https://github.com/rmyorston/busybox-w32/archive/refs/tags/FRP-6075-g169694ebd.tar.gz",
    "sha256": "aa953010f16989cec8e165c5ffddaa9f6633f65670e20d5d7678c987d776f1d7"
@@ -83,6 +78,11 @@
    "file": "git-2.55.0.tar.xz",
    "url": "https://www.kernel.org/pub/software/scm/git/git-2.55.0.tar.xz",
    "sha256": "457fdb04dc8728e007d4688695e6912e6f680727920f2a40bf11eacc17505357"
+  },
+  {
+   "file": "busybox-1.37.0.tar.bz2",
+   "url": "https://busybox.net/downloads/busybox-1.37.0.tar.bz2",
+   "sha256": "3311dff32e746499f4df0d5df04d7eb396382d7e108bb9250e7b519b837043a4"
   }
  ],
  "patches": []

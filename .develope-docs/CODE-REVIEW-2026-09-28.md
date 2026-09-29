@@ -507,8 +507,11 @@ compiler 六个附加工具的完整可移植闭包,仍为 Gate R 前最大剩�
   init/config/add/commit/log 冒烟(`git255-smoke.log`);源码入 full 锁。
 - python 3.14.7 前批已全模块验证(ssl=OpenSSL 3.0.16/sqlite 3.53.4/
   ctypes=libffi 3.4.6,`compiler-smoke.log` 同目录)。
-- Linux full 六件闭包至此齐:busybox 1.37.0 待按目录 applet 子集重建外,
-  jq/sqlite/compiler/python3/git 均已建成并冒烟。
+- busybox 1.37.0 随后按固定 applet 子集重建完成(禁 seedrng 与 ip/tc
+  网络配置族,glibc 2.17 兼容),399 个 applet,sh/awk/sed/grep/find/diff/
+  head/tail/cat/ls/tr/sort/uniq/wc/xargs 在全新 centos:7 容器全部可用。
+  **Linux full 六件闭包至此全部建成并冒烟**(busybox/jq/sqlite/compiler/
+  python3 3.14.7/git 2.55.0)。
 
 ## 继续审查与目标验证
 
