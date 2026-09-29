@@ -513,6 +513,27 @@ compiler 六个附加工具的完整可移植闭包,仍为 Gate R 前最大剩�
   **Linux full 六件闭包至此全部建成并冒烟**(busybox/jq/sqlite/compiler/
   python3 3.14.7/git 2.55.0)。
 
+
+## Linux full 装配批次(2026-09-29)
+
+- 新增 [prepare_linux_full.py](../.tools/qualification/prepare_linux_full.py):
+  以 std staging 为底,并入六件 full 闭包(busybox/jq/sqlite/compiler/
+  python3/git),物化所有符号链接、对 git libexec 的同字节硬链接农场去重
+  (省 1330 MiB)、写 tools/INDEX.txt(名称|简介|手册URL|备注,含 exec/lua
+  边界声明头),并生成 10 工具的 tool-inputs.json(每件带真实源档与 SHA)。
+  装配器 [package_editions.py](../.tools/package_editions.py) 现在把 staged
+  INDEX.txt 原样打进非 clean 版包。
+- 装配产物:`out/editions-linux-full-20260929/`(full zip + notices +
+  SHA256SUMS)。**九包矩阵 7/9**(clean×3、std×3、linux full)。
+- 解包冒烟(全新目录,`packaged-smoke.log`):yaca --version、compiler 的
+  gcc C 编译-链接-运行(exit=9)、busybox echo、jq 加法、sqlite 乘法、
+  python3.14.7(ssl/sqlite3 可用)、git init/config/add/commit/log 全过;
+  git 需 GIT_CONFIG_GLOBAL/SYSTEM 指向可写位置(系统 /root 只读所致),
+  quickstart 应注明。修正点:compiler 的 lib64 与 libgcc.a/libgcc_eh.a
+  因通配 *.a 剪枝一度丢失,已改为按树区分剪枝并复装。
+- 剩余:win32/win64 full(Windows python3 构建主机阻塞)、真实模型旅程
+  (凭证阻塞)、发行旅程与 Gate R。
+
 ## 继续审查与目标验证
 
 1. Win7 当前组件复验；将新的输出路径纳入真实旧终端旅程。

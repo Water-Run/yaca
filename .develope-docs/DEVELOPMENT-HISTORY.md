@@ -71,6 +71,7 @@ git show 32d053e:.develope-docs/TRACKING.md
 | full 档启动:版本钉定与 Linux 三小工具 | `out/linux-full-20260929/` | busybox 1.36.1/jq 1.8.2/sqlite 3.53.4 容器构建+冒烟;七源 SHA 锁 |
 | full 闭包取得(第二批) | `out/full-payloads-20260929/` | PortableGit×2/w64devkit×2 下载入锁;busybox-w32 双架构 mingw 构建冒烟通过 |
 | Linux full 编译器闭包自举 | `out/linux-full-20260929/compiler-smoke.log` | GCC13.5/Binutils2.47/Make4.4.1+glibc2.17 sysroot,C/C++/STL 全验证 |
+| Linux full 装配(九包 7/9) | `out/editions-linux-full-20260929/` | 10 工具 staged+INDEX 入包;解包全工具冒烟通过 |
 
 XP、Win7、CentOS 7 及 Server 2008 的旧候选路径从各自日期记录查阅；
 不因本地仍留有可执行文件或虚拟机就认定当前版本已通过目标验收。
