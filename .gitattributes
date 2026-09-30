@@ -1,0 +1,2 @@
+# Preserve shell scripts, pinned patch hashes and byte-exact golden fixtures on Windows.
+* text=auto eol=lf
