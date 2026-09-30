@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-29
+Date: 2026-09-30
 File: bundled_test.lua
 Description: Verifies the bundled-software index parser, renderer, context projection and question composition.
 ]]
@@ -37,6 +37,135 @@ local function fixture(transform)
     if transform then lines[#lines + 1] = transform() end
     return table.concat(lines, "\n") .. "\n"
 end
+
+-- Supplies finite stream responses and tracks ownership for index read regressions.
+--@param chunks table Ordered chunk records or a typed failure with code and message.
+--@return table Filesystem port that refuses reads beyond the supplied responses.
+--@return table Observed read and close counts for the single fake handle.
+local function index_filesystem(chunks)
+    local handle, observed = {}, { reads = 0, closes = 0 }
+    local filesystem = {
+        -- Opens the index handle whose lifecycle is observed by this fixture.
+        --@param path string Absolute index path supplied by the caller.
+        --@return boolean Always true for the supplied fixture.
+        --@return table The single fake read handle.
+        open_read = function(path) return true, handle end,
+        -- Returns the next response, preserving typed failures and bounding stalled tests.
+        --@param opened table Handle returned by this fixture's open_read.
+        --@param maximum_bytes integer Requested byte ceiling, checked against fixture chunks.
+        --@return boolean Whether a chunk is available rather than a typed failure.
+        --@return table Chunk record or the exact supplied failure.
+        stream_read = function(opened, maximum_bytes)
+            A.equal(opened, handle)
+            observed.reads = observed.reads + 1
+            local chunk = chunks[observed.reads]
+            if not chunk then return false, { code = "UnexpectedRead" } end
+            if chunk.code then return false, chunk end
+            A.truthy(#chunk.bytes <= maximum_bytes)
+            return true, chunk
+        end,
+        -- Counts each release of the fixture's single index handle.
+        --@param opened table Handle returned by this fixture's open_read.
+        --@return boolean Always true after observing the release.
+        close = function(opened)
+            A.equal(opened, handle)
+            observed.closes = observed.closes + 1
+            return true
+        end,
+    }
+    return filesystem, observed
+end
+
+cases[#cases + 1] = {
+    name = "index parsing accepts a leading UTF-8 BOM from legacy Windows editors",
+    -- Verifies that an editor's UTF-8 signature does not become part of an index name or header.
+    --@param none No arguments; supplies the same valid index with an explicit leading signature.
+    --@return nil Assertions verify parsed entries preserve their original names and notes.
+    run = function()
+        local bundled = load_module("bundled")
+        local entries = assert(bundled.parse("\239\187\191" .. fixture()))
+        A.equal(entries[1].name, "python2")
+        A.equal(entries[1].notes, "run via exec")
+    end,
+}
+
+cases[#cases + 1] = {
+    name = "index parsing rejects malformed UTF-8 before projecting optional metadata",
+    -- Verifies malformed notes cannot reach the model-facing runtime environment.
+    --@param none No arguments; supplies invalid and truncated scalar bytes in an otherwise valid line.
+    --@return nil Assertions verify a typed BundledIndex failure for both malformed forms.
+    run = function()
+        local bundled = load_module("bundled")
+        for _, malformed in ipairs({ "\255", "\226\130" }) do
+            local entries, err = bundled.parse("name|summary||notes" .. malformed .. "\n")
+            A.falsy(entries)
+            A.equal(err.code, "BundledIndex")
+        end
+    end,
+}
+
+cases[#cases + 1] = {
+    name = "index byte limit also applies to the final EOF chunk",
+    -- Verifies exact-limit success and limit-plus-one refusal with bytes in the EOF chunk.
+    --@param none No arguments; builds independent finite stream fixtures.
+    --@return nil Assertions check byte admission and exactly one close per read.
+    run = function()
+        local bundled = load_module("bundled")
+        for _, extra in ipairs({ 0, 1 }) do
+            local chunks = {}
+            for index = 1, 4 do
+                chunks[index] = { bytes = string.rep("a", 4096), eof = false }
+            end
+            chunks[5] = { bytes = string.rep("b", extra), eof = true }
+            local filesystem, observed = index_filesystem(chunks)
+            local bytes, err = bundled.read_file(filesystem, "/x/INDEX.txt")
+            if extra == 0 then
+                A.equal(bytes, string.rep("a", 16384))
+                A.falsy(err)
+            else
+                A.falsy(bytes)
+                A.equal(err.code, "BundledIndex")
+            end
+            A.equal(observed.reads, 5)
+            A.equal(observed.closes, 1)
+        end
+    end,
+}
+
+cases[#cases + 1] = {
+    name = "index read refuses a stalled stream and closes its handle",
+    -- Verifies that an empty non-EOF chunk fails before a second read can occur.
+    --@param none No arguments; supplies one stalled chunk and an unexpected-read guard.
+    --@return nil Assertions check the typed failure, read count and handle release.
+    run = function()
+        local bundled = load_module("bundled")
+        local filesystem, observed = index_filesystem({ { bytes = "", eof = false } })
+        local bytes, err = bundled.read_file(filesystem, "/x/INDEX.txt")
+        A.falsy(bytes)
+        A.equal(err.code, "BundledIndex")
+        A.equal(observed.reads, 1)
+        A.equal(observed.closes, 1)
+    end,
+}
+
+cases[#cases + 1] = {
+    name = "index read retains filesystem failures instead of returning a valid prefix",
+    -- Verifies that a failure after a parseable prefix discards bytes and releases ownership.
+    --@param none No arguments; supplies a valid prefix followed by a typed read error.
+    --@return nil Assertions check error identity and exactly one handle close.
+    run = function()
+        local bundled = load_module("bundled")
+        local expected = { code = "ReadFailure", message = "index device became unavailable" }
+        local filesystem, observed = index_filesystem({
+            { bytes = fixture(), eof = false }, expected,
+        })
+        local bytes, err = bundled.read_file(filesystem, "/x/INDEX.txt")
+        A.falsy(bytes)
+        A.equal(err, expected)
+        A.equal(observed.reads, 2)
+        A.equal(observed.closes, 1)
+    end,
+}
 
 cases[#cases + 1] = {
     name = "index parsing accepts bounded entries and preserves optional fields",

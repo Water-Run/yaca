@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-09-30
 File: control_mapping_test.lua
 Description: Verifies versioned Prompt purpose assembly and exact native-control projection.
 ]]
@@ -310,6 +310,65 @@ return {
                 --@return nil No value; assertions verify toolbox discovery does not read execute or require optional files.
                 fs.stat_identity = function() error("unavailable removable drive") end
                 A.contains(tools.describe_environment(fs, layout, "windows"), "built-in lua tool")
+            end,
+        },
+        {
+            name = "toolbox context includes only complete index reads",
+            -- Verifies complete index admission and refuses a readable prefix or stalled stream.
+            --@param none No arguments; exercises successful, failed and stalled index streams.
+            --@return nil Assertions check model-facing text and exactly one index handle close.
+            run = function()
+                local tools = load_module("tools")
+                local index = "sentinel-tool|complete index sentinel||\n"
+                for _, mode in ipairs({ "complete", "read-error", "stalled", "invalid-utf8" }) do
+                    local handle, reads, closes = {}, 0, 0
+                    local filesystem = {
+                        -- Reports the optional directory as present for this scenario.
+                        --@param path string Absolute tools directory path.
+                        --@return boolean Always true for the fixture.
+                        --@return table Directory identity for the optional toolbox.
+                        stat_identity = function(path) return true, { kind = "directory" } end,
+                        -- Opens the single handle used to read the bundled index.
+                        --@param path string Absolute INDEX.txt path.
+                        --@return boolean Always true for the fixture.
+                        --@return table Fake read handle whose release is observed.
+                        open_read = function(path) return true, handle end,
+                        -- Supplies a complete index, a failed tail, or an empty stalled read.
+                        --@param opened table Fixture handle received from open_read.
+                        --@param maximum_bytes integer Requested read ceiling.
+                        --@return boolean Whether a fixture chunk is available.
+                        --@return table Chunk bytes and EOF, or a typed read failure.
+                        stream_read = function(opened, maximum_bytes)
+                            A.equal(opened, handle)
+                            A.truthy(#index <= maximum_bytes)
+                            reads = reads + 1
+                            if reads > 1 then return false, { code = "ReadFailure" } end
+                            if mode == "stalled" then return true, { bytes = "", eof = false } end
+                            if mode == "invalid-utf8" then
+                                return true, { bytes = index .. "bad|metadata||\255\n", eof = true }
+                            end
+                            return true, { bytes = index, eof = mode == "complete" }
+                        end,
+                        -- Records release of the index handle after success or failure.
+                        --@param opened table Fixture handle received from open_read.
+                        --@return boolean Always true after recording the release.
+                        close = function(opened)
+                            A.equal(opened, handle)
+                            closes = closes + 1
+                            return true
+                        end,
+                    }
+                    local description = tools.describe_environment(filesystem,
+                        { application_root = "/opt/yaca" }, "posix")
+                    if mode == "complete" then
+                        A.contains(description, "complete index sentinel")
+                    else
+                        A.falsy(description:find("complete index sentinel", 1, true))
+                    end
+                    A.contains(description, "built-in lua tool")
+                    A.equal(closes, 1)
+                    A.equal(reads, mode == "read-error" and 2 or 1)
+                end
             end,
         },
         {

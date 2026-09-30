@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-09-30
 File: review_queue_ask_test.lua
 Description: Verifies C27 review isolation and the queue, steer, and ask lanes.
 ]]
@@ -390,6 +390,52 @@ end
 return {
     name = "integration/review-queue-ask",
     cases = {
+        {
+            name = "close waits for pending or unknown Ask ownership after the main turn ends",
+            -- Tests idle and active-main shutdown with a side request whose stop is unconfirmed.
+            --@param none No arguments; confirms the exact Ask settlement after each close admission.
+            --@return nil Assertions verify deferred Closing and refusal of new work during cleanup.
+            run = function()
+                for _, main_active in ipairs({ false, true }) do
+                    for _, outcome in ipairs({ "pending", "unknown" }) do
+                        local f = fixture({ ask_cancel = { outcome = outcome } })
+                        if main_active then
+                            assert(f.loop:submit_main(observed(f.loop, { text = "main", source = "user" })))
+                        end
+                        local ask = assert(f.loop:start_ask(observed(f.loop, {
+                            text = "side question", source = "user" })))
+                        assert(f.loop:close("application-close"))
+                        A.equal(f.loop:status().state, "Idle")
+                        A.equal(f.loop:status().ask_state, "cancelling")
+                        local another, err = f.loop:start_ask(observed(f.loop, {
+                            text = "another question", source = "user" }))
+                        A.falsy(another)
+                        A.equal(err.code, "SessionClosing")
+                        assert(f.loop:settle_ask_cancel({ ask_id = ask.ask_id,
+                            request_id = ask.request_id, outcome = "cancelled" }))
+                        A.equal(f.loop:status().ask_state, "idle")
+                        A.equal(f.loop:status().state, "Closing")
+                    end
+                end
+            end,
+        },
+        {
+            name = "stale Ask request binding cannot end or age the current Ask",
+            -- Tests request identity before a malformed response or deadline can settle another owner.
+            --@param none No arguments; sends a wrong request ID for the current Ask ID.
+            --@return nil Assertions verify unchanged durable waterline and retained side ownership.
+            run = function()
+                local f = fixture()
+                local ask = assert(f.loop:start_ask(observed(f.loop, { text = "question", source = "user" })))
+                local before = f.loop:status()
+                f.advance(1000)
+                local result, err = f.loop:accept_ask_response(ask.ask_id, { request_id = "old-ask-request" })
+                A.falsy(result)
+                A.equal(err.code, "StaleAskResponse")
+                A.equal(f.loop:status().active_ask_id, ask.ask_id)
+                A.equal(f.loop:status().last_durable_sequence, before.last_durable_sequence)
+            end,
+        },
         {
             name = "queue amendments are durable and completed alone auto-starts a fresh snapshot",
             --Verifies queue amendments are durable and completed alone auto-starts a fresh snapshot.

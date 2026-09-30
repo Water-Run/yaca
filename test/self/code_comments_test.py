@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Author: WaterRun
-# Date: 2026-09-23
+# Date: 2026-09-30
 # File: code_comments_test.py
 # Description: Rejects annotation-audit blind spots using positive and deliberately incomplete source fixtures.
 
@@ -41,6 +41,32 @@ def audit(language, body):
 
 #@class CommentAuditTests Exercises declaration discovery and rejects incomplete contracts without running fixture code.
 class CommentAuditTests(unittest.TestCase):
+    # Accept CRLF headers for every owned language while rejecting missing or reordered fields.
+    #@param self CommentAuditTests Test runner-owned assertion context.
+    #@return None Assertions verify that newline style does not weaken header validation.
+    #@error Raises AssertionError if a valid Windows header is refused or an invalid one admitted.
+    def test_crlf_headers_keep_fixed_field_validation(self):
+        for suffix, opening, closing, prefix in (
+                (".lua", "--[[\n", "\n]]\n", ""),
+                (".c", "/*\n", "\n*/\n", ""),
+                (".h", "/*\n", "\n*/\n", ""),
+                (".ps1", "<#\n", "\n#>\n", ""),
+                (".py", "#!/usr/bin/env python3\n# coding: utf-8\n", "\n", "# "),
+                (".sh", "#!/usr/bin/env bash\n", "\n", "# ")):
+            with self.subTest(suffix=suffix):
+                name = "fixture" + suffix
+                fields = ["Author: WaterRun", "Date: 2026-09-23",
+                          "File: " + name, "Description: Tests CRLF file headers."]
+                header = opening + "\n".join(prefix + field for field in fields) + closing
+                crlf = header.replace("\n", "\r\n").encode()
+                self.assertEqual(CHECKER.header_errors(pathlib.Path(name), crlf), [])
+                missing = crlf.replace(b"Author: WaterRun", b"Author: SomeoneElse")
+                self.assertTrue(CHECKER.header_errors(pathlib.Path(name), missing))
+                fields[0], fields[1] = fields[1], fields[0]
+                reordered = opening + "\n".join(prefix + field for field in fields) + closing
+                self.assertTrue(CHECKER.header_errors(
+                    pathlib.Path(name), reordered.replace("\n", "\r\n").encode()))
+
     # Accept a correctly annotated Lua function and its exact argument order.
     #@param self CommentAuditTests Test runner-owned assertion context.
     #@return None Assertions finish without returning data.

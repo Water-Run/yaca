@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-09-30
 File: agentloop_test.lua
 Description: Verifies typed AgentLoop traces, durable ordering, caps, and fail-stop behavior.
 ]]
@@ -257,10 +257,10 @@ local function fixture(settings, option_overrides)
     --Simulates the cancel transition of a fake activity port for this suite.
     --@param handle table|integer Fake resource handle whose state is inspected.
     --@param reason string Failure or close reason supplied to the port.
-    --@return table observed Outcome record with status cancelled.
+    --@return table observed Configured pending/unknown/cancelled outcome, defaulting to cancelled.
     function reviews.cancel(handle, reason)
         log[#log + 1] = "cancel:review:" .. handle
-        return { outcome = "cancelled" }
+        return { outcome = settings.review_cancel_outcome or "cancelled" }
     end
 
     local review_port = reviews
@@ -614,6 +614,311 @@ end
 return {
     name = "fault/agentloop",
     cases = {
+        {
+            name = "cancelled tool completion preserves truth and never starts a remaining call",
+            -- Tests success/failure races against pending cancellation and unknown side-effect priority.
+            --@param none No arguments; each outcome gets an independent asynchronous two-call turn.
+            --@return nil Assertions verify result pairing, turn outcome and absence of later effects.
+            run = function()
+                for _, kind in ipairs({ "real-success", "real-failed", "real-cancelled", "unknown" }) do
+                    local f = fixture({
+                        tool_starts = { { kind = "async", handle = "running-process" } },
+                        tool_cancel_result = { outcome = "pending" },
+                    })
+                    assert(f.loop:begin_main(input(false)))
+                    assert(f.loop:accept_model_response(response(f.loop, {
+                        calls = { call("exec", 1), call("write", 2) },
+                    })))
+                    assert(f.loop:cancel("user-stop"))
+                    assert(f.loop:accept_tool_result(tool_result(kind, {
+                        external_effects_unsettled = kind == "unknown",
+                    })))
+                    A.equal(f.loop:status().last_outcome,
+                        kind == "unknown" and "unknown_side_effect" or "cancelled")
+                    A.equal(#f.tool_starts, 1)
+                    A.equal(#f.model_starts, 1)
+                    A.equal(#trace(f.loop).tool_results, 2)
+                    A.equal(trace(f.loop).tool_results[1].kind, kind)
+                    A.equal(trace(f.loop).tool_results[2].kind,
+                        kind == "unknown" and "skipped-after-unknown" or "skipped-by-cancel")
+                end
+            end,
+        },
+        {
+            name = "unknown tool settlement and later cancellation dominate a pending steer",
+            -- Tests that a steer cannot restart a turn after unknown effects or a newer cancel intent.
+            --@param none No arguments; runs unknown and successfully settled asynchronous processes.
+            --@return nil Assertions verify one Model request and no remaining Tool starts.
+            run = function()
+                for _, kind in ipairs({ "unknown", "real-success" }) do
+                    local f = fixture({
+                        tool_starts = { { kind = "async", handle = "steered-process" } },
+                        tool_cancel_result = { outcome = "pending" },
+                    })
+                    assert(f.loop:begin_main(input(false)))
+                    assert(f.loop:accept_model_response(response(f.loop, {
+                        calls = { call("exec", 1), call("write", 2) },
+                    })))
+                    local observed = f.loop:status()
+                    assert(f.loop:steer({ text = "change direction", source = "user",
+                        expected_context_generation = observed.context_generation,
+                        expected_turn_id = observed.turn_id }))
+                    if kind == "real-success" then assert(f.loop:cancel("stop-after-steer")) end
+                    assert(f.loop:accept_tool_result(tool_result(kind, {
+                        external_effects_unsettled = kind == "unknown",
+                    })))
+                    A.equal(f.loop:status().last_outcome,
+                        kind == "unknown" and "unknown_side_effect" or "cancelled")
+                    A.equal(#f.tool_starts, 1)
+                    A.equal(#f.model_starts, 1)
+                end
+            end,
+        },
+        {
+            name = "Model time cap cancels once and retains pending ownership until its response",
+            -- Tests pending and unknown cancellation acknowledgement at the active-time boundary.
+            --@param none No arguments; waits for a late cancelled canonical response in each case.
+            --@return nil Assertions verify retained identity, one cancel and a budget-exhausted result.
+            run = function()
+                for _, outcome in ipairs({ "pending", "unknown" }) do
+                    local f = fixture({ model_cancel_outcome = outcome },
+                        { hard_caps = { active_time_ms = 5 } })
+                    assert(f.loop:begin_main(input(false)))
+                    local request_id = f.loop:status().active_request_id
+                    f.advance(5)
+                    assert(f.loop:tick())
+                    A.equal(f.loop:status().active_request_id, request_id)
+                    A.falsy(f.loop:status().outcome_durable)
+                    assert(f.loop:tick())
+                    A.truthy(index_of(f.log, "cancel:model:"))
+                    A.falsy(index_of(f.log, "cancel:model:", 2))
+                    assert(f.loop:accept_model_response(response(f.loop, {
+                        incomplete = true, finish_class = "cancelled",
+                        incomplete_reason = "cancelled by deadline",
+                    })))
+                    A.equal(f.loop:status().last_outcome, "budget_exhausted")
+                    A.equal(#f.model_starts, 1)
+                end
+            end,
+        },
+        {
+            name = "action review cancellation waits for a verdict before skipping accepted calls",
+            -- Tests that pending review cancellation retains the lane and a late pass cannot execute.
+            --@param none No arguments; supplies an asynchronous reviewer for a two-call batch.
+            --@return nil Assertions verify cancellation settlement and exactly paired skipped calls.
+            run = function()
+                local f = fixture({
+                    review_cancel_outcome = "pending",
+                    -- Requests a high-risk review before the fixture's exact exec call.
+                    --@param call_value table Accepted Tool call with stable identity.
+                    --@return table Review admission retaining the exact permission snapshot.
+                    admit = function(call_value)
+                        return { decision = "review", capabilities = "RawExec",
+                            permission_snapshot_digest = "permission-digest", reason = "high risk",
+                            token = "token:" .. call_value.tool_call_id, after_review = "allow" }
+                    end,
+                })
+                assert(f.loop:begin_main(input(true)))
+                assert(f.loop:accept_model_response(response(f.loop, {
+                    calls = { call("exec", 1), call("write", 2) },
+                })))
+                assert(f.loop:cancel("stop-review"))
+                A.equal(f.loop:status().state, "EvaluatingAction")
+                A.falsy(f.loop:status().outcome_durable)
+                assert(f.loop:resolve_action_review({ verdict = "pass", review_id = "late-review",
+                    binding_digest = "late-binding", reason = "late pass" }))
+                A.equal(f.loop:status().last_outcome, "cancelled")
+                A.equal(#f.tool_starts, 0)
+                A.equal(#trace(f.loop).tool_results, 2)
+            end,
+        },
+        {
+            name = "termination review cancellation and time cap cannot accept a late pass",
+            -- Tests explicit cancellation and active-time exhaustion while the finish reviewer is live.
+            --@param none No arguments; each fixture settles a pending reviewer with a passing verdict.
+            --@return nil Assertions verify reviewer ownership and the original terminal intent.
+            run = function()
+                for _, timed in ipairs({ false, true }) do
+                    local f = fixture({ review_cancel_outcome = "pending" },
+                        { hard_caps = { active_time_ms = 5 } })
+                    assert(f.loop:begin_main(input(true)))
+                    assert(f.loop:accept_model_response(finish(f.loop)))
+                    if timed then f.advance(5); assert(f.loop:tick())
+                    else assert(f.loop:cancel("stop-finish-review")) end
+                    A.equal(f.loop:status().state, "EvaluatingTermination")
+                    A.falsy(f.loop:status().outcome_durable)
+                    assert(f.loop:resolve_termination_review(review_verdict("pass", 1)))
+                    A.equal(f.loop:status().last_outcome, timed and "budget_exhausted" or "cancelled")
+                    A.equal(#f.model_starts, 1)
+                end
+            end,
+        },
+        {
+            name = "stale malformed Model response cannot terminate or age the active request",
+            -- Tests response ownership before malformed-body checks and active-time accounting.
+            --@param none No arguments; sends a stale malformed wrapper after advancing the clock.
+            --@return nil Assertions verify unchanged state, counters and durable event waterline.
+            run = function()
+                local f = fixture()
+                assert(f.loop:begin_main(input(false)))
+                local before = f.loop:status()
+                f.advance(1)
+                local rejected, err = f.loop:accept_model_response({ request_id = "old-request" })
+                A.falsy(rejected)
+                A.equal(err.code, "StaleModelResponse")
+                local after = f.loop:status()
+                A.equal(after.active_request_id, before.active_request_id)
+                A.equal(after.state, before.state)
+                A.equal(after.last_durable_sequence, before.last_durable_sequence)
+                A.equal(after.counters.active_time_ms, before.counters.active_time_ms)
+            end,
+        },
+        {
+            name = "cancelling turns reject new steers and cleanup time does not change user intent",
+            -- Verifies that a pending cancellation closes steer admission and preserves its cause.
+            --@param none No arguments; advances cleanup beyond the active-time limit.
+            --@return nil Assertions check unchanged waterline and a final cancelled outcome.
+            run = function()
+                local f = fixture({ model_cancel_outcome = "pending" },
+                    { hard_caps = { active_time_ms = 5 } })
+                assert(f.loop:begin_main(input(false)))
+                assert(f.loop:cancel("user-stop"))
+                local observed = f.loop:status()
+                local steered, err = f.loop:steer({ text = "restart", source = "user",
+                    expected_context_generation = observed.context_generation,
+                    expected_turn_id = observed.turn_id })
+                A.falsy(steered)
+                A.equal(err.code, "MainTurnCancelling")
+                A.equal(f.loop:status().last_durable_sequence, observed.last_durable_sequence)
+                f.advance(5)
+                assert(f.loop:tick())
+                assert(f.loop:accept_model_response(response(f.loop, {
+                    incomplete = true, finish_class = "cancelled",
+                })))
+                A.equal(f.loop:status().last_outcome, "cancelled")
+                A.equal(#f.model_starts, 1)
+            end,
+        },
+        {
+            name = "settled tool time cap skips the next call before its permission admission",
+            -- Verifies deadline enforcement between tools even when no timer tick occurs first.
+            --@param none No arguments; completes an asynchronous first tool at the deadline.
+            --@return nil Assertions check preserved first result and zero admission/effects for the second.
+            run = function()
+                local f = fixture({
+                    tool_starts = { { kind = "async", handle = "deadline-process" } },
+                }, { hard_caps = { active_time_ms = 5 } })
+                assert(f.loop:begin_main(input(false)))
+                assert(f.loop:accept_model_response(response(f.loop, {
+                    calls = { call("exec", 1), call("write", 2) },
+                })))
+                f.advance(5)
+                assert(f.loop:accept_tool_result(tool_result("real-success")))
+                A.equal(f.loop:status().last_outcome, "budget_exhausted")
+                A.equal(#f.tool_starts, 1)
+                A.equal(#f.model_starts, 1)
+                A.falsy(index_of(f.log, "admit:turn-1:tool:2"))
+                A.equal(trace(f.loop).tool_results[1].kind, "real-success")
+                A.equal(trace(f.loop).tool_results[2].kind, "skipped-budget-exhausted")
+            end,
+        },
+        {
+            name = "durability loss attempts safety cancellation of every live foreground owner",
+            -- Tests fail-stop cleanup while Model, Tool and reviewer activities are outstanding.
+            --@param none No arguments; makes steer publication fail in each foreground lane.
+            --@return nil Assertions verify one physical cancellation attempt and zero terminal claims.
+            run = function()
+                for _, lane in ipairs({ "model", "tool", "review" }) do
+                    local settings = { fail_event = "steer", model_cancel_outcome = "pending",
+                        review_cancel_outcome = "pending",
+                        tool_cancel_result = { outcome = "pending" },
+                        tool_starts = { { kind = "async", handle = "durability-process" } } }
+                    if lane == "review" then
+                        -- Requests review before a Tool can execute in the halted-review fixture.
+                        --@param call_value table Accepted call with a current Tool identity.
+                        --@return table Review admission binding the current permission snapshot.
+                        settings.admit = function(call_value)
+                            return { decision = "review", capabilities = "RawExec",
+                                permission_snapshot_digest = "permission-digest", reason = "review",
+                                token = "token:" .. call_value.tool_call_id, after_review = "allow" }
+                        end
+                    end
+                    local f = fixture(settings)
+                    assert(f.loop:begin_main(input(lane == "review")))
+                    if lane ~= "model" then
+                        assert(f.loop:accept_model_response(response(f.loop, {
+                            calls = { call("exec", 1) },
+                        })))
+                    end
+                    local before = f.loop:status()
+                    local changed, err = f.loop:steer({ text = "new instruction", source = "user",
+                        expected_context_generation = before.context_generation,
+                        expected_turn_id = before.turn_id })
+                    A.falsy(changed)
+                    A.equal(err.code, "AgentDurabilityFailure")
+                    A.truthy(index_of(f.log, "cancel:" .. lane .. ":"))
+                    A.falsy(index_of(f.log, "cancel:" .. lane .. ":", 2))
+                    A.truthy(f.loop:status().halted)
+                    A.falsy(f.loop:status().outcome_durable)
+                    A.equal(f.loop:status().last_durable_sequence, before.last_durable_sequence)
+                end
+            end,
+        },
+        {
+            name = "cancel intent capacity refusal is fail-stop while still requesting physical stop",
+            -- Tests safety cancellation when the Context cannot durably admit the cancel Fact.
+            --@param none No arguments; refuses cancel publication before its disk transaction.
+            --@return nil Assertions verify fail-stop authority and exactly one Model stop attempt.
+            run = function()
+                local f = fixture({ capacity_event = "cancel", model_cancel_outcome = "pending" })
+                assert(f.loop:begin_main(input(false)))
+                local before = f.loop:status()
+                local cancelled, err = f.loop:cancel("user-stop")
+                A.falsy(cancelled)
+                A.equal(err.code, "AgentDurabilityFailure")
+                A.truthy(f.loop:status().halted)
+                A.falsy(f.loop:status().outcome_durable)
+                A.equal(f.loop:status().last_durable_sequence, before.last_durable_sequence)
+                A.truthy(index_of(f.log, "cancel:model:"))
+                A.falsy(index_of(f.log, "cancel:model:", 2))
+            end,
+        },
+        {
+            name = "review verdict at the deadline cannot start a tool or complete a turn",
+            -- Tests action/finish verdicts whose time limit expires before a timer tick observes it.
+            --@param none No arguments; advances the clock only immediately before each verdict.
+            --@return nil Assertions verify budget outcome and no post-deadline effect or completion.
+            run = function()
+                for _, action in ipairs({ false, true }) do
+                    local f = fixture({
+                        -- Requires review before the action fixture can start its Tool.
+                        --@param call_value table Accepted Tool call with stable identity.
+                        --@return table Bound high-risk review admission.
+                        admit = function(call_value)
+                            return { decision = "review", capabilities = "RawExec",
+                                permission_snapshot_digest = "permission-digest", reason = "review",
+                                token = "token:" .. call_value.tool_call_id, after_review = "allow" }
+                        end,
+                    }, { hard_caps = { active_time_ms = 5 } })
+                    assert(f.loop:begin_main(input(true)))
+                    if action then
+                        assert(f.loop:accept_model_response(response(f.loop, {
+                            calls = { call("exec", 1), call("write", 2) },
+                        })))
+                    else assert(f.loop:accept_model_response(finish(f.loop))) end
+                    f.advance(5)
+                    if action then
+                        assert(f.loop:resolve_action_review({ verdict = "pass", review_id = "late",
+                            binding_digest = "late-binding", reason = "pass" }))
+                        A.equal(#trace(f.loop).tool_results, 2)
+                        A.equal(trace(f.loop).tool_results[1].kind, "skipped-budget-exhausted")
+                    else assert(f.loop:resolve_termination_review(review_verdict("pass", 1))) end
+                    A.equal(f.loop:status().last_outcome, "budget_exhausted")
+                    A.equal(#f.tool_starts, 0)
+                    A.equal(#f.model_starts, 1)
+                end
+            end,
+        },
         {
             name = "bounded model view exhaustion closes the turn without a durability failure",
             --Verifies bounded model view exhaustion closes the turn without a durability failure.
