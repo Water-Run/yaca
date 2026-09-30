@@ -557,6 +557,23 @@ INDEX 必然触发);已修复为逐行剥除行尾 CR 并补回归用例。notes
 经确认无害(末字段贪婪匹配,渲染可往返)。空 URL/notes 归一为 false、
 名称空格与控制字符边界维持原判。本节结论不扩展为全仓语义 Review 完成。
 
+
+## std 干净机旅程批次(2026-09-29/30)
+
+- **win32 std 真机干净机旅程(Server 2008 SP2 实机)**:解包
+  `out/editions-win32-20260928/` 的 std zip 后全新部署,
+  `yaca --version` 与 stage-1 自检 **12 PASSED / 0 FAILED**(配置未初始化
+  与 SSH 管道 TTY 两类警告为干净机预期);python2 2.7.18 32 位跑脚本
+  `2+3=5` 且 sqlite3/zlib/ctypes 可导入;plink 0.85(32-bit x86);
+  curl 8.21.0+mbedTLS 以随包 CA 实取 `https://www.example.com` 得 **200**;
+  7za 26.03(x86)。证据后清理部署(`out/w32std-clean-20260929/journey.log`)。
+- **win64 std 干净机旅程(Wine Win64)**:四工具全过(python2 2.7.18
+  64-bit/plink 0.85 64-bit/curl 8.21.0 x64/7za x64),yaca --version 正确;
+  stage-1 9 PASSED,**ST1-ATOMIC-WRITE 在 Wine 下失败**——Wine 无法验证
+  原子发布原语(目录 flush/replace 语义),该检查的真机证据已由同日
+  2008 win32 旅程(ATOMIC PASSED)与资格批次 Win7 win64 stage-1 覆盖;
+  不把 Wine 结果记为目标资格。
+
 ## 继续审查与目标验证
 
 1. Win7 当前组件复验；将新的输出路径纳入真实旧终端旅程。
