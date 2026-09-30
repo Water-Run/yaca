@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Author: WaterRun
-# Date: 2026-09-23
+# Date: 2026-09-30
 # File: check_code_comments.py
 # Description: Inventories owned source declarations and rejects missing or mismatched contract comments.
 
@@ -86,12 +86,12 @@ def source_paths():
     return [path for path in paths if path.suffix in LANGUAGES and (ROOT / path).is_file()]
 
 
-# Validate fixed file-header fields before the first executable statement.
+# Validate fixed file-header fields with either LF or CRLF line endings.
 #@param path Path Repository-relative source path.
 #@param source bytes Original UTF-8 source.
 #@return list[str] Header violations; an empty list means the header conforms.
 def header_errors(path, source):
-    text = source.decode("utf-8")
+    text = source.decode("utf-8").replace("\r\n", "\n")
     if text.startswith("#!"):
         text = text.partition("\n")[2]
     if path.suffix == ".py" and re.match(r"#.*coding[:=]", text):

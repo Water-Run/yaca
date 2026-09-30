@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Author: WaterRun
-# Date: 2026-09-23
+# Date: 2026-09-30
 # File: package_editions.py
 # Description: Assemble portable candidate editions from explicit, hashed target inputs.
 
@@ -283,9 +283,10 @@ def assemble(args):
                 tool_metadata.append(metadata)
             descriptions.extend(target["notes"])
             generated = {} if edition == "clean" else {"tools/README.txt": "\n".join(descriptions) + "\n"}
-            index_file = input_path.parent / "tools/INDEX.txt"
-            if edition != "clean" and index_file.is_file():
-                generated["tools/INDEX.txt"] = index_file.read_text(encoding="utf-8")
+            if edition != "clean":
+                index_file = input_path.parent / "tools/INDEX.txt"
+                if index_file.is_file():
+                    generated["tools/INDEX.txt"] = index_file.read_text(encoding="utf-8")
             write_archive(stage / (stem + ".zip"), files, generated)
             summary = {"schema": "yaca-edition-v1", "target": args.target, "edition": edition,
                        "version": args.version, "core_sha256": core["sha256"],
