@@ -1,6 +1,6 @@
 # 开发历程与历史资料
 
-整理日期：2026-09-28。当前实现看 [CURRENT-STATE.md](CURRENT-STATE.md)，
+整理日期：2026-09-30。当前实现看 [CURRENT-STATE.md](CURRENT-STATE.md)，
 剩余工作看 [TRACKING.md](TRACKING.md)。本页只导航已有工作和证据。
 
 ## 已完成工作的脉络
@@ -25,6 +25,19 @@
 | 2026-09-28，文件读取资源与 seek | `5384b8e` 的 fs_read 由 Lua 持有缓冲；新增分配故障和原生字节偏移探针 | [R48 与 seek](CODE-REVIEW-2026-09-28.md#原生-seek-与-r48-文件读取资源)；Linux/Wine/XP 故障恢复与 XP NTFS/FAT32 边界读取；完整 670/670、readiness 通过 |
 
 ## 如何解释旧结论
+
+9 月 29--30 日补齐 std 三平台与 Linux full，候选装配达到 7/9；随后修复
+附带索引 CRLF 并记录 index/SSE/compaction/terminal 的语义 Review。
+这些节点见 [9 月 28 日续接记录](CODE-REVIEW-2026-09-28.md)。
+`344f864` 同步后的 R51--R54、开发机 682/682 与 Windows 换行复核见
+[9 月 30 日 Review](CODE-REVIEW-2026-09-30.md)；均未提升最终资格。
+
+随后 R55--R72 的取消/超时/Ask 所有权、普通用户 NTFS 发布、父目录绑定及 clean
+装配修复，连同 697/697、Server 2008、双 Windows 当前单文件和 Python 3.4.10
+源码闭包，见[内核审查](KERNEL-REVIEW-2026-09-30.md)。D-077 缩小了本次实机
+矩阵要求，仍保留代码兼容底线与未完成的发行物。收尾复核在同一工作区重跑上述
+检查并用已核对核心重装配 win32 clean，同时登记两条 Windows 打包路径的布局
+分歧；该项留在 [TRACKING.md](TRACKING.md) 的 C33 布局待办，未转为已完成。
 
 `23bf913` 的文档曾按 9 月 19 日的候选与资格口径记录 Gate R 通过。
 之后的 D-073 三档发行、D-074 工具面以及新源码需要各自的证据。

@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-28
+Date: 2026-09-30
 File: manifest.lua
 Description: Indexes modern-host feasibility evidence and its limits for target qualification.
 ]]
@@ -8,6 +8,15 @@ Description: Indexes modern-host feasibility evidence and its limits for target 
 return {
   evidence_version = "modern-2026-08-29.4",
   observed_at = "2026-09-28",
+  latest_recheck = {
+    observed_at = "2026-09-30",
+    source_base = "344f864-with-kernel-working-tree-fixes",
+    host = "Ubuntu 24.04.4 / WSL2 / 6.6.87.2-microsoft-standard-WSL2",
+    log = "out/review-20260930/kernel-readiness-final.log",
+    all_modern_proofs_passed = true,
+    tp010_assertions = 5564779,
+    target_qualification = false,
+  },
   design_baseline_commit = "a169dd0",
   host = {
     os = "Fedora Linux 44 (Workstation Edition)",

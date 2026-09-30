@@ -1,10 +1,15 @@
 # yaca 开发入口
 
-更新日期：2026-09-28。
+更新日期：2026-09-30。
 
 yaca 已有通用 Agent 实现，正在补齐 Review、目标环境验收和
 三档发行物；阶段为 `implemented-unqualified`，Release Gate R 关闭。
 源码基线和验证结果统一见[当前状态](CURRENT-STATE.md)。
+
+已同步到 `344f864` 并完成本轮索引读取与 Windows 开发检查修复；历史候选
+装配为 7/9，当前源码在开发机与 Server 2008 完整 suite 697/697。
+执行顺序和验收条件统一见[剩余工作](TRACKING.md)，内核结论及反例见
+[本轮内核审查](KERNEL-REVIEW-2026-09-30.md)。实机范围按 D-077。
 
 ## 从这里继续
 

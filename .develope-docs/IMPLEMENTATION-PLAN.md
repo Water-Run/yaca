@@ -1,12 +1,17 @@
 # yaca v0.1 全程序实施计划
 
-版本：2026-09-28.1
+版本：2026-09-30.1
 状态：**计划已确认 / Gate B passed / 平台无关核心已实现至 M9 / 目标资格验证待完成**
 
 本文保留 C01--C34 的任务定义、文件、依赖和退出条件。当前源码已实现内嵌 Lua 工具、
 `.ask`、可选 tools、三档装配、首次引导、PTY 修复，以及旧编码和大文件读取。
 当前结果只在 [CURRENT-STATE.md](CURRENT-STATE.md) 维护，剩余执行顺序只在
 [TRACKING.md](TRACKING.md) 维护；历史节点见 [DEVELOPMENT-HISTORY.md](DEVELOPMENT-HISTORY.md)。
+
+当前执行已进入 Review 与 C32--C34 收尾：历史候选装配 7/9，开发机完整 suite
+697/697（开发机和 Server 2008）；最终九包仍待完成，实机范围按 D-077。
+已装配条目不再列为待实现；源码修复后
+重新进入统一目标构建，具体依赖和退出条件由 TRACKING 维护。
 
 产品保持通用 Agent、单文件便携与旧设备兼容。D-073 规定每目标 clean/std/full，
 同平台使用相同核心；full 为开发工具箱，默认候选见[工具清单](../release/TOOL-BUNDLES.md)。

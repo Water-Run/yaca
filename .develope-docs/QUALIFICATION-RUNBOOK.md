@@ -5,6 +5,10 @@
 > 执行前核对当前脚本参数、[工具清单](../release/TOOL-BUNDLES.md)及
 > [剩余工作](TRACKING.md)，最终以 [readiness](contracts/readiness.lua) 判定资格。
 
+> 2026-09-30 的 D-077 覆盖本次执行范围：不再要求重跑完整旧系统实机/VM 矩阵；
+> 保留源码、ABI/导入兼容检查并使用此前指定实机，包括 Server 2008。下文完整
+> 旧矩阵为历史流程资料，不能据此重新向负责人索取相同环境。
+
 日期：2026-09-19。本手册与 `qualify_windows_target.sh` 是拿到目标机后的
 立即可执行件。所有脚本已在 win2008（Server 2008）、evader-admin
 （Windows 11）与 CentOS 7 容器上以同型流程预演通过；正式资格以目标机

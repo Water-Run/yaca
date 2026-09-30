@@ -1,117 +1,104 @@
 # 当前状态
 
-更新日期：2026-09-29。实现基线为 `ce47834`（R37--R50 全部落盘），并完成
-目标资格批次：三目标产物重建、XP/Win7/CentOS 7/Server 2008 四环境当前组件实测、
-A08/A09 真实 2.3 GiB 旅程 10/10、clean 三平台与 win32 std 装配。
-Gate R 仍未开启：三个 full 的工具闭包(git/python3/sqlite/jq/busybox/compiler)、
-真实模型旅程与最终干净机发行旅程待完成;std 三平台已于 2026-09-29 装配齐。详见
-[资格批次记录](CODE-REVIEW-2026-09-28.md)与 [TRACKING.md](TRACKING.md)。
-提交脉络见[开发历程](DEVELOPMENT-HISTORY.md)。
+更新日期：2026-09-30。仓库从 `23bf913` 快进同步到 `344f864`；本轮在此基线上
+修复附带软件索引及内核取消、超时、失败回执和 Ask 关闭路径。提交脉络见
+[开发历程](DEVELOPMENT-HISTORY.md)，本轮证据见
+[9 月 30 日复核](CODE-REVIEW-2026-09-30.md)与[内核审查](KERNEL-REVIEW-2026-09-30.md)。
+实机范围按 [D-077](DECISIONS.md#d-077-本次收尾的兼容检查与实机范围2026-09-30)，
+不再要求本次重跑整个旧系统实机/VM 矩阵。
 
 **核心已实现，目标资格验证待完成。** 机读阶段为 `implemented-unqualified`，
-Release Gate R 为 `closed`，`release_authorized=false`。
-当前依据是 [readiness](contracts/readiness.lua)、[发行清单](../release/manifest.lua)
-和[依赖锁](../release/dependencies.lock)，历史包的资格不自动转给新源码。
+Release Gate R 为 `closed`，`release_authorized=false`。依据是
+[readiness](contracts/readiness.lua)、[发行清单](../release/manifest.lua)和
+[依赖锁](../release/dependencies.lock)。旧源码或旧包通过不能转为当前源码资格。
 
 ## 已有实现
 
-| 范围 | 当前能力 | 对应实现或记录 |
+| 范围 | 当前能力 | 实现或记录 |
 | --- | --- | --- |
-| Agent 核心 | 单 Agent、串行工具、双模型协议、审批、流式输出、取消、压缩、Context 持久化与恢复 | `src/runtime.lua`、`model.lua`、`session.lua`、`context.lua` |
+| Agent 核心 | 单 Agent、串行工具、OpenAI/Anthropic 两协议、审批、流式输出、取消、压缩、Context 持久化与恢复 | `src/runtime.lua`、`model.lua`、`session.lua`、`context.lua` |
 | 交互与管理 | 首次配置、配置/模型/Context 管理、status/export、自检；`.ask` 纯问答 | `src/main.lua`、`cli.lua`、`terminal.lua` |
-| 工具面 | 原八个工具加正式 `lua` 工具；与核心同版本的内嵌解释器，共用权限、预算、取消和收尾 | `src/tools.lua`、`process.lua`、`release/launcher.lua` |
-| 便携发行 | clean/std/full 装配；同平台核心相同；可选 tools 的位置与能力说明 | [工具清单](../release/TOOL-BUNDLES.md)、`release/tool-bundles.json` |
-| 旧终端与原生层 | Cygwin PTY、Unicode 路径/参数/输出、异步 stdin、进程树回收及 FAT32 修复 | [便携实现](PORTABLE-IMPLEMENTATION-2026-09-22.md)、[R01--R22](CODE-REVIEW-2026-09-22.md) |
-| 旧编码 | 原生代码页转换、编码规范化、read/search 解码、write/patch 无损编码、exec 输出解码与环境事实；Lua 内存错误后的原生资源清理 | `native/yaca_text.h`、`src/textcodec.lua`、`tools.lua`、`prompt.lua` |
-| 原生 I/O 资源 | open/create 先建 userdata 再取句柄；进程流读取缓冲由 Lua 持有；错误码跨缓冲收口保存恢复 | [R49--R50](CODE-REVIEW-2026-09-28.md#r49--r50-原生-opencreate-与进程流读取资源)、`native/yaca_native.c` |
-| 大文件 | 超过 16 MiB 时区间读取、有界搜索、`from_end`、续页令牌和超长行截断 | `native/yaca_native.c` 的 seek、`src/tools.lua` |
-| 结果分页 | read/search/list 按最终 JSON 字节预算选取记录；超大显示片段在 UTF-8 边界截断 | [R29](CODE-REVIEW-2026-09-28.md#r29-验证与人工-review)、`src/tools.lua` |
-| 范围一致性 | 页结束时核对完整身份与路径，续页绑定大小/修改时间；读错误和模式异常明确失败并清理句柄 | [R30--R33](CODE-REVIEW-2026-09-28.md#r30--r33-验证与人工-review)、`src/tools.lua` |
-| 注释约束 | 文件头与函数/类型全量结构检查已接入 readiness；人工语义 Review 尚未完成 | [编码规范](CODING-STANDARD.md) |
+| 工具面 | 八个基础工具及正式内嵌 `lua` 工具；共用权限、预算、取消与收尾 | `src/tools.lua`、`process.lua`、`release/launcher.lua` |
+| 附带软件 | `tools/INDEX.txt` 说明、模型环境投影和 `.software` 本地查询/问答；通过 exec/lua 使用程序 | `src/bundled.lua`；本轮统一完整读取、16 KiB 上限与无进展拒绝 |
+| 便携发行 | clean/std/full 装配器；同平台核心相同，可选 tools；历史候选已装配 7/9 | [工具清单](../release/TOOL-BUNDLES.md)、`release/tool-bundles.json` |
+| 旧终端与原生层 | Cygwin PTY、Unicode 路径/参数/输出、异步 stdin、进程树回收、FAT32 修复 | [便携实现](PORTABLE-IMPLEMENTATION-2026-09-22.md)、[R01--R22](CODE-REVIEW-2026-09-22.md) |
+| 旧编码与资源 | 原生代码页转换、无损写回、exec 原字节保留；Lua 分配失败时原生资源清理 | `native/yaca_text.h`、`src/textcodec.lua`；[R34--R50](CODE-REVIEW-2026-09-28.md) |
+| 大文件与分页 | 超过 16 MiB 时区间读取、有界搜索、尾读、续页和长行截断；身份/版本变化明确失败 | `src/tools.lua`、原生 seek；[R23--R33](CODE-REVIEW-2026-09-28.md) |
+| 开发检查 | 全仓注释结构检查；支持 CRLF 文件头；Git 保持脚本、补丁和 golden 的 LF 字节 | [编码规范](CODING-STANDARD.md)、`.gitattributes`；人工语义 Review 未全量完成 |
 
-当前 API 的 `partial_start` 标明尾部片段，`truncated_lines` 标明搜索遗漏的长行内容。
-分页保留预算内的内容与续页信息，读取失败和文件版本变化返回明确错误。
-原生转换器在 Lua 内存错误后释放已持有的缓冲和转换句柄；Windows 原生 malloc
-失败返回 OutOfMemory，错误结果为 false/error，成功才返回 exact 标志。
-read/search 保留转换器不可用与资源错误；write/patch 解码失败在文件发布前返回。
-XP 显式替换非法旧编码字节，保留周围有效文字；GB18030 使用目标支持的标志并校验往返。
-原生编码入口校验 UTF-8 标量，不依赖旧 Windows 的宽松转换行为。
-exec/Lua 通道解码失败时保留 Base64 原字节和 decode_error，命令完成状态保持真实；
-已识别的损坏 UTF-16 输出不会静默丢弃尾部字节。
+## 本轮开发机复核
 
-## 最新基线复核
+环境为 Windows 宿主上的 Ubuntu 24.04.4 / WSL2，内核
+`6.6.87.2-microsoft-standard-WSL2`。Lua 5.5.1 由锁定 SHA-256 的源码本地构建，
+完整 Lua suite 通过资源守卫串行运行。注释检查使用隔离的 Python 3.13.15
+和 `.tools/comment_check_requirements.txt` 的固定解析器。
 
-开发机为 Fedora 44 / x86_64，内核 `7.2.7-200.fc44.x86_64`。
-完整测试在资源守卫下串行运行。最新原生读取回归日志为 `out/native-io-review-20260928/`，
-偏移探针在 `out/seek-qualification-20260928/`，XP 全套源码回归在 `out/xp-closeout-20260928/`；
-进程输出回归日志为 `out/exec-projection-20260928/`，
-Lua 名称回归日志为 `out/codec-alias-20260928/`，
-原生与 XP 回归日志为 `out/codec-xp-20260928/`；
-工具层回归日志为 `out/codec-propagation-20260928/`；
-原生分配审查在 `out/codec-errors-20260928/`，此前日志保留在 `out/native-codec-review-20260928/`、
-`out/range-stability-20260928/`、`out/page-review-20260928/`、
-`out/f4-review-20260928/` 与 `out/development-reset-20260928/`。
-开发机复核和 XP 当前组件证据分别记录，均不代表最终发行包资格。
-
-资料整理的独立复核在 `out/handoff-baseline-20260928/`，当次源码为 `18adc05`。
-后续原生修复重新构建并执行探针和 readiness；本批新增 XP 当前组件实测，完整目标资格仍待完成。
-
-| 检查 | 2026-09-28 结果 |
+| 检查 | 本轮结果 |
 | --- | --- |
-| 完整 Lua suite | 开发机与 XP 当前源码均 670/670 通过；原生探针独立计数 |
-| 全仓注释结构 | 210 个文件、5129 个声明、0 缺项；tree-sitter 0.25.2 |
-| Lua 分配失败与恢复 | Linux 解码/编码/有损各 18 个位置；Wine Win32 4/4/20、Win64 4/4/18，XP 4/4/20；0 资源错误 |
-| Windows 原生分配失败与恢复 | Wine Win32/Win64 和 XP 各九个位置，覆盖严格/有损解码及编码；返回 OutOfMemory、清理与同状态恢复通过 |
-| 原生构建与编码 smoke | 三平台 native 构建通过；Linux/XP 各 13 组、Wine 各 12 组往返；新增坏字节/重复映射/UTF-8 拒绝检查通过；Wine cp54936 不可用单列 |
-| UTF-8 标量校验 | Linux、Wine 两架构及 XP 各 1,114,113 个候选、截断前缀及 8 组非法形式全部通过 |
-| 原生文件读取异常 | Linux、Wine 两架构和 XP 各 13 个分配位置，0 原生泄漏；同句柄恢复、OS 读错误收尾通过 |
-| 原生 open/create 与进程流 | 三环境各 4 端口 0 句柄泄漏；进程流 Linux 20 个、Wine 两架构各 11 个分配位置 0 缓冲泄漏；同状态恢复与终端监督通过 |
-| 原生字节偏移 | Linux、Wine 两架构、XP NTFS/FAT32 的 12 偏移通过，覆盖 2 GiB / 4 GiB 边界与 EOF；不代替真实大文件扫描 |
-| TP-003 / TP-010 | 重跑通过；453 / 5,564,743 条断言 |
-| 注释检查器反例 | 14/14 通过 |
-| 契约 / 证明登记 / readiness | 7687 / 56 / 562 条断言通过 |
-| 公开文档真值 | 5 项通过 |
-| 完整 coding readiness 链 | TP-003/006/008/010、RP-001 全部通过，退出码 0 |
+| 内核状态机专项回归 | 52/52；覆盖取消/转向/超时/回执丢失、旧响应和 Ask 关闭 |
+| 索引及模型环境专项回归 | 25/25；含 EOF 上限、无进展、完整读取、BOM 和损坏 UTF-8 |
+| 完整 Lua suite | 开发机及 Server 2008 当前源码均 697/697 通过 |
+| 注释检查器反例 | 15/15 通过；新增六种文件后缀的 CRLF 正反例 |
+| 全仓注释结构 | 219 文件、5256 声明、0 缺项；包含新增原生最小访问权和目录身份 helper |
+| 契约 / 证明登记 / readiness / 公开文档 | 7739 / 56 / 565 条断言及 5 项文档真值检查通过；Gate R 仍关闭 |
+| 完整 coding readiness | TP-003/006/008/010、RP-001 全链 PASS；TP-010 为 5,564,779 条断言 |
+| 发行装配 | Python 5/5；修复无 tool-inputs 的独立 clean 装配错误 |
+| 收尾复核（同一工作区重跑） | 完整 suite 697/697、内核专项 52/52、四个校验器 PASS、注释 219 文件 / 5256 声明、装配单测 5/5；用已核对核心经 `package_editions.py` 重装配 win32-x86 clean 成功 |
+| 人工语义核对 | 本轮内核状态转换、所有权、失败停止、索引及回归夹具已核对；不扩展为全仓完成 |
 
-TP-003 与 TP-010 已重跑，[证明清单](proofs/modern-2026-08-29/manifest.lua)
-与检查器摘要相符。注释结构零缺项仅说明覆盖，不能代替语义 Review。
+日志与完整注释清单在 `out/review-20260930/`。已重建 Win32 当前单文件/clean，
+在指定 Server 2008（192.168.5.10）通过 697/697；Stage 1 在建立隔离数据目录后
+12 PASSED / 0 FAILED，配置未初始化与非 TTY 警告如实保留，online-requests=0。
+后续普通用户 Win64 原子发布与父目录时间戳缺陷已修复，两种 Windows 核心再次刷新；
+Win32 SHA-256 为 `857680865d91c0a8cbc7f1540717c8c51631392a8cf018913b3b60150cca0a04`，
+Win64 为 `a75a106cfecd7a3b053f0e895baf39bb7ea169655530868bbdab86f3fadb72f3`。
+Win64 本机 Stage 1 也是 12 PASSED / 0 FAILED，实际 inherited DACL、长名称
+rename/replace/delete 与 XML smoke 通过；Server 2008 刷新后的 Stage 1 再通过。
+Linux / 本机 Win64 / Server 2008 Win32 最终原生故障探针均 0 句柄/缓冲泄漏，
+编码资源、严格 Unicode 与同状态恢复通过，原始结果在内核审查中分别记录。
+本轮不补 XP/Win7/CentOS 7 的实机矩阵，未执行模型联网旅程。
+历史 Fedora 开发机 readiness 和目标组件证据保留在
+[9 月 28 日 Review](CODE-REVIEW-2026-09-28.md)；两批环境与证据分别记录。
 
-复核使用 Python 3.13 及固定解析器；本机复现命令如下，其他构建机按
-`.tools/comment_check_requirements.txt` 安装相同依赖，并提供自己的锁定源码缓存：
+收尾复核在同一工作区重跑，日志在 `out/final-verify-20260930/`。契约校验的
+7739 计数含 xmllint 外部 Relax NG 检查；本机未安装该工具时为 7738 并打印
+跳过说明，两者都不是失败。用已核对的 Win32 核心经 `.tools/package_editions.py`
+重装配 clean 得到 `editions=PASS`：clean 载荷与已做 Stage 1 的候选件逐字节相同，
+归档 SHA-256 不同（装配器写入固定时间戳，候选构建脚本保留真实 mtime）；notices
+归档的成员形状也不同，见 TRACKING 的 C33 布局项。
+本工作区没有 Win64 的 companion notices 与 Linux 核心，因此没有在这里
+重装配这两项。
 
-```sh
-.tools/run_with_resource_guard.sh bin/lua55 test/run.lua
-PYTHONPATH="$PWD/out/code-comment-audit-20260923/site313" \
-YACA_PROOF_SOURCE_CACHE="$PWD/out/qualification/sources" \
-  .tools/run_with_resource_guard.sh bash .tools/run_coding_readiness.sh
-```
+## 目标与发行候选
 
-## 目标证据的边界
+以下为截至 `344f864` 的历史记录，原始日志主要位于原构建机的 `out/`。
+本工作区没有这些批次的完整缓存、VM 与最终包；本轮修复后仍需统一源码重建。
 
-| 环境 | 已有证据 | 当前缺口 |
-| --- | --- | --- |
-| XP SP3 x86 | 当前产物完整批次：三故障探针 0 泄漏、codec/seek smoke、源码 suite 670/670、onefile stage-1 自检通过 | 真实模型旅程与最终三档包 |
-| Win7 SP1 x64 | 登录上下文已解决；当前组件全套：codec/pstream/seek 探针、源码 suite 670/670、onefile stage-1 自检 | fs-open 探针真机复跑（现由 Wine Win64 覆盖）；真实模型旅程 |
-| CentOS 7 x86_64 | 当前源码原生构建 670/670、三故障探针 0 泄漏、codec/seek smoke、A08/A09 GiB 旅程 10/10、clean zip 装配 | std/full 工具闭包与最终发行旅程 |
-| 指定 Server 2008 / Cygwin SSH | 当前 win32 单文件 --version 与 stage-1 自检 12 PASSED/0 FAILED | 在线阶段、真实模型旅程；旧 SSH 外层 255 与握手失败记录仍须分辨 |
-| std/full 工具 | win32 std 的部分构建/运行证据；三目标候选版本和装配约束 | win64/Linux std、三个 full 的完整工具闭包与目标运行 |
+| 平台 | clean | std | full | 证据与缺口 |
+| --- | --- | --- | --- | --- |
+| win32-x86 | 已装配 | 已装配 | 未装配 | XP 当前组件 suite 670/670、原生探针与 stage-1；Server 2008 std 干净机旅程通过。full 的 Python 3.4.10 源码构建待可用工具链 |
+| win64-x86_64 | 已装配 | 已装配 | 未装配 | Win7 当前组件 suite 670/670、codec/进程流/seek 与 stage-1；fs-open 真机复跑仍缺。std 工具 Wine 冒烟通过，原子发布失败不算目标资格；Python 3.8.20 构建待完成 |
+| linux-x86_64 | 已装配 | 已装配 | 已装配 | CentOS 7 当前组件 suite 670/670、三故障探针、真实 2.3 GiB 旅程 10/10；full 干净 CentOS 7 工具旅程通过。Git 以 NO_CURL=1 构建，HTTP/HTTPS 传输缺口待收口 |
 
-详细路径、失败记录与适用候选见[Review 记录](CODE-REVIEW-2026-09-22.md)和
-[开发历程](DEVELOPMENT-HISTORY.md)。Windows 新编码转换已有交叉编译、Wine 和 XP 探针，
-XP 已补原生 seek 探针，Win7 当前组件仍待实测；不能沿用旧包的目标资格。
+**7/9 是候选装配进度，不是最终资格通过数。** 附带软件功能后来使历史开发机
+suite 增至 678 项；本轮为 697 项。目标端旧 670 项对应早期源码，不能写成已覆盖
+后续附带软件修复。详细记录见[目标及工具批次](CODE-REVIEW-2026-09-28.md)。
 
-## 尚未完成
+人工语义 Review 已记录 R01--R50 各批、附带软件特性、index.lua、network.lua 的
+SSE 子面、compact.lua 的断路器/恢复子面及 terminal.lua。子面通过不代表所在
+整个模块通过，其余源码仍须继续审查。
 
-- 全仓人工语义 Review；R23--R50 修改范围已逐项核对，接续其余原生端口与未审区域。
-- 三个 full(git/python3/sqlite/jq/busybox/compiler 六工具闭包)的构建与最终九包装配。
-- Win7 当前原生组件和真实旧终端输出旅程；现有 VM 登录上下文待补。
-- 当前源码的三目标完整构建、目标回归、网络故障、恢复与容量矩阵。
-- A08/A09 的 GiB 级日志、增长/轮转、旧代码页及真实模型读取旅程。
-- 工具来源、许可证、依赖闭包及三目标 clean/std/full 共九包验收（C32--C34）。
+## 当前剩余与边界
 
-已知行为边界：大文件单次扫描预算为 256 MiB，不计算整文件摘要；
-超过 16 MiB 的文件不能 write/patch。文件在接纳、读取或续页之间的身份变化返回
-`TargetChanged`，需要重新读取。身份复核不是文件系统快照；持续增长与旧文件系统时间精度
-仍需实际目标验收，不把这些边界记作已解决。
+- 继续全仓人工语义 Review；本轮修复进入三目标统一重建与目标回归。
+- Python 3.4.10 已源码构建并在 Server 2008 验证；Windows 两个 full 的其余完整闭包及最终装配、Python 3.8.20 构建、Linux Git 传输能力仍待收口。VS2019 候选下载清单的整体 SHA/大小与 channel 不一致，保留失败证据，未把该清单记为已验证。
+- 按 D-077 核对兼容源码、ABI 和导入闭包；用已有指定实机补相应运行证据。
+- A08/A09 已有 CentOS 7 离线大文件证据；旧终端、轮转/截断和真实模型续页旅程仍待补齐。
+- 最终九包的布局、核心一致性、干净机旅程、SHA-256、许可证与 SBOM，之后再评审 Gate R。
 
-下一步和逐项完成条件统一放在 [TRACKING.md](TRACKING.md)。
+大文件单次扫描预算为 256 MiB，不计算整文件摘要；超过 16 MiB 的文件不能
+write/patch。`partial_start`、`truncated_lines` 和续页信息明确表示部分结果。
+文件身份或版本变化返回 `TargetChanged`；身份复核不是文件系统快照，持续增长与
+旧文件系统时间精度仍需目标验收。
+
+执行顺序、依赖与完成条件统一见 [TRACKING.md](TRACKING.md)。
