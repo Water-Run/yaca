@@ -1,6 +1,6 @@
 /*
 Author: WaterRun
-Date: 2026-09-28
+Date: 2026-09-30
 File: yaca_native.c
 Description: Portable narrow native ports for filesystem, process, terminal, system identity, clocks, text code pages, and SHA-256.
 */
@@ -3936,6 +3936,36 @@ static int windows_handle_matches_lua(lua_State *L, int index, HANDLE handle)
     && identity_matches_lua(L, index, &identity);
 }
 
+/* Binds a parent directory to its physical object, independent of unrelated child-entry changes.
+ * @param L lua_State* Lua state containing the expected directory identity.
+ * @param index int Stack slot holding kind, volume and object of the admitted parent.
+ * @param handle HANDLE Pinned directory handle captured from the selected physical path.
+ * @return int 1 for the same directory object; 0 for invalid, unavailable or replaced parents.
+ * @effect Reads handle identity; does not change filesystem entries or relax target-file validation.
+ */
+static int windows_parent_matches_lua(lua_State *L, int index, HANDLE handle)
+{
+  yaca_identity identity;
+  const char *value;
+  int matches;
+  memset(&identity, 0, sizeof(identity));
+  if (!lua_istable(L, index) || !identity_from_handle(handle, &identity)
+      || strcmp(identity.kind, "directory") != 0) return 0;
+  lua_getfield(L, index, "kind");
+  value = lua_tostring(L, -1);
+  matches = value != NULL && strcmp(value, "directory") == 0;
+  lua_pop(L, 1);
+  lua_getfield(L, index, "volume");
+  value = lua_tostring(L, -1);
+  matches = matches && value != NULL && strcmp(value, identity.volume) == 0;
+  lua_pop(L, 1);
+  lua_getfield(L, index, "object");
+  value = lua_tostring(L, -1);
+  matches = matches && value != NULL && strcmp(value, identity.object) == 0;
+  lua_pop(L, 1);
+  return matches;
+}
+
 /* Implements the Lua fs open read verified native port.
  * @param L lua_State* Lua state receiving arguments and result values.
  * @return int result Number of Lua results pushed for success or typed failure.
@@ -4029,7 +4059,7 @@ static int l_fs_create_new_verified(lua_State *L)
     return push_failure(L, code, message);
   }
   if (snapshot.exists
-      || !windows_handle_matches_lua(L, 2, snapshot.parent_handle))
+      || !windows_parent_matches_lua(L, 2, snapshot.parent_handle))
   {
     int existed = snapshot.exists;
     free_windows_snapshot(&snapshot);
@@ -4058,6 +4088,71 @@ static int l_fs_create_new_verified(lua_State *L)
   return return_success(L);
 }
 
+/* Selects security fields that actually differ, without demanding ownership rights for equal SIDs.
+ * @param current const_yaca_windows_metadata_state* Proven candidate security descriptor.
+ * @param required const_yaca_windows_metadata_state* Proven target descriptor to preserve exactly.
+ * @param security SECURITY_INFORMATION* Receives the exact security assignment mask.
+ * @return int 1 after valid descriptor comparison; 0 preserves the Windows descriptor error.
+ */
+static int windows_metadata_security_flags(
+  const yaca_windows_metadata_state *current,
+  const yaca_windows_metadata_state *required,
+  SECURITY_INFORMATION *security)
+{
+  PSID current_sid, required_sid;
+  BOOL current_defaulted, required_defaulted;
+  *security = 0;
+  if (current->security_descriptor_length == required->security_descriptor_length
+      && memcmp(current->security_descriptor, required->security_descriptor,
+        required->security_descriptor_length) == 0)
+  {
+    return 1;
+  }
+  *security = DACL_SECURITY_INFORMATION;
+  if (!GetSecurityDescriptorOwner(current->security_descriptor, &current_sid, &current_defaulted)
+      || !GetSecurityDescriptorOwner(required->security_descriptor, &required_sid, &required_defaulted))
+  {
+    return 0;
+  }
+  if (current_defaulted != required_defaulted
+      || ((current_sid == NULL) != (required_sid == NULL))
+      || (current_sid != NULL && required_sid != NULL && !EqualSid(current_sid, required_sid)))
+  {
+    *security |= OWNER_SECURITY_INFORMATION;
+  }
+  if (!GetSecurityDescriptorGroup(current->security_descriptor, &current_sid, &current_defaulted)
+      || !GetSecurityDescriptorGroup(required->security_descriptor, &required_sid, &required_defaulted))
+  {
+    return 0;
+  }
+  if (current_defaulted != required_defaulted
+      || ((current_sid == NULL) != (required_sid == NULL))
+      || (current_sid != NULL && required_sid != NULL && !EqualSid(current_sid, required_sid)))
+  {
+    *security |= GROUP_SECURITY_INFORMATION;
+  }
+  return 1;
+}
+
+/* Computes only the rights required to preserve candidate metadata, keeping ownership checks strict.
+ * @param current const_yaca_windows_metadata_state* Proven candidate descriptor and attributes.
+ * @param required const_yaca_windows_metadata_state* Exact metadata required by publication.
+ * @param access DWORD* Receives the read/write and necessary security-assignment access mask.
+ * @return int 1 after access selection; 0 when security descriptors cannot be compared.
+ */
+static int windows_metadata_write_access(
+  const yaca_windows_metadata_state *current,
+  const yaca_windows_metadata_state *required,
+  DWORD *access)
+{
+  SECURITY_INFORMATION security;
+  if (!windows_metadata_security_flags(current, required, &security)) return 0;
+  *access = GENERIC_READ | GENERIC_WRITE | READ_CONTROL;
+  if (security & DACL_SECURITY_INFORMATION) *access |= WRITE_DAC;
+  if (security & (OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION)) *access |= WRITE_OWNER;
+  return 1;
+}
+
 /* Updates synchronize windows candidate metadata within its ownership boundary.
  * @param path const_WCHAR* Filesystem path selected for this operation.
  * @param handle HANDLE Operating-system handle being inspected or closed.
@@ -4079,9 +4174,9 @@ static int synchronize_windows_candidate_metadata(
     | FILE_ATTRIBUTE_OFFLINE
     | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED;
   DWORD attributes;
-  SECURITY_INFORMATION security = OWNER_SECURITY_INFORMATION
-    | GROUP_SECURITY_INFORMATION
-    | DACL_SECURITY_INFORMATION;
+  SECURITY_INFORMATION security;
+
+  if (!windows_metadata_security_flags(current, required, &security)) return 0;
 
   if ((current->attributes & ~settable)
       != (required->attributes & ~settable))
@@ -4089,12 +4184,7 @@ static int synchronize_windows_candidate_metadata(
     SetLastError(ERROR_NOT_SUPPORTED);
     return 0;
   }
-  if (current->security_descriptor_length
-      != required->security_descriptor_length
-      || memcmp(
-        current->security_descriptor,
-        required->security_descriptor,
-        required->security_descriptor_length) != 0)
+  if (security != 0)
   {
     unsigned char *descriptor = (unsigned char *)malloc(required->security_descriptor_length);
     BOOL copied;
@@ -4390,7 +4480,7 @@ static int l_fs_replace_verified(lua_State *L)
   }
   if (!windows_snapshot_matches_lua(L, 3, &temporary)
       || !windows_snapshot_matches_lua(L, 4, &target)
-      || !windows_handle_matches_lua(L, 5, target.parent_handle)
+      || !windows_parent_matches_lua(L, 5, target.parent_handle)
       || !windows_same_object(
         &temporary.parent_information,
         &target.parent_information)
@@ -4417,16 +4507,30 @@ static int l_fs_replace_verified(lua_State *L)
     message = "direct Windows target metadata is unavailable or stale";
     goto failed;
   }
-  candidate_handle = CreateFileW(
+  {
+    DWORD candidate_access;
+    if (!windows_metadata_write_access(&temporary.metadata, &target.metadata, &candidate_access))
+    {
+      code = windows_error_code(GetLastError());
+      message = "direct Windows replacement security could not be compared";
+      goto failed;
+    }
+    candidate_handle = CreateFileW(
     temporary.canonical_path,
-    GENERIC_READ | GENERIC_WRITE | READ_CONTROL | WRITE_DAC | WRITE_OWNER,
+    candidate_access,
     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
     NULL,
     OPEN_EXISTING,
     FILE_FLAG_OPEN_REPARSE_POINT,
     NULL);
-  if (candidate_handle == INVALID_HANDLE_VALUE
-      || !GetFileInformationByHandle(
+  }
+  if (candidate_handle == INVALID_HANDLE_VALUE)
+  {
+    code = windows_error_code(GetLastError());
+    message = "cannot open direct Windows replacement metadata handle";
+    goto failed;
+  }
+  if (!GetFileInformationByHandle(
         candidate_handle,
         &candidate_information)
       || !windows_same_object(
@@ -4542,9 +4646,16 @@ static int l_fs_replace_verified(lua_State *L)
       && windows_metadata_states_equal(&target.metadata, &displaced.metadata)
       && windows_metadata_added_auto_inheritance(&target.metadata, &published.metadata))
   {
+    DWORD candidate_access;
+    if (!windows_metadata_write_access(&published.metadata, &target.metadata, &candidate_access))
+    {
+      code = "Unknown";
+      message = "direct Windows legacy security comparison is unknown";
+      goto failed;
+    }
     candidate_handle = CreateFileW(
       published.canonical_path,
-      GENERIC_READ | GENERIC_WRITE | READ_CONTROL | WRITE_DAC | WRITE_OWNER,
+      candidate_access,
       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
       NULL, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, NULL);
     free_windows_metadata_state(&candidate_metadata);
@@ -4725,8 +4836,8 @@ static int l_fs_rename_no_replace_verified(lua_State *L)
     goto failed;
   }
   if (!windows_snapshot_matches_lua(L, 3, &source)
-      || !windows_handle_matches_lua(L, 4, source.parent_handle)
-      || !windows_handle_matches_lua(L, 5, target.parent_handle)
+      || !windows_parent_matches_lua(L, 4, source.parent_handle)
+      || !windows_parent_matches_lua(L, 5, target.parent_handle)
       || target.exists
       || source.reparse
       || ((source.target_information.dwFileAttributes
@@ -4893,7 +5004,7 @@ static int l_fs_delete_direct_verified(lua_State *L)
     goto failed;
   }
   if (!windows_snapshot_matches_lua(L, 2, &target)
-      || !windows_handle_matches_lua(L, 3, target.parent_handle)
+      || !windows_parent_matches_lua(L, 3, target.parent_handle)
       || target.reparse)
   {
     code = "TargetChanged";

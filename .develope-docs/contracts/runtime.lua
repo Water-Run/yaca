@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-09-30
 File: runtime.lua
 Description: Defines Agent states, event ordering, cancellation and durability transitions.
 ]]
@@ -136,6 +136,12 @@ return {
     natural_language_done_means_finish = false,
     queue_auto_start_outcome = "completed",
     queue_auto_start_requires_no_pending_or_unknown = true,
+    cancellation_requires_foreground_settlement = true,
+    cancellation_blocks_later_tool_and_model_admission = true,
+    terminal_precedence = { "unknown-side-effects", "cancel-intent", "steer", "ordinary-completion" },
+    stale_model_response_mutates_active_turn = false,
+    durability_loss_safety_cancel = "best-effort-no-terminal-claim",
+    closing_requires_ask_settlement = true,
   },
 
   hard_caps = {

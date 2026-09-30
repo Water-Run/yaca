@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-26
+Date: 2026-09-30
 File: readiness.lua
 Description: Maps implementation and release gates to required artifacts and proof tasks.
 ]]
@@ -69,6 +69,10 @@ return {
       release_authorized = false,
       decision = "D-073",
       decision_date = "2026-09-22",
+      qualification_scope_decision = "D-077",
+      exhaustive_legacy_machine_matrix_required = false,
+      legacy_source_and_dependency_compatibility_required = true,
+      requested_existing_physical_environments = { "Windows Server 2008" },
       pending_targets = { "win32-x86", "win64-x86_64", "linux-x86_64" },
       qualified_environments = {},
       candidate_environments = {

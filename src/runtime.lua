@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-09-30
 File: runtime.lua
 Description: Owns the bounded single-threaded event pump and runtime primitives.
 ]]
@@ -1176,13 +1176,28 @@ function M.new_agent_loop(ports, options)
     --@param detail any|nil Underlying receipt or port failure.
     --@return nil No new activity is admitted.
     --@return table err Persistent durability failure.
+    --@effect Attempts safety cancellation of live activities without journaling or claiming settlement.
     local function durability_failure(reason, detail)
+        if halted then return nil, halt_error end
         halted = true
         halt_error = failure(
             "AgentDurabilityFailure",
             "AgentLoop lost its durable Context barrier",
             detail or reason
         )
+        -- Stop is the only external effect admitted after barrier loss. Keep
+        -- handles and unfinished Facts for recovery; an acknowledgement is
+        -- not proof that the process or request has reached its terminal state.
+        for _, activity in ipairs({
+            { port = admitted_ports.model, handle = active_request and active_request.handle },
+            { port = admitted_ports.reviews, handle = active_review and active_review.handle },
+            { port = admitted_ports.tools, handle = active_tool and active_tool.handle },
+            { port = admitted_ports.ask, handle = ask and ask.handle },
+        }) do
+            if activity.port and activity.handle and activity.port.cancel then
+                pcall(activity.port.cancel, activity.handle, "durability-failure")
+            end
+        end
         if turn and state == "Idle" then
             -- The first input never crossed admission, so no durable turn
             -- exists to finalize. The process is still fail-stop.
@@ -1546,7 +1561,7 @@ function M.new_agent_loop(ports, options)
         active_request, active_review, active_tool, pending = nil, nil, nil, nil
         pending_model_preflight = nil
         pending_steer = nil
-        if closing then transition("Closing") else transition("Idle") end
+        if closing and not ask then transition("Closing") else transition("Idle") end
         last_turn = snapshot
         turn = nil
         local result = {
@@ -2105,6 +2120,28 @@ function M.new_agent_loop(ports, options)
         return true
     end
 
+    ---Settles cancellation or an exhausted budget after the foreground activity has ended.
+    --@param none No arguments; consumes the current turn's terminal intent and unstarted calls.
+    --@return table|nil result Cancelled or budget-exhausted durable turn outcome.
+    --@return table|nil err Exact result-pairing or publication failure.
+    --@effect Publishes synthetic results and the turn outcome without starting another activity.
+    local function finish_cancelled_turn()
+        if not turn.cancel_pending then
+            turn.cancel_pending, turn.cancel_outcome = true, "budget_exhausted"
+            turn.cancel_reason = "active-time-budget"
+        end
+        local outcome = turn.cancel_outcome or "cancelled"
+        if turn.call_cursor <= #turn.calls then
+            if state ~= "DispatchingTools" then transition("DispatchingTools") end
+            local kind = outcome == "budget_exhausted"
+                and "skipped-budget-exhausted" or "skipped-by-cancel"
+            local skipped, skip_error = skip_remaining(kind, "turn-cancel")
+            if not skipped then return nil, skip_error end
+        end
+        return finalize(outcome, turn.cancel_reason or "cancelled",
+            outcome == "budget_exhausted" and "AgentBudgetExhausted" or "AgentCancelled")
+    end
+
     ---Clears active Tool state and requests a follow-up Model response.
     --@param after_failure string|false|nil Failure identity for continuation.
     --@return table|nil admission Next Model request or terminal outcome.
@@ -2157,22 +2194,13 @@ function M.new_agent_loop(ports, options)
         if state ~= "ExecutingTool" or not active_tool then
             return nil, failure("NoExecutingTool", "no foreground tool awaits a result")
         end
+        local now, clock_error = clock_now()
+        if not now then return nil, clock_error end
         local call = active_tool.call
         local paired, pair_error = pair_result(call, result, external_receipt)
         if not paired then return nil, pair_error end
         active_tool = nil
         turn.call_cursor = turn.call_cursor + 1
-        if pending_steer then
-            if turn.call_cursor <= #turn.calls then
-                transition("DispatchingTools")
-                local skipped, skip_error = skip_remaining(
-                    "skipped-by-steer",
-                    pending_steer.message_id
-                )
-                if not skipped then return nil, skip_error end
-            end
-            return inject_steer()
-        end
         local status = TOOL_RESULT_KINDS[result.kind]
         if result.progress_identity ~= false then
             turn.detector.last_progress = result.progress_identity
@@ -2203,19 +2231,17 @@ function M.new_agent_loop(ports, options)
                 result.error_id ~= false and result.error_id or "ToolOutcomeUnknown"
             )
         end
-        if status == "cancelled" and turn.cancel_pending then
+        if turn.cancel_pending or turn.counters.active_time_ms >= limits.hard_caps.active_time_ms then
+            return finish_cancelled_turn()
+        end
+        if pending_steer then
             if turn.call_cursor <= #turn.calls then
                 transition("DispatchingTools")
-                local skipped, skip_error = skip_remaining("skipped-by-cancel", "turn-cancel")
+                local skipped, skip_error = skip_remaining(
+                    "skipped-by-steer", pending_steer.message_id)
                 if not skipped then return nil, skip_error end
             end
-            local outcome = turn.cancel_outcome or "cancelled"
-            return finalize(
-                outcome,
-                turn.cancel_reason or "cancelled",
-                outcome == "budget_exhausted" and "AgentBudgetExhausted"
-                    or "AgentCancelled"
-            )
+            return inject_steer()
         end
         if status ~= "ok" then
             if turn.call_cursor <= #turn.calls then transition("DispatchingTools") end
@@ -2264,6 +2290,11 @@ function M.new_agent_loop(ports, options)
     --@return table|nil activity Active Tool admission or immediate next outcome.
     --@return table|nil err Structured start or durability failure.
     local function start_tool(call, admission)
+        local now, clock_error = clock_now()
+        if not now then return nil, clock_error end
+        if turn.cancel_pending or turn.counters.active_time_ms >= limits.hard_caps.active_time_ms then
+            return finish_cancelled_turn()
+        end
         transition("ExecutingTool")
         local specification = freeze({
             turn_id = turn.id,
@@ -2324,6 +2355,14 @@ function M.new_agent_loop(ports, options)
     --@return table|nil activity Tool, approval, review, or next Model admission.
     --@return table|nil err Structured policy or durability failure.
     dispatch_next = function()
+        if turn.cancel_pending then return finish_cancelled_turn() end
+        local now, clock_error = clock_now()
+        if not now then return nil, clock_error end
+        if turn.counters.active_time_ms >= limits.hard_caps.active_time_ms then
+            local skipped, skip_error = skip_remaining("skipped-budget-exhausted", "active-time")
+            if not skipped then return nil, skip_error end
+            return finalize("budget_exhausted", "active-time", "AgentBudgetExhausted")
+        end
         while turn.call_cursor <= #turn.calls do
             local call = turn.calls[turn.call_cursor]
             if call.result ~= nil then
@@ -3860,6 +3899,7 @@ function M.new_agent_loop(ports, options)
         completed.handle = false
         ask_history[completed.id] = completed
         ask = nil
+        if closing and state == "Idle" then transition("Closing") end
         return assert(freeze({
             ask_id = completed.id,
             outcome = outcome,
@@ -4025,6 +4065,9 @@ function M.new_agent_loop(ports, options)
         if not ask or ask.id ~= ask_id then
             return nil, failure("StaleAskResponse", "ask response is stale")
         end
+        if type(wrapper) ~= "table" or wrapper.request_id ~= ask.request_id then
+            return nil, failure("StaleAskResponse", "ask response request binding is stale")
+        end
         local now, clock_error = clock_now()
         if not now then return nil, clock_error end
         if now - ask.started_at >= limits.lanes.ask_active_time_ms then
@@ -4033,9 +4076,6 @@ function M.new_agent_loop(ports, options)
         local admitted, response_error = validate_model_response(wrapper, limits)
         if not admitted then
             return finish_ask("error", response_error.message, response_error.code)
-        end
-        if wrapper.request_id ~= ask.request_id then
-            return nil, failure("StaleAskResponse", "ask response request binding is stale")
         end
         if #wrapper.canonical_body > limits.lanes.ask_response_bytes
             or #wrapper.normalized.tool_calls ~= 0
@@ -4104,6 +4144,10 @@ function M.new_agent_loop(ports, options)
         if not ask or ask.id ~= command.ask_id then
             return nil, failure("NoAskTurn", "the observed ask turn is not active")
         end
+        if ask.cancel_pending then
+            return assert(freeze({ ask_id = ask.id, cancel_pending = true,
+                context_generation = context_generation }, nil, "pending ask cancellation"))
+        end
         local receipt, commit_error = commit_events({ {
             type = "cancel",
             turn_id = ask.id,
@@ -4115,7 +4159,9 @@ function M.new_agent_loop(ports, options)
             },
         } })
         if not receipt then
-            pcall(admitted_ports.ask.cancel, ask.handle, command.reason)
+            if not halted then
+                return durability_failure("ask-cancel-intent-not-durable", commit_error)
+            end
             return nil, commit_error
         end
         local called, result = pcall(
@@ -4128,12 +4174,12 @@ function M.new_agent_loop(ports, options)
                 and result.outcome ~= "pending"
                 and result.outcome ~= "unknown")
         then
-            return finish_ask("error", "ask cancel result is unknown", "AskCancelUnknown")
+            result = { outcome = "unknown" }
         end
         if result.result ~= nil then
             return self:accept_ask_response(ask.id, result.result)
         end
-        if result.outcome == "pending" then
+        if result.outcome == "pending" or result.outcome == "unknown" then
             ask.cancel_pending = true
             ask.cancel_reason = command.reason
             return assert(freeze({
@@ -4141,9 +4187,6 @@ function M.new_agent_loop(ports, options)
                 cancel_pending = true,
                 context_generation = context_generation,
             }, nil, "pending ask cancellation"))
-        end
-        if result.outcome == "unknown" then
-            return finish_ask("error", "ask cancel result is unknown", "AskCancelUnknown")
         end
         return finish_ask("cancelled", command.reason, "AskCancelled")
     end
@@ -4224,6 +4267,9 @@ function M.new_agent_loop(ports, options)
         if not observed then return nil, observation_error end
         if not turn or state == "Idle" or state == "Finalizing" or state == "Closing" then
             return nil, failure("NoMainTurn", "steer requires an active main turn")
+        end
+        if turn.cancel_pending then
+            return nil, failure("MainTurnCancelling", "a cancelling turn cannot admit another steer")
         end
         if pending_steer then
             return nil, failure("SteerBusy", "a durable steer already awaits its safe point")
@@ -4476,18 +4522,18 @@ function M.new_agent_loop(ports, options)
         if state ~= "RequestingModel" and state ~= "Streaming" then
             return nil, failure("NoModelRequest", "no main Model request awaits a response")
         end
+        if not active_request or type(wrapper) ~= "table"
+            or wrapper.request_id ~= active_request.id
+        then
+            return nil, failure("StaleModelResponse", "response does not bind the active request")
+        end
         local now, clock_error = clock_now()
         if not now then return nil, clock_error end
-        if turn.counters.active_time_ms >= limits.hard_caps.active_time_ms then
-            return finalize("budget_exhausted", "active-time", "AgentBudgetExhausted")
-        end
+        local time_exhausted = turn.counters.active_time_ms >= limits.hard_caps.active_time_ms
         local admitted, response_error = validate_model_response(wrapper, limits)
         if not admitted then
             if state == "RequestingModel" then transition("Streaming") end
             return finalize("error", response_error.message, response_error.code)
-        end
-        if wrapper.request_id ~= active_request.id then
-            return nil, failure("StaleModelResponse", "response does not bind the active request")
         end
         if state == "RequestingModel" then transition("Streaming") end
         message_serial = message_serial + 1
@@ -4499,32 +4545,11 @@ function M.new_agent_loop(ports, options)
         local request_id = active_request.id
         active_request = nil
 
-        if pending_steer then
-            if #calls > 0 then
-                turn.calls = calls
-                turn.call_cursor = 1
-                turn.counters.tool_calls = turn.counters.tool_calls + #calls
-                turn.counters.steps = turn.counters.steps + #calls
-                for _, call_value in ipairs(calls) do
-                    turn.trace.tool_calls[#turn.trace.tool_calls + 1] = call_value.id
-                end
-                transition("DispatchingTools")
-                local skipped, skip_error = skip_remaining(
-                    "skipped-by-steer",
-                    pending_steer.message_id
-                )
-                if not skipped then return nil, skip_error end
-            end
-            return inject_steer()
-        end
-        if wrapper.normalized.incomplete then
-            local outcome = wrapper.normalized.finish_class == "cancelled"
-                and "cancelled" or "error"
-            return finalize(
-                outcome,
-                wrapper.normalized.incomplete_reason or "incomplete-model-response",
-                outcome == "cancelled" and "AgentCancelled" or "ModelResponseIncomplete"
-            )
+        if time_exhausted and not turn.cancel_pending then
+            -- The response has settled its owner; keep its accepted calls paired
+            -- before recording the budget outcome without another external effect.
+            turn.cancel_pending, turn.cancel_outcome = true, "budget_exhausted"
+            turn.cancel_reason = "active-time-budget"
         end
         if turn.cancel_pending then
             if #calls > 0 then
@@ -4549,6 +4574,29 @@ function M.new_agent_loop(ports, options)
                 cancel_outcome == "budget_exhausted" and "AgentBudgetExhausted"
                     or "AgentCancelled"
             )
+        end
+        if pending_steer then
+            if #calls > 0 then
+                turn.calls = calls
+                turn.call_cursor = 1
+                turn.counters.tool_calls = turn.counters.tool_calls + #calls
+                turn.counters.steps = turn.counters.steps + #calls
+                for _, call_value in ipairs(calls) do
+                    turn.trace.tool_calls[#turn.trace.tool_calls + 1] = call_value.id
+                end
+                transition("DispatchingTools")
+                local skipped, skip_error = skip_remaining(
+                    "skipped-by-steer", pending_steer.message_id)
+                if not skipped then return nil, skip_error end
+            end
+            return inject_steer()
+        end
+        if wrapper.normalized.incomplete then
+            local outcome = wrapper.normalized.finish_class == "cancelled"
+                and "cancelled" or "error"
+            return finalize(outcome,
+                wrapper.normalized.incomplete_reason or "incomplete-model-response",
+                outcome == "cancelled" and "AgentCancelled" or "ModelResponseIncomplete")
         end
         if wrapper.normalized.control ~= nil then
             return process_control(wrapper.normalized.control, request_id, message_id)
@@ -4652,8 +4700,6 @@ function M.new_agent_loop(ports, options)
     --@return table|nil err Structured clock, result, or durability failure.
     function loop:accept_tool_result(result, external_receipt)
         if halted then return nil, halt_error end
-        local now, clock_error = clock_now()
-        if not now then return nil, clock_error end
         return accept_result(result, external_receipt)
     end
 
@@ -4770,6 +4816,9 @@ function M.new_agent_loop(ports, options)
         } })
         if not receipt then return nil, commit_error end
         active_review = nil
+        if turn.cancel_pending or turn.counters.active_time_ms >= limits.hard_caps.active_time_ms then
+            return finish_cancelled_turn()
+        end
         if pending_steer then return inject_steer() end
         if verdict.verdict == "uncertain" then
             if state ~= "WaitingUser" then transition("WaitingUser") end
@@ -4846,6 +4895,9 @@ function M.new_agent_loop(ports, options)
         } })
         if not receipt then return nil, commit_error end
         active_review, pending = nil, nil
+        if turn.cancel_pending or turn.counters.active_time_ms >= limits.hard_caps.active_time_ms then
+            return finish_cancelled_turn()
+        end
         if pending_steer then return inject_steer() end
         if state == "WaitingUser" and verdict.verdict ~= "uncertain" then
             transition("EvaluatingTermination")
@@ -4956,6 +5008,9 @@ function M.new_agent_loop(ports, options)
         if not valid_runtime_text(reason, limits.hard_caps.message_bytes, false) then
             return nil, failure("InvalidCancel", "cancel reason is invalid")
         end
+        if turn.cancel_pending then
+            return readonly({ state = state, cancel_pending = true }, "pending cancellation")
+        end
         local now, clock_error = clock_now()
         if not now then return nil, clock_error end
         local target_kind = active_tool and "ToolCall"
@@ -4976,22 +5031,28 @@ function M.new_agent_loop(ports, options)
             },
         } })
         if not receipt then
-            -- Cancellation is the sole safety action still attempted after a
-            -- journal failure; no new request or tool effect is admitted.
-            cancel_activity(reason)
+            if not halted then
+                return durability_failure("cancel-intent-not-durable", commit_error)
+            end
+            -- The fail-stop gate already attempted the sole allowed safety
+            -- action. Do not issue a second cancel or fabricate its outcome.
             return nil, commit_error
         end
         turn.cancel_pending = true
         turn.cancel_reason = reason
         turn.cancel_outcome = turn.cancel_outcome or "cancelled"
+        if active_review then
+            local outcome = cancel_activity(reason)
+            if outcome ~= "cancelled" then
+                return readonly({ state = state, cancel_pending = true,
+                    cancel_outcome = outcome }, "pending review cancellation")
+            end
+            active_review = nil
+        end
         if state == "AwaitingApproval" or state == "DispatchingTools"
             or state == "EvaluatingAction"
             or (state == "WaitingUser" and pending and pending.call)
         then
-            if state == "EvaluatingAction" and active_review then
-                cancel_activity(reason)
-                active_review = nil
-            end
             if state ~= "DispatchingTools" and state ~= "WaitingUser" then
                 transition("DispatchingTools")
             end
@@ -5019,8 +5080,9 @@ function M.new_agent_loop(ports, options)
         end
         local outcome, terminal_result = cancel_activity(reason)
         if active_tool and terminal_result ~= nil then return accept_result(terminal_result) end
-        if outcome == "pending" then
-            return readonly({ state = state, cancel_pending = true }, "pending cancellation")
+        if outcome == "pending" or (outcome == "unknown" and active_request) then
+            return readonly({ state = state, cancel_pending = true,
+                cancel_outcome = outcome }, "pending cancellation")
         end
         if active_tool then
             local result = synthetic_result(
@@ -5078,10 +5140,10 @@ function M.new_agent_loop(ports, options)
             })
             if not cancelled then return nil, cancel_error end
         end
-        if turn and not PAUSED_AGENT_STATES[state]
+        if turn and not turn.cancel_pending and not PAUSED_AGENT_STATES[state]
             and turn.counters.active_time_ms >= limits.hard_caps.active_time_ms
         then
-            if active_tool then
+            if active_tool or active_request or active_review then
                 turn.cancel_outcome = "budget_exhausted"
                 return self:cancel("active-time-budget")
             end
@@ -5123,7 +5185,7 @@ function M.new_agent_loop(ports, options)
             if not cleared then return nil, clear_error end
         end
         if state == "Idle" then
-            transition("Closing")
+            if not ask then transition("Closing") end
             return true
         end
         if state == "Finalizing" or halted then

@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-29
+Date: 2026-09-30
 File: bundled.lua
 Description: Bundled-software index service: reads, validates, renders and rewrites tools/INDEX.txt and separates bundled programs from tool calls.
 ]]
@@ -19,14 +19,14 @@ local FAILURE_CODE = "BundledIndex"
 -- Builds a structured failure record for this module.
 --@param message string Human-readable diagnostic text.
 --@param detail string|nil Extra bounded context for the failure.
---@return table Frozen failure with code, message and optional detail.
+--@return table Structured failure with code, message and optional detail.
 local function failure(message, detail)
     local record = { code = FAILURE_CODE, message = message }
     if detail ~= nil then record.detail = detail end
     return record
 end
 
--- Reports whether a value is a bounded NUL-free UTF-8-looking string.
+-- Reports whether a value is a bounded delimiter-free byte string.
 -- Bundled index text must survive byte-oriented transports unchanged.
 --@param value any Candidate field value.
 --@param limit integer Positive byte ceiling.
@@ -57,7 +57,7 @@ local function parse_entry(line)
 end
 
 -- Parses complete index bytes into validated entries.
---@param bytes string Exact INDEX.txt contents.
+--@param bytes string UTF-8 INDEX.txt contents, optionally with a leading editor BOM.
 --@return table|nil Ordered array of parsed entries.
 --@return table|nil Failure for invalid bytes, size or duplicates.
 function M.parse(bytes)
@@ -70,6 +70,9 @@ function M.parse(bytes)
     if bytes:find("\0") then
         return nil, failure("index contains NUL bytes")
     end
+    local valid, invalid_at = utf8.len(bytes)
+    if not valid then return nil, failure("index text is not valid UTF-8", tostring(invalid_at)) end
+    if bytes:sub(1, 3) == "\239\187\191" then bytes = bytes:sub(4) end
     local entries, seen = {}, {}
     for original in bytes:gmatch("([^\n]+)") do
         local line = original:gsub("\r$", "")
@@ -207,29 +210,33 @@ function M.merge_directory(entries, names)
     return merged
 end
 
--- Reads INDEX.txt bytes through the production filesystem service.
+-- Reads complete INDEX.txt bytes with a byte limit and a forward-progress check.
 --@param filesystem table Filesystem service with open_read, stream_read and close.
 --@param path string Absolute INDEX.txt path.
 --@return string|nil Complete bounded file bytes.
---@return table|nil Typed filesystem failure.
+--@return table|nil Original filesystem failure or BundledIndex for size/progress failures.
+--@effect Opens and reads the index, then closes its handle on success or a reported failure.
 function M.read_file(filesystem, path)
     local opened, handle = filesystem.open_read(path)
     if not opened then return nil, handle end
-    local parts = {}
+    local parts, total = {}, 0
     while true do
-        local chunk, chunk_error
         local ok, value = filesystem.stream_read(handle, 4096)
         if not ok then
-            chunk_error = value
             filesystem.close(handle)
-            return nil, chunk_error
+            return nil, value
         end
-        parts[#parts + 1] = value.bytes
-        if value.eof then break end
-        if #table.concat(parts) > MAXIMUM_INDEX_BYTES then
+        total = total + #value.bytes
+        if total > MAXIMUM_INDEX_BYTES then
             filesystem.close(handle)
             return nil, failure("index exceeds its byte limit")
         end
+        if #value.bytes == 0 and not value.eof then
+            filesystem.close(handle)
+            return nil, failure("index read made no progress")
+        end
+        parts[#parts + 1] = value.bytes
+        if value.eof then break end
     end
     filesystem.close(handle)
     return table.concat(parts)

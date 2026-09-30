@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-28
+Date: 2026-09-30
 File: tools.lua
 Description: Defines the closed tool registry and verified direct-file operations.
 ]]
@@ -5723,11 +5723,13 @@ function M.new_agent_port(ports, options)
 end
 
 ---Describes the embedded interpreter, optional tools directory and text encodings for the Prompt.
+--Includes index entries only after a complete bounded read; failures keep the base description.
 --@param filesystem table Filesystem service used to test for the tools directory.
 --@param layout table Application layout with application_root.
 --@param platform_kind string windows or posix.
 --@param text_codec table|boolean|nil Observed code page facts, or false when unavailable.
 --@return string Bounded environment description lines.
+--@effect Reads optional directory metadata and INDEX.txt through the filesystem service.
 function M.describe_environment(filesystem, layout, platform_kind, text_codec)
     local lines = {
         "The running yaca includes the same Lua interpreter used by its core.",
@@ -5761,27 +5763,13 @@ function M.describe_environment(filesystem, layout, platform_kind, text_codec)
             lines[#lines + 1] = "Optional bundled-software directory (quoted): " .. string.format("%q", directory)
             lines[#lines + 1] = "Bundled software are portable programs, never tool calls; run them through exec or the lua tool with explicit paths."
             local index_path = directory .. separator .. "INDEX.txt"
-            local index_opened, index_handle = filesystem.open_read(index_path)
-            if index_opened then
-                local parts, exceeded = {}, false
-                while true do
-                    local chunk_ok, chunk = filesystem.stream_read(index_handle, 4096)
-                    if not chunk_ok then break end
-                    parts[#parts + 1] = chunk.bytes
-                    if chunk.eof or #table.concat(parts) > 16384 then
-                        if not chunk.eof then exceeded = true end
-                        break
-                    end
-                end
-                filesystem.close(index_handle)
-                local bytes = table.concat(parts)
-                if not exceeded and #bytes > 0 then
-                    local bundled = require("bundled")
-                    local entries = bundled.parse(bytes)
-                    if entries then
-                        local rendered = bundled.render_context(entries)
-                        if rendered then lines[#lines + 1] = rendered end
-                    end
+            local bundled = require("bundled")
+            local bytes = bundled.read_file(filesystem, index_path)
+            if bytes then
+                local entries = bundled.parse(bytes)
+                if entries then
+                    local rendered = bundled.render_context(entries)
+                    if rendered then lines[#lines + 1] = rendered end
                 end
             end
             lines[#lines + 1] = "List the directory or read its INDEX.txt when the index is not quoted above."
