@@ -574,6 +574,25 @@ INDEX 必然触发);已修复为逐行剥除行尾 CR 并补回归用例。notes
   2008 win32 旅程(ATOMIC PASSED)与资格批次 Win7 win64 stage-1 覆盖;
   不把 Wine 结果记为目标资格。
 
+
+## 语义 Review 续推:index.lua(2026-09-30)
+
+对 `src/index.lua`(Context 目录解析,1836 行)做人工语义审核:
+- 构造面:`M.new` 与 `M.new_filesystem_scanner` 的端口/选项校验均为
+  fail-closed,弱键表隔离句柄;扫描范围 `scopes` 在构造期由
+  `maximum_search_rings` 截断,祖先链环化/越界即拒。
+- `scan_ring`:每轮先复核上一轮观测(稳定起始),目录
+  `direct_walk` 以剩余 `maximum_walk_entries` 为上限,不完整枚举
+  (`complete ~= true`)按 partial_reason 记为 incomplete ring 而非成功;
+  深度、候选数(`maximum_scan_candidates`)在入列/入候选前检查,
+  `.xml.yaca-prev` 修复候选同样计入同一预算;完成后合并观测并登记
+  completed_subtrees/seen,防止跨环重复。
+- 后缀匹配复核:目录判定先于 `.xml` 后缀判定(名为 x.xml 的目录不会
+  成为候选);根下裸 `.xml` 文件会进入后缀分支,但 `path.context_file`
+  明确拒绝零段路径(NotContextFile),大小写敏感保持文档语义。
+- 未发现资源、预算或身份复核缺陷;该模块此前由 678 用例覆盖,
+  本节为人工结论,不扩展为全仓 Review 完成。
+
 ## 继续审查与目标验证
 
 1. Win7 当前组件复验；将新的输出路径纳入真实旧终端旅程。
