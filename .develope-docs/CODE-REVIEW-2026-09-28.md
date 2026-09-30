@@ -623,6 +623,19 @@ UTF-8 标量,按数据传递不属 BOM 拒绝范围**——仅流首 BOM 被禁,
 outcome 表、弱引用句柄隔离与日志先行(先记 intent 再发模型请求)
 核对无误。该模块由 678 用例覆盖;本节为人工结论。
 
+
+## 语义 Review 续推:terminal.lua(2026-09-30)
+
+对 `src/terminal.lua`(1304 行)做人工语义审核:构造面对
+native 端口方法集与 `maximum_input_bytes`/`mode` fail-closed 校验;
+`restore` 幂等(成功后重复调用直接返回 true,created 态无副作用即视为
+已恢复,closed 态报错);`close` 先恢复终端模式、再关原生句柄、最后置
+closed——恢复失败会阻止句柄释放并抛出,避免把用户终端留在 raw 模式;
+raw/cooked 双模式共用同一动作词表的映射核对无误。该模块由 678 用例与
+既有资格旅程覆盖;本节为人工结论。全仓语义 Review 至此覆盖:
+附带软件特性、index.lua、SSE 解析器、compact 断路器、terminal;
+R23--R50 各批已逐项核对,其余区域仍按 TRACKING 排队。
+
 ## 继续审查与目标验证
 
 1. Win7 当前组件复验；将新的输出路径纳入真实旧终端旅程。
