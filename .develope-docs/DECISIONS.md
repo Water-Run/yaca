@@ -1062,3 +1062,27 @@ TRACKING 的 C33 布局项要求“先定唯一布局，再让九包与干净机
    源码包与 SHA256SUMS 不变。`package_editions.py` 不改。
 4. 两个 Windows 目标已按新布局重打包，资格与装配两路径的 notices 归档成员
    名集合逐项一致（16=16），验证记录在 10 月 1 日 Review。
+
+## D-079 full 版位外部件的再锚定与装配（2026-10-01）
+
+状态：已执行，重派生 pin 待负责人确认
+
+原构建机的 payloads.lock.json（w64devkit/PortableGit 摘要）不可达，win32
+full 长期登记为缺锁定源。本轮按三档信任分级重新锚定并装配：
+
+1. 官方哈希验证：PortableGit-2.10.0-32-bit.7z.exe 按 git-for-windows
+   v2.10.0.windows.1 发布元数据的官方 SHA-256
+   （89940cca2a8e1b18b5ed6e3d46c97ea4fcfe1628cda3ae452cd2a8984a3c25c8）
+   验证通过，与 std 锁同级的可验证外部输入。
+2. 重派生 pin（上游无校验）：w64devkit-x86-2.9.0.7z.exe 按
+   TOOL-BUNDLES.md 已提交的官方 URL/tag 经 TLS 获取，摘要
+   d05b743dfade0bd063a5f0587f628b0668ddb666fe194d71f42c88377d9595e9
+   为本轮重派生；上游未发布校验值，待与原构建机 payloads.lock.json
+   比对确认。
+3. 重派生 pin（配源补齐）：sqldiff 需 sqlite-src-3530400.zip（同版本
+   官方 URL，摘要重派生，记录于 full-cache）；其余 jq/onig/
+   sqlite-autoconf/busybox-w32 均 full 锁内 SHA-256 逐项验证。
+4. 装配产物 candidate-unqualified、release_authorized=false；重派生
+   pin 与原构建机记录不一致时以原记录为准并重装配。本处理不放宽
+   VS2019 通道类"清单与字节不符"的拒绝原则——本批不存在不符，只是
+   原摘要不在本工作区。

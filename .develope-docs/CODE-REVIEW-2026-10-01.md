@@ -277,3 +277,19 @@ archive.kernel.org/epel 存档源）。配方选择全部入档：
 `payloads.lock.json` 仅在原构建机；win64 缺 Python 3.8.20；linux full
 为重型 sysroot 管线）。std 重建产物的 `qualification=pending` 与实机
 旅程边界同 Windows std。
+
+### win32 full 随当前源码装配（D-079，10-01 深夜续）
+
+按 D-079 三档信任分级取得外部件后，补齐 win32 full 最后一席：
+
+| 步骤 | 结果 |
+| --- | --- |
+| 外部件 | PortableGit-2.10.0-32-bit 官方 SHA-256 验证通过；w64devkit-x86-2.9.0 重派生 d05b743d...；sqlite-src-3530400.zip 重派生 d18fa15a...；jq/onig/sqlite-autoconf/busybox-w32 full 锁逐项验证 |
+| 交叉构建 | jq 1.8.2（onig 静态链，初版误动态链 libwinpthread 已改 -static 重链）、sqlite3 3.53.4 与 sqldiff（src 包 tool/sqldiff.c + autoconf amalgamation + ext/misc/sqlite3_stdio）、busybox-w32 FRP-6075（mingw32_defconfig） |
+| 暂存脚本 | prepare_win32_full.py 入库 .tools/qualification（220 文件注释检查通过），合并 std 4 工具记录共 10 工具 |
+| 装配验证 | editions=PASS；10 工具 12478 文件逐摘要、入口点/许可证齐全、R73 核心、notices 形状、未授权（verify_win32_full.py） |
+| 本机冒烟 | git version 2.10.0.windows.1（cmd/git.exe 相对布局）、py34-ok OpenSSL 1.0.2k、GCC 16.1.0、GNU Make 4.4.1、jq-1.8.2、sqlite3 3.53.4 32-bit、sqldiff --help、busybox echo；std 四工具此前已过 |
+
+九包进度：**7/9**（clean 3/3、std 3/3、win32 full）。剩余 win64 full
+（Python 3.8.20）与 linux full（重型 sysroot 管线）维持登记；全部产物
+candidate-unqualified，实机旅程属 C33。

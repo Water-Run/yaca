@@ -87,6 +87,7 @@ git show 32d053e:.develope-docs/TRACKING.md
 | 2026-10-01，Linux 当前源码重建 | `out/review-20261001/linux-r73-build/`、`editions/linux/` | 真实 CentOS 7 用户态（Docker，GCC 4.8.5/glibc 2.17 官方包）内未修改脚本构建 PASS；suite 698/698、冒烟、ELF/GLIBC 基线断言通过；单文件 `d06ec961...`；Linux clean 版位装配并验证（build-summary.txt、verify_linux_clean.py）；容器共享宿主内核边界已记录 |
 | 2026-10-01，Windows std 复现装配 | `out/review-20261001/tool-cache/`、`editions/win32-std/`、`editions/win64-std/`、`std-smoke/` | 七锁定源下载验 SHA、msi_inventory 本机产 TSV、原样 std 脚本双目标 staging=PASS、两席装配 4 工具/3016/3015 文件逐摘要验证；本机冒烟 Python/plink/curl/7za 通过（fetch_std_sources.py、verify_std_editions.py）；工具资格 pending，摘要与原构建机不同的边界已记录 |
 | 2026-10-01，linux std 复现装配 | `out/review-20261001/linux-std-build/`、`linux-std-staged/`、`editions/linux-std/` | C7 容器内按 prepare 契约重建配方（python2 系统库基线、putty+cmake3、7zz 用 make4.4.1+devtoolset-11、curl 复用核心静态件）；staging=PASS、装配 4 工具/4511 文件逐摘要验证；C7 容器副本冒烟四工具通过（verify_linux_std.py、linux-std-*-entry.sh）；配方选择与 .pyc mtime 教训入档 |
+| 2026-10-01，win32 full 装配（D-079） | `out/review-20261001/full-cache/`、`full-smoke/`、`editions/win32-full/` | PortableGit 官方哈希验证、w64devkit/sqlite-src 重派生 pin；jq/sqlite3/sqldiff/busybox-w32 交叉构建；prepare_win32_full.py 入库；10 工具 12478 文件装配验证+全工具冒烟（verify_win32_full.py）；重派生 pin 待原构建机记录确认 |
 | `709aa85`，XP 收尾复验 | `out/xp-closeout-20260928/` | 当前 Lua suite 670/670、同一当前 native 编码/故障探针通过；输入快照与 SHA-256 保留 |
 | 原生字节偏移 | `out/seek-qualification-20260928/` | 12 个偏移、负值/关闭拒绝、身份一致性；Linux/Wine/XP NTFS/FAT32 |
 | R48，文件读取资源 | `out/native-io-review-20260928/` | 旧实现五个缓冲泄漏位置；新 Lua 缓冲、分配故障、同句柄恢复及 OS 读取错误路径 |
