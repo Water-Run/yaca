@@ -1,11 +1,14 @@
 # 当前状态
 
-更新日期：2026-10-01。本轮基于与 `origin/main` 一致的 `9188a2e` 推进两批人工
+更新日期：2026-10-01。本轮基于与 `origin/main` 一致的 `9188a2e` 推进三批人工
 语义 Review：fs/textcodec/process 错误与资源收尾及 tools 写发布路径（无缺陷，
 探针 36/36）；model/runtime/session/context 的发布与恢复边界（发现并修复 R73
-跨端口边界缺陷）。完整 suite **698/698**、注释 219 文件 / 5266 声明 / 0 缺项、
-四校验器与完整 coding readiness 链（TP-003/006/008/010、RP-001）PASS。两个
-Windows 核心已随 R73 源码刷新并在本机 Stage 1 通过。证据见
+跨端口边界缺陷）；剩余命名模块（safety/permission/path/json/prompt/xml/tui/
+config/cli 全册、main 抽检，无缺陷）。完整 suite **698/698**、注释 219 文件 /
+5266 声明 / 0 缺项、四校验器与完整 coding readiness 链（TP-003/006/008/010、
+RP-001）PASS。两个 Windows 核心已随 R73 源码刷新并在本机 Stage 1 通过；两
+Windows 打包路径的 notices 归档已按 [D-078](DECISIONS.md#d-078-notices-归档统一为装配布局2026-10-01)
+统一为装配布局。证据见
 [10 月 1 日 Review](CODE-REVIEW-2026-10-01.md)。9 月 30 日轮修复附带软件
 索引及内核取消、超时、失败回执和 Ask 关闭路径，提交脉络见
 [开发历程](DEVELOPMENT-HISTORY.md)，证据见
@@ -95,18 +98,20 @@ Linux / 本机 Win64 / Server 2008 Win32 最终原生故障探针均 0 句柄/�
 suite 增至 678 项；本轮为 697 项。目标端旧 670 项对应早期源码，不能写成已覆盖
 后续附带软件修复。详细记录见[目标及工具批次](CODE-REVIEW-2026-09-28.md)。
 
-人工语义 Review 已记录 R01--R72 各批、附带软件特性、index.lua、network.lua 的
+人工语义 Review 已记录 R01--R73 各批、附带软件特性、index.lua、network.lua 的
 SSE 子面、compact.lua 的断路器/恢复子面、terminal.lua，以及 10 月 1 日
-fs/textcodec/process 的错误与资源收尾、tools 写发布路径（无缺陷，探针 36/36）
-和 model/runtime/session/context 的发布与恢复边界（R73 修复）。子面通过不代表
-所在整个模块通过，cli/main/tui/config/json/xml/path/safety/prompt/permission
-等模块仍须继续审查。
+fs/textcodec/process 的错误与资源收尾、tools 写发布路径（无缺陷，探针 36/36）、
+model/runtime/session/context 的发布与恢复边界（R73 修复）和剩余命名模块
+（safety/permission/path/json/prompt/xml/tui/config/cli 全册、main 布局与准入
+抽检，无缺陷）。子面通过不代表所在整个模块通过；main.lua 13.5k 全册通读与
+ini/diagnostics/compact/network 剩余子面、text/clock/platform/backend 及测试
+辅助代码仍须继续审查。
 
 ## 当前剩余与边界
 
-- 继续全仓人工语义 Review：端口层四模块与 model/runtime/session/context 的
-  发布/恢复边界已收口，余 cli/main/tui/config/json/xml/path/safety/prompt/
-  permission 等；随后进入三目标统一重建与目标回归。
+- 继续全仓人工语义 Review：余 main.lua 全册、ini/diagnostics/compact/network
+  剩余子面及 text/clock/platform/backend、测试辅助代码；随后进入三目标统一
+  重建与目标回归。
 - Python 3.4.10 已源码构建并在 Server 2008 验证；Windows 两个 full 的其余完整闭包及最终装配、Python 3.8.20 构建、Linux Git 传输能力仍待收口。VS2019 候选下载清单的整体 SHA/大小与 channel 不一致，保留失败证据，未把该清单记为已验证。
 - 按 D-077 核对兼容源码、ABI 和导入闭包；用已有指定实机补相应运行证据。
 - A08/A09 已有 CentOS 7 离线大文件证据；旧终端、轮转/截断和真实模型续页旅程仍待补齐。

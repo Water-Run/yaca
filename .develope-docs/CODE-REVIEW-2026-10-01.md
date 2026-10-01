@@ -4,7 +4,8 @@
 按 [TRACKING](TRACKING.md) P0 队列推进人工语义 Review，本轮不改变产品源码、配置或发布门。
 承接 [R55--R72](KERNEL-REVIEW-2026-09-30.md)；R01--R53 各批继续适用其记录范围。
 同日下午续推 model/runtime/session/context 的发布与恢复边界并发现 R73，
-两个 Windows 核心随源码修复刷新；见文末第二批记录。
+两个 Windows 核心随源码修复刷新；随后完成剩余命名模块的语义 Review 并按
+D-078 收敛 notices 布局；见文末第二、三批记录。
 
 ## 范围与方法
 
@@ -101,3 +102,36 @@ Server 2008 目标端 Stage 1 与 Linux 当前源码重建（`build_linux_x86_64
 
 以上结论覆盖列出子面；全仓语义 Review 剩余 cli/main/tui/config/json/xml/
 path/safety/prompt/permission 等模块未整册核对。发行资格与 Gate R 维持关闭。
+
+## 第三批：剩余命名模块语义 Review 与 C33 notices 布局收敛
+
+按队列核对 TRACKING 点名的剩余模块，方法为整册通读加与既有测试/证明的
+交叉引用；本批未发现缺陷，无新增 R 编号。
+
+| 模块 | 核对内容 | 结论与既有证据 |
+| --- | --- | --- |
+| safety.lua | 流式摘要句柄收尾、绑定编码的无歧义长度前缀、秘密注册表的按目的地揭示、流扫描器跨块重叠（最长模式-1 的保留尾）与新观察边界去重 | 跨块匹配的数学关系逐步推演成立；TP-006 的 scanner 统计即该扫描器的真实注入证据 |
+| permission.lua | 能力 rank 取最严、审查只升不降且 blocked 粘性、审批快照绑定摘要/操作/调用三重身份、单次消费、历史审批仅审计 | 与 R55--R67 的审查者语义一致 |
+| path.lua | 三根（posix/drive/UNC）解析与 `..` 底线、逻辑路径规范性、`from_logical` 对 `\`/`:` 段的拒绝、整段式 `is_within_root`、Context 名控制字符拒绝 | UNC/驱动器往返与折叠比较已有 path_test 覆盖 |
+| json.lua | RFC 8259 数单词法、`\u` 代理对的字节级索引推进、控制字节与重复键拒绝、深度/节点/字节预算、写端 active 标记全错误路径清理、减法式上限防溢出 | 代理对与控制转义有 json_test 专项用例 |
+| prompt.lua | 构造时以注入摘要端口验证固定控制契约摘要、四类 authority 分层、review 场景把层内容降为 quoted-data、组件 NUL 分隔清单 | 控制契约摘要与 wire 清单的绑定方式自洽 |
+| xml.lua | 读端禁 PI/DTD/实体/外部实体的安全回调面、全部结构上限、abort 后首错优先；写端事件配额与读端对称、多根/序号/关闭名校验 | unit/xml 的 12 组安全与限额用例覆盖 |
+| tui.lua | 铬层仿冒前缀保护、Unicode 隐藏控制可见化、append-only 序列、输出不确定即 fault | tui_renderer_test 覆盖渲染面 |
+| config.lua | 草稿不可变链、编辑/新增/改名/移动的全代复验、`write_temporary`/`verify_temporary` 的对象绑定清理、`commit_draft` 的准入守卫前后复核与 Unknown 不猜删 | 与 context store 同一发布纪律 |
+| cli.lua | argv 的 end-of-options、单主命令、命名值禁选项前缀、行命令引号转义、布尔仅末位、非 TTY 确认需 `--yes` | cli_parser_test 覆盖解析面 |
+| main.lua | 运行时根仅来自可执行文件身份（不取 cwd/PATH）、外内可执行必须不同、Windows 折叠比较；组合根其余接线由集成测试面覆盖 | bootstrap/first_run/production_agent_composition 集成套件；13.5k 全册人工通读仍留待后续批次，如实记录 |
+
+### C33 notices 布局收敛（D-078）
+
+按 [D-078](DECISIONS.md#d-078-notices-归档统一为装配布局2026-10-01) 把
+`windows_package.py` 的 notices 归档改为装配布局：companion 全部成员置于
+`core/` 下，根级新增与 `package_editions.py` 逐字段同构的 `edition.json`
+（`yaca-edition-v1`、clean、`release_authorized=false`）与 `SBOM.spdx.json`。
+两个 Windows 目标已重打包；资格与装配两路径的 notices 成员名集合逐项一致
+（**16=16**），edition/SBOM 结构一致，验证脚本 `verify_notices_shape.py`
+输出 `notices-shape=CONVERGED`。载荷 zip、源码包与既有装配证据不受影响；
+装配单测 **5/5**、注释 **219 文件 / 5266 声明 / 0 缺项**、四校验器与完整
+suite **698/698** 复跑通过（`verify-r2.log`）。
+
+九包的最终干净机旅程仍按 TRACKING P1 队列执行；本批只收敛形状，不宣称
+发行资格。发行资格与 Gate R 维持关闭。

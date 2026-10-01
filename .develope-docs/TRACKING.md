@@ -7,7 +7,16 @@
 
 ## 本轮已收口
 
-10 月 1 日按队列收口人工语义 Review 两批：fs/textcodec/process 的错误与资源
+10 月 1 日第三批按队列收口剩余命名模块（safety/permission/path/json/prompt/
+xml/tui/config/cli 全册、main 布局与准入抽检）的人工语义 Review，无缺陷；
+微妙推导（json 代理对、path UNC 往返、safety 流扫描器）与既有测试/TP-006
+证据交叉核实。同批按 D-078 把两条 Windows 打包路径的 notices 归档统一为
+装配布局（core/ + edition.json + SBOM.spdx.json），两路径成员集合 16=16
+逐项一致；两目标重打包后装配单测 5/5、注释 219/5266/0、四校验器与完整
+suite 698/698 复跑通过。证据见
+[10 月 1 日 Review 第三批](CODE-REVIEW-2026-10-01.md)。
+
+此前两批：10 月 1 日按队列收口人工语义 Review 两批：fs/textcodec/process 的错误与资源
 收尾、tools 的读写/写发布路径（无缺陷，探针 36/36），以及
 model/runtime/session/context 的发布与恢复边界。后者发现 R73：model 活动
 队列上限未与适配器响应事件上限绑定（组合根 16386 = 16384+2 只靠魔法数字
@@ -39,13 +48,13 @@ Win32/Win64 单文件及 clean 已以本轮源码刷新；普通用户 NTFS meta
 
 | 优先级 / 任务 | 剩余工作 | 依赖与完成条件 |
 | --- | --- | --- |
-| P0 · D-075/D-076、F4/F5 | 继续人工语义 Review：核对 cli/main/tui/config/json/xml/path/safety/prompt/permission 等剩余模块（端口层四模块与 model/runtime/session/context 的发布/恢复边界已于 10-01 收口，R73 已修复） | 可直接推进。按实际缺陷修补；每个范围记录人工结论和反例，更新注释及相关契约；结构覆盖不代替语义审核 |
+| P0 · D-075/D-076、F4/F5 | 继续人工语义 Review：核对 main.lua 全册通读与 ini/diagnostics/compact/network 剩余子面、text/clock/platform/backend 及测试辅助代码（端口层四模块、model/runtime/session/context 发布/恢复边界及 cli/tui/config/json/xml/path/safety/prompt/permission 已于 10-01 收口，除 R73 外无缺陷） | 可直接推进。按实际缺陷修补；每个范围记录人工结论和反例，更新注释及相关契约；结构覆盖不代替语义审核 |
 | P0 · F4、C32 | 刷新 Linux 当前源码产物；继续核对统一源码/ABI 与最终布局 | Windows 两核心已随 R73 刷新并本机 Stage 1 通过；win32 的 Server 2008 目标端复跑待补。Linux 重建被构建机条件阻塞：`build_linux_x86_64.sh` 硬性要求真实 CentOS 7 / glibc 2.17 / GCC 4.8.5，本工作区不满足，未放宽检查 |
 | P0 · F3、C33 | 完成 win32/win64 full 的 Python 源码构建与闭包，装配缺少的两个候选包；收口 Linux Git HTTP/HTTPS 传输能力 | Windows 工具链、运行库与目标兼容证明就绪；不把旧 Python 安装包改版本。Linux Git 当前 NO_CURL=1，须补传输依赖并做受控远程操作，或明确形成与工具清单一致的能力决定 |
 | P1 · F2/F4、C32 | 在此前提供的实机补中文/损坏编码输出、取消/进程树、发布/恢复证据 | 按 D-077 使用指定环境；Win7 fs-open 旧 VM 五轮失败保留为历史，不阻断本次收尾 |
 | P1 · A08/A09 | 在已有 2.3 GiB 离线旅程上补轮转/截断、旧代码页输出与模型使用续页 | 当前重建产物及显式联网条件就绪；检查增长/换文件的错误与续页行为，不重复宣称离线用例证明真实模型使用 |
 | P1 · C33 | 最终三平台 clean/std/full 共九包完整干净机旅程 | 以最终 zip 字节验收布局、零表面、同平台核心一致、移除 tools 后核心/Lua、首次配置、Ask/工具、多轮恢复、移动/升级/卸载 |
-| P1 · C33 布局 | 收敛两条 Windows 打包路径的 notices 布局 | `.tools/qualification/windows_package.py` 把 notices 放在归档根（14 项），`.tools/package_editions.py` 放在 `core/` 下并附 `edition.json` 与 edition SBOM（16 项）；载荷同源但形状不同，先定唯一布局，再让九包与干净机旅程按同一形状验收 |
+| P1 · C33 布局 | ~~收敛两条 Windows 打包路径的 notices 布局~~ 已按 [D-078](DECISIONS.md#d-078-notices-归档统一为装配布局2026-10-01) 收敛为装配布局（core/ + edition.json + SBOM），两路径成员集合 16=16 一致；见[10-01 Review 第三批](CODE-REVIEW-2026-10-01.md#第三批剩余命名模块语义-review-与-c33-notices-布局收敛) | 后续九包干净机旅程按该唯一形状验收 |
 | P2 · C34 | 汇总最终证据并复核公开文档与发布门 | 每包 SHA-256、许可证、SBOM、构建/测试摘要对应精确字节；C32/C33/C34 满足后再用独立可审计提交评审 Gate R |
 
 每轮实现按“发现反例 → 窄修复 → 专项回归 → 完整 suite/相应检查 → 人工核对

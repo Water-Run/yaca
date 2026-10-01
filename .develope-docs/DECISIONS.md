@@ -1,6 +1,6 @@
 # 决策日志
 
-更新日期：2026-09-22
+更新日期：2026-10-01
 
 > 注：D-059 起为规格冻结问答（`SPEC-FREEZE-QUEUE.md`）归档。
 
@@ -1042,3 +1042,23 @@ v0.1 对 Context 持久化格式的 **对外产品承诺** 如下（修订此前
    未构建的 Windows full 已存在，也不降低既定工具版本或扩大产品功能。
 4. 内核分析、缺陷、反例和实际验证记录在本轮 Review；上述后续指示覆盖旧资料中
    要求本次重跑完整旧系统实机矩阵的执行安排，不重新向负责人询问同一范围。
+
+## D-078 notices 归档统一为装配布局（2026-10-01）
+
+状态：已确认
+
+TRACKING 的 C33 布局项要求“先定唯一布局，再让九包与干净机旅程按同一形状验收”。
+两条 Windows 打包路径此前形状不同：资格路径（`windows_package.py`）把 companion
+文件平铺在归档根（14 项），装配路径（`package_editions.py`）放在 `core/` 下并在
+根附 `edition.json` 与 `SBOM.spdx.json`（16 项）。决定统一采用装配布局：
+
+1. 最终九包由 `package_editions.py` 装配，C33 的最终旅程按其 zip 字节验收；
+   资格旅程必须验证与发行一致的形状，而不是引入第二种形状再映射。
+2. 根级 `edition.json`（`yaca-edition-v1`）与 `SBOM.spdx.json` 是 C34 逐包
+   SHA-256、许可证与 SBOM 验收所需的机器可读清单；其 `sourceInfo` 本就声明
+   依赖明细在 `core/` 内，两路径互补而非重复。
+3. Linux 与既有 std/full 装配证据已按装配布局通过，收敛资格路径使既有证据
+   失效面最小。改动仅 `windows_package.py` 的 notices 归档成员；载荷 zip、
+   源码包与 SHA256SUMS 不变。`package_editions.py` 不改。
+4. 两个 Windows 目标已按新布局重打包，资格与装配两路径的 notices 归档成员
+   名集合逐项一致（16=16），验证记录在 10 月 1 日 Review。

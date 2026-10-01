@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Author: WaterRun
-# Date: 2026-09-23
+# Date: 2026-10-01
 # File: windows_package.py
 # Description: Audit and assemble a Windows preview without asserting real-target qualification.
 
@@ -196,10 +196,60 @@ def main():
             if path.is_file():
                 archive.write(path, str(path.relative_to(package)))
     notices_output = output / (artifact_prefix + "-clean-notices.zip")
+    # This preview notices archive uses the same member layout as
+    # package_editions.py: every companion byte below core/ plus edition.json
+    # and SBOM.spdx.json at the archive root. Qualification journeys and the
+    # final nine packages are then accepted against one notices shape.
+    core_digest = digest(package / "yaca.exe")
+    edition_summary = {
+        "schema": "yaca-edition-v1", "target": target, "edition": "clean",
+        "version": "0.1.0-preview", "core_sha256": core_digest,
+        "status": "candidate-unqualified", "release_authorized": False,
+        "target_qualification_complete": False, "tools": [],
+        "files": [{"destination": "yaca.exe", "sha256": core_digest, "executable": True}]
+        + [{"destination": "core/" + path.relative_to(companion).as_posix(),
+            "sha256": digest(path), "executable": False}
+           for path in sorted(companion.rglob("*")) if path.is_file()],
+        "archive_sha256": digest(zip_output),
+    }
+    # Mirrors package_editions.edition_sbom for the clean payload; core
+    # dependency detail stays in the companion SBOM under core/docs/.
+    edition_relationships = [
+        {"spdxElementId": "SPDXRef-DOCUMENT", "relationshipType": "DESCRIBES",
+         "relatedSpdxElement": "SPDXRef-yaca"},
+        {"spdxElementId": "SPDXRef-DOCUMENT", "relationshipType": "DESCRIBES",
+         "relatedSpdxElement": "SPDXRef-file-0"},
+    ]
+    edition_sbom = {
+        "spdxVersion": "SPDX-2.3", "dataLicense": "CC0-1.0", "SPDXID": "SPDXRef-DOCUMENT",
+        "name": "yaca " + target + " clean candidate payloads",
+        "documentNamespace": "https://github.com/Water-Run/yaca/editions/"
+            + edition_summary["archive_sha256"],
+        "creationInfo": {"creators": ["Tool: yaca-windows-candidate-builder"],
+                         "created": "2026-10-01T00:00:00Z"},
+        "packages": [{
+            "SPDXID": "SPDXRef-yaca", "name": "yaca", "versionInfo": "0.1.0-preview",
+            "downloadLocation": "NOASSERTION", "filesAnalyzed": False,
+            "licenseConcluded": "NOASSERTION", "licenseDeclared": "GPL-3.0-only",
+            "copyrightText": "NOASSERTION",
+            "checksums": [{"algorithm": "SHA256", "checksumValue": core_digest}],
+            "sourceInfo": "Core runtime binary. See core/ for dependency SBOM, "
+                "notices and source references.",
+        }],
+        "files": [{
+            "SPDXID": "SPDXRef-file-0", "fileName": "./yaca.exe",
+            "checksums": [{"algorithm": "SHA256", "checksumValue": core_digest}],
+            "licenseConcluded": "NOASSERTION", "licenseInfoInFiles": ["NOASSERTION"],
+            "copyrightText": "NOASSERTION",
+        }],
+        "relationships": edition_relationships,
+    }
     with zipfile.ZipFile(notices_output, "w", zipfile.ZIP_DEFLATED) as archive:
         for path in sorted(companion.rglob("*")):
             if path.is_file():
-                archive.write(path, str(path.relative_to(companion)))
+                archive.write(path, "core/" + path.relative_to(companion).as_posix())
+        archive.writestr("edition.json", json.dumps(edition_summary, indent=2) + "\n")
+        archive.writestr("SBOM.spdx.json", json.dumps(edition_sbom, indent=2) + "\n")
     (output / "SHA256SUMS.txt").write_text(
         "".join(f"{digest(path)}  {path.name}\n" for path in (zip_output, source_output, notices_output))
     )
