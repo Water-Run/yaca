@@ -24,6 +24,7 @@
 | 2026-09-28，进程输出投影 | `709aa85` 转换器失败和损坏 UTF-16 使用原字节 Base64 与诊断，保留命令真实完成状态；UTF-8 标签与实际相符 | [R46--R47](CODE-REVIEW-2026-09-28.md#r46--r47-进程输出与执行结果)；32 组故障/恢复、脱敏回归、开发机与 XP 完整 670/670 |
 | 2026-09-28，文件读取资源与 seek | `5384b8e` 的 fs_read 由 Lua 持有缓冲；新增分配故障和原生字节偏移探针 | [R48 与 seek](CODE-REVIEW-2026-09-28.md#原生-seek-与-r48-文件读取资源)；Linux/Wine/XP 故障恢复与 XP NTFS/FAT32 边界读取；完整 670/670、readiness 通过 |
 | 2026-10-01，语义 Review 续推 | 基于 `9188a2e`（与 origin 一致）完成 fs/textcodec/process 错误与资源收尾及 tools 写发布路径人工核对，无缺陷、源码未改；探针 36/36、完整 suite 697/697 | [10-01 Review](CODE-REVIEW-2026-10-01.md)；仅覆盖当日核对子面，不代表全仓 Review 或发行资格完成 |
+| 2026-10-01，R73 与内核边界续推 | model/runtime/session/context 发布与恢复边界人工核对；修复 R73（model 活动队列上限未绑定适配器事件上限，终态批量可悬挂）；两 Windows 核心随源码再刷新并本机 Stage 1 通过 | [10-01 Review 第二批](CODE-REVIEW-2026-10-01.md#第二批model--runtime--session--context-的发布与恢复边界r73)；suite 698/698、完整 readiness 链 PASS；Linux 重建仍待 CentOS 7 构建机 |
 
 ## 如何解释旧结论
 
@@ -77,6 +78,7 @@ git show 32d053e:.develope-docs/TRACKING.md
 | R45，编码名称边界 | `out/codec-alias-20260928/` | 系统 iconv 差异、规范化修复前反例、667/667 与 readiness |
 | R46--R47，进程输出投影 | `out/exec-projection-20260928/` | 旧实现重放反例、32 组故障/恢复、UTF-16/UTF-8 与脱敏回归、670/670 |
 | 2026-10-01，fs/textcodec/process 与 tools 写侧 Review | `out/review-20261001/` | 专项探针 36/36（probe-run.log）、完整 suite 697/697（full-suite.log）；探针脚本随日志保留 |
+| 2026-10-01，R73 修复与核心刷新 | `out/review-20261001/` | R73 修复前后专项（r73-focused.log 前身见 stash 验证）、完整 suite 698/698（full-suite-r73.log）、注释与四校验器、完整 readiness 链（readiness-full.log）、双核心刷新与 Stage 1（windows-refresh-r73.log、win64-stage1-r73.log、win32-stage1-r73.log） |
 | `709aa85`，XP 收尾复验 | `out/xp-closeout-20260928/` | 当前 Lua suite 670/670、同一当前 native 编码/故障探针通过；输入快照与 SHA-256 保留 |
 | 原生字节偏移 | `out/seek-qualification-20260928/` | 12 个偏移、负值/关闭拒绝、身份一致性；Linux/Wine/XP NTFS/FAT32 |
 | R48，文件读取资源 | `out/native-io-review-20260928/` | 旧实现五个缓冲泄漏位置；新 Lua 缓冲、分配故障、同句柄恢复及 OS 读取错误路径 |

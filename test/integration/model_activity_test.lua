@@ -690,5 +690,75 @@ return {
                 end
             end,
         },
+        {
+            name = "queue admission requires room for one terminal adapter burst",
+            --Verifies the activity queue must hold the adapter's declared event
+            --cap plus the canonical marker and terminal wrapper.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify the queue admission bound.
+            run = function()
+                local cache = {}
+                local model = load_module("model", cache)
+                local adapter = assert(model.new(adapter_limits()))
+                local declared = adapter.limits.maximum_events
+                local transport = {
+                    --Supplies unused attempt behavior for the admission case.
+                    --@param none No arguments; construction never starts an attempt.
+                    --@return nil Does not return; start is never called here.
+                    new_attempt = function() error("unused", 2) end,
+                    --Supplies unused retry controller behavior for the admission case.
+                    --@param none No arguments; construction never starts a request.
+                    --@return nil Does not return; start is never called here.
+                    new_retry_controller = function() error("unused", 2) end,
+                    --Supplies unused header parsing behavior for the admission case.
+                    --@param none No arguments; no response is parsed here.
+                    --@return nil Does not return; no attempt runs here.
+                    parse_http_headers = function() error("unused", 2) end,
+                    --Supplies unused single header behavior for the admission case.
+                    --@param none No arguments; no response is read here.
+                    --@return nil Does not return; no attempt runs here.
+                    single_header = function() error("unused", 2) end,
+                    --Supplies unused retry-after behavior for the admission case.
+                    --@param none No arguments; no retry is scheduled here.
+                    --@return nil Does not return; no attempt runs here.
+                    parse_retry_after = function() error("unused", 2) end,
+                }
+                --Builds one activity port and options bundle for a queue cap.
+                --@param queue_cap integer Maximum queued events admitted by the case.
+                --@return table ports Construction-time ports with no runtime behavior.
+                --@return table options Activity options carrying the queue cap.
+                local function ports_for(queue_cap)
+                    local options = activity_options()
+                    options.maximum_queued_events = queue_cap
+                    return {
+                        adapter = adapter,
+                        transport = transport,
+                        safety = { digest = sha256.hex },
+                        clock = {
+                            --Supplies fixed monotonic clock behavior for the admission case.
+                            --@param none No arguments; construction reads no clock.
+                            --@return integer tick Fixed zero tick for the case.
+                            monotonic_now = function() return 0 end,
+                            --Supplies fixed UTC clock behavior for the admission case.
+                            --@param none No arguments; construction reads no clock.
+                            --@return string text Fixed UTC timestamp for the case.
+                            utc_now = function() return "2026-10-01T00:00:00Z" end,
+                        },
+                        requests = {
+                            --Supplies unused request preparation for the admission case.
+                            --@param none No arguments; no request is started here.
+                            --@return nil Does not return; start is never called here.
+                            prepare = function() error("unused", 2) end,
+                        },
+                    }, options
+                end
+                local refused_ports, refused_options = ports_for(declared + 1)
+                local refused, refusal = model.new_activity(refused_ports, refused_options)
+                A.equal(refused, nil)
+                A.equal(refusal.code, "InvalidModelActivityOptions")
+                local tight_ports, tight_options = ports_for(declared + 2)
+                A.truthy(model.new_activity(tight_ports, tight_options))
+            end,
+        },
     },
 }

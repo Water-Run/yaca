@@ -1,9 +1,12 @@
 # 当前状态
 
-更新日期：2026-10-01。本地 `main` 与 `origin/main` 一致于 `9188a2e`，工作区干净。
-本轮按队列完成 fs/textcodec/process 错误与资源收尾及 tools 写发布路径的
-人工语义 Review：未发现缺陷、未修改产品源码，专项探针 36/36、完整 suite 697/697，
-证据见 [10 月 1 日 Review](CODE-REVIEW-2026-10-01.md)。9 月 30 日轮修复附带软件
+更新日期：2026-10-01。本轮基于与 `origin/main` 一致的 `9188a2e` 推进两批人工
+语义 Review：fs/textcodec/process 错误与资源收尾及 tools 写发布路径（无缺陷，
+探针 36/36）；model/runtime/session/context 的发布与恢复边界（发现并修复 R73
+跨端口边界缺陷）。完整 suite **698/698**、注释 219 文件 / 5266 声明 / 0 缺项、
+四校验器与完整 coding readiness 链（TP-003/006/008/010、RP-001）PASS。两个
+Windows 核心已随 R73 源码刷新并在本机 Stage 1 通过。证据见
+[10 月 1 日 Review](CODE-REVIEW-2026-10-01.md)。9 月 30 日轮修复附带软件
 索引及内核取消、超时、失败回执和 Ask 关闭路径，提交脉络见
 [开发历程](DEVELOPMENT-HISTORY.md)，证据见
 [9 月 30 日复核](CODE-REVIEW-2026-09-30.md)与[内核审查](KERNEL-REVIEW-2026-09-30.md)。
@@ -57,6 +60,11 @@ Win32 SHA-256 为 `857680865d91c0a8cbc7f1540717c8c51631392a8cf018913b3b60150cca0
 Win64 为 `a75a106cfecd7a3b053f0e895baf39bb7ea169655530868bbdab86f3fadb72f3`。
 Win64 本机 Stage 1 也是 12 PASSED / 0 FAILED，实际 inherited DACL、长名称
 rename/replace/delete 与 XML smoke 通过；Server 2008 刷新后的 Stage 1 再通过。
+10 月 1 日 R73 修复 `model.lua` 后两个核心按同一流程再刷新：Win32
+`52e9dcb260c24c05ff03de6611c7b18150caa4506423f6149bcffe3225fbfdea`、Win64
+`ce92edcfe77986b6aa6ddeb383a614399fed9841d532ed8c3db013dd8de5b478`，本机
+Stage 1 各 12 PASSED / 0 FAILED；上两个摘要保留为上一源码代的证据，win32 的
+Server 2008 目标端复跑仍待补。
 Linux / 本机 Win64 / Server 2008 Win32 最终原生故障探针均 0 句柄/缓冲泄漏，
 编码资源、严格 Unicode 与同状态恢复通过，原始结果在内核审查中分别记录。
 本轮不补 XP/Win7/CentOS 7 的实机矩阵，未执行模型联网旅程。
@@ -87,15 +95,18 @@ Linux / 本机 Win64 / Server 2008 Win32 最终原生故障探针均 0 句柄/�
 suite 增至 678 项；本轮为 697 项。目标端旧 670 项对应早期源码，不能写成已覆盖
 后续附带软件修复。详细记录见[目标及工具批次](CODE-REVIEW-2026-09-28.md)。
 
-人工语义 Review 已记录 R01--R50 各批、附带软件特性、index.lua、network.lua 的
+人工语义 Review 已记录 R01--R72 各批、附带软件特性、index.lua、network.lua 的
 SSE 子面、compact.lua 的断路器/恢复子面、terminal.lua，以及 10 月 1 日
-fs/textcodec/process 的错误与资源收尾和 tools 读写/写发布路径（无缺陷，探针
-36/36）。子面通过不代表所在整个模块通过，其余源码仍须继续审查。
+fs/textcodec/process 的错误与资源收尾、tools 写发布路径（无缺陷，探针 36/36）
+和 model/runtime/session/context 的发布与恢复边界（R73 修复）。子面通过不代表
+所在整个模块通过，cli/main/tui/config/json/xml/path/safety/prompt/permission
+等模块仍须继续审查。
 
 ## 当前剩余与边界
 
-- 继续全仓人工语义 Review：fs/textcodec/process 与 tools 读写已收口，余
-  model/runtime/session/context 的发布与恢复边界；随后进入三目标统一重建与目标回归。
+- 继续全仓人工语义 Review：端口层四模块与 model/runtime/session/context 的
+  发布/恢复边界已收口，余 cli/main/tui/config/json/xml/path/safety/prompt/
+  permission 等；随后进入三目标统一重建与目标回归。
 - Python 3.4.10 已源码构建并在 Server 2008 验证；Windows 两个 full 的其余完整闭包及最终装配、Python 3.8.20 构建、Linux Git 传输能力仍待收口。VS2019 候选下载清单的整体 SHA/大小与 channel 不一致，保留失败证据，未把该清单记为已验证。
 - 按 D-077 核对兼容源码、ABI 和导入闭包；用已有指定实机补相应运行证据。
 - A08/A09 已有 CentOS 7 离线大文件证据；旧终端、轮转/截断和真实模型续页旅程仍待补齐。

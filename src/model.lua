@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-10-01
 File: model.lua
 Description: Maps bounded OpenAI Chat and Anthropic Messages wire data to canonical model events.
 ]]
@@ -4191,6 +4191,22 @@ function M.new_activity(ports, options)
     if not admitted_ports then return nil, ports_error end
     local admitted, options_error = validate_activity_options(options)
     if not admitted then return nil, options_error end
+    -- One terminal Provider response queues at most the response session's
+    -- declared event cap plus the canonical marker and the terminal wrapper.
+    -- A queue below that bound could reject the single terminal burst and
+    -- strand a closed attempt in a non-terminal activity, so the declared
+    -- adapter limits are checked here instead of relying on matched constants
+    -- at the composition root.  Ports without declared limits keep working.
+    local adapter_limits = admitted_ports.adapter.limits
+    if type(adapter_limits) == "table"
+        and valid_integer(adapter_limits.maximum_events, 1)
+        and adapter_limits.maximum_events + 2 > admitted.maximum_queued_events
+    then
+        return nil, failure(
+            "InvalidModelActivityOptions",
+            "model activity queue cannot hold one terminal adapter event burst"
+        )
+    end
     local active
     local activity_serial = 0
     local last_now

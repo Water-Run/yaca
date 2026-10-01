@@ -7,9 +7,16 @@
 
 ## 本轮已收口
 
-10 月 1 日按队列收口人工语义 Review 第一、二批：fs/textcodec/process 的错误与
-资源收尾及 tools 的读写/写发布路径。基于 `9188a2e` 通读加故障注入探针核对，
-未发现缺陷、未修改产品源码；探针 36/36，同工作区完整 suite 697/697。证据见
+10 月 1 日按队列收口人工语义 Review 两批：fs/textcodec/process 的错误与资源
+收尾、tools 的读写/写发布路径（无缺陷，探针 36/36），以及
+model/runtime/session/context 的发布与恢复边界。后者发现 R73：model 活动
+队列上限未与适配器响应事件上限绑定（组合根 16386 = 16384+2 只靠魔法数字
+维持），终态批量入队失败会使活动悬挂；修复为 `new_activity` 入场校验
+`maximum_events + 2 ≤ maximum_queued_events`，专项修复前反例失败、修复后
+6/6。完整 suite **698/698**、注释 **219 文件 / 5266 声明 / 0 缺项**、四校验器
+与完整 readiness 链（TP-003 453、TP-006 319、TP-008 321、TP-010 5,564,743、
+RP-001）PASS。两个 Windows 核心已随 R73 源码刷新（Win32 `52e9dcb2...`、
+Win64 `ce92edcf...`），本机 Stage 1 各 12 PASSED / 0 FAILED。证据见
 [10 月 1 日 Review](CODE-REVIEW-2026-10-01.md)。
 
 此前内核取消、超时、转向、失败回执及 Ask 关闭已收口；索引读取和 UTF-8/BOM 边界
@@ -32,8 +39,8 @@ Win32/Win64 单文件及 clean 已以本轮源码刷新；普通用户 NTFS meta
 
 | 优先级 / 任务 | 剩余工作 | 依赖与完成条件 |
 | --- | --- | --- |
-| P0 · D-075/D-076、F4/F5 | 继续人工语义 Review：核对 model/runtime/session/context 的发布与恢复边界（fs/textcodec/process 错误与资源收尾、tools 读写/续页已于 10-01 收口，无缺陷） | 可直接推进。按实际缺陷修补；每个范围记录人工结论和反例，更新注释及相关契约；结构覆盖不代替语义审核 |
-| P0 · F4、C32 | 刷新 Linux 当前源码产物；继续核对统一源码/ABI 与最终布局 | Win32/Win64 当前产物已刷新，指定 Server 2008 当前 697 项源码通过；不把旧 670 项证据说成覆盖新代码，不再以新建旧系统实机矩阵为前置 |
+| P0 · D-075/D-076、F4/F5 | 继续人工语义 Review：核对 cli/main/tui/config/json/xml/path/safety/prompt/permission 等剩余模块（端口层四模块与 model/runtime/session/context 的发布/恢复边界已于 10-01 收口，R73 已修复） | 可直接推进。按实际缺陷修补；每个范围记录人工结论和反例，更新注释及相关契约；结构覆盖不代替语义审核 |
+| P0 · F4、C32 | 刷新 Linux 当前源码产物；继续核对统一源码/ABI 与最终布局 | Windows 两核心已随 R73 刷新并本机 Stage 1 通过；win32 的 Server 2008 目标端复跑待补。Linux 重建被构建机条件阻塞：`build_linux_x86_64.sh` 硬性要求真实 CentOS 7 / glibc 2.17 / GCC 4.8.5，本工作区不满足，未放宽检查 |
 | P0 · F3、C33 | 完成 win32/win64 full 的 Python 源码构建与闭包，装配缺少的两个候选包；收口 Linux Git HTTP/HTTPS 传输能力 | Windows 工具链、运行库与目标兼容证明就绪；不把旧 Python 安装包改版本。Linux Git 当前 NO_CURL=1，须补传输依赖并做受控远程操作，或明确形成与工具清单一致的能力决定 |
 | P1 · F2/F4、C32 | 在此前提供的实机补中文/损坏编码输出、取消/进程树、发布/恢复证据 | 按 D-077 使用指定环境；Win7 fs-open 旧 VM 五轮失败保留为历史，不阻断本次收尾 |
 | P1 · A08/A09 | 在已有 2.3 GiB 离线旅程上补轮转/截断、旧代码页输出与模型使用续页 | 当前重建产物及显式联网条件就绪；检查增长/换文件的错误与续页行为，不重复宣称离线用例证明真实模型使用 |
