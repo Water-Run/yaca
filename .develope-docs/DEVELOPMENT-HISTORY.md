@@ -26,6 +26,7 @@
 | 2026-10-01，语义 Review 续推 | 基于 `9188a2e`（与 origin 一致）完成 fs/textcodec/process 错误与资源收尾及 tools 写发布路径人工核对，无缺陷、源码未改；探针 36/36、完整 suite 697/697 | [10-01 Review](CODE-REVIEW-2026-10-01.md)；仅覆盖当日核对子面，不代表全仓 Review 或发行资格完成 |
 | 2026-10-01，R73 与内核边界续推 | model/runtime/session/context 发布与恢复边界人工核对；修复 R73（model 活动队列上限未绑定适配器事件上限，终态批量可悬挂）；两 Windows 核心随源码再刷新并本机 Stage 1 通过 | [10-01 Review 第二批](CODE-REVIEW-2026-10-01.md#第二批model--runtime--session--context-的发布与恢复边界r73)；suite 698/698、完整 readiness 链 PASS；Linux 重建仍待 CentOS 7 构建机 |
 | 2026-10-01，第三批 Review 与 D-078 | safety/permission/path/json/prompt/xml/tui/config/cli 全册与 main 抽检的人工语义 Review（无缺陷）；两 Windows 打包路径 notices 归档统一为装配布局（D-078），成员集合 16=16 一致 | [10-01 Review 第三批](CODE-REVIEW-2026-10-01.md#第三批剩余命名模块语义-review-与-c33-notices-布局收敛)、[D-078](DECISIONS.md)；装配 5/5、注释 5266/0、四校验器与 698/698 复跑通过 |
+| 2026-10-01，第四批 Review 收口 | main.lua 组合/准入/发布面整读、协调器准入与关闭次序整读；text/clock/platform/backend 全册、ini 解析核、diagnostics 脱敏面、network 重试控制器（无缺陷、源码未改）；全仓产品源码 Review 按 10-01 四批口径收口 | [10-01 Review 第四批](CODE-REVIEW-2026-10-01.md#第四批mainlua-组合根与剩余支撑模块)；main 交互事件分发内部、compact 状态机内部、原生 C 层与测试辅助代码为如实保留面 |
 
 ## 如何解释旧结论
 

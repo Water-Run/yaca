@@ -135,3 +135,24 @@ suite **698/698** 复跑通过（`verify-r2.log`）。
 
 九包的最终干净机旅程仍按 TRACKING P1 队列执行；本批只收敛形状，不宣称
 发行资格。发行资格与 Gate R 维持关闭。
+
+## 第四批：main.lua 组合根与剩余支撑模块
+
+整册推进 TRACKING 队列尾段，本批未发现缺陷、未修改源码：
+
+| 范围 | 核对内容 | 结论与既有证据 |
+| --- | --- | --- |
+| main.lua（组合/准入/发布面，1--7476 行整读） | CLI 入口的 native 白名单加载与 ABI/平台准入；应用根的请求字段白名单与生命周期；continue 的三重工作区复核与 `release_opened` 全失败路径关租约；`start_published_agent` 每条构造失败关闭草稿、目录仅空闲替换、恢复串号回填；压缩 owner 的 Runtime 回执采纳与 fail-stop；`compose_runtime` 根仅取自可执行身份、contexts 失败降级不掩错 | 发布/恢复纪律与 context/session 两层一致 |
+| main.lua（交互协调器与 REPL，7476--13502 行） | 准入端口/上限校验、`run` 恰一次、关闭次序（等 loop 至 Closing 真值→关草稿→关终端、主错误优先）、生命周期迁移点（8 处 closing→closed）整读；事件分发与渲染内部按结构级核对并由 application_coordinator/repl_input_surface/line_editor 集成面交叉 | UI 状态机内部未逐行通读，如实保留 |
+| text.lua | 严格 UTF-8 解码拒收 overlong/代理/超上限；标量编码精确；text/binary 载体弱注册；display 转义含 bidi/不可见区 | TP-010 的 1,112,064 标量与 12 类坏 UTF-8 为实测证据 |
+| clock.lua / platform.lua | 单调时钟粘性降级、deadline 溢出检查；平台探针恰一次缓存、目标匹配 | — |
+| backend_windows / backend_linux | 架构与目标绑定、固定 cmd//bin/sh 载体、secure_random ≤64 字节边界、UTC/PID 包装的异常包含 | 与 process/terminal 前批结论衔接 |
+| ini.lua（解析核） | 引号转义有界、控制字节拒绝、键绑 schema、重复键拒绝、单 BOM、具体前后缀保留供 preserve_concrete 写 | 写端由 config 编辑流“写→重解析→全 schema 校验”闭环验证；ini_test 28 项 |
+| diagnostics.lua（脱敏面） | 相邻/重叠秘密区间合并、扫描不可信时 ordinary/path 整条省略；scanner-unavailable 仅在无 ConfigGeneration（即无已注册秘密）时可达 | Stage 1--3 每日实跑为运行证据 |
+| network.lua（重试控制器） | 单活动状态机、fresh attempt ID、logical/turn/runtime 截止底线、尝试上限 2+重试+重定向、canonical 事件后禁回退/禁重放 | attempt 载体由 TP-006 真实 curl 链路实测 |
+| compact.lua | 断路器/恢复子面沿用 9 月既有结论；source/summary 编码由 `verified_compaction_projection` 的重建-摘要核对与 TP-010 字段往返锁定 | 状态机内部逐行通读仍保留 |
+
+本批无源码修改，前批 698/698、注释与四校验器结果继续绑定当前树。
+全仓产品源码的语义 Review 至此覆盖到上表口径：main.lua 交互事件分发
+内部、compact.lua 状态机内部、原生 C 层（有独立故障探针）与测试辅助
+代码为如实保留的剩余面。

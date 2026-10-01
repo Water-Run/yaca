@@ -1,10 +1,12 @@
 # 当前状态
 
-更新日期：2026-10-01。本轮基于与 `origin/main` 一致的 `9188a2e` 推进三批人工
+更新日期：2026-10-01。本轮基于与 `origin/main` 一致的 `9188a2e` 推进四批人工
 语义 Review：fs/textcodec/process 错误与资源收尾及 tools 写发布路径（无缺陷，
 探针 36/36）；model/runtime/session/context 的发布与恢复边界（发现并修复 R73
 跨端口边界缺陷）；剩余命名模块（safety/permission/path/json/prompt/xml/tui/
-config/cli 全册、main 抽检，无缺陷）。完整 suite **698/698**、注释 219 文件 /
+config/cli 全册，无缺陷）；main.lua 组合/准入/发布面整读与协调器准入/关闭
+整读、text/clock/platform/backend 全册、ini 解析核、diagnostics 脱敏面、
+network 重试控制器（无缺陷）。完整 suite **698/698**、注释 219 文件 /
 5266 声明 / 0 缺项、四校验器与完整 coding readiness 链（TP-003/006/008/010、
 RP-001）PASS。两个 Windows 核心已随 R73 源码刷新并在本机 Stage 1 通过；两
 Windows 打包路径的 notices 归档已按 [D-078](DECISIONS.md#d-078-notices-归档统一为装配布局2026-10-01)
@@ -99,19 +101,19 @@ suite 增至 678 项；本轮为 697 项。目标端旧 670 项对应早期源�
 后续附带软件修复。详细记录见[目标及工具批次](CODE-REVIEW-2026-09-28.md)。
 
 人工语义 Review 已记录 R01--R73 各批、附带软件特性、index.lua、network.lua 的
-SSE 子面、compact.lua 的断路器/恢复子面、terminal.lua，以及 10 月 1 日
-fs/textcodec/process 的错误与资源收尾、tools 写发布路径（无缺陷，探针 36/36）、
-model/runtime/session/context 的发布与恢复边界（R73 修复）和剩余命名模块
-（safety/permission/path/json/prompt/xml/tui/config/cli 全册、main 布局与准入
-抽检，无缺陷）。子面通过不代表所在整个模块通过；main.lua 13.5k 全册通读与
-ini/diagnostics/compact/network 剩余子面、text/clock/platform/backend 及测试
-辅助代码仍须继续审查。
+SSE 子面、compact.lua 的断路器/恢复子面、terminal.lua，以及 10 月 1 日四批：
+fs/textcodec/process 错误与资源收尾、tools 写发布路径（无缺陷，探针 36/36）、
+model/runtime/session/context 的发布与恢复边界（R73 修复）、剩余命名模块全册
+及 main.lua 组合/准入/发布面、text/clock/platform/backend、ini 解析核、
+diagnostics 脱敏面、network 重试控制器（无缺陷）。如实保留的剩余面：main.lua
+交互事件分发内部、compact 状态机内部逐行通读、原生 C 层（有独立探针）与
+测试辅助代码。
 
 ## 当前剩余与边界
 
-- 继续全仓人工语义 Review：余 main.lua 全册、ini/diagnostics/compact/network
-  剩余子面及 text/clock/platform/backend、测试辅助代码；随后进入三目标统一
-  重建与目标回归。
+- 全仓语义 Review 已按 10-01 四批口径收口（R73 为唯一缺陷）；剩余面按缺陷驱动
+  补读。下一步为三目标统一重建与目标回归——其中 Linux 重建与 win32 目标端
+  复跑依赖外部环境。
 - Python 3.4.10 已源码构建并在 Server 2008 验证；Windows 两个 full 的其余完整闭包及最终装配、Python 3.8.20 构建、Linux Git 传输能力仍待收口。VS2019 候选下载清单的整体 SHA/大小与 channel 不一致，保留失败证据，未把该清单记为已验证。
 - 按 D-077 核对兼容源码、ABI 和导入闭包；用已有指定实机补相应运行证据。
 - A08/A09 已有 CentOS 7 离线大文件证据；旧终端、轮转/截断和真实模型续页旅程仍待补齐。

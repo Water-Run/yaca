@@ -7,7 +7,12 @@
 
 ## 本轮已收口
 
-10 月 1 日第三批按队列收口剩余命名模块（safety/permission/path/json/prompt/
+10 月 1 日第四批收口 main.lua（组合/准入/发布面整读、交互协调器准入与
+关闭次序整读）与 text/clock/platform/backend_windows/backend_linux 全册、
+ini 解析核、diagnostics 脱敏面、network 重试控制器，无缺陷、源码未改；
+证据见[10 月 1 日 Review 第四批](CODE-REVIEW-2026-10-01.md)。
+
+此前三批：第三批按队列收口剩余命名模块（safety/permission/path/json/prompt/
 xml/tui/config/cli 全册、main 布局与准入抽检）的人工语义 Review，无缺陷；
 微妙推导（json 代理对、path UNC 往返、safety 流扫描器）与既有测试/TP-006
 证据交叉核实。同批按 D-078 把两条 Windows 打包路径的 notices 归档统一为
@@ -48,7 +53,7 @@ Win32/Win64 单文件及 clean 已以本轮源码刷新；普通用户 NTFS meta
 
 | 优先级 / 任务 | 剩余工作 | 依赖与完成条件 |
 | --- | --- | --- |
-| P0 · D-075/D-076、F4/F5 | 继续人工语义 Review：核对 main.lua 全册通读与 ini/diagnostics/compact/network 剩余子面、text/clock/platform/backend 及测试辅助代码（端口层四模块、model/runtime/session/context 发布/恢复边界及 cli/tui/config/json/xml/path/safety/prompt/permission 已于 10-01 收口，除 R73 外无缺陷） | 可直接推进。按实际缺陷修补；每个范围记录人工结论和反例，更新注释及相关契约；结构覆盖不代替语义审核 |
+| P0 · D-075/D-076、F4/F5 | ~~继续人工语义 Review~~ 10-01 四批收口：端口层四模块、model/runtime/session/context 发布/恢复边界、cli/tui/config/json/xml/path/safety/prompt/permission 全册、main.lua 组合/准入/发布面整读+协调器准入/关闭整读、text/clock/platform/backend 全册、ini 解析核、diagnostics 脱敏面、network 重试控制器；除 R73 外无缺陷 | 剩余如实保留：main.lua 交互事件分发内部、compact 状态机内部逐行通读、原生 C 层（有独立探针）、测试辅助代码；后续按缺陷驱动补读，不再作为独立批次 |
 | P0 · F4、C32 | 刷新 Linux 当前源码产物；继续核对统一源码/ABI 与最终布局 | Windows 两核心已随 R73 刷新并本机 Stage 1 通过；win32 的 Server 2008 目标端复跑待补。Linux 重建被构建机条件阻塞：`build_linux_x86_64.sh` 硬性要求真实 CentOS 7 / glibc 2.17 / GCC 4.8.5，本工作区不满足，未放宽检查 |
 | P0 · F3、C33 | 完成 win32/win64 full 的 Python 源码构建与闭包，装配缺少的两个候选包；收口 Linux Git HTTP/HTTPS 传输能力 | Windows 工具链、运行库与目标兼容证明就绪；不把旧 Python 安装包改版本。Linux Git 当前 NO_CURL=1，须补传输依赖并做受控远程操作，或明确形成与工具清单一致的能力决定 |
 | P1 · F2/F4、C32 | 在此前提供的实机补中文/损坏编码输出、取消/进程树、发布/恢复证据 | 按 D-077 使用指定环境；Win7 fs-open 旧 VM 五轮失败保留为历史，不阻断本次收尾 |
