@@ -17,7 +17,11 @@ R73 复跑：单文件 Stage 1 12 PASSED / 0 FAILED、当前源码 suite **698/6
 单文件 `d06ec9618c73aead0f90bd2d018da9cb9839da80794487ded2c8945f381b5c1c`，
 三平台 clean 版位全部绑定 `b5c0c9ff` 源码（`out/review-20261001/`）。
 Windows std 两席随后按锁定源码复现装配并本机冒烟（Python 2.7.18 /
-plink 0.85 / curl 8.21.0 / 7za 26.03，qualification=pending）。证据见
+plink 0.85 / curl 8.21.0 / 7za 26.03，qualification=pending）；linux std
+再于真实 CentOS 7 用户态按重建配方复现装配并在 C7 容器实跑冒烟
+（py2-ok OpenSSL 1.0.2k / plink 0.85 / curl 8.21.0 / 7zz 26.03）。
+**九包 clean 3/3 + std 3/3 全部绑定当前源码**；full 三席维持登记。
+证据见
 [10 月 1 日 Review](CODE-REVIEW-2026-10-01.md)。9 月 30 日轮修复附带软件
 索引及内核取消、超时、失败回执和 Ask 关闭路径，提交脉络见
 [开发历程](DEVELOPMENT-HISTORY.md)，证据见
@@ -102,7 +106,7 @@ Linux / 本机 Win64 / Server 2008 Win32 最终原生故障探针均 0 句柄/�
 | --- | --- | --- | --- | --- |
 | win32-x86 | **当前源码已装配**（R73 核心，Server 2008 Stage 1 + suite 698/698） | **当前源码已装配**（锁定源码复现，4 工具，本机冒烟；qualification=pending） | 未装配 | XP 当前组件 suite 670/670、原生探针与 stage-1；Server 2008 std 干净机旅程通过（旧源码）。full 的 Python 3.4.10 闭包在位，w64devkit/PortableGit 无锁定源 |
 | win64-x86_64 | **当前源码已装配**（R73 核心，本机 Stage 1 12 PASSED） | **当前源码已装配**（锁定源码复现，4 工具，本机冒烟；qualification=pending） | 未装配 | Win7 当前组件 suite 670/670、codec/进程流/seek 与 stage-1；fs-open 真机复跑仍缺。Python 3.8.20 构建待完成 |
-| linux-x86_64 | **当前源码已装配**（CentOS 7 用户态重建，suite 698/698，单文件 `d06ec961...`） | 历史（旧源码，Linux 侧管线待复现） | 历史（旧源码） | 三故障探针、真实 2.3 GiB 旅程 10/10 为旧源码证据；物理 CentOS 7 实机旅程待补。Git NO_CURL=1 传输缺口待收口 |
+| linux-x86_64 | **当前源码已装配**（CentOS 7 用户态重建，suite 698/698，单文件 `d06ec961...`） | **当前源码已装配**（C7 容器复现，4 工具 C7 实跑冒烟；qualification=pending） | 历史（旧源码） | 三故障探针、真实 2.3 GiB 旅程 10/10 为旧源码证据；物理 CentOS 7 实机旅程待补。Git NO_CURL=1 传输缺口待收口 |
 
 **7/9 是候选装配进度，不是最终资格通过数。** 附带软件功能后来使历史开发机
 suite 增至 678 项；本轮为 697 项。目标端旧 670 项对应早期源码，不能写成已覆盖

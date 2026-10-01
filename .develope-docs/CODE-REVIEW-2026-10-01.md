@@ -242,3 +242,38 @@ Wine/实机资格不因重建转移，std 版位的实机旅程仍属 C33。`lzm
 （linux std 待同管线的 Linux 侧构建）、full 0/3（win32 缺 w64devkit/
 PortableGit 锁定源，win64 缺 Python 3.8.20，linux full 为重型 sysroot
 管线，均维持登记）。
+
+### linux std 版位随当前源码复现装配（10-01 深夜续）
+
+仓库只提交了 linux std 的暂存半程（`prepare_linux_std.py`），构建配方
+按其契约与已提交 README 重建并在真实 CentOS 7 用户态执行（容器、
+archive.kernel.org/epel 存档源）。配方选择全部入档：
+
+- **python2 2.7.18**：C7 基线系统库（openssl 1.0.2k/zlib/bz2/sqlite/
+  gdbm/ffi/expat）构建，`--prefix=/yaca/tools/python2` 后 DESTDIR 落
+  `python-root`。锁内 bsddb 树经核实是 MSI 依赖源（无 configure，供
+  源码再分发），Linux 构建按 C7 基线**不含** `_bsddb`。
+- **putty 0.85**：已提交的 portable 补丁 + cmake3（EPEL 存档，C7 自带
+  cmake 2.8 与 putty 的 `-S/-B`/最低版本要求不兼容），原生构建
+  plink/pscp/psftp，`-DPUTTY_GSSAPI=OFF -DYACA_PORTABLE_TOOLS`。
+- **7zz 26.03**：`makefile.gcc`（Alone2 的 `makefile` 是 NMAKE 语法）；
+  C7 的 make 3.82 与 gcc 4.8 均不足，先按 full 锁的 make-4.4.1 源构建
+  GNU make，再用 SCL 存档的 devtoolset-11 编译——仍链接系统 glibc 2.17。
+- **curl 8.21.0**：复用 Linux 核心构建的静态 curl（mbedTLS 静态链，
+  NEEDED 仅 libc/libpthread）与核心锁源码。
+- **暂存**：`prepare_linux_std.py` 原样运行，`staging=PASS tools=4`。
+
+装配与验证：`linux-x86_64` std 以 `d06ec961...` 核心装配；
+`verify_linux_std.py`——4 工具、4511 文件、入口点/许可证/逐文件摘要
+精确、notices 形状正确、未授权。工具冒烟在 CentOS 7 容器内以**副本**
+执行（教训：D: 挂载的 mtime 语义会让 python2 直接在暂存树上重写
+.pyc、破坏 tool-inputs 摘要，冒烟必须跑在拷贝上）：
+`py2-ok OpenSSL 1.0.2k-fips`（ssl/sqlite3/bz2/ctypes 导入通过）、
+`plink 0.85 64-bit Unix`、`curl 8.21.0 + mbedTLS 3.6.7`、
+`7-Zip 26.03 (x64)`。
+
+九包进度更新：**clean 3/3、std 3/3 全部绑定 `b5c0c9ff` 源码**；full
+0/3 维持登记（win32 缺 w64devkit/PortableGit 锁定下载源——其
+`payloads.lock.json` 仅在原构建机；win64 缺 Python 3.8.20；linux full
+为重型 sysroot 管线）。std 重建产物的 `qualification=pending` 与实机
+旅程边界同 Windows std。
