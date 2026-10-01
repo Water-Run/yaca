@@ -217,3 +217,28 @@ CentOS 7 主机上的干净机旅程（含既有 2.3 GiB 旅程口径）仍属 C
 `verify_linux_clean.py`）。至此 clean 版位 win32 `52e9dcb2...`、win64
 `ce92edcf...`、linux `d06ec961...` 三席全部绑定 `b5c0c9ff` 源码；std/full
 六席仍待原构建机的工具输入。
+
+### Windows std 工具从锁定源码复现并装配两席（10-01 深夜）
+
+重新审视“std 工具输入在原构建机”的前提：输入是**锁定源码 + 仓库脚本**
+的确定性产物，而七项 std 源（两个 Python 2.7.18 MSI、Python 源码、
+bsddb、7-Zip extra/src、putty 0.85）全部带 URL 与 SHA-256 锁定。据此
+按记录管线复现，未改任何构建脚本：
+
+| 步骤 | 结果 |
+| --- | --- |
+| 源下载校验 | 七文件按锁 URL 获取，SHA-256 逐项一致（`fetch_std_sources.py` → `VERIFIED`） |
+| MSI 清单 | `msi_inventory.c` 以 `-municode` 交叉编译后在本机 Windows 上运行，win32/amd64 两份 TSV（3509/3503 行，File 3231/—） |
+| 工具构建 | `build_win32_std.sh`/`build_win64_std.sh` 原样运行（WSL 仓库交叉链 + 上游 7zz 26.03 + proof-deps cabextract 1.11），双目标 `staging=PASS tools=4` |
+| 版位装配 | 两席 std 以 R73 核心装配；`verify_std_editions.py`：4 工具、3016/3015 文件、入口点/许可证/逐文件摘要精确、notices 形状正确、`candidate-unqualified` 未授权 |
+| 本机工具冒烟 | Python 2.7.18（32/64 位，ssl/sqlite3/bz2/ctypes 导入通过）、plink 0.85（32/64 位，NO_GSSAPI，源提交 a3cce3a）、curl 8.21.0+mbedTLS 3.6.7（http/https）、7za 26.03 |
+
+如实边界：工具二进制由本工作区 mingw-w64 13 交叉链构建，与原构建机
+产物摘要必然不同；装配器记录 `qualification=pending`，原 std 工具面的
+Wine/实机资格不因重建转移，std 版位的实机旅程仍属 C33。`lzma` 模块在
+两份 MSI 中均不存在（TSV 零命中），暂存忠实于 MSI 清单。win64 核心
+构建树中 `https/` 与 `onedir/.luai/components/cacert.pem` 由 WSL 缓存
+复制到挂载路径供 prepare 只读使用。九包进度：clean 3/3、std 2/3
+（linux std 待同管线的 Linux 侧构建）、full 0/3（win32 缺 w64devkit/
+PortableGit 锁定源，win64 缺 Python 3.8.20，linux full 为重型 sysroot
+管线，均维持登记）。
