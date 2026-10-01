@@ -84,6 +84,7 @@ git show 32d053e:.develope-docs/TRACKING.md
 | 2026-10-01，D-078 notices 收敛 | `out/review-20261001/` | 形状验证（verify_notices_shape.py 输出 CONVERGED）、装配 5/5、注释与四校验器及 698/698 复跑（verify-r2.log、comments-r2.log） |
 | 2026-10-01，R73 后 clean 版位重装配 | `out/review-20261001/editions/` | win32/win64 clean 以 R73 核心重装配；载荷摘要逐字节绑定、editions.json 未授权、两路径 notices 16=16（verify_clean_editions.py） |
 | 2026-10-01，Server 2008 随 R73 复跑 | `out/review-20261001/server2008/` | R73 win32 单文件 Stage 1 12 PASSED / 0 FAILED、当前源码（0a41727）suite 698/698；纯 Lua ustar 展开器与部署通道记录在案（stage1-r73-win32.log、full-suite-r73.log、expand_ustar.lua） |
+| 2026-10-01，Linux 当前源码重建 | `out/review-20261001/linux-r73-build/`、`editions/linux/` | 真实 CentOS 7 用户态（Docker，GCC 4.8.5/glibc 2.17 官方包）内未修改脚本构建 PASS；suite 698/698、冒烟、ELF/GLIBC 基线断言通过；单文件 `d06ec961...`；Linux clean 版位装配并验证（build-summary.txt、verify_linux_clean.py）；容器共享宿主内核边界已记录 |
 | `709aa85`，XP 收尾复验 | `out/xp-closeout-20260928/` | 当前 Lua suite 670/670、同一当前 native 编码/故障探针通过；输入快照与 SHA-256 保留 |
 | 原生字节偏移 | `out/seek-qualification-20260928/` | 12 个偏移、负值/关闭拒绝、身份一致性；Linux/Wine/XP NTFS/FAT32 |
 | R48，文件读取资源 | `out/native-io-review-20260928/` | 旧实现五个缓冲泄漏位置；新 Lua 缓冲、分配故障、同句柄恢复及 OS 读取错误路径 |

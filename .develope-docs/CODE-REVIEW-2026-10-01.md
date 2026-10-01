@@ -186,3 +186,34 @@ Linux 侧仍待外部输入。
 至此 win32 的目标端证据（Stage 1 + 源码 suite）均已绑定 R73 后源码；
 Linux 重建、win64 full 的 Python 3.8.20、模型联网旅程与 std/full 工具输入
 仍按外部依赖等待。
+
+### Linux 当前源码在真实 CentOS 7 用户态内重建（10-01 晚）
+
+本机 Docker Desktop 可用后，改用**真实 centos:7 用户态**执行
+`build_linux_x86_64.sh`：脚本未做任何修改，其自身的主机准入
+（`/etc/centos-release` 为 CentOS Linux 7.9.2009、`getconf` 为 glibc 2.17、
+`gcc -dumpversion` 为 4.8.5，均为 CentOS 7 官方包 4.8.5-44.el7 /
+glibc 2.17-326.el7）原样通过；EOL 的 yum 指向 vault.centos.org 安装工具链。
+七项锁定输入按脚本内置 SHA-256 逐项校验通过。
+
+| 结果 | 值 |
+| --- | --- |
+| 构建状态 | `build-summary.txt` status=PASS；ELF64/x86-64、系统依赖白名单、GLIBC 符号 ≤2.17 基线均由脚本断言通过 |
+| 源码 | `b5c0c9ff...`（HEAD），归档 SHA `ea7f597e...` |
+| 目标端 suite | **698/698**（构建内 `full-test.log`） |
+| 冒烟 | 单文件与 onedir 均输出 `yaca 0.1.0 (linux-x86_64)`；WSL 内实跑同版本 |
+| 产物 SHA-256 | `yaca`（单文件）`d06ec9618c73aead0f90bd2d018da9cb9839da80794487ded2c8945f381b5c1c`；`yaca_native.so` `14ebc048...`、`lxp.so` `53f4bb64...`、`curl` `28f2a805...` |
+
+如实边界：容器共享宿主内核（summary 的 kernel 行为 WSL2），CentOS 7 的
+真实性与兼容保证来自其用户态工具链/运行库及脚本自身的 ABI 断言；物理
+CentOS 7 主机上的干净机旅程（含既有 2.3 GiB 旅程口径）仍属 C33 待办，
+本结果不写成实机通过。
+
+### 三平台 clean 版位全部绑定当前源码
+
+以该 Linux 核心装配 `linux-x86_64` clean 版位（core-notices 由构建自身
+锁定源码的许可证文本构造，`stage_linux_notices.sh`）；载荷恰为 `yaca`
+且摘要逐字节等于 `d06ec961...`，`editions.json` 未授权（
+`verify_linux_clean.py`）。至此 clean 版位 win32 `52e9dcb2...`、win64
+`ce92edcf...`、linux `d06ec961...` 三席全部绑定 `b5c0c9ff` 源码；std/full
+六席仍待原构建机的工具输入。
