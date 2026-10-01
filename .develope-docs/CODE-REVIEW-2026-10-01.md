@@ -156,3 +156,14 @@ suite **698/698** 复跑通过（`verify-r2.log`）。
 全仓产品源码的语义 Review 至此覆盖到上表口径：main.lua 交互事件分发
 内部、compact.lua 状态机内部、原生 C 层（有独立故障探针）与测试辅助
 代码为如实保留的剩余面。
+
+### Windows clean 版位随 R73 源码重装配
+
+本工作区没有 std/full 的工具输入（在原构建机，按外部依赖登记），clean
+版位不需要工具输入：`package_editions.py` 以 R73 双核心与 D-078 后的
+companion 重新装配 win32/win64 clean 候选（`out/review-20261001/editions/`）。
+验证：载荷恰为 `yaca.exe` 且摘要逐字节等于现行核心；`editions.json` 绑定
+同核心、`candidate-unqualified`、`release_authorized=false`；资格路径与
+装配路径的 notices 归档在**同一核心**上成员集合 16=16 逐项一致
+（`verify_clean_editions.py`、`verify_notices_shape.py`）。std/full 版位与
+Linux 侧仍待外部输入。
