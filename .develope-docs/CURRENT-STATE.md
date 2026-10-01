@@ -1,8 +1,11 @@
 # 当前状态
 
-更新日期：2026-09-30。仓库从 `23bf913` 快进同步到 `344f864`；本轮在此基线上
-修复附带软件索引及内核取消、超时、失败回执和 Ask 关闭路径。提交脉络见
-[开发历程](DEVELOPMENT-HISTORY.md)，本轮证据见
+更新日期：2026-10-01。本地 `main` 与 `origin/main` 一致于 `9188a2e`，工作区干净。
+本轮按队列完成 fs/textcodec/process 错误与资源收尾及 tools 写发布路径的
+人工语义 Review：未发现缺陷、未修改产品源码，专项探针 36/36、完整 suite 697/697，
+证据见 [10 月 1 日 Review](CODE-REVIEW-2026-10-01.md)。9 月 30 日轮修复附带软件
+索引及内核取消、超时、失败回执和 Ask 关闭路径，提交脉络见
+[开发历程](DEVELOPMENT-HISTORY.md)，证据见
 [9 月 30 日复核](CODE-REVIEW-2026-09-30.md)与[内核审查](KERNEL-REVIEW-2026-09-30.md)。
 实机范围按 [D-077](DECISIONS.md#d-077-本次收尾的兼容检查与实机范围2026-09-30)，
 不再要求本次重跑整个旧系统实机/VM 矩阵。
@@ -85,12 +88,14 @@ suite 增至 678 项；本轮为 697 项。目标端旧 670 项对应早期源�
 后续附带软件修复。详细记录见[目标及工具批次](CODE-REVIEW-2026-09-28.md)。
 
 人工语义 Review 已记录 R01--R50 各批、附带软件特性、index.lua、network.lua 的
-SSE 子面、compact.lua 的断路器/恢复子面及 terminal.lua。子面通过不代表所在
-整个模块通过，其余源码仍须继续审查。
+SSE 子面、compact.lua 的断路器/恢复子面、terminal.lua，以及 10 月 1 日
+fs/textcodec/process 的错误与资源收尾和 tools 读写/写发布路径（无缺陷，探针
+36/36）。子面通过不代表所在整个模块通过，其余源码仍须继续审查。
 
 ## 当前剩余与边界
 
-- 继续全仓人工语义 Review；本轮修复进入三目标统一重建与目标回归。
+- 继续全仓人工语义 Review：fs/textcodec/process 与 tools 读写已收口，余
+  model/runtime/session/context 的发布与恢复边界；随后进入三目标统一重建与目标回归。
 - Python 3.4.10 已源码构建并在 Server 2008 验证；Windows 两个 full 的其余完整闭包及最终装配、Python 3.8.20 构建、Linux Git 传输能力仍待收口。VS2019 候选下载清单的整体 SHA/大小与 channel 不一致，保留失败证据，未把该清单记为已验证。
 - 按 D-077 核对兼容源码、ABI 和导入闭包；用已有指定实机补相应运行证据。
 - A08/A09 已有 CentOS 7 离线大文件证据；旧终端、轮转/截断和真实模型续页旅程仍待补齐。
