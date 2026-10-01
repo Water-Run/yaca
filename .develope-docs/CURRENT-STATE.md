@@ -10,7 +10,9 @@ network 重试控制器（无缺陷）。完整 suite **698/698**、注释 219 �
 5266 声明 / 0 缺项、四校验器与完整 coding readiness 链（TP-003/006/008/010、
 RP-001）PASS。两个 Windows 核心已随 R73 源码刷新并在本机 Stage 1 通过；两
 Windows 打包路径的 notices 归档已按 [D-078](DECISIONS.md#d-078-notices-归档统一为装配布局2026-10-01)
-统一为装配布局。证据见
+统一为装配布局；clean 版位以 R73 核心重装配并验证。Server 2008 目标端已随
+R73 复跑：单文件 Stage 1 12 PASSED / 0 FAILED、当前源码 suite **698/698**
+（`out/review-20261001/server2008/`）。证据见
 [10 月 1 日 Review](CODE-REVIEW-2026-10-01.md)。9 月 30 日轮修复附带软件
 索引及内核取消、超时、失败回执和 Ask 关闭路径，提交脉络见
 [开发历程](DEVELOPMENT-HISTORY.md)，证据见
@@ -68,8 +70,9 @@ rename/replace/delete 与 XML smoke 通过；Server 2008 刷新后的 Stage 1 �
 10 月 1 日 R73 修复 `model.lua` 后两个核心按同一流程再刷新：Win32
 `52e9dcb260c24c05ff03de6611c7b18150caa4506423f6149bcffe3225fbfdea`、Win64
 `ce92edcfe77986b6aa6ddeb383a614399fed9841d532ed8c3db013dd8de5b478`，本机
-Stage 1 各 12 PASSED / 0 FAILED；上两个摘要保留为上一源码代的证据，win32 的
-Server 2008 目标端复跑仍待补。
+Stage 1 各 12 PASSED / 0 FAILED；win32 核心随后在指定 Server 2008 复跑
+Stage 1（12 PASSED / 0 FAILED）与当前源码 suite（698/698）。上两个摘要
+保留为上一源码代的证据。
 Linux / 本机 Win64 / Server 2008 Win32 最终原生故障探针均 0 句柄/缓冲泄漏，
 编码资源、严格 Unicode 与同状态恢复通过，原始结果在内核审查中分别记录。
 本轮不补 XP/Win7/CentOS 7 的实机矩阵，未执行模型联网旅程。

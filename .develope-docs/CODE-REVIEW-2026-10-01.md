@@ -167,3 +167,22 @@ companion 重新装配 win32/win64 clean 候选（`out/review-20261001/editions/
 装配路径的 notices 归档在**同一核心**上成员集合 16=16 逐项一致
 （`verify_clean_editions.py`、`verify_notices_shape.py`）。std/full 版位与
 Linux 侧仍待外部输入。
+
+### Server 2008 目标端随 R73 复跑（10-01 晚）
+
+此前安装的 SSH 密钥仍可免密登录指定 Server 2008（`Administrator@192.168.5.10`，
+`CYGWIN_NT-6.0-6003 / WIN-TAFWJAAWRX6`），两项目标端证据当场补齐：
+
+| 检查 | 结果 |
+| --- | --- |
+| R73 Win32 单文件 Stage 1（隔离 `/tmp/yaca-r73-stage1/` + `__yaca__`） | **12 PASSED / 0 FAILED**，`outcome=partial`、`online-requests=0`；配置未初始化与非 TTY 三个警告按既往保留（`stage1-r73-win32.log`） |
+| 当前源码完整 suite（`0a41727` 归档 SHA-256 `29bc77af...09ac5`，i686 lua.exe + lxp/yaca_native DLL） | **698/698**，两次运行一致（`full-suite-r73.log`）；`main.lua` 摘要与本地逐字节一致 |
+
+部署通道与既往一致：该机 tar 损坏，改用纯 Lua ustar 展开器
+（`server2008/expand_ustar.lua`，跳过 pax 头并整读其数据块）；解释器需要
+相邻 `lua55.dll` 并对隔离目录内可执行文件补执行权限。原生 DLL 自 9 月 30
+日以来未变（R73 只改 Lua 载荷），昨日原生故障探针继续绑定。
+
+至此 win32 的目标端证据（Stage 1 + 源码 suite）均已绑定 R73 后源码；
+Linux 重建、win64 full 的 Python 3.8.20、模型联网旅程与 std/full 工具输入
+仍按外部依赖等待。
