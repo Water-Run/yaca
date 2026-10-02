@@ -2,7 +2,7 @@
 Author: WaterRun
 Date: 2026-09-28
 File: gib_log_journey.lua
-Description: Real A08/A09 target journey: GiB-scale log range reads, bounded search, growth rejection and legacy-codepage reads through the production tools layer.
+Description: Real A08/A09 target journey: GiB-scale log range reads, bounded search, growth rejection, rotation/truncation continuation guards and legacy-codepage reads through the production tools layer.
 ]]
 
 -- Real target-side A08/A09 journey. Arguments: source root, native module, scratch directory.
@@ -12,6 +12,16 @@ local source_root, native_path, scratch, blocks = table.unpack(arg)
 blocks = tonumber(blocks or 38400)
 assert(source_root and native_path and scratch, "three probe paths are required")
 local plain_assert = assert
+local separator = package.config:sub(1, 1)
+local platform_kind = separator == "\\" and "windows" or "posix"
+
+-- Join one directory and one file name with the host-native separator.
+--@param directory string Absolute directory path supplied on the command line.
+--@param name string File or directory name without separators.
+--@return string Joined path in the host-native separator form.
+local function join(directory, name)
+    return directory .. separator .. name
+end
 
 -- Wraps assert with a structured failure printer for journey evidence.
 --@param value any Candidate value supplied to the journey step.
@@ -49,7 +59,7 @@ local paths = assert(require("path").new(native, {
 local safety = assert(require("safety").new(native, {
     maximum_hash_chunk_bytes = 65536, minimum_scannable_secret_bytes = 8,
 }))
-local text_codec = assert(require("textcodec").new(native, "posix", os.getenv))
+local text_codec = assert(require("textcodec").new(native, platform_kind, os.getenv))
 local operations = assert(require("context").new_operation_service({
     safety = safety,
     journal = {
@@ -92,8 +102,8 @@ local tools = assert(require("tools").new({
     maximum_continuations = 8, maximum_identifier_bytes = 256, filesystem_chunk_bytes = 4096,
     create_permissions = 384, maximum_json_depth = 24, maximum_json_nodes = 4096,
     maximum_number_bytes = 32, maximum_exec_output_bytes = 65536,
-    maximum_exec_deadline_ms = 10000, platform_kind = "posix",
-    workspace_path = scratch, reserved_paths = { scratch .. "/reserved" },
+    maximum_exec_deadline_ms = 10000, platform_kind = platform_kind,
+    workspace_path = scratch, reserved_paths = { join(scratch, "reserved") },
 }))
 local codec = assert(require("json").new({
     maximum_bytes = 65536, maximum_depth = 24, maximum_nodes = 4096,
@@ -141,30 +151,35 @@ local function run(tool, arguments, tag)
     return assert(tools:execute(token))
 end
 
--- Builds the multi-GiB fixture with head, tail, overlong-line and CP936 sections.
+-- Builds the multi-GiB fixture with head, tail and overlong-line sections.
 --@param path string Absolute fixture path on the target filesystem.
---@return number Final fixture size in bytes.
---@effect Writes approximately 2.4 GiB to the scratch directory.
+--@return number Exact fixture size in bytes accumulated from the writes.
+--@effect Writes approximately 2.4 GiB to the scratch directory at full scale.
 local function build_fixture(path)
     local handle = assert(io.open(path, "wb"))
+    local size = 0
+    -- Write one fixture chunk and account for its exact byte count.
+    --@param chunk string Fixture bytes to append at the current position.
+    --@return void No value; updates the captured size accumulator.
+    local function emit(chunk)
+        handle:write(chunk)
+        size = size + #chunk
+    end
     local filler = string.rep("x", 63) .. "\n"
-    handle:write("A08-HEAD-MARKER-0001\n")
+    emit("A08-HEAD-MARKER-0001\n")
     local block = filler:rep(1000)
     for index = 1, blocks do
-        handle:write(block)
+        emit(block)
         if index == math.floor(blocks / 2) then
-            handle:write(string.rep("L", 299999) .. "\n")
+            emit(string.rep("L", 299999) .. "\n")
         end
     end
-    handle:write("A08-TAIL-MARKER-9f2c\n")
+    emit("A08-TAIL-MARKER-9f2c\n")
     handle:close()
-    local probe = assert(io.open(path, "rb"))
-    local size = probe:seek("end")
-    probe:close()
     return size
 end
 
-local path = scratch .. "/a08-gib.log"
+local path = join(scratch, "a08-gib.log")
 local size = build_fixture(path)
 record("fixture-created", blocks < 38400 or size > 2 * 1024 * 1024 * 1024,
     string.format("size=%.0fMiB", size / (1024 * 1024)))
@@ -204,17 +219,17 @@ serial = serial + 1
 local oversize_admitted, oversize_error = tools:admit_call({
     tool = "write", schema_version = tools.schema_version, registry_digest = tools.registry_digest,
     provider_call_id = "a08-write2", tool_call_id = "call-write2", operation_id = "operation-write2",
-    canonical_arguments = codec.write(tag_json({ path = scratch .. "/reject.txt", mode = "create",
+    canonical_arguments = codec.write(tag_json({ path = join(scratch, "reject.txt"), mode = "create",
         content = string.rep("y", 70000), encoding = "utf-8", newline_policy = "preserve" })),
 })
 record("oversize-write-rejected", oversize_admitted == nil
     and oversize_error ~= nil and oversize_error.code == "InvalidToolCall",
     "admission/" .. tostring(oversize_error and oversize_error.code))
-local small_reject = run("write", { path = scratch .. "/reject.txt", mode = "create",
+local small_reject = run("write", { path = join(scratch, "reject.txt"), mode = "create",
     content = string.rep("z", 60000), encoding = "utf-8", newline_policy = "preserve" }, "write2")
-if small_reject.outcome == "success" then os.remove(scratch .. "/reject.txt") end
+if small_reject.outcome == "success" then os.remove(join(scratch, "reject.txt")) end
 
-local legacy_path = scratch .. "/a09-cp936.txt"
+local legacy_path = join(scratch, "a09-cp936.txt")
 local legacy_handle = assert(io.open(legacy_path, "wb"))
 legacy_handle:write("A09-CP936-MARKER\n")
 legacy_handle:write("\xd6\xd0\xce\xc4\xb2\xe2\xca\xd4\n")
@@ -228,11 +243,21 @@ record("cp936-file-decoded", saw_legacy, legacy.outcome)
 
 local legacy_reject = run("read", { path = legacy_path, start_line = 1, max_lines = 2,
     encoding = "auto" }, "legacy-reject")
-record("cp936-strict-utf8-refuses", legacy_reject.outcome == "success"
-    and legacy_reject.payload and legacy_reject.payload.classification == "invalid-encoding"
-    and legacy_reject.payload.hint ~= nil,
-    legacy_reject.outcome .. "/" .. tostring(legacy_reject.payload
-        and legacy_reject.payload.classification))
+-- Strict-UTF-8 hosts refuse the CP936 bytes; hosts whose file default is a
+-- legacy ANSI page decode them transparently by design (textcodec facts).
+if text_codec.facts.file_default then
+    record("cp936-file-default-decodes", legacy_reject.outcome == "success"
+        and legacy_reject.payload and legacy_reject.payload.classification == "text",
+        legacy_reject.outcome .. "/" .. tostring(legacy_reject.payload
+            and legacy_reject.payload.classification) .. "/default="
+            .. tostring(text_codec.facts.file_default))
+else
+    record("cp936-strict-utf8-refuses", legacy_reject.outcome == "success"
+        and legacy_reject.payload and legacy_reject.payload.classification == "invalid-encoding"
+        and legacy_reject.payload.hint ~= nil,
+        legacy_reject.outcome .. "/" .. tostring(legacy_reject.payload
+            and legacy_reject.payload.classification))
+end
 os.remove(legacy_path)
 
 local fh = assert(io.open(path, "r+b"))
@@ -242,6 +267,54 @@ fh:close()
 local changed = run("read", { path = path, start_line = 1, max_lines = 2, from_end = true,
     encoding = "auto" }, "changed")
 record("tail-after-growth", changed.outcome == "success", changed.outcome)
+
+local page = run("read", { path = path, start_line = 1, max_lines = 3, encoding = "auto" }, "page1")
+local page_token = page.payload and page.payload.continuation or ""
+record("continuation-issued", page.outcome == "success"
+    and page.payload and page.payload.continuation and page.payload.next_line == 4,
+    page.outcome .. "/next_line=" .. tostring(page.payload and page.payload.next_line))
+local follow = run("read", { path = path, start_line = 1, max_lines = 3, encoding = "auto",
+    continuation = page_token }, "page2")
+record("continuation-follows-offset", follow.outcome == "success" and follow.payload
+    and follow.payload.lines and follow.payload.lines[1].number == 4,
+    follow.outcome .. "/" .. tostring(follow.error and follow.error.code))
+
+local truncator = assert(io.open(path, "wb"))
+truncator:write("A08-TRUNCATED-SMALL\n")
+truncator:close()
+local follow_token = follow.payload and follow.payload.continuation or ""
+local stale = run("read", { path = path, start_line = 1, max_lines = 3, encoding = "auto",
+    continuation = follow_token }, "stale")
+record("continuation-across-truncation", stale.outcome == "failed"
+    and stale.error and stale.error.code == "TargetChanged",
+    stale.outcome .. "/" .. tostring(stale.error and stale.error.code))
+
+local rotated_away = path .. ".1"
+os.rename(path, rotated_away)
+local replacement = assert(io.open(path, "wb"))
+replacement:write("A08-ROTATED-HEAD-0002\n")
+local rot_block = (string.rep("r", 63) .. "\n"):rep(1000)
+for index = 1, 280 do replacement:write(rot_block) end
+replacement:close()
+local after_rotation = run("read", { path = path, start_line = 1, max_lines = 1,
+    encoding = "auto" }, "rotated")
+record("rotation-fresh-read", after_rotation.outcome == "success" and after_rotation.payload
+    and after_rotation.payload.lines
+    and after_rotation.payload.lines[1].text:find("A08-ROTATED-HEAD-0002", 1, true) ~= nil,
+    after_rotation.outcome)
+local rotated_token = after_rotation.payload and after_rotation.payload.continuation or ""
+local rotated_away_2 = path .. ".2"
+os.rename(path, rotated_away_2)
+local replacement2 = assert(io.open(path, "wb"))
+replacement2:write("A08-ROTATED-HEAD-0003\n")
+replacement2:close()
+local rotated_stale = run("read", { path = path, start_line = 1, max_lines = 3,
+    encoding = "auto", continuation = rotated_token }, "stale2")
+record("continuation-across-rotation", rotated_stale.outcome == "failed"
+    and rotated_stale.error and rotated_stale.error.code == "TargetChanged",
+    rotated_stale.outcome .. "/" .. tostring(rotated_stale.error and rotated_stale.error.code))
+os.remove(rotated_away)
+os.remove(rotated_away_2)
 
 os.remove(path)
 print(string.format("gib-journey steps=%d failures=%d", #steps, #failures))

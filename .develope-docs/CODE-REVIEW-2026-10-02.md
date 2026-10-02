@@ -44,5 +44,36 @@ Stage 2 全项与 Stage 3 通过。密钥仅存隔离部署目录（gitignored�
 `gib_log_journey.lua`（600 MiB 档、9600 块）在本机 Win64 NTFS 以当前
 源码运行，win64 lua.exe + R74 核心 DLL；结果见 `a08-journey/journey-win64.log`。
 
+### A08/A09 轮转/截断步骤补齐与 Server 2008 全档复跑（10-02 后续）
+
+旅程脚本从 10 步扩到 **15 步**，补齐 TRACKING 剩余的两项：
+
+- **新增 5 步**：`continuation-issued`（首页发续页令牌，next_line=4）、
+  `continuation-follows-offset`（续页从第 4 行起免重扫）、
+  `continuation-across-truncation`（就地截断后续页必须 `TargetChanged`）、
+  `rotation-fresh-read`（rename+重建后全新读看到新文件头）、
+  `continuation-across-rotation`（换 inode 后续页必须 `TargetChanged`）。
+  断言依据先从 `src/tools.lua` 核实：续页令牌绑定身份摘要
+  （kind/volume/object/size/modified），版本变化即拒。
+- **脚本宿主平台化**：分隔符与 `platform_kind` 改由 `package.config`
+  推导；fixture 尺寸改为累计写入（32 位 CRT 的 `seek("end")` 在 2.4 GiB
+  上返回 -1）；CP936 auto 步骤按 `text_codec.facts.file_default` 分叉——
+  传统 ANSI 缺省主机（如中文 locale 的 Server 2008）auto 透明解码为
+  设计行为，严格 UTF-8 主机拒绝并给 hint。
+- **本地 WSL Linux 600 MiB**：15/15、0 失败
+  （`a08-journey/journey-linux-rot.log`）。
+- **Server 2008 实机 2.34 GiB 全档**（38400 块，D-077 指定环境）：
+  **15/15、0 失败**（`a08-journey/journey-server2008-full.log`）。
+  `offset-past-2gib` 首次在真实 2 GiB+ 文件上越过边界；
+  `cp936-file-default-decodes ... default=cp936` 证实该机 ANSI 缺省页
+  的透明回退。配对为已验证的 win32 组合：32 位 lua.exe（subsystem 5.0）
+  + win32 核心 DLL（sha1 `b7960ca5...`，与 09-30 候选逐字节一致；原生
+  C 层自该构建后未改，R73/R74 均为纯 Lua 修复）+ 当前源码 Lua 树
+  （`4117256`）。x64 lua.exe（PE32+ 6.0）在该机装载被拒
+  （Exec format error / 拒绝访问），记录为环境事实，按 D-077 以
+  win32 发行目标面完成实机证据。
+- 校验：注释 **220 文件 / 5276 声明 / 0 缺项**、四校验器 PASS；产品
+  源码零改动（完整 suite 699/699 仍绑定 `4117256`）。
+
 外部资源状态更新：DeepSeek 与本地 Qwen 端点已由负责人提供并接入；
 win64 full 的 Python 3.8.20 工具链仍是唯一未装配版位。

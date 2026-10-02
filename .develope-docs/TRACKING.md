@@ -8,6 +8,15 @@ Gate R 关闭。
 
 ## 本轮已收口
 
+10-02 后续：A08/A09 剩余两项收口。旅程脚本扩至 15 步（续页签发/跟随、
+截断与轮转后的 `TargetChanged` 守卫、轮转后全新读）并宿主平台化
+（`package.config` 推导分隔符与 platform_kind、fixture 尺寸累计、CP936
+auto 按 `file_default` 分叉）。本地 WSL Linux 600 MiB **15/15**；Server 2008
+实机（D-077 指定环境）**2.34 GiB 全档 15/15、0 失败**，win32 配对
+（32 位 lua.exe + 核心 DLL `b7960ca5...` + 当前源码 Lua 树）；x64 lua.exe
+在该机装载被拒已记录为环境事实。注释 220/5276/0、四校验器 PASS，产品
+源码零改动。证据见 [10 月 2 日 Review](CODE-REVIEW-2026-10-02.md)。
+
 10-02 上午：负责人提供 DeepSeek 与本地 sglang qwen3.8-27b 端点。发现
 适配器 R74——OpenAI 显式 `"tool_calls": null` 等 null 拼写被判
 `openai-tool-calls` 协议错（JSON null 哨兵为 truthy 表，四处守卫只判
@@ -70,7 +79,7 @@ Win32/Win64 单文件及 clean 已以本轮源码刷新；普通用户 NTFS meta
 | P0 · F4、C32 | ~~刷新 Linux 当前源码产物~~ 已在真实 CentOS 7 用户态（Docker centos:7，GCC 4.8.5-44.el7 / glibc 2.17-326.el7）内以**未修改**的构建脚本完成：PASS、目标端 suite 698/698、单文件 `d06ec961...`；三平台 clean 版位全部绑定 `b5c0c9ff` 源码。物理 CentOS 7 的实机旅程仍属 C33 | Windows 两核心已随 R73 刷新并本机 Stage 1 通过；**win32 的 Server 2008 目标端已复跑**：R73 单文件 Stage 1 12 PASSED / 0 FAILED、当前源码 suite 698/698（见 10-01 Review）。容器共享宿主内核的边界已如实记录 |
 | P0 · F3、C33 | ~~std 重装配~~ **8/9 已随当前源码装配**：std 3/3 + win32 full（D-079 三档信任分级，pin 待负责人确认）+ **linux full（C7 容器内全套重建：可重定位 gcc/g++、含 HTTPS 的 git 2.55.0、自带 ssl/sqlite 的 py314；10 工具 6016 文件验证+重定位冒烟）**。唯余 win64 full（Python 3.8.20 工具链）。**Linux Git 传输缺口已收口**（工具自带 https） | 不把旧 Python 安装包改版本；重派生 pin 与原构建机不一致时以原记录为准重装配；qualification=pending，实机旅程属 C33。锁内 gmp/mpfr/mpc URL 笔误（缺 /gnu/）待修正 |
 | P1 · F2/F4、C32 | 在此前提供的实机补中文/损坏编码输出、取消/进程树、发布/恢复证据 | 按 D-077 使用指定环境；Win7 fs-open 旧 VM 五轮失败保留为历史，不阻断本次收尾 |
-| P1 · A08/A09 | 600 MiB 离线旅程已在当前源码复跑（WSL Linux）；**真实模型联网自测已全绿**（DeepSeek + 本地 Qwen 双端点，Stage 2×2 七项 + Stage 3）。余：2.3 GiB 全档目标端复跑与轮转/截断步骤补齐 | 目标端复跑按 D-077 环境；轮转/截断步骤需扩充旅程脚本后一并执行 |
+| P1 · A08/A09 | ~~余：2.3 GiB 全档目标端复跑与轮转/截断步骤补齐~~ **已收口**（10-02 后续）：旅程扩至 15 步并宿主平台化；本地 Linux 600 MiB 15/15、Server 2008 实机 2.34 GiB 全档 15/15 均 0 失败（win32 配对，见 10-02 Review）。600 MiB 离线旅程与真实模型联网自测此前已绿 | 交互式聊天/多轮恢复的旅程需 TTY，归 C33 |
 | P1 · C33 | 最终三平台 clean/std/full 共九包完整干净机旅程 | 以最终 zip 字节验收布局、零表面、同平台核心一致、移除 tools 后核心/Lua、首次配置、Ask/工具、多轮恢复、移动/升级/卸载 |
 | P1 · C33 布局 | ~~收敛两条 Windows 打包路径的 notices 布局~~ 已按 [D-078](DECISIONS.md#d-078-notices-归档统一为装配布局2026-10-01) 收敛为装配布局（core/ + edition.json + SBOM），两路径成员集合 16=16 一致；见[10-01 Review 第三批](CODE-REVIEW-2026-10-01.md#第三批剩余命名模块语义-review-与-c33-notices-布局收敛) | 后续九包干净机旅程按该唯一形状验收 |
 | P2 · C34 | 汇总最终证据并复核公开文档与发布门 | 每包 SHA-256、许可证、SBOM、构建/测试摘要对应精确字节；C32/C33/C34 满足后再用独立可审计提交评审 Gate R |
