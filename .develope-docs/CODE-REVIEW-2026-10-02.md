@@ -233,3 +233,37 @@ compiler lib 修复重装配挂账待 WSL2 机）。校验：注释 **226 文件
 声明 / 0 缺项**（含 5 个新脚本）、注释检查器反例 15/15、四校验器 PASS
 （7739 / 56 / 565 + 5 文档真值）。产品源码零改动（完整 suite 699/699 仍
 绑定 `4117256`）。全部产物 candidate-unqualified，Win7 实机旅程属 C33。
+
+### win32 full 无挂账重装配与遗留脚本修复（10-02 第四批，原构建机）
+
+验证器指出的三项挂账本批全部收口，**九包 9/9 无挂账**：
+
+**1. prepare_win32_full.py 的 `*.a` 剪除缺陷同修（提交 `a2c1c7d`）**：与
+win64 版一致保留 compiler lib 链接归档。
+
+**2. 遗留 build_win64_candidate.sh 三处缺陷修复并实跑验证**：launcher
+调用补第 5 参数 `stage`、inner.exe 链接补 `-lshell32`、extractor 链接补
+`-municode`；另修复 `windows_package_win64.py` 缺失的两处作用域豁免
+（inner.exe 的 shell32、curl 的 iphlpapi，与统一打包器逐字对齐）。修复后
+全脚本端到端实跑通过：yaca.exe（`db52e8ec...`，wine `--version` 正常，
+subsystem 6.01）。统一脚本仍是装配路径，遗留脚本恢复可用。
+
+**3. win32 full 随当前源码在本机重装配（不等 WSL2 机）**：
+
+| 步骤 | 结果 |
+| --- | --- |
+| win32 核心 | 统一脚本随 HEAD 重建，onefile `acd58d83...`；Server 2008 实机 `--version` 与 `--lua`（`42` / `Lua 5.5`）通过 |
+| std 暂存 | 9-22 本机暂存逐摘要复验 3014 文件 0 坏 |
+| py34 闭包 | `extract_sdk71.py` 以库内 ISO + 库存 TSV 本机提取 SDK 7.1 便携树（842 MiB，剔 symbols 上传）；现行 `prepare_python34.sh` 重跑（9-22 的 r2 输入 zip 早于 9-23 入库的免 perl/nasm ssl 预处理，缺 `ms/nt.mak`，为本轮 ssl 首败根因）；远端 py2.7.18 驱动 `build_python34_windows.py` → **python34-build=PASS**（`MSC v.1600 32 bit`，9-22 的 v100 targets "Required file" 问题未复现） |
+| CRT | msvcr100.dll 行政安装不释放（PrivateCRT 特性对 ACTION=ADMIN 恒 Null，ADDLOCAL=ALL 亦无效）；经 msi.dll 原生 API 导出 python-3.4.4.msi 内嵌 cab 流（COM 封送会破坏字节，已实测），expand 解出 msvcr100.dll `60c06e0f...` 与 pin 逐字节一致、LICENSE.txt `aba36a4b...` 与历史通知一致 |
+| 暂存 | **python34-portable=PASS**（3.4.10、CRT app-local、14 模块、ssl OpenSSL 1.0.2k、sqlite 3.8.11） |
+| 工具 | `build_win32_full_tools.sh` 入库（jq+XP 补丁+0x0501/子系统 5.01、sqlite3/sqldiff、busybox 原记录件 `ca28b094...`、w64devkit-x86 `d05b743d...`、PortableGit-2.10.0 `89940cca...`） |
+| 装配 | `prepare_win32_full.py`（补 6 参签名）+ package_editions → **editions=PASS**：`yaca-0.1.0-win32-x86-full.zip` = `96fc32cf...`（259 MiB，12965 文件）、notices `2b09dcfa...` |
+
+验证：本机 wine 全绿（yaca/py34 1.0.2k/jq/busybox/**gcc 编译运行**）；
+真 Windows（192.168.10.104）全绿——**git 2.10.0.windows.1**（wine i386
+wow64 的 git 崩溃为 wine 环境事实，真机不受影响）、py34、gcc/g++
+编译链接运行、make 4.4.1、sqlite3/sqldiff。`*.a` 修复在真机
+gcc/g++ 链接中得到直接验证。注释 **227 文件 / 5303 声明 / 0 缺项**、
+四校验器 PASS、装配单测 5/5；产品源码零改动。全部产物
+candidate-unqualified，XP 实机旅程属 C33。

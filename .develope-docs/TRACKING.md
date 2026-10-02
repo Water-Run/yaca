@@ -2,10 +2,24 @@
 
 更新日期：2026-10-02。当前快照见 [CURRENT-STATE.md](CURRENT-STATE.md)。
 核心已实现，继续在当前代码上收尾；C01--C31 是已有实现的任务映射，不重新开工。
-九包进度 **9/9**（10-02 第三批在原构建机收口 win64 full；win32 full 的
-compiler lib 修复重装配挂账待 WSL2 机）。Gate R 关闭。
+九包进度 **9/9 无挂账**（10-02 第三批收口 win64 full；第四批在原构建机
+重装配 win32 full 并修复遗留脚本，不再等 WSL2 机）。Gate R 关闭。
 
 ## 本轮已收口
+
+10-02 第四批（原构建机）：**win32 full 无挂账重装配**。prepare_win32_full.py
+的 `*.a` 剪除与 win64 同修（`a2c1c7d`）；遗留 build_win64_candidate.sh 三处
+缺陷 + windows_package_win64.py 两处豁免缺失修复，实跑端到端验证（
+`db52e8ec...`）；win32 核心随 HEAD 统一脚本重建（`acd58d83...`，Server 2008
+实机 `--version`/`--lua` 通过）；SDK 7.1 便携提取 + 现行 prepare 重跑（9-22
+r2 输入缺免 perl nt.mak 为 ssl 首败根因）+ py2 驱动远端构建
+**python34-build=PASS**；msvcr100.dll 经 msi.dll 原生 API 从 python-3.4.4.msi
+内嵌 cab 提取（`60c06e0f...` 与 pin 一致；COM 封送破坏字节、行政安装不释放
+PrivateCRT 的边界如实记录）；**python34-portable=PASS**；build_win32_full_tools.sh
+入库；**editions=PASS**：win32 full zip `96fc32cf...`（12965 文件）。本机
+wine + 真 Windows（git 2.10.0/gcc/g++/make 全过；wine i386 git 崩溃为 wine
+环境事实）双重验证。注释 227/5303/0、四校验器 PASS、装配单测 5/5。证据见
+[10 月 2 日 Review 第四批](CODE-REVIEW-2026-10-02.md)。
 
 10-02 第三批（原构建机）：**win64 full 收口**。D-079 重派生 pin 与原构建机
 payloads.lock.json 逐项对齐（w64devkit-x86/x64、两 PortableGit、busybox
@@ -104,7 +118,7 @@ Win32/Win64 单文件及 clean 已以本轮源码刷新；普通用户 NTFS meta
 | --- | --- | --- |
 | P0 · D-075/D-076、F4/F5 | ~~继续人工语义 Review~~ 10-01 四批收口：端口层四模块、model/runtime/session/context 发布/恢复边界、cli/tui/config/json/xml/path/safety/prompt/permission 全册、main.lua 组合/准入/发布面整读+协调器准入/关闭整读、text/clock/platform/backend 全册、ini 解析核、diagnostics 脱敏面、network 重试控制器；除 R73 外无缺陷 | 剩余如实保留：main.lua 交互事件分发内部、compact 状态机内部逐行通读、原生 C 层（有独立探针）、测试辅助代码；后续按缺陷驱动补读，不再作为独立批次 |
 | P0 · F4、C32 | ~~刷新 Linux 当前源码产物~~ 已在真实 CentOS 7 用户态（Docker centos:7，GCC 4.8.5-44.el7 / glibc 2.17-326.el7）内以**未修改**的构建脚本完成：PASS、目标端 suite 698/698、单文件 `d06ec961...`；三平台 clean 版位全部绑定 `b5c0c9ff` 源码。物理 CentOS 7 的实机旅程仍属 C33 | Windows 两核心已随 R73 刷新并本机 Stage 1 通过；**win32 的 Server 2008 目标端已复跑**：R73 单文件 Stage 1 12 PASSED / 0 FAILED、当前源码 suite 698/698（见 10-01 Review）。容器共享宿主内核的边界已如实记录 |
-| P0 · F3、C33 | ~~std 重装配~~ **9/9 已随当前源码装配**：std 3/3 + win32 full（D-079 三档信任分级，pin 已与原构建机记录对齐）+ **linux full（C7 容器内全套重建：可重定位 gcc/g++、含 HTTPS 的 git 2.55.0、自带 ssl/sqlite 的 py314；10 工具 6016 文件验证+重定位冒烟）** + **win64 full（10-02 第三批：CPython 3.8.20 源码构建 + x64 工具交叉构建 + 外部件；10 工具 14741 文件验证 + gcc/g++ 编译运行；zip `ade7ea70...`）**。**Linux Git 传输缺口已收口**（工具自带 https）。挂账：win32 full 的 compiler lib `*.a` 剪除缺陷同修重装配（WSL2 机当前不可达） | 不把旧 Python 安装包改版本；重派生 pin 与原构建机不一致时以原记录为准重装配；qualification=pending，实机旅程属 C33。~~锁内 gmp/mpfr URL 笔误~~ 10-02 已修正并实拉核对 |
+| P0 · F3、C33 | ~~std 重装配~~ **9/9 无挂账**：std 3/3 + win32 full（D-079 三档信任分级，pin 已与原构建机记录对齐）+ **linux full（C7 容器内全套重建：可重定位 gcc/g++、含 HTTPS 的 git 2.55.0、自带 ssl/sqlite 的 py314；10 工具 6016 文件验证+重定位冒烟）** + **win64 full（10-02 第三批：CPython 3.8.20 源码构建 + x64 工具交叉构建 + 外部件；10 工具 14741 文件验证 + gcc/g++ 编译运行；zip `ade7ea70...`）**。**Linux Git 传输缺口已收口**（工具自带 https）。win32 full 已于第四批在本机重装配（`96fc32cf...`），不再等 WSL2 机 | 不把旧 Python 安装包改版本；重派生 pin 与原构建机不一致时以原记录为准重装配；qualification=pending，实机旅程属 C33。~~锁内 gmp/mpfr URL 笔误~~ 10-02 已修正并实拉核对 |
 | P1 · F2/F4、C32 | 在此前提供的实机补中文/损坏编码输出、取消/进程树、发布/恢复证据 | 按 D-077 使用指定环境；Win7 fs-open 旧 VM 五轮失败保留为历史，不阻断本次收尾 |
 | P1 · A08/A09 | ~~余：2.3 GiB 全档目标端复跑与轮转/截断步骤补齐~~ **已收口**（10-02 后续）：旅程扩至 15 步并宿主平台化；本地 Linux 600 MiB 15/15、Server 2008 实机 2.34 GiB 全档 15/15 均 0 失败（win32 配对，见 10-02 Review）。600 MiB 离线旅程与真实模型联网自测此前已绿 | 交互式聊天/多轮恢复的旅程需 TTY，归 C33 |
 | P1 · C33 | 最终三平台 clean/std/full 共九包完整干净机旅程 | 以最终 zip 字节验收布局、零表面、同平台核心一致、移除 tools 后核心/Lua、首次配置、Ask/工具、多轮恢复、移动/升级/卸载 |

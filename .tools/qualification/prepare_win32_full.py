@@ -6,7 +6,7 @@
 
 """Stage the win32 full toolbox from std staging, cross builds, and official portable packages.
 
-Arguments: STD_STAGED BUILD_ROOT PYTHON34_ZIP SOURCE_CACHE OUTPUT
+Arguments: STD_STAGED BUILD_ROOT PYTHON34_ZIP SOURCE_CACHE PAYLOADS OUTPUT
 STD_STAGED is a completed prepare_win32_std.py output. BUILD_ROOT contains
 out/jq, out/sqlite, out/busybox, unpack/w64devkit, and the PortableGit tree at
 unpack/ itself. All extraction and compilation is done by the caller.
@@ -80,7 +80,7 @@ def collect(output, directory):
 #@param none No arguments; all paths arrive through sys.argv.
 #@return None result No value; writes the staged tree and tool-inputs.json.
 def main():
-    std_staged, root, py34_zip, cache, output = map(pathlib.Path, sys.argv[1:6])
+    std_staged, root, py34_zip, cache, payloads, output = map(pathlib.Path, sys.argv[1:7])
     root = root.resolve()
     if output.exists():
         raise SystemExit("staging output already exists")
@@ -123,9 +123,9 @@ def main():
         archive.add(cache / "sqlite-src-3530400.zip", arcname="sqlite-src-3530400.zip")
     shutil.copyfile(cache / "busybox-w32-FRP-6075-g169694ebd.tar.gz",
                     sources / "busybox/busybox-w32-FRP-6075-g169694ebd.tar.gz")
-    shutil.copyfile(cache / "w64devkit-x86-2.9.0.7z.exe",
+    shutil.copyfile(payloads / "w64devkit-x86-2.9.0.7z.exe",
                     sources / "compiler/w64devkit-x86-2.9.0.7z.exe")
-    shutil.copyfile(cache / "PortableGit-2.10.0-32-bit.7z.exe",
+    shutil.copyfile(payloads / "PortableGit-2.10.0-32-bit.7z.exe",
                     sources / "git/PortableGit-2.10.0-32-bit.7z.exe")
     python_bundle = sources / "python3/python34-portable-closure.tar.gz"
     with tarfile.open(python_bundle, "w:gz") as archive:

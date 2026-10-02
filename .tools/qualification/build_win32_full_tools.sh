@@ -182,4 +182,4 @@ cp "$LOG_ROOT/portablegit-unpack.log" "$OUTPUT_ROOT/unpack/portablegit-unpack.lo
 } >"$LOG_ROOT/smoke.log" 2>&1
 cat "$LOG_ROOT/smoke.log"
 
-echo "win64-full-tools=PASS"
+echo "win32-full-tools=PASS"

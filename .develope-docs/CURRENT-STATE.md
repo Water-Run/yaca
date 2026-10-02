@@ -1,7 +1,10 @@
 # 当前状态
 
-更新日期：2026-10-02。**九包 9/9 全部随当前源码装配**：原构建机（Fedora）
-本批收口 win64 full——CPython 3.8.20 x64 以 v142 私提取工具链 + 私有
+更新日期：2026-10-02。**九包 9/9 全部随当前源码装配、无挂账**：第四批在
+原构建机重装配 win32 full（py34 3.4.10 源码构建 + `*.a` 修复后的 10 工具，
+zip `96fc32cf...`，真 Windows 与 Server 2008 实机抽查通过）并修复遗留
+build_win64_candidate.sh 三处缺陷（实跑验证恢复可用）；win32 full 不再等
+WSL2 机。此前第三批收口 win64 full——CPython 3.8.20 x64 以 v142 私提取工具链 + 私有
 MSBuild 16 在共用 Windows 主机上源码构建 PASS（`MSC v.1929`），便携闭包
 含 app-local VC142 CRT/UCRT 并过重定位复验；jq/sqlite/sqldiff/busybox
 x64 交叉构建与 w64devkit-x64/PortableGit-2.46.2 解包全冒烟；D-079 的
@@ -56,9 +59,9 @@ win32 full 按 D-079 三档信任分级取得外部件并装配（10 工具 1247
 linux full 在 C7 容器内整套重建（可重定位 gcc/g++、含 HTTPS 的 git
 2.55.0、自带 ssl/sqlite 的 py3.14 等，10 工具 6016 文件验证 + 全部
 工具重定位冒烟；Git 传输缺口就此收口）。
-**九包 9/9 绑定当前源码**（clean 3/3、std 3/3、win32 full、linux
-full、win64 full——后者 10-02 第三批在原构建机装配；win32 full 的
-compiler lib `*.a` 修复重装配挂账待 WSL2 机）。证据见
+**九包 9/9 绑定当前源码**（clean 3/3、std 3/3、win32 full（第四批
+`96fc32cf...`）、linux full、win64 full（第三批 `ade7ea70...`），无挂账）。
+证据见
 [10 月 1 日 Review](CODE-REVIEW-2026-10-01.md)。9 月 30 日轮修复附带软件
 索引及内核取消、超时、失败回执和 Ask 关闭路径，提交脉络见
 [开发历程](DEVELOPMENT-HISTORY.md)，证据见
@@ -141,7 +144,7 @@ Linux / 本机 Win64 / Server 2008 Win32 最终原生故障探针均 0 句柄/�
 
 | 平台 | clean | std | full | 证据与缺口 |
 | --- | --- | --- | --- | --- |
-| win32-x86 | **当前源码已装配**（R73 核心，Server 2008 Stage 1 + suite 698/698） | **当前源码已装配**（锁定源码复现，4 工具，本机冒烟；qualification=pending） | **当前源码已装配**（D-079：PortableGit 官方哈希验证 + w64devkit/sqlite-src 重派生 pin + 锁内源构建；10 工具 12478 文件验证+全冒烟） | XP 当前组件 suite 670/670、原生探针与 stage-1；实机旅程属 C33 |
+| win32-x86 | **当前源码已装配**（统一脚本随 HEAD 重建 `acd58d83...`，Server 2008 实机 `--version`+`--lua` 通过） | **当前源码已装配**（本机暂存逐摘要复验 3014 文件 0 坏） | **当前源码已装配**（10-02 第四批：py34 3.4.10 源码构建 + MSVCRT 提取 + `*.a` 修复；10 工具 12965 文件，真 Windows gcc/g++/git 全验，zip `96fc32cf...`） | XP 当前组件 suite 670/670、原生探针与 stage-1；实机旅程属 C33 |
 | win64-x86_64 | **当前源码已装配**（R73 核心，本机 Stage 1 12 PASSED） | **当前源码已装配**（锁定源码复现，4 工具，本机冒烟；qualification=pending） | **当前源码已装配**（10-02 第三批：v142+MSBuild16 私提取、CPython 3.8.20 源码构建、x64 工具交叉构建 + 外部件解包；10 工具 14741 文件验证 + gcc/g++ 编译运行；zip `ade7ea70...`） | Win7 当前组件 suite 670/670、codec/进程流/seek 与 stage-1；fs-open 真机复跑仍缺。KB2533623/UCRT 未打补丁机资格属 C33 |
 | linux-x86_64 | **当前源码已装配**（CentOS 7 用户态重建，suite 698/698，单文件 `d06ec961...`） | **当前源码已装配**（C7 容器复现，4 工具 C7 实跑冒烟；qualification=pending） | **当前源码已装配**（C7 容器重建可重定位 gcc/g++、含 HTTPS 的 git 2.55.0、自带 ssl/sqlite 的 py3.14、jq/sqlite/busybox；10 工具 6016 文件验证+重定位冒烟） | 三故障探针、真实 2.3 GiB 旅程 10/10 为旧源码证据；物理 CentOS 7 实机旅程待补。工具 git 已自带 https，传输缺口收口 |
 
@@ -163,11 +166,9 @@ diagnostics 脱敏面、network 重试控制器（无缺陷）。如实保留的
 - 全仓语义 Review 已按 10-01 四批口径收口（R73 为唯一缺陷）；剩余面按缺陷驱动
   补读。下一步为三目标统一重建与目标回归——其中 Linux 重建与 win32 目标端
   复跑依赖外部环境。
-- Python 3.4.10 已源码构建并在 Server 2008 验证；Python 3.8.20 已源码构建
-  并装配 win64 full（10-02 第三批，`MSC v.1929`）；Linux Git 传输能力已由
-  linux full 自带 https 收口。挂账：win32 full 的 compiler lib `*.a` 剪除
-  缺陷同修重装配（WSL2 机）、遗留脚本 `build_win64_candidate.sh` 的三处
-  链接/参数缺陷（核心已改走统一脚本，待负责人决定删除或修复）。
+- Python 3.4.10 与 3.8.20 均已源码构建并装配（第四/第三批）；Linux Git
+  传输能力已由 linux full 自带 https 收口；遗留脚本
+  `build_win64_candidate.sh` 已修复并实跑验证（第四批）。
 - 按 D-077 核对兼容源码、ABI 和导入闭包；用已有指定实机补相应运行证据。
 - A08/A09 已收口：CentOS 7 离线大文件证据、轮转/截断步骤、真实模型联网自测
   与 Server 2008 2.34 GiB 全档复跑（10-02）均已落档；交互式聊天/多轮恢复
