@@ -293,3 +293,42 @@ archive.kernel.org/epel 存档源）。配方选择全部入档：
 九包进度：**7/9**（clean 3/3、std 3/3、win32 full）。剩余 win64 full
 （Python 3.8.20）与 linux full（重型 sysroot 管线）维持登记；全部产物
 candidate-unqualified，实机旅程属 C33。
+
+### linux full 随当前源码装配（10-01 深夜终章）
+
+重型 sysroot 管线按已入库的 prepare_linux_full.py 契约在真实
+CentOS 7（容器、archive.kernel.org/SCL/EPEL 存档源）内重建，配方
+选择全部入档（`out/review-20261001/linux-full-build3-entry.sh` 等）：
+
+- **可重定位编译器**：binutils 2.47 + GCC 13.5.0（gmp/mpfr/mpc 锁源、
+  devtoolset-11 引导、--disable-bootstrap）+ make 4.4.1，安装前缀
+  `/yaca/tools/compiler`；CRT/重写后的 libc 链接脚本/运行库随 prefix
+  自带（`x86_64-pc-linux-gnu/lib64`），gcc 与 ld 相对自身路径解析——
+  **拷贝到任意目录后 gcc/g++ 编译、链接、运行 hello 均通过**
+  （`linux-full-smoke.log`：relocated-gcc=OK、relocated-gpp=OK）。
+- **git 2.55.0 含 HTTPS**：libcurl 8.21.0（mbedTLS 3.6.7 静态）+ OpenSSL
+  3.0.16，configure 探测；C7 glibc 2.17 无 getrandom 头但有符号，
+  以 syscall shim（COMPAT_OBJS）补齐；Rust 组件 NO_RUST 排除。
+  **9 月登记的"Linux Git 传输缺口"就此收口**——工具自带 https。
+- **Python 3.14.7**：OpenSSL 3.0.16 + 自建 SQLite 3.53.4 + C7 liblzma，
+  libssl/libcrypto/libsqlite3.so 连同 `$ORIGIN/../..` rpath 打进
+  python3 树内——任意目录 `import ssl,sqlite3,bz2,lzma,ctypes` 通过
+  （ssl-ok OpenSSL 3.0.16、sqlite 3.53.4）。
+- jq/oniguruma、sqlite3+sqldiff（autoconf amalgamation + src 包
+  tool/sqldiff.c + sqlite3_stdio）、busybox 1.37.0（can/netlink 新
+  UAPI 头 shim，当年"iplink CAN 常量不可编译"由此解决）。
+- 暂存修复链如实入档：prepare 的 DESTDIR 嵌套拍平、挂载权限需 root
+  容器操作、打包器禁符号链接故全部拍平为真实文件（含 glibc 运行库
+  对 ld-2.17.so/libc-2.17.so 等锚点）、compiler 许可证以 glibc
+  features.h+全套 C7 头入树、git 许可证以源码 COPYING 替换目录标记。
+
+装配验证：10 工具 / 6016 文件逐摘要、入口点/许可证齐全、R73 核心
+`d06ec961...`、notices 形状正确、未授权（`verify_linux_full.py`）；
+全部十工具在 C7 容器**重定位副本**上实跑冒烟通过（gcc/g++ 编译运行、
+git 2.55.0、py314 全模块、jq/sqlite3/sqldiff/busybox sh+awk）。
+
+九包进度更新：**8/9**（clean 3/3、std 3/3、win32 full、linux full
+全部绑定 `b5c0c9ff` 源码）。唯余 win64 full 的 Python 3.8.20 工具链。
+全部产物 candidate-unqualified；实机旅程属 C33。锁内 gmp/mpfr/mpc
+URL 缺 `/gnu/` 段的笔误以重派生正确路径取回、按锁 SHA 逐项验证，
+已记录待修正。
