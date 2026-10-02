@@ -77,3 +77,60 @@ Stage 2 全项与 Stage 3 通过。密钥仅存隔离部署目录（gitignored�
 
 外部资源状态更新：DeepSeek 与本地 Qwen 端点已由负责人提供并接入；
 win64 full 的 Python 3.8.20 工具链仍是唯一未装配版位。
+
+### win64 full 解锁第一步：full 锁 URL 修正与 v142 私提取工具链（10-02 第二批）
+
+按"外部依赖常只是缺缓存"的经验（10-01），对 win64 full 剩余项
+（Python 3.8.20）开工。本批落地三件事，CPython 构建与装配留待下一批。
+
+**1. full 锁 gmp/mpfr URL 笔误修正（TR 挂账项）**：
+`release/full-tool-sources.lock.json` 中
+`https://ftp.gnu.org/gmp/...`、`https://ftp.gnu.org/mpfr/...` 补上缺失的
+`/gnu/` 段（mpc 原本正确）；两个 URL 实际拉取并核对，SHA-256 与锁内
+值逐字节一致（gmp `a3c2b802...`、mpfr `27780735...`）。四校验器复跑
+PASS。
+
+**2. VS2019 channel 稳定性复测（历史阻断解除）**：
+d16.11 channel manifest 两次获取字节一致
+（`ce478cd7...`，134,478 字节）；产品清单 `VisualStudio.vsman` 的
+SHA-256 `fb642c3f...` 与 9 月记录的"channel 给出值"一致——当时的
+"清单不一致"实为 11,154,648 字节期望值与 channel 实际清单的差异，
+本轮以实取字节为准重新锚定（tier-1：清单即微软发布的逐载荷
+SHA-256 载体）。
+
+**3. v142 私提取工具链（`fetch_v142_toolchain_windows.py` 入库）**：
+本机非管理员、无 VS2019 安装，沿用 py34 的"私提取 SDK"先例（见
+`build_python34_windows.py`）：从锚定清单解析 MSVC 14.29.16.11 系列
+（编译器 HostX64/TargetX64 + Res、CRT 头、x64 静态库、x64 redist、
+Props）与 Win10SDK_10.0.19041 全部 241 个载荷（MSI + 外部 cab），
+逐载荷 SHA-256 校验后 vsix 解包、`msiexec /a` 免提权行政安装；
+SDK BuildTools nupkg 提供 rc.exe/mt.exe。合计 **264 载荷全部摘要
+校验（`v142-toolchain=PASS`）**，产物在
+`out/review-20261002/win64-full/toolchain/`（payload-digests.json 留档）。
+
+要点与如实边界：
+
+- MSI Media 表以 `1\<hash>.cab` 相对子目录引用外部 cab，行政安装缺
+  介质时**静默跳过文件**且返回成功；取件脚本从 msiexec 日志收割
+  Media 引用、硬链接补位后重装，并按每个 MSI 的内容标记（Windows.h、
+  kernel32.Lib、ucrt.lib 等）校验完整性——Headers/Libs 的核心内容
+  实际分别在 "Store Apps Headers/Libs" MSI 中（Desktop 同名 MSI 仅
+  辅助件），标记表已如实反映。
+- 16.11 通道不单独发布经典 `lib\x64` 动态导入库（msvcrt/msvcprt/
+  oldnames 仅在 `lib\onecore\x64`）；hello 冒烟以 classic 静态库 +
+  onecore 导入库链接：**/MT 仅依赖 KERNEL32.dll，/MD 为 KERNEL32 +
+  VCRUNTIME140 + api-ms-win-crt-\*（无 api-ms-win-core-\*）**，
+  与官方构建同形状（Win7 SP1 + UCRT KB 可解析）。Win7 未打补丁
+  目标机的 KB2533623/UCRT 资格验证仍按 TOOL-BUNDLES 注记属 C33。
+- win64 核心已随 HEAD（`647c239`）重建 PASS（onedir 核心
+  `0acbd828...`；curl 8.21.0 + mbedTLS 3.6.7，subsystem 6.01），
+  供 std/full 版位装配；CPython 3.8.20 x64 构建、jq/onig/sqlite/
+  busybox x64 交叉构建与 prepare_win64_full.py 装配为下一批。
+- Python 3.8.20 源码与 nasm 2.16.03 已取（WSL 缓存）：
+  `Python-3.8.20.tgz` 摘要 `9f2d5962...`（python.org，重派生 pin）、
+  `nasm-2.16.03-win64.zip` 摘要 `3ee47822...`（nasm.us 未发布官方
+  校验值，tier-2 待负责人确认）。perl 取自本机 scoop git。
+
+校验：注释 **221 文件 / 5284 声明 / 0 缺项**（新增取件脚本）、四校验器
+PASS；产品源码零改动（完整 suite 699/699 仍绑定 `4117256`，
+698→699 为 R74 轮次结果，本轮无源码变化）。

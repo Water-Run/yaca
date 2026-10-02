@@ -46,12 +46,12 @@
   },
   {
    "file": "gmp-6.3.0.tar.xz",
-   "url": "https://ftp.gnu.org/gmp/gmp-6.3.0.tar.xz",
+   "url": "https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz",
    "sha256": "a3c2b80201b89e68616f4ad30bc66aee4927c3ce50e33929ca819d5c43538898"
   },
   {
    "file": "mpfr-4.2.1.tar.xz",
-   "url": "https://ftp.gnu.org/mpfr/mpfr-4.2.1.tar.xz",
+   "url": "https://ftp.gnu.org/gnu/mpfr/mpfr-4.2.1.tar.xz",
    "sha256": "277807353a6726978996945af13e52829e3abd7a9a5b7fb2793894e18f1fcbb2"
   },
   {

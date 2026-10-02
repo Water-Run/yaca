@@ -1,6 +1,16 @@
 # 当前状态
 
-更新日期：2026-10-02。**首批真实模型联网证据已落档**：负责人提供
+更新日期：2026-10-02。**win64 full 工具链已解锁**：full 锁 gmp/mpfr URL
+笔误修正并实拉核对；VS2019 d16.11 channel 清单字节稳定复测后以实取字节
+锚定；MSVC 14.29（v142）+ Win10 SDK 19041 私提取工具链入库
+（`fetch_v142_toolchain_windows.py`，264 载荷全部摘要校验，免提权
+msiexec /a + MSI 介质补位），hello 冒烟 /MT、/MD 导入表与官方构建同形状；
+win64 核心随 HEAD（`647c239`）重建 PASS。余 CPython 3.8.20 x64 构建、
+x64 工具件与装配。注释 **221 文件 / 5284 声明 / 0 缺项**、四校验器 PASS，
+产品源码零改动。详见
+[10 月 2 日 Review 第二批](CODE-REVIEW-2026-10-02.md)。
+
+此前（10-02 第一批）：**首批真实模型联网证据已落档**：负责人提供
 DeepSeek 与本地 sglang qwen3.8-27b 端点后，发现并修复适配器 R74（OpenAI
 显式 null 拼写被误判协议错），修复后双模型 Stage 2 七项全过
 （14 次真实联网请求）、Stage 3 passed（累计 17 次）。A08/A09 旅程随后
@@ -117,7 +127,7 @@ Linux / 本机 Win64 / Server 2008 Win32 最终原生故障探针均 0 句柄/�
 | 平台 | clean | std | full | 证据与缺口 |
 | --- | --- | --- | --- | --- |
 | win32-x86 | **当前源码已装配**（R73 核心，Server 2008 Stage 1 + suite 698/698） | **当前源码已装配**（锁定源码复现，4 工具，本机冒烟；qualification=pending） | **当前源码已装配**（D-079：PortableGit 官方哈希验证 + w64devkit/sqlite-src 重派生 pin + 锁内源构建；10 工具 12478 文件验证+全冒烟） | XP 当前组件 suite 670/670、原生探针与 stage-1；实机旅程属 C33 |
-| win64-x86_64 | **当前源码已装配**（R73 核心，本机 Stage 1 12 PASSED） | **当前源码已装配**（锁定源码复现，4 工具，本机冒烟；qualification=pending） | 未装配 | Win7 当前组件 suite 670/670、codec/进程流/seek 与 stage-1；fs-open 真机复跑仍缺。Python 3.8.20 构建待完成 |
+| win64-x86_64 | **当前源码已装配**（R73 核心，本机 Stage 1 12 PASSED） | **当前源码已装配**（锁定源码复现，4 工具，本机冒烟；qualification=pending） | 未装配（10-02 第二批：v142 工具链已解锁，核心已随 `647c239` 重建；余 CPython 3.8.20 构建 + 装配） | Win7 当前组件 suite 670/670、codec/进程流/seek 与 stage-1；fs-open 真机复跑仍缺。Python 3.8.20 构建待完成 |
 | linux-x86_64 | **当前源码已装配**（CentOS 7 用户态重建，suite 698/698，单文件 `d06ec961...`） | **当前源码已装配**（C7 容器复现，4 工具 C7 实跑冒烟；qualification=pending） | **当前源码已装配**（C7 容器重建可重定位 gcc/g++、含 HTTPS 的 git 2.55.0、自带 ssl/sqlite 的 py3.14、jq/sqlite/busybox；10 工具 6016 文件验证+重定位冒烟） | 三故障探针、真实 2.3 GiB 旅程 10/10 为旧源码证据；物理 CentOS 7 实机旅程待补。工具 git 已自带 https，传输缺口收口 |
 
 **7/9 是候选装配进度，不是最终资格通过数。** 附带软件功能后来使历史开发机
