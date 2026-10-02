@@ -2,11 +2,27 @@
 
 更新日期：2026-10-02。当前快照见 [CURRENT-STATE.md](CURRENT-STATE.md)。
 核心已实现，继续在当前代码上收尾；C01--C31 是已有实现的任务映射，不重新开工。
-九包进度 **8/9**（唯 win64 full 缺 Python 3.8.20）；真实模型联网自测已由
-DeepSeek/本地 Qwen 端点首次全绿（R74 修复后双模型 Stage 2 七项、Stage 3）。
-Gate R 关闭。
+九包进度 **9/9**（10-02 第三批在原构建机收口 win64 full；win32 full 的
+compiler lib 修复重装配挂账待 WSL2 机）。Gate R 关闭。
 
 ## 本轮已收口
+
+10-02 第三批（原构建机）：**win64 full 收口**。D-079 重派生 pin 与原构建机
+payloads.lock.json 逐项对齐（w64devkit-x86/x64、两 PortableGit、busybox
+w64、sqlite-src）；修复入库取件脚本两处缺陷（MSI 标记表三错、介质需多遍
+行政安装）后 v142-toolchain=PASS（262 载荷）；MSBuild 16 私提取入库
+（产品清单双锚定 + URL 内嵌哈希交叉验证）；CPython 3.8.20 x64 源码构建
+PASS（build_python38_windows.py；MSB8036/8037 全局属性解决；liblzma/
+_sqlite3 清单修正）；便携闭包 app-local CRT/UCRT 过重定位复验
+（stage_python38_windows.py）；x64 工具交叉构建 + 外部件解包全冒烟
+（build_win64_full_tools.sh，jq 静态直链 -municode）；win64 核心随 HEAD
+以统一脚本重建（`a81a3f32...`）；prepare_win64_full.py + package_editions
+装配 editions=PASS（full zip `ade7ea70...`，14741 文件，gcc/g++ 编译运行
+验证）。发现两处入库缺陷：遗留 build_win64_candidate.sh 跑不通（未修改，
+核心改走统一脚本）、prepare_win32_full.py 剪 `*.a` 致链接必挂（win64 版
+已修，win32 待同修重装配）。注释 226/5300/0、四校验器 PASS，产品源码
+零改动。证据见
+[10 月 2 日 Review 第三批](CODE-REVIEW-2026-10-02.md)。
 
 10-02 第二批：**win64 full 解锁第一步**。full 锁 gmp/mpfr URL 笔误修正
 （`/gnu/` 段补齐，实拉核对 SHA 一致）；VS2019 d16.11 channel 清单字节
@@ -88,7 +104,7 @@ Win32/Win64 单文件及 clean 已以本轮源码刷新；普通用户 NTFS meta
 | --- | --- | --- |
 | P0 · D-075/D-076、F4/F5 | ~~继续人工语义 Review~~ 10-01 四批收口：端口层四模块、model/runtime/session/context 发布/恢复边界、cli/tui/config/json/xml/path/safety/prompt/permission 全册、main.lua 组合/准入/发布面整读+协调器准入/关闭整读、text/clock/platform/backend 全册、ini 解析核、diagnostics 脱敏面、network 重试控制器；除 R73 外无缺陷 | 剩余如实保留：main.lua 交互事件分发内部、compact 状态机内部逐行通读、原生 C 层（有独立探针）、测试辅助代码；后续按缺陷驱动补读，不再作为独立批次 |
 | P0 · F4、C32 | ~~刷新 Linux 当前源码产物~~ 已在真实 CentOS 7 用户态（Docker centos:7，GCC 4.8.5-44.el7 / glibc 2.17-326.el7）内以**未修改**的构建脚本完成：PASS、目标端 suite 698/698、单文件 `d06ec961...`；三平台 clean 版位全部绑定 `b5c0c9ff` 源码。物理 CentOS 7 的实机旅程仍属 C33 | Windows 两核心已随 R73 刷新并本机 Stage 1 通过；**win32 的 Server 2008 目标端已复跑**：R73 单文件 Stage 1 12 PASSED / 0 FAILED、当前源码 suite 698/698（见 10-01 Review）。容器共享宿主内核的边界已如实记录 |
-| P0 · F3、C33 | ~~std 重装配~~ **8/9 已随当前源码装配**：std 3/3 + win32 full（D-079 三档信任分级，pin 待负责人确认）+ **linux full（C7 容器内全套重建：可重定位 gcc/g++、含 HTTPS 的 git 2.55.0、自带 ssl/sqlite 的 py314；10 工具 6016 文件验证+重定位冒烟）**。唯余 win64 full：~~Python 3.8.20 工具链~~ **10-02 第二批已解锁工具链**（v142 私提取 PASS，见 10-02 Review 第二批），余 CPython 3.8.20 x64 构建 + x64 工具件 + 装配。**Linux Git 传输缺口已收口**（工具自带 https） | 不把旧 Python 安装包改版本；重派生 pin 与原构建机不一致时以原记录为准重装配；qualification=pending，实机旅程属 C33。~~锁内 gmp/mpfr URL 笔误~~ 10-02 已修正并实拉核对 |
+| P0 · F3、C33 | ~~std 重装配~~ **9/9 已随当前源码装配**：std 3/3 + win32 full（D-079 三档信任分级，pin 已与原构建机记录对齐）+ **linux full（C7 容器内全套重建：可重定位 gcc/g++、含 HTTPS 的 git 2.55.0、自带 ssl/sqlite 的 py314；10 工具 6016 文件验证+重定位冒烟）** + **win64 full（10-02 第三批：CPython 3.8.20 源码构建 + x64 工具交叉构建 + 外部件；10 工具 14741 文件验证 + gcc/g++ 编译运行；zip `ade7ea70...`）**。**Linux Git 传输缺口已收口**（工具自带 https）。挂账：win32 full 的 compiler lib `*.a` 剪除缺陷同修重装配（WSL2 机当前不可达） | 不把旧 Python 安装包改版本；重派生 pin 与原构建机不一致时以原记录为准重装配；qualification=pending，实机旅程属 C33。~~锁内 gmp/mpfr URL 笔误~~ 10-02 已修正并实拉核对 |
 | P1 · F2/F4、C32 | 在此前提供的实机补中文/损坏编码输出、取消/进程树、发布/恢复证据 | 按 D-077 使用指定环境；Win7 fs-open 旧 VM 五轮失败保留为历史，不阻断本次收尾 |
 | P1 · A08/A09 | ~~余：2.3 GiB 全档目标端复跑与轮转/截断步骤补齐~~ **已收口**（10-02 后续）：旅程扩至 15 步并宿主平台化；本地 Linux 600 MiB 15/15、Server 2008 实机 2.34 GiB 全档 15/15 均 0 失败（win32 配对，见 10-02 Review）。600 MiB 离线旅程与真实模型联网自测此前已绿 | 交互式聊天/多轮恢复的旅程需 TTY，归 C33 |
 | P1 · C33 | 最终三平台 clean/std/full 共九包完整干净机旅程 | 以最终 zip 字节验收布局、零表面、同平台核心一致、移除 tools 后核心/Lua、首次配置、Ask/工具、多轮恢复、移动/升级/卸载 |
@@ -102,7 +118,7 @@ Win32/Win64 单文件及 clean 已以本轮源码刷新；普通用户 NTFS meta
 
 | 依赖 | 已知情况 | 解锁后的工作 |
 | --- | --- | --- |
-| Windows Python 构建环境 | 私有 VC++ 2010 / SDK 路线已完成 Python 3.4.10；14 模块与 app-local CRT 通过，Server 2008 ssl/sqlite/bz2/lzma/ctypes 通过。~~VS2019 channel 清单不一致~~ 10-02 第二批复测字节稳定并以实取字节锚定；v142 私提取工具链入库并 PASS（264 载荷摘要校验） | ~~完成 Python 3.8.20 的可验证兼容工具链~~ 已完成；CPython 3.8.20 x64 构建 + win64 full 装配继续 |
+| Windows Python 构建环境 | 私有 VC++ 2010 / SDK 路线已完成 Python 3.4.10；14 模块与 app-local CRT 通过，Server 2008 ssl/sqlite/bz2/lzma/ctypes 通过。~~VS2019 channel 清单不一致~~ 10-02 第二批复测字节稳定并以实取字节锚定；v142 私提取工具链入库并 PASS（原构建机重取 262 载荷，标记表/介质多遍两处缺陷已修）；MSBuild 16 私提取入库（双锚定） | ~~完成 Python 3.8.20 的可验证兼容工具链~~ 已完成；~~CPython 3.8.20 x64 构建 + win64 full 装配~~ 10-02 第三批完成（`MSC v.1929`，共用 Windows 主机如实记录） |
 | 当前模型配置 | ~~历史批次真实模型旅程因缺 API 配置未执行~~ **已提供**：DeepSeek 外网 API + 本地 sglang qwen3.8-27b（DGX Spark）。密钥在隔离部署目录，不入库 | 已执行 Stage 2/3 双模型联网自测全绿；后续旅程直接使用，不把 mock-provider 或旧包在线结果当当前源码证据 |
 | 旧系统完整实机矩阵 | D-077 明确本轮不要求重跑；兼容底线保留 | 按代码、ABI/导入和已有指定实机证明，未测环境不声称实测通过 |
 | 原构建机证据与缓存 | 本工作区只留旧 preview 包和部分源码，9 月 28--30 日大部分路径为历史构建机记录 | 恢复锁定缓存、目标机与证据目录；逐项核对摘要后复用，缺失证据保持待验收 |

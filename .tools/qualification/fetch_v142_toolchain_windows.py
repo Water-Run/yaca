@@ -159,15 +159,15 @@ SDK_MSI_MARKERS = {
     "Windows SDK for Windows Store Apps Libs-x86_en-us.msi":
         "Lib/10.0.19041.0/um/x64/kernel32.Lib",
     "Windows SDK Desktop Tools x64-x86_en-us.msi":
-        "bin/10.0.19041.0/x64/signtool.exe",
+        "bin/10.0.19041.0/x64/tracelog.exe",
     "Windows SDK Desktop Tools x86-x86_en-us.msi":
-        "bin/10.0.19041.0/x86/signtool.exe",
+        "bin/10.0.19041.0/x86/tracelog.exe",
     "Windows SDK Signing Tools-x86_en-us.msi":
         "bin/10.0.19041.0/x86/signtool.exe",
     "Windows SDK Modern Versioned Developer Tools-x86_en-us.msi":
-        "bin/10.0.19041.0/x86/midlrt.exe",
+        "bin/10.0.19041.0/x64/AppAnalysis/Microsoft.Diagnostics.AppAnalysis.dll",
     "Windows SDK Modern Non-Versioned Developer Tools-x86_en-us.msi":
-        "bin/10.0.19041.0/x86/makecert.exe",
+        "bin/10.0.19041.0/XamlCompiler/x64/genxbf.dll",
     "Universal CRT Headers Libraries and Sources-x86_en-us.msi":
         "Lib/10.0.19041.0/ucrt/x64/ucrt.lib",
     "Universal CRT Redistributable-x86_en-us.msi":
@@ -179,26 +179,31 @@ SDK_MSI_MARKERS = {
 #@param msi_path pathlib.Path Verified MSI file to extract.
 #@param target_dir pathlib.Path Directory receiving the administrative image.
 #@return None result No value; msiexec copies the feature files.
-#@effect Launches msiexec /a and writes an administrative image under target_dir,
-#@effect skipping work only when the MSI's content marker already exists.
+#@effect Launches msiexec /a up to four times, linking referenced media
+#@effect cabinets between passes, and writes an administrative image under
+#@effect target_dir; multi-pass extraction is required because a single
+#@ msiexec pass resolves only part of the external media set.
 def admin_install(msi_path, target_dir):
     marker = SDK_MSI_MARKERS.get(msi_path.name)
-    if marker and (target_dir / "Windows Kits/10" / marker).is_file():
+    marker_path = target_dir / "Windows Kits/10" / marker if marker else None
+    if marker_path and marker_path.is_file():
         print("admin-install cached", msi_path.name)
         return
     log_path = target_dir.parent / (msi_path.name + ".admin.log")
     command = ["msiexec", "/a", str(msi_path), "/qn",
                "TARGETDIR=" + str(target_dir), "/l*v", str(log_path)]
-    result = subprocess.run(command, capture_output=True)
-    if result.returncode != 0:
-        raise SystemExit("msiexec /a failed (%s) rc=%d" % (msi_path.name,
-                                                           result.returncode))
-    if link_media_from_log(log_path, msi_path.parent) > 0:
+    linked_total = 0
+    for attempt in range(4):
         result = subprocess.run(command, capture_output=True)
         if result.returncode != 0:
-            raise SystemExit("msiexec /a rerun failed (%s) rc=%d"
-                             % (msi_path.name, result.returncode))
-    if marker and not (target_dir / "Windows Kits/10" / marker).is_file():
+            raise SystemExit("msiexec /a failed (%s) rc=%d" % (msi_path.name,
+                                                               result.returncode))
+        if marker_path and marker_path.is_file():
+            break
+        linked_total += link_media_from_log(log_path, msi_path.parent)
+        if linked_total == 0 and attempt:
+            break
+    if marker and not marker_path.is_file():
         raise SystemExit("admin install incomplete for %s (missing %s)"
                          % (msi_path.name, marker))
     print("admin-installed", msi_path.name)
@@ -223,11 +228,6 @@ def link_media_from_log(log_path, installers):
         os.link(plain, target)
         created += 1
     return created
-    result = subprocess.run(command, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise SystemExit("msiexec /a failed (%s) rc=%d" % (msi_path.name,
-                                                           result.returncode))
-    print("admin-installed", msi_path.name)
 
 
 # Runs the toolchain fetch and extraction pipeline for one cache directory.

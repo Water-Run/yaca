@@ -134,3 +134,102 @@ SDK BuildTools nupkg 提供 rc.exe/mt.exe。合计 **264 载荷全部摘要
 校验：注释 **221 文件 / 5284 声明 / 0 缺项**（新增取件脚本）、四校验器
 PASS；产品源码零改动（完整 suite 699/699 仍绑定 `4117256`，
 698→699 为 R74 轮次结果，本轮无源码变化）。
+
+### win64 full 随当前源码装配（10-02 第三批，原构建机）
+
+原构建机（Fedora 44）恢复参与收尾；此前两批在 Windows+WSL2 机完成，该机
+当前不可达，本批全部输入由原构建机与一台可达 Windows 主机（192.168.10.104，
+Win11 26100，Administrator SSH，业务共用机，如实记录）重新取得或重建。
+
+**D-079 重派生 pin 与原构建机记录对齐**：原构建机 `out/full-payloads-20260929/
+payloads.lock.json` 在库，逐项实核——w64devkit-x86 `d05b743d...`、
+PortableGit-2.10.0 `89940cca...`（官方值）、w64devkit-x64 `bff1d13f...`、
+PortableGit-2.46.2-64 `58ae5c1a...`、busybox-w32 win64 `762f8576...` 全部与
+文件实测一致；sqlite-src-3530400.zip `d18fa15a...` 同。D-079 悬置的
+"待负责人确认"按"原记录为准"收口：重派生值与原记录一致，无需重装配。
+
+**入库脚本缺陷修复（fetch_v142_toolchain_windows.py，两处）**：
+
+- `SDK_MSI_MARKERS` 三项标记指向 MSI 实际不含有的文件（Desktop Tools
+  x64/x86 标 signtool、Modern Versioned 标 midlrt、Non-Versioned 标
+  makecert；经 MSI File 表查证 signtool 仅在 Signing Tools MSI）。改为各
+  MSI 实际安装且来自外部 cab 的文件（Desktop Tools → tracelog.exe，
+  Modern Versioned → AppAnalysis.dll，Non-Versioned → genxbf.dll），介质
+  消费证明力不变。
+- `admin_install` 由"重跑一次"改为最多四遍循环：单遍 msiexec 只解析部分
+  外部介质，Desktop Tools 与 Modern Versioned 均需多遍才完整落盘。
+  顺带清除一处 return 后不可达残留。重取后 **v142-toolchain=PASS
+  （262 载荷）**。
+
+**MSBuild 16 私提取（fetch_msbuild16_windows.py 入库）**：CPython 3.8 的
+PCbuild 需要能理解 v142 targets 的 MSBuild，取
+Microsoft.Build（引擎）+ Build.Dependencies + VC.MSBuild.Base（Cpp
+targets）+ VC.MSBuild.X64（`Platforms/x64/Platform.props`，MSB8020 的缺失
+件）+ VC.MSBuild.X64.v142，全部逐载荷摘要校验。产品清单双锚定：优先
+channel 声明的 19,253,644 字节变体（`fb642c3f...`），CDN 旧边带返回的
+11,154,648 字节变体（`406969c3...`，9 月"清单不一致"同源）作兜底并要求
+每个载荷的 URL 内嵌 SHA-256 与清单声明一致，实际使用变体记入 digest
+记录。本轮两台机器分别命中过两个变体，该边界如实保留。
+
+**CPython 3.8.20 x64（build_python38_windows.py 入库）**：v142 提取物 +
+私有 MSBuild 在无 VS、无注册表写入、无 PATH 修改下驱动 PCbuild。
+MSB8036/8037 以全局属性 `WindowsSDKInstalled=true`、
+`WindowsSDK_Desktop_Support=true` 解决——私有提取无 UWP DesignTime
+UAP.props，而桌面标记（shared/sdkddkver.h、um/x64/gdi32.lib）实际在位。
+externals 按 `get_externals.bat --no-tkinter`（bzip2/sqlite/xz/zlib/libffi
+源码 + libffi、openssl-bin-1.1.1w 预构建二进制）；构建机 GitHub 中断一次，
+openssl-bin 由原构建机代取（commit `0650c7f...`）上传补齐。修正两处清单
+（liblzma 前置库项目、_sqlite3 模块项目）后 **python38-build=PASS**
+（`3.8.20 [MSC v.1929 64 bit]`，与 Win7 兼容的 14.29 工具链）。
+
+**便携闭包（stage_python38_windows.py 入库）**：app-local VC142 CRT
+（v142 Redist）+ UCRT（SDK Redist）+ openssl-bin DLL + 15 个 .pyd
+（3.8 的 _asyncio/_sqlite3 并入核心、sqlite3.dll 单列，与 py34 布局的差异
+如实记录）。**python38-portable=PASS 含重定位复验**；vcruntime140 验证为
+本地加载；ucrtbase 在新式宿主经 apiset 取系统副本，属宿主事实——未打补丁
+Win7 目标机的 KB2533623/UCRT 资格验证按 TOOL-BUNDLES 仍属 C33。
+
+**本机交叉构建（build_win64_full_tools.sh 入库）**：jq 1.8.2（绕过
+libtool 直链 `-municode`+onig/.libs 静态归档，复刻 win32 轮已记录的
+"-static 重链"修法，导入表仅 KERNEL32/msvcrt/SHLWAPI）、sqlite3 3.53.4、
+sqldiff（src 包 tool/sqldiff.c + ext/misc/sqlite3_stdio.c + autoconf
+amalgamation）、busybox 复用原构建机 `762f8576...` 记录件、
+w64devkit-x64 与 PortableGit-2.46.2-64 解包，**win64-full-tools=PASS**
+（wine 冒烟全绿）。
+
+**发现入库缺陷（遗留脚本，未修改、待负责人决定）**：
+`build_win64_candidate.sh` 自 8841212 起 launcher 调用缺第 5 参数
+`stage`（windows_sources.lua 要求锁定 Lua 源树）、inner.exe 链接缺
+`-lshell32`、extractor 链接缺 `-municode`，三处叠加使该遗留脚本无法产出
+yaca.exe。本轮核心改用统一脚本 `build_windows_candidate.sh` 的
+`win64-x86_64` 目标完成，遗留脚本保持原样入库。
+
+**发现入库缺陷（影响 win32 full，待同修重装配）**：
+`prepare_win32_full.py` 对 compiler 的 lib 剪除 `*.a`，链接必挂（实测
+`cannot find -lmingw32` 等）——这些归档是链接器输入不是开发冗余。win64 版
+`prepare_win64_full.py` 已改为不剪并实测：包内 gcc/g++ 对 hello.c/hello.cpp
+编译、链接、运行全通过（gcc-full-ok / gpp-full-ok）。win32 full 需在
+WSL2 机（当前不可达）以同修重装配，本缺陷如实挂账。
+
+**win64 核心与装配**：统一脚本随 HEAD（`4a9c4bc`）重建，onefile
+`a81a3f32...`、companion notices 齐；本机 wine `--version` =
+`yaca 0.1.0 (win64-x86_64)`。`prepare_win64_full.py`（6 参，源码/外部件
+分立）+ `package_editions.py --edition full` → **editions=PASS**：
+
+| 产物 | SHA-256 |
+| --- | --- |
+| `yaca-0.1.0-win64-x86_64-full.zip`（330 MiB，解包 14741 文件） | `ade7ea70b1c03a6e1c5fc716058a0c175f49e29fbd89a581469783987282c369` |
+| `yaca-0.1.0-win64-x86_64-full-notices.zip` | `e4d9867a278e343a6b756722014fde7b216ce01b0c21692ffd030274799ed22d` |
+
+解包核验：核心与构建件逐字节一致；10 工具（std 4 + git 2.46.2 /
+python3 3.8.20 / sqlite 3.53.4 / jq 1.8.2 / busybox FRP-6075 /
+compiler w64devkit-2.9.0-x64）；py3.8.20 模块面（json/csv/re/hashlib/
+zipfile/ctypes/encodings/ssl 1.1.1w/sqlite 3.35.5/bz2/lzma）、py2.7.18
+（OpenSSL 1.0.2t，官方 2.7.18 Windows 构建自带）、jq 管道往返、sqlite3、
+sqldiff 差异输出、busybox、git、gcc/g++ 编译运行、make 4.4.1 全部通过。
+
+**九包 9/9 全部随当前源码装配**（win64 full 本批收口；win32 full 的
+compiler lib 修复重装配挂账待 WSL2 机）。校验：注释 **226 文件 / 5300
+声明 / 0 缺项**（含 5 个新脚本）、注释检查器反例 15/15、四校验器 PASS
+（7739 / 56 / 565 + 5 文档真值）。产品源码零改动（完整 suite 699/699 仍
+绑定 `4117256`）。全部产物 candidate-unqualified，Win7 实机旅程属 C33。
