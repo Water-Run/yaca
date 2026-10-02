@@ -94,8 +94,10 @@ def main():
     (output / "tools/compiler").mkdir()
     w64 = root / "unpack/w64devkit"
     for name in ("bin", "lib", "libexec", "include"):
+        # The lib import archives are linker inputs, not development cruft:
+        # pruning them leaves a compiler that cannot link anything.
         copy_tree(w64 / name, output / "tools/compiler" / name,
-                  {"*.a" if name == "lib" else "__pycache__"})
+                  {"__pycache__"})
     for name in ("VERSION.txt", "COPYING.MinGW-w64-runtime.txt", "README.md"):
         shutil.copyfile(w64 / name, output / "tools/compiler" / name)
 
