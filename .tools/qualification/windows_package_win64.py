@@ -53,7 +53,16 @@ def main():
         assert re.search(r"^MajorSubsystemVersion\s+6$", report, re.M), path
         assert re.search(r"^MinorSubsystemVersion\s+1$", report, re.M), path
         imports = re.findall(r"DLL Name: (\S+)", report)
-        assert {name.lower() for name in imports} <= allowed_dlls, (path, imports)
+        # The inner entry decodes Unicode argv with CommandLineToArgvW, and
+        # if_nametoindex in Iphlpapi is available since Vista (IPv6); both
+        # stay scoped to the artifacts that actually need them.
+        artifact_dlls = allowed_dlls | (
+            {"shell32.dll"} if path == output / "onedir/inner.exe" else set()
+        ) | (
+            {"iphlpapi.dll"}
+            if path == output / "onedir/.luai/components/curl.exe" else set()
+        )
+        assert {name.lower() for name in imports} <= artifact_dlls, (path, imports)
         # Inspect import tables only: export names and debug strings are not imports.
         import_report = report.split("The Export Tables")[0]
         assert not banned.search(import_report), f"unbundled CRT import: {path}"

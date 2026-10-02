@@ -163,14 +163,15 @@ cp "$SOURCE_CACHE/cacert-2026-08-13.pem" "$STAGE_ROOT/.luai/components/cacert.pe
 
 "$REPO_ROOT/bin/lua55" "$SCRIPT_DIR/windows_sources.lua" "$BUILDER_ROOT" \
   "$YACA_SOURCE" launcher "$OUTPUT_ROOT/generated/launcher.c" \
+  "$LUA_SOURCE" \
   >"$LOG_ROOT/launcher-generation.log" 2>&1
 $CC $CFLAGS -DLUA_BUILD_AS_DLL -I"$LUA_SOURCE" "$OUTPUT_ROOT/generated/launcher.c" \
-  "$LUA_SOURCE/liblua55.a" $LDFLAGS -o "$STAGE_ROOT/inner.exe" \
+  "$LUA_SOURCE/liblua55.a" $LDFLAGS -lshell32 -o "$STAGE_ROOT/inner.exe" \
   >"$LOG_ROOT/launcher-build.log" 2>&1
 "$REPO_ROOT/bin/lua55" "$SCRIPT_DIR/windows_sources.lua" "$BUILDER_ROOT" \
   "$YACA_SOURCE" extractor "$OUTPUT_ROOT/generated" "$STAGE_ROOT" \
   >"$LOG_ROOT/extractor-generation.log" 2>&1
-$CC $CFLAGS "$OUTPUT_ROOT/generated/extractor.c" $LDFLAGS -ladvapi32 \
+$CC $CFLAGS -municode "$OUTPUT_ROOT/generated/extractor.c" $LDFLAGS -ladvapi32 \
   -o "$OUTPUT_ROOT/package/yaca.exe" >"$LOG_ROOT/extractor-build.log" 2>&1
 
 python3 "$SCRIPT_DIR/windows_package_win64.py" "$REPO_ROOT" "$OUTPUT_ROOT" "$SOURCE_CACHE"
