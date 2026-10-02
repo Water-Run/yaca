@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-10-01
+Date: 2026-10-02
 File: model.lua
 Description: Maps bounded OpenAI Chat and Anthropic Messages wire data to canonical model events.
 ]]
@@ -1493,11 +1493,15 @@ local function new_response_session(codec, options, request_data, registry, cont
         if json.kind(delta) ~= "object" then
             protocol_fail("openai-delta") return nil
         end
-        if delta.content ~= nil and not append_text_delta(delta.content, false) then return nil end
-        if delta.reasoning_summary ~= nil
+        if delta.content ~= nil and delta.content ~= json.null
+            and not append_text_delta(delta.content, false)
+        then return nil end
+        if delta.reasoning_summary ~= nil and delta.reasoning_summary ~= json.null
             and not append_text_delta(delta.reasoning_summary, true)
         then return nil end
-        if delta.tool_calls ~= nil and not parse_openai_tool_deltas(delta.tool_calls) then return nil end
+        if delta.tool_calls ~= nil and delta.tool_calls ~= json.null
+            and not parse_openai_tool_deltas(delta.tool_calls)
+        then return nil end
         if choice.finish_reason ~= nil and choice.finish_reason ~= json.null then
             if type(choice.finish_reason) ~= "string" then
                 protocol_fail("openai-finish-reason") return nil
@@ -1528,7 +1532,7 @@ local function new_response_session(codec, options, request_data, registry, cont
         if message.content ~= nil and message.content ~= json.null
             and not append_text_delta(message.content, false)
         then return nil end
-        if message.tool_calls ~= nil then
+        if message.tool_calls ~= nil and message.tool_calls ~= json.null then
             if json.kind(message.tool_calls) ~= "array" then
                 protocol_fail("openai-tool-calls") return nil
             end

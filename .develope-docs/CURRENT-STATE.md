@@ -1,6 +1,11 @@
 # 当前状态
 
-更新日期：2026-10-01。本轮基于与 `origin/main` 一致的 `9188a2e` 推进四批人工
+更新日期：2026-10-02。**首批真实模型联网证据已落档**：负责人提供
+DeepSeek 与本地 sglang qwen3.8-27b 端点后，发现并修复适配器 R74（OpenAI
+显式 null 拼写被误判协议错），修复后双模型 Stage 2 七项全过
+（14 次真实联网请求）、Stage 3 passed（累计 17 次）；A08/A09 600 MiB
+离线旅程在当前源码复跑。详见
+[10 月 2 日 Review](CODE-REVIEW-2026-10-02.md)。此前（2026-10-01）四批人工
 语义 Review：fs/textcodec/process 错误与资源收尾及 tools 写发布路径（无缺陷，
 探针 36/36）；model/runtime/session/context 的发布与恢复边界（发现并修复 R73
 跨端口边界缺陷）；剩余命名模块（safety/permission/path/json/prompt/xml/tui/

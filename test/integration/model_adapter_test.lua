@@ -163,6 +163,45 @@ return {
     name = "integration/model-adapter",
     cases = {
         {
+            name = "explicit JSON null content and tool calls stay canonical",
+            --Verifies providers may spell absent content, reasoning and tool
+            --calls as explicit JSON null in both streaming and complete shapes.
+            --@param none No arguments; this closure uses its captured fixture state.
+            --@return nil No value; assertions verify null spellings finish cleanly.
+            run = function()
+                local service = assert(load_module("model").new(limits()))
+                local normalized = request(service, "openai-chat", false, "null-fields")
+                local session = assert(service:new_response(normalized))
+                local events = assert(session:push(
+                    '{"id":"n1","object":"chat.completion","choices":[{"index":0,'
+                    .. '"message":{"role":"assistant","content":"READY",'
+                    .. '"reasoning_content":null,"tool_calls":null},'
+                    .. '"logprobs":null,"finish_reason":"stop","matched_stop":1}],'
+                    .. '"usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}}'
+                ))
+                A.truthy(events)
+                assert(session:finish())
+                local response = assert(session:response())
+                A.equal(response.finish_class, "stop")
+                A.equal(response.incomplete, false)
+                A.equal(#response.tool_calls, 0)
+                A.equal(response.usage.total, 4)
+
+                local streamed = request(service, "openai-chat", true, "null-delta")
+                local stream_session = assert(service:new_response(streamed))
+                local delta_events = assert(stream_session:push(
+                    "data: " .. '{"choices":[{"index":0,"delta":{"content":null,'
+                    .. '"reasoning_content":null,"tool_calls":null},"finish_reason":null}]}' .. "\n\n"
+                ))
+                A.truthy(delta_events)
+                local tail = assert(stream_session:finish())
+                A.truthy(tail)
+                local finished = assert(stream_session:response())
+                A.equal(finished.finish_class, "incomplete")
+                A.truthy(finished.incomplete_reason)
+            end,
+        },
+        {
             name = "coalesced SSE reads preserve all frames across parser batch limits",
             --Verifies coalesced SSE reads preserve all frames across parser batch limits.
             --@param none No arguments; this closure uses its captured fixture state.

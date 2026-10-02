@@ -1,11 +1,24 @@
 # 剩余开发与验收
 
-更新日期：2026-10-01。当前快照见 [CURRENT-STATE.md](CURRENT-STATE.md)。
+更新日期：2026-10-02。当前快照见 [CURRENT-STATE.md](CURRENT-STATE.md)。
 核心已实现，继续在当前代码上收尾；C01--C31 是已有实现的任务映射，不重新开工。
-历史候选装配进度为 clean×3、std×3、Linux full，共 **7/9**；本轮新增源码修复
-需要重新进入目标构建与验收。Gate R 关闭。
+九包进度 **8/9**（唯 win64 full 缺 Python 3.8.20）；真实模型联网自测已由
+DeepSeek/本地 Qwen 端点首次全绿（R74 修复后双模型 Stage 2 七项、Stage 3）。
+Gate R 关闭。
 
 ## 本轮已收口
+
+10-02 上午：负责人提供 DeepSeek 与本地 sglang qwen3.8-27b 端点。发现
+适配器 R74——OpenAI 显式 `"tool_calls": null` 等 null 拼写被判
+`openai-tool-calls` 协议错（JSON null 哨兵为 truthy 表，四处守卫只判
+Lua nil）。窄修复 + adapter 回归，专项 11/11、完整 suite **699/699**。
+R74 刷新 Win64 核心（`a310ac78...`）后：Stage 1 **passed**；Stage 2 两模型
+**各 7/7**（合计 14 次真实联网请求，含生产工具 schema 往返与类型化取消）；
+Stage 3 **passed**（17 次，advisory WARNING 按设计保留）。A08/A09 600 MiB
+离线旅程在 WSL Linux 以当前源码复跑。证据见
+[10 月 2 日 Review](CODE-REVIEW-2026-10-02.md)。
+
+此前（10-01 深夜）：四批 Review、8/9 装配等见下。
 
 10 月 1 日第四批收口 main.lua（组合/准入/发布面整读、交互协调器准入与
 关闭次序整读）与 text/clock/platform/backend_windows/backend_linux 全册、
@@ -57,7 +70,7 @@ Win32/Win64 单文件及 clean 已以本轮源码刷新；普通用户 NTFS meta
 | P0 · F4、C32 | ~~刷新 Linux 当前源码产物~~ 已在真实 CentOS 7 用户态（Docker centos:7，GCC 4.8.5-44.el7 / glibc 2.17-326.el7）内以**未修改**的构建脚本完成：PASS、目标端 suite 698/698、单文件 `d06ec961...`；三平台 clean 版位全部绑定 `b5c0c9ff` 源码。物理 CentOS 7 的实机旅程仍属 C33 | Windows 两核心已随 R73 刷新并本机 Stage 1 通过；**win32 的 Server 2008 目标端已复跑**：R73 单文件 Stage 1 12 PASSED / 0 FAILED、当前源码 suite 698/698（见 10-01 Review）。容器共享宿主内核的边界已如实记录 |
 | P0 · F3、C33 | ~~std 重装配~~ **8/9 已随当前源码装配**：std 3/3 + win32 full（D-079 三档信任分级，pin 待负责人确认）+ **linux full（C7 容器内全套重建：可重定位 gcc/g++、含 HTTPS 的 git 2.55.0、自带 ssl/sqlite 的 py314；10 工具 6016 文件验证+重定位冒烟）**。唯余 win64 full（Python 3.8.20 工具链）。**Linux Git 传输缺口已收口**（工具自带 https） | 不把旧 Python 安装包改版本；重派生 pin 与原构建机不一致时以原记录为准重装配；qualification=pending，实机旅程属 C33。锁内 gmp/mpfr/mpc URL 笔误（缺 /gnu/）待修正 |
 | P1 · F2/F4、C32 | 在此前提供的实机补中文/损坏编码输出、取消/进程树、发布/恢复证据 | 按 D-077 使用指定环境；Win7 fs-open 旧 VM 五轮失败保留为历史，不阻断本次收尾 |
-| P1 · A08/A09 | 在已有 2.3 GiB 离线旅程上补轮转/截断、旧代码页输出与模型使用续页 | 当前重建产物及显式联网条件就绪；检查增长/换文件的错误与续页行为，不重复宣称离线用例证明真实模型使用 |
+| P1 · A08/A09 | 600 MiB 离线旅程已在当前源码复跑（WSL Linux）；**真实模型联网自测已全绿**（DeepSeek + 本地 Qwen 双端点，Stage 2×2 七项 + Stage 3）。余：2.3 GiB 全档目标端复跑与轮转/截断步骤补齐 | 目标端复跑按 D-077 环境；轮转/截断步骤需扩充旅程脚本后一并执行 |
 | P1 · C33 | 最终三平台 clean/std/full 共九包完整干净机旅程 | 以最终 zip 字节验收布局、零表面、同平台核心一致、移除 tools 后核心/Lua、首次配置、Ask/工具、多轮恢复、移动/升级/卸载 |
 | P1 · C33 布局 | ~~收敛两条 Windows 打包路径的 notices 布局~~ 已按 [D-078](DECISIONS.md#d-078-notices-归档统一为装配布局2026-10-01) 收敛为装配布局（core/ + edition.json + SBOM），两路径成员集合 16=16 一致；见[10-01 Review 第三批](CODE-REVIEW-2026-10-01.md#第三批剩余命名模块语义-review-与-c33-notices-布局收敛) | 后续九包干净机旅程按该唯一形状验收 |
 | P2 · C34 | 汇总最终证据并复核公开文档与发布门 | 每包 SHA-256、许可证、SBOM、构建/测试摘要对应精确字节；C32/C33/C34 满足后再用独立可审计提交评审 Gate R |
@@ -70,7 +83,7 @@ Win32/Win64 单文件及 clean 已以本轮源码刷新；普通用户 NTFS meta
 | 依赖 | 已知情况 | 解锁后的工作 |
 | --- | --- | --- |
 | Windows Python 构建环境 | 私有 VC++ 2010 / SDK 路线已完成 Python 3.4.10；14 模块与 app-local CRT 通过，Server 2008 ssl/sqlite/bz2/lzma/ctypes 通过。VS2019 channel 给出 19,253,644 字节 / fb642c...，实际清单为 11,154,648 字节 / 406969...，重复获取仍不一致 | 保留校验失败；不把候选清单当可信输入。完成 Python 3.8.20 的可验证兼容工具链，已完成 3.4.10 并入 win32 full |
-| 当前模型配置 | 历史批次真实模型旅程因缺 API 配置未执行 | 通过既有配置/显式联网入口测试；不把 mock-provider 或旧包在线结果当当前源码证据 |
+| 当前模型配置 | ~~历史批次真实模型旅程因缺 API 配置未执行~~ **已提供**：DeepSeek 外网 API + 本地 sglang qwen3.8-27b（DGX Spark）。密钥在隔离部署目录，不入库 | 已执行 Stage 2/3 双模型联网自测全绿；后续旅程直接使用，不把 mock-provider 或旧包在线结果当当前源码证据 |
 | 旧系统完整实机矩阵 | D-077 明确本轮不要求重跑；兼容底线保留 | 按代码、ABI/导入和已有指定实机证明，未测环境不声称实测通过 |
 | 原构建机证据与缓存 | 本工作区只留旧 preview 包和部分源码，9 月 28--30 日大部分路径为历史构建机记录 | 恢复锁定缓存、目标机与证据目录；逐项核对摘要后复用，缺失证据保持待验收 |
 
