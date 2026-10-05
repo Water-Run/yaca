@@ -166,6 +166,11 @@ $CC -std=c99 -Wall -Wextra -Werror $CFLAGS -DLUA_BUILD_AS_DLL \
   -o "$OUTPUT_ROOT/windows_metadata_smoke.exe" \
   >"$LOG_ROOT/metadata-smoke-build.log" 2>&1
 $CC -std=c99 -Wall -Wextra -Werror $CFLAGS -DLUA_BUILD_AS_DLL \
+  -I"$LUA_SOURCE" "$YACA_SOURCE/.tools/qualification/windows_reparse_smoke.c" \
+  "$LUA_SOURCE/liblua55.a" $LDFLAGS -ladvapi32 -lshell32 \
+  -o "$OUTPUT_ROOT/windows_reparse_smoke.exe" \
+  >"$LOG_ROOT/reparse-smoke-build.log" 2>&1
+$CC -std=c99 -Wall -Wextra -Werror $CFLAGS -DLUA_BUILD_AS_DLL \
   -I"$LUA_SOURCE" "$YACA_SOURCE/.tools/qualification/windows_console_reader_smoke.c" \
   "$LUA_SOURCE/liblua55.a" $LDFLAGS -ladvapi32 -lshell32 \
   -o "$OUTPUT_ROOT/windows_console_reader_smoke.exe" \

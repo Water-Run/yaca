@@ -3363,10 +3363,10 @@ static int build_windows_ancestry(
 #define SYMLINK_FLAG_RELATIVE 1UL
 #endif
 
-/* @struct yaca_reparse_buffer Raw Windows reparse payload with bounded target offsets.
+/* @struct yaca_reparse_buffer Microsoft reparse frame viewed only after its fixed fields fit the returned and declared bytes.
  * @field tag DWORD Windows reparse tag identifying payload layout.
- * @field data_length WORD Valid reparse payload byte length.
- * @field reserved WORD Reserved Win32 reparse header field.
+ * @field data_length WORD Declared payload byte length excluding the eight-byte common header.
+ * @field reserved WORD Reserved query field ignored by this decoder.
  * @field value union Symbolic-link or mount-point target layout selected by tag.
  */
 typedef struct yaca_reparse_buffer
@@ -3386,7 +3386,7 @@ typedef struct yaca_reparse_buffer
      * @field print_offset WORD Offset of the display-name field.
      * @field print_length WORD Length of the display-name field.
      * @field flags DWORD Includes SYMLINK_FLAG_RELATIVE when target path is relative.
-     * @field path WCHAR Owned path spelling for the captured object.
+     * @field path WCHAR[] First UTF-16 unit of the variable substitute/display-name payload borrowed from aligned response storage.
      */
     struct
     {
@@ -3402,7 +3402,7 @@ typedef struct yaca_reparse_buffer
      * @field substitute_length WORD Length of the substitute-name field.
      * @field print_offset WORD Offset of the display-name field.
      * @field print_length WORD Length of the display-name field.
-     * @field path WCHAR Owned path spelling for the captured object.
+     * @field path WCHAR[] First UTF-16 unit of the variable substitute/display-name payload borrowed from aligned response storage.
      */
     struct
     {
@@ -3415,11 +3415,23 @@ typedef struct yaca_reparse_buffer
   } value;
 } yaca_reparse_buffer;
 
-/* Normalizes a reparse target against the admitted path.
- * @param parent const_WCHAR* Verified parent path or parent object.
- * @param target const_WCHAR* Destination path or target object under inspection.
- * @param relative int Path relative to the admitted workspace root.
- * @return WCHAR*|NULL result New normalized reparse target; caller frees it, or NULL on failure.
+/* @struct yaca_reparse_storage Aligned union for one bounded Windows kernel reparse response.
+ * @field frame yaca_reparse_buffer Provides alignment for the fixed header and UTF-16 path fields.
+ * @field bytes BYTE[] Receives at most MAXIMUM_REPARSE_DATA_BUFFER_SIZE bytes; only the returned, declared frame is admitted.
+ */
+typedef union yaca_reparse_storage
+{
+  yaca_reparse_buffer frame;
+  BYTE bytes[MAXIMUM_REPARSE_DATA_BUFFER_SIZE];
+} yaca_reparse_storage;
+
+/* Convert an actual substitute name from NT namespace or relative spelling to a Win32 absolute path.
+ * @param parent const_WCHAR* Borrowed absolute physical directory containing the reparse point.
+ * @param target const_WCHAR* Borrowed NUL-terminated substitute name admitted from the bounded kernel frame.
+ * @param relative int Nonzero only for a symbolic link relative to parent; zero for an absolute target or junction.
+ * @return WCHAR*|NULL Newly allocated normalized target; NULL for allocation, normalization or unsupported path naming.
+ * @effect Rejects unsupported NT namespaces and drive-relative absolute targets with ERROR_NOT_SUPPORTED rather than resolving them against process cwd.
+ * @ownership Caller frees a non-NULL result; neither input string is modified or adopted.
  */
 static WCHAR *normalize_windows_reparse_target(
   const WCHAR *parent,
@@ -3455,23 +3467,38 @@ static WCHAR *normalize_windows_reparse_target(
   {
     return NULL;
   }
+  if (windows_path_root_length(candidate) == 0U)
+  {
+    free(candidate);
+    SetLastError(ERROR_NOT_SUPPORTED);
+    return NULL;
+  }
   absolute = windows_full_path(candidate);
   free(candidate);
+  if (absolute != NULL && !validate_windows_direct_wide_path(absolute))
+  {
+    free(absolute);
+    SetLastError(ERROR_NOT_SUPPORTED);
+    return NULL;
+  }
   return absolute;
 }
 
-/* Decodes the target of a Windows symbolic link or mount point.
- * @param handle HANDLE Operating-system handle being inspected or closed.
- * @param parent const_WCHAR* Verified parent path or parent object.
- * @return char*|NULL result New UTF-8 reparse target; caller frees it, or NULL on failure.
+/* Decode the actual substitute target, rejecting malformed or unsupported Windows reparse frames.
+ * @param handle HANDLE Borrowed handle opened with FILE_FLAG_OPEN_REPARSE_POINT; it is not closed here.
+ * @param parent const_WCHAR* Borrowed absolute physical directory containing the link for relative resolution.
+ * @return char*|NULL New strict UTF-8 absolute target; NULL for I/O, framing, tag, flags, allocation or encoding failure.
+ * @effect Queries FSCTL_GET_REPARSE_POINT; malformed frames set ERROR_INVALID_REPARSE_DATA and unknown tags set ERROR_REPARSE_TAG_INVALID.
+ * @ownership Caller frees the returned string; all intermediate owned strings are released before return.
  */
 static char *windows_reparse_target(
   HANDLE handle,
   const WCHAR *parent)
 {
-  BYTE bytes[MAXIMUM_REPARSE_DATA_BUFFER_SIZE];
+  yaca_reparse_storage storage;
+  BYTE *bytes = storage.bytes;
   DWORD received = 0;
-  yaca_reparse_buffer *buffer = (yaca_reparse_buffer *)bytes;
+  yaca_reparse_buffer *buffer = &storage.frame;
   const WCHAR *source = NULL;
   size_t source_units = 0U;
   int relative = 0;
@@ -3479,9 +3506,13 @@ static char *windows_reparse_target(
   WCHAR *absolute;
   char *utf8;
   size_t path_offset;
+  size_t payload_bytes;
   size_t available;
+  size_t index;
   WORD offset;
   WORD length;
+  WORD print_offset;
+  WORD print_length;
 
   if (!DeviceIoControl(
       handle,
@@ -3489,55 +3520,76 @@ static char *windows_reparse_target(
       NULL,
       0,
       bytes,
-      sizeof(bytes),
+      sizeof(storage.bytes),
       &received,
-      NULL)
-      || received < 8U
-      || (size_t)buffer->data_length + 8U > (size_t)received)
+      NULL))
   {
     return NULL;
   }
+  if (received < 8U || received > sizeof(storage.bytes)
+      || (size_t)buffer->data_length > (size_t)received - 8U)
+  {
+    SetLastError(ERROR_INVALID_REPARSE_DATA);
+    return NULL;
+  }
+  payload_bytes = 8U + (size_t)buffer->data_length;
   if (buffer->tag == IO_REPARSE_TAG_SYMLINK)
   {
     path_offset = FIELD_OFFSET(yaca_reparse_buffer, value.symbolic_link.path);
-    offset = buffer->value.symbolic_link.print_length > 0U
-      ? buffer->value.symbolic_link.print_offset
-      : buffer->value.symbolic_link.substitute_offset;
-    length = buffer->value.symbolic_link.print_length > 0U
-      ? buffer->value.symbolic_link.print_length
-      : buffer->value.symbolic_link.substitute_length;
-    relative = (buffer->value.symbolic_link.flags & SYMLINK_FLAG_RELATIVE) != 0;
-    available = (size_t)received > path_offset ? (size_t)received - path_offset : 0U;
-    if ((size_t)offset + (size_t)length > available || (length % sizeof(WCHAR)) != 0U)
+    if (payload_bytes < path_offset)
     {
       SetLastError(ERROR_INVALID_REPARSE_DATA);
       return NULL;
     }
-    source = (const WCHAR *)((const BYTE *)buffer->value.symbolic_link.path + offset);
-    source_units = length / sizeof(WCHAR);
+    if ((buffer->value.symbolic_link.flags & ~SYMLINK_FLAG_RELATIVE) != 0U)
+    {
+      SetLastError(ERROR_INVALID_REPARSE_DATA);
+      return NULL;
+    }
+    offset = buffer->value.symbolic_link.substitute_offset;
+    length = buffer->value.symbolic_link.substitute_length;
+    print_offset = buffer->value.symbolic_link.print_offset;
+    print_length = buffer->value.symbolic_link.print_length;
+    relative = (buffer->value.symbolic_link.flags & SYMLINK_FLAG_RELATIVE) != 0U;
   }
   else if (buffer->tag == IO_REPARSE_TAG_MOUNT_POINT)
   {
     path_offset = FIELD_OFFSET(yaca_reparse_buffer, value.mount_point.path);
-    offset = buffer->value.mount_point.print_length > 0U
-      ? buffer->value.mount_point.print_offset
-      : buffer->value.mount_point.substitute_offset;
-    length = buffer->value.mount_point.print_length > 0U
-      ? buffer->value.mount_point.print_length
-      : buffer->value.mount_point.substitute_length;
-    available = (size_t)received > path_offset ? (size_t)received - path_offset : 0U;
-    if ((size_t)offset + (size_t)length > available || (length % sizeof(WCHAR)) != 0U)
+    if (payload_bytes < path_offset)
     {
       SetLastError(ERROR_INVALID_REPARSE_DATA);
       return NULL;
     }
-    source = (const WCHAR *)((const BYTE *)buffer->value.mount_point.path + offset);
-    source_units = length / sizeof(WCHAR);
+    offset = buffer->value.mount_point.substitute_offset;
+    length = buffer->value.mount_point.substitute_length;
+    print_offset = buffer->value.mount_point.print_offset;
+    print_length = buffer->value.mount_point.print_length;
   }
   else
   {
     SetLastError(ERROR_REPARSE_TAG_INVALID);
     return NULL;
+  }
+  available = payload_bytes - path_offset;
+  if (length == 0U || offset % sizeof(WCHAR) != 0U
+      || length % sizeof(WCHAR) != 0U
+      || print_offset % sizeof(WCHAR) != 0U
+      || print_length % sizeof(WCHAR) != 0U
+      || (size_t)offset + (size_t)length > available
+      || (size_t)print_offset + (size_t)print_length > available)
+  {
+    SetLastError(ERROR_INVALID_REPARSE_DATA);
+    return NULL;
+  }
+  source = (const WCHAR *)(bytes + path_offset + offset);
+  source_units = length / sizeof(WCHAR);
+  for (index = 0U; index < source_units; ++index)
+  {
+    if (source[index] == L'\0')
+    {
+      SetLastError(ERROR_INVALID_REPARSE_DATA);
+      return NULL;
+    }
   }
   copy = (WCHAR *)malloc((source_units + 1U) * sizeof(WCHAR));
   if (copy == NULL)

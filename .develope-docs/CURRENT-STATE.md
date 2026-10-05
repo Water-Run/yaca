@@ -5,6 +5,13 @@
 `release_authorized=false`。依据见 [readiness](contracts/readiness.lua)、
 [发行清单](../release/manifest.lua)及[依赖锁](../release/dependencies.lock)。
 
+候选节点交付后，工作树新增 **R77 Windows reparse 修复**：使用实际 SubstituteName，
+按声明/返回长度检查完整头和 UTF-16 范围，拒绝 NUL、未知 flags 和无法支持的 NT
+命名，避免把绝对目标错误映射到进程 cwd。两指定 Windows 实机的生产函数探针各
+**20/20**，其中真实 junction 的内核跟随对象与解析目标相同；旧实现同组各失败 14 项。
+完整开发 suite 706/706、coding readiness PASS。此结果覆盖原生产函数和窄探针，
+尚未构建含 R77 的三平台单文件及九包；下述已发布候选的 SHA-256 不覆盖本修复。
+
 本节点已修复 R75：OpenAI 工具流后续 ID/name/arguments 的显式 null 表示不更新，
 首片身份和后续非 null 身份变化仍严格校验；R76：压缩取消的日志写入失败后，仍使用
 原句柄清理 Model，返回结构化失败，不再访问已清空的 active。
@@ -102,7 +109,9 @@ CentOS 7 x86_64；未实测的面如实保留。
 注释结构检查覆盖 Git 维护的全部自有源码和新增文件。结构覆盖与人工语义 Review
 分开记录。10-01 四批已核对产品模块及组合/发布边界；保留面为 main 交互事件分发
 内部、原生 C 层和测试辅助代码，不宣称全仓逐项语义审核完成。
-本轮 compact 状态机已通读并修复 R76，main 交互内部继续。
+本轮 compact 状态机已通读并修复 R76，原生 Windows 目录/链接与发布准入面继续到
+约 4400 行并修复 R77。Snapshot/metadata 在 Lua 表/字符串分配异常下的资源生命周期
+仍待故障注入取证；main 交互内部继续。
 本轮新增校验、PTY 生命周期、临时目录所有权及回归逐项核对。
 
 C32/C33/C34 的剩余项完成并形成精确字节证据后，才评审 Gate R。

@@ -335,3 +335,46 @@ compact 已通读，原生 C 只完成前约 3200 行，main 交互内部和测�
 [`candidates/1.0.0-preview.20261005.json`](candidates/1.0.0-preview.20261005.json)，
 构建/测试/旅程报告随预发布 evidence 包交付。三平台首次配置、完整交互与保留数据的
 升级，以及剩余 C32/C33/C34 和语义 Review 留在 TRACKING，正式 Gate R 未开启。
+
+### 正式版续推：R77 Windows reparse 目标与帧边界
+
+候选交付后继续 Windows 原生路径/目录快照和发布准入面 Review，约推进到 4400 行。
+微软的 [symbolic-link 规范](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fscc/b41f1cbf-10df-4a47-98d4-1c52a833d913)
+和 [mount-point 规范](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fscc/ca069dad-ed16-42aa-b057-b6b207f447cc)
+规定 SubstituteName 用于确定实际目标，PrintName 用于显示；声明长度不含八字节公共头。
+旧 `windows_reparse_target` 优先采用 PrintName，且按返回长度而非声明的有效帧检查目标范围。
+
+R77 修复：
+
+- 只以 SubstituteName 决定解析目标；绝对、相对和 UNC 拼写按原有受支持命名处理。
+- 在读取 tag 的完整固定布局前验证头；返回长度不得超出缓冲区，声明长度必须完整。
+- 两组名字的 UTF-16 偏移/长度和范围必须有效，实际目标非空且不含嵌入 NUL；未知
+  symlink flags/tag 拒绝。原生响应使用显式对齐的有界 union。
+- 无法支持的 NT volume 命名和 drive-relative 绝对目标直接拒绝，不映射到进程 cwd。
+  规范允许的相对点路径先正常化，受支持的绝对结果仍遵守直接路径命名约束。
+
+新增维护探针 `windows_reparse_smoke.c` 直接包含生产 native 源码，只拦截
+FSCTL_GET_REPARSE_POINT 以给出同型边界帧。真实 junction 在指定 scratch 内创建唯一
+子目录，设置不同的显示/实际目标；另用未带 OPEN_REPARSE_POINT 的内核跟随句柄核对
+实际对象，再清理该 fixture。未动其它部署、文件和配置。
+
+| 指定环境 | bf28aec 原生函数 / 完整同组反例 | 修复后生产函数 |
+| --- | --- | --- |
+| Server 2008 non-R2 x64 / Win32 WOW64 | 20 项，失败 14，exit=1 | 20/20，exit=0 |
+| Windows 11 x64 | 20 项，失败 14，exit=1 | 20/20，exit=0 |
+
+初始十八项各失败十二项的日志保留；再补齐两个 NT 命名反例，并从 `git archive`
+冻结 bf28aec 原生源码重新构建基线，得到上表的完整二十项失败记录。
+交叉构建使用当前 Lua 5.5.1 import library、`-std=c99 -Wall -Wextra -Werror`，
+Win32 定义 0x0501，Win64 定义 0x0601。统一和遗留 Win64 构建入口均纳入此探针。
+原始输入、二进制和日志在 `out/formal-native-review-20261005/`；冻结 native/probe 输入、
+两个基线/修复程序、Lua DLL/import library 和原始日志摘要在
+[`native-review/R77.json`](native-review/R77.json) 绑定。备注注释修正后再次从冻结输入
+构建并在两目标复跑二十项，最终日志独立保留，不覆盖初次观察。
+
+开发机完整 Lua suite **706/706**；完整 coding readiness **PASS**：注释结构
+**241 文件 / 5415 声明 / 0 缺项**，反例 15/15、各 Python 回归、四校验器和 TP/RP
+均通过。结构检查与本批语义复核仍不代表全仓 Review 完成。
+Snapshot/metadata 投影跨 Lua 可抛分配的资源所有权已登记为下一取证面，尚未形成
+完整故障注入结果，不能写为已修复。原生后续、main 交互内部与测试辅助 Review 继续。
+R77 尚不在已发布的 R75/R76 单文件候选中；最终构建和九包资格须重新绑定，Gate R 关闭。

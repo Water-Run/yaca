@@ -1,0 +1,210 @@
+{
+  "schema": "yaca-native-review-evidence-v1",
+  "review_id": "R77",
+  "date": "2026-10-05",
+  "status": "verified-native-subset",
+  "release_authorized": false,
+  "target_qualification_complete": false,
+  "source_inputs": {
+    "schema": "yaca-native-review-inputs-v1",
+    "source_scope": "working-tree-native-and-probe",
+    "base_revision": "bf28aec6c48460630f0243b00bedb755fcd278f3",
+    "files": [
+      {
+        "path": ".tools/qualification/windows_reparse_smoke.c",
+        "sha256": "fe6c81e861097044c3cdf834892d6293bc46d5b206e1d5bfa1c4918a5460a2f7"
+      },
+      {
+        "path": "native/lxp_build.lua",
+        "sha256": "97bcc6822ae6af6e0ed70c74585c3924845fdee0b3bdace222f171a7071b6fe0"
+      },
+      {
+        "path": "native/yaca_entry.c",
+        "sha256": "e37392e19da463ad55848d6d2550056958ea3084fa3f842b994f798b82bc59a8"
+      },
+      {
+        "path": "native/yaca_lua_windows.h",
+        "sha256": "92f9d56314c8cda74a6eb6e5792688143d5c8d7c7b1a1385ee12817c1f610194"
+      },
+      {
+        "path": "native/yaca_native.c",
+        "sha256": "45901668fac6ae59a9b52ad65979010965018b2d73a47986340b3c99cb44703c"
+      },
+      {
+        "path": "native/yaca_onefile_entry.c",
+        "sha256": "4e59947998f7a9477cc768188c81e268bbf377db42fe27b9172a47a0ae85f9d4"
+      },
+      {
+        "path": "native/yaca_onefile_windows.h",
+        "sha256": "269f3b37b89d53970eb4c5d6947e31f2db7627d153871dd33da3697294dd7c37"
+      },
+      {
+        "path": "native/yaca_pty.h",
+        "sha256": "a9be6b177388ee15e656aba3a4080f00d13bd4bc3ad411af4bd8095a0d3d8c01"
+      },
+      {
+        "path": "native/yaca_supervisor.h",
+        "sha256": "2315e15885d914923a44ba55ae5c65a976c56b1aa4b6731cc87b86d72d2164f6"
+      },
+      {
+        "path": "native/yaca_text.h",
+        "sha256": "82e057d215a77470166e79876dab5c6a7fd38a5d0856229f76e7c1b93a47bbc7"
+      }
+    ]
+  },
+  "target_proofs": [
+    {
+      "target": "win32",
+      "environment": "Windows Server 2008 non-R2 x64 / WOW64",
+      "baseline": {
+        "revision": "bf28aec6c48460630f0243b00bedb755fcd278f3",
+        "cases": 20,
+        "failed": 14,
+        "exit_code": 1
+      },
+      "fixed": {
+        "cases": 20,
+        "failed": 0,
+        "exit_code": 0
+      },
+      "artifact_scope": "standalone probe including production native source; final onefile qualification pending",
+      "bindings": [
+        {
+          "path": "out/formal-native-review-20261005/before-r2/win32-target.log",
+          "sha256": "a9f025ec2e7b6003f612e6a2cd4da9ef12dcd2881557f040d7cc57f353fc0a82"
+        },
+        {
+          "path": "out/formal-native-review-20261005/after/win32-final-target.log",
+          "sha256": "a82c1b0617becd3197713f5a0b34d82a7c0841196b6742b079b9e22f10ce0b8b"
+        },
+        {
+          "path": "out/formal-native-review-20261005/before-r2/win32/windows_reparse_smoke.exe",
+          "sha256": "9e8c23d1193bb7c2f8f3b5160f166d84691dd1bc257192bd3c149f09bf0cb11d"
+        },
+        {
+          "path": "out/formal-native-review-20261005/after/win32/windows_reparse_smoke.exe",
+          "sha256": "3ac2aa31487905aa1aac14ec0fb9934bc76d5addbd9d7939a164dfd7932891e4"
+        },
+        {
+          "path": "out/node-r76-20261005/win32-core/onedir/lua55.dll",
+          "sha256": "3a01621ce0b2a7e973aef32f6ed23820620055af095be57bba96ce64dbbdaae3"
+        },
+        {
+          "path": "out/node-r76-20261005/win32-core/work/lua-5.5.1/src/liblua55.a",
+          "sha256": "b77ccb824ddf0df51927e62f77a6363468c51323d3604a5ab5d83b0b9226437d"
+        }
+      ]
+    },
+    {
+      "target": "win64",
+      "environment": "Windows 11 x64",
+      "baseline": {
+        "revision": "bf28aec6c48460630f0243b00bedb755fcd278f3",
+        "cases": 20,
+        "failed": 14,
+        "exit_code": 1
+      },
+      "fixed": {
+        "cases": 20,
+        "failed": 0,
+        "exit_code": 0
+      },
+      "artifact_scope": "standalone probe including production native source; final onefile qualification pending",
+      "bindings": [
+        {
+          "path": "out/formal-native-review-20261005/before-r2/win64-target.log",
+          "sha256": "da7113f178dfed52252d7976d9f094f8d5a9d5e10802176f3c0c59af4b03c470"
+        },
+        {
+          "path": "out/formal-native-review-20261005/after/win64-final-target.log",
+          "sha256": "35fd2fff2895ca6371bd74350c8d49c0d54616baf29afacb32fcd17bacd0a436"
+        },
+        {
+          "path": "out/formal-native-review-20261005/before-r2/win64/windows_reparse_smoke.exe",
+          "sha256": "1a597b9268fed63f461ad151193d38168507bbc123ed9c2d40aac1c964dfcb31"
+        },
+        {
+          "path": "out/formal-native-review-20261005/after/win64/windows_reparse_smoke.exe",
+          "sha256": "abb9a6c223b5a09bd92256ab2433e74106d6ead9044a65d5fa47a6a0686cab5c"
+        },
+        {
+          "path": "out/node-r76-20261005/win64-core/onedir/lua55.dll",
+          "sha256": "5aae77d9330d72f7a747b7f96309494d52c8f3413e8a09fb9f872da8c31c0b00"
+        },
+        {
+          "path": "out/node-r76-20261005/win64-core/work/lua-5.5.1/src/liblua55.a",
+          "sha256": "f65d19a6761fb2458ca85a274eecc91954c228029279e678165613f6708cca6c"
+        }
+      ]
+    }
+  ],
+  "fixture_cleanup": "each completed unique junction fixture removed; receiver and logs retained",
+  "full_suite": "706/706",
+  "coding_readiness": "PASS",
+  "comment_structure": {
+    "files": 241,
+    "declarations": 5415,
+    "violations": 0
+  },
+  "semantic_review": "partial",
+  "baseline_source_inputs": {
+    "revision": "bf28aec6c48460630f0243b00bedb755fcd278f3",
+    "native_scope": "exact git archive native/",
+    "probe_scope": "same maintained current regression probe as the fixed cases",
+    "files": [
+      {
+        "path": "native/lxp_build.lua",
+        "sha256": "97bcc6822ae6af6e0ed70c74585c3924845fdee0b3bdace222f171a7071b6fe0"
+      },
+      {
+        "path": "native/yaca_entry.c",
+        "sha256": "e37392e19da463ad55848d6d2550056958ea3084fa3f842b994f798b82bc59a8"
+      },
+      {
+        "path": "native/yaca_lua_windows.h",
+        "sha256": "92f9d56314c8cda74a6eb6e5792688143d5c8d7c7b1a1385ee12817c1f610194"
+      },
+      {
+        "path": "native/yaca_native.c",
+        "sha256": "03fbfa133fc6d7d8bb7ce0f12f6b2f6312a33ce938bc930135cab8425dda09cb"
+      },
+      {
+        "path": "native/yaca_onefile_entry.c",
+        "sha256": "4e59947998f7a9477cc768188c81e268bbf377db42fe27b9172a47a0ae85f9d4"
+      },
+      {
+        "path": "native/yaca_onefile_windows.h",
+        "sha256": "269f3b37b89d53970eb4c5d6947e31f2db7627d153871dd33da3697294dd7c37"
+      },
+      {
+        "path": "native/yaca_pty.h",
+        "sha256": "a9be6b177388ee15e656aba3a4080f00d13bd4bc3ad411af4bd8095a0d3d8c01"
+      },
+      {
+        "path": "native/yaca_supervisor.h",
+        "sha256": "2315e15885d914923a44ba55ae5c65a976c56b1aa4b6731cc87b86d72d2164f6"
+      },
+      {
+        "path": "native/yaca_text.h",
+        "sha256": "82e057d215a77470166e79876dab5c6a7fd38a5d0856229f76e7c1b93a47bbc7"
+      },
+      {
+        "path": ".tools/qualification/windows_reparse_smoke.c",
+        "sha256": "fe6c81e861097044c3cdf834892d6293bc46d5b206e1d5bfa1c4918a5460a2f7"
+      }
+    ]
+  },
+  "compiler_flags": [
+    "-std=c99",
+    "-Wall",
+    "-Wextra",
+    "-Werror",
+    "-O2",
+    "-DLUA_BUILD_AS_DLL",
+    "-static-libgcc"
+  ],
+  "platform_defines": {
+    "win32": "_WIN32_WINNT=0x0501",
+    "win64": "_WIN32_WINNT=0x0601"
+  }
+}
