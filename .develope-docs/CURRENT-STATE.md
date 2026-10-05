@@ -1,6 +1,6 @@
 # 当前状态
 
-更新日期：2026-10-05。**九包 9/9 无挂账，win32 版位 C33 旅程已走**：10-05 最终包在 Server 2008 实机完成自举解包、核心哈希复算、Stage 1 12 PASSED、十工具原生实测（gcc 编译运行、git 2.10.0）、移除 tools/移动/卸载与固定 CA 拒绝拦截链实证（见 [10 月 5 日 Review](CODE-REVIEW-2026-10-05.md)）。此前：第四批在
+更新日期：2026-10-05。**九包 9/9 无挂账，win32 版位 C33 旅程已走**：10-05 三平台各走一遍布局/哈希/Stage1/工具面/移动/卸载旅程（win32=Server 2008 实机 full、win64=现代宿主 full、linux=C7 容器 clean——核心随 HEAD 重建 suite 699/699 `e7bb24ed...`、clean 版位 `1088d979...`；gcc 编译运行、git 2.10.0/2.46.2、固定 CA 拒绝拦截链实证；win64 zip 实为 14648 文件并纠正误计），见 [10 月 5 日 Review](CODE-REVIEW-2026-10-05.md)）。此前：第四批在
 原构建机重装配 win32 full（py34 3.4.10 源码构建 + `*.a` 修复后的 10 工具，
 zip `96fc32cf...`，真 Windows 与 Server 2008 实机抽查通过）并修复遗留
 build_win64_candidate.sh 三处缺陷（实跑验证恢复可用）；win32 full 不再等
