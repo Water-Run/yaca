@@ -1,11 +1,20 @@
 # 剩余开发与验收
 
-更新日期：2026-10-02。当前快照见 [CURRENT-STATE.md](CURRENT-STATE.md)。
+更新日期：2026-10-05。当前快照见 [CURRENT-STATE.md](CURRENT-STATE.md)。
 核心已实现，继续在当前代码上收尾；C01--C31 是已有实现的任务映射，不重新开工。
 九包进度 **9/9 无挂账**（10-02 第三批收口 win64 full；第四批在原构建机
 重装配 win32 full 并修复遗留脚本，不再等 WSL2 机）。Gate R 关闭。
 
 ## 本轮已收口
+
+10-05：**C33 win32 版位干净机旅程**。最终 win32 full 包（`96fc32cf...`）在
+指定实机 Server 2008 自举解包后走完：核心哈希实机复算一致（经包内 py34
+hashlib）、非 TTY 零写入拒绝、pty 下如实 ConfigMissing、Stage 1 自检
+12 PASSED + 2 配置 WARNING / 0 FAILED、十工具原生实测（git 2.10.0、
+py2/py34、jq、make、**gcc 编译链接运行**）、移除 tools 与整体移动的
+clean 等价/便携性、出网 TLS 被拦截代理重签时固定 CA 正确拒绝（环境实证）、
+卸载零残留。证据见 [10 月 5 日 Review](CODE-REVIEW-2026-10-05.md)。
+剩余：TTY 交互旅程、持密钥授权模型往返、win64/linux full 的实机对应旅程。
 
 10-02 第四批（原构建机）：**win32 full 无挂账重装配**。prepare_win32_full.py
 的 `*.a` 剪除与 win64 同修（`a2c1c7d`）；遗留 build_win64_candidate.sh 三处
@@ -121,7 +130,7 @@ Win32/Win64 单文件及 clean 已以本轮源码刷新；普通用户 NTFS meta
 | P0 · F3、C33 | ~~std 重装配~~ **9/9 无挂账**：std 3/3 + win32 full（D-079 三档信任分级，pin 已与原构建机记录对齐）+ **linux full（C7 容器内全套重建：可重定位 gcc/g++、含 HTTPS 的 git 2.55.0、自带 ssl/sqlite 的 py314；10 工具 6016 文件验证+重定位冒烟）** + **win64 full（10-02 第三批：CPython 3.8.20 源码构建 + x64 工具交叉构建 + 外部件；10 工具 14741 文件验证 + gcc/g++ 编译运行；zip `ade7ea70...`）**。**Linux Git 传输缺口已收口**（工具自带 https）。win32 full 已于第四批在本机重装配（`96fc32cf...`），不再等 WSL2 机 | 不把旧 Python 安装包改版本；重派生 pin 与原构建机不一致时以原记录为准重装配；qualification=pending，实机旅程属 C33。~~锁内 gmp/mpfr URL 笔误~~ 10-02 已修正并实拉核对 |
 | P1 · F2/F4、C32 | 在此前提供的实机补中文/损坏编码输出、取消/进程树、发布/恢复证据 | 按 D-077 使用指定环境；Win7 fs-open 旧 VM 五轮失败保留为历史，不阻断本次收尾 |
 | P1 · A08/A09 | ~~余：2.3 GiB 全档目标端复跑与轮转/截断步骤补齐~~ **已收口**（10-02 后续）：旅程扩至 15 步并宿主平台化；本地 Linux 600 MiB 15/15、Server 2008 实机 2.34 GiB 全档 15/15 均 0 失败（win32 配对，见 10-02 Review）。600 MiB 离线旅程与真实模型联网自测此前已绿 | 交互式聊天/多轮恢复的旅程需 TTY，归 C33 |
-| P1 · C33 | 最终三平台 clean/std/full 共九包完整干净机旅程 | 以最终 zip 字节验收布局、零表面、同平台核心一致、移除 tools 后核心/Lua、首次配置、Ask/工具、多轮恢复、移动/升级/卸载 |
+| P1 · C33 | 最终三平台 clean/std/full 共九包完整干净机旅程 | 以最终 zip 字节验收布局、零表面、同平台核心一致、移除 tools 后核心/Lua、首次配置、Ask/工具、多轮恢复、移动/升级/卸载。**win32 版位于 10-05 在 Server 2008 走完布局/哈希/Stage1/工具/移动/卸载**；余 TTY 交互、授权模型往返、win64/linux 版位 |
 | P1 · C33 布局 | ~~收敛两条 Windows 打包路径的 notices 布局~~ 已按 [D-078](DECISIONS.md#d-078-notices-归档统一为装配布局2026-10-01) 收敛为装配布局（core/ + edition.json + SBOM），两路径成员集合 16=16 一致；见[10-01 Review 第三批](CODE-REVIEW-2026-10-01.md#第三批剩余命名模块语义-review-与-c33-notices-布局收敛) | 后续九包干净机旅程按该唯一形状验收 |
 | P2 · C34 | 汇总最终证据并复核公开文档与发布门 | 每包 SHA-256、许可证、SBOM、构建/测试摘要对应精确字节；C32/C33/C34 满足后再用独立可审计提交评审 Gate R |
 
