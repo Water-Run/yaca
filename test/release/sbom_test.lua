@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-10-05
 File: sbom_test.lua
 Description: Verifies dependency provenance, licenses, and deterministic SPDX data.
 ]]
@@ -83,7 +83,7 @@ local function make_plan()
         "build/candidates/linux-x86_64/yaca",
         "linux-x86_64",
         "ELF64-x86-64",
-        "0.1.0",
+        manifest.product_version,
         hash("1")
     )
     launcher.lua_abi = "5.5"
@@ -95,7 +95,7 @@ local function make_plan()
         "build/candidates/linux-x86_64/yaca_native.so",
         "linux-x86_64",
         "ELF64-x86-64",
-        "0.1.0",
+        manifest.product_version,
         hash("2")
     )
     native.lua_abi = "5.5"
@@ -265,7 +265,7 @@ return {
                 A.equal(first.spdxVersion, "SPDX-2.3")
                 A.equal(first.dataLicense, "CC0-1.0")
                 A.equal(first.SPDXID, "SPDXRef-DOCUMENT")
-                A.equal(first.creationInfo.created, "2026-08-30T00:00:00Z")
+                A.equal(first.creationInfo.created, lock.lock_date .. "T00:00:00Z")
                 A.equal(#first.packages, #lock.component_order)
                 for index, name in ipairs(lock.component_order) do
                     A.equal(first.packages[index].SPDXID, lock.components[name].spdx_id)

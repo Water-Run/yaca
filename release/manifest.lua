@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-26
+Date: 2026-10-05
 File: manifest.lua
 Description: Declares the versioned runtime and release assembly manifest.
 ]]
@@ -9,7 +9,7 @@ Description: Declares the versioned runtime and release assembly manifest.
 -- This table remains unqualified until all target evidence is complete.
 return {
     schema_version = "yaca-release-manifest-v0.1.0",
-    product_version = "0.1.0",
+    product_version = "1.0.0",
     release_state = "unqualified",
     release_authorized = false,
     target_qualification_complete = false,
@@ -50,19 +50,19 @@ return {
         {
             id = "win32-x86", os = "windows", arch = "x86",
             minimum = "Windows XP SP3", executable = "yaca.exe",
-            installer = "Install.cmd", archive = "yaca-0.1.0-win32-x86-clean.zip",
+            installer = "Install.cmd", archive = "yaca-1.0.0-win32-x86-clean.zip",
             object_format = "PE32-i386", qualification = "pending",
         },
         {
             id = "win64-x86_64", os = "windows", arch = "x86_64",
             minimum = "Windows 7 SP1", executable = "yaca.exe",
-            installer = "Install.cmd", archive = "yaca-0.1.0-win64-x86_64-clean.zip",
+            installer = "Install.cmd", archive = "yaca-1.0.0-win64-x86_64-clean.zip",
             object_format = "PE32+-x86-64", qualification = "pending",
         },
         {
             id = "linux-x86_64", os = "linux", arch = "x86_64",
             minimum = "CentOS 7 x86_64", executable = "yaca",
-            installer = "Install.sh", archive = "yaca-0.1.0-linux-x86_64-clean.zip",
+            installer = "Install.sh", archive = "yaca-1.0.0-linux-x86_64-clean.zip",
             object_format = "ELF64-x86-64", qualification = "pending",
         },
     },
@@ -153,7 +153,7 @@ return {
             status = "source-pinned-target-artifact-pending",
         },
         yaca_native = {
-            version = "0.1.0", source = "native/yaca_native.c",
+            version = "1.0.0", source = "native/yaca_native.c",
             status = "implemented-target-artifact-pending",
         },
     },

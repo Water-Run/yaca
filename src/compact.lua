@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-10-05
 File: compact.lua
 Description: Builds and publishes lossless-facts structured ModelView compactions.
 ]]
@@ -1750,7 +1750,7 @@ function M.new(ports, options)
     --@param reason string Bounded reason for the cancellation record.
     --@return table|nil Pending or terminal cancellation outcome.
     --@return table|nil State, reason, or journal error.
-    --@effect Calls Model cancel; a missing exact receipt keeps journal failure visible.
+    --@effect Calls Model cancel with the original handle even when journal failure clears active state; the failure remains visible.
     function service:cancel(reason)
         if state ~= "Compacting" or not active then
             return nil, failure("NoCompactionRequest", "no compaction request can be cancelled")
@@ -1758,6 +1758,7 @@ function M.new(ports, options)
         if not valid_text(reason, limits.manifest.maximum_summary_bytes, false) then
             return nil, failure("InvalidCompactionCancel", "compaction cancel reason is invalid")
         end
+        local model_handle = active.handle
         local record = {
             kind = "compaction-cancel-request",
             compaction_id = active.id,
@@ -1773,12 +1774,12 @@ function M.new(ports, options)
         }
         local receipt, commit_error = commit("commit_rejection", record, false)
         if not receipt then
-            pcall(admitted_ports.model.cancel, active.handle, reason)
+            pcall(admitted_ports.model.cancel, model_handle, reason)
             return nil, commit_error
         end
         active.context_generation = receipt.context_generation
         active.cancel_reason = reason
-        local called, result = pcall(admitted_ports.model.cancel, active.handle, reason)
+        local called, result = pcall(admitted_ports.model.cancel, model_handle, reason)
         if not called or type(result) ~= "table"
             or (result.outcome ~= "cancelled"
                 and result.outcome ~= "pending"

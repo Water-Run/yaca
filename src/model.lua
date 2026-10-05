@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-10-02
+Date: 2026-10-05
 File: model.lua
 Description: Maps bounded OpenAI Chat and Anthropic Messages wire data to canonical model events.
 ]]
@@ -1433,7 +1433,8 @@ local function new_response_session(codec, options, request_data, registry, cont
         return true
     end
 
-    -- Apply indexed OpenAI Tool call deltas without permitting identity changes.
+    -- Apply indexed OpenAI Tool deltas; later null identity fields mean no update.
+    -- The first fragment still requires a real ID and name, and non-null changes fail.
     --@param values any Typed JSON array of Tool deltas.
     --@return boolean|nil True after all fragments, nil on protocol failure.
     local function parse_openai_tool_deltas(values)
@@ -1453,14 +1454,16 @@ local function new_response_session(codec, options, request_data, registry, cont
                 tool = start_tool(index, item.id, function_value.name)
                 if not tool then return nil end
             else
-                if item.id ~= nil and item.id ~= tool.provider_id then
+                if item.id ~= nil and item.id ~= json.null and item.id ~= tool.provider_id then
                     protocol_fail("tool-call-id-changed") return nil
                 end
-                if function_value.name ~= nil and function_value.name ~= tool.name then
+                if function_value.name ~= nil and function_value.name ~= json.null
+                    and function_value.name ~= tool.name
+                then
                     protocol_fail("tool-call-name-changed") return nil
                 end
             end
-            if function_value.arguments ~= nil then
+            if function_value.arguments ~= nil and function_value.arguments ~= json.null then
                 if type(function_value.arguments) ~= "string" then
                     protocol_fail("openai-tool-arguments") return nil
                 end

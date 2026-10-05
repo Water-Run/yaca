@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-10-05
 File: model_adapter_test.lua
 Description: Verifies canonical dual-provider request and event adapters.
 ]]
@@ -415,6 +415,73 @@ return {
                         A.deep_equal(kinds(events), fixture.canonical_events)
                         A.equal(response.finish_class, fixture.finish_class)
                     end
+                end
+            end,
+        },
+        {
+            name = "streamed null tool identity fields retain the first admitted binding",
+            -- Accept sglang's explicit null ID/name in continuation fragments without changing the call.
+            --@param none The test harness supplies no case arguments.
+            --@return nil Returns after bulk and one-byte feeds assemble the exact same validated call.
+            --@error Assertions fail if nullable continuations terminate parsing or admit execution early.
+            run = function()
+                local source = table.concat({
+                    'data: {"id":"nullable","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","function":{"name":"read","arguments":""}}]},"finish_reason":null}]}\n\n',
+                    'data: {"id":"nullable","choices":[{"delta":{"tool_calls":[{"index":0,"id":null,"function":{"name":null,"arguments":"{\\"path\\":\\"fixture\\"}"}}]},"finish_reason":null}]}\n\n',
+                    'data: {"id":"nullable","choices":[{"delta":{"tool_calls":[{"index":0,"id":null,"function":{"name":null,"arguments":null}}]},"finish_reason":null}]}\n\n',
+                    'data: {"id":"nullable","choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\ndata: [DONE]\n\n',
+                })
+                for _, chunk_bytes in ipairs({ #source, 1 }) do
+                    local service = assert(load_module("model").new(limits()))
+                    local normalized = request(service, "openai-chat", true, "nullable", true)
+                    local session = assert(service:new_response(normalized))
+                    for offset = 1, #source, chunk_bytes do
+                        if not session:response() then
+                            assert(session:push(source:sub(offset, offset + chunk_bytes - 1)))
+                        end
+                    end
+                    assert(session:finish())
+                    local response = assert(session:response())
+                    A.equal(response.incomplete, false)
+                    A.equal(response.finish_class, "tool_calls")
+                    A.equal(#response.tool_calls, 1)
+                    A.equal(response.tool_calls[1].provider_tool_call_id, "call-1")
+                    A.equal(response.tool_calls[1].name, "read")
+                    A.equal(response.tool_calls[1].canonical_arguments, '{"path":"fixture"}')
+                    A.equal(response.execution_admitted, false)
+                end
+            end,
+        },
+        {
+            name = "null continuation support preserves tool identity rejection",
+            -- Require real first-fragment identity and reject every later non-null identity mutation.
+            --@param none The test harness supplies no case arguments.
+            --@return nil Returns after missing first identity and changed later identity are rejected.
+            --@error Assertions fail if nullable support widens the call's name or provider identity.
+            run = function()
+                local scenarios = {
+                    { first_id = "null", first_name = '"read"', next_id = "null", next_name = "null", reason = "tool-call-identity" },
+                    { first_id = '"call-1"', first_name = "null", next_id = "null", next_name = "null", reason = "tool-call-identity" },
+                    { first_id = '"call-1"', first_name = '"read"', next_id = '"changed"', next_name = "null", reason = "tool-call-id-changed" },
+                    { first_id = '"call-1"', first_name = '"read"', next_id = "null", next_name = '"changed"', reason = "tool-call-name-changed" },
+                }
+                for _, scenario in ipairs(scenarios) do
+                    local service = assert(load_module("model").new(limits()))
+                    local session = assert(service:new_response(request(service, "openai-chat", true, "identity", true)))
+                    assert(session:push('data: {"id":"identity","choices":[{"delta":{"tool_calls":[{"index":0,"id":'
+                        .. scenario.first_id .. ',"function":{"name":' .. scenario.first_name
+                        .. ',"arguments":"{}"}}]},"finish_reason":null}]}\n\n'))
+                    if not session:response() then
+                        assert(session:push('data: {"id":"identity","choices":[{"delta":{"tool_calls":[{"index":0,"id":'
+                            .. scenario.next_id .. ',"function":{"name":' .. scenario.next_name
+                            .. ',"arguments":null}}]},"finish_reason":null}]}\n\n'))
+                    end
+                    assert(session:finish())
+                    local response = assert(session:response())
+                    A.equal(response.incomplete, true)
+                    A.equal(response.incomplete_reason, scenario.reason)
+                    A.equal(response.tool_calls_validated, false)
+                    A.equal(#response.tool_calls, 0)
                 end
             end,
         },

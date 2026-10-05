@@ -1,38 +1,29 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-10-05
 File: journeys.lua
-Description: Clean-machine release journey driver. The module part is a
-pure plan/verify core covered by the suite; the CLI part executes the
-offline journey for a candidate zip on a matching Linux host.
+Description: Plans and verifies release journeys; delegates offline Linux execution
+of audited clean/std/full ZIP pairs to the isolated build-host PTY driver.
 
 CLI usage:
 bin/lua55 test/release/journeys.lua <repo-root> <zip> <target-id> <scratch>
-[--i-accept-online-journey <config-ini>]
-The online segment (stages 2/3 with a provider) only runs with the explicit
-consent flag plus a configuration file path.
+[--notices <notices-zip>] [--report <new-json-path>]
+Online steps require the separate configured-target terminal smoke driver.
 ]]
 
 local M = {}
 
 local PLATFORM_LINE = {
-    ["win32-x86"] = "yaca 0%.1%.0 %(win32%-x86%)",
-    ["win64-x86_64"] = "yaca 0%.1%.0 %(win64%-x86_64%)",
-    ["linux-x86_64"] = "yaca 0%.1%.0 %(linux%-x86_64%)",
+    ["win32-x86"] = "yaca 1%.0%.0 %(win32%-x86%)",
+    ["win64-x86_64"] = "yaca 1%.0%.0 %(win64%-x86_64%)",
+    ["linux-x86_64"] = "yaca 1%.0%.0 %(linux%-x86_64%)",
 }
 
-local EXECUTABLE_BY_OS = {
-    windows = "yaca.exe",
-    linux = "yaca",
-}
-
---- Plans the journey steps for one target.
--- options.online is only honoured when options.online_consent is true.
---Supplies plan behavior required by this suite.
---@param target_id string|integer Identity of the selected fake target.
---@param options table|nil Options configuring the exercised component.
---@return any|nil observed plan value observed by the scenario assertion.
---@return string|nil secondary2 Fixture text "unknown target id: " .. tostring(target_id).
+-- Build the target's offline plan, adding online steps only with explicit consent.
+--@param target_id string Canonical release target identifier.
+--@param options table|nil Optional online and online_consent booleans; defaults to offline.
+--@return table|nil Ordered journey steps; nil for an unknown target.
+--@return string|nil Unknown-target diagnostic; nil when planning succeeds.
 function M.plan(target_id, options)
     options = options or {}
     if not PLATFORM_LINE[target_id] then
@@ -40,10 +31,14 @@ function M.plan(target_id, options)
     end
     local os_name = target_id:match("^win") and "windows" or "linux"
     local steps = {
+        { id = "package-integrity", kind = "static" },
         { id = "extract", kind = "setup" },
-        { id = "zero-surface", kind = "static" },
         { id = "version", kind = "run", os = os_name },
+        { id = "non-tty-no-writes", kind = "run", os = os_name },
+        { id = "embedded-lua", kind = "run", os = os_name },
         { id = "selftest-stage1", kind = "run", os = os_name },
+        { id = "without-tools", kind = "run", os = os_name },
+        { id = "move", kind = "run", os = os_name },
     }
     if options.online and options.online_consent then
         steps[#steps + 1] = { id = "configure", kind = "online", os = os_name }
@@ -56,18 +51,20 @@ function M.plan(target_id, options)
     return steps
 end
 
---- Verifies the observed evidence for one journey step.
--- observed: table with string fields depending on the step (output, exit_code,
--- residue_paths). Returns true or false, finding.
---Checks verify step against this test expectation.
---@param step_id any The step id supplied to the fake service for this scenario.
---@param target_id string|integer Identity of the selected fake target.
---@param observed table|any State observed after the exercised operation.
---@return boolean accepted Whether verify step succeeds in the fixture.
---@return string|nil secondary2 Additional status or structured error from the fixture operation.
+-- Validate one observation against the step's completion and failure requirements.
+--@param step_id string Stable journey step identifier.
+--@param target_id string Canonical target used to bind version observations.
+--@param observed table|nil Captured exit code, transcript or explicit observation flags.
+--@return boolean True only when the step has the required successful evidence.
+--@return string|nil Missing or contradictory evidence diagnostic; nil on success.
 function M.verify_step(step_id, target_id, observed)
     observed = observed or {}
-    if step_id == "extract" then
+    if step_id == "package-integrity" then
+        if observed.integrity == "passed" and observed.target == target_id then
+            return true
+        end
+        return false, "package integrity did not pass for the selected target"
+    elseif step_id == "extract" then
         if observed.exit_code ~= 0 then
             return false, "extraction failed with " .. tostring(observed.exit_code)
         end
@@ -80,26 +77,45 @@ function M.verify_step(step_id, target_id, observed)
         return false, "zero-surface check did not pass"
     elseif step_id == "version" then
         local pattern = PLATFORM_LINE[target_id]
-        if pattern and (observed.output or ""):find(pattern) then
+        if observed.exit_code == 0 and pattern and (observed.output or ""):find(pattern) then
             return true
         end
         return false, "version output does not match the target platform"
     elseif step_id == "selftest-stage1" or step_id == "selftest-stage3" then
-        -- A clean machine may run stage 1 before any configuration exists;
-        -- the honest result then is "partial" (exit code 1) with a
-        -- not-initialized warning, which still proves the offline surface.
         local output = observed.output or ""
         local outcome = output:match("outcome=([a-z]+)")
+        local expected_code = outcome == "passed" and 0 or 1
+        local expected_stage = step_id == "selftest-stage1" and "1" or "3"
         local acceptable = outcome == "passed"
             or (step_id == "selftest-stage1" and outcome == "partial")
-        if acceptable
-            and (observed.exit_code == 0
-                or (outcome == "partial" and observed.exit_code == 1))
-            and output:find("auto%-fixes=0", 1, false) then
+        if acceptable and observed.exit_code == expected_code
+            and output:match("completed%-stage=(%d+)") == expected_stage
+            and output:match("auto%-fixes=(%d+)") == "0"
+            and not output:match("%f[%a]FAILED%f[%A]")
+            and (step_id ~= "selftest-stage1"
+                or output:match("online%-requests=(%d+)") == "0")
+        then
             return true
         end
-        return false, "self-test did not pass cleanly (outcome="
-            .. tostring(outcome) .. ", exit=" .. tostring(observed.exit_code) .. ")"
+        return false, "self-test did not finish the requested stage without failures"
+    elseif step_id == "non-tty-no-writes" then
+        if observed.exit_code and observed.exit_code ~= 0
+            and (observed.output or ""):find("TtyRequired", 1, true)
+            and observed.zero_writes == true
+        then
+            return true
+        end
+        return false, "non-TTY refusal or zero-write evidence is missing"
+    elseif step_id == "embedded-lua" then
+        if observed.exit_code == 0 and (observed.output or ""):match("^%s*42%s*$") then
+            return true
+        end
+        return false, "embedded Lua did not produce 42 successfully"
+    elseif step_id == "without-tools" or step_id == "move" then
+        if observed.core_verified == true and observed.lua_verified == true then
+            return true
+        end
+        return false, "portable core or embedded Lua evidence is missing"
     elseif step_id == "configure" then
         if observed.config_active then return true end
         return false, "configuration was not activated"
@@ -122,12 +138,10 @@ function M.verify_step(step_id, target_id, observed)
     return false, "unknown journey step: " .. tostring(step_id)
 end
 
---- Steps that must be skipped when the driver host OS differs from the
--- target OS (for example auditing a Windows zip from a Linux driver).
---Supplies skipped on host mismatch behavior required by this suite.
---@param steps any The steps supplied to the fake service for this scenario.
---@param host_os any The host os supplied to the fake service for this scenario.
---@return any observed skipped on host mismatch value observed by the scenario assertion.
+-- Identify target execution steps that cannot run on the driver's host OS.
+--@param steps table Ordered step descriptors returned by plan.
+--@param host_os string Driver OS identity, windows or linux.
+--@return table Ordered IDs requiring a different operating system.
 function M.skipped_on_host_mismatch(steps, host_os)
     local skipped = {}
     for _, step in ipairs(steps) do
@@ -138,125 +152,35 @@ function M.skipped_on_host_mismatch(steps, host_os)
     return skipped
 end
 
-----------------------------------------------------------------------------
--- CLI execution (Linux hosts only for the run/online kinds).
-----------------------------------------------------------------------------
-
---Supplies shell quote behavior required by this suite.
---@param value any Candidate whose acceptance or transformation the test checks.
---@return string quoted Argument quoted for the selected command shell.
+-- Quote one literal argument for the POSIX build-host command shell.
+--@param value string Command argument, including paths containing spaces or quotes.
+--@return string Single shell word preserving the argument's exact bytes.
 local function shell_quote(value)
     return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
 end
 
---Supplies run command behavior required by this suite.
---@param command string|table Command delivered to the fake executor.
---@return table observed Structured fixture record selected by the exercised branch.
-local function run_command(command)
-    local pipe = io.popen(command .. " 2>&1", "r")
-    if not pipe then return { exit_code = 1, output = "cannot start command" } end
-    local output = pipe:read("a") or ""
-    local ok, _, code = pipe:close()
-    return { exit_code = ok and 0 or (code or 1), output = output }
-end
-
---Supplies main behavior required by this suite.
---@param argv any The argv supplied to the fake service for this scenario.
---@return integer observed main value observed by the scenario assertion.
+-- Delegate runtime work to the guarded driver, propagating every failure exit.
+--@param argv table Repository, runtime ZIP, target, scratch and optional driver arguments.
+--@return integer Driver exit status, or 64 for missing arguments or a Windows driver host.
+--@effect Starts the resource guard and Python build-host driver; it owns extraction and cleanup.
 local function main(argv)
-    local repo, zip_path, target_id, scratch = argv[1], argv[2], argv[3], argv[4]
-    local consent, config_path
-    for index = 5, #argv do
-        if argv[index] == "--i-accept-online-journey" then
-            consent = true
-            config_path = argv[index + 1]
-        end
-    end
-    if not (repo and zip_path and target_id and scratch) then
-        io.stderr:write("usage: journeys.lua <repo-root> <zip> <target-id> "
-            .. "<scratch> [--i-accept-online-journey <config-ini>]\n")
+    if not (argv[1] and argv[2] and argv[3] and argv[4]) then
+        io.stderr:write("usage: journeys.lua <repo-root> <zip> <target-id> <scratch> "
+            .. "[--notices <zip>] [--report <new-json-path>]\n")
         return 64
     end
     if package.config:sub(1, 1) == "\\" then
-        io.stderr:write("journeys: the executing driver supports Linux hosts; "
-            .. "run Windows zips on the Windows target\n")
-        return 1
+        io.stderr:write("journeys: execute the offline driver on a Linux build host\n")
+        return 64
     end
-    local steps, plan_error = M.plan(target_id, {
-        online = consent ~= nil, online_consent = consent,
-    })
-    if not steps then
-        io.stderr:write("journeys: " .. tostring(plan_error) .. "\n")
-        return 1
-    end
-    local install = scratch .. "/yaca-install"
-    local work = scratch .. "/yaca-work"
-    os.execute("rm -rf " .. shell_quote(install) .. " "
-        .. shell_quote(work) .. " " .. shell_quote(scratch .. "/unpack"))
-    os.execute("mkdir -p " .. shell_quote(scratch .. "/unpack") .. " "
-        .. shell_quote(work))
-
-    local results = {}
-    local failed = false
-    for _, step in ipairs(steps) do
-        local observed
-        if step.id == "extract" then
-            observed = run_command("unzip -q " .. shell_quote(zip_path)
-                .. " -d " .. shell_quote(install))
-        elseif step.id == "zero-surface" then
-            observed = run_command("bin/lua55 .tools/check_zero_surface.lua "
-                .. shell_quote(repo) .. " " .. shell_quote(install) .. " "
-                .. shell_quote(target_id))
-        elseif step.id == "version" then
-            observed = run_command(shell_quote(install .. "/yaca")
-                .. " --version")
-        elseif step.id == "selftest-stage1" then
-            observed = run_command(shell_quote(install .. "/yaca")
-                .. " --self-test --through-stage 1")
-        elseif step.id == "configure" then
-            os.execute("mkdir -p " .. shell_quote(install .. "/__yaca__"))
-            os.execute("cp " .. shell_quote(config_path or "/dev/null")
-                .. " " .. shell_quote(install .. "/__yaca__/config.ini"))
-            local status = run_command(shell_quote(install .. "/yaca")
-                .. " --status")
-            observed = {
-                config_active = status.output:find("config%-generation", 1, false)
-                    ~= nil,
-                output = status.output,
-            }
-        elseif step.id == "chat-tool-turn" or step.id == "restore"
-            or step.id == "selftest-stage3" then
-            -- The interactive segment is driven by the operator's expect
-            -- harness against the same install; record it as not executed
-            -- here instead of faking evidence.
-            observed = { output = "interactive segment not executed by driver" }
-        elseif step.id == "uninstall" then
-            observed = run_command("rm -rf " .. shell_quote(install) .. " "
-                .. shell_quote(work) .. " " .. shell_quote(scratch .. "/unpack"))
-        elseif step.id == "verify-no-residue" then
-            local residue = {}
-            for _, path in ipairs({ install, work, scratch .. "/unpack" }) do
-                local probe = io.open(path, "r")
-                if probe then
-                    probe:close()
-                    residue[#residue + 1] = path
-                end
-            end
-            observed = { residue_paths = residue }
-        end
-        local ok, finding = M.verify_step(step.id, target_id, observed or {})
-        results[#results + 1] = string.format("%s %s%s",
-            ok and "PASS" or "SKIP-FAIL", step.id,
-            (ok and "") or (" :: " .. tostring(finding)))
-        if not ok and step.kind ~= "online" then failed = true end
-    end
-    for _, line in ipairs(results) do print(line) end
-    if failed then
-        print("journey=FAIL target=" .. target_id)
-        return 1
-    end
-    print("journey=PASS target=" .. target_id)
-    return 0
+    local repo = argv[1]
+    local words = {
+        "bash", shell_quote(repo .. "/.tools/run_with_resource_guard.sh"),
+        "python3", shell_quote(repo .. "/.tools/qualification/edition_journey.py"),
+    }
+    for _, value in ipairs(argv) do words[#words + 1] = shell_quote(value) end
+    local ok, _, code = os.execute(table.concat(words, " "))
+    return ok and 0 or (code or 1)
 end
 
 if arg and arg[0] and arg[0]:match("journeys%.lua$") then

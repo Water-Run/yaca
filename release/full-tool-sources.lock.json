@@ -83,7 +83,47 @@
    "file": "busybox-1.37.0.tar.bz2",
    "url": "https://busybox.net/downloads/busybox-1.37.0.tar.bz2",
    "sha256": "3311dff32e746499f4df0d5df04d7eb396382d7e108bb9250e7b519b837043a4"
+  },
+  {
+   "file": "sqlite-src-3530400.zip",
+   "url": "https://sqlite.org/2026/sqlite-src-3530400.zip",
+   "sha256": "d18fa15aec74d8c17e1463f861095adc01b5ad190256acb4f91d22f0368d232b"
+  },
+  {
+   "file": "libffi-3.4.6.tar.gz",
+   "url": "https://github.com/libffi/libffi/releases/download/v3.4.6/libffi-3.4.6.tar.gz",
+   "sha256": "b0dea9df23c863a7a50e825440f3ebffabd65df1497108e5d437747843895a4e"
+  },
+  {
+   "file": "glibc-2.17-317.el7.src.rpm",
+   "url": "https://archive.kernel.org/centos-vault/7.9.2009/os/Source/SPackages/glibc-2.17-317.el7.src.rpm",
+   "sha256": "3e03c2bdc2574a01cf47221fad0e4553e449929c7b344afb4776c558f3201f88"
+  },
+  {
+   "file": "kernel-3.10.0-1160.el7.src.rpm",
+   "url": "https://archive.kernel.org/centos-vault/7.9.2009/os/Source/SPackages/kernel-3.10.0-1160.el7.src.rpm",
+   "sha256": "9181264d78aa71eb68b4981cbb9ea74b33a0aff254cae591cf6a2820d16e1695"
+  },
+  {
+   "file": "gcc-4.8.5-44.el7.src.rpm",
+   "url": "https://archive.kernel.org/centos-vault/7.9.2009/os/Source/SPackages/gcc-4.8.5-44.el7.src.rpm",
+   "sha256": "642c4085f6af9565e39583e54a9d7a5d9e6b93dd8c8e9474aec8a892d6c7aa36"
   }
  ],
- "patches": []
+ "patches": [],
+ "git_runtime_sources": [
+  {
+   "file": "libxcrypt-4.4.38.tar.xz",
+   "url": "https://github.com/besser82/libxcrypt/releases/download/v4.4.38/libxcrypt-4.4.38.tar.xz",
+   "sha256": "80304b9c306ea799327f01d9a7549bdb28317789182631f1b54f4511b4206dd6",
+   "target": "linux-x86_64"
+  },
+  {
+   "file": "perl-5.42.3.tar.xz",
+   "url": "https://www.cpan.org/src/5.0/perl-5.42.3.tar.xz",
+   "sha256": "c9387e1473a1866935cb047ece7c2e0a80767a3acdecb79d4a375f8a95970ddc",
+   "upstream_sha256_url": "https://www.cpan.org/src/5.0/perl-5.42.3.tar.xz.sha256.txt",
+   "target": "linux-x86_64"
+  }
+ ]
 }

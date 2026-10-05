@@ -1,6 +1,6 @@
 /*
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-10-05
 File: windows_unicode_smoke.c
 Description: Relocation/argv/file checks through the real onefile executable. XP APIs.
 */
@@ -149,7 +149,7 @@ int wmain(int argc, WCHAR **argv)
   path_join(exe, root, L"yaca.exe");
   check(CopyFileW(source, exe, TRUE), "relocate executable");
   path_join(file, root, L"version.log");
-  run(exe, root, L"--version", file, "yaca 0.1.0");
+  run(exe, root, L"--version", file, "yaca 1.0.0");
   path_join(file, root, L"\u811a\u672c.lua");
   write_file(file, script);
   path_join(file, root, L"lua.log");

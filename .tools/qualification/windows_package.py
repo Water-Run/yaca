@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Author: WaterRun
-# Date: 2026-10-01
+# Date: 2026-10-05
 # File: windows_package.py
 # Description: Audit and assemble a Windows preview without asserting real-target qualification.
 
@@ -37,7 +37,12 @@ def main():
         "win64-x86_64": ("x86_64-w64-mingw32", "pei-x86-64", 6, "Windows 7 SP1", "64-bit"),
     }
     cross, pe_format, subsystem, minimum, bits = profiles[target]
-    artifact_prefix = "yaca-0.1.0-preview-" + target
+    version_text=(output/'work/yaca/release/manifest.lua').read_text(encoding='utf-8')
+    version_match=re.search(r'^    product_version = "([0-9]+\.[0-9]+\.[0-9]+)",$',version_text,re.M)
+    if not version_match:
+        raise ValueError('captured source manifest has no canonical product version')
+    product_version=version_match[1]
+    artifact_prefix = "yaca-"+product_version+"-preview-" + target
     package = output / "package"
     companion = output / "companion"
     docs = companion / "docs"
@@ -99,7 +104,7 @@ def main():
         shutil.copyfile(source, licenses / name)
     shutil.copyfile(cache / "cacert-2026-08-13.pem", licenses / "Mozilla-CA.pem")
     (docs / "COMPONENTS.txt").write_text(
-        "yaca 0.1.0 preview: GPL-3.0-only\n"
+        "yaca "+product_version+" preview: GPL-3.0-only\n"
         "luainstaller 1.3.0 launcher/extractor: LGPL-3.0-or-later\n"
         "Lua 5.5.1, LuaExpat 1.5.2, Expat 2.8.2: MIT\n"
         "curl 8.21.0: curl license; Mbed TLS 3.6.7: Apache-2.0\n"
@@ -110,7 +115,7 @@ def main():
         encoding="ascii",
     )
     (companion / "README.txt").write_bytes(
-        ("yaca 0.1.0 Windows preview (" + bits + ", " + minimum + ")\r\n").encode("ascii") +
+        ("yaca "+product_version+" Windows preview (" + bits + ", " + minimum + ")\r\n").encode("ascii") +
         b"Extract the complete zip to C:\\yaca, then open cmd.exe:\r\n"
         b"  C:\\yaca\\yaca.exe --version\r\n"
         b"  C:\\yaca\\yaca.exe --model-repl\r\n"
@@ -132,6 +137,7 @@ def main():
     summary = {
         "schema": "yaca-windows-preview-v1", "status": "cross-build-passed",
         "target": target, "intended_deployment": minimum,
+        "product_version": product_version,
         "image_subsystem": str(subsystem) + ".01", "lua": "5.5.1", "build_jobs": 1,
         "base_revision": (output / "logs/base-revision.txt").read_text().strip(),
         "source_snapshot_sha256": digest(output / "yaca-source.tar.gz"),
@@ -145,7 +151,7 @@ def main():
     (docs / "build-summary.json").write_text(json.dumps(summary, indent=2) + "\n")
 
     components = [
-        ("yaca", "0.1.0-preview", "GPL-3.0-only", output / "yaca-source.tar.gz"),
+        ("yaca", product_version, "GPL-3.0-only", output / "yaca-source.tar.gz"),
         ("luainstaller", "1.3.0", "LGPL-3.0-or-later", cache / "luainstaller-97192d1.tar.gz"),
         ("Lua", "5.5.1", "MIT", cache / "lua-5.5.1.tar.gz"),
         ("LuaExpat", "1.5.2", "MIT", cache / "luaexpat-1.5.2.tar.gz"),
@@ -203,7 +209,7 @@ def main():
     core_digest = digest(package / "yaca.exe")
     edition_summary = {
         "schema": "yaca-edition-v1", "target": target, "edition": "clean",
-        "version": "0.1.0-preview", "core_sha256": core_digest,
+        "version": product_version, "core_sha256": core_digest,
         "status": "candidate-unqualified", "release_authorized": False,
         "target_qualification_complete": False, "tools": [],
         "files": [{"destination": "yaca.exe", "sha256": core_digest, "executable": True}]
@@ -228,7 +234,7 @@ def main():
         "creationInfo": {"creators": ["Tool: yaca-windows-candidate-builder"],
                          "created": "2026-10-01T00:00:00Z"},
         "packages": [{
-            "SPDXID": "SPDXRef-yaca", "name": "yaca", "versionInfo": "0.1.0-preview",
+            "SPDXID": "SPDXRef-yaca", "name": "yaca", "versionInfo": product_version,
             "downloadLocation": "NOASSERTION", "filesAnalyzed": False,
             "licenseConcluded": "NOASSERTION", "licenseDeclared": "GPL-3.0-only",
             "copyrightText": "NOASSERTION",

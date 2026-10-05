@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Author: WaterRun
-# Date: 2026-09-23
+# Date: 2026-10-05
 # File: build_windows_candidate.sh
 # Description: Builds Windows candidate payloads and checks their legacy import closure.
 
@@ -67,64 +67,16 @@ verify "$SOURCE_CACHE/luainstaller-97192d1.tar.gz" \
 verify "$SOURCE_CACHE/cacert-2026-08-13.pem" \
   f66dff1bdf8f96060b8177976f8b7d9254bc89bc4db933d769f7384d28480bc9
 
-# Snapshot only tracked project inputs (including current edits), never user
-# configuration, historical bin/, source-cache contents or ambient credentials.
+# Snapshot the complete maintained working tree, including new regression and
+# qualification files. Ignored build/data/credential paths never enter it.
 mkdir "$YACA_SOURCE" "$BUILDER_ROOT"
-git -C "$REPO_ROOT" ls-files -z | python3 -c '
-import os, subprocess, sys
-root = sys.argv[1]
-deleted = set(subprocess.check_output(["git", "-C", root, "ls-files", "--deleted", "-z"]).split(b"\0"))
-sys.stdout.buffer.write(b"\0".join(name for name in sys.stdin.buffer.read().split(b"\0")
-    if name and name not in deleted) + b"\0")
-' "$REPO_ROOT" | tar -C "$REPO_ROOT" --null -T - -cf - \
-  | tar -C "$YACA_SOURCE" -xf -
-cp "$SCRIPT_DIR/windows_sources.lua" "$YACA_SOURCE/.tools/qualification/"
-cp "$SCRIPT_DIR/build_windows_candidate.sh" "$SCRIPT_DIR/windows_package.py" \
-  "$SCRIPT_DIR/windows_native_smoke.lua" "$SCRIPT_DIR/windows_network_smoke.lua" \
-  "$SCRIPT_DIR/windows_mock_provider.ps1" \
-  "$YACA_SOURCE/.tools/qualification/"
-cp "$REPO_ROOT/release/WINDOWS-QUICKSTART.md" "$YACA_SOURCE/release/"
-cp "$REPO_ROOT/release/launcher.lua" "$YACA_SOURCE/release/"
-cp "$REPO_ROOT/native/yaca_entry.c" "$YACA_SOURCE/native/"
-cp "$REPO_ROOT/native/yaca_pty.h" "$YACA_SOURCE/native/"
-cp "$REPO_ROOT/native/yaca_onefile_windows.h" "$REPO_ROOT/native/yaca_onefile_entry.c" "$YACA_SOURCE/native/"
-cp "$REPO_ROOT/native/yaca_lua_windows.h" "$YACA_SOURCE/native/"
-cp "$REPO_ROOT/native/yaca_supervisor.h" "$YACA_SOURCE/native/"
-for input in release/tool-bundles.json release/TOOL-BUNDLES.md \
-  release/tool-sources.lock.json release/patches/putty-0.85-portable.patch \
-  release/patches/jq-1.8.2-xp.patch \
-  .tools/package_editions.py .tools/qualification/interpreter_smoke.py \
-  .tools/qualification/build_win64_https_candidate.sh \
-  .tools/qualification/build_win32_std.sh .tools/qualification/prepare_win32_std.py \
-  test/release/editions_test.py test/integration/first_run_test.lua \
-  test/integration/review_queue_ask_test.lua \
-  .tools/qualification/msi_inventory.c .tools/qualification/windows_pty_smoke.c \
-  .tools/qualification/windows_std_smoke.py \
-  .tools/qualification/windows_portable_acceptance.py \
-  .tools/qualification/windows_console_agent_smoke.py \
-  .tools/qualification/windows_inherited_smoke.py \
-  .tools/qualification/windows_filesystem_identity_smoke.c \
-  .tools/qualification/lua_tool_smoke.lua \
-  .tools/qualification/process_tree_smoke.lua .tools/qualification/agent_terminal_smoke.py \
-  .tools/qualification/linux_supervisor_smoke.lua .tools/qualification/process_stdin_smoke.lua \
-  .tools/qualification/linux_supervisor_smoke.py \
-  .tools/qualification/windows_console_smoke.c \
-  .tools/qualification/extract_sdk71.py .tools/qualification/prepare_python34.sh \
-  .tools/qualification/build_python34_windows.py \
-  .tools/qualification/stage_python34_windows.py \
-  .tools/qualification/prepare_python34_ssl.py .tools/qualification/windows_unicode_smoke.c \
-  .develope-docs/CODE-REVIEW-2026-09-22.md \
-  .develope-docs/BASELINE-REVIEW-2026-09-22.md \
-  .develope-docs/MAJOR-REDESIGN-PLAN-2026-09-22.md \
-  .develope-docs/PRODUCT-ROADMAP-2026-09-22.md \
-  .develope-docs/PORTABLE-IMPLEMENTATION-2026-09-22.md \
-  .develope-docs/references/agent-loop-source-review-2026-09-22.md; do
-  cp "$REPO_ROOT/$input" "$YACA_SOURCE/$input"
-done
-cp "$REPO_ROOT/.develope-docs/WINDOWS-PREVIEW-2026-09-14.md" "$YACA_SOURCE/.develope-docs/"
+python3 "$SCRIPT_DIR/source_snapshot.py" "$REPO_ROOT" "$OUTPUT_ROOT/source-snapshot" \
+  >"$LOG_ROOT/source-snapshot.log"
+tar -C "$YACA_SOURCE" -xzf "$OUTPUT_ROOT/source-snapshot/yaca-source.tar.gz"
+cp "$OUTPUT_ROOT/source-snapshot/yaca-source.tar.gz" "$OUTPUT_ROOT/yaca-source.tar.gz"
+cp "$OUTPUT_ROOT/source-snapshot/snapshot.json" "$LOG_ROOT/source-snapshot.json"
 git -C "$REPO_ROOT" rev-parse HEAD >"$LOG_ROOT/base-revision.txt"
 git -C "$REPO_ROOT" diff --binary HEAD >"$LOG_ROOT/source-changes.patch"
-tar -C "$YACA_SOURCE" -czf "$OUTPUT_ROOT/yaca-source.tar.gz" .
 tar -C "$BUILDER_ROOT" -xzf "$SOURCE_CACHE/luainstaller-97192d1.tar.gz"
 for archive in lua-5.5.1 expat-2.8.2 luaexpat-1.5.2; do
   tar -C "$WORK_ROOT" -xzf "$SOURCE_CACHE/$archive.tar.gz"

@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-30
+Date: 2026-10-05
 File: readiness.lua
 Description: Maps implementation and release gates to required artifacts and proof tasks.
 ]]
@@ -196,7 +196,7 @@ return {
     task("C30", "M9", { "C18", "C21", "C25", "C29" }, { "src/diagnostics.lua", "src/main.lua", ".develope-docs/contracts/readiness.lua", ".develope-docs/IMPLEMENTATION-PLAN.md", "README.md", "README-zh.md" }, { "test/integration/self_test_test.lua" }, "feat: add staged self-test runner"),
     task("C31", "M10", { "C30" }, { "release/manifest.lua", "release/luainstaller.lua", "release/dependencies.lock" }, { "test/release/package_layout_test.lua", "test/release/sbom_test.lua" }, "build: assemble minimal target packages"),
     task("C32", "M10", { "C31" }, { "test/qualification/win32.lua", "test/qualification/win64.lua", "test/qualification/linux.lua" }, { "test/qualification" }, "test: qualify all release targets"),
-    task("C33", "M10", { "C32" }, { ".tools/check_zero_surface.lua", "test/release/journeys.lua" }, { "test/release/clean_machine_test.lua", "test/release/journeys.lua" }, "test: prove release journeys and zero surface"),
-    task("C34", "M10", { "C33" }, { "README.md", "README-zh.md", "docs", "release/evidence" }, { ".tools/check_documentation_truth.lua" }, "docs: publish qualified release evidence"),
+    task("C33", "M10", { "C32" }, { ".tools/check_zero_surface.lua", "test/release/journeys.lua", ".tools/qualification/edition_journey.py" }, { "test/release/clean_machine_test.lua", "test/release/journeys.lua", "test/qualification/edition_journey_test.py" }, "test: prove release journeys and zero surface"),
+    task("C34", "M10", { "C33" }, { "README.md", "README-zh.md", "docs", "release/evidence", ".tools/qualification/audit_editions.py" }, { ".tools/check_documentation_truth.lua", "test/release/audit_editions_test.py" }, "docs: publish qualified release evidence"),
   },
 }

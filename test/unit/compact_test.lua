@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-10-05
 File: compact_test.lua
 Description: Verifies lossless-facts structured ModelView compaction.
 ]]
@@ -202,15 +202,18 @@ local function fixture(settings, manifest_overrides, source_document)
         return (#bytes + bytes_per_token - 1) // bytes_per_token
     end
 
-    --Supplies journal commit behavior required by the 'read' case.
-    --@param method string Port method selected by the scenario.
-    --@param binding table Verified binding under inspection.
-    --@param publishing any The publishing supplied to the fake service for this scenario.
-    --@return boolean accepted Whether journal commit succeeds in the fixture.
-    --@return table|any|nil secondary2 Additional status or structured error from the fixture operation.
+    -- Record the attempted journal write and return its exact receipt or an injected failure.
+    --@param method string Journal method selecting the configured fault, if any.
+    --@param binding table Frozen compaction record that the returned receipt must retain by identity.
+    --@param publishing boolean True changes the manifest; false retains its current digest.
+    --@return boolean accepted False for an injected rejection, otherwise true.
+    --@return table|nil receipt Exact durable receipt, invalid receipt or capacity error; nil for a rejected write.
+    --@error Raises the injected journal exception after recording the attempt.
+    --@effect Appends the attempted record and advances generation/manifest only for an accepted write.
     local function journal_commit(method, binding, publishing)
         log[#log + 1] = "journal:" .. method .. ":" .. binding.kind
         journal_records[#journal_records + 1] = { method = method, binding = binding }
+        if settings.throw_journal_method == method then error("journal-fault") end
         if settings.fail_journal_method == method then return false, nil end
         if settings.capacity and method == "commit_intent" then
             return false, { code = "ContextCapacity", publication_started = false }
@@ -285,10 +288,11 @@ local function fixture(settings, manifest_overrides, source_document)
             if settings.fail_model_start then return nil, "model-start-fault" end
             return "handle:" .. specification.request_id
         end,
-        --Simulates the cancel transition of a fake activity port for the 'read' case.
-        --@param handle table|integer Fake resource handle whose state is inspected.
-        --@param reason string Failure or close reason supplied to the port.
-        --@return any value Callback value consumed by the enclosing scenario assertion.
+        -- Observe cancellation of the exact handle returned by the fake Model start.
+        --@param handle string|boolean Model handle identity; false when no live handle was retained.
+        --@param reason string Requested cancellation reason retained in the observation.
+        --@return table|any result Configured cancellation result, defaulting to a terminal cancelled outcome.
+        --@effect Appends the handle/reason pair to cancellation observations and the ordered event log.
         cancel = function(handle, reason)
             cancel_calls[#cancel_calls + 1] = { handle = handle, reason = reason }
             log[#log + 1] = "model:cancel:" .. tostring(handle)
@@ -883,6 +887,39 @@ return {
                 A.equal(#bad.starts, 0)
                 A.equal(bad.manifest(), "view-old")
                 A.equal(bad.service:status().state, "Unknown")
+            end,
+        },
+        {
+            name = "cancel intent journal faults preserve the original Model handle for cleanup",
+            -- Preserve structured durability failure and attempt cancellation after the lifecycle becomes Unknown.
+            --@param none Uses independent fixtures for rejected, forged and throwing journal writes.
+            --@return nil Assertions require one cleanup attempt, no publication and no further request admission.
+            --@error Raises if cancellation throws, loses its handle or hides the journal failure.
+            run = function()
+                for _, settings in ipairs({
+                    { fail_journal_method = "commit_rejection" },
+                    { bad_receipt_method = "commit_rejection" },
+                    { throw_journal_method = "commit_rejection" },
+                }) do
+                    local instance = fixture(settings)
+                    local input = input_for(instance, { mode = "manual", active_estimated_tokens = 200 })
+                    local started = assert(instance.service:begin(input))
+                    local called, result, cancel_error = pcall(
+                        instance.service.cancel, instance.service, "user-cancel"
+                    )
+                    A.truthy(called, result)
+                    A.falsy(result)
+                    A.equal(cancel_error.code, "CompactionJournalFailure")
+                    A.equal(#instance.cancel_calls, 1)
+                    A.equal(instance.cancel_calls[1].handle, "handle:" .. started.request_id)
+                    A.equal(instance.cancel_calls[1].reason, "user-cancel")
+                    A.equal(instance.service:status().state, "Unknown")
+                    A.equal(instance.service:status().active_request_id, false)
+                    A.equal(instance.manifest(), "view-old")
+                    A.equal(#instance.publications, 0)
+                    A.falsy(instance.service:begin(input))
+                    A.equal(#instance.starts, 1)
+                end
             end,
         },
         {

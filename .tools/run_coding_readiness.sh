@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Author: WaterRun
-# Date: 2026-09-23
+# Date: 2026-10-05
 # File: run_coding_readiness.sh
 # Description: Runs contract, evidence and feasibility checks under the shared resource guard.
 
@@ -17,6 +17,13 @@ cd "$REPO_ROOT"
 
 python3.13 test/self/code_comments_test.py
 python3.13 .tools/check_code_comments.py
+python3.13 test/release/editions_test.py
+python3.13 test/release/audit_editions_test.py
+python3.13 test/qualification/edition_journey_test.py
+python3.13 test/qualification/source_snapshot_test.py
+python3.13 test/qualification/terminal_approval_test.py
+python3.13 test/qualification/linux_full_staging_test.py
+python3.13 test/qualification/windows_test_evidence_test.py
 
 bin/lua55 .tools/validate_design_contracts.lua
 bin/lua55 .tools/validate_proof_evidence.lua

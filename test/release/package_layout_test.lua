@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-10-05
 File: package_layout_test.lua
 Description: Verifies exact minimal candidate package assembly policy.
 ]]
@@ -39,7 +39,7 @@ local TARGETS = {
         executable = "yaca.exe",
         installer = "Install.cmd",
         curl = "curl.exe",
-        archive = "yaca-0.1.0-win32-x86-clean.zip",
+        archive = "yaca-1.0.0-win32-x86-clean.zip",
         root = { "yaca.exe" },
     },
     ["win64-x86_64"] = {
@@ -47,7 +47,7 @@ local TARGETS = {
         executable = "yaca.exe",
         installer = "Install.cmd",
         curl = "curl.exe",
-        archive = "yaca-0.1.0-win64-x86_64-clean.zip",
+        archive = "yaca-1.0.0-win64-x86_64-clean.zip",
         root = { "yaca.exe" },
     },
     ["linux-x86_64"] = {
@@ -55,7 +55,7 @@ local TARGETS = {
         executable = "yaca",
         installer = "Install.sh",
         curl = "curl",
-        archive = "yaca-0.1.0-linux-x86_64-clean.zip",
+        archive = "yaca-1.0.0-linux-x86_64-clean.zip",
         root = { "yaca" },
     },
 }
@@ -114,7 +114,7 @@ end
 --@return table observed Structured fixture record selected by the exercised branch.
 local function inputs(target_id)
     local target = assert(TARGETS[target_id])
-    local launcher = artifact(target_id, "launcher", "0.1.0", hash("1"))
+    local launcher = artifact(target_id, "launcher", manifest.product_version, hash("1"))
     launcher.builder_version = "1.3.0"
     launcher.builder_commit = "97192d100077b31b61dc8f94427e14df1c68a9eb"
     launcher.mode = "onefile"
@@ -128,7 +128,7 @@ local function inputs(target_id)
         source_revision = "0123456789abcdef0123456789abcdef01234567",
         artifacts = {
             launcher = launcher,
-            yaca_native = artifact(target_id, "yaca_native", "0.1.0", hash("2")),
+            yaca_native = artifact(target_id, "yaca_native", manifest.product_version, hash("2")),
             lxp = artifact(target_id, "lxp", "1.5.2", hash("3")),
             curl = curl,
             ca_bundle = {

@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-10-05
 File: luainstaller.lua
 Description: Plans deterministic minimal packages without authorizing release.
 ]]
@@ -503,7 +503,7 @@ local function validate_manifest(manifest, lock)
     local authorized = lock.release_authorized == true
     if type(manifest) ~= "table"
         or manifest.schema_version ~= "yaca-release-manifest-v0.1.0"
-        or manifest.product_version ~= "0.1.0"
+        or manifest.product_version ~= "1.0.0"
         or manifest.release_state ~= (authorized and "qualified" or "unqualified")
         or manifest.release_authorized ~= authorized
         or manifest.target_qualification_complete ~= authorized

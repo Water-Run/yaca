@@ -52,6 +52,8 @@ The extra tools sit in a `tools/` folder next to yaca. yaca tells the agent
 they're there; it doesn't need them to start. Lua 5.5 is built into yaca
 itself, in every edition.
 
+> The compiler SDK in Linux full needs a case-sensitive filesystem.
+
 ## Getting started
 
 Unzip anywhere you can write to, then run it:

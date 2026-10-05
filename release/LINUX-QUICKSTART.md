@@ -6,6 +6,8 @@
 yaca 不需要安装。Lua、HTTPS 和证书都在 `yaca` 里，系统上不用装 Lua、Python、
 Node.js 或开发工具。
 
+> Linux full 的编译器 SDK 需要大小写敏感文件系统。
+
 ## 1. 解压并连接模型
 
 ```sh

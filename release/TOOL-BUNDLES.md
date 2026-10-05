@@ -106,6 +106,8 @@ XP full 不带/不宣告这三项及不支持 XP 的 C11 threads 能力；编译
 工具链可运行与它生成的程序可运行是两项检查：C/C++ 样本须在该目标上实际编译、链接、执行。
 
 Linux devkit 需要可重定位的编译器、Binutils、运行库、头文件、启动对象和相应 sysroot；
+内核头文件保留 `xt_CONNMARK.h` / `xt_connmark.h` 等不同名称，因此 SDK 需大小写敏感
+文件系统。yaca 核心和可选 SDK 的文件系统条件分别记录。
 不能只带 gcc/g++ 再要求目标机安装 devel 包。环境只对工具子进程生效。
 Git 保留所需脚本/helper/TLS 运行闭包；旧 Windows Git 的远程兼容必须单独测，
 不能借 std curl 可联网就声称 Git clone 可用。

@@ -125,7 +125,8 @@
    },
    "notes": [
     "All programs must run against glibc 2.17.",
-    "Compiler payload includes a relocatable sysroot; do not depend on the build host toolchain."
+    "Compiler payload includes a relocatable sysroot; do not depend on the build host toolchain.",
+    "The Linux full compiler SDK needs a case-sensitive filesystem; kernel headers include case-distinct names."
    ]
   }
  }

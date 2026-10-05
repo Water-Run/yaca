@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Author: WaterRun
-# Date: 2026-09-30
+# Date: 2026-10-05
 # File: package_editions.py
 # Description: Assemble portable candidate editions from explicit, hashed target inputs.
 
@@ -114,12 +114,13 @@ def file_record(base, record, destination=None):
 
 # Rejects duplicate and unsafe archive destinations.
 #@param files list[dict] Verified files to place in the archive.
+#@param case_sensitive bool True preserves Linux-distinct spellings; false rejects case-insensitive collisions for Windows.
 #@return None result No value; raises on unsafe or colliding archive paths.
-def validate_destinations(files):
+def validate_destinations(files, case_sensitive=False):
     seen = set()
-    names = {item["destination"].casefold() for item in files}
+    names = {item["destination"] if case_sensitive else item["destination"].casefold() for item in files}
     for item in files:
-        name = item["destination"].casefold()
+        name = item["destination"] if case_sensitive else item["destination"].casefold()
         require(name not in seen, "duplicate destination: " + item["destination"])
         require(not any(str(parent) in names for parent in pathlib.PurePosixPath(name).parents),
                 "file/directory destination collision: " + name)
@@ -130,9 +131,10 @@ def validate_destinations(files):
 #@param path Path|str Input file or package path under inspection.
 #@param files list[dict] Verified files to place in the archive.
 #@param generated dict Generated metadata files for the archive.
+#@param case_sensitive bool Whether the target filesystem distinguishes case; defaults to Windows-safe collision rules.
 #@return None result No value; writes the verified deterministic ZIP archive.
-def write_archive(path, files, generated=None):
-    validate_destinations(files + [{"destination": safe_destination(name)} for name in generated or {}])
+def write_archive(path, files, generated=None, case_sensitive=False):
+    validate_destinations(files + [{"destination": safe_destination(name)} for name in generated or {}], case_sensitive)
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
         # Orders package entries by their normalized archive destination.
         #@param value dict Verified source and destination record.
@@ -287,7 +289,7 @@ def assemble(args):
                 index_file = input_path.parent / "tools/INDEX.txt"
                 if index_file.is_file():
                     generated["tools/INDEX.txt"] = index_file.read_text(encoding="utf-8")
-            write_archive(stage / (stem + ".zip"), files, generated)
+            write_archive(stage / (stem + ".zip"), files, generated, case_sensitive=args.target=="linux-x86_64")
             summary = {"schema": "yaca-edition-v1", "target": args.target, "edition": edition,
                        "version": args.version, "core_sha256": core["sha256"],
                        "status": "candidate-unqualified", "release_authorized": False,
@@ -321,7 +323,7 @@ def main():
     parser.add_argument("--core-sha256", required=True)
     parser.add_argument("--core-notices", type=pathlib.Path, required=True)
     parser.add_argument("--tool-inputs", type=pathlib.Path)
-    parser.add_argument("--version", default="0.1.0-preview")
+    parser.add_argument("--version", default="1.0.0")
     parser.add_argument("--edition", choices=["all", "clean", "std", "full"], default="all")
     parser.add_argument("--output", type=pathlib.Path, required=True)
     args = parser.parse_args()

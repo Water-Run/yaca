@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Author: WaterRun
-# Date: 2026-09-23
+# Date: 2026-10-05
 # File: editions_test.py
 # Description: Build-host integration tests for edition payloads, provenance and failures.
 
@@ -174,6 +174,20 @@ class EditionTest(unittest.TestCase):
             editions.assemble(self.args)
         with self.assertRaisesRegex(ValueError, "duplicate"):
             editions.validate_destinations([{"destination": "tools/a"}, {"destination": "tools/A"}])
+
+    # Preserve legitimate Linux kernel header names while keeping exact duplicates and directory conflicts invalid.
+    #@param self EditionTest Fixture owner.
+    #@return None Assertions require case-sensitive targets to retain both distinct headers without relaxing other path checks.
+    def test_linux_case_distinct_headers_do_not_collide(self):
+        headers=[{'destination':'tools/compiler/include/xt_CONNMARK.h'},
+                 {'destination':'tools/compiler/include/xt_connmark.h'}]
+        editions.validate_destinations(headers,case_sensitive=True)
+        with self.assertRaises(ValueError):
+            editions.validate_destinations(headers)
+        for invalid in (headers+[headers[0]],
+                        [{'destination':'tools/a'},{'destination':'tools/a/header.h'}]):
+            with self.assertRaises(ValueError):
+                editions.validate_destinations(invalid,case_sensitive=True)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 /*
 Author: WaterRun
-Date: 2026-09-30
+Date: 2026-10-05
 File: yaca_native.c
 Description: Portable narrow native ports for filesystem, process, terminal, system identity, clocks, text code pages, and SHA-256.
 */
@@ -349,7 +349,7 @@ static void digest_hex(const unsigned char digest[32], char output[65]);
 */
 /* Pushes a typed native failure and its diagnostic onto the Lua stack.
  * @param L lua_State* Lua state receiving arguments and result values.
- * @param code const_char* Stable native error code or Unicode code point.
+ * @param code const_char* Stable native error identifier copied into the Lua diagnostic.
  * @param message const_char* Diagnostic text for the reported native outcome.
  * @return int result Two Lua results: false and a typed error table.
  */
@@ -392,11 +392,12 @@ static int push_true_result(lua_State *L)
 /* Validates a Lua byte string and exposes its pointer and length.
  * @param L lua_State* Lua state receiving arguments and result values.
  * @param index int Lua stack index or item position being read.
- * @param bytes const_char** Raw byte buffer supplied to the native operation.
- * @param length size_t* Byte or wide-character length of the supplied buffer.
- * @param code const_char* Stable native error code or Unicode code point.
+ * @param bytes const_char** Output pointer borrowed from the checked Lua string; no allocation or ownership transfer.
+ * @param length size_t* Output byte count of the checked Lua string.
+ * @param code const_char* Stable error identifier used for empty or NUL-containing input.
  * @param message const_char* Diagnostic text for the reported native outcome.
  * @return int result 1 for a nonempty NUL-free byte string; 0 after pushing a typed failure.
+ * @error Raises a Lua argument error when the selected value cannot be accepted as a string.
  */
 static int checked_byte_string(
   lua_State *L,
@@ -979,8 +980,10 @@ static char *posix_runtime_path(void)
 **   paths = module.executable_paths(original_argv0)
 */
 /* Implements the Lua executable paths native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+ * @param L lua_State* Stack argument 1 is the original executable spelling, a nonempty NUL-free string.
+ * @return int One Lua table containing the resolved application and current runtime executable paths.
+ * @error Raises a Lua error for invalid arguments, allocation, path resolution or UTF-8 conversion failure.
+ * @effect Reads executable/path metadata and temporarily opens attribute handles on Windows; no filesystem writes.
  */
 static int l_executable_paths(lua_State *L)
 {
@@ -1072,8 +1075,9 @@ static int l_executable_paths(lua_State *L)
 **   facts = module.stdio_facts()
 */
 /* Implements the Lua stdio facts native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+ * @param L lua_State* State receiving the facts; this port consumes no Lua arguments.
+ * @return int One Lua table with stdin_is_tty, stdout_is_tty and stderr_is_tty Boolean observations.
+ * @effect Queries inherited standard handles or POSIX isatty without changing terminal modes.
  */
 static int l_stdio_facts(lua_State *L)
 {
@@ -1113,8 +1117,10 @@ static int l_stdio_facts(lua_State *L)
 /* Windows consoles consume UTF-16 independently of their OEM code page.
 ** Pipes/files deliberately fall back to the caller's ordinary byte writer. */
 /* Implements the Lua console write native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+ * @param L lua_State* Stack arguments are stdout/stderr selector and exact UTF-8 bytes to write.
+ * @return int Two Lua values: true,true after a complete Windows console write; otherwise false and a typed diagnostic.
+ * @error Raises a Lua argument error for values that cannot be accepted as strings.
+ * @effect Writes UTF-16 to a Windows console, inserting CR before bare LF; byte streams return NotConsole without writing.
  */
 static int l_console_write(lua_State *L)
 {
@@ -1195,8 +1201,9 @@ static yaca_file *check_file(lua_State *L, int index)
 }
 
 /* Closes the file native owner.
- * @param file yaca_file* The file bound to close file.
- * @return void result Closes the native file handle owned by the Lua userdata.
+ * @param file yaca_file* Lua-owned file handle whose descriptor/handle and close state are updated in place.
+ * @return void No result; repeated close is a no-op and native close errors are not returned by this cleanup helper.
+ * @effect Attempts to close the native handle once, then marks the owner closed and its native handle invalid.
  */
 static void close_file(yaca_file *file)
 {
@@ -1221,8 +1228,9 @@ static void close_file(yaca_file *file)
 }
 
 /* Implements the Lua file gc native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+ * @param L lua_State* Stack argument 1 may be a yaca file userdata; other values are ignored.
+ * @return int Zero Lua results after optional file-owner cleanup.
+ * @effect Closes a matching file userdata through the idempotent native cleanup helper.
  */
 static int l_file_gc(lua_State *L)
 {
@@ -1469,8 +1477,10 @@ static int identity_from_descriptor(int descriptor, yaca_identity *identity)
 **   workspace = module.workspace_inspect(requested_path)
 */
 /* Implements the Lua workspace inspect native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+ * @param L lua_State* Stack argument 1 is a nonempty NUL-free workspace path, strict UTF-8 on Windows.
+ * @return int One Lua table with canonical path, enterable=true and captured directory identity.
+ * @error Raises a Lua error for invalid paths, allocation, encoding or a directory that cannot be entered.
+ * @effect Reads path and directory metadata; temporary native handles are closed before returning.
  */
 static int l_workspace_inspect(lua_State *L)
 {
@@ -1577,8 +1587,10 @@ static int l_workspace_inspect(lua_State *L)
 **   ok, value_or_error = module.fs_make_directory(absolute_path, permissions)
 */
 /* Implements the Lua fs make directory native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+ * @param L lua_State* Arguments 1/2 are an absolute directory path and integer POSIX permissions from 0 through 0777.
+ * @return int Two Lua results: true,true on creation, or false and a typed path/permission/storage error.
+ * @error Raises a Lua argument error for wrong string/integer types.
+ * @effect Creates one directory; Windows uses inherited security while POSIX passes the requested mode to mkdir.
  */
 static int l_fs_make_directory(lua_State *L)
 {
@@ -1662,8 +1674,10 @@ static int l_fs_make_directory(lua_State *L)
 **   ok, handle_or_error = module.fs_open_read(absolute_path)
 */
 /* Implements the Lua fs open read native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+ * @param L lua_State* Argument 1 is a nonempty NUL-free path, strict UTF-8 on Windows.
+ * @return int Two Lua results: true and a read-only file userdata, or false and a typed path/encoding/open error.
+ * @error Lua argument/allocation errors propagate; the userdata already owns any successfully opened native handle.
+ * @effect Opens the existing file for reading and leaves its position at the beginning.
  * @ownership The userdata owner is created before the operating-system handle is opened,
  *   so a Lua allocation failure can never strand an opened handle outside Lua ownership.
  */
@@ -1741,8 +1755,10 @@ static int l_fs_open_read(lua_State *L)
 **   ok, handle_or_error = module.fs_create_new(absolute_path, permissions)
 */
 /* Implements the Lua fs create new native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+ * @param L lua_State* Arguments 1/2 are a nonempty NUL-free path and integer permissions from 0 through 0777.
+ * @return int Two Lua results: true and the created read/write file userdata, or false and a typed creation error.
+ * @error Lua argument/allocation errors propagate; the userdata already owns any successfully created native handle.
+ * @effect Exclusively creates the target and fails when it exists; Windows security is inherited, POSIX uses the requested mode.
  * @ownership The userdata owner is created before the operating-system handle is created,
  *   so a Lua allocation failure can never strand a created handle outside Lua ownership.
  */
@@ -1826,8 +1842,10 @@ static int l_fs_create_new(lua_State *L)
 **   ok, identity_or_error = module.fs_stat_identity(handle_or_path)
 */
 /* Implements the Lua fs stat identity native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+ * @param L lua_State* Argument 1 is a file userdata or nonempty NUL-free path whose current identity is requested.
+ * @return int Two Lua results: true and kind/volume/object/size/modified identity, or false and a typed lookup error.
+ * @error Raises a Lua argument error when a non-userdata input cannot be accepted as a string.
+ * @effect Reads file metadata; a path lookup follows the OS path target and temporary Windows handles are closed.
  */
 static int l_fs_stat_identity(lua_State *L)
 {
@@ -2038,8 +2056,10 @@ static int l_fs_seek(lua_State *L)
 **   ok, byte_count_or_error = module.fs_write(handle, bytes)
 */
 /* Implements the Lua fs write native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+ * @param L lua_State* Arguments 1/2 are a live file userdata and exact bytes, including an empty byte string.
+ * @return int Two Lua results: true and the complete byte count, or false and a typed write error.
+ * @error Raises a Lua argument error for wrong/closed userdata or an invalid string argument.
+ * @effect Advances the file position and may write a prefix before failure; this port does not flush or roll back bytes.
  */
 static int l_fs_write(lua_State *L)
 {
@@ -2085,8 +2105,10 @@ static int l_fs_write(lua_State *L)
 }
 
 /* Implements the Lua fs flush file native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+ * @param L lua_State* Argument 1 is the live file userdata whose pending data must be flushed.
+ * @return int Two Lua results: true,true after OS flush, or false and a typed storage error.
+ * @error Raises a Lua argument error for wrong or closed file userdata.
+ * @effect Calls FlushFileBuffers or fsync without closing or moving the file position.
  */
 static int l_fs_flush_file(lua_State *L)
 {
@@ -2108,8 +2130,10 @@ static int l_fs_flush_file(lua_State *L)
 }
 
 /* Implements the Lua fs flush directory native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+ * @param L lua_State* Argument 1 is a nonempty NUL-free directory path, strict UTF-8 on Windows.
+ * @return int Two Lua results: true,true after directory flush, or false and a typed path/open/flush error.
+ * @error Raises a Lua argument error for a value that cannot be accepted as a string.
+ * @effect Opens a temporary directory handle, requests metadata durability, then closes that handle.
  */
 static int l_fs_flush_directory(lua_State *L)
 {
@@ -2185,8 +2209,10 @@ static int l_fs_flush_directory(lua_State *L)
 }
 
 /* Implements the Lua fs replace native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+ * @param L lua_State* Arguments 1/2 are nonempty NUL-free temporary and existing target paths.
+ * @return int Two Lua results: true,true after replacement, or false and a typed path/encoding/storage error.
+ * @error Raises a Lua argument error for invalid string argument types.
+ * @effect Replaces the target with the temporary file by ReplaceFileW or rename; parent-directory flush remains the caller's responsibility.
  */
 static int l_fs_replace(lua_State *L)
 {
@@ -2263,8 +2289,10 @@ static int l_fs_replace(lua_State *L)
 }
 
 /* Implements the Lua fs rename no replace native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+ * @param L lua_State* Arguments 1/2 are nonempty NUL-free source and absent destination paths.
+ * @return int Two Lua results: true,true after a move, or false and a typed error; rollback failure is Unknown.
+ * @error Raises a Lua argument error for invalid string argument types.
+ * @effect Windows performs a no-replace MoveFileExW; POSIX creates a hard link then unlinks the source, with best-effort link rollback on failure.
  */
 static int l_fs_rename_no_replace(lua_State *L)
 {
@@ -2424,8 +2452,10 @@ static int l_fs_delete_verified(lua_State *L)
 }
 
 /* Implements the Lua fs close native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+ * @param L lua_State* Argument 1 is the file userdata whose native owner must be closed.
+ * @return int Two Lua results: true,true after cleanup, or false and Closed when already closed.
+ * @error Raises a Lua argument error for another userdata type.
+ * @effect Performs the same idempotent native cleanup as GC; close-system-call errors are not reported by close_file.
  */
 static int l_fs_close(lua_State *L)
 {
@@ -2501,7 +2531,7 @@ typedef struct yaca_windows_snapshot
 } yaca_windows_snapshot;
 
 /* @struct yaca_windows_path_vector Bounded vector of Windows walk results.
- * @field items char* Owned array of collected entries.
+ * @field items char** Owned array of individually allocated UTF-8 path strings.
  * @field count size_t Number of valid entries in the array.
  * @field capacity size_t Allocated element capacity of the buffer or vector.
  * @field maximum size_t Maximum admitted entries for this collection.
@@ -2530,7 +2560,8 @@ static void free_windows_metadata_state(yaca_windows_metadata_state *state)
 
 /* Rejects alternate data streams on a pinned Windows handle.
  * @param handle HANDLE Operating-system handle being inspected or closed.
- * @return int result 1 when the handle exposes only its ordinary data stream; 0 otherwise.
+ * @return int result 1 for ordinary data/security streams, 0 for a non-plain stream or bound overflow, -1 on enumeration/allocation errors.
+ * @effect Uses bounded BackupRead/BackupSeek enumeration and releases the backup context before returning.
  */
 static int windows_streams_are_plain(HANDLE handle)
 {

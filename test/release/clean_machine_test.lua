@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-10-05
 File: clean_machine_test.lua
 Description: Verifies the zero-surface package verifier decision table.
 ]]
@@ -260,17 +260,17 @@ return {
             run = function()
                 local offline, plan_error = journeys.plan("linux-x86_64", {})
                 A.truthy(offline, plan_error)
-                A.equal(#offline, 6)
-                A.equal(offline[1].id, "extract")
-                A.equal(offline[6].id, "verify-no-residue")
+                A.equal(#offline, 10)
+                A.equal(offline[1].id, "package-integrity")
+                A.equal(offline[10].id, "verify-no-residue")
                 local without_consent = journeys.plan("win32-x86",
                     { online = true })
-                A.equal(#without_consent, 6)
+                A.equal(#without_consent, 10)
                 local with_consent = journeys.plan("win32-x86",
                     { online = true, online_consent = true })
-                A.equal(#with_consent, 10)
-                A.equal(with_consent[5].id, "configure")
-                A.equal(with_consent[10].id, "verify-no-residue")
+                A.equal(#with_consent, 14)
+                A.equal(with_consent[9].id, "configure")
+                A.equal(with_consent[14].id, "verify-no-residue")
                 local bad, bad_error = journeys.plan("win16", {})
                 A.falsy(bad)
                 A.truthy(bad_error)
@@ -284,11 +284,14 @@ return {
             --@error Assertions fail if a mismatched journey observation passes.
             run = function()
                 local ok = journeys.verify_step("version", "linux-x86_64",
-                    { output = "yaca 0.1.0 (linux-x86_64)\n" })
+                    { exit_code = 0, output = "yaca 1.0.0 (linux-x86_64)\n" })
                 A.truthy(ok)
                 ok = journeys.verify_step("version", "linux-x86_64",
-                    { output = "yaca 0.1.0 (win32-x86)\n" })
+                    { exit_code = 0, output = "yaca 1.0.0 (win32-x86)\n" })
                 A.falsy(ok)
+                A.falsy(journeys.verify_step("version", "linux-x86_64", {
+                    exit_code = 0, output = "yaca 0.1.0 (linux-x86_64)\n",
+                }))
                 ok = journeys.verify_step("selftest-stage1", "win32-x86",
                     { exit_code = 0,
                       output = "self-test outcome=passed completed-stage=1 online-requests=0 auto-fixes=0" })
@@ -319,6 +322,92 @@ return {
             end,
         },
         {
+            name = "journey version requires a successful process exit",
+            -- Reject a target version printed by a process that then fails.
+            --@param none The test harness passes no case arguments.
+            --@return nil Returns after verifying exit failures cannot pass the version step.
+            --@error Assertions fail if failed or unobserved execution is accepted.
+            run = function()
+                for _, code in ipairs({ 1, 127 }) do
+                    A.falsy(journeys.verify_step("version", "linux-x86_64", {
+                        exit_code = code, output = "yaca 1.0.0 (linux-x86_64)\n",
+                    }))
+                end
+                A.falsy(journeys.verify_step("version", "linux-x86_64", {
+                    output = "yaca 1.0.0 (linux-x86_64)\n",
+                }))
+            end,
+        },
+        {
+            name = "partial self-test cannot hide failed checks or wrong stage",
+            -- Reject partial transcripts with failures, online work or incomplete stage binding.
+            --@param none The test harness passes no case arguments.
+            --@return nil Returns after all contradictory Stage 1 and Stage 3 observations are rejected.
+            --@error Assertions fail if partial status widens the offline or online acceptance gate.
+            run = function()
+                local summary = "self-test outcome=partial completed-stage=1 online-requests=0 auto-fixes=0"
+                A.falsy(journeys.verify_step("selftest-stage1", "linux-x86_64", {
+                    exit_code = 1, output = "ST1-ATOMIC-WRITE FAILED broken publication\n" .. summary,
+                }))
+                A.falsy(journeys.verify_step("selftest-stage1", "linux-x86_64", {
+                    exit_code = 1, output = summary:gsub("online%-requests=0", "online-requests=1"),
+                }))
+                A.falsy(journeys.verify_step("selftest-stage1", "linux-x86_64", {
+                    exit_code = 1, output = summary:gsub("completed%-stage=1", "completed-stage=0"),
+                }))
+                A.falsy(journeys.verify_step("selftest-stage3", "linux-x86_64", {
+                    exit_code = 1, output = summary:gsub("completed%-stage=1", "completed-stage=3"),
+                }))
+                A.falsy(journeys.verify_step("selftest-stage3", "linux-x86_64", {
+                    exit_code = 0, output = summary:gsub("outcome=partial", "outcome=passed"),
+                }))
+            end,
+        },
+        {
+            name = "edition integrity and portable-core evidence must be explicit",
+            -- Bind integrity to the selected target and require both core and Lua mobility observations.
+            --@param none The test harness passes no case arguments.
+            --@return nil Returns after matching and missing evidence assertions.
+            --@error Assertions fail if an unbound package or missing portable capability passes.
+            run = function()
+                A.truthy(journeys.verify_step("package-integrity", "linux-x86_64", {
+                    integrity = "passed", target = "linux-x86_64",
+                }))
+                A.falsy(journeys.verify_step("package-integrity", "linux-x86_64", {
+                    integrity = "passed", target = "win64-x86_64",
+                }))
+                for _, step in ipairs({ "without-tools", "move" }) do
+                    A.truthy(journeys.verify_step(step, "linux-x86_64", {
+                        core_verified = true, lua_verified = true,
+                    }))
+                    A.falsy(journeys.verify_step(step, "linux-x86_64", {
+                        core_verified = true,
+                    }))
+                end
+                A.truthy(journeys.verify_step("embedded-lua", "linux-x86_64", {
+                    exit_code = 0, output = "42\r\n",
+                }))
+                A.falsy(journeys.verify_step("embedded-lua", "linux-x86_64", {
+                    exit_code = 1, output = "42\r\n",
+                }))
+            end,
+        },
+        {
+            name = "non-TTY refusal requires zero-write evidence",
+            -- Require explicit write observation instead of inferring it from a TTY error.
+            --@param none The test harness passes no case arguments.
+            --@return nil Returns after valid and missing zero-write evidence assertions.
+            --@error Assertions fail if an error alone is accepted as zero writes.
+            run = function()
+                A.truthy(journeys.verify_step("non-tty-no-writes", "linux-x86_64", {
+                    exit_code = 1, output = "TtyRequired", zero_writes = true,
+                }))
+                A.falsy(journeys.verify_step("non-tty-no-writes", "linux-x86_64", {
+                    exit_code = 1, output = "TtyRequired",
+                }))
+            end,
+        },
+        {
             name = "host mismatch only skips run and online steps",
             -- Verify cross-host qualification skips only host-dependent actions.
             --@param none The test harness passes no case arguments.
@@ -327,9 +416,9 @@ return {
             run = function()
                 local steps = journeys.plan("win64-x86_64", {})
                 local skipped = journeys.skipped_on_host_mismatch(steps, "linux")
-                A.equal(#skipped, 2)
+                A.equal(#skipped, 6)
                 A.equal(skipped[1], "version")
-                A.equal(skipped[2], "selftest-stage1")
+                A.equal(skipped[4], "selftest-stage1")
                 local none = journeys.skipped_on_host_mismatch(
                     journeys.plan("linux-x86_64", {}), "linux")
                 A.equal(#none, 0)

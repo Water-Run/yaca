@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-26
+Date: 2026-10-05
 File: main.lua
 Description: Routes the offline bootstrap lifecycle from the unique composition root.
 ]]
@@ -11,6 +11,7 @@ local session = require("session")
 
 local M = {}
 local default_runtime_dispatch
+local PRODUCT_VERSION = "1.0.0"
 
 local BOOTSTRAP_ACTIONS = {
     ["config-repl"] = true,
@@ -671,11 +672,11 @@ function M.run_cli(arguments, ports)
         if request.machine == true then
             rendered, render_error = cli_service.machine_result("version", "success", {
                 product = "yaca",
-                version = "0.1.0",
+                version = PRODUCT_VERSION,
                 release_target = identity.target,
             })
         else
-            rendered = "yaca 0.1.0 (" .. identity.target .. ")\n"
+            rendered = "yaca " .. PRODUCT_VERSION .. " (" .. identity.target .. ")\n"
         end
     else
         local dispatch = ports.dispatch or default_runtime_dispatch
@@ -5989,7 +5990,7 @@ function M.compose_runtime(runtime)
     end
     local application, application_error = M.new(application_components, {
         product_name = "yaca",
-        product_version = "0.1.0",
+        product_version = PRODUCT_VERSION,
         release_target = runtime.identity.target,
         config_path = layout.config_path,
         maximum_draft_bytes = 16384,
@@ -9338,7 +9339,7 @@ function M.new_application_coordinator(ports, options)
 
     ---Stages a typed Agent action and renders its exact accepted result.
     --@param method string AgentLoop method name.
-    --@param message table Typed action payload.
+    --@param message string Exact submitted draft text passed to Session staging and transcript rendering.
     --@return boolean|nil applied Whether the action was rendered.
     --@return table|nil err Structured Runtime or renderer failure.
     local function stage_and_apply(method, message)
@@ -9464,8 +9465,8 @@ function M.new_application_coordinator(ports, options)
 
     ---Checks that Agent, Ask, approval, and editor lanes are idle for a switch.
     --@param none No arguments.
-    --@return boolean|nil ready True when Context switching can proceed.
-    --@return table|nil err Structured busy-lane failure.
+    --@return boolean ready True when Context switching can proceed; false while a lane is busy.
+    --@return table|nil status_or_error Current draft status on success, nil without an Agent, or a structured busy-lane error.
     local function context_switch_ready()
         local current_status
         if agent then
@@ -10582,7 +10583,7 @@ local function production_chat_view(composed, runtime)
     function view:startup(status)
         local existing = status.durable == true
         local rendered, render_error = renderer.render_startup({
-            version = "0.1.0",
+            version = composed.application.product_version,
             work_directory = status.workspace,
             data_root = composed.layout.data_root,
             config_status = "valid",

@@ -1,81 +1,100 @@
-# C32 目标机资格执行手册（就绪件）
+# 发行验收执行手册
 
-> 这是 2026-09-19 的旧候选执行记录，保留供流程复用。下文包名、根目录布局、
-> 手工 winpty 和三包门禁不再代表当前实现；D-073 要求三目标各 clean/std/full。
-> 执行前核对当前脚本参数、[工具清单](../release/TOOL-BUNDLES.md)及
-> [剩余工作](TRACKING.md)，最终以 [readiness](contracts/readiness.lua) 判定资格。
+更新日期：2026-10-05。适用于当前 clean/std/full 布局，三目标共九包。
+当前任务与证据边界见[TRACKING](TRACKING.md)和
+[CURRENT-STATE](CURRENT-STATE.md)。旧 9 月候选命令保留在 Git 历史，不再作为执行入口。
 
-> 2026-09-30 的 D-077 覆盖本次执行范围：不再要求重跑完整旧系统实机/VM 矩阵；
-> 保留源码、ABI/导入兼容检查并使用此前指定实机，包括 Server 2008。下文完整
-> 旧矩阵为历史流程资料，不能据此重新向负责人索取相同环境。
+本手册使用实际 ZIP 字节，所有结果保持 `qualification=pending`。
+按 D-077 使用已有指定环境，不要求重新准备整套旧系统实机/VM 矩阵。
+构建、完整测试和容器/VM 均经资源守卫串行运行。
 
-日期：2026-09-19。本手册与 `qualify_windows_target.sh` 是拿到目标机后的
-立即可执行件。所有脚本已在 win2008（Server 2008）、evader-admin
-（Windows 11）与 CentOS 7 容器上以同型流程预演通过；正式资格以目标机
-上的实际执行与证据为准，一平台失败不能被另两平台替代。
+## 1. 开发检查
 
-## 1. Windows 目标（XP SP3 x86 → win32-x86；Win7 SP1 x64 → win64-x86_64）
-
-前置：目标机可 ssh 登录；无其他 yaca 进程；离线段无需凭据。
+使用 Python 3.13 及 `.tools/comment_check_requirements.txt` 的固定解析器，执行：
 
 ```sh
-# 构建机上（锁定源码缓存就绪）：
-bash .tools/qualification/build_windows_candidate.sh <sources> <out-win32>   # XP 用
-bash .tools/qualification/build_win64_candidate.sh   <sources> <out-win64>   # Win7 用
-
-# 离线资格（自动：分发/解包/清单/version/Stage1/升级演练/卸载/残留）：
-bash .tools/qualification/qualify_windows_target.sh <ssh-host> win32-x86 \
-  <out>/yaca-0.1.0-preview-win32-x86.zip
-
-# 在线段（需私有配置，输出进入证据目录）：
-YACA_CONFIG_INI=<私有config.ini> \
-  bash .tools/qualification/qualify_windows_target.sh <ssh-host> win32-x86 <zip>
+bash .tools/run_with_resource_guard.sh bin/lua55 test/run.lua
+bash .tools/run_coding_readiness.sh
 ```
 
-随后在构建机补两步机器内验证：
+若使用隔离环境，把其 `bin/` 放在当前命令的 PATH 前端。完整 readiness 包含全仓注释
+检查与反例、装配/发行校验/PTY 回归、四个校验器和 TP-003/006/008/010、RP-001。
+人工语义 Review 单独记录，不由结构检查替代。
 
-- 零表面：目标机导出的 `02-file-list.txt` 喂给
-  `check_zero_surface.verify(manifest, entries, target)`。
-- 交互旅程（真实工具/审批/恢复）：`journey.py` 以
-  `ssh -tt`+winpty（XP/Win7 同 win2008 方式）驱动；DeepSeek 配置经私有
-  管道放置。
+## 2. 显式包对完整性检查
 
-XP 专属注意：控制台走 winpty + `stty rows/cols`；SSH 保持真实 PTY；
-断连时保留现场不要重试写操作。Win7 专属注意：默认 shell 若为
-PowerShell，参照 evader-admin 的 `cmd /c`/保持 stdin 打开方式。
-
-### 断电与文件系统矩阵（人工配合项）
-
-XP/Win7 均需：安装目录所在卷为 NTFS；对 `__yaca__` 执行
-写入中 kill（任务管理器结束 yaca.exe）→ 重启后 `--continue` 观察
-保守恢复门禁；真实断电（拔电）至少一次，由用户在现场执行，
-记录 `ver`、卷信息、恢复结果与出现的错误编号。
-
-## 2. 裸机 CentOS 7（linux-x86_64 硬门）
-
-在裸机（非容器）上以同等身份登录后：
+runtime ZIP 与同名 `-notices.zip` 配对。检查器不解包、不执行工具、不联网。
 
 ```sh
-# 资格构建（脚本自身强制 CentOS 7/glibc 2.17/GCC 4.8.5/5GiB/串行）：
-bash .tools/qualification/build_linux_x86_64.sh <sources> \
-  <yaca-source.tar.gz> <full-revision> <archive-sha256> <out>
-python3 .tools/qualification/package_linux_zip.py <repo> <out> <sources>
-
-# 干净机旅程（解包→零表面→version→stage1→卸载→无残留）：
-bin/lua55 test/release/journeys.lua <repo> <out>/yaca-0.1.0-preview-linux-x86_64.zip \
-  linux-x86_64 <scratch>
-
-# 在线段：私有 config 放置后 stage2/3 + journey.py 交互旅程。
+bash .tools/run_with_resource_guard.sh python3.13 .tools/qualification/audit_editions.py \
+  --pair out/node-r76-20261005/upload/yaca-1.0.0-linux-x86_64-clean.zip \
+         out/node-r76-20261005/upload/yaca-1.0.0-linux-x86_64-clean-notices.zip \
+  --output out/single-edition-audit.json
 ```
 
-裸机专属项（容器证据不覆盖）：真实 3.10 内核下的 wait/console/process
-行为；断电持久性（至少一次真实断电）；目标文件系统 replace/lock/崩溃
-矩阵（kill -9 于提交窗口后 `--continue`）。
+报告记录 runtime/notices SHA-256、核心 SHA-256、成员数、工具数、源码/构建/测试
+摘要及缺项。CRC、成员摘要、版本、来源、模式、路径冲突或 SPDX 不一致时非零退出。
+已存在的输出文件不会覆盖。
+`tool_payload_gaps` 单列 Git HTTP(S) helper 等载荷缺项，不能用版本号替代闭包检查。
 
-## 3. Gate R 发布提交
+九包汇总用显式矩阵，不扫描目录猜包：
 
-三目标全部通过后：`contracts/readiness.lua` 的 `gates.R.status` 改为
-`passed`、`release_is_not_authorized` 撤除、manifest `release_state` 与
-各 target `qualification` 同步更新，`check_documentation_truth` 的
-pending 标记要求随之解除——以上必须是独立、可审计的发布提交
-（保留名：`docs: publish qualified release evidence`）。
+```sh
+audit_pairs=()
+for target in win32-x86 win64-x86_64 linux-x86_64; do
+  for edition in clean std full; do
+    stem="out/node-r76-20261005/upload/yaca-1.0.0-$target-$edition"
+    audit_pairs+=(--pair "$stem.zip" "$stem-notices.zip")
+  done
+done
+bash .tools/run_with_resource_guard.sh python3.13 .tools/qualification/audit_editions.py \
+  "${audit_pairs[@]}" --require-nine --require-evidence --output out/nine-edition-audit.json
+```
+
+同平台三档核心不一致、产品版本混用或席位重复均失败。`--require-nine` 只要求九包
+完整性矩阵；再加 `--require-evidence` 才要求 C34 文件证据及已检查的工具载荷齐备。缺项时仍留下 JSON
+便于 Review，并以非零退出停止验收。两个选项都不会开启 Gate R。
+
+## 3. Linux 三档离线核心旅程
+
+使用 Linux x86_64 宿主，以及可运行候选核心的用户态：
+
+```sh
+bin/lua55 test/release/journeys.lua "$PWD" \
+  "$PWD/out/node-r76-20261005/upload/yaca-1.0.0-linux-x86_64-full.zip" \
+  linux-x86_64 "$PWD/out/journey-scratch" \
+  --report "$PWD/out/linux-full-offline-journey.json"
+```
+
+Lua 入口会调用资源守卫。也可在匹配用户态中直接以 Python 3 调用
+`.tools/qualification/edition_journey.py`，参数相同，外层仍须用资源守卫。
+本轮 CentOS 7 容器可用已核对 full 工具包的 Python 3.14 启动开发驱动；这不是
+产品运行时依赖。
+
+10 步覆盖包完整性、解包、版本、非 TTY 零写入拒绝、内嵌 Lua、真实 PTY Stage 1、
+移除 tools、整体移动、卸载和自有临时目录无残留。Stage 1 的未初始化配置 WARNING
+可为 partial；失败项、未完成阶段、在线请求或不匹配的退出码均拒绝。
+
+只删除脚本在 scratch 中新建的唯一临时目录。日志中的“无残留”指该目录，
+不扩展为宿主注册表或全部用户目录检查。clean/std/full 分别执行。
+输出明确为 `scope=offline-core`，不替代首次配置、模型、恢复、升级及附带工具运行。
+
+## 4. 目标交互与在线旅程
+
+使用已有指定实机、隔离部署目录和此前已授权的配置。现有 TTY 驱动为：
+
+```sh
+bash .tools/run_with_resource_guard.sh python3.13 .tools/qualification/agent_terminal_smoke.py \
+  <ssh-host> <isolated-directory> <transcript-path> --executable yaca --online
+```
+
+Windows 使用 `--executable yaca.exe`。配置不写入仓库；记录实际 Ask、工具审批、取消、
+退出和恢复。首次配置及保留数据的升级另按 C33 逐项取证。
+离线驱动收到在线选项或 Windows 运行目标会在执行前拒绝，不能以跳过转为通过。
+现代 Windows 与 CentOS 7 容器结果各保留宿主/共享内核边界。
+
+## 5. 发布门
+
+C32/C33/C34 与注释语义 Review 都满足后，再评审 Gate R。
+逐包 SHA-256、来源/许可证/SPDX、源码/构建/测试、目标旅程必须绑定精确产物。
+发布门与 manifest 的状态变更以独立可审计提交处理，不以改标记代替证据。

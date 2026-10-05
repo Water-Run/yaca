@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-10-05
 File: dependencies.lock
 Description: Locks every source that may contribute bytes to a yaca package.
 ]]
@@ -9,7 +9,7 @@ Description: Locks every source that may contribute bytes to a yaca package.
 -- second parser.  It performs no I/O and does not authorize a release.
 return {
     schema_version = "yaca-dependency-lock-v1",
-    lock_date = "2026-08-30",
+    lock_date = "2026-10-05",
     lock_status = "source-locked-target-artifacts-pending",
     release_authorized = false,
     target_artifacts_qualified = false,
@@ -29,7 +29,7 @@ return {
     components = {
         yaca = {
             name = "yaca",
-            version = "0.1.0",
+            version = "1.0.0",
             spdx_id = "SPDXRef-Package-yaca",
             purpose = "application",
             delivery = "application-and-native-source",

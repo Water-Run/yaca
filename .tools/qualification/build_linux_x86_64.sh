@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Author: WaterRun
-# Date: 2026-09-23
+# Date: 2026-10-05
 # File: build_linux_x86_64.sh
 # Description: Builds pinned Linux candidates and records dependency, ABI and test evidence.
 
@@ -61,8 +61,8 @@ OUTPUT_ROOT="$OUTPUT_PARENT/$(basename "$5")"
 [[ "$(basename "$OUTPUT_ROOT")" != "." && "$(basename "$OUTPUT_ROOT")" != ".." ]] \
   || die "output basename is unsafe"
 
-for command in ar awk chmod cp file gcc getconf grep ldd make mktemp objdump \
-  patch perl ranlib readelf sed sha256sum sort tar; do
+for command in ar awk bzip2 chmod cp file gcc getconf grep ldd make mktemp objdump \
+  patch perl ranlib readelf sed sha256sum sort tar xz; do
   command -v "$command" >/dev/null 2>&1 || die "required command is missing: $command"
 done
 
@@ -310,9 +310,11 @@ env -i PATH=/usr/bin:/bin HOME="$EMPTY_HOME" TMPDIR="$EMPTY_TMP" \
   "$PACKAGE_ROOT/onedir/onedir" --version >"$LOG_ROOT/onedir-smoke.log"
 env -i PATH=/usr/bin:/bin HOME="$EMPTY_HOME" TMPDIR="$EMPTY_TMP" \
   "$ARTIFACT_ROOT/yaca" --version >"$LOG_ROOT/onefile-smoke.log"
-grep -q '^yaca 0\.1\.0 (linux-x86_64)$' "$LOG_ROOT/onedir-smoke.log" \
+YACA_PRODUCT_VERSION=$(YACA_BUILD_MANIFEST_PATH="$YACA_SOURCE/release/manifest.lua" \
+  "$LUA_PREFIX/bin/lua" -e 'local m=assert(loadfile(os.getenv("YACA_BUILD_MANIFEST_PATH"),"t",{}))(); assert(type(m.product_version)=="string" and m.product_version:match("^%d+%.%d+%.%d+$")); print(m.product_version)')
+grep -Fxq "yaca $YACA_PRODUCT_VERSION (linux-x86_64)" "$LOG_ROOT/onedir-smoke.log" \
   || die "onedir version smoke failed"
-grep -q '^yaca 0\.1\.0 (linux-x86_64)$' "$LOG_ROOT/onefile-smoke.log" \
+grep -Fxq "yaca $YACA_PRODUCT_VERSION (linux-x86_64)" "$LOG_ROOT/onefile-smoke.log" \
   || die "onefile version smoke failed"
 
 # Require an x86-64 ELF header on one Linux candidate artifact.
@@ -373,6 +375,7 @@ ldd "$NATIVE_OUTPUT" "$LXP_OUTPUT" "$ARTIFACT_ROOT/curl" \
   echo "schema=yaca-linux-build-summary-v1"
   echo "status=PASS"
   echo "target=linux-x86_64"
+  echo "product_version=$YACA_PRODUCT_VERSION"
   echo "minimum=CentOS Linux 7"
   echo "host=$(cat /etc/centos-release)"
   echo "kernel=$(uname -r)"

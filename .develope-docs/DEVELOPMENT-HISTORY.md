@@ -1,6 +1,6 @@
 # 开发历程与历史资料
 
-整理日期：2026-09-30。当前实现看 [CURRENT-STATE.md](CURRENT-STATE.md)，
+整理日期：2026-10-05。当前实现看 [CURRENT-STATE.md](CURRENT-STATE.md)，
 剩余工作看 [TRACKING.md](TRACKING.md)。本页只导航已有工作和证据。
 
 ## 已完成工作的脉络
@@ -27,6 +27,9 @@
 | 2026-10-01，R73 与内核边界续推 | model/runtime/session/context 发布与恢复边界人工核对；修复 R73（model 活动队列上限未绑定适配器事件上限，终态批量可悬挂）；两 Windows 核心随源码再刷新并本机 Stage 1 通过 | [10-01 Review 第二批](CODE-REVIEW-2026-10-01.md#第二批model--runtime--session--context-的发布与恢复边界r73)；suite 698/698、完整 readiness 链 PASS；Linux 重建仍待 CentOS 7 构建机 |
 | 2026-10-01，第三批 Review 与 D-078 | safety/permission/path/json/prompt/xml/tui/config/cli 全册与 main 抽检的人工语义 Review（无缺陷）；两 Windows 打包路径 notices 归档统一为装配布局（D-078），成员集合 16=16 一致 | [10-01 Review 第三批](CODE-REVIEW-2026-10-01.md#第三批剩余命名模块语义-review-与-c33-notices-布局收敛)、[D-078](DECISIONS.md)；装配 5/5、注释 5266/0、四校验器与 698/698 复跑通过 |
 | 2026-10-01，第四批 Review 收口 | main.lua 组合/准入/发布面整读、协调器准入与关闭次序整读；text/clock/platform/backend 全册、ini 解析核、diagnostics 脱敏面、network 重试控制器（无缺陷、源码未改）；全仓产品源码 Review 按 10-01 四批口径收口 | [10-01 Review 第四批](CODE-REVIEW-2026-10-01.md#第四批mainlua-组合根与剩余支撑模块)；main 交互事件分发内部、compact 状态机内部、原生 C 层与测试辅助代码为如实保留面 |
+| 2026-10-02，模型与九包收口 | R74 修复显式 JSON null；真实双模型 Stage 2/3、Server 2008 2.34 GiB 15 步旅程；源码构建 Python 3.4.10/3.8.20、Windows full 工具与九包装配 | [10-02 Review](CODE-REVIEW-2026-10-02.md)；候选 9/9，目标资格仍待完成 |
+| 2026-10-05，目标旅程与发行检查实现 | 三平台已有布局/运行/移动/卸载子集；新增 ZIP 对逐文件与来源/SPDX 校验、九包汇总及真实 PTY 离线核心旅程；修正过期状态与旅程误通过判定 | [10-05 Review](CODE-REVIEW-2026-10-05.md)；补齐 Linux companion 许可证/SBOM，保留 Windows 测试摘要和最终交互旅程缺项 |
+| 2026-10-05，R75/R76 与 1.0.0 候选节点 | 修复 Qwen 工具流 null 续片和压缩取消日志失败；三平台核心各 706/706、九包完整性/文件证据齐备；复现 Linux Git/Perl/SDK 闭包、三档 C7 离线 10/10、当前 Linux 双模型各 7/7 与跨进程恢复 | [节点 Review](CODE-REVIEW-2026-10-05.md#r75r76-候选预发布节点d-081)、[候选预发布](https://github.com/Water-Run/yaca/releases/tag/v1.0.0-preview.20261005)；正式 Gate R 关闭，剩余语义 Review 和完整目标旅程继续 |
 
 ## 如何解释旧结论
 
@@ -41,11 +44,11 @@
 源码闭包，见[内核审查](KERNEL-REVIEW-2026-09-30.md)。D-077 缩小了本次实机
 矩阵要求，仍保留代码兼容底线与未完成的发行物。收尾复核在同一工作区重跑上述
 检查并用已核对核心重装配 win32 clean，同时登记两条 Windows 打包路径的布局
-分歧；该项留在 [TRACKING.md](TRACKING.md) 的 C33 布局待办，未转为已完成。
+分歧。该布局项后来按 D-078 收口，见 10-01 Review；本段保留的是当时的收尾经过。
 
 `23bf913` 的文档曾按 9 月 19 日的候选与资格口径记录 Gate R 通过。
 之后的 D-073 三档发行、D-074 工具面以及新源码需要各自的证据。
-当前 yaca 尚未发布，机读门为关闭；不能沿用旧提交的发布措辞。
+当前 yaca 尚未正式发布，机读门为关闭；候选预发布不能沿用旧提交的正式发布措辞。
 
 日期文档中的 N13/N23/N4、测试数、失败、人工修复以及外层 SSH 退出码均按当时
 观察保留。R21 的 Lua 源码覆盖验证不能代替最终单文件包，结构注释检查不能代替
