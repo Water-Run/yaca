@@ -267,3 +267,7 @@ Linux companion 的源码、build/test 日志与 SBOM 重新绑定当前字节�
 完整字节清单与证据边界见 [节点记录](candidates/1.0.0-preview.20261006.json)，
 原始记录位于 `out/node-r81-publish-20261006/`。本地和 GitHub 的分支及默认分支
 均为 main；发行 tag 不作为开发分支。后续仅完成已授权的附件上传与远端摘要复核。
+
+交付后复核：`v1.0.0-preview.20261006` 已公开为预发布，24 个远端附件的大小与
+SHA-256 全部与本地相同。发布目标为 `1918f4f`；[远端核对回执](candidates/1.0.0-preview.20261006-publication.json)
+随文档提交，本地/远端及默认分支均为 main。D-082 的暂停生效，此后不继续开发。
