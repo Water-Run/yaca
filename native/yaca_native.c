@@ -8999,9 +8999,12 @@ static int l_process_gc(lua_State *L)
   return 0;
 }
 
-/* Pushes process fields onto the Lua stack.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return yaca_process* result New process userdata also pushed onto Lua stack; Lua owns its lifetime.
+/* Allocate and initialize the process owner before native startup acquires any resources.
+ * @param L lua_State* State receiving one process userdata with the registered process finalizer.
+ * @return yaca_process* Borrowed address of the Lua-owned userdata at stack top; all native handles initially invalid.
+ * @error Lua allocation or metatable lookup may raise before any startup resource exists.
+ * @effect On POSIX, nonblocking collection also reaps previously abandoned supervisors.
+ * @ownership The userdata retains live process/stream/input resources transferred during startup until explicit close or finalization.
  */
 static yaca_process *push_process(lua_State *L)
 {
@@ -9028,14 +9031,15 @@ static yaca_process *push_process(lua_State *L)
   return process;
 }
 
-/* Reads and validates a string field from the process request.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @param index int Lua stack index or item position being read.
- * @param field const_char* Digest field or metadata field being appended.
- * @param value const_char** Candidate value being converted or checked.
- * @param length size_t* Byte or wide-character length of the supplied buffer.
- * @param optional int Whether the field may be absent.
- * @return int result 1 after reading an admitted string or allowed absence; 0 for invalid input.
+/* Borrow a validated string field retained by the private captured request or descriptor.
+ * @param L lua_State* State retaining the plain request/descriptor and all of its returned string values.
+ * @param index int Stack index of that rooted private table.
+ * @param field const_char* Fixed process field name being read.
+ * @param value const_char** Receives borrowed string bytes, or NULL for allowed absence.
+ * @param length size_t* Receives byte length, or zero for allowed absence.
+ * @param optional int Nonzero accepts an absent field; zero requires a nonempty actual Lua string.
+ * @return int One for a nonempty NUL-free string or allowed nil, zero for invalid input.
+ * @ownership The captured table keeps returned bytes alive throughout startup; caller does not free or retain them afterward.
  */
 static int request_string_field(
   lua_State *L,
@@ -9071,11 +9075,11 @@ static int request_string_field(
   return 1;
 }
 
-/* Parses the requested process invocation mode.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @param request_index int Lua stack index of the request table.
- * @param argv_mode int* The argv mode bound to request process mode.
- * @return int result 1 for default or argv mode, 0 for an invalid mode; writes argv_mode.
+/* Select the fixed shell for absent mode or the direct component boundary for the exact string argv.
+ * @param L lua_State* State retaining the private request snapshot.
+ * @param request_index int Stack index of the plain request table; unchanged by this lookup.
+ * @param argv_mode int* Receives zero for absent mode and one for argv; value is unspecified on rejection.
+ * @return int One for an admitted mode or zero for any other type/spelling; stack height is preserved.
  */
 static int request_process_mode(lua_State *L, int request_index, int *argv_mode)
 {
@@ -9102,12 +9106,13 @@ static int request_process_mode(lua_State *L, int request_index, int *argv_mode)
   return *argv_mode;
 }
 
-/* Validates the stdin payload for a component request.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @param request_index int Lua stack index of the request table.
- * @param bytes const_char** Raw byte buffer supplied to the native operation.
- * @param length size_t* Byte or wide-character length of the supplied buffer.
- * @return int result 1 after validating stdin bytes; 0 for invalid component input.
+/* Borrow component stdin bytes from its rooted plain bytes/anonymous-pipe descriptor.
+ * @param L lua_State* State retaining the captured request and nested stdin descriptor.
+ * @param request_index int Stack index of the private request; stack height is preserved.
+ * @param bytes const_char** Receives borrowed string bytes, including an empty string or embedded NULs.
+ * @param length size_t* Receives the exact binary byte count on success.
+ * @return int One for the required descriptor and actual string payload, zero for a missing or malformed field.
+ * @ownership The snapshot retains bytes until native startup copies them into its child/input owner.
  */
 static int request_component_stdin(
   lua_State *L,
@@ -9163,11 +9168,11 @@ static int request_component_stdin(
   return 1;
 }
 
-/* Checks the bounded argument count of a component request.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @param request_index int Lua stack index of the request table.
- * @param count size_t* Number of values to inspect or emit.
- * @return int result 1 after validating argument count; 0 if outside the bound.
+/* Admit a contiguous raw array of actual NUL-free strings from the captured arguments table.
+ * @param L lua_State* State retaining the private request and copied argument strings.
+ * @param request_index int Stack index of the plain request; no caller getter is invoked.
+ * @param count size_t* Receives the exact array length on success; unchanged on rejection.
+ * @return int One for a dense positive-integer array within size_t vector bounds, zero for other keys/types/holes; stack height is preserved.
  */
 static int request_component_argument_count(
   lua_State *L,
@@ -9232,8 +9237,8 @@ static int request_component_argument_count(
 #if defined(_WIN32)
 
 /* @struct yaca_wide_arguments Owned wide arguments used for Windows process creation.
- * @field items WCHAR* Owned array of collected entries.
- * @field count size_t Number of valid entries in the array.
+ * @field items WCHAR** Owned pointer array whose initialized entries each own a converted UTF-16 argument.
+ * @field count size_t Allocated argument slots including executable; partial conversion leaves unused entries NULL.
  * @field command_line WCHAR* Owned wide command line for process creation.
  */
 typedef struct yaca_wide_arguments
@@ -9244,7 +9249,7 @@ typedef struct yaca_wide_arguments
 } yaca_wide_arguments;
 
 /* @struct yaca_wide_environment Owned wide environment block used for Windows process creation.
- * @field items WCHAR* Owned array of collected entries.
+ * @field items WCHAR** Owned pointer array whose counted entries each own one name=value UTF-16 string.
  * @field count size_t Number of valid entries in the array.
  * @field block WCHAR* Owned Windows environment block.
  */
@@ -9385,9 +9390,9 @@ static WCHAR *append_quoted_windows_argument(WCHAR *output, const WCHAR *value)
   return output;
 }
 
-/* Builds the quoted UTF-16 command line for a Windows child.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @param request_index int Lua stack index of the request table.
+/* Build the quoted UTF-16 command line from one captured and rooted component request.
+ * @param L lua_State* State retaining the private plain request and its validated argument strings.
+ * @param request_index int Stack index of the captured request; the caller's arguments getter is not read again.
  * @param executable const_char* Selected executable path or process image.
  * @param executable_length size_t The executable length bound to build wide arguments.
  * @param arguments yaca_wide_arguments* Child-process argument vector or owned argument storage.
@@ -9602,8 +9607,8 @@ static void free_wide_environment(yaca_wide_environment *environment)
   memset(environment, 0, sizeof(*environment));
 }
 
-/* Builds a UTF-16 environment block for a Windows child.
- * @param L lua_State* Lua state receiving arguments and result values.
+/* Build a strict string-to-string captured environment as a sorted UTF-16 block.
+ * @param L lua_State* State retaining the private plain environment map; keys and values must be actual Lua strings.
  * @param request_index int Lua stack index of the request table.
  * @param environment yaca_wide_environment* Child-process environment being constructed or released.
  * @return int result 1 after building the UTF-16 environment block; 0 on failure.
@@ -9646,7 +9651,7 @@ static int build_wide_environment(
     char *entry;
     WCHAR *wide_entry;
 
-    if (!lua_isstring(L, -2) || !lua_isstring(L, -1))
+    if (lua_type(L, -2) != LUA_TSTRING || lua_type(L, -1) != LUA_TSTRING)
     {
       lua_pop(L, 2);
       lua_pop(L, 1);
@@ -9949,7 +9954,7 @@ static int read_windows_process_stream(
 #else
 
 /* @struct yaca_posix_environment Owned POSIX environment entries for a child process.
- * @field items char* Owned array of collected entries.
+ * @field items char** Owned NUL-terminated pointer array whose counted entries own name=value byte strings.
  * @field count size_t Number of valid entries in the array.
  */
 typedef struct yaca_posix_environment
@@ -9958,11 +9963,11 @@ typedef struct yaca_posix_environment
   size_t count;
 } yaca_posix_environment;
 
-/* Builds a NUL-terminated argument vector for a POSIX child.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @param request_index int Lua stack index of the request table.
- * @param executable const_char* Selected executable path or process image.
- * @return char**|NULL result New NUL-terminated argument vector; caller frees its members and storage, or NULL on failure.
+/* Build a POSIX argv view from a previously captured and rooted plain request.
+ * @param L lua_State* State retaining the private plain request and every borrowed string.
+ * @param request_index int Stack index of the private captured request, not a caller getter proxy.
+ * @param executable const_char* Borrowed absolute executable spelling retained by the request.
+ * @return char**|NULL New NUL-terminated vector, or NULL on failure; caller frees only vector storage, while its strings are borrowed from the rooted private request.
  */
 static char **build_posix_arguments(
   lua_State *L,
@@ -10019,8 +10024,8 @@ static void free_posix_environment(yaca_posix_environment *environment)
   memset(environment, 0, sizeof(*environment));
 }
 
-/* Builds a NUL-terminated environment vector for a POSIX child.
- * @param L lua_State* Lua state receiving arguments and result values.
+/* Build a strict string-to-string captured environment as a NUL-terminated POSIX vector.
+ * @param L lua_State* State retaining the private plain environment map; keys and values must be actual Lua strings.
  * @param request_index int Lua stack index of the request table.
  * @param environment yaca_posix_environment* Child-process environment being constructed or released.
  * @return int result 1 after building the POSIX environment vector; 0 on failure.
@@ -10059,7 +10064,7 @@ static int build_posix_environment(
     size_t value_length;
     char *entry;
 
-    if (!lua_isstring(L, -2) || !lua_isstring(L, -1))
+    if (lua_type(L, -2) != LUA_TSTRING || lua_type(L, -1) != LUA_TSTRING)
     {
       lua_pop(L, 2);
       lua_pop(L, 1);
@@ -10125,9 +10130,10 @@ static int build_posix_environment(
 
 /* Applies the requested descriptor flag bits through fcntl.
  * @param descriptor int POSIX file descriptor under inspection.
- * @param command int Executable command or argument vector to launch.
- * @param flag int Single control or status flag.
- * @return int result 1 after changing the descriptor flags; 0 on fcntl failure.
+ * @param command int F_SETFD for descriptor flags or F_SETFL for file status flags.
+ * @param flag int Bits to combine with the existing descriptor or file status flags.
+ * @return int One after successfully preserving and adding flags, zero when either fcntl call fails with errno set.
+ * @effect Changes only the supplied descriptor's selected flags; does not acquire or close it.
  */
 static int set_descriptor_flags(int descriptor, int command, int flag)
 {
@@ -10297,14 +10303,136 @@ static int read_posix_process_stream(
 
 #endif
 
+/* Capture one known request field before any native startup resource is acquired.
+ * @param L lua_State* State retaining both the caller source and the plain destination table.
+ * @param source int Absolute stack index of the caller-owned request or descriptor table.
+ * @param destination int Absolute stack index of the private plain snapshot table.
+ * @param field const_char* Fixed known field name; unknown fields are not inspected.
+ * @return void No value; destination retains the exact returned Lua value, including transient strings.
+ * @error Caller getters and Lua allocation failures propagate before native acquisition.
+ * @effect Invokes a source getter once and writes only the private Lua snapshot.
+ */
+static void capture_process_field(lua_State *L, int source, int destination, const char *field)
+{
+  lua_getfield(L, source, field);
+  lua_setfield(L, destination, field);
+}
+
+/* Copy raw argument or environment entries into a private table with strong references and no metatable.
+ * @param L lua_State* State receiving the copied table above its current stack.
+ * @param source int Stack index of the caller-owned raw table; converted to an absolute index before pushing.
+ * @return void No value; one new table remains at stack top with the same raw keys and values.
+ * @error Lua allocation/iteration errors propagate before native acquisition.
+ * @ownership The snapshot keeps string keys/values alive independently of the caller's table or getter closure.
+ */
+static void capture_process_map(lua_State *L, int source)
+{
+  int absolute = lua_absindex(L, source);
+  int destination;
+  lua_createtable(L, 0, 0);
+  destination = lua_gettop(L);
+  lua_pushnil(L);
+  while (lua_next(L, absolute) != 0)
+  {
+    lua_pushvalue(L, -2);
+    lua_pushvalue(L, -2);
+    lua_rawset(L, destination);
+    lua_pop(L, 1);
+  }
+}
+
+/* Replace one nested descriptor with a private copy of only its admitted fields.
+ * @param L lua_State* State retaining the plain top-level snapshot at request.
+ * @param request int Absolute index of the private request snapshot.
+ * @param field const_char* Known nested descriptor name, stdin or shell.
+ * @param fields const_char*const* Ordered admitted descriptor field names.
+ * @param count size_t Number of fixed field names; bounded by the maintained descriptor schema.
+ * @return void No value; a table descriptor is replaced with its plain copy, while other types remain for typed rejection.
+ * @error Descriptor getters and Lua allocations may raise before native acquisition.
+ * @effect Reads each known descriptor field once; retains its returned value without modifying caller data.
+ */
+static void capture_process_descriptor(
+  lua_State *L, int request, const char *field, const char *const *fields, size_t count)
+{
+  size_t index;
+  int source;
+  int destination;
+  lua_getfield(L, request, field);
+  if (!lua_istable(L, -1)) { lua_pop(L, 1); return; }
+  source = lua_gettop(L);
+  lua_createtable(L, 0, (int)count);
+  destination = lua_gettop(L);
+  for (index = 0U; index < count; ++index)
+    capture_process_field(L, source, destination, fields[index]);
+  lua_setfield(L, request, field);
+  lua_pop(L, 1);
+}
+
+/* Admit a rooted, independent startup request before creating native buffers, pipes, jobs or children.
+ * @param L lua_State* Argument 1 is the caller request; other arguments remain at their original indices.
+ * @param argv_mode int* Receives zero for the fixed shell or one for component argv after valid mode capture.
+ * @return int One with the private plain snapshot at argument 1, or zero for an invalid mode with the original stack restored.
+ * @error Caller field/descriptor getters and Lua allocation errors propagate before any native resource acquisition.
+ * @ownership Snapshot tables strongly retain all strings borrowed by later C builders through completion of startup.
+ * @effect Reads each relevant caller request field once, copies raw maps and known descriptors, and replaces only this call's argument slot.
+ */
+static int capture_process_request(lua_State *L, int *argv_mode)
+{
+  static const char *const stdin_fields[] = { "kind", "carrier", "bytes" };
+  static const char *const shell_fields[] = { "kind", "executable" };
+  static const char *const map_fields[] = { "arguments", "environment" };
+  int initial_top = lua_gettop(L);
+  int request;
+  size_t index;
+  lua_createtable(L, 0, 8);
+  request = lua_gettop(L);
+  capture_process_field(L, 1, request, "mode");
+  if (!request_process_mode(L, request, argv_mode))
+  {
+    lua_settop(L, initial_top);
+    return 0;
+  }
+  capture_process_field(L, 1, request, "cwd");
+  capture_process_field(L, 1, request, "started_at");
+  if (*argv_mode)
+  {
+    capture_process_field(L, 1, request, "executable");
+    capture_process_field(L, 1, request, "arguments");
+    capture_process_field(L, 1, request, "stdin");
+    capture_process_descriptor(L, request, "stdin", stdin_fields, sizeof(stdin_fields) / sizeof(stdin_fields[0]));
+  }
+  else
+  {
+    capture_process_field(L, 1, request, "command");
+    capture_process_field(L, 1, request, "shell");
+    capture_process_descriptor(L, request, "shell", shell_fields, sizeof(shell_fields) / sizeof(shell_fields[0]));
+  }
+  capture_process_field(L, 1, request, "environment");
+  for (index = *argv_mode ? 0U : 1U; index < sizeof(map_fields) / sizeof(map_fields[0]); ++index)
+  {
+    lua_getfield(L, request, map_fields[index]);
+    if (lua_istable(L, -1))
+    {
+      capture_process_map(L, -1);
+      lua_setfield(L, request, map_fields[index]);
+    }
+    lua_pop(L, 1);
+  }
+  lua_replace(L, 1);
+  return 1;
+}
+
 /*
 ** Starts either one fixed system shell or one trusted absolute component.
 ** Component argv never passes through cmd.exe or /bin/sh, and its bounded
 ** stdin bytes use an anonymous pipe owned by this native boundary.
 */
-/* Implements the Lua process start native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Start one rooted captured request through the fixed shell or admitted absolute component boundary.
+ * @param L lua_State* Argument 1 is a caller-owned request with mode/cwd/started_at/environment and the selected shell or argv/stdin fields.
+ * @return int Two results: true and a supervised process userdata, or false and a typed validation/OS startup failure.
+ * @error Caller getters and Lua allocations may raise; every caller lookup occurs before native startup resources are acquired.
+ * @ownership A private Lua snapshot roots borrowed request strings; the process userdata owns live child/job/stream handles before success projection.
+ * @effect Creates only the selected child under native supervision, using captured argv, cwd, stdin and a string-to-string environment.
  */
 static int l_process_start(lua_State *L)
 {
@@ -10325,7 +10453,7 @@ static int l_process_start(lua_State *L)
   int argv_mode;
 
   luaL_checktype(L, 1, LUA_TTABLE);
-  if (!request_process_mode(L, 1, &argv_mode)
+  if (!capture_process_request(L, &argv_mode)
       || !request_string_field(L, 1, "cwd", &cwd, &cwd_length, 1))
   {
     return push_failure(L, "InvalidProcessMode", "process mode or cwd is invalid");
@@ -10407,6 +10535,16 @@ static int l_process_start(lua_State *L)
     }
     lua_pop(L, 1);
   }
+
+  /* Reject a missing environment before any native argument storage exists.
+  ** A nil field does not retain its lookup key in the private snapshot. */
+  lua_getfield(L, 1, "environment");
+  if (!lua_istable(L, -1))
+  {
+    lua_pop(L, 1);
+    return push_failure(L, "InvalidEnvironment", "process environment is invalid");
+  }
+  lua_pop(L, 1);
 
   /* Allocate the Lua owner before spawning. A Lua allocation failure must
   ** never strand a live process or its job outside an owned userdata. */

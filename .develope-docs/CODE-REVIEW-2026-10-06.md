@@ -1,4 +1,4 @@
-# 原生文件系统资源生命周期 R78 / R79
+# 原生资源生命周期 R78 / R79 / R80
 
 故障取证与完整检查于 2026-10-05 执行，2026-10-06 核对并收口。
 基线为 `1e97083b783d0d65634125a2eabf97467015d567`；R78 已提交推送为 `7b616ad`。
@@ -124,3 +124,55 @@ TP/RP 通过。新 guard/context、每个端口 getter 前的转移及正常 dis
 实际日志和接收摘要在 [`native-review/R79.json`](native-review/R79.json) 绑定。
 原始记录在 `out/native-publication-review-20261006/`。这是生产函数与维护探针证据，
 不是最终单文件或九包资格；旧预发布不包含修复，Gate R 继续关闭。
+
+## R80 进程启动请求的保留与一致性
+
+接续基线为精确 `797b2bbe53b0afce71973addb794d9ccbfa84979` native。
+原实现从调用方 getter 取得可执行路径后弹出 Lua 值，随后 getter 触发 GC 时可能
+失去字符串所有者；Linux AddressSanitizer 在实际组件启动入口确认已释放内存读取。
+组件参数还会先校验、再读取一次 `arguments`，动态 getter 可使子进程收到不同参数。
+环境读取发生在参数缓冲区已分配之后，getter 抛错可泄漏这些原生缓冲区；数字键/值
+被 `lua_isstring` 接纳后转换，又可能破坏遍历或投影成未声明的环境内容。
+
+启动先把已知请求字段、stdin/shell 描述及 raw 参数/环境表复制到无元表的私有表。
+所有调用方 getter 在原生缓冲区、管道、job 和子进程获取前完成；私有表强引用保留
+借用字符串，后续校验与构造使用同一份数据。两个环境构造器只接纳实际 Lua 字符串。
+缺失环境表在原生参数分配前拒绝，避免依赖未保留的缺失字段查询键。正常错误形状、
+固定系统 shell、组件直接 argv 和 stdin 所有权保留；没有增加公开端口。
+
+新增维护探针 `process_start_faults.c`，直接包含生产函数。对实际组件和固定 shell
+逐个持续拒绝 Lua 增长分配，包含 emergency GC 重试；另在 environment getter 抛错。
+每例在同一 Lua 状态执行故障、真实启动并 join/close、重复故障、再次恢复。
+跟踪原生缓冲区，GC 后核对全部 OS 描述符/句柄；只救援已证实的基线泄漏。
+动态 arguments 控制核对子进程实际输出；两模式分别验证数字键、数字值和缺失环境表
+返回 `InvalidEnvironment`。临时路径控制在后续 getter 内强制 GC，核对精确 argv 输出
+与后代 proven-stopped。两条 Windows 构建入口纳入该维护探针。
+
+| 环境 | 同组基线累计泄漏 | 修复后泄漏 / 所有权错误 / 协议失败 | 同状态恢复 |
+| --- | --- | --- | --- |
+| Linux x86_64 开发宿主 | 21 | 0 / 0 / 0 | 每例两次通过 |
+| Server 2008 non-R2 x64 / Win32 WOW64 | 55 | 0 / 0 / 0 | 每例两次通过 |
+| Windows 11 x64 | 55 | 0 / 0 / 0 | 每例两次通过 |
+
+三平台基线 arguments 读取两次、五个协议控制失败；修复后读取一次、六个环境控制
+均类型化拒绝。计数是所有故障例累计，不是产品常态。Windows 临时字符串控制均通过；
+Linux 同组 Clang AddressSanitizer 基线确认 heap-use-after-free，修复后零退出且精确
+输出通过。该 sanitizer 只仪器化原生 C，缓存 Lua 库未重新仪器化，LeakSanitizer
+关闭；泄漏结论来自独立资源跟踪及 OS 计数，不扩大 sanitizer 覆盖。
+
+三平台进程 stream 故障回归、R78 snapshot 和 R79 publication 回归通过。
+Windows 接收件含基线/修复探针、组件夹具、回归程序与 Lua DLL，每目标实际摘要
+**9/9** 与本机构建件相同。编译使用 C99、`-Wall -Wextra -Werror -O2`，Win32
+保留 `_WIN32_WINNT=0x0501`，Win64 保留 `0x0601`。
+
+完整 Lua suite **706/706**、完整 coding readiness **PASS**；注释结构
+**245 文件 / 5491 声明 / 0 缺项**，清点报告归档。逐项人工核对捕获栈恢复、原表
+不变性、借用字符串保留、raw 数组校验、环境键类型、启动前资源准入、正常释放与
+process userdata 转移，以及探针和构建入口注释。全仓语义 Review 仍为 partial。
+
+冻结输入、精确基线、编译件、实机日志、接收摘要、sanitizer 和完整检查在
+[`native-review/R80.json`](native-review/R80.json) 绑定，原始记录位于
+`out/native-process-review-20261006/`。旧候选单文件尚不含 R77--R80；正式资格待完成。
+继续审核时发现终端 poll/Windows cooked 投影仍持有 C 缓冲区跨 Lua 结果分配，
+终端 mode 字符串也未固定在私有请求中。这些终端路径另行复现、修复和取证，
+不计入本批启动通过；main 交互内部与测试辅助代码仍待继续复核。
