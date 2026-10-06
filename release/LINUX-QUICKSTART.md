@@ -1,7 +1,7 @@
 # Linux 上手
 
-适用于 x86_64 Linux，最低 CentOS 7（glibc 2.17）。yaca 目前是试用候选版，
-目标系统的资格验证还在进行，待完成后才正式发布。
+适用于 x86_64 Linux，最低 CentOS 7（glibc 2.17）。yaca 1.0.0 是候选预发布，
+目标系统的资格验证待完成。
 
 yaca 不需要安装。Lua、HTTPS 和证书都在 `yaca` 里，系统上不用装 Lua、Python、
 Node.js 或开发工具。

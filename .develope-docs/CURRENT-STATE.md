@@ -1,6 +1,8 @@
 # 当前状态
 
-更新日期：2026-10-06。核心已实现，正在收尾发行验收。阶段为
+更新日期：2026-10-06。核心已实现，R81 节点正在打包交付。负责人按
+[D-082](DECISIONS.md#d-082-r81-节点打包推送后暂停开发2026-10-06) 要求交付后暂停开发。
+阶段为
 `implemented-unqualified`，目标资格验证待完成；Release Gate R 为 `closed`，
 `release_authorized=false`。依据见 [readiness](contracts/readiness.lua)、
 [发行清单](../release/manifest.lua)及[依赖锁](../release/dependencies.lock)。
@@ -60,8 +62,8 @@ R80 启动及进程流回归通过；Windows cooked 投影证据使用 completed
 C7 用户态分别通过 10/10 离线核心旅程。本节点交付为
 [`v1.0.0-preview.20261005`](https://github.com/Water-Run/yaca/releases/tag/v1.0.0-preview.20261005)
 候选预发布，正式资格仍待完成。
-负责人已按 [D-080](DECISIONS.md#d-080-继续收尾至-v10-正式版2026-10-05) 撤回暂停安排，
-正式版本目标为 `1.0.0`。本节点候选不等于正式版；后续产品源码变化仍须重新构建并绑定证据。
+正式版本目标为 `1.0.0`。D-080 的继续收尾安排已被 D-082 覆盖，R81 节点交付后暂停。
+候选不等于正式版；负责人恢复开发后，产品源码变化仍须重新构建并绑定证据。
 历次实现与修复见[开发历程](DEVELOPMENT-HISTORY.md)，剩余任务只在
 [TRACKING.md](TRACKING.md)维护。本轮证据见
 [10 月 5 日 Review](CODE-REVIEW-2026-10-05.md)和

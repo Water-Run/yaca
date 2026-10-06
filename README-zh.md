@@ -2,20 +2,19 @@
 
 [English](README.md)
 
-yaca 是一个能在老机器上跑的通用终端 AI Agent。Windows XP、Server 2008、
-CentOS 7——如今的 Agent 在这些系统上连启动都做不到。
+yaca 是一个能在老机器上跑的通用终端 AI Agent。32 位 Windows 兼容到
+XP SP3，64 位 Windows 兼容到 Windows 7 SP1，Linux 兼容到 CentOS 7。
 
 把它放进 U 盘，插到出问题的机器上，直接开问，什么都不用装。它也能陪你
 长时间写代码，但它更擅长的是日常那种事：走到一台机器前，把问题修好。
 
 > [!NOTE]
-> yaca 还没有正式发布。核心功能已经可用，下面三个平台的目标资格验证待完成。
+> yaca 1.0.0 是候选预发布，下面三个平台的目标资格验证待完成。
 
 ## 为什么是 yaca
 
-**别人跑不了的地方，它能跑。** 现在的编程 Agent 大多要 Node.js、Python 或者
-较新的系统，很多连 Windows 10 1809 都跑不起来。yaca 一路兼容到 Windows XP SP3。
-它自带 HTTPS 客户端和证书列表，老系统的 TLS 再旧，也不影响连上模型。
+**适合老机器。** yaca 不需要另外安装 Node.js 或 Python。它自带 HTTPS 客户端
+和证书列表，可以从老系统连接模型。
 
 **便携。** yaca 就一个可执行文件。配置和历史放在它旁边的 `__yaca__` 文件夹里，
 不管从哪个目录启动都一样，所以整套东西跟着 U 盘走。
@@ -46,7 +45,8 @@ CentOS 7——如今的 Agent 在这些系统上连启动都做不到。
 
 ## 开始使用
 
-解压到任意有写权限的位置，然后运行：
+从[候选预发布](https://github.com/Water-Run/yaca/releases/tag/v1.0.0-preview.20261006)
+下载压缩包，解压到任意有写权限的位置，然后运行：
 
 ```bat
 C:\yaca\yaca.exe

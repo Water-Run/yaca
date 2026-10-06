@@ -1,7 +1,7 @@
 # Windows 上手
 
 适用于 Windows XP SP3 到 Windows 11（32 位包），以及 Windows 7 SP1 以上（64 位包）。
-yaca 目前是试用候选版，各目标系统的资格验证还在进行，待完成后才正式发布。
+yaca 1.0.0 是候选预发布，各目标系统的资格验证待完成。
 
 yaca 不需要安装。Lua、HTTPS 和证书都在 `yaca.exe` 里，机器上不用装 Lua、
 Python、Node.js 或任何开发工具。
@@ -9,7 +9,6 @@ Python、Node.js 或任何开发工具。
 ## 1. 解压并连接模型
 
 1. 把压缩包解压到一个能写入的地方，比如 `C:\yaca` 或 U 盘。
-   老系统上路径尽量用短的英文。
 2. 打开 `cmd.exe`，运行：
 
    ```bat
@@ -33,7 +32,6 @@ Python、Node.js 或任何开发工具。
 
 > [!TIP]
 > 需要代理的话，运行 `yaca.exe --config-repl`，在 `[Network]` 里设置 `ProxyUrl`。
-> 连不上时别去关证书校验，yaca 自带的证书就是为老系统准备的。
 
 ## 2. 试一试
 

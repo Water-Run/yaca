@@ -2,9 +2,9 @@
 
 [中文](README-zh.md)
 
-yaca is a general-purpose AI agent for the terminal that runs on old
-machines. Windows XP, Server 2008, CentOS 7: places where today's agents
-won't even start.
+yaca is a general-purpose AI agent for the terminal. It runs on older
+machines: Windows XP SP3 for 32-bit Windows, Windows 7 SP1 for 64-bit
+Windows, and CentOS 7 for Linux.
 
 Put it on a USB stick, plug it into the machine that's misbehaving, and
 ask. There's nothing to install. It can write code over a long session
@@ -12,16 +12,14 @@ too, but it's built for the everyday job of walking up to a system and
 fixing something.
 
 > [!NOTE]
-> yaca isn't released yet. The core works; target qualification pending on
-> the three platforms below.
+> yaca 1.0.0 is a preview; target qualification pending on the three
+> platforms below.
 
 ## Why yaca
 
-**It runs where others don't.** Most current coding agents need Node.js,
-Python or a recent OS, and many won't run on anything older than Windows 10
-1809. yaca goes back to Windows XP SP3. It brings its own HTTPS client and
-certificate list, so an old system's outdated TLS doesn't stop it from
-reaching the model.
+**It works on old machines.** yaca doesn't need a separate Node.js or
+Python installation. It brings its own HTTPS client and certificate list
+to connect to a model from an older system.
 
 **It's portable.** yaca is a single executable. Settings and history live in
 a `__yaca__` folder right next to it, wherever you start it from, so the
@@ -56,7 +54,8 @@ itself, in every edition.
 
 ## Getting started
 
-Unzip anywhere you can write to, then run it:
+Download a package from the [preview release](https://github.com/Water-Run/yaca/releases/tag/v1.0.0-preview.20261006),
+unzip anywhere you can write to, then run it:
 
 ```bat
 C:\yaca\yaca.exe

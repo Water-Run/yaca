@@ -1,19 +1,20 @@
 # yaca 开发入口
 
-更新日期：2026-10-05。
+更新日期：2026-10-06。
 
-yaca 已有通用 Agent 实现和三平台 clean/std/full 九包候选，正在补齐
-目标交互旅程、发行证据和剩余语义 Review；阶段为 `implemented-unqualified`，Release Gate R 关闭。
+yaca 已有通用 Agent 实现，R81 节点正在打包交付。负责人按
+[D-082](DECISIONS.md#d-082-r81-节点打包推送后暂停开发2026-10-06) 要求交付后暂停开发；
+阶段为 `implemented-unqualified`，Release Gate R 关闭。
 源码基线和验证结果统一见[当前状态](CURRENT-STATE.md)。
 
 本轮补齐发行 ZIP 对的逐文件校验、九包汇总和真实 PTY 离线核心旅程，整理过期状态记录。
 执行顺序和验收条件统一见[剩余工作](TRACKING.md)，复跑方法见
 [资格执行手册](QUALIFICATION-RUNBOOK.md)，证据见
-[10 月 5 日 Review](CODE-REVIEW-2026-10-05.md)。实机范围按 D-077。
+[10 月 6 日 Review](CODE-REVIEW-2026-10-06.md)。实机范围按 D-077。
 
 ## 从这里继续
 
-先读当前状态和剩余工作即可接手；需要追溯依据时再按历史索引查阅日期资料。
+负责人明确恢复后，先读当前状态和暂存剩余事项即可接手；需要追溯依据时再按历史索引查阅日期资料。
 
 | 资料 | 用途 |
 | --- | --- |
