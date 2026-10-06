@@ -229,3 +229,41 @@ Windows 的同场景通过。sanitizer 范围仍是仪器化 native C、未仪�
 完整检查绑定于 [`native-review/R81.json`](native-review/R81.json)，原始记录位于
 `out/native-terminal-review-20261006/`。本批完成的是生产函数子集，最终单文件和
 九包尚未重建，旧预发布不含 R77--R81；Gate R 保持关闭。
+
+## R81 候选交付与暂停（D-082）
+
+负责人要求“打包推送，就开发到这里”，并要求本地/远端仅保留 main、文档对齐。
+本次仅完成节点交付与检查，未启动新的实现或语义 Review。D-082 覆盖 D-080 的
+继续收尾安排，交付后暂停；保留的终端 reader、main 内部和正式资格事项不改为完成。
+
+构建冻结提交为 `d215a8d9d14683fb6acd2ee51e8f7879d9976f6d`，包含 R77--R81。
+三份归档 SHA-256 均为
+`a6c160a9ff28a11118da7dc4606e217d763c3049f496f5bb5d5597966fbd07bf`，
+406 个成员逐字节相同。Linux 在有签名 C7 依赖、GCC 4.8.5/glibc 2.17 的用户态
+构建；Windows 使用统一维护入口，分别检查 5.01/6.01 PE 和依赖导入闭包。
+
+| 核心 | SHA-256 | 完整 suite |
+| --- | --- | --- |
+| Linux | `1bc7e3bd37b2b42765b437f4a7dd84b827b8c823e752d76cd9e983fc52be40b6` | C7 用户态 706/706 |
+| Win32 | `82053d9fedf7fc406140b6493671969bd20fbacaae2e9d088712d96c1a1771e0` | Server 2008 non-R2 x64 / WOW64 706/706 |
+| Win64 | `b732ebea7d014435d6c78166241995bb762183f636ad2a97c18414814ff42c73` | Windows 11 x64 706/706 |
+
+Windows 使用实际候选单文件的内嵌 Lua 运行冻结源码 suite，目标重算核心摘要与本机
+一致；真实日志和回执由维护工具绑定源码归档/核心/环境/计数。三平台 clean/std/full
+使用各自新核心重新装配，工具输入沿用已核对且未改字节的 payload。
+Linux companion 的源码、build/test 日志与 SBOM 重新绑定当前字节。
+
+九个 runtime/notices 对的完整性、CRC、成员摘要、工具/来源/许可证/SPDX、构建与
+目标测试证据，以及同平台核心一致性全部通过；`tool_payload_gaps` 与 `missing_pairs`
+为空。Linux 三档实际 ZIP 在 C7 用户态分别通过 10/10 离线核心旅程。容器共享宿主
+内核，未把该旅程扩大到首次配置、模型、升级或 Windows 最低系统实测。
+
+全量 coding readiness PASS，注释结构仍为 246 文件 / 5505 声明 / 0 缺项。
+本次修改为 README/quickstart、当前入口、暂停指示和交付清单；两 README 的九个
+章节及十九行命令参考相互对应，五份用户文档的资格待完成标记由检查器核对。
+构建后变化只有文档与候选证据清单，未改变产品源码；与冻结成员的产品字节再次核对。
+
+新候选为 `v1.0.0-preview.20261006`，Gate R 保持关闭，`release_authorized=false`。
+完整字节清单与证据边界见 [节点记录](candidates/1.0.0-preview.20261006.json)，
+原始记录位于 `out/node-r81-publish-20261006/`。本地和 GitHub 的分支及默认分支
+均为 main；发行 tag 不作为开发分支。后续仅完成已授权的附件上传与远端摘要复核。

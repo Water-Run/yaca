@@ -1,176 +1,91 @@
 # 当前状态
 
-更新日期：2026-10-06。核心已实现，R81 节点正在打包交付。负责人按
-[D-082](DECISIONS.md#d-082-r81-节点打包推送后暂停开发2026-10-06) 要求交付后暂停开发。
-阶段为
-`implemented-unqualified`，目标资格验证待完成；Release Gate R 为 `closed`，
+更新日期：2026-10-06。核心已实现，R81 节点完成重建与九包验收，正在推送候选交付。
+负责人按 [D-082](DECISIONS.md#d-082-r81-节点打包推送后暂停开发2026-10-06)
+要求在本节点停止开发；剩余工作暂存于 [TRACKING](TRACKING.md)，明确恢复前不启动。
+
+阶段为 `implemented-unqualified`，目标资格验证待完成；Release Gate R 为 `closed`，
 `release_authorized=false`。依据见 [readiness](contracts/readiness.lua)、
 [发行清单](../release/manifest.lua)及[依赖锁](../release/dependencies.lock)。
 
-候选节点交付后，源码已提交 **R77 Windows reparse 修复**：使用实际 SubstituteName，
-按声明/返回长度检查完整头和 UTF-16 范围，拒绝 NUL、未知 flags 和无法支持的 NT
-命名，避免把绝对目标错误映射到进程 cwd。两指定 Windows 实机的生产函数探针各
-**20/20**，其中真实 junction 的内核跟随对象与解析目标相同；旧实现同组各失败 14 项。
-完整开发 suite 706/706、coding readiness PASS。此结果覆盖原生产函数和窄探针，
-尚未构建含 R77 的三平台单文件及九包；下述已发布候选的 SHA-256 不覆盖本修复。
+## 当前候选
 
-工作树进一步修复 **R78 原生资源生命周期**：snapshot、metadata、walk 和 verified
-open/create 的临时路径、元数据与句柄在 Lua 分配失败或身份 getter 抛错时仍有所有者。
-Linux、Server 2008 Win32、Windows 11 Win64 的生产函数故障探针均为零泄漏、零所有权
-错误，并在同一状态完成故障、恢复、重复故障、再次恢复。基线累计泄漏数分别为
-1706、5814、10062；这些是故障用例的资源计数，不是产品常态使用量。
-当前源码完整 Lua suite 706/706、coding readiness PASS，证据见
-[R78 Review](CODE-REVIEW-2026-10-06.md)与[字节绑定](native-review/R78.json)。
-R78 修复与证据已收口，尚未装入候选单文件，正式资格仍待完成。
+产品版本为 `1.0.0`，本节点为
+[`v1.0.0-preview.20261006`](https://github.com/Water-Run/yaca/releases/tag/v1.0.0-preview.20261006)
+候选预发布。源码已包含 R77--R81：Windows reparse 解码、原生文件系统资源生命周期、
+发布身份验证资源保留、进程启动请求捕获，以及终端输入投影和 mode 字符串保留。
+具体缺陷、反例和逐项语义核对在 [10 月 6 日 Review](CODE-REVIEW-2026-10-06.md)，
+R77 原始证据在 [10 月 5 日 Review](CODE-REVIEW-2026-10-05.md)。
 
-R78 已提交推送为 `7b616ad`。续推完成 **R79 删除/替换/改名验证资源修复**：
-身份 getter 期间由私有守卫持有资源，正常验证后仍走原有发布和回滚路径。
-Linux / Server 2008 Win32 / Windows 11 Win64 基线累计泄漏分别为 458 / 1156 / 1536，
-修复后三平台均为零泄漏、零所有权错误；每个实际 getter 字段的异常均未修改夹具，
-同状态两轮真实恢复通过。三平台 R78 回归通过，两 Windows 的 R77 回归各 20/20。
-完整 suite 706/706、coding readiness PASS；R79 证据见
-[Review](CODE-REVIEW-2026-10-06.md#r79-删除替换改名的验证资源所有权)与
-[字节绑定](native-review/R79.json)。已发布候选尚不包含这些原生修复。
+本节点三目标从同一份完整维护源码快照构建：冻结提交为
+`d215a8d9d14683fb6acd2ee51e8f7879d9976f6d`，源码归档 SHA-256 为
+`a6c160a9ff28a11118da7dc4606e217d763c3049f496f5bb5d5597966fbd07bf`，
+406 个成员。三份归档及逐成员字节一致，冻结时工作树干净。构建后的候选清单、
+交付记录和暂停文档单独提交，产品源码保持与冻结输入一致。
 
-接续完成 **R80 进程启动请求保留与一致性修复**：已知字段和嵌套表在原生资源获取前
-捕获一次，强引用保留借用字符串，环境项只接纳实际字符串。Linux / Server 2008
-Win32 / Windows 11 Win64 同组基线累计泄漏 21 / 55 / 55；修复后均零泄漏、零
-所有权错误、零协议失败，动态参数与实际 argv 一致，同状态两轮恢复通过。
-Linux 临时路径 GC 场景的 sanitizer 基线确认已释放内存读取，修复后通过；
-Windows 同场景通过，每目标接收件摘要 9/9 一致。三平台进程流、R78/R79 回归通过。
-完整 suite 706/706、coding readiness PASS，证据见
-[R80 Review](CODE-REVIEW-2026-10-06.md#r80-进程启动请求的保留与一致性)和
-[字节绑定](native-review/R80.json)。终端异常路径已有待复现项，正式资格仍待完成。
+| 当前核心 | SHA-256 | 完整测试及环境 |
+| --- | --- | --- |
+| Linux x86_64 | `1bc7e3bd37b2b42765b437f4a7dd84b827b8c823e752d76cd9e983fc52be40b6` | 706/706；CentOS 7.9 用户态、GCC 4.8.5、glibc 2.17 |
+| Win32 x86 | `82053d9fedf7fc406140b6493671969bd20fbacaae2e9d088712d96c1a1771e0` | 706/706；Server 2008 non-R2 x64 / WOW64 |
+| Win64 x86_64 | `b732ebea7d014435d6c78166241995bb762183f636ad2a97c18414814ff42c73` | 706/706；Windows 11 x64 |
 
-进一步完成 **R81 终端输入投影与 mode 保留修复**：重定向读取和 Windows cooked
-转码的临时字节由 Lua 持有，启动 mode 捕获后强引用保留。Linux / Server 2008
-Win32 / Windows 11 Win64 同组基线累计泄漏 26 / 40 / 40；修复后均零泄漏、零
-所有权错误、零协议失败。同 owner 两次恢复、EOF/cancel、控制字节/Unicode 限额、
-R80 启动及进程流回归通过；Windows cooked 投影证据使用 completed reader double，
-不替代真实控制台资格。Linux mode GC sanitizer 同组回归通过，Windows 接收件
-各 8/8 摘要一致。完整 suite 706/706、coding readiness PASS；证据见
-[R81 Review](CODE-REVIEW-2026-10-06.md#r81-终端输入投影与启动模式的保留)及
-[字节绑定](native-review/R81.json)。旧候选单文件尚未包含后续修复。
+Windows 两目标的完整 suite 使用实际单文件的内嵌 Lua 执行冻结源码测试，核心摘要在
+目标端重算一致；回执、原始日志、源码归档及核心逐字节绑定。Linux 在 C7 用户态
+完成原生构建、完整 suite、onedir/onefile 冒烟与 ELF/glibc 导入闭包检查。
+C7 容器共享 Fedora 宿主内核；Windows 兼容底线仍按 XP SP3 x86、Win7 SP1 x64
+源码与导入核对，不把指定现代宿主结果扩展为最低系统实测。
 
-本节点已修复 R75：OpenAI 工具流后续 ID/name/arguments 的显式 null 表示不更新，
-首片身份和后续非 null 身份变化仍严格校验；R76：压缩取消的日志写入失败后，仍使用
-原句柄清理 Model，返回结构化失败，不再访问已清空的 active。
-产品版本入口统一为 `1.0.0`。三目标核心已从同一份源码成员快照构建，Linux C7
-用户态、Server 2008 Win32、Windows 11 Win64 分别通过完整 suite **706/706**。
-原生 C 本轮只修改路径、文件与元数据的契约注释，运行行为未改。
-三平台 clean/std/full 已重新装配，九包完整性与文件证据检查通过；Linux 三档在
-C7 用户态分别通过 10/10 离线核心旅程。本节点交付为
-[`v1.0.0-preview.20261005`](https://github.com/Water-Run/yaca/releases/tag/v1.0.0-preview.20261005)
-候选预发布，正式资格仍待完成。
-正式版本目标为 `1.0.0`。D-080 的继续收尾安排已被 D-082 覆盖，R81 节点交付后暂停。
-候选不等于正式版；负责人恢复开发后，产品源码变化仍须重新构建并绑定证据。
-历次实现与修复见[开发历程](DEVELOPMENT-HISTORY.md)，剩余任务只在
-[TRACKING.md](TRACKING.md)维护。本轮证据见
-[10 月 5 日 Review](CODE-REVIEW-2026-10-05.md)和
-[10 月 6 日 Review](CODE-REVIEW-2026-10-06.md)。
+三平台各 clean/std/full，共九个 runtime/notices ZIP 对。逐文件 SHA-256/CRC、
+路径/模式、工具版本、许可证、SPDX、来源摘要、构建/测试回执和同平台核心一致性
+检查通过，`missing_pairs` 与 `tool_payload_gaps` 均为空。Linux 三档使用这次
+实际上传 ZIP 在 C7 用户态完成 10/10 离线核心旅程，包括真实 PTY Stage 1、移除
+工具、整体移动、卸载和自有临时目录无残留。首次配置、模型、升级与完整交互不在
+这一离线结论中。
 
-## 已有实现
+字节清单及证据边界见 [本节点清单](candidates/1.0.0-preview.20261006.json)，
+原始记录位于 `out/node-r81-publish-20261006/`。配套证据、三目标来源包和
+`SHA256SUMS.txt` 随候选附件交付。
+
+## 已有能力
 
 | 范围 | 当前能力 | 实现 |
 | --- | --- | --- |
-| Agent 核心 | 单 Agent、串行工具、OpenAI/Anthropic 协议、流式输出、审批、取消、压缩、Context 持久化与恢复 | `runtime.lua`、`model.lua`、`session.lua`、`context.lua` |
+| Agent 核心 | 单 Agent、串行工具、OpenAI/Anthropic 协议、流式输出、审批、取消、压缩、Context 保存与恢复 | `runtime.lua`、`model.lua`、`session.lua`、`context.lua` |
 | 交互与管理 | 首次配置、配置/模型/Context 管理、status/export、自检；`.ask` 纯问答 | `main.lua`、`cli.lua`、`terminal.lua` |
-| 工具 | 八个基础工具及正式内嵌 `lua`；共用权限、预算、取消与收尾 | `tools.lua`、`process.lua`、`release/launcher.lua` |
-| 附带软件 | 可选 `tools/`、索引、模型环境投影和 `.software` 查询；clean/std/full 三档装配 | `bundled.lua`、`release/tool-bundles.json`、`package_editions.py` |
-| 便携与旧系统 | 单文件、Windows PTY/Unicode、异步 stdin、进程树回收、FAT32 发布、旧代码页无损读写 | `native/`、`fs.lua`、`textcodec.lua` |
-| 大文件 | 区间读、尾读、有界搜索、续页和长行截断；身份/版本变化返回 `TargetChanged` | `tools.lua`、原生 seek |
-| 发行验收 | clean/std/full 逐文件与来源包校验、九包核心一致性汇总；Linux 离线旅程使用真实 PTY | `audit_editions.py`、`edition_journey.py`、`test/release/journeys.lua` |
+| 工具 | 八个基础工具及内嵌 `lua`，共用权限、预算、取消与收尾 | `tools.lua`、`process.lua`、`release/launcher.lua` |
+| 附带软件 | 可选 tools、索引、模型环境投影、`.software` 查询；clean/std/full 三档 | `bundled.lua`、`release/tool-bundles.json`、`package_editions.py` |
+| 便携与旧系统 | 单文件、Windows PTY/Unicode、异步 stdin、进程树回收、FAT32 发布、旧编码无损读写 | `native/`、`fs.lua`、`textcodec.lua` |
+| 大文件 | 区间读、尾读、有界搜索、续页和长行截断；身份变化返回 `TargetChanged` | `tools.lua`、原生 seek |
 
-## 当前复核
+附带工具输入沿用已核对且字节未改的来源。Windows 两目标输入位于
+`out/win32-full-staged-20261002/`、`out/win64-full-staged-20261002/`；Linux 输入位于
+`out/node-r76-20261005/linux-full-staged/`。这次九包重新绑定当前核心，不继承旧核心测试。
+Linux full 的 Git HTTPS、Perl、静态库和默认 SDK 闭包此前已构建并运行通过，来源和
+逐文件摘要仍由当前装配重新核对；最终工具来源语义审计保留为待完成。
 
-本轮开发宿主为 Fedora / Linux `7.2.7-200.fc44.x86_64`。Lua 测试使用
-`bin/lua55`；注释检查使用隔离 Python 3.13.8 和仓库固定版本的解析器。
-构建、完整测试和容器均经资源守卫串行执行。
+## 注释与语义 Review
 
-新增发行校验逐一核对 ZIP 外层 SHA-256、成员 SHA-256/CRC、路径和模式、工具版本、
-入口/许可证/来源、SPDX 与同平台核心。缺包、缺构建/测试证据和未完成的目标资格分别记录。
-它不会把完整性通过转为发布授权。
+当前完整 coding readiness **PASS**；全仓注释结构为
+**246 文件 / 5505 声明 / 0 缺项**。检查器反例、装配/审计/旅程回归、四校验器和
+全部 TP/RP 通过，构建、完整测试和容器均经资源守卫串行运行。
 
-Linux 离线旅程验收包完整性、解包、版本、非 TTY 零写入拒绝、内嵌 Lua、真实 PTY
-Stage 1、移除 tools、整体移动、卸载及临时目录无残留。已有 scratch 内容保留。
-在线步骤与跨平台执行不由该驱动完成，选择后非零退出，不报告跳过即通过。
+R78--R81 对相应生产函数及维护探针完成人工语义核对和三平台故障取证，冻结输入与
+日志分别绑定于 [R78](native-review/R78.json)、[R79](native-review/R79.json)、
+[R80](native-review/R80.json)、[R81](native-review/R81.json)。R80/R81 的 Linux
+临时字符串 GC 反例另有 sanitizer 前后证据。Windows cooked 投影使用有界
+completed reader double；该证据不替代真实控制台交互或 emergency cancellation。
 
-本轮逐文件复核确认，10-05 的 Linux clean companion 缺项目 GPL 许可证和
-核心依赖 SBOM；Windows 两 full companion 缺完整测试摘要。Linux 缺项已在本轮
-九包重装配时补齐，并核对核心源码快照与各依赖来源摘要。当前 1.0.0 Windows 两目标
-已补齐实际日志、环境和计数绑定，不再以开发机或旧核心结果代填。
+全仓人工语义 Review 仍为 **partial**。Windows cooked reader 取消失败后的 detach
+所有权、后续原生/main 交互内部和部分测试辅助代码尚未完成，不用结构覆盖或
+本节点打包通过代替这些核对。C32/C33/C34 剩余正式资格见 TRACKING，Gate R 保持关闭。
 
-Linux full 已替换早期 Git 输入。在 C7 用户态补建 Git 2.55.0、静态
-libcurl/Mbed TLS 和 Perl 5.42.3/libxcrypt 4.4.38；Perl 上游完整 **2654 文件 /
-1,338,437 项测试**与 libxcrypt **45/45** 通过，RPATH 和 glibc 2.17 校验通过。
-SDK 补齐签名 C7 运行库和默认 sysroot，带空格的移动路径下 C/C++ 编译运行通过，
-生成程序最高 glibc 要求 2.17。十个工具、Git Perl 模块和真实 GitHub HTTPS 在 C7
-容器的只读移动路径下通过。full 来源包分别绑定对应工具与新增 C7 来源。
-Linux SDK 存在合法的大小写不同头文件；装配和审计按 Linux 大小写敏感规则核对，
-Windows 仍拒绝大小写冲突，精确重复和文件/目录冲突在两平台都拒绝。
+## 开发与仓库状态
 
-负责人已提供本轮模型访问：DeepSeek `deepseek-flash`、DGX Spark `qwen3.8-27b`。
-凭据仅保存在忽略的私有目录。当前 1.0.0 Linux 核心在全新隔离部署复跑 Stage 2：
-**两模型各 7/7、14 次请求全过**。真实 PTY 在 DeepSeek 下通过多行 Ask、精确 Lua
-审批执行、结果问答、主任务随机 token 跨进程召回和两次终端恢复。落盘 XML 另核对
-唯一一次 Lua operation、stdout=42、exit=0 和后代 proven-stopped。
-驱动和模型的此前失败在日期 Review 与原始日志保留，不扩展为其它目标的恢复资格。
+本地和 GitHub 仅保留 `main`，默认分支为 `main`；候选 tag 属于发行标记。
+README.md、README-zh.md 和两份 quickstart 均描述 `1.0.0` 候选及资格待完成，
+中英文 README 的章节、命令参考和下载入口已对齐。开发入口、实施计划和资格手册
+以 D-082 的暂停指示为准。
 
-| 本节点 1.0.0 核心 | SHA-256 | 当前证据 |
-| --- | --- | --- |
-| Linux | `406752564e2e68e541fd7f4078500bc3434e65f56a07c647702d1646d5a5fefa` | C7 用户态构建及 ELF/glibc 闭包 PASS；完整 suite 706/706 |
-| Win32 | `d681140088429ccfff8cb6a05bdc5ae9a231b4cdb2ef3f4a3851aa4c2045f728` | 统一交叉构建及导入闭包 PASS；Server 2008 实机完整 suite 706/706 |
-| Win64 | `d90f49960cd03af9a9a77e6c80e02d0d605fcf1839776520841f40acc4563638` | 统一交叉构建及导入闭包 PASS；Windows 11 x64 实机完整 suite 706/706 |
-
-最终测试数、注释清单及逐包摘要记录在[本轮 Review](CODE-REVIEW-2026-10-05.md)
-和 `out/node-r76-20261005/`；包内核心的历史测试数不随开发机新增测试改写。
-
-## 候选产物与证据边界
-
-三目标各 clean/std/full 已装配，共九个候选包。本轮从已核对的当前核心及锁定工具输入
-重新装配三档，逐包校验并检查同平台核心一致。候选装配完成不代表九包目标资格完成。
-
-当前三核心共享未压缩源码 tar SHA-256
-`64afb701973f9be775919f1757312de3b74b55305a354e69aa16155d0f6b224e`。
-归档基线为 `a71bb76` 加工作树改动，不冒充该 HEAD 的源码。Python/zlib 的压缩结果
-不同，但三目标未压缩 tar 与逐成员内容相同；压缩摘要在各自构建证据中保留。
-构建后新增的打包路径校验、回归和用户文档不改变产品源码，最终提交与构建快照的
-差异另记在日期 Review，不改写核心捕获来源。
-
-旧 Windows full 的工具/移动/卸载、大文件旅程，以及 R75 Linux 的模型/恢复子集，
-均在日期 Review 保留其精确摘要，不能扩展成当前九包完整 C33 通过。当前节点的
-首次配置、三平台完整交互、保留数据的升级和剩余目标运行证据仍须补齐。
-
-实机范围按 [D-077](DECISIONS.md#d-077-本次收尾的兼容检查与实机范围2026-09-30)，
-不重新要求整套旧系统实机/VM 矩阵。兼容底线仍是 XP SP3 x86、Win7 SP1 x64、
-CentOS 7 x86_64；未实测的面如实保留。
-
-## Review 与验收状态
-
-注释结构检查覆盖 Git 维护的全部自有源码和新增文件。结构覆盖与人工语义 Review
-分开记录。10-01 四批已核对产品模块及组合/发布边界；保留面为 main 交互事件分发
-内部、原生 C 层和测试辅助代码，不宣称全仓逐项语义审核完成。
-本轮 compact 状态机已通读并修复 R76，原生 Windows 目录/链接与发布准入面继续到
-约 4400 行并修复 R77。R78 完成 snapshot/metadata 投影、walk、verified open/create
-跨 Lua 分配异常和 getter 异常的资源所有权复核与三平台故障取证。
-R79 完成删除/替换/改名验证跨 getter/分配异常的资源复核与三平台故障取证；
-尚余后续原生进程/终端接口、main 交互内部和测试辅助代码。
-R80 完成进程启动捕获/参数/环境、Lua 异常前的资源准入及实际 argv 的三平台取证；
-R81 完成终端 poll/cooked 投影与启动 mode 保留路径的复核及三平台有界故障取证；
-保留面包括 Windows cooked reader 取消失败后的 detach 所有权和后续原生/main 交互。
-本轮新增校验、PTY 生命周期、临时目录所有权及回归逐项核对。
-
-C32/C33/C34 的剩余项完成并形成精确字节证据后，才评审 Gate R。
-执行顺序、依赖与退出条件见 [TRACKING.md](TRACKING.md)。
-
-R79 源码全量 coding readiness PASS：注释结构 **244 文件 / 5476 声明 / 0 缺项**，
-检查器反例 15/15；装配/审计/旅程/快照/审批/staging/Windows 证据回归均通过，
-四校验器及全部 TP/RP 通过。人工语义 Review 保留面仍未完成。
-R80 源码完整检查同样通过，注释结构为 **245 文件 / 5491 声明 / 0 缺项**；
-新增启动探针及改动的捕获、校验、所有权注释已逐项核对，未扩大为全仓完成。
-R81 完整检查同样通过，最新注释结构为 **246 文件 / 5505 声明 / 0 缺项**；
-终端输入投影、模式保留和维护探针已逐项核对，其余语义 Review 继续保留。
-
-本轮交付节点按 [D-081](DECISIONS.md#d-081-下一个开发节点打包推送2026-10-05)：
-推送源码到 `origin/main` 并发布三目标九包候选预发布。正式 v1.0 的 Gate R 保持关闭，
-剩余语义 Review 和交互/升级旅程继续登记。
+暂停期间不启动新实现、Review、在线模型调用或正式资格推进。负责人明确恢复后，
+从 [暂存剩余事项](TRACKING.md) 接续；历史过程见 [开发历程](DEVELOPMENT-HISTORY.md)。
+此前已授权的模型凭据仍留在忽略的私有目录，未进入源码包、候选包或公开证据。

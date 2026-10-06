@@ -1,0 +1,562 @@
+{
+  "schema": "yaca-candidate-node-v1",
+  "date": "2026-10-06",
+  "version": "1.0.0",
+  "tag": "v1.0.0-preview.20261006",
+  "publication": {
+    "kind": "github-prerelease",
+    "owner_authorized": true,
+    "url": "https://github.com/Water-Run/yaca/releases/tag/v1.0.0-preview.20261006"
+  },
+  "status": "candidate-unqualified",
+  "release_authorized": false,
+  "target_qualification_complete": false,
+  "development_paused_after_delivery": true,
+  "pause_decision": "D-082",
+  "branch_policy": {
+    "local": [
+      "main"
+    ],
+    "remote": [
+      "main"
+    ],
+    "default": "main"
+  },
+  "source_equivalence": {
+    "schema": "yaca-node-source-equivalence-v1",
+    "status": "PASS",
+    "source_revision": "d215a8d9d14683fb6acd2ee51e8f7879d9976f6d",
+    "source_archive_sha256": "a6c160a9ff28a11118da7dc4606e217d763c3049f496f5bb5d5597966fbd07bf",
+    "source_members": 406,
+    "archives": [
+      "out/node-r81-publish-20261006/source-snapshot/yaca-source.tar.gz",
+      "out/node-r81-publish-20261006/win32-core/yaca-source.tar.gz",
+      "out/node-r81-publish-20261006/win64-core/yaca-source.tar.gz"
+    ],
+    "all_archive_and_member_bytes_identical": true
+  },
+  "artifacts": [
+    {
+      "target": "win32-x86",
+      "edition": "clean",
+      "version": "1.0.0",
+      "archive": "yaca-1.0.0-win32-x86-clean.zip",
+      "archive_sha256": "0222daeaaee887af7fdb14cd88503a98d416600967ff8a2e497f633c96315888",
+      "notices": "yaca-1.0.0-win32-x86-clean-notices.zip",
+      "notices_sha256": "d273221215bcd5fc169fbdc462e9f5cec992e2148d53748ceadef2ced3ec388d",
+      "core_sha256": "82053d9fedf7fc406140b6493671969bd20fbacaae2e9d088712d96c1a1771e0",
+      "files": 1,
+      "tools": 0,
+      "core_evidence": {
+        "source_revision": "d215a8d9d14683fb6acd2ee51e8f7879d9976f6d",
+        "source_snapshot_sha256": "a6c160a9ff28a11118da7dc4606e217d763c3049f496f5bb5d5597966fbd07bf",
+        "full_tests": "706/706",
+        "missing": []
+      },
+      "tool_payload_gaps": [],
+      "integrity": "passed",
+      "qualification": "pending"
+    },
+    {
+      "target": "win32-x86",
+      "edition": "std",
+      "version": "1.0.0",
+      "archive": "yaca-1.0.0-win32-x86-std.zip",
+      "archive_sha256": "8e6cb1c21e31979e99a589381d0cb695f6df29c3016125cb366d0b4babaa4ec2",
+      "notices": "yaca-1.0.0-win32-x86-std-notices.zip",
+      "notices_sha256": "ca6a75457ed60fe342468ec0fd23825c5c28d3348640b8614d7ee50e95b9be2e",
+      "core_sha256": "82053d9fedf7fc406140b6493671969bd20fbacaae2e9d088712d96c1a1771e0",
+      "files": 3016,
+      "tools": 4,
+      "core_evidence": {
+        "source_revision": "d215a8d9d14683fb6acd2ee51e8f7879d9976f6d",
+        "source_snapshot_sha256": "a6c160a9ff28a11118da7dc4606e217d763c3049f496f5bb5d5597966fbd07bf",
+        "full_tests": "706/706",
+        "missing": []
+      },
+      "tool_payload_gaps": [],
+      "integrity": "passed",
+      "qualification": "pending"
+    },
+    {
+      "target": "win32-x86",
+      "edition": "full",
+      "version": "1.0.0",
+      "archive": "yaca-1.0.0-win32-x86-full.zip",
+      "archive_sha256": "19fe3ea7032ff05856d2e88b674715da5599c737fc4c97e44940968c77323246",
+      "notices": "yaca-1.0.0-win32-x86-full-notices.zip",
+      "notices_sha256": "d9d2c989afc24d6d59b6a9aaaa5bdac6cd33701786abd349d4a0591e4a088298",
+      "core_sha256": "82053d9fedf7fc406140b6493671969bd20fbacaae2e9d088712d96c1a1771e0",
+      "files": 12965,
+      "tools": 10,
+      "core_evidence": {
+        "source_revision": "d215a8d9d14683fb6acd2ee51e8f7879d9976f6d",
+        "source_snapshot_sha256": "a6c160a9ff28a11118da7dc4606e217d763c3049f496f5bb5d5597966fbd07bf",
+        "full_tests": "706/706",
+        "missing": []
+      },
+      "tool_payload_gaps": [],
+      "integrity": "passed",
+      "qualification": "pending"
+    },
+    {
+      "target": "win64-x86_64",
+      "edition": "clean",
+      "version": "1.0.0",
+      "archive": "yaca-1.0.0-win64-x86_64-clean.zip",
+      "archive_sha256": "677d857c78b0a1efc98d061144cb594d58da532231967684fa004393a0f1da40",
+      "notices": "yaca-1.0.0-win64-x86_64-clean-notices.zip",
+      "notices_sha256": "c80083f37219adb27234a10be1ff57d14e95ad7363713e148f535693a58be075",
+      "core_sha256": "b732ebea7d014435d6c78166241995bb762183f636ad2a97c18414814ff42c73",
+      "files": 1,
+      "tools": 0,
+      "core_evidence": {
+        "source_revision": "d215a8d9d14683fb6acd2ee51e8f7879d9976f6d",
+        "source_snapshot_sha256": "a6c160a9ff28a11118da7dc4606e217d763c3049f496f5bb5d5597966fbd07bf",
+        "full_tests": "706/706",
+        "missing": []
+      },
+      "tool_payload_gaps": [],
+      "integrity": "passed",
+      "qualification": "pending"
+    },
+    {
+      "target": "win64-x86_64",
+      "edition": "std",
+      "version": "1.0.0",
+      "archive": "yaca-1.0.0-win64-x86_64-std.zip",
+      "archive_sha256": "823b66e07b116c5877d6177945b245193cea531fab5588c6c29f9616ce907fce",
+      "notices": "yaca-1.0.0-win64-x86_64-std-notices.zip",
+      "notices_sha256": "c56483a1f139d32a80b3113e02d4585983dcdf40d36fe8aa614b7d270681d610",
+      "core_sha256": "b732ebea7d014435d6c78166241995bb762183f636ad2a97c18414814ff42c73",
+      "files": 3015,
+      "tools": 4,
+      "core_evidence": {
+        "source_revision": "d215a8d9d14683fb6acd2ee51e8f7879d9976f6d",
+        "source_snapshot_sha256": "a6c160a9ff28a11118da7dc4606e217d763c3049f496f5bb5d5597966fbd07bf",
+        "full_tests": "706/706",
+        "missing": []
+      },
+      "tool_payload_gaps": [],
+      "integrity": "passed",
+      "qualification": "pending"
+    },
+    {
+      "target": "win64-x86_64",
+      "edition": "full",
+      "version": "1.0.0",
+      "archive": "yaca-1.0.0-win64-x86_64-full.zip",
+      "archive_sha256": "2047a88dac68093c30df01c49449aff79b66ff30d1fae49aacddbf5b95776de1",
+      "notices": "yaca-1.0.0-win64-x86_64-full-notices.zip",
+      "notices_sha256": "5d12c5cd85c06d6db8c92f79a53c867f379fada7eb235d0b75e63b5133d53b36",
+      "core_sha256": "b732ebea7d014435d6c78166241995bb762183f636ad2a97c18414814ff42c73",
+      "files": 14648,
+      "tools": 10,
+      "core_evidence": {
+        "source_revision": "d215a8d9d14683fb6acd2ee51e8f7879d9976f6d",
+        "source_snapshot_sha256": "a6c160a9ff28a11118da7dc4606e217d763c3049f496f5bb5d5597966fbd07bf",
+        "full_tests": "706/706",
+        "missing": []
+      },
+      "tool_payload_gaps": [],
+      "integrity": "passed",
+      "qualification": "pending"
+    },
+    {
+      "target": "linux-x86_64",
+      "edition": "clean",
+      "version": "1.0.0",
+      "archive": "yaca-1.0.0-linux-x86_64-clean.zip",
+      "archive_sha256": "e1081f2a5bf4942b9fa8bd7997a297424c587b90336affc03e2ae65237be9979",
+      "notices": "yaca-1.0.0-linux-x86_64-clean-notices.zip",
+      "notices_sha256": "cefe70050a09a658b027192b5ebc86b11588ad403ac3325d59bc1dd235ac7a7a",
+      "core_sha256": "1bc7e3bd37b2b42765b437f4a7dd84b827b8c823e752d76cd9e983fc52be40b6",
+      "files": 1,
+      "tools": 0,
+      "core_evidence": {
+        "source_revision": "d215a8d9d14683fb6acd2ee51e8f7879d9976f6d",
+        "source_snapshot_sha256": "a6c160a9ff28a11118da7dc4606e217d763c3049f496f5bb5d5597966fbd07bf",
+        "full_tests": "706/706",
+        "missing": []
+      },
+      "tool_payload_gaps": [],
+      "integrity": "passed",
+      "qualification": "pending"
+    },
+    {
+      "target": "linux-x86_64",
+      "edition": "std",
+      "version": "1.0.0",
+      "archive": "yaca-1.0.0-linux-x86_64-std.zip",
+      "archive_sha256": "a6614d2be240745d732c6abe8164a239b6546b787b3d65499e77da5738994833",
+      "notices": "yaca-1.0.0-linux-x86_64-std-notices.zip",
+      "notices_sha256": "b1876caa7d7a979578e1bf79ce3aa36bce77d79570cbc9571518dca7f891a904",
+      "core_sha256": "1bc7e3bd37b2b42765b437f4a7dd84b827b8c823e752d76cd9e983fc52be40b6",
+      "files": 4508,
+      "tools": 4,
+      "core_evidence": {
+        "source_revision": "d215a8d9d14683fb6acd2ee51e8f7879d9976f6d",
+        "source_snapshot_sha256": "a6c160a9ff28a11118da7dc4606e217d763c3049f496f5bb5d5597966fbd07bf",
+        "full_tests": "706/706",
+        "missing": []
+      },
+      "tool_payload_gaps": [],
+      "integrity": "passed",
+      "qualification": "pending"
+    },
+    {
+      "target": "linux-x86_64",
+      "edition": "full",
+      "version": "1.0.0",
+      "archive": "yaca-1.0.0-linux-x86_64-full.zip",
+      "archive_sha256": "6ac2e313a2923bc10c37d73efe837a7755079d7cd92e1e2a6507f8306eae1f8e",
+      "notices": "yaca-1.0.0-linux-x86_64-full-notices.zip",
+      "notices_sha256": "64e2e68d17a745408d0c8bfbbd1e4d5ca4cf12a663344e8a3084d974971cb648",
+      "core_sha256": "1bc7e3bd37b2b42765b437f4a7dd84b827b8c823e752d76cd9e983fc52be40b6",
+      "files": 14773,
+      "tools": 10,
+      "core_evidence": {
+        "source_revision": "d215a8d9d14683fb6acd2ee51e8f7879d9976f6d",
+        "source_snapshot_sha256": "a6c160a9ff28a11118da7dc4606e217d763c3049f496f5bb5d5597966fbd07bf",
+        "full_tests": "706/706",
+        "missing": []
+      },
+      "tool_payload_gaps": [],
+      "integrity": "passed",
+      "qualification": "pending"
+    }
+  ],
+  "verification": {
+    "coding_readiness": {
+      "path": "out/node-r81-publish-20261006/coding-readiness-final.log",
+      "sha256": "2e1e1d820febff40723446195f41486f2454fa1311350ee99161bc69ffc22e55",
+      "bytes": 4210
+    },
+    "comment_structure": {
+      "files": 246,
+      "declarations": 5505,
+      "violations": 0
+    },
+    "linux_offline_core_journeys": [
+      {
+        "edition": "clean",
+        "binding": {
+          "path": "out/node-r81-publish-20261006/c7-final-journeys/c7-clean-offline-journey.json",
+          "sha256": "7369174411a06a8bc866afbe7fe8b5c04f667081e867fe0ec2f815d8989e9fb9",
+          "bytes": 3273
+        },
+        "report": {
+          "schema": "yaca-edition-journey-v1",
+          "scope": "offline-core",
+          "qualification": "pending",
+          "release_authorized": false,
+          "host": "Linux-7.2.7-200.fc44.x86_64-x86_64-with-glibc2.17",
+          "artifact": {
+            "target": "linux-x86_64",
+            "edition": "clean",
+            "version": "1.0.0",
+            "archive": "/repo/out/node-r81-publish-20261006/upload/yaca-1.0.0-linux-x86_64-clean.zip",
+            "archive_sha256": "e1081f2a5bf4942b9fa8bd7997a297424c587b90336affc03e2ae65237be9979",
+            "notices": "/repo/out/node-r81-publish-20261006/upload/yaca-1.0.0-linux-x86_64-clean-notices.zip",
+            "notices_sha256": "cefe70050a09a658b027192b5ebc86b11588ad403ac3325d59bc1dd235ac7a7a",
+            "core_sha256": "1bc7e3bd37b2b42765b437f4a7dd84b827b8c823e752d76cd9e983fc52be40b6",
+            "files": 1,
+            "tools": 0,
+            "core_evidence": {
+              "source_revision": "d215a8d9d14683fb6acd2ee51e8f7879d9976f6d",
+              "source_snapshot_sha256": "a6c160a9ff28a11118da7dc4606e217d763c3049f496f5bb5d5597966fbd07bf",
+              "full_tests": "706/706",
+              "missing": []
+            },
+            "tool_payload_gaps": [],
+            "integrity": "passed",
+            "qualification": "pending"
+          },
+          "steps": [
+            {
+              "id": "package-integrity",
+              "passed": true
+            },
+            {
+              "id": "extract",
+              "passed": true
+            },
+            {
+              "id": "version",
+              "passed": true,
+              "exit_code": 0,
+              "output": "yaca 1.0.0 (linux-x86_64)\n"
+            },
+            {
+              "id": "non-tty-no-writes",
+              "passed": true,
+              "exit_code": 5,
+              "output": "yaca: TtyRequired: this action requires both stdin and stdout to be interactive terminals\n"
+            },
+            {
+              "id": "embedded-lua",
+              "passed": true,
+              "exit_code": 0,
+              "output": "42\n"
+            },
+            {
+              "id": "selftest-stage1",
+              "passed": true,
+              "exit_code": 1,
+              "output": "ST1-PLATFORM PASSED    release platform identity matches\r\nST1-PACKAGE PASSED    minimal package files are present\r\nST1-SAFE-LOAD PASSED    native module came from the bundled allowlist\r\nST1-DATA-ROOT PASSED    adjacent data root is available\r\nST1-CONFIG-SCHEMA WARNING   configuration is not initialized yet\r\nST1-CONFIG-SOURCE WARNING   configuration is not initialized yet\r\nST1-ATOMIC-WRITE PASSED    isolated publication round-trip and cleanup passed\r\nST1-CONTEXT-CODEC PASSED    pinned Context XML codec loaded\r\nST1-CONTEXT-SCHEMA PASSED    Context schema service constructed\r\nST1-CONTEXT-CATALOG PASSED    Context catalog is complete and bounded\r\nST1-CONTEXT-LOCK PASSED    Context writer locks were inspected safely\r\nST1-TOOLS PASSED    verified direct filesystem tools are available\r\nST1-CA-BUNDLE PASSED    bundled CA certificate set matches the lock\r\nST1-TTY-INPUT PASSED    interactive terminal input is available\r\nST1-ZERO-SURFACE PASSED    excluded product surfaces are absent\r\nself-test outcome=partial completed-stage=1 online-requests=0 auto-fixes=0\r\n"
+            },
+            {
+              "id": "without-tools",
+              "passed": true
+            },
+            {
+              "id": "move",
+              "passed": true
+            },
+            {
+              "id": "uninstall",
+              "passed": true
+            },
+            {
+              "id": "verify-no-residue",
+              "passed": true
+            }
+          ],
+          "pending": [
+            "first-configuration",
+            "chat-tool-turn",
+            "restore",
+            "upgrade",
+            "target-tool-runtime"
+          ]
+        }
+      },
+      {
+        "edition": "std",
+        "binding": {
+          "path": "out/node-r81-publish-20261006/c7-final-journeys/c7-std-offline-journey.json",
+          "sha256": "d3be9b69449b85bac748629ea5dfa9de4eb17e1289263a2a1b8a46c4e1dee4a2",
+          "bytes": 3270
+        },
+        "report": {
+          "schema": "yaca-edition-journey-v1",
+          "scope": "offline-core",
+          "qualification": "pending",
+          "release_authorized": false,
+          "host": "Linux-7.2.7-200.fc44.x86_64-x86_64-with-glibc2.17",
+          "artifact": {
+            "target": "linux-x86_64",
+            "edition": "std",
+            "version": "1.0.0",
+            "archive": "/repo/out/node-r81-publish-20261006/upload/yaca-1.0.0-linux-x86_64-std.zip",
+            "archive_sha256": "a6614d2be240745d732c6abe8164a239b6546b787b3d65499e77da5738994833",
+            "notices": "/repo/out/node-r81-publish-20261006/upload/yaca-1.0.0-linux-x86_64-std-notices.zip",
+            "notices_sha256": "b1876caa7d7a979578e1bf79ce3aa36bce77d79570cbc9571518dca7f891a904",
+            "core_sha256": "1bc7e3bd37b2b42765b437f4a7dd84b827b8c823e752d76cd9e983fc52be40b6",
+            "files": 4508,
+            "tools": 4,
+            "core_evidence": {
+              "source_revision": "d215a8d9d14683fb6acd2ee51e8f7879d9976f6d",
+              "source_snapshot_sha256": "a6c160a9ff28a11118da7dc4606e217d763c3049f496f5bb5d5597966fbd07bf",
+              "full_tests": "706/706",
+              "missing": []
+            },
+            "tool_payload_gaps": [],
+            "integrity": "passed",
+            "qualification": "pending"
+          },
+          "steps": [
+            {
+              "id": "package-integrity",
+              "passed": true
+            },
+            {
+              "id": "extract",
+              "passed": true
+            },
+            {
+              "id": "version",
+              "passed": true,
+              "exit_code": 0,
+              "output": "yaca 1.0.0 (linux-x86_64)\n"
+            },
+            {
+              "id": "non-tty-no-writes",
+              "passed": true,
+              "exit_code": 5,
+              "output": "yaca: TtyRequired: this action requires both stdin and stdout to be interactive terminals\n"
+            },
+            {
+              "id": "embedded-lua",
+              "passed": true,
+              "exit_code": 0,
+              "output": "42\n"
+            },
+            {
+              "id": "selftest-stage1",
+              "passed": true,
+              "exit_code": 1,
+              "output": "ST1-PLATFORM PASSED    release platform identity matches\r\nST1-PACKAGE PASSED    minimal package files are present\r\nST1-SAFE-LOAD PASSED    native module came from the bundled allowlist\r\nST1-DATA-ROOT PASSED    adjacent data root is available\r\nST1-CONFIG-SCHEMA WARNING   configuration is not initialized yet\r\nST1-CONFIG-SOURCE WARNING   configuration is not initialized yet\r\nST1-ATOMIC-WRITE PASSED    isolated publication round-trip and cleanup passed\r\nST1-CONTEXT-CODEC PASSED    pinned Context XML codec loaded\r\nST1-CONTEXT-SCHEMA PASSED    Context schema service constructed\r\nST1-CONTEXT-CATALOG PASSED    Context catalog is complete and bounded\r\nST1-CONTEXT-LOCK PASSED    Context writer locks were inspected safely\r\nST1-TOOLS PASSED    verified direct filesystem tools are available\r\nST1-CA-BUNDLE PASSED    bundled CA certificate set matches the lock\r\nST1-TTY-INPUT PASSED    interactive terminal input is available\r\nST1-ZERO-SURFACE PASSED    excluded product surfaces are absent\r\nself-test outcome=partial completed-stage=1 online-requests=0 auto-fixes=0\r\n"
+            },
+            {
+              "id": "without-tools",
+              "passed": true
+            },
+            {
+              "id": "move",
+              "passed": true
+            },
+            {
+              "id": "uninstall",
+              "passed": true
+            },
+            {
+              "id": "verify-no-residue",
+              "passed": true
+            }
+          ],
+          "pending": [
+            "first-configuration",
+            "chat-tool-turn",
+            "restore",
+            "upgrade",
+            "target-tool-runtime"
+          ]
+        }
+      },
+      {
+        "edition": "full",
+        "binding": {
+          "path": "out/node-r81-publish-20261006/c7-final-journeys/c7-full-offline-journey.json",
+          "sha256": "2edfa23ff711383585fa8504b4f911b3f553344adbc2d276f9d044f118daae95",
+          "bytes": 3275
+        },
+        "report": {
+          "schema": "yaca-edition-journey-v1",
+          "scope": "offline-core",
+          "qualification": "pending",
+          "release_authorized": false,
+          "host": "Linux-7.2.7-200.fc44.x86_64-x86_64-with-glibc2.17",
+          "artifact": {
+            "target": "linux-x86_64",
+            "edition": "full",
+            "version": "1.0.0",
+            "archive": "/repo/out/node-r81-publish-20261006/upload/yaca-1.0.0-linux-x86_64-full.zip",
+            "archive_sha256": "6ac2e313a2923bc10c37d73efe837a7755079d7cd92e1e2a6507f8306eae1f8e",
+            "notices": "/repo/out/node-r81-publish-20261006/upload/yaca-1.0.0-linux-x86_64-full-notices.zip",
+            "notices_sha256": "64e2e68d17a745408d0c8bfbbd1e4d5ca4cf12a663344e8a3084d974971cb648",
+            "core_sha256": "1bc7e3bd37b2b42765b437f4a7dd84b827b8c823e752d76cd9e983fc52be40b6",
+            "files": 14773,
+            "tools": 10,
+            "core_evidence": {
+              "source_revision": "d215a8d9d14683fb6acd2ee51e8f7879d9976f6d",
+              "source_snapshot_sha256": "a6c160a9ff28a11118da7dc4606e217d763c3049f496f5bb5d5597966fbd07bf",
+              "full_tests": "706/706",
+              "missing": []
+            },
+            "tool_payload_gaps": [],
+            "integrity": "passed",
+            "qualification": "pending"
+          },
+          "steps": [
+            {
+              "id": "package-integrity",
+              "passed": true
+            },
+            {
+              "id": "extract",
+              "passed": true
+            },
+            {
+              "id": "version",
+              "passed": true,
+              "exit_code": 0,
+              "output": "yaca 1.0.0 (linux-x86_64)\n"
+            },
+            {
+              "id": "non-tty-no-writes",
+              "passed": true,
+              "exit_code": 5,
+              "output": "yaca: TtyRequired: this action requires both stdin and stdout to be interactive terminals\n"
+            },
+            {
+              "id": "embedded-lua",
+              "passed": true,
+              "exit_code": 0,
+              "output": "42\n"
+            },
+            {
+              "id": "selftest-stage1",
+              "passed": true,
+              "exit_code": 1,
+              "output": "ST1-PLATFORM PASSED    release platform identity matches\r\nST1-PACKAGE PASSED    minimal package files are present\r\nST1-SAFE-LOAD PASSED    native module came from the bundled allowlist\r\nST1-DATA-ROOT PASSED    adjacent data root is available\r\nST1-CONFIG-SCHEMA WARNING   configuration is not initialized yet\r\nST1-CONFIG-SOURCE WARNING   configuration is not initialized yet\r\nST1-ATOMIC-WRITE PASSED    isolated publication round-trip and cleanup passed\r\nST1-CONTEXT-CODEC PASSED    pinned Context XML codec loaded\r\nST1-CONTEXT-SCHEMA PASSED    Context schema service constructed\r\nST1-CONTEXT-CATALOG PASSED    Context catalog is complete and bounded\r\nST1-CONTEXT-LOCK PASSED    Context writer locks were inspected safely\r\nST1-TOOLS PASSED    verified direct filesystem tools are available\r\nST1-CA-BUNDLE PASSED    bundled CA certificate set matches the lock\r\nST1-TTY-INPUT PASSED    interactive terminal input is available\r\nST1-ZERO-SURFACE PASSED    excluded product surfaces are absent\r\nself-test outcome=partial completed-stage=1 online-requests=0 auto-fixes=0\r\n"
+            },
+            {
+              "id": "without-tools",
+              "passed": true
+            },
+            {
+              "id": "move",
+              "passed": true
+            },
+            {
+              "id": "uninstall",
+              "passed": true
+            },
+            {
+              "id": "verify-no-residue",
+              "passed": true
+            }
+          ],
+          "pending": [
+            "first-configuration",
+            "chat-tool-turn",
+            "restore",
+            "upgrade",
+            "target-tool-runtime"
+          ]
+        }
+      }
+    ],
+    "linux_target_full_suite": {
+      "path": "out/node-r81-publish-20261006/linux-core/logs/full-test.log",
+      "sha256": "ea2031c3d465ef3393da0d4c39f086c814fc72e0a0e231174319e489ba0a959e",
+      "bytes": 70250
+    },
+    "win32_target_full_suite": {
+      "path": "out/node-r81-publish-20261006/win32-target-tests.log",
+      "sha256": "b7fa176c22cc91fa009017c7995113d1c2c00b8a6e61548469069b3a62afdba7",
+      "bytes": 71159
+    },
+    "win64_target_full_suite": {
+      "path": "out/node-r81-publish-20261006/win64-target-tests.log",
+      "sha256": "cca6d85d2c789a1543ce8fed06e9e34fdbbfaf304d81c1b41418c90e5e175b64",
+      "bytes": 71116
+    }
+  },
+  "native_review_scope": [
+    "R77 reparse decoding",
+    "R78 snapshot/open/create ownership",
+    "R79 publication validation ownership",
+    "R80 rooted startup request capture",
+    "R81 terminal input projection and mode retention"
+  ],
+  "semantic_review": "partial; preserved remaining Windows cooked reader emergency cancellation/detach ownership and main interactive/helper review",
+  "remaining_formal_qualification": [
+    "remaining semantic review",
+    "first configuration and data-preserving upgrade journeys",
+    "remaining final target interaction and toolbox/source audit"
+  ],
+  "linux_environment_boundary": "CentOS 7.9 userland and glibc 2.17 on the shared Fedora host kernel",
+  "post_core_changes": [
+    ".develope-docs/CODE-REVIEW-2026-10-06.md",
+    ".develope-docs/CURRENT-STATE.md",
+    ".develope-docs/DEVELOPMENT-HISTORY.md",
+    ".develope-docs/IMPLEMENTATION-PLAN.md",
+    ".develope-docs/QUALIFICATION-RUNBOOK.md",
+    ".develope-docs/README.md",
+    ".develope-docs/TRACKING.md",
+    ".develope-docs/candidates/1.0.0-preview.20261006.json"
+  ],
+  "product_source_unchanged_since_capture": true
+}

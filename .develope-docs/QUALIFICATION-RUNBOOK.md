@@ -1,8 +1,9 @@
 # 发行验收执行手册
 
-更新日期：2026-10-05。适用于当前 clean/std/full 布局，三目标共九包。
+更新日期：2026-10-06。适用于 R81 节点 clean/std/full 布局，三目标共九包。
 当前任务与证据边界见[TRACKING](TRACKING.md)和
 [CURRENT-STATE](CURRENT-STATE.md)。旧 9 月候选命令保留在 Git 历史，不再作为执行入口。
+本节点交付后按 D-082 暂停开发，本手册供负责人明确恢复后的复跑使用。
 
 本手册使用实际 ZIP 字节，所有结果保持 `qualification=pending`。
 按 D-077 使用已有指定环境，不要求重新准备整套旧系统实机/VM 矩阵。
@@ -27,8 +28,8 @@ runtime ZIP 与同名 `-notices.zip` 配对。检查器不解包、不执行工�
 
 ```sh
 bash .tools/run_with_resource_guard.sh python3.13 .tools/qualification/audit_editions.py \
-  --pair out/node-r76-20261005/upload/yaca-1.0.0-linux-x86_64-clean.zip \
-         out/node-r76-20261005/upload/yaca-1.0.0-linux-x86_64-clean-notices.zip \
+  --pair out/node-r81-publish-20261006/upload/yaca-1.0.0-linux-x86_64-clean.zip \
+         out/node-r81-publish-20261006/upload/yaca-1.0.0-linux-x86_64-clean-notices.zip \
   --output out/single-edition-audit.json
 ```
 
@@ -43,7 +44,7 @@ bash .tools/run_with_resource_guard.sh python3.13 .tools/qualification/audit_edi
 audit_pairs=()
 for target in win32-x86 win64-x86_64 linux-x86_64; do
   for edition in clean std full; do
-    stem="out/node-r76-20261005/upload/yaca-1.0.0-$target-$edition"
+    stem="out/node-r81-publish-20261006/upload/yaca-1.0.0-$target-$edition"
     audit_pairs+=(--pair "$stem.zip" "$stem-notices.zip")
   done
 done
@@ -61,7 +62,7 @@ bash .tools/run_with_resource_guard.sh python3.13 .tools/qualification/audit_edi
 
 ```sh
 bin/lua55 test/release/journeys.lua "$PWD" \
-  "$PWD/out/node-r76-20261005/upload/yaca-1.0.0-linux-x86_64-full.zip" \
+  "$PWD/out/node-r81-publish-20261006/upload/yaca-1.0.0-linux-x86_64-full.zip" \
   linux-x86_64 "$PWD/out/journey-scratch" \
   --report "$PWD/out/linux-full-offline-journey.json"
 ```
