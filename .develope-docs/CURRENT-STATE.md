@@ -1,16 +1,25 @@
 # 当前状态
 
-更新日期：2026-10-05。核心已实现，正在收尾发行验收。阶段为
+更新日期：2026-10-06。核心已实现，正在收尾发行验收。阶段为
 `implemented-unqualified`，目标资格验证待完成；Release Gate R 为 `closed`，
 `release_authorized=false`。依据见 [readiness](contracts/readiness.lua)、
 [发行清单](../release/manifest.lua)及[依赖锁](../release/dependencies.lock)。
 
-候选节点交付后，工作树新增 **R77 Windows reparse 修复**：使用实际 SubstituteName，
+候选节点交付后，源码已提交 **R77 Windows reparse 修复**：使用实际 SubstituteName，
 按声明/返回长度检查完整头和 UTF-16 范围，拒绝 NUL、未知 flags 和无法支持的 NT
 命名，避免把绝对目标错误映射到进程 cwd。两指定 Windows 实机的生产函数探针各
 **20/20**，其中真实 junction 的内核跟随对象与解析目标相同；旧实现同组各失败 14 项。
 完整开发 suite 706/706、coding readiness PASS。此结果覆盖原生产函数和窄探针，
 尚未构建含 R77 的三平台单文件及九包；下述已发布候选的 SHA-256 不覆盖本修复。
+
+工作树进一步修复 **R78 原生资源生命周期**：snapshot、metadata、walk 和 verified
+open/create 的临时路径、元数据与句柄在 Lua 分配失败或身份 getter 抛错时仍有所有者。
+Linux、Server 2008 Win32、Windows 11 Win64 的生产函数故障探针均为零泄漏、零所有权
+错误，并在同一状态完成故障、恢复、重复故障、再次恢复。基线累计泄漏数分别为
+1706、5814、10062；这些是故障用例的资源计数，不是产品常态使用量。
+当前源码完整 Lua suite 706/706、coding readiness PASS，证据见
+[R78 Review](CODE-REVIEW-2026-10-06.md)与[字节绑定](native-review/R78.json)。
+R78 修复与证据已收口，尚未装入候选单文件，正式资格仍待完成。
 
 本节点已修复 R75：OpenAI 工具流后续 ID/name/arguments 的显式 null 表示不更新，
 首片身份和后续非 null 身份变化仍严格校验；R76：压缩取消的日志写入失败后，仍使用
@@ -26,7 +35,8 @@ C7 用户态分别通过 10/10 离线核心旅程。本节点交付为
 正式版本目标为 `1.0.0`。本节点候选不等于正式版；后续产品源码变化仍须重新构建并绑定证据。
 历次实现与修复见[开发历程](DEVELOPMENT-HISTORY.md)，剩余任务只在
 [TRACKING.md](TRACKING.md)维护。本轮证据见
-[10 月 5 日 Review](CODE-REVIEW-2026-10-05.md)。
+[10 月 5 日 Review](CODE-REVIEW-2026-10-05.md)和
+[10 月 6 日 Review](CODE-REVIEW-2026-10-06.md)。
 
 ## 已有实现
 
@@ -110,14 +120,15 @@ CentOS 7 x86_64；未实测的面如实保留。
 分开记录。10-01 四批已核对产品模块及组合/发布边界；保留面为 main 交互事件分发
 内部、原生 C 层和测试辅助代码，不宣称全仓逐项语义审核完成。
 本轮 compact 状态机已通读并修复 R76，原生 Windows 目录/链接与发布准入面继续到
-约 4400 行并修复 R77。Snapshot/metadata 在 Lua 表/字符串分配异常下的资源生命周期
-仍待故障注入取证；main 交互内部继续。
+约 4400 行并修复 R77。R78 完成 snapshot/metadata 投影、walk、verified open/create
+跨 Lua 分配异常和 getter 异常的资源所有权复核与三平台故障取证。
+尚余原生删除/替换/改名的异常边界、后续原生接口、main 交互内部和测试辅助代码。
 本轮新增校验、PTY 生命周期、临时目录所有权及回归逐项核对。
 
 C32/C33/C34 的剩余项完成并形成精确字节证据后，才评审 Gate R。
 执行顺序、依赖与退出条件见 [TRACKING.md](TRACKING.md)。
 
-本节点全量 coding readiness PASS：注释结构 **240 文件 / 5408 声明 / 0 缺项**，
+R78 源码全量 coding readiness PASS：注释结构 **242 文件 / 5454 声明 / 0 缺项**，
 检查器反例 15/15；装配/审计/旅程/快照/审批/staging/Windows 证据回归均通过，
 四校验器及全部 TP/RP 通过。人工语义 Review 保留面仍未完成。
 

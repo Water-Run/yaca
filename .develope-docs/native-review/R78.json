@@ -1,0 +1,651 @@
+{
+  "schema": "yaca-native-review-evidence-v1",
+  "review_id": "R78",
+  "date": "2026-10-06",
+  "fault_observation_date": "2026-10-05",
+  "status": "verified-native-subset",
+  "release_authorized": false,
+  "target_qualification_complete": false,
+  "source_inputs": {
+    "schema": "yaca-native-review-inputs-v1",
+    "base_revision": "1e97083b783d0d65634125a2eabf97467015d567",
+    "source_scope": "working-tree-native-and-probes",
+    "files": [
+      {
+        "path": ".tools/qualification/filesystem_open_faults.c",
+        "sha256": "ae879db9fb55506169bdc8c0d600343f14b4895192629f3baa5db54c6bbe2d60"
+      },
+      {
+        "path": ".tools/qualification/filesystem_read_faults.c",
+        "sha256": "3fdcae7cfa586bfb12838f8404d81a693ae31c972abd1e1385812d5e8b89ae6d"
+      },
+      {
+        "path": ".tools/qualification/filesystem_snapshot_faults.c",
+        "sha256": "d4a11c5fc5eb971a3b58fa36c809529ad7153510f0f1b65fde6da66b44b1ff38"
+      },
+      {
+        "path": ".tools/qualification/process_stream_faults.c",
+        "sha256": "b8289b6ed97cb1e2f8886399b0991e4a8864e857942d4f4b496198f4c316bb91"
+      },
+      {
+        "path": ".tools/qualification/text_codec_faults.c",
+        "sha256": "c4b99f5d343da258b23055b2fc4a8afd27c8229823ab2b1ba6094da8da9665c5"
+      },
+      {
+        "path": ".tools/qualification/windows_reparse_smoke.c",
+        "sha256": "fe6c81e861097044c3cdf834892d6293bc46d5b206e1d5bfa1c4918a5460a2f7"
+      },
+      {
+        "path": "native/lxp_build.lua",
+        "sha256": "97bcc6822ae6af6e0ed70c74585c3924845fdee0b3bdace222f171a7071b6fe0"
+      },
+      {
+        "path": "native/yaca_entry.c",
+        "sha256": "e37392e19da463ad55848d6d2550056958ea3084fa3f842b994f798b82bc59a8"
+      },
+      {
+        "path": "native/yaca_lua_windows.h",
+        "sha256": "92f9d56314c8cda74a6eb6e5792688143d5c8d7c7b1a1385ee12817c1f610194"
+      },
+      {
+        "path": "native/yaca_native.c",
+        "sha256": "38a1cef6a69b690eebee3c326f33aeb40ee951f4b38b6a3524660c81f932c89d"
+      },
+      {
+        "path": "native/yaca_onefile_entry.c",
+        "sha256": "4e59947998f7a9477cc768188c81e268bbf377db42fe27b9172a47a0ae85f9d4"
+      },
+      {
+        "path": "native/yaca_onefile_windows.h",
+        "sha256": "269f3b37b89d53970eb4c5d6947e31f2db7627d153871dd33da3697294dd7c37"
+      },
+      {
+        "path": "native/yaca_pty.h",
+        "sha256": "a9be6b177388ee15e656aba3a4080f00d13bd4bc3ad411af4bd8095a0d3d8c01"
+      },
+      {
+        "path": "native/yaca_supervisor.h",
+        "sha256": "2315e15885d914923a44ba55ae5c65a976c56b1aa4b6731cc87b86d72d2164f6"
+      },
+      {
+        "path": "native/yaca_text.h",
+        "sha256": "82e057d215a77470166e79876dab5c6a7fd38a5d0856229f76e7c1b93a47bbc7"
+      }
+    ]
+  },
+  "baseline_source_inputs": {
+    "revision": "1e97083b783d0d65634125a2eabf97467015d567",
+    "native_scope": "exact git archive native/",
+    "probe_scope": "same final maintained probe as fixed cases",
+    "files": [
+      {
+        "path": "native/lxp_build.lua",
+        "sha256": "97bcc6822ae6af6e0ed70c74585c3924845fdee0b3bdace222f171a7071b6fe0"
+      },
+      {
+        "path": "native/yaca_entry.c",
+        "sha256": "e37392e19da463ad55848d6d2550056958ea3084fa3f842b994f798b82bc59a8"
+      },
+      {
+        "path": "native/yaca_lua_windows.h",
+        "sha256": "92f9d56314c8cda74a6eb6e5792688143d5c8d7c7b1a1385ee12817c1f610194"
+      },
+      {
+        "path": "native/yaca_native.c",
+        "sha256": "45901668fac6ae59a9b52ad65979010965018b2d73a47986340b3c99cb44703c"
+      },
+      {
+        "path": "native/yaca_onefile_entry.c",
+        "sha256": "4e59947998f7a9477cc768188c81e268bbf377db42fe27b9172a47a0ae85f9d4"
+      },
+      {
+        "path": "native/yaca_onefile_windows.h",
+        "sha256": "269f3b37b89d53970eb4c5d6947e31f2db7627d153871dd33da3697294dd7c37"
+      },
+      {
+        "path": "native/yaca_pty.h",
+        "sha256": "a9be6b177388ee15e656aba3a4080f00d13bd4bc3ad411af4bd8095a0d3d8c01"
+      },
+      {
+        "path": "native/yaca_supervisor.h",
+        "sha256": "2315e15885d914923a44ba55ae5c65a976c56b1aa4b6731cc87b86d72d2164f6"
+      },
+      {
+        "path": "native/yaca_text.h",
+        "sha256": "82e057d215a77470166e79876dab5c6a7fd38a5d0856229f76e7c1b93a47bbc7"
+      },
+      {
+        "path": ".tools/qualification/filesystem_snapshot_faults.c",
+        "sha256": "d4a11c5fc5eb971a3b58fa36c809529ad7153510f0f1b65fde6da66b44b1ff38"
+      }
+    ]
+  },
+  "build_integration_inputs": [
+    {
+      "path": ".tools/qualification/build_windows_candidate.sh",
+      "sha256": "e13a37651b6b4b10dbf30f9c534e7d52d2793e618ddc135cdb8ab8705f5558bf",
+      "bytes": 10357
+    },
+    {
+      "path": ".tools/qualification/build_win64_candidate.sh",
+      "sha256": "96b977fc0a4a5f397f98ac84480cf4d974ba70a914972e426e60cdda0adde549",
+      "bytes": 9474
+    }
+  ],
+  "target_proofs": [
+    {
+      "target": "linux",
+      "environment": "Linux 7.2.7-200.fc44.x86_64 x86_64 development host",
+      "baseline": {
+        "revision": "1e97083b783d0d65634125a2eabf97467015d567",
+        "native_leaks": 1706,
+        "ownership_errors": 0,
+        "ports": [
+          {
+            "operation": "inspect-file",
+            "allocation_sites": 60,
+            "native_leaks": 362,
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "inspect-directory",
+            "allocation_sites": 50,
+            "native_leaks": 278,
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "walk",
+            "allocation_sites": 73,
+            "native_leaks": 1058,
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "open-verified",
+            "allocation_sites": 1,
+            "native_leaks": 2,
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "create-verified",
+            "allocation_sites": 1,
+            "native_leaks": 6,
+            "same_state_recovery": "PASS"
+          }
+        ],
+        "exit_code": 1
+      },
+      "fixed": {
+        "native_leaks": 0,
+        "ownership_errors": 0,
+        "ports": [
+          {
+            "operation": "inspect-file",
+            "allocation_sites": 69,
+            "native_leaks": 0,
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "inspect-directory",
+            "allocation_sites": 59,
+            "native_leaks": 0,
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "walk",
+            "allocation_sites": 82,
+            "native_leaks": 0,
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "open-verified",
+            "allocation_sites": 1,
+            "native_leaks": 0,
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "create-verified",
+            "allocation_sites": 2,
+            "native_leaks": 0,
+            "same_state_recovery": "PASS"
+          }
+        ],
+        "exit_code": 0
+      },
+      "fault_recovery_cycles_per_case": 2,
+      "artifact_scope": "standalone probe including production native source; final onefile qualification pending",
+      "bindings": [
+        {
+          "path": "out/native-lifetime-review-20261005/before/probe-final.log",
+          "sha256": "db53b9b6ecc162941389b0abb5bcdd89cc42fd32d53a5b41f0a96b6f74b19c50",
+          "bytes": 17929
+        },
+        {
+          "path": "out/native-lifetime-review-20261005/after/probe-final.log",
+          "sha256": "a2d954630c939fde47bd5423949181fadce01100318454cedcc8fcfff8f9abbe",
+          "bytes": 517
+        },
+        {
+          "path": "out/native-lifetime-review-20261005/before/filesystem_snapshot_faults-final",
+          "sha256": "e4b2359144066f9192014b63c6a6b92c157846cd6eb14473506a82b65a8a57f4",
+          "bytes": 287352
+        },
+        {
+          "path": "out/native-lifetime-review-20261005/after/filesystem_snapshot_faults",
+          "sha256": "e3c9d1968771e7f6aedf78e227b00fa03677a90923b9409b1de6e88739d7a11e",
+          "bytes": 287480
+        },
+        {
+          "path": "out/node-r76-20261005/linux-core-r2/work/lua-5.5.1/src/liblua.a",
+          "sha256": "b9e3cb65881bafed563f37e7500c9a1967a069e1da09c34a012d0fb3152a5f12",
+          "bytes": 509994
+        }
+      ]
+    },
+    {
+      "target": "win32",
+      "environment": "Windows Server 2008 non-R2 x64 / WOW64",
+      "baseline": {
+        "revision": "1e97083b783d0d65634125a2eabf97467015d567",
+        "native_leaks": 5814,
+        "ownership_errors": 0,
+        "ports": [
+          {
+            "operation": "inspect-file",
+            "allocation_sites": 64,
+            "native_leaks": 1438,
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "inspect-directory",
+            "allocation_sites": 55,
+            "native_leaks": 1120,
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "walk",
+            "allocation_sites": 77,
+            "native_leaks": 3220,
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "open-verified",
+            "allocation_sites": 1,
+            "native_leaks": 20,
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "create-verified",
+            "allocation_sites": 1,
+            "native_leaks": 16,
+            "same_state_recovery": "PASS"
+          }
+        ],
+        "exit_code": 1
+      },
+      "fixed": {
+        "native_leaks": 0,
+        "ownership_errors": 0,
+        "ports": [
+          {
+            "operation": "inspect-file",
+            "allocation_sites": 71,
+            "native_leaks": 0,
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "inspect-directory",
+            "allocation_sites": 62,
+            "native_leaks": 0,
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "walk",
+            "allocation_sites": 85,
+            "native_leaks": 0,
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "open-verified",
+            "allocation_sites": 2,
+            "native_leaks": 0,
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "create-verified",
+            "allocation_sites": 2,
+            "native_leaks": 0,
+            "same_state_recovery": "PASS"
+          }
+        ],
+        "exit_code": 0
+      },
+      "fault_recovery_cycles_per_case": 2,
+      "artifact_scope": "standalone probe including production native source; final onefile qualification pending",
+      "bindings": [
+        {
+          "path": "out/native-lifetime-review-20261005/before/win32-target-final.log",
+          "sha256": "155961aebf4b636ec27e83760e9dab6ab42b65a47d4e9fe2fa259d715784000f",
+          "bytes": 20152
+        },
+        {
+          "path": "out/native-lifetime-review-20261005/after/win32-target-final.log",
+          "sha256": "0113c033d2643151fa96c3a88762ac40dc1a0aad058f517a967d07563c2d344e",
+          "bytes": 523
+        },
+        {
+          "path": "out/native-lifetime-review-20261005/before/win32/filesystem_snapshot_faults.exe",
+          "sha256": "14134273507e91ddcff7e278a0f3a3e34b1d2754ee55ecd56971c620db6ed759",
+          "bytes": 483597
+        },
+        {
+          "path": "out/native-lifetime-review-20261005/after/win32/filesystem_snapshot_faults.exe",
+          "sha256": "e1e064f2fe28edc8405f2de2c93605803577b5bb4805484bbc01293d33ed8599",
+          "bytes": 485319
+        },
+        {
+          "path": "out/node-r76-20261005/win32-core/onedir/lua55.dll",
+          "sha256": "3a01621ce0b2a7e973aef32f6ed23820620055af095be57bba96ce64dbbdaae3",
+          "bytes": 696873
+        },
+        {
+          "path": "out/node-r76-20261005/win32-core/work/lua-5.5.1/src/liblua55.a",
+          "sha256": "b77ccb824ddf0df51927e62f77a6363468c51323d3604a5ab5d83b0b9226437d",
+          "bytes": 101114
+        }
+      ]
+    },
+    {
+      "target": "win64",
+      "environment": "Windows 11 x64",
+      "baseline": {
+        "revision": "1e97083b783d0d65634125a2eabf97467015d567",
+        "native_leaks": 10062,
+        "ownership_errors": 0,
+        "ports": [
+          {
+            "operation": "inspect-file",
+            "allocation_sites": 86,
+            "native_leaks": 2476,
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "inspect-directory",
+            "allocation_sites": 79,
+            "native_leaks": 2110,
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "walk",
+            "allocation_sites": 100,
+            "native_leaks": 5428,
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "open-verified",
+            "allocation_sites": 1,
+            "native_leaks": 26,
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "create-verified",
+            "allocation_sites": 1,
+            "native_leaks": 22,
+            "same_state_recovery": "PASS"
+          }
+        ],
+        "exit_code": 1
+      },
+      "fixed": {
+        "native_leaks": 0,
+        "ownership_errors": 0,
+        "ports": [
+          {
+            "operation": "inspect-file",
+            "allocation_sites": 92,
+            "native_leaks": 0,
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "inspect-directory",
+            "allocation_sites": 85,
+            "native_leaks": 0,
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "walk",
+            "allocation_sites": 107,
+            "native_leaks": 0,
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "open-verified",
+            "allocation_sites": 2,
+            "native_leaks": 0,
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "create-verified",
+            "allocation_sites": 2,
+            "native_leaks": 0,
+            "same_state_recovery": "PASS"
+          }
+        ],
+        "exit_code": 0
+      },
+      "fault_recovery_cycles_per_case": 2,
+      "artifact_scope": "standalone probe including production native source; final onefile qualification pending",
+      "bindings": [
+        {
+          "path": "out/native-lifetime-review-20261005/before/win64-target-final.log",
+          "sha256": "6a2e440a8853359102c23cf511bf49d7f7c8901e3ea901f3860fb671cb2e6b28",
+          "bytes": 27634
+        },
+        {
+          "path": "out/native-lifetime-review-20261005/after/win64-target-final.log",
+          "sha256": "bd4068785644b1e7a333a9ad669ed8e46315dbddf0f9318665dc1b4c870abff4",
+          "bytes": 539
+        },
+        {
+          "path": "out/native-lifetime-review-20261005/before/win64/filesystem_snapshot_faults.exe",
+          "sha256": "5c37dcfd4f0ad3018b148a7384637028d214f5033c1926d901d93b1411a8380b",
+          "bytes": 479046
+        },
+        {
+          "path": "out/native-lifetime-review-20261005/after/win64/filesystem_snapshot_faults.exe",
+          "sha256": "edc6e8f84e8e37e748a9421557a59782e65c4ca3af0ecab056b7fcd4e60bb323",
+          "bytes": 481277
+        },
+        {
+          "path": "out/node-r76-20261005/win64-core/onedir/lua55.dll",
+          "sha256": "5aae77d9330d72f7a747b7f96309494d52c8f3413e8a09fb9f872da8c31c0b00",
+          "bytes": 753984
+        },
+        {
+          "path": "out/node-r76-20261005/win64-core/work/lua-5.5.1/src/liblua55.a",
+          "sha256": "f65d19a6761fb2458ca85a274eecc91954c228029279e678165613f6708cca6c",
+          "bytes": 98552
+        }
+      ]
+    }
+  ],
+  "compiler_flags": [
+    "-std=c99",
+    "-Wall",
+    "-Wextra",
+    "-Werror",
+    "-O2"
+  ],
+  "platform_flags": {
+    "linux": [
+      "-ldl",
+      "-lm"
+    ],
+    "win32": [
+      "-D_WIN32_WINNT=0x0501",
+      "-DLUA_BUILD_AS_DLL",
+      "-static-libgcc",
+      "-ladvapi32",
+      "-lshell32"
+    ],
+    "win64": [
+      "-D_WIN32_WINNT=0x0601",
+      "-DLUA_BUILD_AS_DLL",
+      "-static-libgcc",
+      "-ladvapi32",
+      "-lshell32"
+    ]
+  },
+  "compilers": {
+    "linux": "GCC 16.2.1 20260819 Red Hat 16.2.1-2",
+    "windows_cross": "Fedora MinGW GCC 16.2.1 20260819 16.2.1-1.fc44"
+  },
+  "regression_proofs": [
+    {
+      "name": "filesystem_open_faults",
+      "environment": "Linux development host",
+      "status": "PASS",
+      "bindings": [
+        {
+          "path": "out/native-lifetime-review-20261005/regression/filesystem_open_faults.log",
+          "sha256": "034130a508705558fb61e21850bb1b4bab7b7f14496a16caeda1811ebaa2998a",
+          "bytes": 447
+        },
+        {
+          "path": "out/native-lifetime-review-20261005/regression/filesystem_open_faults",
+          "sha256": "ff54ff4bbc8f15005a227942fc5c0e7dcbc81d778e9600c9bf1178f7991eb978",
+          "bytes": 286784
+        }
+      ]
+    },
+    {
+      "name": "filesystem_read_faults",
+      "environment": "Linux development host",
+      "status": "PASS",
+      "bindings": [
+        {
+          "path": "out/native-lifetime-review-20261005/regression/filesystem_read_faults.log",
+          "sha256": "bc3b62cc643d318b525da4114c40c28bf9b5521f9b87ccc6174be22c7f0352d3",
+          "bytes": 239
+        },
+        {
+          "path": "out/native-lifetime-review-20261005/regression/filesystem_read_faults",
+          "sha256": "ae96a03a92f13bbfea3532df39fad0e0775e981bb1f0cae669c84eb6e713d7ba",
+          "bytes": 287160
+        }
+      ]
+    },
+    {
+      "name": "process_stream_faults",
+      "environment": "Linux development host",
+      "status": "PASS",
+      "bindings": [
+        {
+          "path": "out/native-lifetime-review-20261005/regression/process_stream_faults.log",
+          "sha256": "2d5afc34550feed7b87006c0dbc4fcb1fd8b3e2ad414356e49bd91c5c567b7d7",
+          "bytes": 227
+        },
+        {
+          "path": "out/native-lifetime-review-20261005/regression/process_stream_faults",
+          "sha256": "564c86ef9e342632c375c5bb80eafeb1c08d126b6c64d969d89135dda33e6b92",
+          "bytes": 291232
+        }
+      ]
+    },
+    {
+      "name": "text_codec_faults",
+      "environment": "Linux development host",
+      "status": "PASS",
+      "bindings": [
+        {
+          "path": "out/native-lifetime-review-20261005/regression/text_codec_faults.log",
+          "sha256": "5ff09673a10b40d33911f9f06836933a799007540339a0e578a4c1c6fff7642d",
+          "bytes": 291
+        },
+        {
+          "path": "out/native-lifetime-review-20261005/regression/text_codec_faults",
+          "sha256": "9070eaab5f0d3dd1f9bd7b7983b7bab6725bf52b474aa67eab57f6258af36617",
+          "bytes": 205152
+        }
+      ]
+    },
+    {
+      "name": "filesystem_seek_smoke",
+      "date": "2026-10-06",
+      "status": "PASS",
+      "environment": "Linux development host; cached 64-bit Lua 5.5.1",
+      "bindings": [
+        {
+          "path": "out/native-lifetime-review-20261005/regression/filesystem_seek_smoke.log",
+          "sha256": "65c42e9c9aac688d1228111b939c9039c12fe62084dbcdb81b547b27e7f2276f",
+          "bytes": 252
+        },
+        {
+          "path": "out/native-lifetime-review-20261005/regression/native-module/yaca_native.so",
+          "sha256": "9a04738d55db0566cbd6e8174ce70866cac06d7687a0e22a06361aae3fa0d3c1",
+          "bytes": 112416
+        },
+        {
+          "path": ".tools/qualification/filesystem_seek_smoke.lua",
+          "sha256": "96281e1b013bfefcf10b19dea50eed332c1166469b08088476a582218734627b",
+          "bytes": 2604
+        },
+        {
+          "path": "out/node-r76-20261005/linux-core-r2/work/lua-5.5.1/src/lua",
+          "sha256": "1e6243cebdb6c3ed0452967c52c6ead5235d31ac65156582baf986507661ddd5",
+          "bytes": 298400
+        }
+      ]
+    }
+  ],
+  "full_suite": {
+    "status": "PASS",
+    "total": 706,
+    "passed": 706,
+    "failed": 0,
+    "binding": {
+      "path": "out/native-lifetime-review-20261005/lua-suite-final.log",
+      "sha256": "d06be7e370dc49686a492c099c8f271d482c7d9f01e4ab241f98a00ae7c9dc49",
+      "bytes": 70397
+    }
+  },
+  "coding_readiness": {
+    "status": "PASS",
+    "binding": {
+      "path": "out/native-lifetime-review-20261005/coding-readiness-final.log",
+      "sha256": "08ff1fab743f85b260fa2b697316ea35763b84ec33a92bc8d0956e8ec8983436",
+      "bytes": 4230
+    }
+  },
+  "comment_structure": {
+    "files": 242,
+    "declarations": 5454,
+    "violations": 0,
+    "binding": {
+      "path": "out/native-lifetime-review-20261005/comment-check-final.log",
+      "sha256": "a32b04c581e40cfa4640cd971bdf08e78d9f58b54cea45dff4c7a2c80980a29b",
+      "bytes": 64
+    }
+  },
+  "semantic_review": "partial; this batch reviews guard/context initialization, cleanup, ownership transfers and stack/result shapes",
+  "uncovered_scope": [
+    "all symlink/special-metadata fault branches",
+    "delete/replace/rename exceptional getters and Lua result allocation",
+    "other native APIs",
+    "main interactive internals and remaining test helpers",
+    "final onefile/nine-package qualification"
+  ],
+  "fixture_cleanup": "each probe owns one unique temporary fixture; final root cleanup required for normal completion; receiver directories and raw logs retained",
+  "published_candidate_contains_fix": false,
+  "source_delivery": "source node; permissions restored on 2026-10-06, first local packet preserves the earlier read-only environment",
+  "closure_checks": {
+    "date": "2026-10-06",
+    "status": "PASS",
+    "scope": "comment structure, documentation truth and coding-readiness contract; cached 64-bit Lua",
+    "binding": {
+      "path": "out/native-lifetime-review-20261005/closure-checks-20261006.log",
+      "sha256": "d13518fc7752029a4eb62005b098aab710c83006d42d9172baa1feaade40d0f1",
+      "bytes": 395
+    }
+  },
+  "first_local_delivery": "out/node-r78-20261006/delivery/delivery.json"
+}

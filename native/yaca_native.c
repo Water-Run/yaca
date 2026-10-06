@@ -74,6 +74,7 @@ extern BOOLEAN WINAPI SystemFunction036(PVOID buffer, ULONG length);
 #define YACA_PROCESS_METATABLE "yaca.native.process"
 #define YACA_TERMINAL_METATABLE "yaca.native.terminal"
 #define YACA_SHA256_METATABLE "yaca.native.sha256"
+#define YACA_NATIVE_GUARD_METATABLE "yaca.native.resource-guard"
 
 #if defined(_WIN32)
 #define YACA_PATH_SEPARATOR L'\\'
@@ -313,6 +314,96 @@ typedef struct yaca_sha256
   size_t buffer_length;
   int closed;
 } yaca_sha256;
+
+/* Release initialized resource fields without calling Lua during guard finalization.
+ * @callback yaca_native_cleanup Native cleanup callback accepting partial resource acquisition.
+ * @param resource void* Guard-owned initialized context whose lifetime ends after this call.
+ * @return void No result; cleanup must accept partially acquired resources.
+ */
+typedef void (*yaca_native_cleanup)(void *resource);
+
+/* @struct yaca_native_guard_alignment Matches the alignment of filesystem context scalars and Lua userdata.
+ * @field pointer void* Supplies pointer alignment, not a separately owned allocation.
+ * @field integer lua_Integer Supplies integer alignment for platform identities and counters.
+ * @field number lua_Number Supplies scalar alignment consistent with the Lua allocator.
+ */
+typedef union yaca_native_guard_alignment
+{
+  void *pointer;
+  lua_Integer integer;
+  lua_Number number;
+} yaca_native_guard_alignment;
+
+/* @struct yaca_native_guard Private Lua owner followed by an aligned operation-specific context.
+ * @field cleanup yaca_native_cleanup NULL until the context is initialized, and again before cleanup executes.
+ * @field alignment yaca_native_guard_alignment Forces the following context to the required userdata alignment.
+ */
+typedef struct yaca_native_guard
+{
+  yaca_native_cleanup cleanup;
+  yaca_native_guard_alignment alignment;
+} yaca_native_guard;
+
+/* Release initialized native resources once, retaining the Lua-owned context storage until collection.
+ * @param guard yaca_native_guard* Live private owner; cleanup is NULL before acquisition or after release.
+ * @return void No value; repeated calls do not invoke cleanup again.
+ * @effect Invokes only the native cleanup callback, disabling it before any resource is released.
+ */
+static void close_native_guard(yaca_native_guard *guard)
+{
+  yaca_native_cleanup cleanup = guard->cleanup;
+  if (cleanup != NULL)
+  {
+    guard->cleanup = NULL;
+    cleanup((void *)(guard + 1));
+  }
+}
+
+/* Collect a matching private owner after normal return, allocation failure or another Lua exception.
+ * @param L lua_State* Argument 1 may be the private guard userdata; other values are ignored.
+ * @return int Zero Lua results after optional idempotent cleanup.
+ * @effect Releases any acquired native resources without invoking caller Lua code.
+ */
+static int l_native_guard_gc(lua_State *L)
+{
+  yaca_native_guard *guard = (yaca_native_guard *)luaL_testudata(L, 1, YACA_NATIVE_GUARD_METATABLE);
+  if (guard != NULL) close_native_guard(guard);
+  return 0;
+}
+
+/* Push an unarmed native-resource owner before any resource acquisition or fallible Lua projection.
+ * @param L lua_State* State whose stack retains the new owner throughout the operation.
+ * @param context_bytes size_t Size of the following operation-specific context, initialized to zero.
+ * @return yaca_native_guard* Private owner at stack top; caller initializes its context before assigning cleanup.
+ * @effect Creates the private finalizer metatable if absent and one Lua userdata; allocates no native resources.
+ * @error Lua allocation errors propagate before any resources are acquired; oversized contexts raise a Lua error.
+ * @ownership Lua owns the complete guard/context; its native fields remain caller-managed until cleanup is assigned.
+ */
+static yaca_native_guard *push_native_guard(lua_State *L, size_t context_bytes)
+{
+  yaca_native_guard *guard;
+  if (context_bytes > SIZE_MAX - sizeof(yaca_native_guard))
+    luaL_error(L, "native resource context exceeds its size bound");
+  /* @metatable yaca_native_resource_guard Private finalizer-only owner; no context is exposed to Lua.
+   * @field __gc function Idempotently releases initialized native resources after stack unwinding.
+   * @field __metatable string Prevents ordinary Lua code from replacing the finalizer metatable.
+   */
+  luaL_newmetatable(L, YACA_NATIVE_GUARD_METATABLE);
+  /* Repair a metatable left partially initialized by an earlier Lua allocation
+  ** failure before creating another owner. Existing finalizers stay unchanged. */
+  lua_pushcfunction(L, l_native_guard_gc); lua_setfield(L, -2, "__gc");
+  lua_pushliteral(L, "private native resource owner"); lua_setfield(L, -2, "__metatable");
+  guard = (yaca_native_guard *)lua_newuserdatauv(L, sizeof(*guard) + context_bytes, 0);
+  memset(guard, 0, sizeof(*guard) + context_bytes);
+  lua_pushvalue(L, -2);
+  /* @metatable yaca_native_resource_guard Attach the private finalizer table created above to the unarmed userdata.
+   * @field __gc function Releases initialized native fields only after cleanup has been armed.
+   * @field __metatable string Prevents ordinary Lua code from replacing this owner table.
+   */
+  lua_setmetatable(L, -2);
+  lua_remove(L, -2);
+  return guard;
+}
 
 /* Declares initialization of one incremental SHA-256 context.
  * @param context yaca_sha256* Hash state reset for a new digest.
@@ -2548,6 +2639,26 @@ typedef struct yaca_windows_path_vector
   int conservative_ignore;
 } yaca_windows_path_vector;
 
+/* @struct yaca_windows_fs_context Guard-owned filesystem snapshot, walk vector and projection strings.
+ * @field snapshot yaca_windows_snapshot Owns pinned handles, paths, ancestry and captured metadata.
+ * @field vector yaca_windows_path_vector Owns optional collected relative walk paths.
+ * @field path char* Owns the current UTF-8 canonical/walk path while Lua copies it.
+ * @field ancestor_path char* Owns the current UTF-8 ancestor spelling while Lua copies it.
+ */
+typedef struct yaca_windows_fs_context
+{
+  yaca_windows_snapshot snapshot;
+  yaca_windows_path_vector vector;
+  char *path;
+  char *ancestor_path;
+} yaca_windows_fs_context;
+
+/* Release a zero-initialized Windows filesystem context after normal or exceptional projection.
+ * @param resource void* Guard-owned yaca_windows_fs_context, possibly only partially acquired.
+ * @return void No value; releases only this context's native fields without calling Lua.
+ */
+static void cleanup_windows_fs_context(void *resource);
+
 /* Releases owned windows metadata state storage.
  * @param state yaca_windows_metadata_state* Captured native state updated or compared by the operation.
  * @return void result Releases the security descriptor and resets captured metadata.
@@ -3832,13 +3943,15 @@ fail:
   return 0;
 }
 
-/* Pushes windows direct snapshot fields onto the Lua stack.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @param requested const_char* Path or byte count requested by the caller.
- * @param requested_length size_t Length of the requested path in bytes or wide characters.
- * @param code const_char** Stable native error code or Unicode code point.
- * @param message const_char** Diagnostic text for the reported native outcome.
- * @return int result 1 after pushing the snapshot into Lua; 0 on encoding failure.
+/* Project a pinned Windows snapshot into one Lua table while native resources remain guard-owned.
+ * @param L lua_State* Stack receives one snapshot table on success and is restored on typed failure.
+ * @param requested const_char* Borrowed nonempty NUL-free UTF-8 path admitted by the public port.
+ * @param requested_length size_t Exact UTF-8 byte length, excluding any terminator.
+ * @param code const_char** Receives a stable typed inspection/encoding/storage failure code.
+ * @param message const_char** Receives static diagnostic text on typed failure.
+ * @return int One with a snapshot table at stack top; zero after restoring the original stack on typed failure.
+ * @error Lua allocation errors propagate; the private finalizer releases the snapshot and projection strings after unwinding.
+ * @ownership Owns only guard fields during projection; the returned Lua table contains copied data and no native handles.
  */
 static int push_windows_direct_snapshot(
   lua_State *L,
@@ -3847,25 +3960,32 @@ static int push_windows_direct_snapshot(
   const char **code,
   const char **message)
 {
-  yaca_windows_snapshot snapshot;
+  yaca_native_guard *guard;
+  yaca_windows_fs_context *context;
+  yaca_windows_snapshot *snapshot;
   yaca_identity identity;
-  char *canonical = NULL;
-  char *ancestor_path = NULL;
   char behavior[96];
   size_t index;
   int initial_top = lua_gettop(L);
 
+  guard = push_native_guard(L, sizeof(*context));
+  context = (yaca_windows_fs_context *)(guard + 1);
+  snapshot = &context->snapshot;
+  guard->cleanup = cleanup_windows_fs_context;
+
   if (!inspect_windows_path(
       requested,
       requested_length,
-      &snapshot,
+      snapshot,
       code,
       message))
   {
+    close_native_guard(guard);
+    lua_settop(L, initial_top);
     return 0;
   }
-  canonical = wide_to_utf8(snapshot.canonical_path);
-  if (canonical == NULL)
+  context->path = wide_to_utf8(snapshot->canonical_path);
+  if (context->path == NULL)
   {
     *code = "InvalidEncoding";
     *message = "direct Windows canonical path is not strict UTF-8";
@@ -3874,26 +3994,26 @@ static int push_windows_direct_snapshot(
   lua_createtable(L, 0, 8);
   lua_pushlstring(L, requested, requested_length);
   lua_setfield(L, -2, "requested_path");
-  lua_pushstring(L, canonical);
+  lua_pushstring(L, context->path);
   lua_setfield(L, -2, "canonical_path");
-  lua_pushboolean(L, snapshot.exists);
+  lua_pushboolean(L, snapshot->exists);
   lua_setfield(L, -2, "exists");
-  if (snapshot.exists)
+  if (snapshot->exists)
   {
     memset(&identity, 0, sizeof(identity));
-    if (!identity_from_handle(snapshot.target_handle, &identity))
+    if (!identity_from_handle(snapshot->target_handle, &identity))
     {
       *code = windows_error_code(GetLastError());
       *message = "direct Windows target identity failed";
       goto fail;
     }
-    if (snapshot.reparse)
+    if (snapshot->reparse)
     {
       strcpy(identity.kind, "link");
     }
     push_identity(L, &identity);
     lua_setfield(L, -2, "identity");
-    if (!windows_behavior_digest(&snapshot.metadata, behavior))
+    if (!windows_behavior_digest(&snapshot->metadata, behavior))
     {
       *code = "Storage";
       *message = "direct Windows behavior metadata is unavailable";
@@ -3902,19 +4022,19 @@ static int push_windows_direct_snapshot(
     lua_createtable(L, 0, 4);
     lua_pushinteger(
       L,
-      (lua_Integer)snapshot.target_information.nNumberOfLinks);
+      (lua_Integer)snapshot->target_information.nNumberOfLinks);
     lua_setfield(L, -2, "link_count");
     lua_pushstring(L, behavior);
     lua_setfield(L, -2, "behavior_digest");
     lua_pushstring(
       L,
-      snapshot.metadata.proven && !snapshot.reparse
+      snapshot->metadata.proven && !snapshot->reparse
         ? "proven"
         : "unsupported");
     lua_setfield(L, -2, "preservation");
-    if (snapshot.reparse)
+    if (snapshot->reparse)
     {
-      lua_pushstring(L, snapshot.link_target);
+      lua_pushstring(L, snapshot->link_target);
     }
     else
     {
@@ -3931,7 +4051,7 @@ static int push_windows_direct_snapshot(
     lua_setfield(L, -2, "metadata");
   }
   memset(&identity, 0, sizeof(identity));
-  if (!identity_from_handle(snapshot.parent_handle, &identity))
+  if (!identity_from_handle(snapshot->parent_handle, &identity))
   {
     *code = windows_error_code(GetLastError());
     *message = "direct Windows parent identity failed";
@@ -3941,40 +4061,38 @@ static int push_windows_direct_snapshot(
   lua_setfield(L, -2, "parent_identity");
   lua_createtable(
     L,
-    (int)(snapshot.ancestor_count > (size_t)INT_MAX
+    (int)(snapshot->ancestor_count > (size_t)INT_MAX
       ? INT_MAX
-      : snapshot.ancestor_count),
+      : snapshot->ancestor_count),
     0);
-  for (index = 0U; index < snapshot.ancestor_count; ++index)
+  for (index = 0U; index < snapshot->ancestor_count; ++index)
   {
-    ancestor_path = wide_to_utf8(snapshot.ancestors[index].path);
-    if (ancestor_path == NULL)
+    context->ancestor_path = wide_to_utf8(snapshot->ancestors[index].path);
+    if (context->ancestor_path == NULL)
     {
       *code = "InvalidEncoding";
       *message = "direct Windows ancestor is not strict UTF-8";
       goto fail;
     }
     lua_createtable(L, 0, 2);
-    lua_pushstring(L, ancestor_path);
+    lua_pushstring(L, context->ancestor_path);
     lua_setfield(L, -2, "path");
-    push_identity(L, &snapshot.ancestors[index].identity);
+    push_identity(L, &snapshot->ancestors[index].identity);
     lua_setfield(L, -2, "identity");
     lua_seti(L, -2, (lua_Integer)index + 1);
-    free(ancestor_path);
-    ancestor_path = NULL;
+    free(context->ancestor_path);
+    context->ancestor_path = NULL;
   }
   lua_setfield(L, -2, "ancestors");
   lua_pushboolean(L, 1);
   lua_setfield(L, -2, "ancestry_complete");
-  free(canonical);
-  free_windows_snapshot(&snapshot);
+  close_native_guard(guard);
+  lua_remove(L, initial_top + 1);
   return 1;
 
 fail:
-  free(canonical);
-  free(ancestor_path);
+  close_native_guard(guard);
   lua_settop(L, initial_top);
-  free_windows_snapshot(&snapshot);
   return 0;
 }
 
@@ -4049,17 +4167,21 @@ static int windows_parent_matches_lua(lua_State *L, int index, HANDLE handle)
   return matches;
 }
 
-/* Implements the Lua fs open read verified native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
- * @ownership The userdata owner is created before the verified target handle is adopted,
- *   so a Lua allocation failure can never strand the snapshot handle outside Lua ownership.
+/* Open an existing regular file only while its exact expected identity remains valid.
+ * @param L lua_State* Arguments 1/2 are an admitted absolute path and caller-owned expected identity table.
+ * @return int Two results: true and the read-only file userdata, or false and a typed validation/open failure.
+ * @error Wrong argument types, expected-identity getters and Lua allocations may raise.
+ * @ownership A file userdata or private snapshot guard owns every acquired handle before a caller getter can raise.
+ * @effect Opens the selected file, validates its identity and returns a file owner positioned at byte zero.
  */
 static int l_fs_open_read_verified(lua_State *L)
 {
   const char *path;
   size_t length;
-  yaca_windows_snapshot snapshot;
+  yaca_native_guard *guard;
+  yaca_windows_fs_context *context;
+  yaca_windows_snapshot *snapshot;
+  int guard_index;
   const char *code = "Storage";
   const char *message = "direct Windows read failed";
   yaca_file *file;
@@ -4072,18 +4194,27 @@ static int l_fs_open_read_verified(lua_State *L)
   /* Allocate the Lua owner before inspecting; a Lua allocation failure must
   ** never strand the verified operating-system handle outside the userdata. */
   file = push_file(L);
-  if (!inspect_windows_path(path, length, &snapshot, &code, &message))
+  guard = push_native_guard(L, sizeof(*context));
+  context = (yaca_windows_fs_context *)(guard + 1);
+  snapshot = &context->snapshot;
+  guard->cleanup = cleanup_windows_fs_context;
+  guard_index = lua_gettop(L);
+
+  if (!inspect_windows_path(path, length, snapshot, &code, &message))
   {
+    close_native_guard(guard);
+    lua_remove(L, guard_index);
     lua_pop(L, 1);
     return push_failure(L, code, message);
   }
-  if (!snapshot.exists
-      || snapshot.reparse
-      || (snapshot.target_information.dwFileAttributes
+  if (!snapshot->exists
+      || snapshot->reparse
+      || (snapshot->target_information.dwFileAttributes
         & FILE_ATTRIBUTE_DIRECTORY) != 0
-      || !windows_handle_matches_lua(L, 2, snapshot.target_handle))
+      || !windows_handle_matches_lua(L, 2, snapshot->target_handle))
   {
-    free_windows_snapshot(&snapshot);
+    close_native_guard(guard);
+    lua_remove(L, guard_index);
     lua_pop(L, 1);
     return push_failure(L, "TargetChanged", "direct Windows read target changed");
   }
@@ -4091,32 +4222,38 @@ static int l_fs_open_read_verified(lua_State *L)
   {
     LARGE_INTEGER beginning;
     beginning.QuadPart = 0;
-    if (!SetFilePointerEx(snapshot.target_handle, beginning, NULL, FILE_BEGIN))
+    if (!SetFilePointerEx(snapshot->target_handle, beginning, NULL, FILE_BEGIN))
     {
       DWORD error_value = GetLastError();
-      free_windows_snapshot(&snapshot);
+      close_native_guard(guard);
+      lua_remove(L, guard_index);
       lua_pop(L, 1);
       return push_windows_failure(L, error_value, "direct Windows read rewind failed");
     }
   }
-  file->handle = snapshot.target_handle;
-  snapshot.target_handle = INVALID_HANDLE_VALUE;
-  free_windows_snapshot(&snapshot);
+  file->handle = snapshot->target_handle;
+  snapshot->target_handle = INVALID_HANDLE_VALUE;
+  close_native_guard(guard);
+  lua_remove(L, guard_index);
   return return_success(L);
 }
 
-/* Implements the Lua fs create new verified native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
- * @ownership The userdata owner is created before the verified file is created,
- *   so a Lua allocation failure can never strand the created handle outside Lua ownership.
+/* Exclusively create an absent file after verifying its admitted physical parent object.
+ * @param L lua_State* Arguments 1/2/3 are absolute child path, caller-owned parent identity and integer permissions 0..0777.
+ * @return int Two results: true and the new read/write file owner, or false and a typed parent/existence/create failure.
+ * @error Wrong argument types, parent-identity getters and Lua allocations may raise.
+ * @ownership Private guards retain parent/path resources; the file userdata owns a created native handle before result allocation.
+ * @effect Creates only the absent selected child; failed identity getters do not create an entry.
  */
 static int l_fs_create_new_verified(lua_State *L)
 {
   const char *path;
   size_t length;
   lua_Integer permissions;
-  yaca_windows_snapshot snapshot;
+  yaca_native_guard *guard;
+  yaca_windows_fs_context *context;
+  yaca_windows_snapshot *snapshot;
+  int guard_index;
   const char *code = "Storage";
   const char *message = "direct Windows create failed";
   HANDLE handle;
@@ -4136,16 +4273,25 @@ static int l_fs_create_new_verified(lua_State *L)
   /* Allocate the Lua owner before creating; a Lua allocation failure must
   ** never strand the created operating-system handle outside the userdata. */
   file = push_file(L);
-  if (!inspect_windows_path(path, length, &snapshot, &code, &message))
+  guard = push_native_guard(L, sizeof(*context));
+  context = (yaca_windows_fs_context *)(guard + 1);
+  snapshot = &context->snapshot;
+  guard->cleanup = cleanup_windows_fs_context;
+  guard_index = lua_gettop(L);
+
+  if (!inspect_windows_path(path, length, snapshot, &code, &message))
   {
+    close_native_guard(guard);
+    lua_remove(L, guard_index);
     lua_pop(L, 1);
     return push_failure(L, code, message);
   }
-  if (snapshot.exists
-      || !windows_parent_matches_lua(L, 2, snapshot.parent_handle))
+  if (snapshot->exists
+      || !windows_parent_matches_lua(L, 2, snapshot->parent_handle))
   {
-    int existed = snapshot.exists;
-    free_windows_snapshot(&snapshot);
+    int existed = snapshot->exists;
+    close_native_guard(guard);
+    lua_remove(L, guard_index);
     lua_pop(L, 1);
     return push_failure(
       L,
@@ -4153,7 +4299,7 @@ static int l_fs_create_new_verified(lua_State *L)
       "direct Windows create binding changed");
   }
   handle = CreateFileW(
-    snapshot.canonical_path,
+    snapshot->canonical_path,
     GENERIC_READ | GENERIC_WRITE,
     FILE_SHARE_READ,
     NULL,
@@ -4161,7 +4307,8 @@ static int l_fs_create_new_verified(lua_State *L)
     FILE_ATTRIBUTE_NORMAL,
     NULL);
   error_value = GetLastError();
-  free_windows_snapshot(&snapshot);
+  close_native_guard(guard);
+  lua_remove(L, guard_index);
   if (handle == INVALID_HANDLE_VALUE)
   {
     lua_pop(L, 1);
@@ -5224,6 +5371,20 @@ static void free_windows_path_vector(yaca_windows_path_vector *vector)
   memset(vector, 0, sizeof(*vector));
 }
 
+/* Release Windows projection/walk fields in an initialized private context exactly once per guard.
+ * @param resource void* Guard-owned yaca_windows_fs_context with zero or partial acquisition.
+ * @return void No value; all context fields become empty and native handles invalid.
+ * @effect Frees owned path strings, walk storage and snapshot metadata, and closes snapshot handles.
+ */
+static void cleanup_windows_fs_context(void *resource)
+{
+  yaca_windows_fs_context *context = (yaca_windows_fs_context *)resource;
+  free(context->path); context->path = NULL;
+  free(context->ancestor_path); context->ancestor_path = NULL;
+  free_windows_path_vector(&context->vector);
+  free_windows_snapshot(&context->snapshot);
+}
+
 /* Appends one path to the bounded Windows walk vector.
  * @param vector yaca_windows_path_vector* Bounded vector collecting walk results.
  * @param path const_char* Filesystem path selected for this operation.
@@ -5609,9 +5770,11 @@ static int append_windows_walk_generation_from_lua(
   return 1;
 }
 
-/* Implements the Lua fs walk direct native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Enumerate and project a bounded directory view with private owners retained throughout Lua allocation.
+ * @param L lua_State* Arguments are absolute root, nonnegative depth, positive entry cap and git-compatible-v1 policy.
+ * @return int Two results: true and entries/generation/completeness, or false and a typed failure table.
+ * @error Wrong argument types and Lua allocation errors raise; active snapshot/vector/path guards finalize after unwinding.
+ * @effect Reads directory entries and metadata; releases owned native resources before any normal return.
  */
 static int l_fs_walk_direct(lua_State *L)
 {
@@ -5621,8 +5784,11 @@ static int l_fs_walk_direct(lua_State *L)
   size_t policy_length;
   lua_Integer depth;
   lua_Integer maximum;
-  yaca_windows_snapshot root_snapshot;
-  yaca_windows_path_vector vector;
+  yaca_native_guard *guard;
+  yaca_windows_fs_context *context;
+  yaca_windows_snapshot *root_snapshot;
+  yaca_windows_path_vector *vector;
+  int guard_index;
   const char *code = "Storage";
   const char *message = "direct Windows walk failed";
   size_t index;
@@ -5631,9 +5797,6 @@ static int l_fs_walk_direct(lua_State *L)
   char generation[73];
   static const char hexadecimal[] = "0123456789abcdef";
 
-  memset(&root_snapshot, 0, sizeof(root_snapshot));
-  root_snapshot.target_handle = root_snapshot.parent_handle = INVALID_HANDLE_VALUE;
-  memset(&vector, 0, sizeof(vector));
   if (!checked_byte_string(
       L, 1, &root, &root_length,
       "InvalidPath", "direct Windows walk root is invalid"))
@@ -5650,85 +5813,92 @@ static int l_fs_walk_direct(lua_State *L)
   {
     return push_failure(L, "InvalidWalk", "direct Windows walk bounds are invalid");
   }
+  guard = push_native_guard(L, sizeof(*context));
+  context = (yaca_windows_fs_context *)(guard + 1);
+  guard->cleanup = cleanup_windows_fs_context;
+  guard_index = lua_gettop(L);
+  root_snapshot = &context->snapshot;
+  vector = &context->vector;
   if (!inspect_windows_path(
       root,
       root_length,
-      &root_snapshot,
+      root_snapshot,
       &code,
       &message))
   {
+    close_native_guard(guard);
+    lua_settop(L, guard_index - 1);
     return push_failure(L, code, message);
   }
-  if (!root_snapshot.exists
-      || root_snapshot.reparse
-      || (root_snapshot.target_information.dwFileAttributes
+  if (!root_snapshot->exists
+      || root_snapshot->reparse
+      || (root_snapshot->target_information.dwFileAttributes
         & FILE_ATTRIBUTE_DIRECTORY) == 0)
   {
-    free_windows_snapshot(&root_snapshot);
+    close_native_guard(guard);
+    lua_settop(L, guard_index - 1);
     return push_failure(L, "InvalidTargetType", "direct walk root must be a directory");
   }
-  vector.maximum = (size_t)maximum;
+  vector->maximum = (size_t)maximum;
   if (!walk_windows_directory(
-      root_snapshot.canonical_path,
+      root_snapshot->canonical_path,
       "",
       1,
       depth + 1,
-      &vector,
+      vector,
       &code,
       &message))
   {
-    free_windows_snapshot(&root_snapshot);
-    free_windows_path_vector(&vector);
+    close_native_guard(guard);
+    lua_settop(L, guard_index - 1);
     return push_failure(L, code, message);
   }
-  if (vector.count > 1U)
+  if (vector->count > 1U)
   {
-    qsort(vector.items, vector.count, sizeof(char *), compare_windows_paths);
+    qsort(vector->items, vector->count, sizeof(char *), compare_windows_paths);
   }
   sha256_initialize(&hash);
   lua_createtable(L, 0, 4);
   lua_createtable(
     L,
-    (int)(vector.count > (size_t)INT_MAX ? INT_MAX : vector.count),
+    (int)(vector->count > (size_t)INT_MAX ? INT_MAX : vector->count),
     0);
-  for (index = 0U; index < vector.count; ++index)
+  for (index = 0U; index < vector->count; ++index)
   {
     WCHAR *wide_path = windows_path_from_relative(
-      root_snapshot.canonical_path,
-      vector.items[index]);
-    char *full_path = wide_path == NULL ? NULL : wide_to_utf8(wide_path);
+      root_snapshot->canonical_path,
+      vector->items[index]);
+    context->path = wide_path == NULL ? NULL : wide_to_utf8(wide_path);
     free(wide_path);
-    if (full_path == NULL)
+    if (context->path == NULL)
     {
+      close_native_guard(guard);
       lua_settop(L, 0);
-      free_windows_snapshot(&root_snapshot);
-      free_windows_path_vector(&vector);
       return push_failure(L, "InvalidEncoding", "direct Windows walk path is invalid");
     }
     lua_createtable(L, 0, 2);
-    lua_pushstring(L, vector.items[index]);
+    lua_pushstring(L, vector->items[index]);
     lua_setfield(L, -2, "relative_path");
     if (!push_windows_direct_snapshot(
         L,
-        full_path,
-        strlen(full_path),
+        context->path,
+        strlen(context->path),
         &code,
         &message)
         || !append_windows_walk_generation_from_lua(
           L,
           -1,
-          vector.items[index],
+          vector->items[index],
           &hash))
     {
-      free(full_path);
+      free(context->path); context->path = NULL;
+      close_native_guard(guard);
       lua_settop(L, 0);
-      free_windows_snapshot(&root_snapshot);
-      free_windows_path_vector(&vector);
       return push_failure(L, code, message);
     }
     lua_setfield(L, -2, "snapshot");
     lua_seti(L, -2, (lua_Integer)index + 1);
-    free(full_path);
+    free(context->path); context->path = NULL;
   }
   lua_setfield(L, -2, "entries");
   sha256_finalize(&hash, digest);
@@ -5741,13 +5911,13 @@ static int l_fs_walk_direct(lua_State *L)
   generation[72] = '\0';
   lua_pushstring(L, generation);
   lua_setfield(L, -2, "generation");
-  lua_pushboolean(L, !vector.truncated && !vector.conservative_ignore);
+  lua_pushboolean(L, !vector->truncated && !vector->conservative_ignore);
   lua_setfield(L, -2, "complete");
-  if (vector.truncated)
+  if (vector->truncated)
   {
     lua_pushstring(L, "entry-limit");
   }
-  else if (vector.conservative_ignore)
+  else if (vector->conservative_ignore)
   {
     lua_pushstring(L, "git-ignore-policy-conservative");
   }
@@ -5756,8 +5926,8 @@ static int l_fs_walk_direct(lua_State *L)
     lua_pushboolean(L, 0);
   }
   lua_setfield(L, -2, "partial_reason");
-  free_windows_snapshot(&root_snapshot);
-  free_windows_path_vector(&vector);
+  close_native_guard(guard);
+  lua_remove(L, guard_index);
   return return_success(L);
 }
 
@@ -5844,6 +6014,49 @@ typedef struct yaca_posix_metadata_state
   yaca_xattr_set xattrs;
   int proven;
 } yaca_posix_metadata_state;
+
+/* @struct yaca_posix_fs_context Private guard-owned projection, walk and verified-open resources.
+ * @field snapshot yaca_posix_snapshot Owns canonical target and parent paths.
+ * @field vector yaca_path_vector Owns optional relative walk entries.
+ * @field metadata yaca_posix_metadata_state Owns optional captured xattrs.
+ * @field path char* Owns the current full/link path while Lua copies it.
+ * @field ancestor_path char* Owns a temporary ancestry or parent spelling.
+ * @field name char* Owns the verified create basename.
+ * @field descriptor int Owns a temporary parent/read descriptor; initialized to -1 before cleanup is armed.
+ */
+typedef struct yaca_posix_fs_context
+{
+  yaca_posix_snapshot snapshot;
+  yaca_path_vector vector;
+  yaca_posix_metadata_state metadata;
+  char *path;
+  char *ancestor_path;
+  char *name;
+  int descriptor;
+} yaca_posix_fs_context;
+
+/* Release an initialized POSIX context without calling Lua during stack unwinding.
+ * @param resource void* Guard-owned yaca_posix_fs_context with zero or partial resource acquisition.
+ * @return void No value; every owned resource is released before the guard storage is collected.
+ */
+static void cleanup_posix_fs_context(void *resource);
+
+/* Create and arm a POSIX resource context before acquiring descriptors, paths or attribute buffers.
+ * @param L lua_State* State retaining the private guard at stack top.
+ * @param guard yaca_native_guard** Receives the guard for explicit normal/typed-failure cleanup.
+ * @return yaca_posix_fs_context* Zero-initialized context with descriptor=-1 and an active cleanup callback.
+ * @error Lua allocation errors propagate before any native resource is acquired.
+ * @ownership Lua owns the guard/context; acquired native fields are released explicitly or by its finalizer.
+ */
+static yaca_posix_fs_context *push_posix_fs_context(lua_State *L, yaca_native_guard **guard)
+{
+  yaca_posix_fs_context *context;
+  *guard = push_native_guard(L, sizeof(*context));
+  context = (yaca_posix_fs_context *)(*guard + 1);
+  context->descriptor = -1;
+  (*guard)->cleanup = cleanup_posix_fs_context;
+  return context;
+}
 
 /* @enum yaca_metadata_capture Distinguishes capture errors, unsupported metadata, and complete evidence.
  * @field YACA_METADATA_ERROR value Metadata retrieval failed.
@@ -6544,12 +6757,14 @@ static int push_posix_ancestor(
   return 1;
 }
 
-/* Pushes posix ancestors fields onto the Lua stack.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @param parent_path const_char* Canonical path of the selected parent directory.
- * @param code const_char** Stable native error code or Unicode code point.
- * @param message const_char** Diagnostic text for the reported native outcome.
- * @return int result 1 after pushing the complete verified ancestry; 0 on failure.
+/* Capture and project a complete physical POSIX ancestry into one Lua array.
+ * @param L lua_State* Receives the ancestry array above the caller's original stack.
+ * @param parent_path const_char* Borrowed canonical absolute parent-directory spelling.
+ * @param code const_char** Receives a stable allocation/stat/identity failure code.
+ * @param message const_char** Receives static failure text when ancestry cannot be completed.
+ * @return int One with the complete array, or zero after restoring the caller stack.
+ * @error Lua allocation failures propagate; the temporary path-prefix buffer remains finalizer-owned.
+ * @effect Reads ancestor metadata without changing directory entries or transferring path ownership.
  */
 static int push_posix_ancestors(
   lua_State *L,
@@ -6558,15 +6773,20 @@ static int push_posix_ancestors(
   const char **message)
 {
   struct stat information;
-  char *prefix;
+  yaca_native_guard *guard;
+  yaca_posix_fs_context *context;
+  int initial_top = lua_gettop(L);
   size_t length;
   size_t index;
   lua_Integer output_index = 1;
 
+  context = push_posix_fs_context(L, &guard);
   length = strlen(parent_path);
-  prefix = (char *)malloc(length + 1U);
-  if (prefix == NULL)
+  context->ancestor_path = (char *)malloc(length + 1U);
+  if (context->ancestor_path == NULL)
   {
+    close_native_guard(guard);
+    lua_settop(L, initial_top);
     direct_error(code, message, "Storage", "direct ancestry allocation failed");
     return 0;
   }
@@ -6574,7 +6794,8 @@ static int push_posix_ancestors(
   if (stat("/", &information) != 0
       || !push_posix_ancestor(L, "/", &information, output_index++))
   {
-    free(prefix);
+    close_native_guard(guard);
+    lua_settop(L, initial_top);
     direct_error(code, message, errno_code(errno), "direct root ancestry failed");
     return 0;
   }
@@ -6584,29 +6805,33 @@ static int push_posix_ancestors(
     {
       if (index == length || parent_path[index] == '/')
       {
-        memcpy(prefix, parent_path, index);
-        prefix[index] = '\0';
-        if (stat(prefix, &information) != 0
+        memcpy(context->ancestor_path, parent_path, index);
+        context->ancestor_path[index] = '\0';
+        if (stat(context->ancestor_path, &information) != 0
             || !S_ISDIR(information.st_mode)
-            || !push_posix_ancestor(L, prefix, &information, output_index++))
+            || !push_posix_ancestor(L, context->ancestor_path, &information, output_index++))
         {
-          free(prefix);
+          close_native_guard(guard);
+          lua_settop(L, initial_top);
           direct_error(code, message, errno_code(errno), "direct physical ancestry failed");
           return 0;
         }
       }
     }
   }
-  free(prefix);
+  close_native_guard(guard);
+  lua_remove(L, initial_top + 1);
   return 1;
 }
 
-/* Pushes posix metadata fields onto the Lua stack.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @param snapshot const_yaca_posix_snapshot* Pinned target snapshot owned by this operation.
- * @param code const_char** Stable native error code or Unicode code point.
- * @param message const_char** Diagnostic text for the reported native outcome.
- * @return int result 1 after pushing captured POSIX metadata; 0 on conversion failure.
+/* Project exact POSIX behavior metadata or supported link spelling using private guarded storage.
+ * @param L lua_State* Receives one copied metadata table on success.
+ * @param snapshot const_yaca_posix_snapshot* Borrowed pinned facts and paths; this helper does not release the snapshot.
+ * @param code const_char** Receives a stable capture/change/encoding/storage failure code.
+ * @param message const_char** Receives static diagnostic text on typed failure.
+ * @return int One with the metadata table, or zero with the caller stack restored.
+ * @error Lua allocations may raise; captured xattrs and temporary link strings remain guard-owned until collection.
+ * @effect Opens/closes a metadata descriptor, reads flags/xattrs/link data and releases all temporary native fields.
  */
 static int push_posix_metadata(
   lua_State *L,
@@ -6615,7 +6840,10 @@ static int push_posix_metadata(
   const char **message)
 {
   char behavior[96];
-  yaca_posix_metadata_state metadata;
+  yaca_native_guard *guard;
+  yaca_posix_fs_context *context;
+  yaca_posix_metadata_state *metadata;
+  int initial_top = lua_gettop(L);
   int capture = YACA_METADATA_UNSUPPORTED;
   int descriptor = -1;
 
@@ -6624,10 +6852,11 @@ static int push_posix_metadata(
     direct_error(code, message, "Storage", "direct link count exceeds Lua integer range");
     return 0;
   }
-  memset(&metadata, 0, sizeof(metadata));
-  metadata.mode = snapshot->target.st_mode & 07777;
-  metadata.uid = snapshot->target.st_uid;
-  metadata.gid = snapshot->target.st_gid;
+  context = push_posix_fs_context(L, &guard);
+  metadata = &context->metadata;
+  metadata->mode = snapshot->target.st_mode & 07777;
+  metadata->uid = snapshot->target.st_uid;
+  metadata->gid = snapshot->target.st_gid;
   if (S_ISREG(snapshot->target.st_mode) || S_ISDIR(snapshot->target.st_mode))
   {
     struct stat opened_information;
@@ -6644,17 +6873,20 @@ static int push_posix_metadata(
       {
         int error_value = errno == 0 ? EAGAIN : errno;
         close(descriptor);
+        close_native_guard(guard);
+        lua_settop(L, initial_top);
         direct_error(code, message, errno_code(error_value), "direct metadata target changed");
         return 0;
       }
       capture = capture_posix_metadata(
-        descriptor, &opened_information, &metadata);
+        descriptor, &opened_information, metadata);
       close(descriptor);
       descriptor = -1;
       if (capture == YACA_METADATA_ERROR)
       {
         int error_value = errno;
-        free_posix_metadata_state(&metadata);
+        close_native_guard(guard);
+        lua_settop(L, initial_top);
         direct_error(
           code,
           message,
@@ -6666,13 +6898,16 @@ static int push_posix_metadata(
     else if (errno != EACCES && errno != EPERM)
     {
       int error_value = errno;
+      close_native_guard(guard);
+      lua_settop(L, initial_top);
       direct_error(code, message, errno_code(error_value), "direct metadata open failed");
       return 0;
     }
   }
-  if (!posix_behavior_digest(&metadata, behavior))
+  if (!posix_behavior_digest(metadata, behavior))
   {
-    free_posix_metadata_state(&metadata);
+    close_native_guard(guard);
+    lua_settop(L, initial_top);
     direct_error(code, message, "Storage", "direct behavior metadata is unavailable");
     return 0;
   }
@@ -6692,14 +6927,14 @@ static int push_posix_metadata(
     size_t capacity;
     char *target;
     ssize_t count;
-    char *absolute;
 
     if (snapshot->target.st_size > 0)
     {
       if ((uintmax_t)snapshot->target.st_size
           >= (uintmax_t)YACA_LINK_TARGET_MAX_BYTES)
       {
-        free_posix_metadata_state(&metadata);
+        close_native_guard(guard);
+        lua_settop(L, initial_top);
         direct_error(code, message, "Storage", "direct link target exceeds its hard limit");
         return 0;
       }
@@ -6713,7 +6948,8 @@ static int push_posix_metadata(
 
     if (target == NULL)
     {
-      free_posix_metadata_state(&metadata);
+      close_native_guard(guard);
+      lua_settop(L, initial_top);
       direct_error(code, message, "Storage", "direct link target allocation failed");
       return 0;
     }
@@ -6721,40 +6957,44 @@ static int push_posix_metadata(
     if (count < 0 || (size_t)count >= capacity)
     {
       free(target);
-      free_posix_metadata_state(&metadata);
+      close_native_guard(guard);
+      lua_settop(L, initial_top);
       direct_error(code, message, "Storage", "direct link target is unavailable");
       return 0;
     }
     target[count] = '\0';
-    absolute = target[0] == '/'
+    context->path = target[0] == '/'
       ? strdup(target)
       : posix_join_path(snapshot->parent_path, target);
     free(target);
-    if (absolute == NULL)
+    if (context->path == NULL)
     {
-      free_posix_metadata_state(&metadata);
+      close_native_guard(guard);
+      lua_settop(L, initial_top);
       direct_error(code, message, "Storage", "direct link target allocation failed");
       return 0;
     }
-    lua_pushstring(L, absolute);
+    lua_pushstring(L, context->path);
     lua_setfield(L, -2, "link_target");
-    free(absolute);
   }
   else
   {
     lua_pushboolean(L, 0);
     lua_setfield(L, -2, "link_target");
   }
-  free_posix_metadata_state(&metadata);
+  close_native_guard(guard);
+  lua_remove(L, initial_top + 1);
   return 1;
 }
 
-/* Pushes posix direct snapshot fields onto the Lua stack.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @param requested_path const_char* Untrusted path supplied by the Lua caller.
- * @param code const_char** Stable native error code or Unicode code point.
- * @param message const_char** Diagnostic text for the reported native outcome.
- * @return int result 1 after pushing captured direct-path facts; 0 on failure.
+/* Project a POSIX snapshot, metadata and ancestry while all temporary native fields have Lua owners.
+ * @param L lua_State* Stack receives one complete snapshot table on success.
+ * @param requested_path const_char* Borrowed NUL-terminated absolute entry path admitted by the public port.
+ * @param code const_char** Receives a stable failure code when inspection or projection cannot complete.
+ * @param message const_char** Receives static diagnostic text on typed failure.
+ * @return int One with the copied snapshot at stack top; zero with the caller stack restored on typed failure.
+ * @error Lua allocation errors propagate; nested native-resource guards release their fields after unwinding.
+ * @ownership Native paths remain private to guards; no native allocation is transferred to the returned table.
  */
 static int push_posix_direct_snapshot(
   lua_State *L,
@@ -6762,32 +7002,38 @@ static int push_posix_direct_snapshot(
   const char **code,
   const char **message)
 {
-  yaca_posix_snapshot snapshot;
+  yaca_native_guard *guard;
+  yaca_posix_fs_context *context;
+  yaca_posix_snapshot *snapshot;
   yaca_identity identity;
   int initial_top = lua_gettop(L);
 
-  if (!inspect_posix_path(requested_path, &snapshot, code, message))
+  context = push_posix_fs_context(L, &guard);
+  snapshot = &context->snapshot;
+  if (!inspect_posix_path(requested_path, snapshot, code, message))
   {
+    close_native_guard(guard);
+    lua_settop(L, initial_top);
     return 0;
   }
   memset(&identity, 0, sizeof(identity));
   lua_createtable(L, 0, 8);
   lua_pushstring(L, requested_path);
   lua_setfield(L, -2, "requested_path");
-  lua_pushstring(L, snapshot.canonical_path);
+  lua_pushstring(L, snapshot->canonical_path);
   lua_setfield(L, -2, "canonical_path");
-  lua_pushboolean(L, snapshot.exists);
+  lua_pushboolean(L, snapshot->exists);
   lua_setfield(L, -2, "exists");
-  if (snapshot.exists)
+  if (snapshot->exists)
   {
-    if (!identity_from_stat(&snapshot.target, &identity))
+    if (!identity_from_stat(&snapshot->target, &identity))
     {
       direct_error(code, message, errno_code(errno), "direct target identity failed");
       goto fail;
     }
     push_identity(L, &identity);
     lua_setfield(L, -2, "identity");
-    if (!push_posix_metadata(L, &snapshot, code, message))
+    if (!push_posix_metadata(L, snapshot, code, message))
     {
       goto fail;
     }
@@ -6801,26 +7047,27 @@ static int push_posix_direct_snapshot(
     lua_setfield(L, -2, "metadata");
   }
   memset(&identity, 0, sizeof(identity));
-  if (!identity_from_stat(&snapshot.parent, &identity))
+  if (!identity_from_stat(&snapshot->parent, &identity))
   {
     direct_error(code, message, errno_code(errno), "direct parent identity failed");
     goto fail;
   }
   push_identity(L, &identity);
   lua_setfield(L, -2, "parent_identity");
-  if (!push_posix_ancestors(L, snapshot.parent_path, code, message))
+  if (!push_posix_ancestors(L, snapshot->parent_path, code, message))
   {
     goto fail;
   }
   lua_setfield(L, -2, "ancestors");
   lua_pushboolean(L, 1);
   lua_setfield(L, -2, "ancestry_complete");
-  free_posix_snapshot(&snapshot);
+  close_native_guard(guard);
+  lua_remove(L, initial_top + 1);
   return 1;
 
 fail:
+  close_native_guard(guard);
   lua_settop(L, initial_top);
-  free_posix_snapshot(&snapshot);
   return 0;
 }
 
@@ -6861,6 +7108,23 @@ static void free_path_vector(yaca_path_vector *vector)
   }
   free(vector->items);
   memset(vector, 0, sizeof(*vector));
+}
+
+/* Release all POSIX projection/walk fields and a temporary descriptor from one initialized context.
+ * @param resource void* Guard-owned yaca_posix_fs_context; empty and partially acquired fields are valid.
+ * @return void No result; context descriptors become invalid and owned buffers empty.
+ * @effect Closes only its owned descriptor and frees paths, vector entries, snapshots and attribute storage.
+ */
+static void cleanup_posix_fs_context(void *resource)
+{
+  yaca_posix_fs_context *context = (yaca_posix_fs_context *)resource;
+  if (context->descriptor >= 0) { close(context->descriptor); context->descriptor = -1; }
+  free(context->path); context->path = NULL;
+  free(context->ancestor_path); context->ancestor_path = NULL;
+  free(context->name); context->name = NULL;
+  free_path_vector(&context->vector);
+  free_posix_snapshot(&context->snapshot);
+  free_posix_metadata_state(&context->metadata);
 }
 
 /* Appends one path to the bounded POSIX walk vector.
@@ -7165,9 +7429,11 @@ static void digest_hex(const unsigned char digest[32], char output[65])
   output[64] = '\0';
 }
 
-/* Implements the Lua fs walk direct native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Enumerate and project a bounded directory view with private owners retained throughout Lua allocation.
+ * @param L lua_State* Arguments are absolute root, nonnegative depth, positive entry cap and git-compatible-v1 policy.
+ * @return int Two results: true and entries/generation/completeness, or false and a typed failure table.
+ * @error Wrong argument types and Lua allocation errors raise; active snapshot/vector/path guards finalize after unwinding.
+ * @effect Reads directory entries and metadata; releases owned native resources before any normal return.
  */
 static int l_fs_walk_direct(lua_State *L)
 {
@@ -7177,8 +7443,11 @@ static int l_fs_walk_direct(lua_State *L)
   size_t policy_length;
   lua_Integer depth;
   lua_Integer maximum;
-  yaca_posix_snapshot root_snapshot;
-  yaca_path_vector vector;
+  yaca_native_guard *guard;
+  yaca_posix_fs_context *context;
+  yaca_posix_snapshot *root_snapshot;
+  yaca_path_vector *vector;
+  int guard_index;
   const char *code = "Storage";
   const char *message = "direct walk failed";
   size_t index;
@@ -7201,65 +7470,69 @@ static int l_fs_walk_direct(lua_State *L)
     return push_failure(L, "InvalidWalk", "direct walk bounds or policy are invalid");
   }
   (void)root_length;
-  if (!inspect_posix_path(root, &root_snapshot, &code, &message))
+  context = push_posix_fs_context(L, &guard);
+  guard_index = lua_gettop(L);
+  root_snapshot = &context->snapshot;
+  vector = &context->vector;
+  if (!inspect_posix_path(root, root_snapshot, &code, &message))
   {
+    close_native_guard(guard);
+    lua_settop(L, guard_index - 1);
     return push_failure(L, code, message);
   }
-  if (!root_snapshot.exists || !S_ISDIR(root_snapshot.target.st_mode))
+  if (!root_snapshot->exists || !S_ISDIR(root_snapshot->target.st_mode))
   {
-    free_posix_snapshot(&root_snapshot);
+    close_native_guard(guard);
+    lua_settop(L, guard_index - 1);
     return push_failure(L, "InvalidTargetType", "direct walk root must be a directory");
   }
-  memset(&vector, 0, sizeof(vector));
-  vector.maximum = (size_t)maximum;
+  vector->maximum = (size_t)maximum;
   if (!walk_posix_directory(
-      root_snapshot.canonical_path,
+      root_snapshot->canonical_path,
       "",
       1,
       depth + 1,
-      &vector,
+      vector,
       &code,
       &message))
   {
-    free_posix_snapshot(&root_snapshot);
-    free_path_vector(&vector);
+    close_native_guard(guard);
+    lua_settop(L, guard_index - 1);
     return push_failure(L, code, message);
   }
-  if (vector.count > 1U)
+  if (vector->count > 1U)
   {
-    qsort(vector.items, vector.count, sizeof(char *), compare_paths);
+    qsort(vector->items, vector->count, sizeof(char *), compare_paths);
   }
   sha256_initialize(&hash);
   lua_createtable(L, 0, 4);
-  lua_createtable(L, (int)(vector.count > (size_t)INT_MAX ? INT_MAX : vector.count), 0);
-  for (index = 0U; index < vector.count; ++index)
+  lua_createtable(L, (int)(vector->count > (size_t)INT_MAX ? INT_MAX : vector->count), 0);
+  for (index = 0U; index < vector->count; ++index)
   {
-    char *full_path = posix_join_path(root_snapshot.canonical_path, vector.items[index]);
+    context->path = posix_join_path(root_snapshot->canonical_path, vector->items[index]);
     struct stat information;
-    if (full_path == NULL
-        || lstat(full_path, &information) != 0
-        || !append_walk_generation(&hash, vector.items[index], &information))
+    if (context->path == NULL
+        || lstat(context->path, &information) != 0
+        || !append_walk_generation(&hash, vector->items[index], &information))
     {
-      free(full_path);
+      free(context->path); context->path = NULL;
+      close_native_guard(guard);
       lua_settop(L, 0);
-      free_posix_snapshot(&root_snapshot);
-      free_path_vector(&vector);
       return push_failure(L, "TargetChanged", "direct walk entry changed during inspection");
     }
     lua_createtable(L, 0, 2);
-    lua_pushstring(L, vector.items[index]);
+    lua_pushstring(L, vector->items[index]);
     lua_setfield(L, -2, "relative_path");
-    if (!push_posix_direct_snapshot(L, full_path, &code, &message))
+    if (!push_posix_direct_snapshot(L, context->path, &code, &message))
     {
-      free(full_path);
+      free(context->path); context->path = NULL;
+      close_native_guard(guard);
       lua_settop(L, 0);
-      free_posix_snapshot(&root_snapshot);
-      free_path_vector(&vector);
       return push_failure(L, code, message);
     }
     lua_setfield(L, -2, "snapshot");
     lua_seti(L, -2, (lua_Integer)index + 1);
-    free(full_path);
+    free(context->path); context->path = NULL;
   }
   lua_setfield(L, -2, "entries");
   sha256_finalize(&hash, digest);
@@ -7267,13 +7540,13 @@ static int l_fs_walk_direct(lua_State *L)
   digest_hex(digest, generation + 8U);
   lua_pushstring(L, generation);
   lua_setfield(L, -2, "generation");
-  lua_pushboolean(L, !vector.truncated && !vector.conservative_ignore);
+  lua_pushboolean(L, !vector->truncated && !vector->conservative_ignore);
   lua_setfield(L, -2, "complete");
-  if (vector.truncated)
+  if (vector->truncated)
   {
     lua_pushstring(L, "entry-limit");
   }
-  else if (vector.conservative_ignore)
+  else if (vector->conservative_ignore)
   {
     lua_pushstring(L, "git-ignore-policy-conservative");
   }
@@ -7282,8 +7555,8 @@ static int l_fs_walk_direct(lua_State *L)
     lua_pushboolean(L, 0);
   }
   lua_setfield(L, -2, "partial_reason");
-  free_posix_snapshot(&root_snapshot);
-  free_path_vector(&vector);
+  close_native_guard(guard);
+  lua_remove(L, guard_index);
   return return_success(L);
 }
 
@@ -7360,11 +7633,12 @@ static int stat_at_matches_lua(
     && identity_matches_lua(L, index, &identity);
 }
 
-/* Implements the Lua fs open read verified native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
- * @ownership The userdata owner is created before the verified descriptor is opened,
- *   so a Lua allocation failure can never strand the descriptor outside Lua ownership.
+/* Open an existing regular file only while its exact expected identity remains valid.
+ * @param L lua_State* Arguments 1/2 are an admitted absolute path and caller-owned expected identity table.
+ * @return int Two results: true and the read-only file userdata, or false and a typed validation/open failure.
+ * @error Wrong argument types, expected-identity getters and Lua allocations may raise.
+ * @ownership A file userdata or private snapshot guard owns every acquired handle before a caller getter can raise.
+ * @effect Opens the selected file, validates its identity and returns a file owner positioned at byte zero.
  */
 static int l_fs_open_read_verified(lua_State *L)
 {
@@ -7395,35 +7669,36 @@ static int l_fs_open_read_verified(lua_State *L)
     lua_pop(L, 1);
     return push_failure(L, errno_code(error_value), "direct read open failed");
   }
+  file->descriptor = descriptor;
   memset(&identity, 0, sizeof(identity));
   if (fstat(descriptor, &information) != 0
       || !S_ISREG(information.st_mode)
       || !identity_from_stat(&information, &identity)
       || !identity_matches_lua(L, 2, &identity))
   {
-    close(descriptor);
+    close_file(file);
     lua_pop(L, 1);
     return push_failure(L, "TargetChanged", "direct read target changed");
   }
-  file->descriptor = descriptor;
   return return_success(L);
 }
 
-/* Implements the Lua fs create new verified native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
- * @ownership The userdata owner is created before the verified file is created,
- *   so a Lua allocation failure can never strand the created descriptor outside Lua ownership.
+/* Exclusively create an absent file after verifying its admitted physical parent object.
+ * @param L lua_State* Arguments 1/2/3 are absolute child path, caller-owned parent identity and integer permissions 0..0777.
+ * @return int Two results: true and the new read/write file owner, or false and a typed parent/existence/create failure.
+ * @error Wrong argument types, parent-identity getters and Lua allocations may raise.
+ * @ownership Private guards retain parent/path resources; the file userdata owns a created native handle before result allocation.
+ * @effect Creates only the absent selected child; failed identity getters do not create an entry.
  */
 static int l_fs_create_new_verified(lua_State *L)
 {
   const char *path;
   size_t length;
   lua_Integer permissions;
-  int parent_descriptor = -1;
+  yaca_native_guard *guard;
+  yaca_posix_fs_context *context;
+  int guard_index;
   int descriptor;
-  char *parent = NULL;
-  char *name = NULL;
   const char *code = "Storage";
   const char *message = "direct create failed";
   yaca_file *file;
@@ -7442,37 +7717,38 @@ static int l_fs_create_new_verified(lua_State *L)
   /* Allocate the Lua owner before creating; a Lua allocation failure must
   ** never strand the created descriptor outside the userdata. */
   file = push_file(L);
+  context = push_posix_fs_context(L, &guard);
+  guard_index = lua_gettop(L);
   if (!open_posix_parent(
-      path, &parent_descriptor, &parent, &name, &code, &message))
+      path, &context->descriptor, &context->ancestor_path, &context->name, &code, &message))
   {
+    close_native_guard(guard);
+    lua_remove(L, guard_index);
     lua_pop(L, 1);
     return push_failure(L, code, message);
   }
-  if (!descriptor_matches_lua(L, 2, parent_descriptor))
+  if (!descriptor_matches_lua(L, 2, context->descriptor))
   {
-    close(parent_descriptor);
-    free(parent);
-    free(name);
+    close_native_guard(guard);
+    lua_remove(L, guard_index);
     lua_pop(L, 1);
     return push_failure(L, "TargetChanged", "direct create parent changed");
   }
   descriptor = openat(
-    parent_descriptor,
-    name,
+    context->descriptor,
+    context->name,
     O_CREAT | O_EXCL | O_RDWR | O_NOFOLLOW | O_CLOEXEC,
     (mode_t)permissions);
   if (descriptor < 0)
   {
     int error_value = errno;
-    close(parent_descriptor);
-    free(parent);
-    free(name);
+    close_native_guard(guard);
+    lua_remove(L, guard_index);
     lua_pop(L, 1);
     return push_failure(L, errno_code(error_value), "direct create failed");
   }
-  close(parent_descriptor);
-  free(parent);
-  free(name);
+  close_native_guard(guard);
+  lua_remove(L, guard_index);
   file->descriptor = descriptor;
   return return_success(L);
 }
