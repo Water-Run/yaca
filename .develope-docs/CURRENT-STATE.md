@@ -21,6 +21,15 @@ Linux、Server 2008 Win32、Windows 11 Win64 的生产函数故障探针均为�
 [R78 Review](CODE-REVIEW-2026-10-06.md)与[字节绑定](native-review/R78.json)。
 R78 修复与证据已收口，尚未装入候选单文件，正式资格仍待完成。
 
+R78 已提交推送为 `7b616ad`。续推完成 **R79 删除/替换/改名验证资源修复**：
+身份 getter 期间由私有守卫持有资源，正常验证后仍走原有发布和回滚路径。
+Linux / Server 2008 Win32 / Windows 11 Win64 基线累计泄漏分别为 458 / 1156 / 1536，
+修复后三平台均为零泄漏、零所有权错误；每个实际 getter 字段的异常均未修改夹具，
+同状态两轮真实恢复通过。三平台 R78 回归通过，两 Windows 的 R77 回归各 20/20。
+完整 suite 706/706、coding readiness PASS；R79 证据见
+[Review](CODE-REVIEW-2026-10-06.md#r79-删除替换改名的验证资源所有权)与
+[字节绑定](native-review/R79.json)。已发布候选尚不包含这些原生修复。
+
 本节点已修复 R75：OpenAI 工具流后续 ID/name/arguments 的显式 null 表示不更新，
 首片身份和后续非 null 身份变化仍严格校验；R76：压缩取消的日志写入失败后，仍使用
 原句柄清理 Model，返回结构化失败，不再访问已清空的 active。
@@ -122,13 +131,14 @@ CentOS 7 x86_64；未实测的面如实保留。
 本轮 compact 状态机已通读并修复 R76，原生 Windows 目录/链接与发布准入面继续到
 约 4400 行并修复 R77。R78 完成 snapshot/metadata 投影、walk、verified open/create
 跨 Lua 分配异常和 getter 异常的资源所有权复核与三平台故障取证。
-尚余原生删除/替换/改名的异常边界、后续原生接口、main 交互内部和测试辅助代码。
+R79 完成删除/替换/改名验证跨 getter/分配异常的资源复核与三平台故障取证；
+尚余后续原生进程/终端接口、main 交互内部和测试辅助代码。
 本轮新增校验、PTY 生命周期、临时目录所有权及回归逐项核对。
 
 C32/C33/C34 的剩余项完成并形成精确字节证据后，才评审 Gate R。
 执行顺序、依赖与退出条件见 [TRACKING.md](TRACKING.md)。
 
-R78 源码全量 coding readiness PASS：注释结构 **242 文件 / 5454 声明 / 0 缺项**，
+R79 源码全量 coding readiness PASS：注释结构 **244 文件 / 5476 声明 / 0 缺项**，
 检查器反例 15/15；装配/审计/旅程/快照/审批/staging/Windows 证据回归均通过，
 四校验器及全部 TP/RP 通过。人工语义 Review 保留面仍未完成。
 

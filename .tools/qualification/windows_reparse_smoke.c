@@ -1,6 +1,6 @@
 /*
 Author: WaterRun
-Date: 2026-10-05
+Date: 2026-10-06
 File: windows_reparse_smoke.c
 Description: Exercises the production Windows reparse decoder with substituted kernel buffers and an optional isolated real junction whose display and actual targets differ.
 */
@@ -178,12 +178,13 @@ static void probe_synthetic(void)
 /* Create one uniquely owned real junction, compare decoded and kernel-followed targets, then remove it.
  * @param root const_char* Existing caller-owned ASCII/UTF-8 scratch directory on a Windows filesystem.
  * @return void No result; adds one case and removes the completed fixture after either decoder outcome.
- * @effect Creates only a reserved unique child under root, two directories and one junction; queries handles and cleans them.
+ * @effect Normalizes the root before composing an NT target; creates only a reserved unique child, two directories and one junction, then queries handles and cleans them.
  * @error Aborts for unusable scratch paths, failed fixture setup or incomplete cleanup; an incomplete owned fixture remains for investigation.
  */
 static void probe_real_junction(const char *root)
 {
   WCHAR *wide_root = utf8_to_wide(root, strlen(root));
+  WCHAR *normalized_root = wide_root == NULL ? NULL : windows_full_path(wide_root);
   WCHAR owned[MAX_PATH];
   WCHAR actual[MAX_PATH];
   WCHAR display[MAX_PATH];
@@ -198,6 +199,8 @@ static void probe_real_junction(const char *root)
   char *expected;
   DWORD returned;
   int matches;
+  free(wide_root);
+  wide_root = normalized_root;
   if (wide_root == NULL || GetTempFileNameW(wide_root, L"yrp", 0U, owned) == 0U) abort();
   free(wide_root);
   if (wcslen(owned) + 16U >= MAX_PATH || !DeleteFileW(owned) || !CreateDirectoryW(owned, NULL)) abort();

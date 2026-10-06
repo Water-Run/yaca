@@ -1,6 +1,6 @@
 /*
 Author: WaterRun
-Date: 2026-10-05
+Date: 2026-10-06
 File: yaca_native.c
 Description: Portable narrow native ports for filesystem, process, terminal, system identity, clocks, text code pages, and SHA-256.
 */
@@ -404,6 +404,94 @@ static yaca_native_guard *push_native_guard(lua_State *L, size_t context_bytes)
   lua_remove(L, -2);
   return guard;
 }
+
+/* Transfer guarded validation resources back to the caller's native cleanup path.
+ * @param L lua_State* State retaining the live private owner at guard_index.
+ * @param guard_index int Positive stack index of the validation owner, above the original arguments.
+ * @param guard yaca_native_guard* Owner whose copied resource fields remain valid in caller native locals.
+ * @return void No value; removes only the private owner and releases no native resource.
+ * @ownership Clears finalization before caller cleanup; the native locals resume sole ownership of their resources.
+ * @effect Removes one Lua stack value without allocating or invoking caller Lua code.
+ */
+static void disarm_native_guard(lua_State *L, int guard_index, yaca_native_guard *guard)
+{
+  guard->cleanup = NULL;
+  lua_remove(L, guard_index);
+}
+
+#if defined(_WIN32)
+/* @struct yaca_windows_basic_validation_context Owns a basic-delete path and handle while identity getters may raise.
+ * @field path WCHAR* Owned converted path while armed; transferred back to C cleanup after validation.
+ * @field handle HANDLE Owned identity handle while armed; invalid before acquisition and after exception cleanup.
+ */
+typedef struct yaca_windows_basic_validation_context
+{
+  WCHAR *path;
+  HANDLE handle;
+} yaca_windows_basic_validation_context;
+
+/* Release a basic Windows delete validation after exceptional Lua unwinding.
+ * @param resource void* Initialized validation context retaining copies of the path and identity handle.
+ * @return void No result; resets both resource fields after release.
+ * @effect Closes a valid owned handle and frees the converted path without calling Lua.
+ */
+static void cleanup_windows_basic_validation_context(void *resource)
+{
+  yaca_windows_basic_validation_context *context = (yaca_windows_basic_validation_context *)resource;
+  if (context->handle != NULL && context->handle != INVALID_HANDLE_VALUE)
+    CloseHandle(context->handle);
+  context->handle = INVALID_HANDLE_VALUE;
+  free(context->path); context->path = NULL;
+}
+#else
+/* @struct yaca_posix_validation_context Owns admitted paths and descriptors while publication identity getters may raise.
+ * @field descriptors int[3] Parent/candidate/target or two parent descriptors; unused slots are -1.
+ * @field paths char*[4] Independently allocated parent/basename strings; unused slots are NULL.
+ */
+typedef struct yaca_posix_validation_context
+{
+  int descriptors[3];
+  char *paths[4];
+} yaca_posix_validation_context;
+
+/* Release copied POSIX publication validation resources after Lua unwinding.
+ * @param resource void* Context whose paths and descriptors were transferred to this owner before a getter.
+ * @return void No result; every owned slot becomes empty or invalid.
+ * @effect Closes each admitted descriptor and frees each independent path without calling Lua.
+ */
+static void cleanup_posix_validation_context(void *resource)
+{
+  yaca_posix_validation_context *context = (yaca_posix_validation_context *)resource;
+  size_t index;
+  for (index = 0U; index < sizeof(context->descriptors) / sizeof(context->descriptors[0]); ++index)
+  {
+    if (context->descriptors[index] >= 0) close(context->descriptors[index]);
+    context->descriptors[index] = -1;
+  }
+  for (index = 0U; index < sizeof(context->paths) / sizeof(context->paths[0]); ++index)
+  {
+    free(context->paths[index]); context->paths[index] = NULL;
+  }
+}
+
+/* Allocate an unarmed validation owner before any POSIX publication resource is acquired.
+ * @param L lua_State* State retaining the new private owner at stack top.
+ * @param guard yaca_native_guard** Receives the owner to arm before getters and disarm before native cleanup.
+ * @return yaca_posix_validation_context* Empty context with all descriptor slots initialized to -1.
+ * @error Lua allocation errors propagate before resource acquisition.
+ * @ownership Caller transfers native locals into the context before arming its cleanup callback.
+ */
+static yaca_posix_validation_context *push_posix_validation_context(lua_State *L, yaca_native_guard **guard)
+{
+  yaca_posix_validation_context *context;
+  size_t index;
+  *guard = push_native_guard(L, sizeof(*context));
+  context = (yaca_posix_validation_context *)(*guard + 1);
+  for (index = 0U; index < sizeof(context->descriptors) / sizeof(context->descriptors[0]); ++index)
+    context->descriptors[index] = -1;
+  return context;
+}
+#endif
 
 /* Declares initialization of one incremental SHA-256 context.
  * @param context yaca_sha256* Hash state reset for a new digest.
@@ -2456,9 +2544,12 @@ static int l_fs_rename_no_replace(lua_State *L)
   return push_true_result(L);
 }
 
-/* Implements the Lua fs delete verified native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Delete a file or empty directory after its expected identity is validated.
+ * @param L lua_State* Arguments 1/2 are a nonempty NUL-free path and caller-owned expected identity table.
+ * @return int Two results: true,true after deletion, or false and a typed path/identity/storage failure.
+ * @error Invalid argument types, expected-identity getters and Lua allocations may raise.
+ * @ownership Windows validation resources have a private Lua owner while getters run; normal validation transfers them back to native cleanup.
+ * @effect Removes the validated entry; a result-allocation error does not undo completed deletion.
  */
 static int l_fs_delete_verified(lua_State *L)
 {
@@ -2484,7 +2575,14 @@ static int l_fs_delete_verified(lua_State *L)
     HANDLE handle;
     DWORD error_value;
     int is_directory;
+    yaca_native_guard *guard;
+    yaca_windows_basic_validation_context *validation;
+    int guard_index;
+    int bindings_match;
 
+    guard = push_native_guard(L, sizeof(*validation));
+    validation = (yaca_windows_basic_validation_context *)(guard + 1);
+    guard_index = lua_gettop(L);
     wide_path = utf8_to_wide(path, length);
     if (wide_path == NULL)
     {
@@ -2504,7 +2602,12 @@ static int l_fs_delete_verified(lua_State *L)
       free(wide_path);
       return push_windows_failure(L, error_value, "cannot identify delete target");
     }
-    if (!identity_matches_lua(L, 2, &identity))
+    validation->path = wide_path;
+    validation->handle = handle;
+    guard->cleanup = cleanup_windows_basic_validation_context;
+    bindings_match = identity_matches_lua(L, 2, &identity);
+    disarm_native_guard(L, guard_index, guard);
+    if (!bindings_match)
     {
       CloseHandle(handle);
       free(wide_path);
@@ -3335,6 +3438,28 @@ static void free_windows_snapshot(yaca_windows_snapshot *snapshot)
   memset(snapshot, 0, sizeof(*snapshot));
   snapshot->target_handle = INVALID_HANDLE_VALUE;
   snapshot->parent_handle = INVALID_HANDLE_VALUE;
+}
+
+/* @struct yaca_windows_validation_context Owns the two admitted snapshots while publication identity getters may raise.
+ * @field first yaca_windows_snapshot Source/temporary/target facts and all associated native allocations and handles.
+ * @field second yaca_windows_snapshot Optional destination/target facts; a zero-initialized unused snapshot is valid.
+ */
+typedef struct yaca_windows_validation_context
+{
+  yaca_windows_snapshot first;
+  yaca_windows_snapshot second;
+} yaca_windows_validation_context;
+
+/* Release admitted Windows snapshots after an exceptional publication validation.
+ * @param resource void* Private context armed only after snapshot resources have been copied into it.
+ * @return void No result; both snapshots become empty with invalid handles.
+ * @effect Frees paths/metadata/ancestors and closes their handles without invoking Lua.
+ */
+static void cleanup_windows_validation_context(void *resource)
+{
+  yaca_windows_validation_context *context = (yaca_windows_validation_context *)resource;
+  free_windows_snapshot(&context->first);
+  free_windows_snapshot(&context->second);
 }
 
 /* Closes the windows snapshot handles native owner.
@@ -4629,9 +4754,12 @@ done:
   return equal;
 }
 
-/* Implements the Lua fs replace verified native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Replace an existing regular file while preserving its admitted behavior metadata.
+ * @param L lua_State* Arguments are temporary/target paths, their identity tables, target parent identity and exact behavior digest.
+ * @return int Two results: true and published identity, or false and a typed failure including Unknown outcome.
+ * @error Invalid argument types, expected-identity getters and Lua allocations may raise.
+ * @ownership A private validation owner retains copied resources while getters run; original native cleanup resumes ownership before result allocation.
+ * @effect Publishes the candidate and verifies postconditions; native recovery follows raced publication and result-allocation errors do not undo completion.
  */
 static int l_fs_replace_verified(lua_State *L)
 {
@@ -4659,6 +4787,10 @@ static int l_fs_replace_verified(lua_State *L)
   char behavior[96];
   DWORD error_value;
   int rollback_succeeded = 0;
+  yaca_native_guard *guard;
+  yaca_windows_validation_context *validation;
+  int guard_index;
+  int bindings_match;
 
   memset(&temporary, 0, sizeof(temporary));
   memset(&target, 0, sizeof(target));
@@ -4693,6 +4825,9 @@ static int l_fs_replace_verified(lua_State *L)
   {
     return 2;
   }
+  guard = push_native_guard(L, sizeof(*validation));
+  validation = (yaca_windows_validation_context *)(guard + 1);
+  guard_index = lua_gettop(L);
   if (!inspect_windows_path(
       temporary_path,
       temporary_length,
@@ -4708,9 +4843,14 @@ static int l_fs_replace_verified(lua_State *L)
   {
     goto failed;
   }
-  if (!windows_snapshot_matches_lua(L, 3, &temporary)
-      || !windows_snapshot_matches_lua(L, 4, &target)
-      || !windows_parent_matches_lua(L, 5, target.parent_handle)
+  validation->first = temporary;
+  validation->second = target;
+  guard->cleanup = cleanup_windows_validation_context;
+  bindings_match = windows_snapshot_matches_lua(L, 3, &temporary)
+    && windows_snapshot_matches_lua(L, 4, &target)
+    && windows_parent_matches_lua(L, 5, target.parent_handle);
+  disarm_native_guard(L, guard_index, guard);
+  if (!bindings_match
       || !windows_same_object(
         &temporary.parent_information,
         &target.parent_information)
@@ -5004,9 +5144,12 @@ failed:
   return push_failure(L, code, message);
 }
 
-/* Implements the Lua fs rename no replace verified native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Move a regular file or directory only into an absent destination with admitted parent identities.
+ * @param L lua_State* Arguments are source/destination paths, source identity and both parent identity tables.
+ * @return int Two results: true and moved identity, or false and a typed failure including Unknown outcome.
+ * @error Invalid argument types, expected-identity getters and Lua allocations may raise.
+ * @ownership A private validation owner retains copied resources while getters run; original native cleanup resumes ownership before result allocation.
+ * @effect Moves the source without overwriting an existing destination, verifies postconditions and performs native race recovery when available.
  */
 static int l_fs_rename_no_replace_verified(lua_State *L)
 {
@@ -5025,6 +5168,10 @@ static int l_fs_rename_no_replace_verified(lua_State *L)
   HANDLE source_pin = INVALID_HANDLE_VALUE;
   HANDLE rollback_pin = INVALID_HANDLE_VALUE;
   yaca_identity published_identity;
+  yaca_native_guard *guard;
+  yaca_windows_validation_context *validation;
+  int guard_index;
+  int bindings_match;
 
   memset(&source, 0, sizeof(source));
   memset(&target, 0, sizeof(target));
@@ -5050,6 +5197,9 @@ static int l_fs_rename_no_replace_verified(lua_State *L)
   luaL_checktype(L, 3, LUA_TTABLE);
   luaL_checktype(L, 4, LUA_TTABLE);
   luaL_checktype(L, 5, LUA_TTABLE);
+  guard = push_native_guard(L, sizeof(*validation));
+  validation = (yaca_windows_validation_context *)(guard + 1);
+  guard_index = lua_gettop(L);
   if (!inspect_windows_path(
       source_path,
       source_length,
@@ -5065,9 +5215,14 @@ static int l_fs_rename_no_replace_verified(lua_State *L)
   {
     goto failed;
   }
-  if (!windows_snapshot_matches_lua(L, 3, &source)
-      || !windows_parent_matches_lua(L, 4, source.parent_handle)
-      || !windows_parent_matches_lua(L, 5, target.parent_handle)
+  validation->first = source;
+  validation->second = target;
+  guard->cleanup = cleanup_windows_validation_context;
+  bindings_match = windows_snapshot_matches_lua(L, 3, &source)
+    && windows_parent_matches_lua(L, 4, source.parent_handle)
+    && windows_parent_matches_lua(L, 5, target.parent_handle);
+  disarm_native_guard(L, guard_index, guard);
+  if (!bindings_match
       || target.exists
       || source.reparse
       || ((source.target_information.dwFileAttributes
@@ -5197,9 +5352,12 @@ static WCHAR *windows_delete_recovery_path(const WCHAR *path)
   return result;
 }
 
-/* Implements the Lua fs delete direct verified native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Delete an admitted regular file or empty directory through verified isolation and postconditions.
+ * @param L lua_State* Arguments are target path, expected target identity and expected parent identity table.
+ * @return int Two results: true,true after deletion, or false and a typed failure including Unknown outcome.
+ * @error Invalid argument types, expected-identity getters and Lua allocations may raise.
+ * @ownership A private validation owner retains copied resources while getters run; original native cleanup resumes ownership before result allocation.
+ * @effect Isolates the entry under its recovery name before deletion and performs native race recovery when available.
  */
 static int l_fs_delete_direct_verified(lua_State *L)
 {
@@ -5216,6 +5374,10 @@ static int l_fs_delete_direct_verified(lua_State *L)
   int rollback_succeeded = 0;
   HANDLE target_pin = INVALID_HANDLE_VALUE;
   HANDLE rollback_pin = INVALID_HANDLE_VALUE;
+  yaca_native_guard *guard;
+  yaca_windows_validation_context *validation;
+  int guard_index;
+  int bindings_match;
 
   memset(&target, 0, sizeof(target));
   memset(&moved, 0, sizeof(moved));
@@ -5229,13 +5391,19 @@ static int l_fs_delete_direct_verified(lua_State *L)
   }
   luaL_checktype(L, 2, LUA_TTABLE);
   luaL_checktype(L, 3, LUA_TTABLE);
+  guard = push_native_guard(L, sizeof(*validation));
+  validation = (yaca_windows_validation_context *)(guard + 1);
+  guard_index = lua_gettop(L);
   if (!inspect_windows_path(path, length, &target, &code, &message))
   {
     goto failed;
   }
-  if (!windows_snapshot_matches_lua(L, 2, &target)
-      || !windows_parent_matches_lua(L, 3, target.parent_handle)
-      || target.reparse)
+  validation->first = target;
+  guard->cleanup = cleanup_windows_validation_context;
+  bindings_match = windows_snapshot_matches_lua(L, 2, &target)
+    && windows_parent_matches_lua(L, 3, target.parent_handle);
+  disarm_native_guard(L, guard_index, guard);
+  if (!bindings_match || target.reparse)
   {
     code = "TargetChanged";
     message = "direct Windows delete binding changed";
@@ -7873,9 +8041,12 @@ static char *posix_delete_recovery_name(const char *name)
   return result;
 }
 
-/* Implements the Lua fs replace verified native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Replace an existing regular file while preserving its admitted behavior metadata.
+ * @param L lua_State* Arguments are temporary/target paths, their identity tables, target parent identity and exact behavior digest.
+ * @return int Two results: true and published identity, or false and a typed failure including Unknown outcome.
+ * @error Invalid argument types, expected-identity getters and Lua allocations may raise.
+ * @ownership A private validation owner retains copied resources while getters run; original native cleanup resumes ownership before result allocation.
+ * @effect Publishes the candidate and verifies postconditions; native recovery follows raced publication and result-allocation errors do not undo completion.
  */
 static int l_fs_replace_verified(lua_State *L)
 {
@@ -7910,6 +8081,9 @@ static int l_fs_replace_verified(lua_State *L)
   int displaced_observed = 0;
   int published_observed = 0;
   int result = 0;
+  yaca_native_guard *guard;
+  yaca_posix_validation_context *validation;
+  int guard_index;
 
 /* Records a typed replace failure and enters the common cleanup path.
  * @param next_code const_char* Stable code assigned to the failure response.
@@ -7955,6 +8129,8 @@ static int l_fs_replace_verified(lua_State *L)
   }
   (void)temporary_length;
   (void)target_length;
+  validation = push_posix_validation_context(L, &guard);
+  guard_index = lua_gettop(L);
   if (!posix_parent_and_name(
       temporary_path, &temporary_parent, &temporary_name, &code, &message)
       || !posix_parent_and_name(
@@ -7969,6 +8145,12 @@ static int l_fs_replace_verified(lua_State *L)
       "direct replacement must stay in one directory");
   }
   parent_descriptor = open(target_parent, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  validation->paths[0] = temporary_parent;
+  validation->paths[1] = temporary_name;
+  validation->paths[2] = target_parent;
+  validation->paths[3] = target_name;
+  validation->descriptors[0] = parent_descriptor;
+  guard->cleanup = cleanup_posix_validation_context;
   if (parent_descriptor < 0 || !descriptor_matches_lua(L, 5, parent_descriptor))
   {
     REPLACE_FAIL("TargetChanged", "direct replacement parent changed");
@@ -7977,6 +8159,8 @@ static int l_fs_replace_verified(lua_State *L)
     parent_descriptor, temporary_name, O_RDWR | O_NOFOLLOW | O_CLOEXEC);
   target_descriptor = openat(
     parent_descriptor, target_name, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+  validation->descriptors[1] = temporary_descriptor;
+  validation->descriptors[2] = target_descriptor;
   if (temporary_descriptor < 0 || target_descriptor < 0
       || fstat(temporary_descriptor, &temporary_information) != 0
       || fstat(target_descriptor, &target_information) != 0
@@ -8176,6 +8360,7 @@ static int l_fs_replace_verified(lua_State *L)
   result = 1;
 
 cleanup:
+  disarm_native_guard(L, guard_index, guard);
   free_posix_metadata_state(&target_metadata);
   free_posix_metadata_state(&check_metadata);
   free_posix_metadata_state(&temporary_metadata);
@@ -8192,9 +8377,12 @@ cleanup:
   return return_success(L);
 }
 
-/* Implements the Lua fs rename no replace verified native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Move a regular file or directory only into an absent destination with admitted parent identities.
+ * @param L lua_State* Arguments are source/destination paths, source identity and both parent identity tables.
+ * @return int Two results: true and moved identity, or false and a typed failure including Unknown outcome.
+ * @error Invalid argument types, expected-identity getters and Lua allocations may raise.
+ * @ownership A private validation owner retains copied resources while getters run; original native cleanup resumes ownership before result allocation.
+ * @effect Moves the source without overwriting an existing destination, verifies postconditions and performs native race recovery when available.
  */
 static int l_fs_rename_no_replace_verified(lua_State *L)
 {
@@ -8221,6 +8409,9 @@ static int l_fs_rename_no_replace_verified(lua_State *L)
   int target_observed;
   int source_absent;
   int result = 0;
+  yaca_native_guard *guard;
+  yaca_posix_validation_context *validation;
+  int guard_index;
 
 /* Records a typed rename failure and enters the common cleanup path.
  * @param next_code const_char* Stable code assigned to the failure response.
@@ -8248,6 +8439,8 @@ static int l_fs_rename_no_replace_verified(lua_State *L)
   luaL_checktype(L, 5, LUA_TTABLE);
   (void)source_length;
   (void)target_length;
+  validation = push_posix_validation_context(L, &guard);
+  guard_index = lua_gettop(L);
   if (!posix_parent_and_name(
       source_path, &source_parent, &source_name, &code, &message)
       || !posix_parent_and_name(
@@ -8257,6 +8450,13 @@ static int l_fs_rename_no_replace_verified(lua_State *L)
   }
   source_parent_descriptor = open(source_parent, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
   target_parent_descriptor = open(target_parent, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  validation->paths[0] = source_parent;
+  validation->paths[1] = source_name;
+  validation->paths[2] = target_parent;
+  validation->paths[3] = target_name;
+  validation->descriptors[0] = source_parent_descriptor;
+  validation->descriptors[1] = target_parent_descriptor;
+  guard->cleanup = cleanup_posix_validation_context;
   if (source_parent_descriptor < 0 || target_parent_descriptor < 0
       || !descriptor_matches_lua(L, 4, source_parent_descriptor)
       || !descriptor_matches_lua(L, 5, target_parent_descriptor)
@@ -8354,6 +8554,7 @@ static int l_fs_rename_no_replace_verified(lua_State *L)
   RENAME_FAIL("Unknown", "direct rename postcondition is unknown");
 
 cleanup:
+  disarm_native_guard(L, guard_index, guard);
   if (source_parent_descriptor >= 0) close(source_parent_descriptor);
   if (target_parent_descriptor >= 0) close(target_parent_descriptor);
   free(source_parent);
@@ -8366,9 +8567,12 @@ cleanup:
   return return_success(L);
 }
 
-/* Implements the Lua fs delete direct verified native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Delete an admitted regular file or empty directory through verified isolation and postconditions.
+ * @param L lua_State* Arguments are target path, expected target identity and expected parent identity table.
+ * @return int Two results: true,true after deletion, or false and a typed failure including Unknown outcome.
+ * @error Invalid argument types, expected-identity getters and Lua allocations may raise.
+ * @ownership A private validation owner retains copied resources while getters run; original native cleanup resumes ownership before result allocation.
+ * @effect Isolates the entry under its recovery name before deletion and performs native race recovery when available.
  */
 static int l_fs_delete_direct_verified(lua_State *L)
 {
@@ -8394,6 +8598,9 @@ static int l_fs_delete_direct_verified(lua_State *L)
   int moved_observed;
   int source_absent;
   int result = 0;
+  yaca_native_guard *guard;
+  yaca_posix_validation_context *validation;
+  int guard_index;
 
 /* Records a typed delete failure and enters the common cleanup path.
  * @param next_code const_char* Stable code assigned to the failure response.
@@ -8413,10 +8620,16 @@ static int l_fs_delete_direct_verified(lua_State *L)
   luaL_checktype(L, 2, LUA_TTABLE);
   luaL_checktype(L, 3, LUA_TTABLE);
   (void)length;
+  validation = push_posix_validation_context(L, &guard);
+  guard_index = lua_gettop(L);
   if (!open_posix_parent(path, &parent_descriptor, &parent, &name, &code, &message))
   {
     return push_failure(L, code, message);
   }
+  validation->paths[0] = parent;
+  validation->paths[1] = name;
+  validation->descriptors[0] = parent_descriptor;
+  guard->cleanup = cleanup_posix_validation_context;
   if (!descriptor_matches_lua(L, 3, parent_descriptor)
       || !stat_at_matches_lua(L, 2, parent_descriptor, name, &information))
   {
@@ -8587,6 +8800,7 @@ static int l_fs_delete_direct_verified(lua_State *L)
   result = 1;
 
 cleanup:
+  disarm_native_guard(L, guard_index, guard);
   if (target_descriptor >= 0) close(target_descriptor);
   if (parent_descriptor >= 0) close(parent_descriptor);
   free(parent);

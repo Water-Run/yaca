@@ -1,0 +1,725 @@
+{
+  "schema": "yaca-native-review-evidence-v1",
+  "review_id": "R79",
+  "date": "2026-10-06",
+  "status": "verified-native-subset",
+  "release_authorized": false,
+  "target_qualification_complete": false,
+  "source_inputs": {
+    "schema": "yaca-native-review-inputs-v1",
+    "base_revision": "7b616adf5d21a0654f9ce30d856f483f131c6822",
+    "source_scope": "working-tree-native-and-probes",
+    "files": [
+      {
+        "path": ".tools/qualification/filesystem_fault_tracker.h",
+        "sha256": "ee81e1b5c1ba5574364036759bb52f40087839356766a12e087b97da18c93fad"
+      },
+      {
+        "path": ".tools/qualification/filesystem_open_faults.c",
+        "sha256": "ae879db9fb55506169bdc8c0d600343f14b4895192629f3baa5db54c6bbe2d60"
+      },
+      {
+        "path": ".tools/qualification/filesystem_publication_faults.c",
+        "sha256": "1e8f1a2c47f27b6147ff24e75c12ca607b22b068639ea9d38375812853725d7f"
+      },
+      {
+        "path": ".tools/qualification/filesystem_read_faults.c",
+        "sha256": "3fdcae7cfa586bfb12838f8404d81a693ae31c972abd1e1385812d5e8b89ae6d"
+      },
+      {
+        "path": ".tools/qualification/filesystem_snapshot_faults.c",
+        "sha256": "3a14ec94e0adcf3febb2ad1a8dce7404b6546b0d49f879ab019d14e9f1275f87"
+      },
+      {
+        "path": ".tools/qualification/process_stream_faults.c",
+        "sha256": "b8289b6ed97cb1e2f8886399b0991e4a8864e857942d4f4b496198f4c316bb91"
+      },
+      {
+        "path": ".tools/qualification/text_codec_faults.c",
+        "sha256": "c4b99f5d343da258b23055b2fc4a8afd27c8229823ab2b1ba6094da8da9665c5"
+      },
+      {
+        "path": ".tools/qualification/windows_reparse_smoke.c",
+        "sha256": "13e3a8526f075a92e5b5b5a557d7aaa0c8288631c852f1110d07e8ebf1a50fae"
+      },
+      {
+        "path": "native/lxp_build.lua",
+        "sha256": "97bcc6822ae6af6e0ed70c74585c3924845fdee0b3bdace222f171a7071b6fe0"
+      },
+      {
+        "path": "native/yaca_entry.c",
+        "sha256": "e37392e19da463ad55848d6d2550056958ea3084fa3f842b994f798b82bc59a8"
+      },
+      {
+        "path": "native/yaca_lua_windows.h",
+        "sha256": "92f9d56314c8cda74a6eb6e5792688143d5c8d7c7b1a1385ee12817c1f610194"
+      },
+      {
+        "path": "native/yaca_native.c",
+        "sha256": "f5d45905e2851fb2e680e75602adccc3d192a4aa9e6b7acd85f0c3796e214a6f"
+      },
+      {
+        "path": "native/yaca_onefile_entry.c",
+        "sha256": "4e59947998f7a9477cc768188c81e268bbf377db42fe27b9172a47a0ae85f9d4"
+      },
+      {
+        "path": "native/yaca_onefile_windows.h",
+        "sha256": "269f3b37b89d53970eb4c5d6947e31f2db7627d153871dd33da3697294dd7c37"
+      },
+      {
+        "path": "native/yaca_pty.h",
+        "sha256": "a9be6b177388ee15e656aba3a4080f00d13bd4bc3ad411af4bd8095a0d3d8c01"
+      },
+      {
+        "path": "native/yaca_supervisor.h",
+        "sha256": "2315e15885d914923a44ba55ae5c65a976c56b1aa4b6731cc87b86d72d2164f6"
+      },
+      {
+        "path": "native/yaca_text.h",
+        "sha256": "82e057d215a77470166e79876dab5c6a7fd38a5d0856229f76e7c1b93a47bbc7"
+      }
+    ]
+  },
+  "baseline_source_inputs": {
+    "revision": "7b616adf5d21a0654f9ce30d856f483f131c6822",
+    "native_scope": "exact git archive native/",
+    "probe_scope": "same final maintained publication probe and shared fault tracker as fixed cases",
+    "files": [
+      {
+        "path": "native/lxp_build.lua",
+        "sha256": "97bcc6822ae6af6e0ed70c74585c3924845fdee0b3bdace222f171a7071b6fe0"
+      },
+      {
+        "path": "native/yaca_entry.c",
+        "sha256": "e37392e19da463ad55848d6d2550056958ea3084fa3f842b994f798b82bc59a8"
+      },
+      {
+        "path": "native/yaca_lua_windows.h",
+        "sha256": "92f9d56314c8cda74a6eb6e5792688143d5c8d7c7b1a1385ee12817c1f610194"
+      },
+      {
+        "path": "native/yaca_native.c",
+        "sha256": "38a1cef6a69b690eebee3c326f33aeb40ee951f4b38b6a3524660c81f932c89d"
+      },
+      {
+        "path": "native/yaca_onefile_entry.c",
+        "sha256": "4e59947998f7a9477cc768188c81e268bbf377db42fe27b9172a47a0ae85f9d4"
+      },
+      {
+        "path": "native/yaca_onefile_windows.h",
+        "sha256": "269f3b37b89d53970eb4c5d6947e31f2db7627d153871dd33da3697294dd7c37"
+      },
+      {
+        "path": "native/yaca_pty.h",
+        "sha256": "a9be6b177388ee15e656aba3a4080f00d13bd4bc3ad411af4bd8095a0d3d8c01"
+      },
+      {
+        "path": "native/yaca_supervisor.h",
+        "sha256": "2315e15885d914923a44ba55ae5c65a976c56b1aa4b6731cc87b86d72d2164f6"
+      },
+      {
+        "path": "native/yaca_text.h",
+        "sha256": "82e057d215a77470166e79876dab5c6a7fd38a5d0856229f76e7c1b93a47bbc7"
+      },
+      {
+        "path": ".tools/qualification/filesystem_fault_tracker.h",
+        "sha256": "ee81e1b5c1ba5574364036759bb52f40087839356766a12e087b97da18c93fad"
+      },
+      {
+        "path": ".tools/qualification/filesystem_publication_faults.c",
+        "sha256": "1e8f1a2c47f27b6147ff24e75c12ca607b22b068639ea9d38375812853725d7f"
+      }
+    ]
+  },
+  "build_integration_inputs": [
+    {
+      "path": ".tools/qualification/build_windows_candidate.sh",
+      "sha256": "344e62f9fa2f2246fdb16adcace6211a4092ab5595c2e52167d405c733ac1278",
+      "bytes": 10673
+    },
+    {
+      "path": ".tools/qualification/build_win64_candidate.sh",
+      "sha256": "ff5f042059b234f00010281050a0b7d1ca75ef081640664386a7a35bf4a2fbc4",
+      "bytes": 9790
+    }
+  ],
+  "target_proofs": [
+    {
+      "target": "linux",
+      "environment": "Linux 7.2.7-200.fc44.x86_64 x86_64 development host",
+      "baseline": {
+        "revision": "7b616adf5d21a0654f9ce30d856f483f131c6822",
+        "native_leaks": 458,
+        "ownership_errors": 0,
+        "ports": [
+          {
+            "operation": "delete-verified",
+            "allocation_sites": 1,
+            "getter_sites": 5,
+            "native_leaks": 0,
+            "unchanged_getter_rejections": "PASS",
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "delete-direct",
+            "allocation_sites": 1,
+            "getter_sites": 10,
+            "native_leaks": 66,
+            "unchanged_getter_rejections": "PASS",
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "rename-verified",
+            "allocation_sites": 4,
+            "getter_sites": 15,
+            "native_leaks": 192,
+            "unchanged_getter_rejections": "PASS",
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "replace-verified",
+            "allocation_sites": 4,
+            "getter_sites": 15,
+            "native_leaks": 200,
+            "unchanged_getter_rejections": "PASS",
+            "same_state_recovery": "PASS"
+          }
+        ],
+        "exit_code": 1
+      },
+      "fixed": {
+        "native_leaks": 0,
+        "ownership_errors": 0,
+        "ports": [
+          {
+            "operation": "delete-verified",
+            "allocation_sites": 1,
+            "getter_sites": 5,
+            "native_leaks": 0,
+            "unchanged_getter_rejections": "PASS",
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "delete-direct",
+            "allocation_sites": 2,
+            "getter_sites": 10,
+            "native_leaks": 0,
+            "unchanged_getter_rejections": "PASS",
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "rename-verified",
+            "allocation_sites": 5,
+            "getter_sites": 15,
+            "native_leaks": 0,
+            "unchanged_getter_rejections": "PASS",
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "replace-verified",
+            "allocation_sites": 5,
+            "getter_sites": 15,
+            "native_leaks": 0,
+            "unchanged_getter_rejections": "PASS",
+            "same_state_recovery": "PASS"
+          }
+        ],
+        "exit_code": 0
+      },
+      "fault_recovery_cycles_per_case": 2,
+      "getter_scope": "every observed field read, counted separately for each platform implementation",
+      "snapshot_regression": "zero leaks and ownership errors; two same-state recoveries per case",
+      "reparse_regression": null,
+      "receiver_hashes": null,
+      "artifact_scope": "standalone probes including frozen production native source; final onefile qualification pending",
+      "bindings": [
+        {
+          "path": "out/native-publication-review-20261006/before/linux-final.log",
+          "sha256": "5266cc16e5b3f5183d88e96cdbba205fdbac9ee081d205d6330ed43f8efd6ebe",
+          "bytes": 4906
+        },
+        {
+          "path": "out/native-publication-review-20261006/after/linux-final.log",
+          "sha256": "f1faab9681d56880edb1a244921cd9b039fff569147978b47c8f791f344d4850",
+          "bytes": 486
+        },
+        {
+          "path": "out/native-publication-review-20261006/before/linux/filesystem_publication_faults",
+          "sha256": "463abce3bcf29e59fc755b9f0ee61000a7b87f6261bedae14dea8aeb37600b0f",
+          "bytes": 287960
+        },
+        {
+          "path": "out/native-publication-review-20261006/before/linux/filesystem_publication_faults-build.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "path": "out/native-publication-review-20261006/after/linux/filesystem_publication_faults",
+          "sha256": "bdf0e9ee6475c7a2163df573a970843118c2399b2cf257c7a09ef6760b6aca58",
+          "bytes": 288016
+        },
+        {
+          "path": "out/native-publication-review-20261006/after/linux/filesystem_publication_faults-build.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "path": "out/native-publication-review-20261006/after/linux/filesystem_snapshot_faults",
+          "sha256": "8364bdc23c5d3bb973d2c1e8d5a9b20759692128a7a166f37dbdd6e6450599f3",
+          "bytes": 287528
+        },
+        {
+          "path": "out/native-publication-review-20261006/after/linux/filesystem_snapshot_faults-build.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "path": "out/native-publication-review-20261006/after/linux-snapshot-final.log",
+          "sha256": "42c3213da2f2e847f176166b51e2cf84dd7140d4776c7a85eb5f7417e3dcf3bd",
+          "bytes": 370
+        },
+        {
+          "path": "out/node-r76-20261005/linux-core-r2/work/lua-5.5.1/src/liblua.a",
+          "sha256": "b9e3cb65881bafed563f37e7500c9a1967a069e1da09c34a012d0fb3152a5f12",
+          "bytes": 509994
+        }
+      ]
+    },
+    {
+      "target": "win32",
+      "environment": "Windows Server 2008 non-R2 x64 / WOW64",
+      "baseline": {
+        "revision": "7b616adf5d21a0654f9ce30d856f483f131c6822",
+        "native_leaks": 1156,
+        "ownership_errors": 0,
+        "ports": [
+          {
+            "operation": "delete-verified",
+            "allocation_sites": 1,
+            "getter_sites": 5,
+            "native_leaks": 24,
+            "unchanged_getter_rejections": "PASS",
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "delete-direct",
+            "allocation_sites": 1,
+            "getter_sites": 8,
+            "native_leaks": 180,
+            "unchanged_getter_rejections": "PASS",
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "rename-verified",
+            "allocation_sites": 3,
+            "getter_sites": 11,
+            "native_leaks": 432,
+            "unchanged_getter_rejections": "PASS",
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "replace-verified",
+            "allocation_sites": 2,
+            "getter_sites": 13,
+            "native_leaks": 520,
+            "unchanged_getter_rejections": "PASS",
+            "same_state_recovery": "PASS"
+          }
+        ],
+        "exit_code": 1
+      },
+      "fixed": {
+        "native_leaks": 0,
+        "ownership_errors": 0,
+        "ports": [
+          {
+            "operation": "delete-verified",
+            "allocation_sites": 2,
+            "getter_sites": 5,
+            "native_leaks": 0,
+            "unchanged_getter_rejections": "PASS",
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "delete-direct",
+            "allocation_sites": 2,
+            "getter_sites": 8,
+            "native_leaks": 0,
+            "unchanged_getter_rejections": "PASS",
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "rename-verified",
+            "allocation_sites": 4,
+            "getter_sites": 11,
+            "native_leaks": 0,
+            "unchanged_getter_rejections": "PASS",
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "replace-verified",
+            "allocation_sites": 3,
+            "getter_sites": 13,
+            "native_leaks": 0,
+            "unchanged_getter_rejections": "PASS",
+            "same_state_recovery": "PASS"
+          }
+        ],
+        "exit_code": 0
+      },
+      "fault_recovery_cycles_per_case": 2,
+      "getter_scope": "every observed field read, counted separately for each platform implementation",
+      "snapshot_regression": "zero leaks and ownership errors; two same-state recoveries per case",
+      "reparse_regression": {
+        "total": 20,
+        "failed": 0,
+        "includes_real_kernel_followed_junction": true
+      },
+      "receiver_hashes": {
+        "matched": 6,
+        "total": 6,
+        "binding": {
+          "path": "out/native-publication-review-20261006/remote-win32-sha256.txt",
+          "sha256": "778e1c66c9ba37b1fc63b125db14d331c853d8f9971ce8a7b07b2a23c15a6971",
+          "bytes": 579
+        }
+      },
+      "artifact_scope": "standalone probes including frozen production native source; final onefile qualification pending",
+      "bindings": [
+        {
+          "path": "out/native-publication-review-20261006/before/win32-final.log",
+          "sha256": "7d511fd83bcf8057923684177c3fdd762a0dd9a203e16127a29765dcb1d7cd3f",
+          "bytes": 4794
+        },
+        {
+          "path": "out/native-publication-review-20261006/after/win32-final.log",
+          "sha256": "3bcc29a3b999414e58f5c01b072828f73a0c7c69346d2b8e02b8ad74079dc0de",
+          "bytes": 1515
+        },
+        {
+          "path": "out/native-publication-review-20261006/before/win32/filesystem_publication_faults.exe",
+          "sha256": "212b1a7c8f0d2d08a0f0eb17eaecaa4745ae44738aea2189cb994979908b7f62",
+          "bytes": 487246
+        },
+        {
+          "path": "out/native-publication-review-20261006/before/win32/filesystem_publication_faults-build.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "path": "out/native-publication-review-20261006/after/win32/filesystem_publication_faults.exe",
+          "sha256": "e35befddabbb35f3b8199d5adc2c1ce0295394dbf68c0301bf0da38a120f2d0a",
+          "bytes": 487896
+        },
+        {
+          "path": "out/native-publication-review-20261006/after/win32/filesystem_publication_faults-build.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "path": "out/native-publication-review-20261006/after/win32/filesystem_snapshot_faults.exe",
+          "sha256": "e51478e0e915c4e012fa5ff8fbbc476b6756f8cb7e257c662bb8ddd8a0eba961",
+          "bytes": 486993
+        },
+        {
+          "path": "out/native-publication-review-20261006/after/win32/filesystem_snapshot_faults-build.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "path": "out/node-r76-20261005/win32-core/onedir/lua55.dll",
+          "sha256": "3a01621ce0b2a7e973aef32f6ed23820620055af095be57bba96ce64dbbdaae3",
+          "bytes": 696873
+        },
+        {
+          "path": "out/node-r76-20261005/win32-core/work/lua-5.5.1/src/liblua55.a",
+          "sha256": "b77ccb824ddf0df51927e62f77a6363468c51323d3604a5ab5d83b0b9226437d",
+          "bytes": 101114
+        },
+        {
+          "path": "out/native-publication-review-20261006/after/win32/windows_reparse_smoke.exe",
+          "sha256": "ae9c508c5533c1e9ce3d7ada9a644f78a0b4232d1e3b5eec3b60a895838d9caa",
+          "bytes": 480801
+        }
+      ]
+    },
+    {
+      "target": "win64",
+      "environment": "Windows 11 x64 10.0.26100.33438",
+      "baseline": {
+        "revision": "7b616adf5d21a0654f9ce30d856f483f131c6822",
+        "native_leaks": 1536,
+        "ownership_errors": 0,
+        "ports": [
+          {
+            "operation": "delete-verified",
+            "allocation_sites": 1,
+            "getter_sites": 5,
+            "native_leaks": 24,
+            "unchanged_getter_rejections": "PASS",
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "delete-direct",
+            "allocation_sites": 1,
+            "getter_sites": 8,
+            "native_leaks": 234,
+            "unchanged_getter_rejections": "PASS",
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "rename-verified",
+            "allocation_sites": 3,
+            "getter_sites": 11,
+            "native_leaks": 576,
+            "unchanged_getter_rejections": "PASS",
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "replace-verified",
+            "allocation_sites": 2,
+            "getter_sites": 13,
+            "native_leaks": 702,
+            "unchanged_getter_rejections": "PASS",
+            "same_state_recovery": "PASS"
+          }
+        ],
+        "exit_code": 1
+      },
+      "fixed": {
+        "native_leaks": 0,
+        "ownership_errors": 0,
+        "ports": [
+          {
+            "operation": "delete-verified",
+            "allocation_sites": 2,
+            "getter_sites": 5,
+            "native_leaks": 0,
+            "unchanged_getter_rejections": "PASS",
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "delete-direct",
+            "allocation_sites": 2,
+            "getter_sites": 8,
+            "native_leaks": 0,
+            "unchanged_getter_rejections": "PASS",
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "rename-verified",
+            "allocation_sites": 4,
+            "getter_sites": 11,
+            "native_leaks": 0,
+            "unchanged_getter_rejections": "PASS",
+            "same_state_recovery": "PASS"
+          },
+          {
+            "operation": "replace-verified",
+            "allocation_sites": 3,
+            "getter_sites": 13,
+            "native_leaks": 0,
+            "unchanged_getter_rejections": "PASS",
+            "same_state_recovery": "PASS"
+          }
+        ],
+        "exit_code": 0
+      },
+      "fault_recovery_cycles_per_case": 2,
+      "getter_scope": "every observed field read, counted separately for each platform implementation",
+      "snapshot_regression": "zero leaks and ownership errors; two same-state recoveries per case",
+      "reparse_regression": {
+        "total": 20,
+        "failed": 0,
+        "includes_real_kernel_followed_junction": true
+      },
+      "receiver_hashes": {
+        "matched": 6,
+        "total": 6,
+        "binding": {
+          "path": "out/native-publication-review-20261006/remote-win64-sha256.txt",
+          "sha256": "9eb39d5eb6610d008fa7ea32d8ddb944b31706846b05e30a7fafd00f168ffbac",
+          "bytes": 585
+        }
+      },
+      "artifact_scope": "standalone probes including frozen production native source; final onefile qualification pending",
+      "bindings": [
+        {
+          "path": "out/native-publication-review-20261006/before/win64-final.log",
+          "sha256": "c3baa8593dfdd7c69c64624a309df4efeef3de31f4863724aa0d21809c794bd3",
+          "bytes": 4868
+        },
+        {
+          "path": "out/native-publication-review-20261006/after/win64-final.log",
+          "sha256": "9bf3c132bc76ee76976689d5d8e94b7873e5c3843437000e77178b6d82dc2701",
+          "bytes": 1531
+        },
+        {
+          "path": "out/native-publication-review-20261006/before/win64/filesystem_publication_faults.exe",
+          "sha256": "c1a7373a2403bb1b22b29ef0c2cf42b236460ed1f643f8e3bf4ba28e2da8148a",
+          "bytes": 482707
+        },
+        {
+          "path": "out/native-publication-review-20261006/before/win64/filesystem_publication_faults-build.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "path": "out/native-publication-review-20261006/after/win64/filesystem_publication_faults.exe",
+          "sha256": "4854926b416e720bf0f37825cd9f4aa43779e592d1f3e87169ee603fecf1ff2a",
+          "bytes": 484379
+        },
+        {
+          "path": "out/native-publication-review-20261006/after/win64/filesystem_publication_faults-build.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "path": "out/native-publication-review-20261006/after/win64/filesystem_snapshot_faults.exe",
+          "sha256": "75d612b3b9eb4e28621c030e7a4ba689d976e2fa893b26ed4d26ab0d6b732560",
+          "bytes": 482949
+        },
+        {
+          "path": "out/native-publication-review-20261006/after/win64/filesystem_snapshot_faults-build.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "path": "out/node-r76-20261005/win64-core/onedir/lua55.dll",
+          "sha256": "5aae77d9330d72f7a747b7f96309494d52c8f3413e8a09fb9f872da8c31c0b00",
+          "bytes": 753984
+        },
+        {
+          "path": "out/node-r76-20261005/win64-core/work/lua-5.5.1/src/liblua55.a",
+          "sha256": "f65d19a6761fb2458ca85a274eecc91954c228029279e678165613f6708cca6c",
+          "bytes": 98552
+        },
+        {
+          "path": "out/native-publication-review-20261006/after/win64/windows_reparse_smoke.exe",
+          "sha256": "57a71ecb9ac07b74aee359fa92c87c01ec8989c859155e1f0f7b235a9fd156a3",
+          "bytes": 476415
+        }
+      ]
+    }
+  ],
+  "compiler_flags": [
+    "-std=c99",
+    "-Wall",
+    "-Wextra",
+    "-Werror",
+    "-O2"
+  ],
+  "compilers": {
+    "linux": "GCC 16.2.1 20260819 Red Hat 16.2.1-2",
+    "windows_cross": "Fedora MinGW GCC 16.2.1 20260819 16.2.1-1.fc44"
+  },
+  "build_command_source": {
+    "path": "out/native-publication-review-20261006/build_probes.sh",
+    "sha256": "0ce03b82fc8384f64abcb38d3a18e4a53050a96db5c098a17fe7c9fdafbf077a",
+    "bytes": 3217
+  },
+  "build_transcripts": [
+    {
+      "path": "out/native-publication-review-20261006/build-final.log",
+      "sha256": "a305e344ecbd686261929a3996e3a37e88a8c6a39afe9c505c5cc33b0e5f77d4",
+      "bytes": 224
+    },
+    {
+      "path": "out/native-publication-review-20261006/reparse-rebuild.log",
+      "sha256": "2510fb2aff25459cf2bdfcd6eabcf4bb1d2dd2e7eb68151dd7c1d15f623f387b",
+      "bytes": 147
+    }
+  ],
+  "platform_flags": {
+    "linux": [
+      "-ldl",
+      "-lm"
+    ],
+    "win32": [
+      "-D_WIN32_WINNT=0x0501",
+      "-DLUA_BUILD_AS_DLL",
+      "-static-libgcc",
+      "-ladvapi32",
+      "-lshell32"
+    ],
+    "win64": [
+      "-D_WIN32_WINNT=0x0601",
+      "-DLUA_BUILD_AS_DLL",
+      "-static-libgcc",
+      "-ladvapi32",
+      "-lshell32"
+    ]
+  },
+  "full_suite": {
+    "status": "PASS",
+    "total": 706,
+    "passed": 706,
+    "failed": 0,
+    "binding": {
+      "path": "out/native-publication-review-20261006/lua-suite-final.log",
+      "sha256": "ea2031c3d465ef3393da0d4c39f086c814fc72e0a0e231174319e489ba0a959e",
+      "bytes": 70250
+    }
+  },
+  "coding_readiness": {
+    "status": "PASS",
+    "binding": {
+      "path": "out/native-publication-review-20261006/coding-readiness-final.log",
+      "sha256": "6b8ae5281d43d0119f063f4663a7fe58ce11ed206aa4a93eba880e3aac79ad2f",
+      "bytes": 4083
+    }
+  },
+  "comment_structure": {
+    "files": 244,
+    "declarations": 5476,
+    "violations": 0
+  },
+  "check_resource_guard": {
+    "path": "out/native-publication-review-20261006/complete-checks-run.log",
+    "sha256": "d49c719a9ba95ee81f1f464fb6532ac7fd97d8dbb6b4b36218d0bfa89b27810d",
+    "bytes": 147
+  },
+  "semantic_review": "partial; R79 transfer/disarm/getter boundaries, native cleanup-before-result allocation, tracker extraction, fixture ownership and real recovery reviewed",
+  "initial_failures": {
+    "win32_junction": "publication and snapshot passed; raw forward-slash root produced unusable NT target in the probe fixture; helper now normalizes root, final 20 cases pass",
+    "bindings": [
+      {
+        "path": "out/native-publication-review-20261006/after/win32-first-with-junction-failure.log",
+        "sha256": "035bcc2cb5a039f03a9832cf9cb19f62f9982c0f62a424074473dbcae0f57489",
+        "bytes": 1593
+      },
+      {
+        "path": "out/native-publication-review-20261006/failed-junction-cleanup.log",
+        "sha256": "6eb99ac0ad0a810b09d168b9a7e146d373c5ca0da87cfad36daecb2ca4f36883",
+        "bytes": 255
+      },
+      {
+        "path": "out/native-publication-review-20261006/failed-junction-native-cleanup.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      },
+      {
+        "path": "out/native-publication-review-20261006/remote-win64-first-with-progress.txt",
+        "sha256": "74b27b8dd94adf7b14749ce7061ec44f23a227558cae8fe7fcbcbc81faed9ed6",
+        "bytes": 1201
+      }
+    ],
+    "failed_fixture_cleanup": "exact owned yrpFA31.tmp and its children removed with native rmdir after path verification; Cygwin failure retained"
+  },
+  "fixture_cleanup": "each completed publication/snapshot/junction probe removes its own unique root; receiver directories and logs retained",
+  "published_candidate_contains_fix": false,
+  "uncovered_scope": [
+    "all special filesystems and metadata/race branches",
+    "remaining process/terminal native semantic review",
+    "main interactive internals and remaining helpers",
+    "final onefile/nine-package qualification"
+  ],
+  "closure_checks": {
+    "status": "PASS",
+    "binding": {
+      "path": "out/native-publication-review-20261006/closure-checks.log",
+      "sha256": "a41d1093a69230bbb061cfe3c3f981e6f0150ebb99bb3893974a32cb14d7e341",
+      "bytes": 395
+    }
+  }
+}

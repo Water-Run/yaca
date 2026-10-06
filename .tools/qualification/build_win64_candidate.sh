@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Author: WaterRun
-# Date: 2026-10-05
+# Date: 2026-10-06
 # File: build_win64_candidate.sh
 # Description: Builds and audits Windows x64 candidate payloads from pinned source inputs.
 
@@ -160,6 +160,11 @@ $CC -std=c99 -Wall -Wextra -Werror $CFLAGS -DLUA_BUILD_AS_DLL \
   "$LUA_SOURCE/liblua55.a" $LDFLAGS -ladvapi32 -lshell32 \
   -o "$OUTPUT_ROOT/filesystem_snapshot_faults.exe" \
   >"$LOG_ROOT/snapshot-faults-build.log" 2>&1
+$CC -std=c99 -Wall -Wextra -Werror $CFLAGS -DLUA_BUILD_AS_DLL \
+  -I"$LUA_SOURCE" "$YACA_SOURCE/.tools/qualification/filesystem_publication_faults.c" \
+  "$LUA_SOURCE/liblua55.a" $LDFLAGS -ladvapi32 -lshell32 \
+  -o "$OUTPUT_ROOT/filesystem_publication_faults.exe" \
+  >"$LOG_ROOT/publication-faults-build.log" 2>&1
 $CC -std=c99 -Wall -Wextra -Werror $CFLAGS -DLUA_BUILD_AS_DLL \
   -I"$LUA_SOURCE" "$YACA_SOURCE/.tools/qualification/windows_console_reader_smoke.c" \
   "$LUA_SOURCE/liblua55.a" $LDFLAGS -ladvapi32 -lshell32 \
