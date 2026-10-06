@@ -1,0 +1,780 @@
+{
+  "schema": "yaca-native-review-evidence-v1",
+  "review_id": "R81",
+  "date": "2026-10-06",
+  "status": "verified-native-subset",
+  "release_authorized": false,
+  "target_qualification_complete": false,
+  "source_inputs": {
+    "schema": "yaca-native-review-inputs-v1",
+    "base_revision": "ec120639625b1988532cec7abc25152ead82293f",
+    "files": [
+      {
+        "path": "native/lxp_build.lua",
+        "sha256": "97bcc6822ae6af6e0ed70c74585c3924845fdee0b3bdace222f171a7071b6fe0"
+      },
+      {
+        "path": "native/yaca_entry.c",
+        "sha256": "e37392e19da463ad55848d6d2550056958ea3084fa3f842b994f798b82bc59a8"
+      },
+      {
+        "path": "native/yaca_lua_windows.h",
+        "sha256": "92f9d56314c8cda74a6eb6e5792688143d5c8d7c7b1a1385ee12817c1f610194"
+      },
+      {
+        "path": "native/yaca_native.c",
+        "sha256": "71373f1fdcc3c29f75b7c14b6959d1f14ab03eb878c55a0630496baad9e927b5"
+      },
+      {
+        "path": "native/yaca_onefile_entry.c",
+        "sha256": "4e59947998f7a9477cc768188c81e268bbf377db42fe27b9172a47a0ae85f9d4"
+      },
+      {
+        "path": "native/yaca_onefile_windows.h",
+        "sha256": "269f3b37b89d53970eb4c5d6947e31f2db7627d153871dd33da3697294dd7c37"
+      },
+      {
+        "path": "native/yaca_pty.h",
+        "sha256": "a9be6b177388ee15e656aba3a4080f00d13bd4bc3ad411af4bd8095a0d3d8c01"
+      },
+      {
+        "path": "native/yaca_supervisor.h",
+        "sha256": "2315e15885d914923a44ba55ae5c65a976c56b1aa4b6731cc87b86d72d2164f6"
+      },
+      {
+        "path": "native/yaca_text.h",
+        "sha256": "82e057d215a77470166e79876dab5c6a7fd38a5d0856229f76e7c1b93a47bbc7"
+      },
+      {
+        "path": ".tools/qualification/filesystem_fault_tracker.h",
+        "sha256": "ee81e1b5c1ba5574364036759bb52f40087839356766a12e087b97da18c93fad"
+      },
+      {
+        "path": ".tools/qualification/terminal_input_faults.c",
+        "sha256": "90c5ed2af43f02e1eb53ef0136a663d3623ad88396699cc2f61f912bd65a5d1a"
+      },
+      {
+        "path": ".tools/qualification/windows_console_reader_smoke.c",
+        "sha256": "060ccb5672b56c29c9d21274c477fa02fdc213da96220c36b23567e71bc93693"
+      },
+      {
+        "path": ".tools/qualification/process_start_faults.c",
+        "sha256": "045a47f16fbe050a618383b92f92f8dfc55edc468e2ef983cca4a6b999383310"
+      },
+      {
+        "path": ".tools/qualification/native_component_probe.c",
+        "sha256": "9be0c188df7324dc00bf1de5fa10183f0462febc0d9f5f32488d818a7a82fe80"
+      },
+      {
+        "path": ".tools/qualification/process_stream_faults.c",
+        "sha256": "b8289b6ed97cb1e2f8886399b0991e4a8864e857942d4f4b496198f4c316bb91"
+      }
+    ]
+  },
+  "baseline_source_inputs": {
+    "revision": "ec120639625b1988532cec7abc25152ead82293f",
+    "native_scope": "exact git archive native/",
+    "probe_scope": "same maintained terminal input probe and shared tracker",
+    "files": [
+      {
+        "path": "native/lxp_build.lua",
+        "sha256": "97bcc6822ae6af6e0ed70c74585c3924845fdee0b3bdace222f171a7071b6fe0"
+      },
+      {
+        "path": "native/yaca_entry.c",
+        "sha256": "e37392e19da463ad55848d6d2550056958ea3084fa3f842b994f798b82bc59a8"
+      },
+      {
+        "path": "native/yaca_lua_windows.h",
+        "sha256": "92f9d56314c8cda74a6eb6e5792688143d5c8d7c7b1a1385ee12817c1f610194"
+      },
+      {
+        "path": "native/yaca_native.c",
+        "sha256": "a9619e212e7c0085415245164b30eb6e778e4b77c47a72c40fdb5fc1b1c8c3b2"
+      },
+      {
+        "path": "native/yaca_onefile_entry.c",
+        "sha256": "4e59947998f7a9477cc768188c81e268bbf377db42fe27b9172a47a0ae85f9d4"
+      },
+      {
+        "path": "native/yaca_onefile_windows.h",
+        "sha256": "269f3b37b89d53970eb4c5d6947e31f2db7627d153871dd33da3697294dd7c37"
+      },
+      {
+        "path": "native/yaca_pty.h",
+        "sha256": "a9be6b177388ee15e656aba3a4080f00d13bd4bc3ad411af4bd8095a0d3d8c01"
+      },
+      {
+        "path": "native/yaca_supervisor.h",
+        "sha256": "2315e15885d914923a44ba55ae5c65a976c56b1aa4b6731cc87b86d72d2164f6"
+      },
+      {
+        "path": "native/yaca_text.h",
+        "sha256": "82e057d215a77470166e79876dab5c6a7fd38a5d0856229f76e7c1b93a47bbc7"
+      },
+      {
+        "path": ".tools/qualification/filesystem_fault_tracker.h",
+        "sha256": "ee81e1b5c1ba5574364036759bb52f40087839356766a12e087b97da18c93fad"
+      },
+      {
+        "path": ".tools/qualification/terminal_input_faults.c",
+        "sha256": "90c5ed2af43f02e1eb53ef0136a663d3623ad88396699cc2f61f912bd65a5d1a"
+      }
+    ]
+  },
+  "build_integration_inputs": [
+    {
+      "path": ".tools/qualification/build_windows_candidate.sh",
+      "sha256": "336896bc950aa2c05735f3da5047f10159b50345c53d8cd77a63e36ab9ec4eff",
+      "bytes": 11276
+    },
+    {
+      "path": ".tools/qualification/build_win64_candidate.sh",
+      "sha256": "9170924b03799d5925be2eadf651cb4d24205b6f36b1d45cc9d9babf9501ce28",
+      "bytes": 10393
+    }
+  ],
+  "target_proofs": [
+    {
+      "target": "linux",
+      "environment": "Fedora Linux x86_64 development host",
+      "baseline": {
+        "revision": "ec120639625b1988532cec7abc25152ead82293f",
+        "native_leaks": 26,
+        "ownership_errors": 0,
+        "protocol_failures": 0,
+        "profiles": [
+          {
+            "profile": 0,
+            "allocation_sites": 10,
+            "native_leaks": 14,
+            "same_owner_recovery": "PASS"
+          },
+          {
+            "profile": 1,
+            "allocation_sites": 9,
+            "native_leaks": 12,
+            "same_owner_recovery": "PASS"
+          },
+          {
+            "profile": 2,
+            "allocation_sites": 9,
+            "native_leaks": 0,
+            "same_owner_recovery": "PASS"
+          }
+        ],
+        "byte_controls": 5,
+        "invalid_cooked_controls": null,
+        "exit_code": 1
+      },
+      "fixed": {
+        "native_leaks": 0,
+        "ownership_errors": 0,
+        "protocol_failures": 0,
+        "profiles": [
+          {
+            "profile": 0,
+            "allocation_sites": 18,
+            "native_leaks": 0,
+            "same_owner_recovery": "PASS"
+          },
+          {
+            "profile": 1,
+            "allocation_sites": 17,
+            "native_leaks": 0,
+            "same_owner_recovery": "PASS"
+          },
+          {
+            "profile": 2,
+            "allocation_sites": 9,
+            "native_leaks": 0,
+            "same_owner_recovery": "PASS"
+          }
+        ],
+        "byte_controls": 5,
+        "invalid_cooked_controls": null,
+        "exit_code": 0
+      },
+      "fault_recovery_cycles_per_case": 2,
+      "os_resource_audit": "stable after each state closes, before closing its borrowed owned input file",
+      "reader_scope": "redirected production input and bounded completed-console doubles; existing production cooked reader tested separately with deterministic ReadConsoleW double",
+      "receiver_hashes": null,
+      "regressions": [
+        "R80 startup faults",
+        "process stream faults",
+        "Windows deterministic cooked reader when applicable"
+      ],
+      "bindings": [
+        {
+          "path": "out/native-terminal-review-20261006/before/linux-final.log",
+          "sha256": "4c42b6a649833c79cb0b91537a2f1aaa8285b177d6d035b81f0540bf0d0e5ef8",
+          "bytes": 1414
+        },
+        {
+          "path": "out/native-terminal-review-20261006/after/linux-final.log",
+          "sha256": "f8d029d6abe4753db42e854cda4af35e5cc6edd831a2576c7cb0317215bce589",
+          "bytes": 384
+        },
+        {
+          "path": "out/native-terminal-review-20261006/before/linux/terminal_input_faults",
+          "sha256": "8a90c34ec894c70f53181e0a8f50687f61488608d11b28be1c609b3583fb038b",
+          "bytes": 292192
+        },
+        {
+          "path": "out/native-terminal-review-20261006/before/linux/terminal_input_faults-build.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "path": "out/native-terminal-review-20261006/after/linux/terminal_input_faults",
+          "sha256": "8cccd202e86a12bd1348ac3281e87b543ac89513b88163d058c1e99157811356",
+          "bytes": 292192
+        },
+        {
+          "path": "out/native-terminal-review-20261006/after/linux/terminal_input_faults-build.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "path": "out/native-terminal-review-20261006/after/linux/native_component_probe",
+          "sha256": "578a6d584fb8db6c0282de208ad5a4d5c796d2faef048ed8b38fadc35fb494b5",
+          "bytes": 12992
+        },
+        {
+          "path": "out/native-terminal-review-20261006/after/linux/native_component_probe-build.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "path": "out/native-terminal-review-20261006/after/linux/process_start_faults",
+          "sha256": "d91b51d0cee9f739cab5f90ef89a271d54da2f87ced3d93365bc9641215e1ffb",
+          "bytes": 291840
+        },
+        {
+          "path": "out/native-terminal-review-20261006/after/linux/process_start_faults-build.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "path": "out/native-terminal-review-20261006/after/linux/process_stream_faults",
+          "sha256": "b5d0732853535bfecdf2f9ff57c623e0c2d210eda68e9c36b8228f47e23b61b8",
+          "bytes": 291456
+        },
+        {
+          "path": "out/native-terminal-review-20261006/after/linux/process_stream_faults-build.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "path": "out/native-terminal-review-20261006/after/linux-startup-regression.log",
+          "sha256": "8e1b38e370e0bf7f703a787a02d2e172e2e47f1603898641f50bcc5060657dde",
+          "bytes": 603
+        },
+        {
+          "path": "out/native-terminal-review-20261006/after/linux-stream-regression.log",
+          "sha256": "2ba8efc2da2bcf13adbb194ef6f319c323124594830e8026dc2dad8570c4786d",
+          "bytes": 80
+        },
+        {
+          "path": "out/node-r76-20261005/linux-core-r2/work/lua-5.5.1/src/liblua.a",
+          "sha256": "b9e3cb65881bafed563f37e7500c9a1967a069e1da09c34a012d0fb3152a5f12",
+          "bytes": 509994
+        }
+      ]
+    },
+    {
+      "target": "win32",
+      "environment": "Windows Server 2008 non-R2 x64 / WOW64",
+      "baseline": {
+        "revision": "ec120639625b1988532cec7abc25152ead82293f",
+        "native_leaks": 40,
+        "ownership_errors": 0,
+        "protocol_failures": 0,
+        "profiles": [
+          {
+            "profile": 0,
+            "allocation_sites": 10,
+            "native_leaks": 14,
+            "same_owner_recovery": "PASS"
+          },
+          {
+            "profile": 1,
+            "allocation_sites": 9,
+            "native_leaks": 12,
+            "same_owner_recovery": "PASS"
+          },
+          {
+            "profile": 2,
+            "allocation_sites": 9,
+            "native_leaks": 0,
+            "same_owner_recovery": "PASS"
+          },
+          {
+            "profile": 3,
+            "allocation_sites": 10,
+            "native_leaks": 14,
+            "same_owner_recovery": "PASS"
+          },
+          {
+            "profile": 4,
+            "allocation_sites": 9,
+            "native_leaks": 0,
+            "same_owner_recovery": "PASS"
+          }
+        ],
+        "byte_controls": 5,
+        "invalid_cooked_controls": 4,
+        "exit_code": 1
+      },
+      "fixed": {
+        "native_leaks": 0,
+        "ownership_errors": 0,
+        "protocol_failures": 0,
+        "profiles": [
+          {
+            "profile": 0,
+            "allocation_sites": 18,
+            "native_leaks": 0,
+            "same_owner_recovery": "PASS"
+          },
+          {
+            "profile": 1,
+            "allocation_sites": 17,
+            "native_leaks": 0,
+            "same_owner_recovery": "PASS"
+          },
+          {
+            "profile": 2,
+            "allocation_sites": 9,
+            "native_leaks": 0,
+            "same_owner_recovery": "PASS"
+          },
+          {
+            "profile": 3,
+            "allocation_sites": 18,
+            "native_leaks": 0,
+            "same_owner_recovery": "PASS"
+          },
+          {
+            "profile": 4,
+            "allocation_sites": 9,
+            "native_leaks": 0,
+            "same_owner_recovery": "PASS"
+          }
+        ],
+        "byte_controls": 5,
+        "invalid_cooked_controls": 4,
+        "exit_code": 0
+      },
+      "fault_recovery_cycles_per_case": 2,
+      "os_resource_audit": "stable after each state closes, before closing its borrowed owned input file",
+      "reader_scope": "redirected production input and bounded completed-console doubles; existing production cooked reader tested separately with deterministic ReadConsoleW double",
+      "receiver_hashes": {
+        "matched": 8,
+        "total": 8,
+        "binding": {
+          "path": "out/native-terminal-review-20261006/remote-win32-sha256.txt",
+          "sha256": "da01d5850ea3853fb5813914e5c6a002bd1047169b2c17e4105a5bd1eb276d6c",
+          "bytes": 779
+        }
+      },
+      "regressions": [
+        "R80 startup faults",
+        "process stream faults",
+        "Windows deterministic cooked reader when applicable"
+      ],
+      "bindings": [
+        {
+          "path": "out/native-terminal-review-20261006/before/win32-final.log",
+          "sha256": "68bff3ae651ef159ea8b600fe7f6f12c3c6fdad8853f8797947df11715c61ae5",
+          "bytes": 2231
+        },
+        {
+          "path": "out/native-terminal-review-20261006/after/win32-final.log",
+          "sha256": "342fdc1efe8233accfd0e31f0ba5aa45dbbeba514cc1754f55b199ae5057d30d",
+          "bytes": 1399
+        },
+        {
+          "path": "out/native-terminal-review-20261006/before/win32/terminal_input_faults.exe",
+          "sha256": "5e2b49aabf544f76de2a4538d9979303e0bb4eebcfe2e76bf649a93f34563b7a",
+          "bytes": 490813
+        },
+        {
+          "path": "out/native-terminal-review-20261006/before/win32/terminal_input_faults-build.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "path": "out/native-terminal-review-20261006/after/win32/terminal_input_faults.exe",
+          "sha256": "f9a7aa58015b5e2bd8c74a7206274f56f50ec5c4e31e698b89c89a8475516940",
+          "bytes": 492349
+        },
+        {
+          "path": "out/native-terminal-review-20261006/after/win32/terminal_input_faults-build.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "path": "out/native-terminal-review-20261006/after/win32/native_component_probe.exe",
+          "sha256": "a44d888acdee727487a100c61272006de051222b3d1e944f07146c98ea9926b7",
+          "bytes": 265672
+        },
+        {
+          "path": "out/native-terminal-review-20261006/after/win32/native_component_probe-build.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "path": "out/native-terminal-review-20261006/after/win32/process_start_faults.exe",
+          "sha256": "9e155e6317e5c694ab09460707908f3291e33579f0aab626a30cbcbdf7f6079f",
+          "bytes": 491166
+        },
+        {
+          "path": "out/native-terminal-review-20261006/after/win32/process_start_faults-build.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "path": "out/native-terminal-review-20261006/after/win32/process_stream_faults.exe",
+          "sha256": "6dd557967a3d7f1a8af060422342fe47a1f6aeb14ee2cb2df271bd4d4a3befa7",
+          "bytes": 492246
+        },
+        {
+          "path": "out/native-terminal-review-20261006/after/win32/process_stream_faults-build.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "path": "out/node-r76-20261005/win32-core/onedir/lua55.dll",
+          "sha256": "3a01621ce0b2a7e973aef32f6ed23820620055af095be57bba96ce64dbbdaae3",
+          "bytes": 696873
+        },
+        {
+          "path": "out/node-r76-20261005/win32-core/work/lua-5.5.1/src/liblua55.a",
+          "sha256": "b77ccb824ddf0df51927e62f77a6363468c51323d3604a5ab5d83b0b9226437d",
+          "bytes": 101114
+        },
+        {
+          "path": "out/native-terminal-review-20261006/after/win32/windows_console_reader_smoke.exe",
+          "sha256": "069044ad0c343e26cb8faca94fdeea1b99621b42309012774afa065492a6d203",
+          "bytes": 472649
+        },
+        {
+          "path": "out/native-terminal-review-20261006/after/win32/windows_console_reader_smoke-build.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      ]
+    },
+    {
+      "target": "win64",
+      "environment": "Windows 11 x64, NT 10.0.26100.0",
+      "baseline": {
+        "revision": "ec120639625b1988532cec7abc25152ead82293f",
+        "native_leaks": 40,
+        "ownership_errors": 0,
+        "protocol_failures": 0,
+        "profiles": [
+          {
+            "profile": 0,
+            "allocation_sites": 10,
+            "native_leaks": 14,
+            "same_owner_recovery": "PASS"
+          },
+          {
+            "profile": 1,
+            "allocation_sites": 9,
+            "native_leaks": 12,
+            "same_owner_recovery": "PASS"
+          },
+          {
+            "profile": 2,
+            "allocation_sites": 9,
+            "native_leaks": 0,
+            "same_owner_recovery": "PASS"
+          },
+          {
+            "profile": 3,
+            "allocation_sites": 10,
+            "native_leaks": 14,
+            "same_owner_recovery": "PASS"
+          },
+          {
+            "profile": 4,
+            "allocation_sites": 9,
+            "native_leaks": 0,
+            "same_owner_recovery": "PASS"
+          }
+        ],
+        "byte_controls": 5,
+        "invalid_cooked_controls": 4,
+        "exit_code": 1
+      },
+      "fixed": {
+        "native_leaks": 0,
+        "ownership_errors": 0,
+        "protocol_failures": 0,
+        "profiles": [
+          {
+            "profile": 0,
+            "allocation_sites": 18,
+            "native_leaks": 0,
+            "same_owner_recovery": "PASS"
+          },
+          {
+            "profile": 1,
+            "allocation_sites": 17,
+            "native_leaks": 0,
+            "same_owner_recovery": "PASS"
+          },
+          {
+            "profile": 2,
+            "allocation_sites": 9,
+            "native_leaks": 0,
+            "same_owner_recovery": "PASS"
+          },
+          {
+            "profile": 3,
+            "allocation_sites": 18,
+            "native_leaks": 0,
+            "same_owner_recovery": "PASS"
+          },
+          {
+            "profile": 4,
+            "allocation_sites": 9,
+            "native_leaks": 0,
+            "same_owner_recovery": "PASS"
+          }
+        ],
+        "byte_controls": 5,
+        "invalid_cooked_controls": 4,
+        "exit_code": 0
+      },
+      "fault_recovery_cycles_per_case": 2,
+      "os_resource_audit": "stable after each state closes, before closing its borrowed owned input file",
+      "reader_scope": "redirected production input and bounded completed-console doubles; existing production cooked reader tested separately with deterministic ReadConsoleW double",
+      "receiver_hashes": {
+        "matched": 8,
+        "total": 8,
+        "binding": {
+          "path": "out/native-terminal-review-20261006/remote-win64-sha256.txt",
+          "sha256": "b89e58787908d9c6ea2aec85a5a187d0ac53e9a0184e877abf0578a9b1f75943",
+          "bytes": 787
+        }
+      },
+      "regressions": [
+        "R80 startup faults",
+        "process stream faults",
+        "Windows deterministic cooked reader when applicable"
+      ],
+      "bindings": [
+        {
+          "path": "out/native-terminal-review-20261006/before/win64-final.log",
+          "sha256": "1df2b604b433f0257f74905e054b7075135662c805475a52b40d848e59289ad7",
+          "bytes": 2232
+        },
+        {
+          "path": "out/native-terminal-review-20261006/after/win64-final.log",
+          "sha256": "9f4c2435cde1d0d3e464ebf4e92e8363d74e46e9d60bd387524db1aa30cc3d1b",
+          "bytes": 1400
+        },
+        {
+          "path": "out/native-terminal-review-20261006/before/win64/terminal_input_faults.exe",
+          "sha256": "e8fbd3e61c37dce798aba28e91454084af95f265c8c1f336643679f6f2f7198c",
+          "bytes": 487256
+        },
+        {
+          "path": "out/native-terminal-review-20261006/before/win64/terminal_input_faults-build.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "path": "out/native-terminal-review-20261006/after/win64/terminal_input_faults.exe",
+          "sha256": "02243715a43655a9bd189d210f2cfe1e9a14f3e04314b0d0b3404d5abfc2f762",
+          "bytes": 487768
+        },
+        {
+          "path": "out/native-terminal-review-20261006/after/win64/terminal_input_faults-build.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "path": "out/native-terminal-review-20261006/after/win64/native_component_probe.exe",
+          "sha256": "f418e0948e3f76f71dd5de173a39b528bc8daebb4285487101d02c5fcf7bfe31",
+          "bytes": 279112
+        },
+        {
+          "path": "out/native-terminal-review-20261006/after/win64/native_component_probe-build.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "path": "out/native-terminal-review-20261006/after/win64/process_start_faults.exe",
+          "sha256": "1bd8d7303341bff0d4097b691981ef9f1dfd4046b59d738ba40217009b21be8a",
+          "bytes": 485533
+        },
+        {
+          "path": "out/native-terminal-review-20261006/after/win64/process_start_faults-build.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "path": "out/native-terminal-review-20261006/after/win64/process_stream_faults.exe",
+          "sha256": "f38424f54d682a7b0cc08a7e74459d01540d1fb7f3d505e52b2403d086ed7ea1",
+          "bytes": 486681
+        },
+        {
+          "path": "out/native-terminal-review-20261006/after/win64/process_stream_faults-build.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        {
+          "path": "out/node-r76-20261005/win64-core/onedir/lua55.dll",
+          "sha256": "5aae77d9330d72f7a747b7f96309494d52c8f3413e8a09fb9f872da8c31c0b00",
+          "bytes": 753984
+        },
+        {
+          "path": "out/node-r76-20261005/win64-core/work/lua-5.5.1/src/liblua55.a",
+          "sha256": "f65d19a6761fb2458ca85a274eecc91954c228029279e678165613f6708cca6c",
+          "bytes": 98552
+        },
+        {
+          "path": "out/native-terminal-review-20261006/after/win64/windows_console_reader_smoke.exe",
+          "sha256": "77aef7fae81d92431f0a0c73a39708a9d24691397c4566b63096340e33d057b1",
+          "bytes": 466432
+        },
+        {
+          "path": "out/native-terminal-review-20261006/after/win64/windows_console_reader_smoke-build.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      ]
+    }
+  ],
+  "compiler_flags": [
+    "-std=c99",
+    "-Wall",
+    "-Wextra",
+    "-Werror",
+    "-O2"
+  ],
+  "platform_flags": {
+    "linux": [
+      "-ldl",
+      "-lm"
+    ],
+    "win32": [
+      "_WIN32_WINNT=0x0501",
+      "-DLUA_BUILD_AS_DLL",
+      "-static-libgcc",
+      "-ladvapi32",
+      "-lshell32"
+    ],
+    "win64": [
+      "_WIN32_WINNT=0x0601",
+      "-DLUA_BUILD_AS_DLL",
+      "-static-libgcc",
+      "-ladvapi32",
+      "-lshell32"
+    ]
+  },
+  "build_command_source": {
+    "path": "out/native-terminal-review-20261006/build_probes.sh",
+    "sha256": "7a41fd3842e3d386977c0fc9ea502d0738262f20f221feba93510d99bbe8822e",
+    "bytes": 3252
+  },
+  "build_transcript": {
+    "path": "out/native-terminal-review-20261006/build-final.log",
+    "sha256": "5a9af470397cda66192b3f284cd911d00a9ae9abb71e3d522f0ee4913f8a9731",
+    "bytes": 224
+  },
+  "transport_command_source": {
+    "path": "out/native-terminal-review-20261006/run_windows_probes.py",
+    "sha256": "700359d5f14170827fa0edf34b256663282dd4d1baccfa0de5a9dc9044104788",
+    "bytes": 5176
+  },
+  "transport_results": {
+    "path": "out/native-terminal-review-20261006/remote-step-results.json",
+    "sha256": "03327e8e54e03630c3fa3e59c10581008b9c4d49584ba0234416b40523a7a20e",
+    "bytes": 1615
+  },
+  "targets_resource_guard": {
+    "path": "out/native-terminal-review-20261006/targets-run.log",
+    "sha256": "0797829320bdfef2138d39a0b17cc049ce5b9ac94805257792419b1fbb2549e5",
+    "bytes": 563
+  },
+  "sanitizer": {
+    "scope": "transient mode returned by a caller getter and collected from the next getter; native C instrumented, cached Lua library uninstrumented; LeakSanitizer disabled",
+    "baseline": "confirmed heap-use-after-free in mode comparison, nonzero exit",
+    "fixed": "retained mode and successful explicit restoration/close, zero exit",
+    "bindings": [
+      {
+        "path": "out/native-terminal-review-20261006/sanitizer_and_windows.sh",
+        "sha256": "3de27745a7056c18bf8bf51b8f15b1dfae81173938da2eaa7be6fc8a453a6970",
+        "bytes": 1557
+      },
+      {
+        "path": "out/native-terminal-review-20261006/before/linux-transient-asan-final.log",
+        "sha256": "2c3af0cb0c3338b12151fdcb9e7e390f5303480c9f65457c812d050f2bae2f9c",
+        "bytes": 5066
+      },
+      {
+        "path": "out/native-terminal-review-20261006/after/linux-transient-asan-final.log",
+        "sha256": "bb6beba8102cebbbe9bf8c39723ae34fa5a16326fbfc3f48eb43fa3ab22d28f2",
+        "bytes": 57
+      },
+      {
+        "path": "out/native-terminal-review-20261006/before/linux/terminal_input_faults-asan",
+        "sha256": "12e582c4a8070cbc626885ff993bde302f572ba505d785a40992070dc674350b",
+        "bytes": 2448016
+      },
+      {
+        "path": "out/native-terminal-review-20261006/after/linux/terminal_input_faults-asan",
+        "sha256": "712b5ac7de918ea8a18328f0bcbc39aef1e1546566c2fbbd0115683813f2facb",
+        "bytes": 2447832
+      }
+    ]
+  },
+  "full_suite": {
+    "status": "PASS",
+    "total": 706,
+    "passed": 706,
+    "failed": 0,
+    "binding": {
+      "path": "out/native-terminal-review-20261006/lua-suite-final.log",
+      "sha256": "ea2031c3d465ef3393da0d4c39f086c814fc72e0a0e231174319e489ba0a959e",
+      "bytes": 70250
+    }
+  },
+  "coding_readiness": {
+    "status": "PASS",
+    "binding": {
+      "path": "out/native-terminal-review-20261006/coding-readiness-final.log",
+      "sha256": "9c2f04dbdec9b2f9175e813c521f6eb5d8f7fd8edcd6cc4477c5de2d7b3b52ea",
+      "bytes": 4210
+    }
+  },
+  "comment_structure": {
+    "files": 246,
+    "declarations": 5505,
+    "violations": 0,
+    "inventory": {
+      "path": "out/native-terminal-review-20261006/comment-inventory.json",
+      "sha256": "8a40aee1e88673ec705a510e060e13964fa0938ff75d9e3d32841649105da9db",
+      "bytes": 1228261
+    }
+  },
+  "check_resource_guard": {
+    "path": "out/native-terminal-review-20261006/complete-checks-run.log",
+    "sha256": "cc2fdd5abd671865e341dfaeef13bb05a1214ffc876800b98af912a815ce5db7",
+    "bytes": 172
+  },
+  "semantic_review": "partial; rooted terminal startup fields, Lua-owned read/conversion storage, stack restoration on OS/encoding/limit failures, retained terminal outcome and post-insertion delivered marker, same-owner fixture recovery and byte/control contracts reviewed",
+  "published_candidate_contains_fix": false,
+  "fixture_cleanup": "owned input file closes after each state; completed-reader events/storage finalize; transferred receiver directories and logs retained",
+  "uncovered_scope": [
+    "real console interaction and cooked reader emergency cancellation/detach ownership",
+    "remaining native/main interactive internals and remaining helpers",
+    "final onefile/nine-package qualification"
+  ]
+}

@@ -1,4 +1,4 @@
-# 原生资源生命周期 R78 / R79 / R80
+# 原生资源生命周期 R78 / R79 / R80 / R81
 
 故障取证与完整检查于 2026-10-05 执行，2026-10-06 核对并收口。
 基线为 `1e97083b783d0d65634125a2eabf97467015d567`；R78 已提交推送为 `7b616ad`。
@@ -176,3 +176,56 @@ process userdata 转移，以及探针和构建入口注释。全仓语义 Revie
 继续审核时发现终端 poll/Windows cooked 投影仍持有 C 缓冲区跨 Lua 结果分配，
 终端 mode 字符串也未固定在私有请求中。这些终端路径另行复现、修复和取证，
 不计入本批启动通过；main 交互内部与测试辅助代码仍待继续复核。
+
+## R81 终端输入投影与启动模式的保留
+
+基线为精确 R80 提交 `ec12063` native。POSIX 和 Windows 重定向输入在 malloc
+缓冲区仍存活时创建 Lua action/terminal 结果；Windows cooked 行也在 C UTF-8
+临时缓冲区存活时投影 Lua 结果。Lua 分配异常跳过 free。启动 mode 则从 caller
+getter 借用但未保留，随后 maximum getter 的 GC 可释放它；Linux sanitizer 在
+后续 mode 比较确认已释放内存读取。
+
+终端启动先捕获 mode/maximum 到无元表私有表，两个 getter 都在模式修改前完成。
+输入与 cooked 转码改用 `luaL_Buffer`；先生成并保留 Lua 字符串，再投影 action，
+避免跨结果分配的独立 C heap。错误与空读正常退出时恢复缓冲栈。已知终态保留在
+userdata；投影 helper 不提前标记 delivered，调用方插入事件后再标记，重试可
+投影缓存终态。该标记调整是状态次序收敛，本组没有复现旧代码丢失终态。
+
+新增 `terminal_input_faults.c`。重定向面使用实际临时文件句柄/描述符；Windows
+cooked 投影使用已完成的有界 UTF-16 reader double 和 signalled event，不冒充
+真实控制台输入。每个 Lua 增长点持续拒绝分配，含 emergency GC；每例同一终端
+owner 两次故障、两次精确恢复，核对 EOF/cancel 的 join 与单次 terminal delivery。
+GC 后区别仍由 owner 持有的 reader 与逃逸缓冲区，只救援基线已确认的泄漏。
+状态关闭后全部 OS 资源数回到借用输入文件仍打开时的基线，随后关闭该文件。
+
+| 环境 | 同组基线累计泄漏缓冲区 | 修复后泄漏 / 所有权错误 / 协议失败 |
+| --- | --- | --- |
+| Linux x86_64 开发宿主 | 26 | 0 / 0 / 0 |
+| Server 2008 non-R2 x64 / Win32 WOW64 | 40 | 0 / 0 / 0 |
+| Windows 11 x64 | 40 | 0 / 0 / 0 |
+
+Linux 覆盖重定向 text、EOF 和 cancel；Windows 另覆盖 completed cooked text/EOF。
+五个控制字节/二进制序列保持原平台意图与精确字节，含嵌入 NUL；两 Windows 的
+四个 cooked Unicode/字节限额控制返回原类型化错误，并释放 reader。实际最大值
+getter 异常在三平台均按预期传播。临时 mode 场景在 Linux Clang AddressSanitizer
+基线确认为 heap-use-after-free，修复后启动及显式 restoration/close 通过；两个
+Windows 的同场景通过。sanitizer 范围仍是仪器化 native C、未仪器化缓存 Lua，
+不以关闭 LeakSanitizer 的结果代替独立泄漏跟踪。
+
+三平台 R80 启动与进程 stream 故障回归通过；两 Windows 的生产 cooked reader
+在现有 ReadConsoleW double 下保持片段、跨片段 surrogate、EOF/读错控制通过。
+这也不替代最终真实控制台交互或 emergency cancellation。Windows 接收的基线/
+修复探针、回归程序及 Lua DLL，每目标摘要 **8/8** 一致。严格编译标志与 R80
+相同，Win32/Win64 的最低 API 编译宏继续分别为 0x0501/0x0601。
+
+完整 Lua suite **706/706**，完整 coding readiness **PASS**；注释结构
+**246 文件 / 5505 声明 / 0 缺项**，清点归档。人工逐项核对私有请求根、buffer
+转换后指针来源、空读/错误的栈恢复、Unicode 限额与错误码、已知终态及 delivered
+次序、completed reader 的异常保留、探针的借用输入/所有者区别及构建入口。
+全仓语义 Review 仍为 partial；尤其 Windows cooked reader 取消失败后 detach
+所有权、后续原生/main 交互内部及测试辅助代码仍待继续复核和取证。
+
+15 个冻结 native/helper 输入、精确基线、实际编译件/日志、接收摘要、sanitizer 与
+完整检查绑定于 [`native-review/R81.json`](native-review/R81.json)，原始记录位于
+`out/native-terminal-review-20261006/`。本批完成的是生产函数子集，最终单文件和
+九包尚未重建，旧预发布不含 R77--R81；Gate R 保持关闭。

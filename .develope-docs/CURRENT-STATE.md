@@ -40,6 +40,16 @@ Windows 同场景通过，每目标接收件摘要 9/9 一致。三平台进程�
 [R80 Review](CODE-REVIEW-2026-10-06.md#r80-进程启动请求的保留与一致性)和
 [字节绑定](native-review/R80.json)。终端异常路径已有待复现项，正式资格仍待完成。
 
+进一步完成 **R81 终端输入投影与 mode 保留修复**：重定向读取和 Windows cooked
+转码的临时字节由 Lua 持有，启动 mode 捕获后强引用保留。Linux / Server 2008
+Win32 / Windows 11 Win64 同组基线累计泄漏 26 / 40 / 40；修复后均零泄漏、零
+所有权错误、零协议失败。同 owner 两次恢复、EOF/cancel、控制字节/Unicode 限额、
+R80 启动及进程流回归通过；Windows cooked 投影证据使用 completed reader double，
+不替代真实控制台资格。Linux mode GC sanitizer 同组回归通过，Windows 接收件
+各 8/8 摘要一致。完整 suite 706/706、coding readiness PASS；证据见
+[R81 Review](CODE-REVIEW-2026-10-06.md#r81-终端输入投影与启动模式的保留)及
+[字节绑定](native-review/R81.json)。旧候选单文件尚未包含后续修复。
+
 本节点已修复 R75：OpenAI 工具流后续 ID/name/arguments 的显式 null 表示不更新，
 首片身份和后续非 null 身份变化仍严格校验；R76：压缩取消的日志写入失败后，仍使用
 原句柄清理 Model，返回结构化失败，不再访问已清空的 active。
@@ -144,7 +154,8 @@ CentOS 7 x86_64；未实测的面如实保留。
 R79 完成删除/替换/改名验证跨 getter/分配异常的资源复核与三平台故障取证；
 尚余后续原生进程/终端接口、main 交互内部和测试辅助代码。
 R80 完成进程启动捕获/参数/环境、Lua 异常前的资源准入及实际 argv 的三平台取证；
-后续终端 poll/cooked 投影与启动 mode 的保留路径正在继续复核。
+R81 完成终端 poll/cooked 投影与启动 mode 保留路径的复核及三平台有界故障取证；
+保留面包括 Windows cooked reader 取消失败后的 detach 所有权和后续原生/main 交互。
 本轮新增校验、PTY 生命周期、临时目录所有权及回归逐项核对。
 
 C32/C33/C34 的剩余项完成并形成精确字节证据后，才评审 Gate R。
@@ -155,6 +166,8 @@ R79 源码全量 coding readiness PASS：注释结构 **244 文件 / 5476 声明
 四校验器及全部 TP/RP 通过。人工语义 Review 保留面仍未完成。
 R80 源码完整检查同样通过，注释结构为 **245 文件 / 5491 声明 / 0 缺项**；
 新增启动探针及改动的捕获、校验、所有权注释已逐项核对，未扩大为全仓完成。
+R81 完整检查同样通过，最新注释结构为 **246 文件 / 5505 声明 / 0 缺项**；
+终端输入投影、模式保留和维护探针已逐项核对，其余语义 Review 继续保留。
 
 本轮交付节点按 [D-081](DECISIONS.md#d-081-下一个开发节点打包推送2026-10-05)：
 推送源码到 `origin/main` 并发布三目标九包候选预发布。正式 v1.0 的 Gate R 保持关闭，

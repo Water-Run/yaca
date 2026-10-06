@@ -11532,10 +11532,11 @@ static void push_terminal_action(
   }
 }
 
-/* Pushes terminal fact fields onto the Lua stack.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @param terminal yaca_terminal* Terminal owner whose input and mode state are managed.
- * @return void result Pushes a terminal observation with its typed fields to the Lua stack.
+/* Project cached terminal truth without marking it delivered before the caller inserts the event.
+ * @param L lua_State* State receiving one terminal observation table at stack top.
+ * @param terminal yaca_terminal* Borrowed owner retaining the completed or cancelled outcome.
+ * @return void No value; pushes kind/outcome fields while leaving terminal_emitted unchanged.
+ * @error Lua allocation may raise; the owner retains its truth for a later poll retry.
  */
 static void push_terminal_fact(lua_State *L, yaca_terminal *terminal)
 {
@@ -11544,7 +11545,6 @@ static void push_terminal_fact(lua_State *L, yaca_terminal *terminal)
   lua_setfield(L, -2, "kind");
   lua_pushstring(L, terminal->outcome);
   lua_setfield(L, -2, "outcome");
-  terminal->terminal_emitted = 1;
 }
 
 #if defined(_WIN32)
@@ -11853,14 +11853,17 @@ static int cancel_windows_cooked_read(yaca_terminal *terminal)
 /*
 ** Emits one completed wide cooked line as strict UTF-8.
 */
-/* Pushes windows cooked line fields onto the Lua stack.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @param terminal yaca_terminal* Terminal owner whose input and mode state are managed.
- * @return int result 2 for a terminal fact, 0 when pending, or a negative code on failure.
+/* Project a completed Windows cooked line with Lua-owned temporary UTF-8 storage.
+ * @param L lua_State* State receiving one text action or terminal fact at stack top on success.
+ * @param terminal yaca_terminal* Owner retaining a completed wide reader throughout result allocation.
+ * @return int One for text, two for EOF, zero for no reader, minus one for a byte limit, minus two for invalid Unicode.
+ * @error Lua allocation may raise; temporary bytes remain Lua-owned and the completed reader remains terminal-owned for retry.
+ * @ownership Caller releases the completed reader after a normal return; this function acquires no independent C heap buffer.
  */
 static int push_windows_cooked_line(lua_State *L, yaca_terminal *terminal)
 {
   yaca_terminal_read *read;
+  luaL_Buffer output;
   char *bytes;
   size_t byte_length;
   size_t index;
@@ -11880,11 +11883,7 @@ static int push_windows_cooked_line(lua_State *L, yaca_terminal *terminal)
   {
     return -1;
   }
-  bytes = (char *)malloc(terminal->maximum_input_bytes + 1U);
-  if (bytes == NULL)
-  {
-    return -1;
-  }
+  bytes = luaL_buffinitsize(L, &output, terminal->maximum_input_bytes);
   byte_length = 0;
   index = 0;
   while (index < (size_t)read->received)
@@ -11897,7 +11896,7 @@ static int push_windows_cooked_line(lua_State *L, yaca_terminal *terminal)
     unit = (unsigned int)read->wide[index++];
     if (unit == 0U)
     {
-      free(bytes);
+      luaL_pushresultsize(&output, 0U); lua_pop(L, 1);
       return -2;
     }
     if (unit >= 0xD800U && unit <= 0xDBFFU)
@@ -11906,13 +11905,13 @@ static int push_windows_cooked_line(lua_State *L, yaca_terminal *terminal)
 
       if (index >= (size_t)read->received)
       {
-        free(bytes);
+        luaL_pushresultsize(&output, 0U); lua_pop(L, 1);
         return -2;
       }
       low = (unsigned int)read->wide[index++];
       if (low < 0xDC00U || low > 0xDFFFU)
       {
-        free(bytes);
+        luaL_pushresultsize(&output, 0U); lua_pop(L, 1);
         return -2;
       }
       codepoint = 0x10000UL
@@ -11921,7 +11920,7 @@ static int push_windows_cooked_line(lua_State *L, yaca_terminal *terminal)
     }
     else if (unit >= 0xDC00U && unit <= 0xDFFFU)
     {
-      free(bytes);
+      luaL_pushresultsize(&output, 0U); lua_pop(L, 1);
       return -2;
     }
     else
@@ -11931,22 +11930,42 @@ static int push_windows_cooked_line(lua_State *L, yaca_terminal *terminal)
     encoded_length = encode_utf8_codepoint(codepoint, encoded);
     if (encoded_length > terminal->maximum_input_bytes - byte_length)
     {
-      free(bytes);
+      luaL_pushresultsize(&output, 0U); lua_pop(L, 1);
       return -1;
     }
     memcpy(bytes + byte_length, encoded, encoded_length);
     byte_length += encoded_length;
   }
-  push_terminal_action(L, "text", bytes, byte_length);
-  free(bytes);
+  luaL_pushresultsize(&output, byte_length);
+  push_terminal_action(L, "text", lua_tostring(L, -1), byte_length);
+  lua_remove(L, -2);
   return 1;
 }
 
 #endif
 
-/* Implements the Lua terminal start native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Retain both admitted terminal request values before a later getter can collect temporary mode bytes.
+ * @param L lua_State* Argument 1 is the caller request; any other argument indices remain unchanged.
+ * @return void No value; replaces argument 1 with a private plain mode/maximum_input_bytes table.
+ * @error Caller getters and Lua allocation may raise before terminal settings or OS resources change.
+ * @effect Reads the two known fields once and retains their returned values without modifying the caller table.
+ */
+static void capture_terminal_request(lua_State *L)
+{
+  int request;
+  lua_createtable(L, 0, 2);
+  request = lua_gettop(L);
+  capture_process_field(L, 1, request, "mode");
+  capture_process_field(L, 1, request, "maximum_input_bytes");
+  lua_replace(L, 1);
+}
+
+/* Start bounded terminal input using a retained mode and a Lua owner allocated before settings change.
+ * @param L lua_State* Argument 1 is the request with auto/raw/cooked mode and positive integer maximum_input_bytes.
+ * @return int Two Lua results: true and a terminal userdata, or false and a typed mode/limit/OS failure.
+ * @error Wrong argument types, caller getters and Lua allocation may raise; the terminal owner finalizes acquired mode/reader state.
+ * @effect Captures and changes stdin flags or console/PTY settings and, for Windows cooked consoles, starts an owned reader.
+ * @ownership Standard input is borrowed; the userdata owns restoration state and any asynchronous read, never the host stdin handle.
  */
 static int l_terminal_start(lua_State *L)
 {
@@ -11956,6 +11975,7 @@ static int l_terminal_start(lua_State *L)
   yaca_terminal *terminal;
 
   luaL_checktype(L, 1, LUA_TTABLE);
+  capture_terminal_request(L);
   if (!request_string_field(L, 1, "mode", &mode, &mode_length, 0))
   {
     return push_failure(L, "InvalidTerminalMode", "terminal mode is invalid");
@@ -12109,9 +12129,12 @@ static int l_terminal_start(lua_State *L)
   return return_success(L);
 }
 
-/* Implements the Lua terminal poll native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Poll bounded terminal input while retaining temporary bytes and undelivered terminal truth through Lua errors.
+ * @param L lua_State* Arguments are an open terminal userdata, integer tick time and nonnegative integer event budget.
+ * @return int Two Lua results: true and an event array, or false and a typed limit/input failure.
+ * @error Bad arguments or Lua allocation may raise; consumed stream bytes are not replayed, but owners and terminal truth remain recoverable.
+ * @effect Reads borrowed stdin or completed console input; marks a terminal fact delivered only after inserting it in the returned array.
+ * @ownership Read/conversion buffers are Lua-owned; the userdata keeps its mode and outstanding cooked reader resources.
  */
 static int l_terminal_poll(lua_State *L)
 {
@@ -12135,10 +12158,18 @@ static int l_terminal_poll(lua_State *L)
     strcpy(terminal->outcome, "cancelled");
     push_terminal_fact(L, terminal);
     lua_seti(L, -2, (lua_Integer)++count);
+    terminal->terminal_emitted = 1;
     return return_success(L);
   }
   if (terminal->terminal_emitted || count >= budget)
   {
+    return return_success(L);
+  }
+  if (terminal->outcome[0] != '\0')
+  {
+    push_terminal_fact(L, terminal);
+    lua_seti(L, -2, 1);
+    terminal->terminal_emitted = 1;
     return return_success(L);
   }
 #if defined(_WIN32)
@@ -12191,6 +12222,7 @@ static int l_terminal_poll(lua_State *L)
         return push_failure(L, "Limit", "cooked terminal line exceeds its byte limit");
       }
       lua_seti(L, -2, 1);
+      if (line_result == 2) terminal->terminal_emitted = 1;
       return return_success(L);
     }
     else
@@ -12235,6 +12267,7 @@ static int l_terminal_poll(lua_State *L)
   else
   {
     char *buffer;
+    luaL_Buffer input;
     DWORD received;
     DWORD maximum;
     DWORD available;
@@ -12252,6 +12285,7 @@ static int l_terminal_poll(lua_State *L)
           strcpy(terminal->outcome, "completed");
           push_terminal_fact(L, terminal);
           lua_seti(L, -2, 1);
+          terminal->terminal_emitted = 1;
           return return_success(L);
         }
         lua_pop(L, 1);
@@ -12270,44 +12304,39 @@ static int l_terminal_poll(lua_State *L)
     {
       maximum = available;
     }
-    buffer = (char *)malloc((size_t)maximum);
-    if (buffer == NULL)
-    {
-      lua_pop(L, 1);
-      return push_failure(L, "Limit", "terminal input allocation failed");
-    }
+    buffer = luaL_buffinitsize(L, &input, (size_t)maximum);
     if (!ReadFile(terminal->input, buffer, maximum, &received, NULL))
     {
       DWORD error_value;
 
       error_value = GetLastError();
-      free(buffer);
+      luaL_pushresultsize(&input, 0U); lua_pop(L, 1);
       lua_pop(L, 1);
       return push_windows_failure(L, error_value, "terminal redirected input failed");
     }
     if (received == 0)
     {
+      luaL_pushresultsize(&input, 0U); lua_pop(L, 1);
       strcpy(terminal->outcome, "completed");
       push_terminal_fact(L, terminal);
     }
     else
     {
-      push_terminal_action(L, "text", buffer, (size_t)received);
+      luaL_pushresultsize(&input, (size_t)received);
+      push_terminal_action(L, "text", lua_tostring(L, -1), (size_t)received);
+      lua_remove(L, -2);
     }
-    free(buffer);
     lua_seti(L, -2, 1);
+    if (received == 0) terminal->terminal_emitted = 1;
   }
 #else
   {
     char *buffer;
+    luaL_Buffer input;
+    const char *intent;
     ssize_t received;
 
-    buffer = (char *)malloc(terminal->maximum_input_bytes);
-    if (buffer == NULL)
-    {
-      lua_pop(L, 1);
-      return push_failure(L, "Limit", "terminal input allocation failed");
-    }
+    buffer = luaL_buffinitsize(L, &input, terminal->maximum_input_bytes);
     do
     {
       received = read(terminal->input, buffer, terminal->maximum_input_bytes);
@@ -12315,7 +12344,7 @@ static int l_terminal_poll(lua_State *L)
     while (received < 0 && errno == EINTR);
     if (received < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
     {
-      free(buffer);
+      luaL_pushresultsize(&input, 0U); lua_pop(L, 1);
       return return_success(L);
     }
     if (received < 0)
@@ -12323,29 +12352,27 @@ static int l_terminal_poll(lua_State *L)
       int error_value;
 
       error_value = errno;
-      free(buffer);
+      luaL_pushresultsize(&input, 0U); lua_pop(L, 1);
       lua_pop(L, 1);
       return push_failure(L, errno_code(error_value), "terminal input read failed");
     }
     if (received == 0)
     {
+      luaL_pushresultsize(&input, 0U); lua_pop(L, 1);
       strcpy(terminal->outcome, "completed");
       push_terminal_fact(L, terminal);
     }
-    else if (received == 1 && buffer[0] == 27)
-    {
-      push_terminal_action(L, "cancel", NULL, 0);
-    }
-    else if (received == 1 && (buffer[0] == '\r' || buffer[0] == '\n'))
-    {
-      push_terminal_action(L, "submit-or-queue", NULL, 0);
-    }
     else
     {
-      push_terminal_action(L, "text", buffer, (size_t)received);
+      intent = received == 1 && buffer[0] == 27 ? "cancel"
+        : received == 1 && (buffer[0] == '\r' || buffer[0] == '\n') ? "submit-or-queue" : "text";
+      luaL_pushresultsize(&input, (size_t)received);
+      push_terminal_action(L, intent,
+        strcmp(intent, "text") == 0 ? lua_tostring(L, -1) : NULL, (size_t)received);
+      lua_remove(L, -2);
     }
-    free(buffer);
     lua_seti(L, -2, 1);
+    if (received == 0) terminal->terminal_emitted = 1;
   }
 #endif
   return return_success(L);
