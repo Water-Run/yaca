@@ -1,8 +1,8 @@
 /*
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-10-08
 File: yaca_pty.h
-Description: Recognizes Cygwin PTYs on XP APIs and delegates termios to host stty.
+Description: Recognizes Cygwin PTYs on XP APIs and contains fixed host stty mode/query subprocesses with bounded restoration and cleanup.
 */
 
 #ifndef YACA_PTY_H
@@ -26,9 +26,10 @@ typedef struct yaca_pty_state
 ** ordinary redirected stream. Query the name using the pre-Vista NT API.
 ** https://cygwin.com/pipermail/cygwin/2015-June/222067.html
 */
-/* Checks is cygwin pty against the admitted native state.
- * @param handle HANDLE Operating-system handle being inspected or closed.
- * @return int result 1 for a valid Cygwin PTY pipe, otherwise 0.
+/* Recognize only the bounded documented Cygwin PTY pipe-name forms.
+ * @param handle HANDLE Borrowed input handle; this function never closes it.
+ * @return int One for a pipe whose queried name matches the exact admitted prefix/id/direction; zero for unavailable APIs or any other handle/name.
+ * @effect Reads kernel handle type/name and resolves the fixed ntdll query without starting a process or changing modes.
  */
 static int yaca_is_cygwin_pty(HANDLE handle)
 {
@@ -53,8 +54,8 @@ static int yaca_is_cygwin_pty(HANDLE handle)
   /* Reads the native name used to identify a Cygwin PTY pipe.
    * @callback query_type Dynamically resolved native pipe-name query.
    * @param arg1 HANDLE Pipe handle whose native name is queried.
-   * @param arg2 PVOID Caller-owned information buffer.
-   * @param arg3 PVOID Caller-owned I/O status block.
+   * @param arg2 PVOID Caller-owned I/O status block receiving status/information.
+   * @param arg3 PVOID Caller-owned FILE_NAME_INFORMATION buffer receiving the bounded pipe name.
    * @param arg4 ULONG Information-buffer capacity in bytes.
    * @param arg5 int Native information class selector.
    * @return LONG status Native query completion status.
@@ -120,9 +121,11 @@ static int yaca_is_cygwin_pty(HANDLE handle)
 ** application name and fixed arguments. No command shell or tools/ is used.
 ** The adjacent Cygwin DLL is necessary to manipulate that host's terminal.
 */
-/* Locates host Cygwin stty beside cygwin1.dll.
- * @param state yaca_pty_state* Captured native state updated or compared by the operation.
- * @return int result 1 when a compatible stty path is stored in state, otherwise 0.
+/* Locate the host stty from inherited PATH and require its adjacent Cygwin DLL.
+ * @param state yaca_pty_state* Caller-owned state receiving the absolute stty path on success.
+ * @return int One for a bounded quote-free stty path with an adjacent regular cygwin1.dll; zero for allocation/API/path/attribute failure.
+ * @effect Reads PATH and host filesystem attributes; failure may leave an unusable path in state, which callers must ignore.
+ * @ownership Frees its temporary PATH allocation on every return; no process or library is loaded here.
  */
 static int yaca_find_stty(yaca_pty_state *state)
 {
@@ -158,10 +161,12 @@ static int yaca_find_stty(yaca_pty_state *state)
 ** inherited: stty must recognize that PTY, never a guessed /dev/pty number.
 */
 /* Runs host stty against the inherited PTY with a bounded wait.
- * @param state yaca_pty_state* Captured native state updated or compared by the operation.
- * @param options const_char* The options bound to yaca stty.
- * @param output char* Caller-provided output buffer or result destination.
- * @return int result 1 when stty exits successfully and optional output is captured, otherwise 0.
+ * @param state yaca_pty_state* Borrowed validated host stty path; saved mode and active state are not changed here.
+ * @param options const_char* Fixed mode/query or validated serialized restore options, encoded as UTF-8.
+ * @param output char* Optional caller-owned 1024-byte query destination; NULL for mode changes.
+ * @return int One for an observed zero exit and bounded output; zero on setup/wait/exit/output failure.
+ * @effect Starts stty suspended, admits it to an independent kill-on-close job, then resumes it with the exact inherited stdin.
+ * @ownership Owns temporary pipes, NUL/input duplicates, job and child handles through cleanup; failure never resumes an unassigned child.
  */
 static int yaca_stty(yaca_pty_state *state, const char *options, char *output)
 {
@@ -172,12 +177,17 @@ static int yaca_stty(yaca_pty_state *state, const char *options, char *output)
   HANDLE read_pipe = NULL;
   HANDLE write_pipe = NULL;
   HANDLE null_handle = INVALID_HANDLE_VALUE;
+  HANDLE job = NULL;
+  JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits;
   WCHAR command[6144];
   WCHAR wide_options[1024];
   DWORD exit_code;
   DWORD available;
   DWORD received;
+  DWORD creation_flags;
   int ok = 0;
+
+  memset(&child, 0, sizeof(child));
 
   if (!MultiByteToWideChar(CP_UTF8, 0, options, -1, wide_options, 1024)) return 0;
   if (_snwprintf(command, 6144, L"\"%ls\" %ls", state->stty, wide_options) < 0) return 0;
@@ -191,25 +201,37 @@ static int yaca_stty(yaca_pty_state *state, const char *options, char *output)
   null_handle = CreateFileW(L"NUL", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
     &security, OPEN_EXISTING, 0, NULL);
   if (null_handle == INVALID_HANDLE_VALUE) goto done;
+  job = CreateJobObjectW(NULL, NULL);
+  if (job == NULL) goto done;
+  memset(&limits, 0, sizeof(limits));
+  limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+  if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation,
+      &limits, sizeof(limits))) goto done;
   memset(&startup, 0, sizeof(startup));
-  memset(&child, 0, sizeof(child));
   startup.cb = sizeof(startup);
   startup.dwFlags = STARTF_USESTDHANDLES;
   startup.hStdInput = input;
   startup.hStdOutput = write_pipe;
   startup.hStdError = null_handle;
-  if (!CreateProcessW(state->stty, command, NULL, NULL, TRUE, 0, NULL, NULL,
+  creation_flags = CREATE_SUSPENDED | CREATE_NO_WINDOW;
+  memset(&limits, 0, sizeof(limits));
+  if (QueryInformationJobObject(NULL, JobObjectExtendedLimitInformation,
+      &limits, sizeof(limits), NULL)
+      && (limits.BasicLimitInformation.LimitFlags & JOB_OBJECT_LIMIT_BREAKAWAY_OK))
+  {
+    creation_flags |= CREATE_BREAKAWAY_FROM_JOB;
+  }
+  if (!CreateProcessW(state->stty, command, NULL, NULL, TRUE, creation_flags, NULL, NULL,
       &startup, &child)) goto done;
+  if (!AssignProcessToJobObject(job, child.hProcess)
+      || ResumeThread(child.hThread) == (DWORD)-1) goto done;
   CloseHandle(child.hThread);
+  child.hThread = NULL;
   if (WaitForSingleObject(child.hProcess, 3000) != WAIT_OBJECT_0)
   {
-    TerminateProcess(child.hProcess, 1);
-    WaitForSingleObject(child.hProcess, 1000);
-    CloseHandle(child.hProcess);
     goto done;
   }
   ok = GetExitCodeProcess(child.hProcess, &exit_code) && exit_code == 0;
-  CloseHandle(child.hProcess);
   if (ok && output != NULL)
   {
     ok = PeekNamedPipe(read_pipe, NULL, 0, NULL, &available, NULL)
@@ -221,6 +243,20 @@ static int yaca_stty(yaca_pty_state *state, const char *options, char *output)
     }
   }
 done:
+  /* Closing the independent job stops admitted processes even if direct
+  ** termination fails. An unassigned child is still suspended and is stopped
+  ** here without ever executing stty or modifying the terminal. */
+  if (job != NULL) CloseHandle(job);
+  if (child.hProcess != NULL)
+  {
+    if (WaitForSingleObject(child.hProcess, 0U) != WAIT_OBJECT_0)
+    {
+      TerminateProcess(child.hProcess, 1U);
+      if (WaitForSingleObject(child.hProcess, 1000U) != WAIT_OBJECT_0) ok = 0;
+    }
+    CloseHandle(child.hProcess);
+  }
+  if (child.hThread != NULL) CloseHandle(child.hThread);
   if (input != INVALID_HANDLE_VALUE) CloseHandle(input);
   if (read_pipe != NULL) CloseHandle(read_pipe);
   if (write_pipe != NULL) CloseHandle(write_pipe);
@@ -228,9 +264,10 @@ done:
   return ok;
 }
 
-/* Restores saved Cygwin PTY settings when they were changed.
- * @param state yaca_pty_state* Captured native state updated or compared by the operation.
- * @return int result 1 after restoration or when inactive, otherwise 0.
+/* Restore the retained host mode and clear ownership only after acknowledged stty success.
+ * @param state yaca_pty_state* Owner retaining the validated saved mode and host executable.
+ * @return int One for inactive or successfully restored state; zero when the bounded restore command fails.
+ * @effect May change the actual inherited PTY mode; failed restoration keeps active set for another attempt.
  */
 static int yaca_pty_restore(yaca_pty_state *state)
 {
@@ -240,10 +277,12 @@ static int yaca_pty_restore(yaca_pty_state *state)
   return 1;
 }
 
-/* Captures Cygwin PTY settings and applies cooked or raw mode.
- * @param state yaca_pty_state* Captured native state updated or compared by the operation.
- * @param cooked int The cooked bound to yaca pty start.
- * @return int result 1 when the requested mode is active, otherwise 0.
+/* Capture a validated serialized PTY mode before attempting cooked/raw entry.
+ * @param state yaca_pty_state* Fresh caller-owned state receiving host path, saved mode and restoration ownership.
+ * @param cooked int Nonzero selects canonical echo/signals; zero selects hidden noncanonical no-signals input with min=1/time=0.
+ * @return int One after successful mode entry; zero on lookup/query/format/apply failure, retaining active if attempted rollback also fails.
+ * @effect Runs fixed host queries/mode commands; failed apply attempts rollback through the same bounded helper.
+ * @ownership Sets active before a mode change; saved mode remains owned until a successful restore clears it.
  */
 static int yaca_pty_start(yaca_pty_state *state, int cooked)
 {

@@ -7,6 +7,7 @@
 
 | 时间 / 节点 | 主要成果 | 证据与适用范围 |
 | --- | --- | --- |
+| 2026-10-08，R87 Cygwin stty ownership | 修复 timeout 后活 child，增加 suspended/job admission；双目标六项矩阵、指定 Cygwin 四组实际模式/回滚/retry 及原生回归通过 | [本日 Review](CODE-REVIEW-2026-10-08.md#r87cygwin-stty-子进程所有权与模式回滚)、[R87](native-review/R87.json)；TTY carrier 255 保留、独立 nonce receipt 已核对；720/720、readiness PASS、256/5628/0 |
 | 2026-10-08，R86 main input owner | 关闭失败时保留 owner、停止模式复用并缓存已成功 join；四项公开 REPL 故障/重试和未知恢复不发布验证通过 | [本日 Review](CODE-REVIEW-2026-10-08.md#r86main-输入协调器保留未关闭的-owner)、[R86](native-review/R86.json)；87/87 专项、720/720 完整、readiness PASS、255/5615/0；不替代物理机和最终包资格 |
 | 2026-10-08，R85 terminal adapter 与 Linux raw | 修复失败关闭后的 owner/确认值/恢复状态和 Linux raw 空闲 EOF；十场景回归、五组实际 PTY/kernel 状态恢复通过 | [本日 Review](CODE-REVIEW-2026-10-08.md#r85终端适配器失败重试与-linux-raw-模式)、[R85](native-review/R85.json)；开发宿主 716/716、readiness PASS、255/5603/0；未扩大为新目标或发行包资格 |
 | 2026-10-08，R84 worker 代码生命周期 | 修复 Lua close 后活 worker 的 DLL 卸载，采用独立引用及原子 release/exit；双目标实际 DLL 和六个 setup 拒绝通过 | [本日 Review](CODE-REVIEW-2026-10-08.md#r84异步-worker-独立保留-dll-代码)、[R84](native-review/R84.json)；完整 706/706、readiness PASS，252/5574/0；最终单文件与九包待重建 |

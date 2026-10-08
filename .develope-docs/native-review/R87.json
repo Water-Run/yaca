@@ -1,0 +1,623 @@
+{
+  "schema": "yaca-native-review-evidence-v1",
+  "review_id": "R87",
+  "date": "2026-10-08",
+  "status": "verified-native-subset",
+  "release_authorized": false,
+  "target_qualification_complete": false,
+  "published_candidate_contains_fix": false,
+  "source_inputs": {
+    "base_revision": "c95e9f27d47cb333d9c15b780ef9db2c3709ccca",
+    "files": [
+      {
+        "path": ".tools/qualification/build_win64_candidate.sh",
+        "sha256": "e0b80228427730a7cbe9fc98bdafb570a4c715a7412511ffee3ac33ebe6624c5"
+      },
+      {
+        "path": ".tools/qualification/build_windows_candidate.sh",
+        "sha256": "f4634d5eb45fb144d80e63fe641840d44cd4bfbf61bd4c15065ad83586730ebe"
+      },
+      {
+        "path": ".tools/qualification/filesystem_fault_tracker.h",
+        "sha256": "ee81e1b5c1ba5574364036759bb52f40087839356766a12e087b97da18c93fad"
+      },
+      {
+        "path": ".tools/qualification/native_component_probe.c",
+        "sha256": "9be0c188df7324dc00bf1de5fa10183f0462febc0d9f5f32488d818a7a82fe80"
+      },
+      {
+        "path": ".tools/qualification/process_start_faults.c",
+        "sha256": "045a47f16fbe050a618383b92f92f8dfc55edc468e2ef983cca4a6b999383310"
+      },
+      {
+        "path": ".tools/qualification/process_stream_faults.c",
+        "sha256": "b8289b6ed97cb1e2f8886399b0991e4a8864e857942d4f4b496198f4c316bb91"
+      },
+      {
+        "path": ".tools/qualification/terminal_input_faults.c",
+        "sha256": "789aff9f69750adbad605cfb7161c95487553a58bdcc79d3f5ee413c20c24359"
+      },
+      {
+        "path": ".tools/qualification/windows_console_lifetime_faults.c",
+        "sha256": "53ebcb8ed0fe4d5615eeb66b6074c9f05371f4ecab431e9e6a4c768a3518134a"
+      },
+      {
+        "path": ".tools/qualification/windows_console_reader_smoke.c",
+        "sha256": "dd8e64d52f7ca65914a52cebd9972271844b12a948caf3e3afe156818693e5f1"
+      },
+      {
+        "path": ".tools/qualification/windows_keyboard_faults.c",
+        "sha256": "f87061c489ffd8587b9fe870119f705073e4af71316f7003ea0dbc08afa259d0"
+      },
+      {
+        "path": ".tools/qualification/windows_pty_process_faults.c",
+        "sha256": "2720c4ae560a6a149eaa1f964ea9b70f3260a6f2d245d88e68592b5c5555177a"
+      },
+      {
+        "path": ".tools/qualification/windows_terminal_input_smoke.c",
+        "sha256": "a1f5fc621392486ef088fd6126880c995aa02204dd1166cc99a267fce48c69b1"
+      },
+      {
+        "path": ".tools/qualification/windows_worker_dll_fixture.h",
+        "sha256": "0bd7e0d4e42499d78fb02daf30eedc356c6aaaec5d062bb44bb1965871248525"
+      },
+      {
+        "path": ".tools/qualification/windows_worker_dll_lifetime.c",
+        "sha256": "e2044ddf9f470c7031396ca8c0f97f5886b736dea14931f3f4e318a3619312cd"
+      },
+      {
+        "path": ".tools/qualification/windows_worker_dll_probe.c",
+        "sha256": "8b45c3ecdc8bed83558f7fc81f5bb751de11e5b9f6d1be240e0e59d50d8725a6"
+      },
+      {
+        "path": "native/lxp_build.lua",
+        "sha256": "97bcc6822ae6af6e0ed70c74585c3924845fdee0b3bdace222f171a7071b6fe0"
+      },
+      {
+        "path": "native/yaca_entry.c",
+        "sha256": "e37392e19da463ad55848d6d2550056958ea3084fa3f842b994f798b82bc59a8"
+      },
+      {
+        "path": "native/yaca_lua_windows.h",
+        "sha256": "92f9d56314c8cda74a6eb6e5792688143d5c8d7c7b1a1385ee12817c1f610194"
+      },
+      {
+        "path": "native/yaca_native.c",
+        "sha256": "713a5e6b78ba159d8c484cafa690daf46115d9e69e2160eb08cd2bddc15d056c"
+      },
+      {
+        "path": "native/yaca_onefile_entry.c",
+        "sha256": "4e59947998f7a9477cc768188c81e268bbf377db42fe27b9172a47a0ae85f9d4"
+      },
+      {
+        "path": "native/yaca_onefile_windows.h",
+        "sha256": "269f3b37b89d53970eb4c5d6947e31f2db7627d153871dd33da3697294dd7c37"
+      },
+      {
+        "path": "native/yaca_pty.h",
+        "sha256": "e84b20b3b8f56d4b2008e17ece90441a6898da087190d0420e73cfc7b0e01aa6"
+      },
+      {
+        "path": "native/yaca_supervisor.h",
+        "sha256": "2315e15885d914923a44ba55ae5c65a976c56b1aa4b6731cc87b86d72d2164f6"
+      },
+      {
+        "path": "native/yaca_text.h",
+        "sha256": "82e057d215a77470166e79876dab5c6a7fd38a5d0856229f76e7c1b93a47bbc7"
+      }
+    ]
+  },
+  "baseline_inputs": {
+    "revision": "c95e9f27d47cb333d9c15b780ef9db2c3709ccca",
+    "files": [
+      {
+        "path": ".tools/qualification/windows_pty_process_faults.c",
+        "sha256": "2720c4ae560a6a149eaa1f964ea9b70f3260a6f2d245d88e68592b5c5555177a"
+      },
+      {
+        "path": "native/lxp_build.lua",
+        "sha256": "97bcc6822ae6af6e0ed70c74585c3924845fdee0b3bdace222f171a7071b6fe0"
+      },
+      {
+        "path": "native/yaca_entry.c",
+        "sha256": "e37392e19da463ad55848d6d2550056958ea3084fa3f842b994f798b82bc59a8"
+      },
+      {
+        "path": "native/yaca_lua_windows.h",
+        "sha256": "92f9d56314c8cda74a6eb6e5792688143d5c8d7c7b1a1385ee12817c1f610194"
+      },
+      {
+        "path": "native/yaca_native.c",
+        "sha256": "713a5e6b78ba159d8c484cafa690daf46115d9e69e2160eb08cd2bddc15d056c"
+      },
+      {
+        "path": "native/yaca_onefile_entry.c",
+        "sha256": "4e59947998f7a9477cc768188c81e268bbf377db42fe27b9172a47a0ae85f9d4"
+      },
+      {
+        "path": "native/yaca_onefile_windows.h",
+        "sha256": "269f3b37b89d53970eb4c5d6947e31f2db7627d153871dd33da3697294dd7c37"
+      },
+      {
+        "path": "native/yaca_pty.h",
+        "sha256": "a9be6b177388ee15e656aba3a4080f00d13bd4bc3ad411af4bd8095a0d3d8c01"
+      },
+      {
+        "path": "native/yaca_supervisor.h",
+        "sha256": "2315e15885d914923a44ba55ae5c65a976c56b1aa4b6731cc87b86d72d2164f6"
+      },
+      {
+        "path": "native/yaca_text.h",
+        "sha256": "82e057d215a77470166e79876dab5c6a7fd38a5d0856229f76e7c1b93a47bbc7"
+      }
+    ]
+  },
+  "targets": [
+    {
+      "target": "win32",
+      "observed_os_caption": "Microsoft® Windows Server® 2008 Enterprise (无 Hyper-V)",
+      "observed_os_version": "6.0.6003",
+      "environment": {
+        "path": "out/cygwin-pty-review-20261008/win32-environment.log",
+        "sha256": "5c01254fa5baad7f8354233fd82147e688a5aff868c7f83ab9d306c3aaa7b3b6",
+        "bytes": 143
+      },
+      "baseline": {
+        "cases": 2,
+        "confirmed_live_child": 1,
+        "binding": {
+          "path": "out/cygwin-pty-review-20261008/win32-before-run.log",
+          "sha256": "9f981c59722eb6e9e8ca0fcb28b905443ee925046ff76809cf43992b4bbd12d3",
+          "bytes": 412
+        }
+      },
+      "fixed": {
+        "cases": 6,
+        "failures": 0,
+        "child_live_after_return": 0,
+        "binding": {
+          "path": "out/cygwin-pty-review-20261008/win32-after-run.log",
+          "sha256": "f44975fb3e0f29c4a07b703270c5391f157a0f4282f5b6fb9ce8df4865d17a90",
+          "bytes": 816
+        }
+      },
+      "received_baseline": {
+        "matched": 1,
+        "bindings": [
+          {
+            "path": "out/cygwin-pty-review-20261008/win32-before-digests.log",
+            "sha256": "3be77c3533541b50b6e3e1ee6289874e42cdebaf558ed99877b749578f527f22",
+            "bytes": 115
+          },
+          {
+            "path": "out/cygwin-pty-review-20261008/before/win32/windows_pty_process_faults.exe",
+            "sha256": "e4c4ef4f6baec2b0e7057bfa918760ca8e195361448c80e071b8ed0cadeafb84",
+            "bytes": 281734
+          }
+        ]
+      },
+      "received_fixed": {
+        "matched": 12,
+        "bindings": [
+          {
+            "path": "out/cygwin-pty-review-20261008/reg-win32-after-digests.log",
+            "sha256": "aa259b653a42175e372b3b064c3f76606fbe1606c66179dcc7f77c15e591fca6",
+            "bytes": 1138
+          },
+          {
+            "path": "out/cygwin-pty-review-20261008/after/win32/native_component_probe.exe",
+            "sha256": "4e7de30b302e1cf24a68c45e93c050b8991308981af059d5db1631d53d1c7934",
+            "bytes": 265672
+          },
+          {
+            "path": "out/cygwin-pty-review-20261008/after/win32/process_start_faults.exe",
+            "sha256": "b2c78da8bb9e829f3556dfc0460fdeffb87c02b2f5e3d758f67d7457e99d9ef1",
+            "bytes": 492244
+          },
+          {
+            "path": "out/cygwin-pty-review-20261008/after/win32/process_stream_faults.exe",
+            "sha256": "f7bf9c7a9f3dd22f526e07660d66aa4042ad3baa1bf397efbdd69701eee97b1c",
+            "bytes": 494286
+          },
+          {
+            "path": "out/cygwin-pty-review-20261008/after/win32/terminal_input_faults.exe",
+            "sha256": "d92a209286a40f5362e342fd3c02c7ad7e2a849fcda8f6bdec04687ed6a51872",
+            "bytes": 494451
+          },
+          {
+            "path": "out/cygwin-pty-review-20261008/after/win32/windows_console_lifetime_faults.exe",
+            "sha256": "465ad57e91d02554e4fc873f8e00fc55dfa16b97f34eb0f65aa85b6d9580e8e8",
+            "bytes": 516741
+          },
+          {
+            "path": "out/cygwin-pty-review-20261008/after/win32/windows_console_reader_smoke.exe",
+            "sha256": "78932996d4267a381dddc80ebc07021bc216f41cfa6d68fc4f5c466c207d21cb",
+            "bytes": 474239
+          },
+          {
+            "path": "out/cygwin-pty-review-20261008/after/win32/windows_keyboard_faults.exe",
+            "sha256": "9bef0c1b5b7e0e0b619f8e7aea6931ee992a2481381251fe510ea94aed13e5cb",
+            "bytes": 485923
+          },
+          {
+            "path": "out/cygwin-pty-review-20261008/after/win32/windows_pty_process_faults.exe",
+            "sha256": "948f717af61eef16c97373593d017f10aa98bc9b284068b81b2b9a0c062a8675",
+            "bytes": 282986
+          },
+          {
+            "path": "out/cygwin-pty-review-20261008/after/win32/windows_terminal_input_smoke.exe",
+            "sha256": "c812ca20d4ca2bd78d4be3bb92967979b2e420ced9da6a2901b10523993c0121",
+            "bytes": 493032
+          },
+          {
+            "path": "out/cygwin-pty-review-20261008/after/win32/windows_worker_dll_lifetime.exe",
+            "sha256": "743f13d35deb703a0e6ee62873b634f0c849a6893b669a438bc7abd959f6a235",
+            "bytes": 275416
+          },
+          {
+            "path": "out/cygwin-pty-review-20261008/after/win32/lua55.dll",
+            "sha256": "3a01621ce0b2a7e973aef32f6ed23820620055af095be57bba96ce64dbbdaae3",
+            "bytes": 696873
+          },
+          {
+            "path": "out/cygwin-pty-review-20261008/after/win32/worker_dll_probe.dll",
+            "sha256": "2f41450742e1715de3552a1f1af6882dd8f68ef13d3363b568d54ec17b08b81c",
+            "bytes": 449488
+          }
+        ]
+      },
+      "regressions": {
+        "path": "out/cygwin-pty-review-20261008/reg-win32-after-regressions.log",
+        "sha256": "ca31f17da7caf6333ff5f1338c981ce55ff9d70b9b4ba0c5ea5e5caa036b1614",
+        "bytes": 1823
+      },
+      "worker_dll_and_setup_controls": [
+        {
+          "path": "out/cygwin-pty-review-20261008/reg-win32-after-reader.log",
+          "sha256": "33ced19172dabf1bcee535f5e5f62a55e4db54bbfdf5a37b63e22391685ba081",
+          "bytes": 322
+        },
+        {
+          "path": "out/cygwin-pty-review-20261008/reg-win32-after-reader-startup-1.log",
+          "sha256": "544569fdc8377b90edbbe3dcff69ec07dacc8d8f54c96e0f50e0de70f65f7501",
+          "bytes": 109
+        },
+        {
+          "path": "out/cygwin-pty-review-20261008/reg-win32-after-reader-startup-2.log",
+          "sha256": "fc571b838c0c1999e5f2d70fc0ebe6c61405922cc4d5f04806aa53688848bfef",
+          "bytes": 109
+        },
+        {
+          "path": "out/cygwin-pty-review-20261008/reg-win32-after-reader-startup-3.log",
+          "sha256": "9c812f8babfee2814bc1134957da6404c814a49c739332900241d3e4bee80b6e",
+          "bytes": 109
+        },
+        {
+          "path": "out/cygwin-pty-review-20261008/reg-win32-after-writer.log",
+          "sha256": "a64a206e341ff2bc03cdb0f5a9f9c2d2510706d64f7e0cf0fddf2aa58b7ea791",
+          "bytes": 461
+        },
+        {
+          "path": "out/cygwin-pty-review-20261008/reg-win32-after-writer-startup-1.log",
+          "sha256": "5298843ebe02068c68ec7d7fc2c15109241089510c4eb57ecfb260fc62d816d8",
+          "bytes": 152
+        },
+        {
+          "path": "out/cygwin-pty-review-20261008/reg-win32-after-writer-startup-2.log",
+          "sha256": "13b602241ae98025858eb975897659c3a5a02cfc9bc8822abd18d787b8c95c77",
+          "bytes": 152
+        },
+        {
+          "path": "out/cygwin-pty-review-20261008/reg-win32-after-writer-startup-3.log",
+          "sha256": "7c53399357c9727d93ee63d66216883870bb4f44f1107eeecacb66a4c7577efc",
+          "bytes": 152
+        }
+      ]
+    },
+    {
+      "target": "win64",
+      "observed_os_caption": "Microsoft Windows Server 2025 Standard",
+      "observed_os_version": "10.0.26100",
+      "environment": {
+        "path": "out/cygwin-pty-review-20261008/win64-environment.log",
+        "sha256": "abb9c42b091557c1e60a40b89476dbe5b5eeedde060955f7cb65b61c41ab13aa",
+        "bytes": 121
+      },
+      "baseline": {
+        "cases": 2,
+        "confirmed_live_child": 1,
+        "binding": {
+          "path": "out/cygwin-pty-review-20261008/win64-before-run.log",
+          "sha256": "f3415afca436338536cf758ed6525502d2eee8779e2579674e925b42b7e02eea",
+          "bytes": 413
+        }
+      },
+      "fixed": {
+        "cases": 6,
+        "failures": 0,
+        "child_live_after_return": 0,
+        "binding": {
+          "path": "out/cygwin-pty-review-20261008/win64-after-run.log",
+          "sha256": "e2c88d3f0a0dc252e795afa01804fd0585a1fbdc01ac5cc910528cce9666087c",
+          "bytes": 817
+        }
+      },
+      "received_baseline": {
+        "matched": 1,
+        "bindings": [
+          {
+            "path": "out/cygwin-pty-review-20261008/win64-before-digests.log",
+            "sha256": "143400b7fcf9f2b604b2c54d0f5a779c9a0f36d9e632c5a341a45ac993eae13a",
+            "bytes": 116
+          },
+          {
+            "path": "out/cygwin-pty-review-20261008/before/win64/windows_pty_process_faults.exe",
+            "sha256": "b20f8ed4a83b7e40d0440f1670cbe9dd2a5d13ca58cb90e571e3c8bfeb36e678",
+            "bytes": 294226
+          }
+        ]
+      },
+      "received_fixed": {
+        "matched": 12,
+        "bindings": [
+          {
+            "path": "out/cygwin-pty-review-20261008/reg-win64-after-digests.log",
+            "sha256": "1929f92c9f59e965c42f64123974bdc559711a633d1223caf0855ef9dcc0f32a",
+            "bytes": 1150
+          },
+          {
+            "path": "out/cygwin-pty-review-20261008/after/win64/native_component_probe.exe",
+            "sha256": "3f461371d456e48e0582c99185a61c638cb63b00d08adaab4f006bc6798487bb",
+            "bytes": 279112
+          },
+          {
+            "path": "out/cygwin-pty-review-20261008/after/win64/process_start_faults.exe",
+            "sha256": "2e39c6c5e3e69178721e75de775f95291b1b63610fa2deb4aeb1b40531d34549",
+            "bytes": 486787
+          },
+          {
+            "path": "out/cygwin-pty-review-20261008/after/win64/process_stream_faults.exe",
+            "sha256": "7b1b64e774fdc35295c9b9e2f28bd6b1ea0853b6237bbf308fd8f305da0bd84c",
+            "bytes": 488898
+          },
+          {
+            "path": "out/cygwin-pty-review-20261008/after/win64/terminal_input_faults.exe",
+            "sha256": "bcb01957de526e82f8dbd9689da7804bf1c9a361b3c5ee962ec1185b43028c1e",
+            "bytes": 489534
+          },
+          {
+            "path": "out/cygwin-pty-review-20261008/after/win64/windows_console_lifetime_faults.exe",
+            "sha256": "9d626e0aa6434eea6171c9104c581c1485a1f7532a7d69ec910430927fd19fa6",
+            "bytes": 503615
+          },
+          {
+            "path": "out/cygwin-pty-review-20261008/after/win64/windows_console_reader_smoke.exe",
+            "sha256": "659773f1075fbb9455aa5f1e8eca208b3816073f8b38ab85dc2cb293529c7dc5",
+            "bytes": 469222
+          },
+          {
+            "path": "out/cygwin-pty-review-20261008/after/win64/windows_keyboard_faults.exe",
+            "sha256": "b73b1a6cee826d1284b72dc9fea8b12a12623cc0c758a3d7160a809ebb2fb86f",
+            "bytes": 482106
+          },
+          {
+            "path": "out/cygwin-pty-review-20261008/after/win64/windows_pty_process_faults.exe",
+            "sha256": "e808367cabc11a855057034294b3aed0b712a23725ebbbfdf951ff2f24cf7e7f",
+            "bytes": 295982
+          },
+          {
+            "path": "out/cygwin-pty-review-20261008/after/win64/windows_terminal_input_smoke.exe",
+            "sha256": "8b55d704ec8280f0548eb75a6099380818256b4b97aca52dd8897e8d5e2ea823",
+            "bytes": 487015
+          },
+          {
+            "path": "out/cygwin-pty-review-20261008/after/win64/windows_worker_dll_lifetime.exe",
+            "sha256": "84dd2516f9ed6b7a0b4ece6b1f3d2cb7f0ab9da17c6864066ed3d8541023ac3d",
+            "bytes": 288948
+          },
+          {
+            "path": "out/cygwin-pty-review-20261008/after/win64/lua55.dll",
+            "sha256": "5aae77d9330d72f7a747b7f96309494d52c8f3413e8a09fb9f872da8c31c0b00",
+            "bytes": 753984
+          },
+          {
+            "path": "out/cygwin-pty-review-20261008/after/win64/worker_dll_probe.dll",
+            "sha256": "90a293af5142623301e6ca68e7455910bcc1f1bc794b8ddf3994758d321a22e3",
+            "bytes": 438784
+          }
+        ]
+      },
+      "regressions": {
+        "path": "out/cygwin-pty-review-20261008/reg-win64-after-regressions.log",
+        "sha256": "efdd0d9725e41b40ee563c4bb01814ea510211386afa721deaa14d89c67231dd",
+        "bytes": 1823
+      },
+      "worker_dll_and_setup_controls": [
+        {
+          "path": "out/cygwin-pty-review-20261008/reg-win64-after-reader.log",
+          "sha256": "bd69249a2fe3832080dd17201559764482ead1ee437875341a9eee63df5dcb5c",
+          "bytes": 323
+        },
+        {
+          "path": "out/cygwin-pty-review-20261008/reg-win64-after-reader-startup-1.log",
+          "sha256": "544569fdc8377b90edbbe3dcff69ec07dacc8d8f54c96e0f50e0de70f65f7501",
+          "bytes": 109
+        },
+        {
+          "path": "out/cygwin-pty-review-20261008/reg-win64-after-reader-startup-2.log",
+          "sha256": "fc571b838c0c1999e5f2d70fc0ebe6c61405922cc4d5f04806aa53688848bfef",
+          "bytes": 109
+        },
+        {
+          "path": "out/cygwin-pty-review-20261008/reg-win64-after-reader-startup-3.log",
+          "sha256": "9c812f8babfee2814bc1134957da6404c814a49c739332900241d3e4bee80b6e",
+          "bytes": 109
+        },
+        {
+          "path": "out/cygwin-pty-review-20261008/reg-win64-after-writer.log",
+          "sha256": "f1938b92590e5686434208cd46daea8ad2b04004b706b669dbb81b8d319742c8",
+          "bytes": 486
+        },
+        {
+          "path": "out/cygwin-pty-review-20261008/reg-win64-after-writer-startup-1.log",
+          "sha256": "de9c8be27b74fe93a6a22f9043f4e343cc15ae26aa8d9e59532368fa37806fa2",
+          "bytes": 152
+        },
+        {
+          "path": "out/cygwin-pty-review-20261008/reg-win64-after-writer-startup-2.log",
+          "sha256": "94accf3ca1c66a96229f105d9df9c7d208b19ae6039f8b335090e403e74e7d1e",
+          "bytes": 152
+        },
+        {
+          "path": "out/cygwin-pty-review-20261008/reg-win64-after-writer-startup-3.log",
+          "sha256": "ed362cb1c8168e7cc052805e24b101e6e15b2e6cfaf45d98e76b53db849f1da4",
+          "bytes": 152
+        }
+      ]
+    }
+  ],
+  "live_cygwin": {
+    "profiles": 4,
+    "probe_exit": 0,
+    "original_mode_restored": true,
+    "tty_carrier_exit": 255,
+    "independent_receipt_carrier_exit": 0,
+    "receipt": {
+      "path": "out/cygwin-pty-review-20261008/win32-live-receipt.json",
+      "sha256": "637553ba2287290ab019580518a29446594b42297f7b6691826c1658fe4f93c0",
+      "bytes": 286
+    },
+    "transcript": {
+      "path": "out/cygwin-pty-review-20261008/win32-live-pty.log",
+      "sha256": "621ce6884388d72ee77a1819240e93d369a594759d7c7d487f148e6ef5b1d5f5",
+      "bytes": 300
+    },
+    "receipt_carrier": {
+      "path": "out/cygwin-pty-review-20261008/win32-live-receipt-transport.log",
+      "sha256": "c9b4ff0083ac7fbdfe5a8ee9f916dfe6157030beacaec8804ffeae4d9ca72c2f",
+      "bytes": 18
+    },
+    "driver": {
+      "path": "out/cygwin-pty-review-20261008/run_live.py",
+      "sha256": "b60733921e07dbb55eae0320e1b036e2138ce9d4c2fcb63302fc79aaa927d61a",
+      "bytes": 2772
+    }
+  },
+  "full_suite": {
+    "scope": "development-host Lua suite",
+    "status": "PASS",
+    "total": 720,
+    "passed": 720,
+    "failed": 0,
+    "binding": {
+      "path": "out/cygwin-pty-review-20261008/lua-suite-final.log",
+      "sha256": "64ddc0108cf7dbaef39a97ea5f4762bdf4e7a95abeb79228de44dfd9f1769d1b",
+      "bytes": 71664
+    }
+  },
+  "coding_readiness": {
+    "status": "PASS",
+    "binding": {
+      "path": "out/cygwin-pty-review-20261008/coding-readiness-final.log",
+      "sha256": "ae1dbf5ec5e8b24d0e45d553755ee3721bb601e2d5c7e130ec6fa42748bbcc3b",
+      "bytes": 4083
+    }
+  },
+  "comment_structure": {
+    "files": 256,
+    "declarations": 5628,
+    "violations": 0,
+    "inventory": {
+      "path": "out/cygwin-pty-review-20261008/comment-inventory.json",
+      "sha256": "8e04ba59f87d60b94a62f700af68784a5c55011dad3080d0d8d63aba7b03c2de",
+      "bytes": 1257006
+    }
+  },
+  "builds_and_checks": [
+    {
+      "path": "out/cygwin-pty-review-20261008/baseline-matched-final-run.log",
+      "sha256": "48657c9b711f9c2ce426dd0b58c2095bcec7667a678e0be59ced826913ff92dd",
+      "bytes": 309
+    },
+    {
+      "path": "out/cygwin-pty-review-20261008/fixed-build-targets-run.log",
+      "sha256": "13a4e038e9f992cbea8a0a91afd191c6c4da8a8e1fbc09681c37c8f8b3a398e9",
+      "bytes": 303
+    },
+    {
+      "path": "out/cygwin-pty-review-20261008/build_regressions.sh",
+      "sha256": "b7e8f1dcc474cab84d4644a15809c54c16d7d8d4a34effee1f58a96ccab09f0b",
+      "bytes": 2646
+    },
+    {
+      "path": "out/cygwin-pty-review-20261008/run_regressions.py",
+      "sha256": "6c572150715caa3f2126e65957eeda8459f68bb8213513ba7f5b71056e0db119",
+      "bytes": 7426
+    },
+    {
+      "path": "out/cygwin-pty-review-20261008/regression-build-targets-run.log",
+      "sha256": "2b161b7e3bcb83a2625affe4940dc560697e940ab65a037c79a451d9c2768558",
+      "bytes": 855
+    },
+    {
+      "path": "out/cygwin-pty-review-20261008/run_targets.py",
+      "sha256": "d568cd13f3ddbc8b21bf06df843f3d8af33c02794165a4f1ceb51d0096a8a6b4",
+      "bytes": 4459
+    },
+    {
+      "path": "out/cygwin-pty-review-20261008/complete_checks.sh",
+      "sha256": "bf4ad498e496a5d2ae73fd83d015c619bdb73ddfb6128134325aff6ca80c0932",
+      "bytes": 1094
+    },
+    {
+      "path": "out/cygwin-pty-review-20261008/complete-checks-run.log",
+      "sha256": "0b3c7af9eda48a0be20a3b07245a3c2662c4feeb85326ff8d2ef7f47d06dc431",
+      "bytes": 172
+    },
+    {
+      "path": "out/cygwin-pty-review-20261008/create_evidence.py",
+      "sha256": "99f98a328cf154c047e0f9f3550c486cf188ad5d70ef78a26496bb596d508a79",
+      "bytes": 9746
+    }
+  ],
+  "retained_diagnostics": [
+    {
+      "path": "out/cygwin-pty-review-20261008/win32-before-first-failed.log",
+      "sha256": "e2e50d2eeda6359649f4f772a0e281f5831492bacb7044a14347aaf92d7af97c",
+      "bytes": 336
+    },
+    {
+      "path": "out/cygwin-pty-review-20261008/baseline-handle-diagnostic.log",
+      "sha256": "673bfa942c5327b24d2d378a0a45d17ea3d9c362513f20b29699fca46b578ce1",
+      "bytes": 500
+    },
+    {
+      "path": "out/cygwin-pty-review-20261008/baseline-warmup-diagnostic.log",
+      "sha256": "3ee5afeca1ac0e5d1f8a23d87e82a682b007ec7dcd0deda91a2037c989177e1e",
+      "bytes": 528
+    },
+    {
+      "path": "out/cygwin-pty-review-20261008/fixed-first-guard-refused.log",
+      "sha256": "35a8efe4762ad1d91d695af3ea50d93acc747911486418a56448d11fedde62a2",
+      "bytes": 88
+    },
+    {
+      "path": "out/cygwin-pty-review-20261008/win32-live-pty-first-carrier-255.log",
+      "sha256": "b08d66371066766db0e3edfe94a9f794b6f5bb8b9354d8715327ed9ba0af79cd",
+      "bytes": 252
+    },
+    {
+      "path": "out/cygwin-pty-review-20261008/win32-live-pty-second-carrier-255.log",
+      "sha256": "621ce6884388d72ee77a1819240e93d369a594759d7c7d487f148e6ef5b1d5f5",
+      "bytes": 300
+    }
+  ],
+  "scope": "production yaca_pty helpers with actual Windows subprocess/job handles; finite-child direct-termination rejection and job startup rejection controls; actual assigned Cygwin PTY with raw/cooked mode and explicit reported-exit failure doubles for rollback/retry",
+  "semantic_review": "partial globally; this subset reviewed PTY name query argument roles, bounded PATH/path ownership, suspended child admission and parent-job breakaway, job-close containment and partial cleanup, serialized mode validation/active ownership, live rollback retry, first-use process controls and all affected comments",
+  "fixture_cleanup": "all finite children joined; only confirmed baseline survivors rescued after observation; actual live PTY mode restored by receipt and shell trap; independent carrier binds exact target program; owned process/job/pipe handles stable against separately measured startup baseline",
+  "uncovered_scope": [
+    "combined failures of unassigned-child termination and setup APIs",
+    "remaining native/main/helpers and global semantic Review",
+    "final application, three-target core and nine-package qualification"
+  ]
+}

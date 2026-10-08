@@ -292,3 +292,58 @@ raw close 拒绝，以及永久拒绝。独立 native double 记录真实 fixtur
 [R86 证据](native-review/R86.json) 绑定，原始记录位于
 `out/setup-input-owner-review-20261008/`。全仓语义 Review 仍为 partial；已发布
 R81 不含 R82--R86，最终三目标九包待统一重建，Gate R 保持关闭。
+
+## R87：Cygwin stty 子进程所有权与模式回滚
+
+基线为 `c95e9f2`。`yaca_stty` 在三秒等待失败后不核对 direct termination 与随后
+等待的结果，就关闭 child handle 并返回。独立有限子进程探针在两指定 Windows
+目标注入初始 timeout 和 TerminateProcess 拒绝，证实 helper 已返回 0 时子进程
+仍活着。probe 先记录，再救援结束并 join 该自有 child，不把救援当作产品成功。
+
+修复在执行 stty 前建立独立 kill-on-close job。child 以 suspended 方式创建，只有
+成功 assign 后才 resume；建立 job、设置限制、assign 或 resume 失败不执行 stty。
+沿用 native process port 的 parent-job 规则：只有父 job 允许 BREAKAWAY_OK 时才
+请求 breakaway，兼容 XP/Server 2008 的单 job 限制。收尾关闭独立 job，观察 child，
+对未完成或未 assign 的 suspended child 继续执行有界 termination/join，并关闭
+各自进程/线程/pipe/NUL/input duplicate handles。没有 shell、系统安装或新接口。
+API 行为依据微软 [TerminateProcess](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-terminateprocess)
+和 [Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)。
+
+| 指定环境 | 基线 lifetime cases / 活 child | 修复后 matrix cases / 失败 / 活 child |
+| --- | --- | --- |
+| Server 2008 non-R2 x64 / Win32 WOW64 | 2 / 1 | 6 / 0 / 0 |
+| Server 2025 Standard x64 / Win64 | 2 / 1 | 6 / 0 / 0 |
+
+六项包含正常 stdout、timeout/direct-termination 拒绝，以及 job creation、limit、
+assign、resume 拒绝。所有实际观察 child 都 join，句柄数保持初始化后的基线。
+首次普通 child 检查曾多一句柄；独立 warmup control 创建/关闭 NUL 没有增加，
+单独创建有限 child、等待并关闭其两个 handles 后，Win32 从 38 增至 39，Win64
+从 74 增至 79。其后生产 helper 前后相等，不按未知增量忽略句柄检查。
+初次计数失败与第一次因已有 guarded work 被拒绝的日志保留。
+
+实际 Server 2008 / Cygwin SSH PTY 另运行四组：raw、cooked、实际 mode apply 后
+注入非零退出报告的 rollback，以及 rollback 报告失败后的 active 保留/再次 restore。
+拒绝仅改变回报，实际 host stty 命令执行和前后 serialized mode 都独立比较。
+原 host 模式恢复一致，probe exit=0；session shell 的 EXIT trap 额外恢复其原模式。
+旧 SSH 的 TTY carrier 在共享/独立连接两次都返回 255，但完整输出和 probe 为 0。
+最终由唯一 nonce 的目标端 receipt 记录 probe status、前后 mode 和程序 SHA-256，
+通过独立非 TTY carrier（exit=0）取回并逐项核对。保留 255，结论基于该明确回执，
+不把 TTY transport 写作成功。
+
+完整人工通读 PTY name query、PATH/stty/Cygwin DLL lookup、process helper、mode
+snapshot validation、entry rollback 和 restore 所有权；纠正 query callback 第二/三
+参数的旧反向注释，补齐各函数真实副作用与失败语义。没有更改 pipe-name 识别策略。
+两 Windows 的 R80 startup/stream、R81 input、R82 lifetime、R83 raw/keyboard、
+R84 DLL lifetime/setup 控制回归通过；固定 API 宏仍为 0x0501/0x0601，严格 C99
+`-Wall -Wextra -Werror -O2`。两个 Windows builder 已纳入维护探针。
+
+开发宿主完整 suite **720/720**、coding readiness **PASS**，全仓注释结构
+**256 文件 / 5628 声明 / 0 缺项**；四校验器和全部 TP/RP 通过。所有构建、
+实机/PTY 和完整检查经资源守卫串行执行。已 Review 的是上述生产子面，不将
+单 API fault 覆盖扩大为任意组合 OS 故障、最低系统实测或最终包资格。
+
+24 个维护输入、10 个基线输入、实际程序/DLL、环境、receiver/live receipt、
+原始日志和完整检查绑定在 [R87 证据](native-review/R87.json)，26 个接收件摘要
+与本地一致。原始记录位于 `out/cygwin-pty-review-20261008/`。全仓语义 Review
+仍为 partial，剩余原生/交互内部及辅助代码继续核对。已发布 R81 不含 R82--R87，
+最终三目标九包待重建，Gate R 保持关闭。

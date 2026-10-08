@@ -223,6 +223,9 @@ $CC -std=c99 -Wall -Wextra -Werror $CFLAGS -DLUA_BUILD_AS_DLL \
 $CC -std=c99 -Wall -Wextra -Werror $CFLAGS \
   "$YACA_SOURCE/.tools/qualification/windows_pty_smoke.c" $LDFLAGS \
   -o "$OUTPUT_ROOT/windows_pty_smoke.exe" >"$LOG_ROOT/pty-smoke-build.log" 2>&1
+$CC -std=c99 -Wall -Wextra -Werror $CFLAGS \
+  "$YACA_SOURCE/.tools/qualification/windows_pty_process_faults.c" $LDFLAGS \
+  -o "$OUTPUT_ROOT/windows_pty_process_faults.exe" >"$LOG_ROOT/pty-process-faults-build.log" 2>&1
 
 bash "$REPO_ROOT/.tools/qualification/$HTTPS_BUILD" \
   "$SOURCE_CACHE" "$OUTPUT_ROOT/https" >"$LOG_ROOT/https-build.log" 2>&1
