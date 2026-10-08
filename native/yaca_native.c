@@ -49,6 +49,26 @@ Description: Portable narrow native ports for filesystem, process, terminal, sys
  */
 extern BOOLEAN WINAPI SystemFunction036(PVOID buffer, ULONG length);
 
+static const char yaca_worker_module_anchor = 0;
+
+/* Retain the DLL containing worker code before starting a thread that may outlive Lua.
+ * @param module HMODULE* Receives one owned DLL reference, or NULL when this code belongs to the process executable.
+ * @return int One after retention or executable detection; zero with the original OS error on lookup/retention failure.
+ * @effect Looks up this module by a private data address and increments only DLL reference counts.
+ * @ownership The calling Lua loader keeps the module live during lookup; the worker releases the acquired reference with FreeLibraryAndExitThread.
+ */
+static int retain_windows_worker_module(HMODULE *module)
+{
+  HMODULE observed;
+  *module = NULL;
+  if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS
+      | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+      (LPCWSTR)&yaca_worker_module_anchor, &observed)) return 0;
+  if (observed == GetModuleHandleW(NULL)) return 1;
+  return GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+    (LPCWSTR)&yaca_worker_module_anchor, module) != 0;
+}
+
 #else
 
 #include <fcntl.h>
@@ -122,7 +142,8 @@ typedef struct yaca_file
  * @field bytes char* Owned byte buffer awaiting transfer.
  * @field length size_t Valid byte or character length in the buffer.
  * @field error_value DWORD Operating-system error captured by the worker.
- * @field references volatile Outstanding owners of the asynchronous input block.
+ * @field references volatile_LONG Outstanding process and worker references to the asynchronous input block.
+ * @field module HMODULE DLL reference exclusively owned by the worker until thread exit; NULL for executable-local code.
  */
 typedef struct yaca_process_input
 {
@@ -132,11 +153,14 @@ typedef struct yaca_process_input
   size_t length;
   DWORD error_value;
   volatile LONG references;
+  HMODULE module;
 } yaca_process_input;
 
-/* Releases asynchronous process-input storage after its final reference.
- * @param input yaca_process_input* Owned process or terminal input state.
- * @return void result Releases the byte buffer and owner after the last asynchronous reference.
+/* Release one process or worker reference to independently retained stdin storage.
+ * @param input yaca_process_input* Live input record whose caller owns one outstanding reference.
+ * @return void No value; the record remains live only while another reference is held.
+ * @effect Atomically releases the reference and frees its byte buffer and record at zero.
+ * @ownership The worker separately closes its pipe and releases its DLL reference; this helper does neither.
  */
 static void release_process_input(yaca_process_input *input)
 {
@@ -242,9 +266,10 @@ static void reap_abandoned_supervisors(void)
  * @field thread HANDLE Worker handle owned and closed by the terminal, including emergency detach.
  * @field wide WCHAR* Owned wide-character input buffer.
  * @field capacity DWORD Allocated element capacity of the buffer or vector.
- * @field received volatile Number of characters received by the worker.
- * @field error_value volatile Operating-system error captured by the worker.
+ * @field received volatile_DWORD Code units copied before the worker completes.
+ * @field error_value volatile_DWORD ReadConsoleW or invalid-count error consumed after worker completion.
  * @field references volatile_LONG Terminal and worker references; final release frees the record and wide buffer.
+ * @field module HMODULE DLL reference exclusively owned by the reader until thread exit; NULL for executable-local code.
  */
 typedef struct yaca_terminal_read
 {
@@ -255,6 +280,7 @@ typedef struct yaca_terminal_read
   volatile DWORD received;
   volatile DWORD error_value;
   volatile LONG references;
+  HMODULE module;
 } yaca_terminal_read;
 
 /* Release one terminal or worker reference without requiring a live Lua owner.
@@ -9548,17 +9574,21 @@ static int write_windows_pipe(HANDLE handle, const char *bytes, size_t length)
   return 1;
 }
 
-/* Updates write process input within its ownership boundary.
- * @param opaque LPVOID Opaque pointer retained by the callback owner.
- * @return DWORD result Worker thread exit code 0; write failure is recorded in its shared input state.
+/* Write independently retained stdin bytes, release their owner, then end the worker safely outside an unloadable DLL.
+ * @param opaque LPVOID Input record carrying the worker's storage and optional DLL references.
+ * @return DWORD Zero thread exit status for executable-local code; the DLL path terminates with zero status without returning.
+ * @effect Writes the bounded pipe payload, records IO failure, closes the pipe and releases its input reference.
+ * @ownership Saves the worker-owned DLL reference before the input can be freed, then releases it through FreeLibraryAndExitThread.
  */
 static DWORD WINAPI write_process_input(LPVOID opaque)
 {
   yaca_process_input *input = (yaca_process_input *)opaque;
+  HMODULE module = input->module;
   if (!write_windows_pipe(input->pipe, input->bytes, input->length))
     input->error_value = GetLastError();
   CloseHandle(input->pipe);
   release_process_input(input);
+  if (module != NULL) FreeLibraryAndExitThread(module, 0U);
   return 0;
 }
 
@@ -9566,7 +9596,9 @@ static DWORD WINAPI write_process_input(LPVOID opaque)
  * @param pipe HANDLE Interprocess communication pipe or its handle.
  * @param bytes const_char* Raw byte buffer supplied to the native operation.
  * @param length size_t Byte or wide-character length of the supplied buffer.
- * @return yaca_process_input*|NULL result New asynchronous input owner shared with its worker, or NULL on failure.
+ * @return yaca_process_input*|NULL result New owner shared with its worker, or NULL with the setup OS error.
+ * @effect Copies the payload, retains DLL code if needed and starts the worker; all partial storage/module acquisition is released on failure.
+ * @ownership Success transfers pipe ownership to the worker; failure leaves the caller's pipe owned by the caller.
  */
 static yaca_process_input *start_process_input(HANDLE pipe, const char *bytes, size_t length)
 {
@@ -9579,10 +9611,17 @@ static yaca_process_input *start_process_input(HANDLE pipe, const char *bytes, s
   input->pipe = pipe;
   input->length = length;
   input->references = 2; /* process owner + writer thread */
+  if (!retain_windows_worker_module(&input->module))
+  {
+    DWORD error_value = GetLastError();
+    free(input->bytes); free(input); SetLastError(error_value);
+    return NULL;
+  }
   input->thread = CreateThread(NULL, 0, write_process_input, input, 0, NULL);
   if (input->thread == NULL)
   {
     DWORD error_value = GetLastError();
+    if (input->module != NULL) FreeLibrary(input->module);
     free(input->bytes); free(input); SetLastError(error_value);
     return NULL;
   }
@@ -11694,9 +11733,9 @@ static int push_windows_key_action(
 
 /* Read one cooked line into independently retained storage, then release the worker reference.
  * @param opaque LPVOID Heap reader record whose worker reference was established before CreateThread.
- * @return DWORD Zero thread exit status; the record stores the received count and OS error.
+ * @return DWORD Zero thread exit status for executable-local code; the DLL path terminates with zero status without returning.
  * @effect Calls bounded-size ReadConsoleW operations and releases storage if the terminal already detached.
- * @ownership Does not access Lua or the terminal userdata; a terminal reference retains completed input.
+ * @ownership Does not access Lua or the terminal userdata; saves and releases its DLL reference after storage cleanup with FreeLibraryAndExitThread.
  */
 static DWORD WINAPI windows_cooked_reader(LPVOID opaque)
 {
@@ -11704,8 +11743,10 @@ static DWORD WINAPI windows_cooked_reader(LPVOID opaque)
   DWORD offset;
   DWORD requested;
   DWORD received;
+  HMODULE module;
 
   read = (yaca_terminal_read *)opaque;
+  module = read->module;
   offset = 0;
   read->error_value = ERROR_SUCCESS;
   /* Legacy console servers reject large individual buffers even when the
@@ -11737,6 +11778,7 @@ static DWORD WINAPI windows_cooked_reader(LPVOID opaque)
   }
   read->received = offset;
   release_windows_cooked_read(read);
+  if (module != NULL) FreeLibraryAndExitThread(module, 0U);
   return 0;
 }
 
@@ -11748,8 +11790,8 @@ static DWORD WINAPI windows_cooked_reader(LPVOID opaque)
 /* Start a cooked reader with separate terminal and worker references established before launch.
  * @param terminal yaca_terminal* Live owner with borrowed console input and an input byte bound.
  * @return int One when a reader already exists or starts successfully; zero with an OS error on setup failure.
- * @effect Allocates bounded reader storage and starts a ReadConsoleW worker; partial setup is released.
- * @ownership The terminal owns the returned thread handle and one reference; the callback owns the other.
+ * @effect Allocates bounded reader storage, retains DLL code and starts a ReadConsoleW worker; partial setup is released.
+ * @ownership The terminal owns the thread handle and one storage reference; the worker owns the other and the optional DLL reference.
  */
 static int start_windows_cooked_read(yaca_terminal *terminal)
 {
@@ -11788,6 +11830,14 @@ static int start_windows_cooked_read(yaca_terminal *terminal)
   read->input = terminal->input;
   read->capacity = (DWORD)capacity;
   read->references = 2;
+  if (!retain_windows_worker_module(&read->module))
+  {
+    error_value = GetLastError();
+    free(read->wide);
+    free(read);
+    SetLastError(error_value);
+    return 0;
+  }
   read->thread = CreateThread(
     NULL,
     0,
@@ -11798,6 +11848,7 @@ static int start_windows_cooked_read(yaca_terminal *terminal)
   if (read->thread == NULL)
   {
     error_value = GetLastError();
+    if (read->module != NULL) FreeLibrary(read->module);
     free(read->wide);
     free(read);
     SetLastError(error_value);
