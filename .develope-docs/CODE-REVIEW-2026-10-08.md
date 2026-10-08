@@ -129,3 +129,66 @@ main 交互内部和测试辅助代码继续核对。
 原始输入、失败/成功日志与编译件位于 `out/native-input-mode-review-20261008/`。
 本批直接验证生产函数，仍不替代最终单文件、完整交互旅程或最低系统实测。
 已发布 R81 不含 R82/R83，最终三目标九包待统一重建，Gate R 继续关闭。
+
+## R84：异步 worker 独立保留 DLL 代码
+
+基线为 `f128838f736dc492ec6f802ae9a1637fe16b8b13`。生产 loader 通过
+`package.loadlib` 打开 native DLL；固定 Lua 5.5.1 的 `loadlib.c` 以 library string
+保存引用，在 Lua 状态销毁时调用 FreeLibrary。原生 cooked reader 和 stdin writer
+虽然独立持有堆记录，仍在此 DLL 的代码中执行，没有独立 loader 引用。
+
+维护 DLL `windows_worker_dll_probe.c` 直接包含生产源码，以真实 package.loadlib
+载入；host `windows_worker_dll_lifetime.c` 运行实际 reader/writer helper 和实际
+userdata GC。线程暂停于有界 I/O double，host 销毁 Lua 状态，再用 VirtualQuery
+及 GetModuleHandle 检查代码映射，同时独立线程句柄仍为 WAIT_TIMEOUT。
+旧实现四组都证实活线程的 DLL 已被卸载。baseline 在不放行线程的情况下以
+ExitProcess 结束其独占测试进程，不执行已经失效的 DLL 返回路径，也不把 OS
+收回夹具资源记作产品成功。
+
+修复先按 callback 地址辨认模块。当前调用方在解析期间仍持有该代码；如果代码
+编入 EXE，不取得 DLL 引用。DLL entry 在 CreateThread 前取得独立引用，成功后
+归 worker 所有；模块解析、引用获取或线程创建失败均保持原错误码，释放已取得的
+堆记录及引用，保留 caller 的 pipe 所有权。
+worker 先保存 module handle，再完成 pipe/记录释放；最终通过
+FreeLibraryAndExitThread 一次完成 DLL 释放与线程退出，避免 FreeLibrary 后
+返回已卸载代码。这里不使用永久 PIN。两个 API 都符合 XP 编译底线，依据为微软
+[GetModuleHandleExW](https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-getmodulehandleexw)
+及 [FreeLibraryAndExitThread](https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-freelibraryandexitthread)。
+
+| 指定环境 / worker | 基线 Lua close 后映射 / 活线程 | 修复后 close / join 后映射 | 最终原生块 / module 引用 |
+| --- | --- | --- | --- |
+| Server 2008 Win32 · reader | 0 / 1 | 1 / 0 | 0 / 0 |
+| Server 2008 Win32 · writer | 0 / 1 | 1 / 0 | 0 / 0 |
+| Server 2025 Win64 · reader | 0 / 1 | 1 / 0 | 0 / 0 |
+| Server 2025 Win64 · writer | 0 / 1 | 1 / 0 | 0 / 0 |
+
+每目标另有 reader/writer 各三项 setup 拒绝：地址查询失败、DLL retain 失败，以及
+成功 retain 后 CreateThread 失败。实际错误码、零原生块/引用、DLL 卸载和句柄
+基线一致均通过。Writer 的 write pipe 实际关闭，独立 host read end 在 join 后关闭。
+
+首次 Win32 writer 运行在所有 Native/DLL 资源已释放后仍比未经初始化的基线多一
+句柄。独立 control 在不加载 native DLL 的情况下调用 CreatePipe 并关闭返回两端，
+自身也使计数从 39 增为 40；按该初始化后的基线，writer 前后均为 40。Win64
+同样测得首次 pipe control 从 70 增为 71，writer 前后均为 71。因此记录的是实际
+first-use 初始化边界，不用忽略句柄检查或 probe 救援来制造通过。
+首次 DLL 编译的 opener import/export 注解错误及首次空载荷 scp、writer 句柄断言
+失败全部保留。qualification wrapper 仅为可调用的自身 opener 设置 export；Lua
+API 保持 import，生产函数体保持冻结输入。完善计数后，两个 phase 用相同维护
+probe 字节重跑；旧记录和编译件保存在 `initial-proof/`。
+
+R80 启动/进程流、R81 输入、R82 176 例生命周期、R83 86 个真实控制台检查及其
+54 阈值分配故障回归在两目标通过。Linux 从同份源码严格构建 native 和
+输入/启动/进程流探针，回归通过。完整 Lua suite **706/706**、coding readiness
+**PASS**；全仓注释结构 **252 文件 / 5574 声明 / 0 缺项**，四校验器及全部
+TP/RP 通过。构建、目标运行及完整检查均经资源守卫串行执行。
+
+人工逐项核对借用/retained 引用的区分、EXE 分支、线程创建前转移、startup 失败
+清理及错误码、记录最后访问后的 module 保存、原子 exit、GC 顺序，以及探针
+不执行已卸载代码的界限、first-use control、pipe/观察句柄与声明注释。
+全仓语义 Review 仍为 **partial**；下一面为终端 Lua adapter 的失败关闭、
+Cygwin PTY 失败/恢复及 main 交互内部。不宣称能终止永久阻塞的 worker。
+
+23 个维护输入、12 个基线输入、目标程序/DLL、实际环境、原始日志和完整检查
+绑定在 [R84 证据](native-review/R84.json)，28 个接收件摘要与本地一致。
+原始记录位于 `out/native-worker-module-review-20261008/`。生产 native 接口和产品
+版本未变；最终单文件和九包仍需重建，已发布 R81 不含 R82--R84。Gate R 保持关闭。

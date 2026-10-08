@@ -210,6 +210,16 @@ $CC -std=c99 -Wall -Wextra -Werror $CFLAGS -DLUA_BUILD_AS_DLL \
   "$LUA_SOURCE/liblua55.a" $LDFLAGS -ladvapi32 -lshell32 \
   -o "$OUTPUT_ROOT/windows_keyboard_faults.exe" \
   >"$LOG_ROOT/keyboard-faults-build.log" 2>&1
+$CC -std=c99 -Wall -Wextra -Werror $CFLAGS -shared -DLUA_BUILD_AS_DLL \
+  -I"$LUA_SOURCE" "$YACA_SOURCE/.tools/qualification/windows_worker_dll_probe.c" \
+  "$LUA_SOURCE/liblua55.a" $LDFLAGS -ladvapi32 -lshell32 \
+  -o "$OUTPUT_ROOT/worker_dll_probe.dll" \
+  >"$LOG_ROOT/worker-dll-probe-build.log" 2>&1
+$CC -std=c99 -Wall -Wextra -Werror $CFLAGS -DLUA_BUILD_AS_DLL \
+  -I"$LUA_SOURCE" "$YACA_SOURCE/.tools/qualification/windows_worker_dll_lifetime.c" \
+  "$LUA_SOURCE/liblua55.a" $LDFLAGS -ladvapi32 -lshell32 \
+  -o "$OUTPUT_ROOT/windows_worker_dll_lifetime.exe" \
+  >"$LOG_ROOT/worker-dll-lifetime-build.log" 2>&1
 $CC -std=c99 -Wall -Wextra -Werror $CFLAGS \
   "$YACA_SOURCE/.tools/qualification/windows_pty_smoke.c" $LDFLAGS \
   -o "$OUTPUT_ROOT/windows_pty_smoke.exe" >"$LOG_ROOT/pty-smoke-build.log" 2>&1

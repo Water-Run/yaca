@@ -66,8 +66,8 @@ Linux full 的 Git HTTPS、Perl、静态库和默认 SDK 闭包此前已构建�
 
 ## 注释与语义 Review
 
-当前 R83 完整 Lua suite **706/706**、coding readiness **PASS**，全仓注释结构为
-**249 文件 / 5548 声明 / 0 缺项**。检查器反例、发行/旅程回归、四校验器和
+当前 R84 完整 Lua suite **706/706**、coding readiness **PASS**，全仓注释结构为
+**252 文件 / 5574 声明 / 0 缺项**。检查器反例、发行/旅程回归、四校验器和
 全部 TP/RP 通过；构建、完整测试和容器均经资源守卫串行运行。
 
 R78--R81 对相应生产函数及维护探针完成人工语义核对和三平台故障取证，冻结输入与
@@ -86,13 +86,18 @@ R83 修复 raw 键盘字符/退格的重复次数、UTF-16 配对和字节上限
 目标各 86 个真实自建控制台检查通过；原模式、句柄数及真实 cooked 取消/终态通过。
 新键盘分配故障每目标覆盖 54 个初始阈值，54 次初始和 36 次重复异常后内容恢复通过，
 18 次暖调用未到达初始阈值，原生泄漏为零。已有 R82/R81 回归通过。
-已发布 R81 候选未包含 R82/R83，新单文件及九包待统一重建。
+R84 修复 reader/stdin writer 超出 Lua 状态生命周期后的 DLL 代码保留。两指定
+Windows 各验证 reader/writer 的实际 Lua close、DLL 仍映射及最终卸载，六个
+startup 拒绝分支通过；最终原生块/引用为零，按独立 first-use pipe control
+测得的基线无句柄增长。R80--R83 及 Linux 输入/启动/进程流回归通过。
+已发布 R81 候选未包含 R82--R84，新单文件及九包待统一重建。
 
 全仓人工语义 Review 仍为 **partial**。R82 所有权及 R83 原生键盘投影/模式错误
-子面已核对；异步 worker 的 DLL 生命周期、Cygwin PTY 失败路径、终端 Lua
+子面及 R84 的 worker DLL 生命周期已核对；Cygwin PTY 失败路径、终端 Lua
 适配器失败关闭、main 交互内部和部分测试辅助代码仍待完成。
-R82 的 12 个接收件及 R83 的 16 个接收件 SHA-256 与本地一致，源码、日志和环境在
-[R82 证据](native-review/R82.json) 及 [R83 证据](native-review/R83.json) 绑定。证据边界见
+R82 的 12 个、R83 的 16 个及 R84 的 28 个接收件 SHA-256 与本地一致，源码、日志
+和环境在 [R82](native-review/R82.json)、[R83](native-review/R83.json)、
+[R84](native-review/R84.json) 绑定。证据边界见
 [10 月 8 日 Review](CODE-REVIEW-2026-10-08.md)。C32/C33/C34 剩余正式资格
 见 TRACKING，Gate R 保持关闭。
 
