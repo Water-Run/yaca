@@ -1,8 +1,8 @@
 # 当前状态
 
-更新日期：2026-10-06。核心已实现，R81 节点已打包、推送并发布候选预发布；开发已暂停。
-负责人按 [D-082](DECISIONS.md#d-082-r81-节点打包推送后暂停开发2026-10-06)
-要求在本节点停止开发；剩余工作暂存于 [TRACKING](TRACKING.md)，明确恢复前不启动。
+更新日期：2026-10-08。核心已实现，R81 候选已发布；开发已按
+[D-083](DECISIONS.md#d-083-同步项目并恢复开发2026-10-08) 恢复。
+`origin/main` 已同步至 `df38087`。剩余顺序见 [TRACKING](TRACKING.md)。
 
 阶段为 `implemented-unqualified`，目标资格验证待完成；Release Gate R 为 `closed`，
 `release_authorized=false`。依据见 [readiness](contracts/readiness.lua)、
@@ -66,9 +66,9 @@ Linux full 的 Git HTTPS、Perl、静态库和默认 SDK 闭包此前已构建�
 
 ## 注释与语义 Review
 
-当前完整 coding readiness **PASS**；全仓注释结构为
-**246 文件 / 5505 声明 / 0 缺项**。检查器反例、装配/审计/旅程回归、四校验器和
-全部 TP/RP 通过，构建、完整测试和容器均经资源守卫串行运行。
+当前 R82 完整 Lua suite **706/706**、coding readiness **PASS**；全仓注释结构为
+**247 文件 / 5527 声明 / 0 缺项**。检查器反例、装配/审计/旅程回归、四校验器和
+全部 TP/RP 通过。构建、完整测试和容器均经资源守卫串行运行。
 
 R78--R81 对相应生产函数及维护探针完成人工语义核对和三平台故障取证，冻结输入与
 日志分别绑定于 [R78](native-review/R78.json)、[R79](native-review/R79.json)、
@@ -76,17 +76,28 @@ R78--R81 对相应生产函数及维护探针完成人工语义核对和三平�
 临时字符串 GC 反例另有 sanitizer 前后证据。Windows cooked 投影使用有界
 completed reader double；该证据不替代真实控制台交互或 emergency cancellation。
 
-全仓人工语义 Review 仍为 **partial**。Windows cooked reader 取消失败后的 detach
-所有权、后续原生/main 交互内部和部分测试辅助代码尚未完成，不用结构覆盖或
-本节点打包通过代替这些核对。C32/C33/C34 剩余正式资格见 TRACKING，Gate R 保持关闭。
+R82 修复 Windows cooked reader 取消失败后的 detach 所有权：终端关闭其线程句柄并
+释放自己的引用，仍运行的 worker 保留独立引用，最后一次释放回收缓冲区和记录。
+指定 Server 2008 Win32 与当前 Server 2025 Win64 目标各 176 例，修复前
+160 次缓冲区泄漏及 80 次句柄泄漏，修复后
+均为零；三平台输入故障回归及两 Windows reader 回归通过。探针使用真实线程和
+有界 console/wait double，不替代真实控制台交互；永久未返回的 worker 仍保留所需资源。
+已发布 R81 候选未包含 R82，新单文件及九包待统一重建。
+
+全仓人工语义 Review 仍为 **partial**。R82 的引用初始化、抢先完成、异常 detach、
+正常 join 与探针资源观测已核对；后续原生/main 交互内部和部分测试辅助代码仍待完成。
+12 个目标接收件的 SHA-256 与本地一致，源码、日志和环境在
+[R82 证据](native-review/R82.json) 绑定。证据边界见
+[10 月 8 日 Review](CODE-REVIEW-2026-10-08.md)。C32/C33/C34 剩余正式资格
+见 TRACKING，Gate R 保持关闭。
 
 ## 开发与仓库状态
 
 本地和 GitHub 仅保留 `main`，默认分支为 `main`；候选 tag 属于发行标记。
 README.md、README-zh.md 和两份 quickstart 均描述 `1.0.0` 候选及资格待完成，
 中英文 README 的章节、命令参考和下载入口已对齐。开发入口、实施计划和资格手册
-以 D-082 的暂停指示为准。
+以 D-083 的恢复开发指示为准。
 
-暂停期间不启动新实现、Review、在线模型调用或正式资格推进。负责人明确恢复后，
-从 [暂存剩余事项](TRACKING.md) 接续；历史过程见 [开发历程](DEVELOPMENT-HISTORY.md)。
+继续按 [剩余事项](TRACKING.md) 推进 Review 和正式资格；历史过程见
+[开发历程](DEVELOPMENT-HISTORY.md)。
 此前已授权的模型凭据仍留在忽略的私有目录，未进入源码包、候选包或公开证据。

@@ -1,12 +1,13 @@
 # 开发历程与历史资料
 
-整理日期：2026-10-06。当前实现看 [CURRENT-STATE.md](CURRENT-STATE.md)，
+整理日期：2026-10-08。当前实现看 [CURRENT-STATE.md](CURRENT-STATE.md)，
 剩余工作看 [TRACKING.md](TRACKING.md)。本页只导航已有工作和证据。
 
 ## 已完成工作的脉络
 
 | 时间 / 节点 | 主要成果 | 证据与适用范围 |
 | --- | --- | --- |
+| 2026-10-08，恢复开发与 R82 | 同步 `origin/main` 至 `df38087`，修复 cooked reader 取消失败后的终端/worker 所有权；指定 Windows 目标各 176 例零泄漏 | [本日 Review](CODE-REVIEW-2026-10-08.md)；真实线程及有界 console/wait double，不扩展为真实控制台或最终发行资格 |
 | 2026-10-06，R77--R81 与暂停交付 | 修复 Windows reparse 及原生资源/字符串生命周期，三目标从同一冻结源码重建、九包重新装配；按 D-082 交付后暂停 | [本日 Review](CODE-REVIEW-2026-10-06.md)、[节点清单](candidates/1.0.0-preview.20261006.json)；三平台各 706/706，Linux 三档离线核心旅程各 10/10，正式资格和剩余语义 Review 保留 |
 | 2026-08，设计与计划 | 产品决定、16 份机读契约、测试夹具、C01--C34 依赖及现代机证明 | [决策](DECISIONS.md)、[实施计划](IMPLEMENTATION-PLAN.md)、[Gate A/B 审计](GATE-AUDIT-2026-08-29.md)；设计就绪不等于发行资格 |
 | 2026-09-07 至 09-16，核心与交互收口 | status/export、Prompt 与配置编辑、Context 管理、模型管理/测试、在线 self-test、审批恢复 | [N13 基本可用验收](BASIC-USABILITY-ACCEPTANCE-2026-09-16.md)、[Windows 收尾](WINDOWS-PREVIEW-CLOSEOUT-2026-09-16.md)；对应当时源码与候选 |

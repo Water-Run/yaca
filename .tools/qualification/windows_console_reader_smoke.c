@@ -1,6 +1,6 @@
 /*
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-10-08
 File: windows_console_reader_smoke.c
 Description: Checks the production cooked reader against a bounded console
 double, including UTF-16 fragments and failures. Run on Windows; this is a
@@ -77,6 +77,9 @@ static void prepare(yaca_terminal_read *read, DWORD length)
   DWORD index;
 
   memset(read, 0, sizeof(*read));
+  /* The synchronous worker releases one reference; the stack fixture retains
+  ** the other and explicitly releases only its separately allocated buffer. */
+  read->references = 2;
   read->capacity = 65538U;
   read->wide = (WCHAR *)calloc(read->capacity + 1U, sizeof(WCHAR));
   assert(read->wide != NULL);

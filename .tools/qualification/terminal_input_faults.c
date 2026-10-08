@@ -1,6 +1,6 @@
 /*
 Author: WaterRun
-Date: 2026-10-06
+Date: 2026-10-08
 File: terminal_input_faults.c
 Description: Injects persistent Lua allocation failures into production terminal text/EOF/cancellation projection, checks native resource ownership and repeated same-owner recovery, and verifies transient startup mode retention.
 */
@@ -108,6 +108,8 @@ static void terminal_prepare(yaca_terminal *terminal, FILE *input, terminal_case
     read->wide = probe_malloc(256U * sizeof(WCHAR));
     if (read->wide == NULL) abort();
     read->capacity = 256U;
+    /* This completed-reader double has only the terminal reference. */
+    read->references = 1;
     read->received = kind == TERMINAL_COOKED_TEXT ? 256U : 0U;
     for (index = 0U; index < 256U; ++index) read->wide[index] = L't';
     read->thread = CreateEventW(NULL, TRUE, TRUE, NULL);
