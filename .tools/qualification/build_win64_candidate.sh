@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Author: WaterRun
-# Date: 2026-10-06
+# Date: 2026-10-08
 # File: build_win64_candidate.sh
 # Description: Builds and audits Windows x64 candidate payloads from pinned source inputs.
 
@@ -61,11 +61,13 @@ verify "$SOURCE_CACHE/luainstaller-97192d1.tar.gz" \
 verify "$SOURCE_CACHE/cacert-2026-08-13.pem" \
   f66dff1bdf8f96060b8177976f8b7d9254bc89bc4db933d769f7384d28480bc9
 
-# Snapshot only tracked project inputs (including current edits), never user
-# configuration, historical bin/, source-cache contents or ambient credentials.
+# Snapshot maintained inputs, including new regression files, while excluding
+# ignored configuration, historical bin/, caches and credentials.
 mkdir "$YACA_SOURCE" "$BUILDER_ROOT"
-git -C "$REPO_ROOT" ls-files -z | tar -C "$REPO_ROOT" --null -T - -cf - \
-  | tar -C "$YACA_SOURCE" -xf -
+python3 "$SCRIPT_DIR/source_snapshot.py" "$REPO_ROOT" "$OUTPUT_ROOT/source-snapshot" \
+  >"$LOG_ROOT/source-snapshot.log"
+tar -C "$YACA_SOURCE" -xzf "$OUTPUT_ROOT/source-snapshot/yaca-source.tar.gz"
+cp "$OUTPUT_ROOT/source-snapshot/snapshot.json" "$LOG_ROOT/source-snapshot.json"
 cp "$SCRIPT_DIR/windows_sources.lua" "$YACA_SOURCE/.tools/qualification/"
 cp "$SCRIPT_DIR/build_win64_candidate.sh" "$SCRIPT_DIR/windows_package_win64.py" \
   "$SCRIPT_DIR/windows_native_smoke.lua" "$SCRIPT_DIR/windows_network_smoke.lua" \
@@ -175,6 +177,11 @@ $CC -std=c99 -Wall -Wextra -Werror $CFLAGS -DLUA_BUILD_AS_DLL \
   "$LUA_SOURCE/liblua55.a" $LDFLAGS -ladvapi32 -lshell32 \
   -o "$OUTPUT_ROOT/terminal_input_faults.exe" \
   >"$LOG_ROOT/terminal-input-faults-build.log" 2>&1
+$CC -std=c99 -Wall -Wextra -Werror $CFLAGS -DLUA_BUILD_AS_DLL \
+  -I"$LUA_SOURCE" "$YACA_SOURCE/.tools/qualification/windows_cooked_lifetime_smoke.c" \
+  "$LUA_SOURCE/liblua55.a" $LDFLAGS -ladvapi32 -lshell32 \
+  -o "$OUTPUT_ROOT/windows_cooked_lifetime_smoke.exe" \
+  >"$LOG_ROOT/cooked-lifetime-smoke-build.log" 2>&1
 $CC -std=c99 -Wall -Wextra -Werror $CFLAGS -DLUA_BUILD_AS_DLL \
   -I"$LUA_SOURCE" "$YACA_SOURCE/.tools/qualification/windows_console_reader_smoke.c" \
   "$LUA_SOURCE/liblua55.a" $LDFLAGS -ladvapi32 -lshell32 \

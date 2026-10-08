@@ -1,6 +1,6 @@
 /*
 Author: WaterRun
-Date: 2026-10-06
+Date: 2026-10-08
 File: yaca_native.c
 Description: Portable narrow native ports for filesystem, process, terminal, system identity, clocks, text code pages, and SHA-256.
 */
@@ -237,13 +237,14 @@ static void reap_abandoned_supervisors(void)
 #endif
 
 #if defined(_WIN32)
-/* @struct yaca_terminal_read Windows console reader thread and its buffered input.
- * @field input HANDLE Terminal input handle or mode state.
- * @field thread HANDLE Worker thread handle owned by this state.
+/* @struct yaca_terminal_read Independently retained Windows console worker and buffered input.
+ * @field input HANDLE Borrowed console input; the worker does not close the host handle.
+ * @field thread HANDLE Worker handle owned and closed by the terminal, including emergency detach.
  * @field wide WCHAR* Owned wide-character input buffer.
  * @field capacity DWORD Allocated element capacity of the buffer or vector.
  * @field received volatile Number of characters received by the worker.
  * @field error_value volatile Operating-system error captured by the worker.
+ * @field references volatile_LONG Terminal and worker references; final release frees the record and wide buffer.
  */
 typedef struct yaca_terminal_read
 {
@@ -253,7 +254,23 @@ typedef struct yaca_terminal_read
   DWORD capacity;
   volatile DWORD received;
   volatile DWORD error_value;
+  volatile LONG references;
 } yaca_terminal_read;
+
+/* Release one terminal or worker reference without requiring a live Lua owner.
+ * @param read yaca_terminal_read* Independently allocated record with one reference owned by the caller.
+ * @return void No value; the record remains valid only while another reference is held.
+ * @effect Atomically releases the reference and frees the wide buffer and record at zero.
+ * @ownership The terminal closes the thread handle separately; this helper never accesses Lua userdata.
+ */
+static void release_windows_cooked_read(yaca_terminal_read *read)
+{
+  if (InterlockedDecrement(&read->references) == 0)
+  {
+    free(read->wide);
+    free(read);
+  }
+}
 #endif
 
 /* @struct yaca_terminal Lua-owned terminal mode, input, and restoration state.
@@ -11425,6 +11442,12 @@ static yaca_terminal *check_terminal(lua_State *L, int index)
  * @return int cancelled Whether a cancellation request was accepted.
  */
 static int cancel_windows_cooked_read(yaca_terminal *terminal);
+/* Declare release of the terminal's reader ownership, including an active detached worker.
+ * @param terminal yaca_terminal* Owner whose cooked_read pointer and thread handle are released.
+ * @return void No value; a still-running worker retains its independent storage reference.
+ * @effect Clears the owner pointer, closes the worker handle, and releases the terminal reference.
+ */
+static void free_windows_cooked_read(yaca_terminal *terminal);
 #endif
 
 /* Restores original terminal mode and descriptor flags.
@@ -11460,9 +11483,11 @@ static int restore_terminal(yaca_terminal *terminal)
   return 1;
 }
 
-/* Implements the Lua terminal gc native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Finalize a terminal, retaining any uncancellable worker independently of collected userdata.
+ * @param L lua_State* Argument 1 is the terminal userdata being collected.
+ * @return int Zero Lua results; restoration failures are not raised from this finalizer.
+ * @effect Attempts cancellation and restoration, releases reader ownership, and marks the terminal closed.
+ * @ownership A detached worker frees its own record after ReadConsoleW eventually finishes.
  */
 static int l_terminal_gc(lua_State *L)
 {
@@ -11474,9 +11499,9 @@ static int l_terminal_gc(lua_State *L)
 #if defined(_WIN32)
     if (!cancel_windows_cooked_read(terminal))
     {
-      /* The worker owns an independent heap record, so a failed emergency
-      ** cancellation may be detached without accessing collected userdata. */
-      terminal->cooked_read = NULL;
+      /* Drop the terminal reference and handle while the worker keeps its
+      ** independent record alive until the outstanding read finishes. */
+      free_windows_cooked_read(terminal);
     }
 #endif
     restore_terminal(terminal);
@@ -11667,9 +11692,11 @@ static int push_windows_key_action(
   return 1;
 }
 
-/* Reads one cooked Windows console line in a worker thread.
- * @param opaque LPVOID Opaque pointer retained by the callback owner.
- * @return DWORD result Worker thread exit code 0; read outcome is stored in terminal state.
+/* Read one cooked line into independently retained storage, then release the worker reference.
+ * @param opaque LPVOID Heap reader record whose worker reference was established before CreateThread.
+ * @return DWORD Zero thread exit status; the record stores the received count and OS error.
+ * @effect Calls bounded-size ReadConsoleW operations and releases storage if the terminal already detached.
+ * @ownership Does not access Lua or the terminal userdata; a terminal reference retains completed input.
  */
 static DWORD WINAPI windows_cooked_reader(LPVOID opaque)
 {
@@ -11709,6 +11736,7 @@ static DWORD WINAPI windows_cooked_reader(LPVOID opaque)
     }
   }
   read->received = offset;
+  release_windows_cooked_read(read);
   return 0;
 }
 
@@ -11717,9 +11745,11 @@ static DWORD WINAPI windows_cooked_reader(LPVOID opaque)
 ** preserves the host console's live XP-era echo, backspace, cursor, and IME
 ** behavior without blocking the Agent event loop while a draft is unfinished.
 */
-/* Starts an asynchronous cooked Windows console read.
- * @param terminal yaca_terminal* Terminal owner whose input and mode state are managed.
- * @return int result 1 after starting the line-reader worker; 0 on setup failure.
+/* Start a cooked reader with separate terminal and worker references established before launch.
+ * @param terminal yaca_terminal* Live owner with borrowed console input and an input byte bound.
+ * @return int One when a reader already exists or starts successfully; zero with an OS error on setup failure.
+ * @effect Allocates bounded reader storage and starts a ReadConsoleW worker; partial setup is released.
+ * @ownership The terminal owns the returned thread handle and one reference; the callback owns the other.
  */
 static int start_windows_cooked_read(yaca_terminal *terminal)
 {
@@ -11757,6 +11787,7 @@ static int start_windows_cooked_read(yaca_terminal *terminal)
   }
   read->input = terminal->input;
   read->capacity = (DWORD)capacity;
+  read->references = 2;
   read->thread = CreateThread(
     NULL,
     0,
@@ -11776,9 +11807,11 @@ static int start_windows_cooked_read(yaca_terminal *terminal)
   return 1;
 }
 
-/* Releases owned windows cooked read storage.
- * @param terminal yaca_terminal* Terminal owner whose input and mode state are managed.
- * @return void result Releases the completed Windows cooked-input worker and buffer.
+/* Release the terminal reference and handle for a completed or emergency-detached reader.
+ * @param terminal yaca_terminal* Owner whose cooked_read pointer is cleared, or whose reader is already absent.
+ * @return void No value; an absent reader requires no work.
+ * @effect Closes the terminal-owned thread handle and atomically releases its storage reference.
+ * @ownership A running worker keeps its buffer and record until its own final release.
  */
 static void free_windows_cooked_read(yaca_terminal *terminal)
 {
@@ -11789,13 +11822,12 @@ static void free_windows_cooked_read(yaca_terminal *terminal)
   {
     return;
   }
+  terminal->cooked_read = NULL;
   if (read->thread != NULL)
   {
     CloseHandle(read->thread);
   }
-  free(read->wide);
-  free(read);
-  terminal->cooked_read = NULL;
+  release_windows_cooked_read(read);
 }
 
 /*

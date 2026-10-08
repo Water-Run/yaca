@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Author: WaterRun
-# Date: 2026-10-06
+# Date: 2026-10-08
 # File: build_windows_candidate.sh
 # Description: Builds Windows candidate payloads and checks their legacy import closure.
 
@@ -190,6 +190,11 @@ $CC -std=c99 -Wall -Wextra -Werror $CFLAGS -DLUA_BUILD_AS_DLL \
   "$LUA_SOURCE/liblua55.a" $LDFLAGS -ladvapi32 -lshell32 \
   -o "$OUTPUT_ROOT/terminal_input_faults.exe" \
   >"$LOG_ROOT/terminal-input-faults-build.log" 2>&1
+$CC -std=c99 -Wall -Wextra -Werror $CFLAGS -DLUA_BUILD_AS_DLL \
+  -I"$LUA_SOURCE" "$YACA_SOURCE/.tools/qualification/windows_cooked_lifetime_smoke.c" \
+  "$LUA_SOURCE/liblua55.a" $LDFLAGS -ladvapi32 -lshell32 \
+  -o "$OUTPUT_ROOT/windows_cooked_lifetime_smoke.exe" \
+  >"$LOG_ROOT/cooked-lifetime-smoke-build.log" 2>&1
 $CC -std=c99 -Wall -Wextra -Werror $CFLAGS -DLUA_BUILD_AS_DLL \
   -I"$LUA_SOURCE" "$YACA_SOURCE/.tools/qualification/windows_console_reader_smoke.c" \
   "$LUA_SOURCE/liblua55.a" $LDFLAGS -ladvapi32 -lshell32 \

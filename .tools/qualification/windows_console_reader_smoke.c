@@ -1,6 +1,6 @@
 /*
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-10-08
 File: windows_console_reader_smoke.c
 Description: Checks the production cooked reader against a bounded console
 double, including UTF-16 fragments and failures. Run on Windows; this is a
@@ -71,12 +71,14 @@ static BOOL WINAPI fixture_read_console(
  * @param read yaca_terminal_read* The read bound to prepare.
  * @param length DWORD Byte or wide-character length of the supplied buffer.
  * @return void No value; resets fixture counters and allocates the wide input buffer.
+ * @ownership The stack record retains its caller reference after the directly invoked worker releases its reference.
  */
 static void prepare(yaca_terminal_read *read, DWORD length)
 {
   DWORD index;
 
   memset(read, 0, sizeof(*read));
+  read->references = 2;
   read->capacity = 65538U;
   read->wide = (WCHAR *)calloc(read->capacity + 1U, sizeof(WCHAR));
   assert(read->wide != NULL);

@@ -1,8 +1,11 @@
 # 当前状态
 
-更新日期：2026-10-06。核心已实现，R81 节点已打包、推送并发布候选预发布；开发已暂停。
-负责人按 [D-082](DECISIONS.md#d-082-r81-节点打包推送后暂停开发2026-10-06)
-要求在本节点停止开发；剩余工作暂存于 [TRACKING](TRACKING.md)，明确恢复前不启动。
+更新日期：2026-10-08。已从 `origin/main` 快进 15 个提交到 `df38087`，
+按 [D-083](DECISIONS.md#d-083-同步最新进展并恢复开发2026-10-08) 恢复开发。
+本轮发现并修复 R82：Windows cooked reader 取消失败后，终端 GC 丢失读取记录，
+线程结束仍留下缓冲区和线程句柄。两架构在本机的实际线程故障探针各从累计
+30 个泄漏资源降为 0；完整 Lua suite 706/706、完整 readiness PASS。证据见
+[10 月 8 日 Review](CODE-REVIEW-2026-10-08.md)。剩余工作见 [TRACKING](TRACKING.md)。
 
 阶段为 `implemented-unqualified`，目标资格验证待完成；Release Gate R 为 `closed`，
 `release_authorized=false`。依据见 [readiness](contracts/readiness.lua)、
@@ -17,11 +20,12 @@
 具体缺陷、反例和逐项语义核对在 [10 月 6 日 Review](CODE-REVIEW-2026-10-06.md)，
 R77 原始证据在 [10 月 5 日 Review](CODE-REVIEW-2026-10-05.md)。
 
-本节点三目标从同一份完整维护源码快照构建：冻结提交为
+R81 候选三目标从同一份完整维护源码快照构建：冻结提交为
 `d215a8d9d14683fb6acd2ee51e8f7879d9976f6d`，源码归档 SHA-256 为
 `a6c160a9ff28a11118da7dc4606e217d763c3049f496f5bb5d5597966fbd07bf`，
 406 个成员。三份归档及逐成员字节一致，冻结时工作树干净。构建后的候选清单、
-交付记录和暂停文档单独提交，产品源码保持与冻结输入一致。
+交付记录和暂停文档单独提交，交付时产品源码与冻结输入一致。
+当前工作树另含 R82，已发布的 R81 ZIP 不包含本轮修复。
 
 | 当前核心 | SHA-256 | 完整测试及环境 |
 | --- | --- | --- |
@@ -43,7 +47,7 @@ C7 容器共享 Fedora 宿主内核；Windows 兼容底线仍按 XP SP3 x86、Wi
 这一离线结论中。
 
 字节清单及证据边界见 [本节点清单](candidates/1.0.0-preview.20261006.json)，
-原始记录位于 `out/node-r81-publish-20261006/`。配套证据、三目标来源包和
+原始记录位于 R81 构建机的 `out/node-r81-publish-20261006/`。配套证据、三目标来源包和
 `SHA256SUMS.txt` 随候选附件交付。 GitHub 的 24 个附件大小与 SHA-256
 均与本地一致，远端回执见 [发布核对](candidates/1.0.0-preview.20261006-publication.json)。
 
@@ -66,9 +70,9 @@ Linux full 的 Git HTTPS、Perl、静态库和默认 SDK 闭包此前已构建�
 
 ## 注释与语义 Review
 
-当前完整 coding readiness **PASS**；全仓注释结构为
-**246 文件 / 5505 声明 / 0 缺项**。检查器反例、装配/审计/旅程回归、四校验器和
-全部 TP/RP 通过，构建、完整测试和容器均经资源守卫串行运行。
+本轮完整 coding readiness **PASS**；全仓注释结构为
+**247 文件 / 5524 声明 / 0 缺项**。检查器反例、装配/审计/旅程回归、四校验器和
+全部 TP/RP 通过，本轮构建与完整检查经资源守卫串行运行。
 
 R78--R81 对相应生产函数及维护探针完成人工语义核对和三平台故障取证，冻结输入与
 日志分别绑定于 [R78](native-review/R78.json)、[R79](native-review/R79.json)、
@@ -76,8 +80,14 @@ R78--R81 对相应生产函数及维护探针完成人工语义核对和三平�
 临时字符串 GC 反例另有 sanitizer 前后证据。Windows cooked 投影使用有界
 completed reader double；该证据不替代真实控制台交互或 emergency cancellation。
 
-全仓人工语义 Review 仍为 **partial**。Windows cooked reader 取消失败后的 detach
-所有权、后续原生/main 交互内部和部分测试辅助代码尚未完成，不用结构覆盖或
+本轮补齐 cooked reader detach 所有权：终端与 worker 分别持有原子引用；GC
+释放终端引用和线程句柄，未结束的 worker 保留其记录，结束后释放最后引用。
+本机 Win32/Win64 各覆盖 56 个实际线程场景，既有两架构 cooked reader 和
+三平台 terminal input 故障回归均通过。源码与实际日志绑定于
+[R82](native-review/R82.json)，真实控制台和最低 Windows 系统实测不扩展。
+
+全仓人工语义 Review 仍为 **partial**。后续原生/main 交互内部和部分测试辅助代码
+尚未完成，真实控制台 emergency cancellation 仍需对应运行证据，不用结构覆盖或
 本节点打包通过代替这些核对。C32/C33/C34 剩余正式资格见 TRACKING，Gate R 保持关闭。
 
 ## 开发与仓库状态
@@ -85,8 +95,9 @@ completed reader double；该证据不替代真实控制台交互或 emergency c
 本地和 GitHub 仅保留 `main`，默认分支为 `main`；候选 tag 属于发行标记。
 README.md、README-zh.md 和两份 quickstart 均描述 `1.0.0` 候选及资格待完成，
 中英文 README 的章节、命令参考和下载入口已对齐。开发入口、实施计划和资格手册
-以 D-082 的暂停指示为准。
+以 D-083 的恢复指示为准。
 
-暂停期间不启动新实现、Review、在线模型调用或正式资格推进。负责人明确恢复后，
-从 [暂存剩余事项](TRACKING.md) 接续；历史过程见 [开发历程](DEVELOPMENT-HISTORY.md)。
-此前已授权的模型凭据仍留在忽略的私有目录，未进入源码包、候选包或公开证据。
+从 [剩余事项](TRACKING.md) 接续 Review 与资格收尾；历史过程见
+[开发历程](DEVELOPMENT-HISTORY.md)。
+此前已授权的模型凭据属于原构建机的忽略目录，当前工作区未恢复，未进入源码包、
+候选包或公开证据。后续产物与在线旅程的依赖恢复见 TRACKING。
