@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-10-08
 File: terminal.lua
 Description: Wraps terminal input and restoration as a bounded AsyncPort.
 ]]
@@ -457,9 +457,10 @@ function M.new(native, options)
 
     ---Restores terminal state and then releases the native handle.
     --@param self table Started or joined terminal AsyncPort.
-    --@return boolean closed True after both operations succeed.
-    --@error Raises for invalid state or either native restore/close failure.
-    --@effect Attempts restoration, closes the handle, and marks state closed.
+    --@return boolean closed True after restoration and native close both report success.
+    --@error Raises for invalid state or native restore/close failure; an earlier restore failure keeps precedence.
+    --@effect Attempts restoration and close; marks closed only after native close succeeds.
+    --@ownership Native close failure keeps the same started/joined handle available for retry, preserving successful restoration.
     function port:close()
         if state ~= "started" and state ~= "joined" then
             error("terminal port is " .. state, 2)
@@ -474,7 +475,7 @@ function M.new(native, options)
             end
         end
         local close_ok, close_value = call_native(native, "terminal_close", handle)
-        state = "closed"
+        if close_ok then state = "closed" end
         if restore_error then raise_native(restore_error, 1) end
         if not close_ok then raise_native(close_value, 1) end
         return true

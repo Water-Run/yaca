@@ -7,6 +7,7 @@
 
 | 时间 / 节点 | 主要成果 | 证据与适用范围 |
 | --- | --- | --- |
+| 2026-10-08，R84 终端清理重试 | 修复 terminal native close 失败也标记 closed 的状态丢失；保留同一 started/joined owner、已恢复设置与先前错误优先级 | [本日 Review](CODE-REVIEW-2026-10-08.md)；精确 R83 源码反例 9/10，修复后 10/10；完整 708/708、250/5547/0、完整 readiness PASS |
 | 2026-10-08，R83 工作线程 DLL 引用 | 实际 loadlib/lua_close 确认 native DLL 先于存活 reader/writer 卸载；worker 独立持有 DLL，收尾后 FreeLibraryAndExitThread，双 worker 只在最后一个退出后卸载 | [本日 Review](CODE-REVIEW-2026-10-08.md)、[R83 证据](native-review/R83.json)；本机两架构各 26 场景及 terminal/process 回归通过，706/706、完整 readiness PASS，正式资格保留 |
 | 2026-10-08，恢复开发与 R82 | 从 `origin/main` 快进 15 个提交，按 D-083 恢复；修复 Windows cooked reader 取消失败后 GC 丢失资源所有者，补齐实际线程 detach/重试/启动竞争探针 | [本日 Review](CODE-REVIEW-2026-10-08.md)；本机两架构各 56 场景通过、基线各 30 个泄漏资源降为 0；R81 已发布 ZIP 未含修复，正式资格与全仓语义 Review 仍待完成 |
 | 2026-10-06，R77--R81 与暂停交付 | 修复 Windows reparse 及原生资源/字符串生命周期，三目标从同一冻结源码重建、九包重新装配；按 D-082 交付后暂停 | [本日 Review](CODE-REVIEW-2026-10-06.md)、[节点清单](candidates/1.0.0-preview.20261006.json)；三平台各 706/706，Linux 三档离线核心旅程各 10/10，正式资格和剩余语义 Review 保留 |

@@ -1,4 +1,4 @@
-# 恢复开发与 Windows 工作线程所有权 R82 / R83
+# 恢复开发与关闭路径 R82 / R83 / R84
 
 日期：2026-10-08。负责人要求同步最新进展、检查梳理并推进开发，按
 [D-083](DECISIONS.md#d-083-同步最新进展并恢复开发2026-10-08) 恢复。
@@ -126,3 +126,29 @@ reader 退出后才允许卸载。两架构既有 cooked/terminal、process stre
 0 缺项**；完整 Lua **706/706**、完整 readiness 全链 **PASS**。
 本批 worker DLL/storage/pipe/thread 所有权、失败回收、返回协议和所有探针已完成人工
 语义核对。正式源码冻结和三目标九包重建仍待后续 Review，全仓语义 Review 保持 partial。
+
+## R84 终端关闭失败后的同句柄重试
+
+基线为 R83 提交 `6a6dae4`。`terminal.lua` 的 `port:close()` 在 native
+`terminal_close` 返回失败或抛错后也无条件标记 `closed`，下一次清理只能得到
+"terminal port is closed"，原生 owner 尚未释放却失去重试入口。
+process 适配器已经只在 native 关闭成功后推进状态；terminal 现遵守同一所有权边界。
+
+窄修复只在 `close_ok` 为真时改变状态。native close 失败保留原来的 started/joined
+owner；成功恢复的设置不重复恢复，失败恢复可再尝试。原有错误优先级保留；如果
+native close 实际成功而此前 restore 失败，仍报告先前错误，但 owner 已关闭，
+不能为重试而再次触碰已释放的句柄。
+
+新增两个 integration case，覆盖 joined 的 typed close 拒绝、started 的 restore
+与 close 连续失败、native close 异常，以及先前 restore 失败但实际 close 成功。
+最新维护回归与精确 R83 `src/` 在隔离 test root 中组合：专项 **9/10**，原失败为
+第二次关闭被错误的 closed 状态拒绝；修复后 **10/10**，核对同一个原生 handle、
+restore/close 次数及成功后不二次释放。
+
+完整 Lua suite **708/708**，完整 coding readiness **PASS**；全仓结构清点
+**250 文件 / 5547 声明 / 0 缺项**。修改后的 close 参数、返回、错误先后、状态与
+所有权注释及每个测试 callback 已逐项核对。该批没有修改 C 或发行版本，不重写
+R83 的 native/DLL 结果；已发布 R81 包不含 R84。
+原始专项、全套检查、精确基线与维护回归在 `out/review-20261008/r84/`，
+冻结来源与实际日志摘要见 [R84 清单](lua-review/R84.json)。
+整体语义 Review、主交互和正式资格继续按 TRACKING 收尾。

@@ -5,7 +5,8 @@
 本轮发现并修复 R82/R83：cooked reader 的 GC detach 遗留资源，以及 Lua 关闭
 后 DLL 先于存活 reader/stdin writer 被卸载。两架构的 R82 探针各从 30 个泄漏资源
 降为 0；R83 共 52 个 DLL/worker 场景通过，最后一个线程退出后才释放 DLL。
-完整 Lua suite 706/706、完整 readiness PASS。证据见
+R84 另修复 terminal native close 失败后无法重试同一 owner。
+完整 Lua suite 708/708、完整 readiness PASS。证据见
 [10 月 8 日 Review](CODE-REVIEW-2026-10-08.md)。剩余工作见 [TRACKING](TRACKING.md)。
 
 阶段为 `implemented-unqualified`，目标资格验证待完成；Release Gate R 为 `closed`，
@@ -26,7 +27,7 @@ R81 候选三目标从同一份完整维护源码快照构建：冻结提交为
 `a6c160a9ff28a11118da7dc4606e217d763c3049f496f5bb5d5597966fbd07bf`，
 406 个成员。三份归档及逐成员字节一致，冻结时工作树干净。构建后的候选清单、
 交付记录和暂停文档单独提交，交付时产品源码与冻结输入一致。
-当前开发源码另含 R82/R83，已发布的 R81 ZIP 不包含本轮修复。
+当前开发源码另含 R82/R83/R84，已发布的 R81 ZIP 不包含本轮修复。
 
 | 当前核心 | SHA-256 | 完整测试及环境 |
 | --- | --- | --- |
@@ -72,7 +73,7 @@ Linux full 的 Git HTTPS、Perl、静态库和默认 SDK 闭包此前已构建�
 ## 注释与语义 Review
 
 本轮完整 coding readiness **PASS**；全仓注释结构为
-**250 文件 / 5541 声明 / 0 缺项**。检查器反例、装配/审计/旅程回归、四校验器和
+**250 文件 / 5547 声明 / 0 缺项**。检查器反例、装配/审计/旅程回归、四校验器和
 全部 TP/RP 通过，本轮构建与完整检查经资源守卫串行运行。
 
 R78--R81 对相应生产函数及维护探针完成人工语义核对和三平台故障取证，冻结输入与
@@ -89,6 +90,8 @@ completed reader double；该证据不替代真实控制台交互或 emergency c
 失败收回，正常或错误 IO 后在终止线程的同一步释放；两架构各 26 场景、既有
 terminal/process 故障回归和 Linux native 编译通过，绑定于
 [R83](native-review/R83.json)。真实控制台和最低 Windows 系统实测不扩展。
+R84 保留关闭失败的 started/joined 句柄，仅在原生关闭成功后推进状态；专项
+10/10，含同句柄恢复、异常及先前错误优先级，见本轮 Review。
 
 全仓人工语义 Review 仍为 **partial**。后续原生/main 交互内部和部分测试辅助代码
 尚未完成，真实控制台 emergency cancellation 仍需对应运行证据，不用结构覆盖或

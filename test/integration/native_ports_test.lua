@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-10-08
 File: native_ports_test.lua
 Description: Verifies narrow filesystem, process, terminal, and backend ports.
 ]]
@@ -569,6 +569,95 @@ return {
                 A.equal(native.calls.terminal_restore, 1)
                 A.truthy(port:close())
                 A.equal(native.calls.terminal_restore, 1)
+            end,
+        },
+        {
+            name = "terminal close failure retains its handle for cleanup retry",
+            -- Reject one close under each native failure form, then recover through the same live owner.
+            --@param none No arguments; the case creates isolated terminal ports and native fault closures.
+            --@return nil No value; assertions require same-handle retry and correct restoration counts.
+            run = function()
+                local terminal = load_module("terminal")
+                for _, mode in ipairs({ "restored", "restore-failed", "exception" }) do
+                    local native = success_native()
+                    local restore_calls = 0
+                    local close_calls = 0
+                    local live_handle
+                    -- Restore the same admitted terminal, optionally refusing the first attempt.
+                    --@param handle table Live terminal owner supplied by the production adapter.
+                    --@return boolean accepted False only for the selected initial restoration failure.
+                    --@return boolean|table result True acknowledgement or the typed transient restoration error.
+                    native.terminal_restore = function(handle)
+                        live_handle = live_handle or handle
+                        A.equal(handle, live_handle)
+                        restore_calls = restore_calls + 1
+                        if mode == "restore-failed" and restore_calls == 1 then
+                            return false, { code = "RestoreTransient", message = "restore may be retried" }
+                        end
+                        return true, true
+                    end
+                    -- Refuse the first native close without releasing its handle, then accept the retry.
+                    --@param handle table Live terminal owner retained after the initial failure.
+                    --@return boolean accepted False on the first typed rejection, true after retry.
+                    --@return boolean|table result True acknowledgement or the typed transient close error.
+                    --@error Raises the configured exception on the first exception-mode call.
+                    native.terminal_close = function(handle)
+                        A.equal(handle, live_handle)
+                        close_calls = close_calls + 1
+                        if close_calls == 1 then
+                            if mode == "exception" then error("native close interrupted") end
+                            return false, { code = "CloseTransient", message = "close may be retried" }
+                        end
+                        return true, true
+                    end
+                    local port = assert(terminal.new(native, { mode = "cooked", maximum_input_bytes = 16 }))
+                    port:start(1)
+                    if mode == "restored" then A.equal(port:join(2).outcome, "completed") end
+                    local closed, close_error = pcall(port.close, port)
+                    A.falsy(closed)
+                    A.truthy(tostring(close_error):find(mode == "restore-failed" and "RestoreTransient"
+                        or mode == "exception" and "NativeFailure" or "CloseTransient", 1, true))
+                    A.truthy(port:close())
+                    A.equal(close_calls, 2)
+                    A.equal(restore_calls, mode == "restore-failed" and 2 or 1)
+                    A.falsy(pcall(port.close, port))
+                    A.equal(close_calls, 2)
+                end
+            end,
+        },
+        {
+            name = "successful native terminal close settles ownership despite an earlier restore error",
+            -- Keep the port closed when its native close succeeds after the explicit restore attempt failed.
+            --@param none No arguments; the case owns one isolated terminal and its transient restore closure.
+            --@return nil No value; assertions reject a second native close after the first actual release.
+            run = function()
+                local terminal = load_module("terminal")
+                local native = success_native()
+                local close_calls = 0
+                -- Refuse explicit restoration so close must preserve this error while still settling ownership.
+                --@param handle table Started terminal owner whose restoration is being attempted.
+                --@return boolean accepted Always false for this isolated explicit-restore control.
+                --@return table err Typed error retained by the port's close call.
+                native.terminal_restore = function(handle)
+                    A.equal(handle.terminal, 1)
+                    return false, { code = "RestoreTransient", message = "first restore failed" }
+                end
+                -- Accept actual native close, which releases the terminal and its remaining restoration work.
+                --@param handle table Started terminal owner to release exactly once.
+                --@return boolean accepted True for the completed native close.
+                --@return boolean result True acknowledgement of handle release.
+                native.terminal_close = function(handle)
+                    A.equal(handle.terminal, 1)
+                    close_calls = close_calls + 1
+                    return true, true
+                end
+                local port = assert(terminal.new(native, { mode = "cooked", maximum_input_bytes = 16 }))
+                port:start(1)
+                local closed, close_error = pcall(port.close, port)
+                A.falsy(closed)
+                A.truthy(tostring(close_error):find("RestoreTransient", 1, true))
+                A.falsy(pcall(port.close, port))
+                A.equal(close_calls, 1)
             end,
         },
         {

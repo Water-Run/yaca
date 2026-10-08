@@ -1,0 +1,108 @@
+{
+  "schema": "yaca-lua-review-evidence-v1",
+  "review_id": "R84",
+  "date": "2026-10-08",
+  "status": "verified-port-subset",
+  "release_authorized": false,
+  "base_revision": "6a6dae417561573870fb4955b812d16e84f432da",
+  "working_tree_changes": true,
+  "source_inputs": [
+    {
+      "path": "src/terminal.lua",
+      "size": 58390,
+      "sha256": "7bb447df98bbaf43bd3284f58a50f619026300fb100e57bd6f32aa43af7a7499"
+    },
+    {
+      "path": "test/integration/native_ports_test.lua",
+      "size": 41009,
+      "sha256": "1cd22caec5a32879c1767a14111bf660c9094f95700e84dcc8165dfab763bd0c"
+    }
+  ],
+  "frozen_source_inputs": [
+    {
+      "path": "out/review-20261008/r84/after-source/src/terminal.lua",
+      "size": 58390,
+      "sha256": "7bb447df98bbaf43bd3284f58a50f619026300fb100e57bd6f32aa43af7a7499"
+    },
+    {
+      "path": "out/review-20261008/r84/after-source/test/integration/native_ports_test.lua",
+      "size": 41009,
+      "sha256": "1cd22caec5a32879c1767a14111bf660c9094f95700e84dcc8165dfab763bd0c"
+    }
+  ],
+  "baseline_inputs": [
+    {
+      "path": "out/review-20261008/r84/before-source/src/terminal.lua",
+      "size": 58161,
+      "sha256": "93505b82d9dba21e7415c01cbbd8f3731c4882f14cb38416e173d75af5ccbda2"
+    },
+    {
+      "path": "out/review-20261008/r84/before-source/test/integration/native_ports_test.lua",
+      "size": 41009,
+      "sha256": "1cd22caec5a32879c1767a14111bf660c9094f95700e84dcc8165dfab763bd0c"
+    }
+  ],
+  "observations": {
+    "baseline_cases": 10,
+    "baseline_failed": 1,
+    "fixed_cases": 10,
+    "fixed_failed": 0,
+    "complete_lua_suite": {
+      "total": 708,
+      "passed": 708,
+      "failed": 0
+    },
+    "comment_coverage": {
+      "files": 250,
+      "declarations": 5547,
+      "violations": 0
+    },
+    "coding_readiness": "PASS"
+  },
+  "logs": [
+    {
+      "path": "out/review-20261008/r84/before-final.log",
+      "size": 1694,
+      "sha256": "2fc72d7443c38349e8489c40e9a9102484b03bdd250b5979a61ba5839faddbc5"
+    },
+    {
+      "path": "out/review-20261008/r84/after.log",
+      "size": 1177,
+      "sha256": "0fc35a71f7ce7c9513e79996b57571e3b5605055944b07dd17186f6157725274"
+    },
+    {
+      "path": "out/review-20261008/r84/full-suite.log",
+      "size": 70460,
+      "sha256": "364798af56c46d18cad70edbda0195a8db2c9146613473b81ed97994d1873ba4"
+    },
+    {
+      "path": "out/review-20261008/r84/coding-readiness.log",
+      "size": 4213,
+      "sha256": "d84b0cbc8b2256f78e0554b08dab1a78659e5ed667fac7f54aab56aad497b29f"
+    },
+    {
+      "path": "out/review-20261008/r84/validation.log",
+      "size": 818,
+      "sha256": "46eac6ee098e3f633d9898cfb58880cce70b2bab3c3002602a08d6ab211e74fe"
+    },
+    {
+      "path": "out/review-20261008/r84/comment-inventory.txt",
+      "size": 1238551,
+      "sha256": "05703c65e0601c93342a695da65acaadd5ac311d24feb212b1f7dcadd18b0661"
+    }
+  ],
+  "scope": [
+    "started and joined terminal handle retention after native close failure",
+    "typed rejection, native exception, restore failure and restoration reuse",
+    "successful native release despite earlier restore error keeps ownership closed"
+  ],
+  "semantic_review": {
+    "subset_complete": true,
+    "whole_repository": "partial"
+  },
+  "remaining_scope": [
+    "main terminal owner lifecycle",
+    "remaining semantic review",
+    "current three-target core builds and nine-package qualification"
+  ]
+}
