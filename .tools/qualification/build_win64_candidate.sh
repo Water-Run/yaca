@@ -185,6 +185,16 @@ $CC -std=c99 -Wall -Wextra -Werror $CFLAGS -DLUA_BUILD_AS_DLL \
   "$LUA_SOURCE/liblua55.a" $LDFLAGS -ladvapi32 -lshell32 \
   -o "$OUTPUT_ROOT/windows_console_lifetime_faults.exe" \
   >"$LOG_ROOT/console-lifetime-faults-build.log" 2>&1
+$CC -std=c99 -Wall -Wextra -Werror $CFLAGS -DLUA_BUILD_AS_DLL \
+  -I"$LUA_SOURCE" "$YACA_SOURCE/.tools/qualification/windows_terminal_input_smoke.c" \
+  "$LUA_SOURCE/liblua55.a" $LDFLAGS -ladvapi32 -lshell32 \
+  -o "$OUTPUT_ROOT/windows_terminal_input_smoke.exe" \
+  >"$LOG_ROOT/terminal-input-smoke-build.log" 2>&1
+$CC -std=c99 -Wall -Wextra -Werror $CFLAGS -DLUA_BUILD_AS_DLL \
+  -I"$LUA_SOURCE" "$YACA_SOURCE/.tools/qualification/windows_keyboard_faults.c" \
+  "$LUA_SOURCE/liblua55.a" $LDFLAGS -ladvapi32 -lshell32 \
+  -o "$OUTPUT_ROOT/windows_keyboard_faults.exe" \
+  >"$LOG_ROOT/keyboard-faults-build.log" 2>&1
 
 bash "$REPO_ROOT/.tools/qualification/build_win64_https_candidate.sh" \
   "$SOURCE_CACHE" "$OUTPUT_ROOT/https" >"$LOG_ROOT/https-build.log" 2>&1

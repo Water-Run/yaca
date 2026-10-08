@@ -1,10 +1,12 @@
-# R82：Windows cooked reader 的取消失败与最终释放
+# 原生终端生命周期与键盘输入 Review
+
+## R82：Windows cooked reader 的取消失败与最终释放
 
 开发按 [D-083](DECISIONS.md#d-083-同步项目并恢复开发2026-10-08) 恢复。
 `git fetch origin --prune` 和 `git pull --ff-only` 完成；基线为
 `df38087c6c7855a45e94cf63b51528da4da0b345`，远端没有新增源码提交。
 
-## 缺陷和修复
+### 缺陷和修复
 
 `l_terminal_gc` 在 `cancel_windows_cooked_read` 失败时直接丢弃 `cooked_read`。
 worker 使用独立堆记录，不会访问已被收集的 userdata，但返回后没有释放堆记录、
@@ -26,7 +28,7 @@ worker 在最后一次访问 `received` 后释放其引用。终端正常 join �
 已更新 completed-reader 和同步 reader 夹具的所有权初始化。两条 Windows 构建入口
 纳入维护探针 `windows_console_lifetime_faults.c`。未增加公开 native 接口。
 
-## 对照与回归
+### 对照与回归
 
 新探针直接包含生产源码，实际启动 Windows 线程；ReadConsoleW、WriteConsoleInputW
 及取消等待的故障通过有界 double 注入。线程暂停在读入处，实际 Lua GC 或 lua_close
@@ -54,7 +56,7 @@ Linux 从同份源码严格构建 native 模块及输入故障探针，输入故
 API 宏分别保持 0x0501/0x0601。以上是原生函数专项，不替代真实控制台交互、
 终端模式故障或最低系统实测。
 
-## 验收与 Review 范围
+### 验收与 Review 范围
 
 完整 Lua suite **706/706**，coding readiness **PASS**；全仓注释结构检查
 **247 文件 / 5527 声明 / 0 缺项**。检查器反例 15/15、装配/审计/旅程回归、
@@ -73,3 +75,57 @@ API 宏分别保持 0x0501/0x0601。以上是原生函数专项，不替代真�
 原始失败、编译、实机和回归日志在 `out/native-console-lifetime-review-20261008/`。
 已发布 R81 候选不含 R82；新的最终单文件/九包尚未统一重建。Gate R 保持关闭，
 `release_authorized=false`，目标资格验证待完成。
+
+## R83：raw 键盘重复、UTF-16 配对与字节上限
+
+基线为 R82 提交 `5fc23ac`。`push_windows_key_action` 忽略 `wRepeatCount`，
+合并的连续字符和退格只发出一次。它还把合法 Unicode 的字节限额返回成
+`InvalidEncoding`；连续 high surrogate 会覆盖已有的半个字符，不拒绝畸形序列。
+微软 [KEY_EVENT_RECORD](https://learn.microsoft.com/en-us/windows/console/key-event-record-str)
+明确说明重复按键可能合并在一个 record 中，不能只按 record 数量计字符。
+
+修复为每个 text action 保留完整重复次数，UTF-8 重复存储使用 Lua-owned buffer，
+分配错误不泄漏独立原生缓冲区。先用除法检查总字节上限，再计算长度和复制。
+high surrogate 同时保留重复次数，low surrogate 必须匹配；重复 high 或次数不匹配
+返回 `InvalidEncoding` 并清空半字符状态。合法输入超过上限返回 `Limit`。
+Enter/Esc 继续按一个 record 发出一个命令，既有修饰键优先级和零次数单键后备保留。
+
+维护探针 `windows_terminal_input_smoke.c` 自建真实 Windows 控制台，通过实际
+WriteConsoleInputW/ReadConsoleInputW 验证 ASCII、两/三/四字节字符、退格、最大
+WORD 次数、跨 poll 的 surrogate、畸形后的同 owner 恢复及字节限额。
+同时验证 raw 入场、restore 和 close 的 setter 拒绝及重试；仅 SetConsoleMode 的
+拒绝用 double 注入，实际模式前后读回比较。另在真实控制台启动 cooked reader，
+通过生产 synthetic Enter 取消、join 并核对终态与恢复模式。所有输入仅为固定非秘密
+夹具，测试进程独占其控制台，不修改 SSH 终端或调用模型。
+
+| 指定环境 | 真实控制台检查 | 基线失败 | 修复后失败 | 最终模式 / 句柄 |
+| --- | --- | --- | --- | --- |
+| Server 2008 non-R2 x64 / Win32 WOW64 | 86 | 26 | 0 | 原模式恢复 / 无增长 |
+| Server 2025 Standard x64 / Win64 | 86 | 26 | 0 | 原模式恢复 / 无增长 |
+
+`windows_keyboard_faults.c` 另使用有界 KEY_EVENT double，对三种大重复文本分别
+枚举 18 个 Lua 增长分配点；每目标共 54 个阈值，持续拒绝包含 emergency GC 重试。
+每例在同一 terminal owner 尝试相同阈值两次，每次后提供新的夹具输入并核对完整
+UTF-8 字节；不把消耗的原记录记作成功重放，也不手工重置 owner 的 surrogate 状态。
+实测每目标 54 次初始内存异常、36 次重复内存异常，另 18 次暖状态调用成功：
+初次创建的 Lua buffer 元表等结构已保留，暖调用没有到达对应初始阈值。
+这 18 次不记作注入异常。两轮内容恢复均通过，原生泄漏和所有权错误均为零。
+
+两 Windows 的 R82 176 例生命周期、R81 输入投影和 bounded cooked-reader 回归
+通过；Linux 严格构建同份 native 和输入故障探针，输入故障回归通过。编译使用 C99、
+`-Wall -Wextra -Werror -O2`，Windows API 宏仍为 0x0501/0x0601。
+首次新增探针严格构建遇到共享 tracker 中 getter helper 未使用的告警；保留失败日志，
+在本窄探针显式引用共享符号后重建，未关闭告警或执行无关 getter 伪充键盘测试。
+
+完整 Lua suite **706/706**、coding readiness **PASS**，全仓注释结构为
+**249 文件 / 5548 声明 / 0 缺项**。检查器反例、发行/旅程回归、四校验器和
+全部 TP/RP 通过。人工已逐项核对重复计数、缓冲区所有权、乘法限额、半字符失败清理、命令
+保留行为及探针的真实控制台/故障 double 边界。全仓语义 Review 仍为 partial，
+剩余异步线程的 DLL 生命周期、Cygwin PTY 失败路径、终端 Lua 适配器的失败关闭、
+main 交互内部和测试辅助代码继续核对。
+
+17 个维护输入、10 个基线输入、目标编译件、完整检查及实际环境绑定在
+[R83 证据](native-review/R83.json)。16 个接收件的目标端 SHA-256 与本地一致。
+原始输入、失败/成功日志与编译件位于 `out/native-input-mode-review-20261008/`。
+本批直接验证生产函数，仍不替代最终单文件、完整交互旅程或最低系统实测。
+已发布 R81 不含 R82/R83，最终三目标九包待统一重建，Gate R 继续关闭。

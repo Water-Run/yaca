@@ -277,6 +277,7 @@ static void release_windows_cooked_read(yaca_terminal_read *read)
  * @field original_mode DWORD|termios Host terminal mode captured before this session changes it.
  * @field input_type DWORD Windows handle type used to select console or pipe input.
  * @field pending_high_surrogate WCHAR First UTF-16 code unit awaiting its matching low surrogate.
+ * @field pending_high_repeat_count WORD Repetition count retained with the high surrogate; a low surrogate must have the same count.
  * @field cooked_mode int Whether Windows console line editing is currently enabled.
  * @field cooked_read yaca_terminal_read* Active asynchronous Windows console read, if any.
  * @field pty yaca_pty_state Cygwin PTY mode and restoration state.
@@ -297,6 +298,7 @@ typedef struct yaca_terminal
   DWORD original_mode;
   DWORD input_type;
   WCHAR pending_high_surrogate;
+  WORD pending_high_repeat_count;
   int cooked_mode;
   yaca_terminal_read *cooked_read;
   yaca_pty_state pty;
@@ -11571,10 +11573,11 @@ static void push_terminal_fact(lua_State *L, yaca_terminal *terminal)
 
 #if defined(_WIN32)
 
-/* Encodes one Unicode scalar into its UTF-8 byte sequence.
- * @param codepoint unsigned_long The codepoint bound to encode utf8 codepoint.
- * @param output char_[4] Caller-provided output buffer or result destination.
- * @return size_t result Byte count, offset, or numeric value for encode utf8 codepoint.
+/* Encode one admitted Unicode scalar without allocating or retaining its destination.
+ * @param codepoint unsigned_long Scalar already validated by the strict Windows key decoder.
+ * @param output char[4] Borrowed destination with capacity for the longest UTF-8 scalar.
+ * @return size_t Exact encoded byte count, from one through four.
+ * @effect Writes only the encoded prefix of output.
  */
 static size_t encode_utf8_codepoint(unsigned long codepoint, char output[4])
 {
@@ -11603,11 +11606,14 @@ static size_t encode_utf8_codepoint(unsigned long codepoint, char output[4])
   return 4;
 }
 
-/* Pushes windows key action fields onto the Lua stack.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @param terminal yaca_terminal* Terminal owner whose input and mode state are managed.
- * @param key const_KEY_EVENT_RECORD* Selected metadata or table key.
- * @return int result 1 when an action was pushed, 0 when no action was emitted, -1 on invalid input.
+/* Project a console key record with exact bounded text repetition and strict UTF-16 pairing.
+ * @param L lua_State* State receiving exactly one action when projection succeeds.
+ * @param terminal yaca_terminal* Owner retaining a partial surrogate and its repetition count across polls.
+ * @param key const_KEY_EVENT_RECORD* Borrowed OS key record; zero repeat metadata keeps the single-key fallback.
+ * @return int One for an action, zero for key-up/modifier/partial input, minus one for invalid UTF-16, minus two for a byte limit.
+ * @error Lua allocation may raise; consumed key records are not replayed and temporary bytes remain Lua-owned.
+ * @effect Updates partial-surrogate state; Enter/Esc remain one command per record with existing modifier precedence.
+ * @ownership Repeated UTF-8 storage belongs to a Lua buffer/string until the action owns its copied text.
  */
 static int push_windows_key_action(
   lua_State *L,
@@ -11619,6 +11625,11 @@ static int push_windows_key_action(
   unsigned long codepoint;
   char bytes[4];
   size_t length;
+  WORD repeats;
+  size_t total;
+  size_t index;
+  char *repeated;
+  luaL_Buffer input;
 
   if (!key->bKeyDown)
   {
@@ -11655,37 +11666,58 @@ static int push_windows_key_action(
   {
     return 0;
   }
+  repeats = key->wRepeatCount == 0U ? 1U : key->wRepeatCount;
   if (character >= 0xD800U && character <= 0xDBFFU)
   {
+    if (terminal->pending_high_surrogate != 0)
+    {
+      terminal->pending_high_surrogate = 0;
+      terminal->pending_high_repeat_count = 0;
+      return -1;
+    }
     terminal->pending_high_surrogate = character;
+    terminal->pending_high_repeat_count = repeats;
     return 0;
   }
   if (character >= 0xDC00U && character <= 0xDFFFU)
   {
-    if (terminal->pending_high_surrogate == 0)
+    if (terminal->pending_high_surrogate == 0
+        || terminal->pending_high_repeat_count != repeats)
     {
+      terminal->pending_high_surrogate = 0;
+      terminal->pending_high_repeat_count = 0;
       return -1;
     }
     codepoint = 0x10000UL
       + (((unsigned long)terminal->pending_high_surrogate - 0xD800UL) << 10)
       + ((unsigned long)character - 0xDC00UL);
     terminal->pending_high_surrogate = 0;
+    terminal->pending_high_repeat_count = 0;
   }
   else
   {
     if (terminal->pending_high_surrogate != 0)
     {
       terminal->pending_high_surrogate = 0;
+      terminal->pending_high_repeat_count = 0;
       return -1;
     }
     codepoint = (unsigned long)character;
   }
   length = encode_utf8_codepoint(codepoint, bytes);
-  if (length > terminal->maximum_input_bytes)
+  if ((size_t)repeats > terminal->maximum_input_bytes / length)
   {
-    return -1;
+    return -2;
   }
-  push_terminal_action(L, "text", bytes, length);
+  total = length * (size_t)repeats;
+  repeated = luaL_buffinitsize(L, &input, total);
+  for (index = 0U; index < (size_t)repeats; ++index)
+  {
+    memcpy(repeated + index * length, bytes, length);
+  }
+  luaL_pushresultsize(&input, total);
+  push_terminal_action(L, "text", lua_tostring(L, -1), total);
+  lua_remove(L, -2);
   return 1;
 }
 
@@ -12280,6 +12312,11 @@ static int l_terminal_poll(lua_State *L)
           continue;
         }
         action_result = push_windows_key_action(L, terminal, &record.Event.KeyEvent);
+        if (action_result == -2)
+        {
+          lua_pop(L, 1);
+          return push_failure(L, "Limit", "terminal key text exceeds its byte limit");
+        }
         if (action_result < 0)
         {
           lua_pop(L, 1);
