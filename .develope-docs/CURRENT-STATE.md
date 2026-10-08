@@ -66,8 +66,8 @@ Linux full 的 Git HTTPS、Perl、静态库和默认 SDK 闭包此前已构建�
 
 ## 注释与语义 Review
 
-当前 R85 开发宿主完整 Lua suite **716/716**、coding readiness **PASS**，全仓注释结构为
-**255 文件 / 5603 声明 / 0 缺项**。检查器反例、发行/旅程回归、四校验器和
+当前 R86 开发宿主完整 Lua suite **720/720**、coding readiness **PASS**，全仓注释结构为
+**255 文件 / 5615 声明 / 0 缺项**。检查器反例、发行/旅程回归、四校验器和
 全部 TP/RP 通过；构建、完整测试和容器均经资源守卫串行运行。
 
 R78--R81 对相应生产函数及维护探针完成人工语义核对和三平台故障取证，冻结输入与
@@ -94,15 +94,19 @@ R85 修复终端适配器的恢复/关闭确认值、失败 owner 重试、输�
 停止新读取；另修复 Linux raw 空闲读被当成 EOF。十个新增场景、五个实际 native/PTY
 模式与 fd flags 恢复场景通过；配置恢复未知时不发布的 bootstrap 回归通过。
 本批未重跑 Windows 目标，不沿用旧核心的完整结果作为当前源码验收。
-已发布 R81 候选未包含 R82--R85，新单文件及九包待统一重建。
+R86 将失败关闭的 owner 保留到 main 输入协调器，停止旧模式复用，记住成功 join
+而不重放收尾阶段；公开配置 REPL 的拒绝/异常/时钟失效/永久失败及相邻回归
+87/87 通过。未关闭旧 owner 时不建立新输入代，未知恢复仍不发布配置。
+已发布 R81 候选未包含 R82--R86，新单文件及九包待统一重建。
 
 全仓人工语义 Review 仍为 **partial**。R82 所有权及 R83 原生键盘投影/模式错误
-子面、R84 worker DLL 生命周期及 R85 adapter/raw 恢复子面已核对；main 输入
-协调器失败关闭、Cygwin PTY 失败路径、其余交互内部和部分测试辅助代码仍待完成。
+子面、R84 worker DLL 生命周期及 R85/R86 adapter/main 恢复子面已核对；Cygwin
+PTY 失败路径、其余交互/原生内部和部分测试辅助代码仍待完成。
 R82 的 12 个、R83 的 16 个及 R84 的 28 个接收件 SHA-256 与本地一致，源码、日志
 和环境在 [R82](native-review/R82.json)、[R83](native-review/R83.json)、
 [R84](native-review/R84.json) 绑定，R85 的冻结源码和实际 native/PTY 在
-[R85](native-review/R85.json) 绑定。证据边界见
+[R85](native-review/R85.json) 绑定，main owner 子面在
+[R86](native-review/R86.json) 绑定。证据边界见
 [10 月 8 日 Review](CODE-REVIEW-2026-10-08.md)。C32/C33/C34 剩余正式资格
 见 TRACKING，Gate R 保持关闭。
 

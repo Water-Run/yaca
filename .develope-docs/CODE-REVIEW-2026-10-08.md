@@ -250,3 +250,45 @@ Linux 最小字符/非阻塞组合、独立 PTY 观察与清理，以及所有�
 和完整检查在 [R85 证据](native-review/R85.json) 绑定，原始记录位于
 `out/terminal-adapter-review-20261008/`。发行版本及接口名称未变，已发布 R81 不含
 R82--R85；最终三目标九包待统一重建，Gate R 保持关闭。
+
+## R86：main 输入协调器保留未关闭的 owner
+
+基线为 `7a7a98a`。R85 已保留 adapter 的失败关闭 owner，但 main 的
+`new_model_setup_input.close_active` 在正常与时钟失效两个分支仍无条件清空
+active。旧 owner 未关闭时可启动替代终端；同模式还可能复用已完成 join 的端口。
+这会丢失重试入口，或在下次 poll/cancel/join 时触发状态错误。
+
+修复在收尾开始时停止旧模式复用、清除原输入批次，只有 close 明确返回 true 才
+释放 active。保存已经成功的 join，重试只继续未完成的关闭；不重复 cancel/join。
+时钟失效时仍直接尝试 close，拒绝时保留 owner。activate 需要先确认原 owner 已
+关闭，再创建新输入代。既有取消、时钟和终态失败仍报告，不把成功回收当作此前
+操作没有失败，也不自动发布配置或重放输入。
+
+四项新的公开配置 REPL 场景覆盖 cooked close 拒绝、close 异常、时钟失效后的
+raw close 拒绝，以及永久拒绝。独立 native double 记录真实 fixture owner 状态，
+在未关闭的旧 owner 上拒绝创建新 owner，并拒绝重复 native join。旧代码四项
+均失败；同一冻结 main/adapter 配合最终测试时，bootstrap 共 52 项、47 通过/
+5 失败，第五项来自现有未知恢复场景未发生新的清理重试。
+
+修复后 bootstrap/adapter/REPL 专项 **87/87**，正常和异常的关闭均在同 owner 上
+再次尝试成功，已完成 cancel/join 各一次；时钟失效路径不伪造 join，仍返回失败
+但实际清理重试通过。永久拒绝不开始替代输入代，返回失败且配置字节未变。
+现有 Model setup 的 unknown-restoration double 改为持续拒绝第三次及之后的
+恢复，并核对第四次真实重试；它不会在恢复仍未知时发出成功 close acknowledgment。
+秘密值不显示、配置不发布的验收保持。
+
+首次实现的多余 end 语法错误，以及首次故障计划对每个 cooked owner 都拒绝一次
+导致的夹具失败保留。计划现明确只选定第一个匹配 owner，final phase 由相同
+维护测试与冻结基线重跑，不把这些初次错误计入正式源码结果。
+
+完整 Lua suite **720/720**、coding readiness **PASS**，全仓注释结构
+**255 文件 / 5615 声明 / 0 缺项**。四校验器和全部 TP/RP 通过，完整检查由资源
+守卫串行执行。人工核对 active/mode/pending 的边界、两分支的保留/释放、join
+阶段缓存、activate 准入、未知恢复重试及所有新增/改动声明注释。
+本批是生产 CLI、main 协调器与 adapter 的 source/double 验证；没有新物理机或
+包运行结论。Cygwin PTY 失败/恢复和剩余交互/原生/辅助代码仍待继续 Review。
+
+三份维护输入及冻结 main/adapter/最终测试、失败/成功日志和完整验收在
+[R86 证据](native-review/R86.json) 绑定，原始记录位于
+`out/setup-input-owner-review-20261008/`。全仓语义 Review 仍为 partial；已发布
+R81 不含 R82--R86，最终三目标九包待统一重建，Gate R 保持关闭。

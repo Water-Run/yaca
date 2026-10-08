@@ -526,6 +526,111 @@ local function config_editor_fixture(answers, settings)
     }
 end
 
+-- Run the production configuration REPL with independent native-owner truth and selected close failures.
+--@param plan table Failed mode, throw/permanent flags and optional second-poll clock failure.
+--@return table CLI result, preserved configuration bytes, captured output and existing fixture observations.
+--@return table Ordered native owners and their actual cancellation/join/restoration/close counts.
+--@effect Runs only the isolated native/configuration doubles; no model or real terminal is used.
+local function config_input_close_fixture(plan)
+    local handles = {}
+    local failure_owner
+    local settings = {}
+    if plan.clock_failure then
+        -- Degrade timing only after the secret input owner has actually started.
+        --@param index integer Number of normal answer polls completed by the existing fixture.
+        --@return nil No result; the second answer makes later clock reads unavailable.
+        --@effect Sets the caller-owned fixture's clock_failed flag.
+        settings.before_poll = function(index)
+            if index == 2 then settings.clock_failed = true end
+        end
+    end
+    -- Install owner-aware terminal methods before the production CLI composes its adapter.
+    --@param native table Existing narrow native double whose terminal methods are replaced here.
+    --@param _filesystem table Existing configuration filesystem double, unused by these terminal controls.
+    --@return nil No result; native receives the explicit owner/call observations and failure behavior.
+    --@effect Changes only the fixture's terminal methods; existing answer and clock paths remain in use.
+    settings.native_setup = function(native, _filesystem)
+        local original_restore = native.terminal_restore
+        -- Admit a new owner only after every prior input generation has actually closed.
+        --@param request table Production mode and byte-limit request.
+        --@return boolean True native startup status.
+        --@return table Fresh fixture-owned handle carrying actual lifecycle truth.
+        --@effect Records one owner; overlapping generations raise before another owner is created.
+        native.terminal_start = function(request)
+            for _, previous in ipairs(handles) do A.truthy(previous.closed, "prior owner remains open") end
+            --@class configuration_input_owner Mutable native lifecycle truth used to reject overlapping REPL generations.
+            --@field mode string Requested cooked/raw input mode.
+            --@field closed boolean True only after acknowledged native close.
+            --@field cancelled boolean Accepted cancellation truth.
+            --@field joined boolean Successful native join, independent of closed.
+            --@field cancel_calls integer Native cancellation attempts.
+            --@field join_calls integer Successful native join attempts.
+            --@field restore_calls integer Native restoration invocations.
+            --@field close_calls integer Rejected or acknowledged native close attempts.
+            local handle = {
+                mode = request.mode, closed = false, cancelled = false, joined = false,
+                cancel_calls = 0, join_calls = 0, restore_calls = 0, close_calls = 0,
+            }
+            handles[#handles + 1] = handle
+            return true, handle
+        end
+        -- Accept exactly one cancellation while the real fixture owner is open and unjoined.
+        --@param handle table Borrowed fixture owner selected by the production adapter.
+        --@return boolean True native status.
+        --@return boolean True cancellation acknowledgment.
+        --@effect Records cancellation truth/count; duplicate cancellation after join is an assertion failure.
+        native.terminal_cancel = function(handle)
+            A.falsy(handle.closed or handle.joined)
+            handle.cancel_calls = handle.cancel_calls + 1
+            handle.cancelled = true
+            return true, true
+        end
+        -- Join the accepted cancellation once and retain native ownership until close acknowledgment.
+        --@param handle table Cancelled, still-open fixture owner.
+        --@return boolean True native status.
+        --@return table Cancelled outcome consistent with the fixture's actual terminal fact.
+        --@effect Records joined truth/count; a second native join is an assertion failure.
+        native.terminal_join = function(handle)
+            A.truthy(handle.cancelled)
+            A.falsy(handle.closed or handle.joined)
+            handle.join_calls = handle.join_calls + 1
+            handle.joined = true
+            return true, { outcome = "cancelled" }
+        end
+        -- Forward the existing actual fixture restoration acknowledgment while counting this owner's calls.
+        --@param handle table Open native owner whose input mode is being restored.
+        --@return boolean Existing true restoration status.
+        --@return boolean Existing true restoration acknowledgment.
+        --@effect Increments per-owner restore_calls and the existing fixture's restoration count.
+        native.terminal_restore = function(handle)
+            A.falsy(handle.closed)
+            handle.restore_calls = handle.restore_calls + 1
+            return original_restore(handle)
+        end
+        -- Reject the selected owner's first close, or every close, without releasing ownership.
+        --@param handle table Open fixture owner retained across actual production cleanup attempts.
+        --@return boolean False for an injected rejection; true after a successful close.
+        --@return table|boolean Fixed structured rejection or true acknowledgment.
+        --@effect Records close_calls; only an acknowledged successful close marks the owner closed.
+        --@error Raises the fixed exception instead of returning a rejection when plan.throw is set.
+        native.terminal_close = function(handle)
+            A.falsy(handle.closed)
+            handle.close_calls = handle.close_calls + 1
+            if failure_owner == nil and handle.mode == plan.mode then failure_owner = handle end
+            if handle == failure_owner and (plan.permanent or handle.close_calls == 1) then
+                if plan.throw then error("fixed owner close exception", 0) end
+                return false, { code = "CloseRejected", message = "fixed owner close rejection" }
+            end
+            handle.closed = true
+            return true, true
+        end
+    end
+    local answers = { "set Network ProxyUrl", "quit" }
+    if plan.clock_failure then answers[2] = '"private-fixture-value"' end
+    local observed = config_editor_fixture(answers, settings)
+    return observed, handles
+end
+
 --Supplies application behavior required by this suite.
 --@param source string|table Source content or object under test.
 --@param continuation any The continuation supplied to the fake service for this scenario.
@@ -1007,6 +1112,69 @@ return {
                 A.contains(table.concat(output), "Catalog rescanned; 0 Context(s)")
                 A.equal(polls, 3); A.equal(restores, 1); A.equal(calls.process_starts, 0)
                 A.falsy(filesystem.bytes(CONFIG_PATH)); A.deep_equal(errors, {})
+            end,
+        },
+        {
+            name = "configuration mode transition retries the same joined owner after close rejection",
+            -- Verify public REPL mode switching retains the old owner and does not repeat cancel/join.
+            --@param none Uses one cooked close rejection during a requested hidden-input transition.
+            --@return nil No result; checks actual release, safe later generation and unchanged configuration.
+            run = function()
+                local observed, handles = config_input_close_fixture({ mode = "cooked" })
+                A.equal(observed.code, 0, observed.stderr .. observed.output)
+                A.equal(handles[1].close_calls, 2)
+                A.equal(handles[1].cancel_calls, 1)
+                A.equal(handles[1].join_calls, 1)
+                for _, handle in ipairs(handles) do A.truthy(handle.closed) end
+                A.equal(observed.filesystem.bytes(observed.path), observed.original)
+                A.contains(observed.output, "TerminalFailure")
+            end,
+        },
+        {
+            name = "configuration close exception retains the owner until successful retry",
+            -- Verify a thrown native close cannot drop an owned input generation or admit overlapping input.
+            --@param none Uses one cooked close exception through the actual production CLI and adapter.
+            --@return nil No result; checks one cancellation/join and two close attempts before release.
+            run = function()
+                local observed, handles = config_input_close_fixture({ mode = "cooked", throw = true })
+                A.equal(observed.code, 0, observed.stderr .. observed.output)
+                A.equal(handles[1].close_calls, 2)
+                A.equal(handles[1].cancel_calls, 1)
+                A.equal(handles[1].join_calls, 1)
+                for _, handle in ipairs(handles) do A.truthy(handle.closed) end
+                A.equal(observed.filesystem.bytes(observed.path), observed.original)
+            end,
+        },
+        {
+            name = "configuration degraded clock retries failed raw close without losing its owner",
+            -- Verify clock-independent final cleanup retries the same raw owner after timing degrades.
+            --@param none Degrades the second answer's clock and rejects its raw owner's first close.
+            --@return nil No result; checks acknowledged release while preserving failure and private draft boundaries.
+            run = function()
+                local observed, handles = config_input_close_fixture({ mode = "raw", clock_failure = true })
+                A.equal(observed.code, 1)
+                A.equal(#handles, 2)
+                A.equal(handles[2].close_calls, 2)
+                A.truthy(handles[2].closed)
+                A.equal(handles[2].join_calls, 0)
+                A.equal(observed.filesystem.bytes(observed.path), observed.original)
+                A.falsy(observed.output:find("private-fixture-value", 1, true))
+            end,
+        },
+        {
+            name = "configuration persistent close failure never admits another input owner",
+            -- Verify repeated close rejection keeps the owner and aborts without a replacement generation.
+            --@param none Uses a cooked owner whose native close consistently refuses release.
+            --@return nil No result; checks multiple bounded cleanup attempts and no configuration publication.
+            run = function()
+                local observed, handles = config_input_close_fixture({ mode = "cooked", permanent = true })
+                A.equal(observed.code, 1)
+                A.equal(#handles, 1)
+                A.truthy(handles[1].close_calls >= 2)
+                A.falsy(handles[1].closed)
+                A.equal(handles[1].cancel_calls, 1)
+                A.equal(handles[1].join_calls, 1)
+                A.equal(observed.filesystem.bytes(observed.path), observed.original)
             end,
         },
         {
@@ -2365,14 +2533,14 @@ return {
                 function native.terminal_join()
                     return true, { outcome = "cancelled" }
                 end
-                -- Reject the third mode restoration and retain unknown truth for the subsequent native close.
+                -- Reject the third and later mode restorations while the same unknown owner is retried.
                 --@param none Uses the captured restore count and persistent unknown-mode flag.
-                --@return boolean False at the selected unknown restoration; true on the earlier two restorations.
+                --@return boolean False from the third restoration onward; true on the earlier two restorations.
                 --@return table|boolean The structured RestoreUnknown diagnostic or true acknowledgment.
                 --@effect Increments restores; the third failure leaves restoration_unknown=true.
                 function native.terminal_restore()
                     restores = restores + 1
-                    if restores == 3 then
+                    if restores >= 3 then
                         restoration_unknown = true
                         return false, {
                             code = "RestoreUnknown",
@@ -2412,7 +2580,7 @@ return {
                 })
                 A.equal(exit_code, 1)
                 A.equal(answer_index, #answers)
-                A.equal(restores, 3)
+                A.equal(restores, 4)
                 A.falsy(filesystem.exists(CONFIG_PATH))
                 A.equal(calls.directory_creates, 0)
                 A.equal(calls.process_starts, 0)
