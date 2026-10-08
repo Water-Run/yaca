@@ -12239,7 +12239,10 @@ static int l_terminal_start(lua_State *L)
       {
         next_mode = terminal->original_mode;
         next_mode.c_lflag &= (tcflag_t)~(ICANON | ECHO);
-        next_mode.c_cc[VMIN] = 0;
+        /* O_NONBLOCK provides asynchronous polling. Requiring one character
+        ** keeps an empty Linux raw TTY at EAGAIN instead of polling-mode zero,
+        ** which the input port correctly reserves for actual EOF. */
+        next_mode.c_cc[VMIN] = 1;
         next_mode.c_cc[VTIME] = 0;
         if (tcsetattr(terminal->input, TCSANOW, &next_mode) != 0
             )

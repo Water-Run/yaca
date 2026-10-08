@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-10-08
 File: bootstrap_test.lua
 Description: Verifies offline bootstrap routing, Agent gates, and bare-draft behavior.
 ]]
@@ -2325,6 +2325,7 @@ return {
                 }
                 local answer_index = 0
                 local restores = 0
+                local restoration_unknown = false
                 --Simulates terminal start in the Model setup publishes nothing when terminal restoration is unknown fixture.
                 --@param request table Request delivered to the fake component.
                 --@return boolean accepted Whether terminal start succeeds in the fixture.
@@ -2364,13 +2365,15 @@ return {
                 function native.terminal_join()
                     return true, { outcome = "cancelled" }
                 end
-                --Simulates terminal restore in the Model setup publishes nothing when terminal restoration is unknown fixture.
-                --@param none No arguments; this closure uses its captured fixture state.
-                --@return boolean accepted Whether terminal restore succeeds in the fixture.
-                --@return table|boolean secondary2 Additional status or structured error from the fixture operation.
+                -- Reject the third mode restoration and retain unknown truth for the subsequent native close.
+                --@param none Uses the captured restore count and persistent unknown-mode flag.
+                --@return boolean False at the selected unknown restoration; true on the earlier two restorations.
+                --@return table|boolean The structured RestoreUnknown diagnostic or true acknowledgment.
+                --@effect Increments restores; the third failure leaves restoration_unknown=true.
                 function native.terminal_restore()
                     restores = restores + 1
                     if restores == 3 then
+                        restoration_unknown = true
                         return false, {
                             code = "RestoreUnknown",
                             message = "terminal mode restoration is unknown",
@@ -2378,11 +2381,19 @@ return {
                     end
                     return true, true
                 end
-                --Simulates terminal close in the Model setup publishes nothing when terminal restoration is unknown fixture.
-                --@param none No arguments; this closure uses its captured fixture state.
-                --@return boolean accepted Whether terminal close succeeds in the fixture.
-                --@return boolean secondary2 True acknowledgment from the fake port.
-                function native.terminal_close() return true, true end
+                -- Preserve native close's restoration guarantee by rejecting closure while mode truth remains unknown.
+                --@param none Reads only the captured restoration_unknown flag.
+                --@return boolean False while restoration is unknown; true for earlier known-restored owners.
+                --@return table|boolean The same RestoreUnknown diagnostic or true close acknowledgment.
+                function native.terminal_close()
+                    if restoration_unknown then
+                        return false, {
+                            code = "RestoreUnknown",
+                            message = "terminal mode restoration is unknown",
+                        }
+                    end
+                    return true, true
+                end
 
                 local stdout, stderr = {}, {}
                 local exit_code = main.run_cli({

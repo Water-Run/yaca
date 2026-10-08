@@ -192,3 +192,61 @@ Cygwin PTY 失败/恢复及 main 交互内部。不宣称能终止永久阻塞�
 绑定在 [R84 证据](native-review/R84.json)，28 个接收件摘要与本地一致。
 原始记录位于 `out/native-worker-module-review-20261008/`。生产 native 接口和产品
 版本未变；最终单文件和九包仍需重建，已发布 R81 不含 R82--R84。Gate R 保持关闭。
+
+## R85：终端适配器失败重试与 Linux raw 模式
+
+基线为 `53d842c`。`src/terminal.lua` 的 close 在 native close 失败时仍把 port
+标为 closed，失去原生 owner 的重试入口；restore 失败、随后 close 实际恢复并
+关闭成功时，又报出已经过时的 restore 错误。restore/close 接纳任何 true-status
+响应而未核对第二个 true acknowledgment。另有 created port 提前 restore 后，
+其标记未在 start 时重置，使后续实际恢复被跳过。
+
+现在仅在 native close 返回 true/true 后记录 restored/closed 并释放 handle 引用。
+失败、异常或错误确认值保留 started/joined 状态，已经成功恢复的标记保留，下一次
+close 不重复恢复。最终 close 的实际恢复保证可消除预先恢复失败；若两个阶段都
+失败，仍报告首个恢复错误。start 接纳新 owner 时重置该输入代的恢复/取消状态。
+
+真实 PTY 揭示两个相关问题。Linux raw 使用 VMIN=0/VTIME=0，空闲 read 返回零
+而被当作 EOF；改用 VMIN=1，仍由 O_NONBLOCK 提供异步行为。Linux 的实际空闲
+poll 现在返回空批次，真实 EOF 的原有处理保留。依据见
+[termios 非规范模式](https://man7.org/linux/man-pages/man3/termios.3.html)；不把 Linux
+实测扩大为所有 POSIX 系统相同的 O_NONBLOCK/VMIN 优先级。
+成功 restore 会恢复 stdin 的原始阻塞设置，之后直接 native poll 又可能挂起。
+适配器现在只排空已缓存的事实，未接受取消时停止新 native 读取；接受取消后仍可
+观察原生 cancelled 终态。close 保留 owner 的目的包括可靠清理重试，不意味着
+已经恢复的输入仍按 raw 模式读入。
+
+新增十个适配器生命周期场景，冻结基线同一测试为 **1/10 通过、9/10 失败**。
+修复后专项及既有 native-port/line-editor 回归 **26/26**。其中覆盖 started/joined
+重试、异常、false/nil/table 确认值、成功 close 的恢复保证、启动前 restore，以及
+已恢复后的空闲 poll/取消事实。
+
+维护 `terminal_adapter_pty_smoke.py` 用独立 Linux PTY 和实际 native owner 验证
+五组：两阶段拒绝、仅 close 拒绝、joined 拒绝、最终 close 恢复、启动前 restore。
+仅拒绝发生于明确的 forwarding double；父进程实际读回 termios 和 fd flags，
+核对 raw 检查点、最终原始模式及标记完全一致。两个实现层的反例独立保留：固定
+Lua 搭配旧 native 仍得到错误 EOF；修复 raw idle 后，已恢复的 close 拒绝场景曾在
+旧 poll 路径阻塞并触发十秒超时。驱动只结束自己的子进程并关闭自有 PTY，两项
+修复后五组全部通过，没有读取用户输入或调用模型。
+
+全量回归发现 Model setup 的旧 unknown-restoration double 同时返回 native close
+成功，违反实际 C 端“成功 close 已恢复”的保证。已令未知状态的 close 同样拒绝，
+保持“恢复未知不发布配置、不显示 Key”验收要求，bootstrap/恢复专项 **58/58**。
+首次独立加载测试未继承 runner 标准函数的失败也保留；补齐局部 environment 的
+明确 __index 后重跑，不把这些夹具错误计为产品反例。
+
+完整 Lua suite **716/716**、coding readiness **PASS**，全仓注释结构
+**255 文件 / 5603 声明 / 0 缺项**。四校验器及全部 TP/RP 通过，当前 native 输入
+持续分配故障回归零泄漏/所有权/协议错误。构建、PTY 与完整检查均经资源守卫
+串行运行。本批实际系统为当前 Linux 开发宿主，不宣称新 Windows/最低系统或
+最终单文件验收通过。
+
+人工核对当前输入代状态、确认值、错误优先级、失败引用保留、取消事实和缓存排空、
+Linux 最小字符/非阻塞组合、独立 PTY 观察与清理，以及所有新增/改动函数及注释。
+全仓语义 Review 仍为 partial。下一项是 main 输入协调器关闭失败后的 owner
+保留及 Cygwin PTY 失败/恢复，然后继续其余交互内部和辅助代码。
+
+17 个维护输入、14 个基线输入、实际解释器/native 模块、十场景反例、五组 PTY
+和完整检查在 [R85 证据](native-review/R85.json) 绑定，原始记录位于
+`out/terminal-adapter-review-20261008/`。发行版本及接口名称未变，已发布 R81 不含
+R82--R85；最终三目标九包待统一重建，Gate R 保持关闭。

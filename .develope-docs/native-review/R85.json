@@ -1,0 +1,388 @@
+{
+  "schema": "yaca-native-review-evidence-v1",
+  "review_id": "R85",
+  "date": "2026-10-08",
+  "status": "verified-source-subset",
+  "release_authorized": false,
+  "target_qualification_complete": false,
+  "published_candidate_contains_fix": false,
+  "source_inputs": {
+    "base_revision": "53d842c432eff0e9195374631af68142db16b952",
+    "files": [
+      {
+        "path": ".tools/qualification/terminal_adapter_native_smoke.lua",
+        "sha256": "42bc011c8a9a2eacacfb778251ffe092c54e910e8364ca3bf2e53b44b0ef773a"
+      },
+      {
+        "path": ".tools/qualification/terminal_adapter_pty_smoke.py",
+        "sha256": "c74149503ef54cacab439d1d2b9a1df555a5f70a48311ea0731f0368dbf901cb"
+      },
+      {
+        "path": "native/lxp_build.lua",
+        "sha256": "97bcc6822ae6af6e0ed70c74585c3924845fdee0b3bdace222f171a7071b6fe0"
+      },
+      {
+        "path": "native/yaca_entry.c",
+        "sha256": "e37392e19da463ad55848d6d2550056958ea3084fa3f842b994f798b82bc59a8"
+      },
+      {
+        "path": "native/yaca_lua_windows.h",
+        "sha256": "92f9d56314c8cda74a6eb6e5792688143d5c8d7c7b1a1385ee12817c1f610194"
+      },
+      {
+        "path": "native/yaca_native.c",
+        "sha256": "713a5e6b78ba159d8c484cafa690daf46115d9e69e2160eb08cd2bddc15d056c"
+      },
+      {
+        "path": "native/yaca_onefile_entry.c",
+        "sha256": "4e59947998f7a9477cc768188c81e268bbf377db42fe27b9172a47a0ae85f9d4"
+      },
+      {
+        "path": "native/yaca_onefile_windows.h",
+        "sha256": "269f3b37b89d53970eb4c5d6947e31f2db7627d153871dd33da3697294dd7c37"
+      },
+      {
+        "path": "native/yaca_pty.h",
+        "sha256": "a9be6b177388ee15e656aba3a4080f00d13bd4bc3ad411af4bd8095a0d3d8c01"
+      },
+      {
+        "path": "native/yaca_supervisor.h",
+        "sha256": "2315e15885d914923a44ba55ae5c65a976c56b1aa4b6731cc87b86d72d2164f6"
+      },
+      {
+        "path": "native/yaca_text.h",
+        "sha256": "82e057d215a77470166e79876dab5c6a7fd38a5d0856229f76e7c1b93a47bbc7"
+      },
+      {
+        "path": "src/terminal.lua",
+        "sha256": "4a38feef1def9685186c3f85b3ba696d2d5c0a073716e6cd28e6d78d3e41829a"
+      },
+      {
+        "path": "src/text.lua",
+        "sha256": "5dad1789bef5a4a4d985f3e58ae0429c68273d80541f28d089b31b057c14ce99"
+      },
+      {
+        "path": "test/integration/bootstrap_test.lua",
+        "sha256": "81d432b7539fd1371b3c3fdad3978ee8c7a85ffeee7c04f56500212a9a1b1a90"
+      },
+      {
+        "path": "test/integration/terminal_close_test.lua",
+        "sha256": "f5d22834696df205fff6817ea6983c00bcc034ea9cb2740b44f3345fb82174a3"
+      },
+      {
+        "path": "test/run.lua",
+        "sha256": "b8c2f8e76e7db479aad674048e067e332d68dad2fea44c495fc270d2386d22b8"
+      },
+      {
+        "path": "test/support/assert.lua",
+        "sha256": "418d47f848af1a8f762769465f5457b2320c90d892e2a7c19278c764be8d121f"
+      }
+    ]
+  },
+  "baseline_inputs": {
+    "revision": "53d842c432eff0e9195374631af68142db16b952",
+    "files": [
+      {
+        "path": "native/lxp_build.lua",
+        "sha256": "97bcc6822ae6af6e0ed70c74585c3924845fdee0b3bdace222f171a7071b6fe0"
+      },
+      {
+        "path": "native/yaca_entry.c",
+        "sha256": "e37392e19da463ad55848d6d2550056958ea3084fa3f842b994f798b82bc59a8"
+      },
+      {
+        "path": "native/yaca_lua_windows.h",
+        "sha256": "92f9d56314c8cda74a6eb6e5792688143d5c8d7c7b1a1385ee12817c1f610194"
+      },
+      {
+        "path": "native/yaca_native.c",
+        "sha256": "769ce793bcea3cff8d655dcbeb267b60d7e4eba0e8582ddc6e8c852b4a499a2f"
+      },
+      {
+        "path": "native/yaca_onefile_entry.c",
+        "sha256": "4e59947998f7a9477cc768188c81e268bbf377db42fe27b9172a47a0ae85f9d4"
+      },
+      {
+        "path": "native/yaca_onefile_windows.h",
+        "sha256": "269f3b37b89d53970eb4c5d6947e31f2db7627d153871dd33da3697294dd7c37"
+      },
+      {
+        "path": "native/yaca_pty.h",
+        "sha256": "a9be6b177388ee15e656aba3a4080f00d13bd4bc3ad411af4bd8095a0d3d8c01"
+      },
+      {
+        "path": "native/yaca_supervisor.h",
+        "sha256": "2315e15885d914923a44ba55ae5c65a976c56b1aa4b6731cc87b86d72d2164f6"
+      },
+      {
+        "path": "native/yaca_text.h",
+        "sha256": "82e057d215a77470166e79876dab5c6a7fd38a5d0856229f76e7c1b93a47bbc7"
+      },
+      {
+        "path": "src/terminal.lua",
+        "sha256": "93505b82d9dba21e7415c01cbbd8f3731c4882f14cb38416e173d75af5ccbda2"
+      },
+      {
+        "path": "src/text.lua",
+        "sha256": "5dad1789bef5a4a4d985f3e58ae0429c68273d80541f28d089b31b057c14ce99"
+      },
+      {
+        "path": "test/integration/terminal_close_test.lua",
+        "sha256": "f5d22834696df205fff6817ea6983c00bcc034ea9cb2740b44f3345fb82174a3"
+      },
+      {
+        "path": "test/run.lua",
+        "sha256": "b8c2f8e76e7db479aad674048e067e332d68dad2fea44c495fc270d2386d22b8"
+      },
+      {
+        "path": "test/support/assert.lua",
+        "sha256": "418d47f848af1a8f762769465f5457b2320c90d892e2a7c19278c764be8d121f"
+      }
+    ]
+  },
+  "adapter_baseline": {
+    "total": 10,
+    "passed": 1,
+    "failed": 9,
+    "binding": {
+      "path": "out/terminal-adapter-review-20261008/baseline-ten-cases.log",
+      "sha256": "b34b1f04af9e41c8abe818be76575d61068c63abe8bb6b5feab8347896047e17",
+      "bytes": 7807
+    }
+  },
+  "focused_fixed": {
+    "total": 26,
+    "passed": 26,
+    "failed": 0,
+    "binding": {
+      "path": "out/terminal-adapter-review-20261008/fixed-focused-final.log",
+      "sha256": "3c847b75fac9681c330da25164c27c640bf28a7235ec186e1bbfba7d13102fa5",
+      "bytes": 2599
+    }
+  },
+  "full_suite": {
+    "total": 716,
+    "passed": 716,
+    "failed": 0,
+    "binding": {
+      "path": "out/terminal-adapter-review-20261008/lua-suite-final.log",
+      "sha256": "ea118c6793d0dd5d2100da7bf90b2a573116cf0595c96afb7186dfff6706dc50",
+      "bytes": 71240
+    }
+  },
+  "native_pty": {
+    "scope": "actual Linux PTYs and production native owner, with explicit pre-call forwarding rejection controls",
+    "host": {
+      "path": "out/terminal-adapter-review-20261008/host-environment.log",
+      "sha256": "ca6afcdfd1cf1d9bf1a41c6e2ef9f9a52919097166281e797d6beff91d87ef45",
+      "bytes": 97
+    },
+    "profiles": [
+      {
+        "profile": "both",
+        "kernel_mode_and_flags_restored": true,
+        "binding": {
+          "path": "out/terminal-adapter-review-20261008/native-pty-accepted/both/process.log",
+          "sha256": "23a88b15c2dfca28370bd2b85058fa5a2528339250acbb87bd0df8a05855b35b",
+          "bytes": 96
+        }
+      },
+      {
+        "profile": "close",
+        "kernel_mode_and_flags_restored": true,
+        "binding": {
+          "path": "out/terminal-adapter-review-20261008/native-pty-accepted/close/process.log",
+          "sha256": "ca3b41e313b3310952a618b16360c411ef202d65e0df6bf381cb0864c7505a25",
+          "bytes": 102
+        }
+      },
+      {
+        "profile": "joined",
+        "kernel_mode_and_flags_restored": true,
+        "binding": {
+          "path": "out/terminal-adapter-review-20261008/native-pty-accepted/joined/process.log",
+          "sha256": "0228fa0b96f07a65f83c5305f67f84f4eab7b148dc215201ac88df9348eff2ee",
+          "bytes": 98
+        }
+      },
+      {
+        "profile": "recover",
+        "kernel_mode_and_flags_restored": true,
+        "binding": {
+          "path": "out/terminal-adapter-review-20261008/native-pty-accepted/recover/process.log",
+          "sha256": "86dd2efb17d254e261f21eb8143bd2acb09cb0a04bb7e4a8b1b1b11af51d8ed1",
+          "bytes": 104
+        }
+      },
+      {
+        "profile": "created",
+        "kernel_mode_and_flags_restored": true,
+        "binding": {
+          "path": "out/terminal-adapter-review-20261008/native-pty-accepted/created/process.log",
+          "sha256": "b6a84148749c8a87901565c04dc2c68ba6da517c59c03c12efc9189d05f0a1e9",
+          "bytes": 104
+        }
+      }
+    ],
+    "run": {
+      "path": "out/terminal-adapter-review-20261008/native-pty-accepted-run.log",
+      "sha256": "5018083e5dd143d58a460c6b80d0e38ffcef7a4c9de0e95dadc7a69dbdcd9b87",
+      "bytes": 359
+    },
+    "native_module": {
+      "path": "out/terminal-adapter-review-20261008/yaca_native-final.so",
+      "sha256": "075b2d92979d9b6dae544c1a29be028b3ae3aeb3e938f932181df560b15715c9",
+      "bytes": 112720
+    },
+    "native_build": {
+      "path": "out/terminal-adapter-review-20261008/native-build-final.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "interpreter": {
+      "path": "out/node-r76-20261005/linux-core-r2/work/lua-5.5.1/src/lua",
+      "sha256": "1e6243cebdb6c3ed0452967c52c6ead5235d31ac65156582baf986507661ddd5",
+      "bytes": 298400
+    }
+  },
+  "retained_failures": [
+    {
+      "path": "out/terminal-adapter-review-20261008/baseline-fixture-first-failed.log",
+      "sha256": "eeb51bc14aa220b0b00a8b3a6a1213be0101ef80b56485ebf76055398a054211",
+      "bytes": 5578
+    },
+    {
+      "path": "out/terminal-adapter-review-20261008/fixed-fixture-first-failed.log",
+      "sha256": "6b89ab7a1d139ec5e7880dd56a781f551027c232ff84e949f35ff4fc43db6a30",
+      "bytes": 7153
+    },
+    {
+      "path": "out/terminal-adapter-review-20261008/native-pty-run.log",
+      "sha256": "f81ec0563c4c4b3e0e76af39ef70623d4d0a6771c54b0096aa8ce373c752f4fc",
+      "bytes": 1148
+    },
+    {
+      "path": "out/terminal-adapter-review-20261008/native-pty/both/process.log",
+      "sha256": "f450b5532dba19c799bf6337f2e2f0d1e2d5ad61d62931cfffd4e308535241f1",
+      "bytes": 331
+    },
+    {
+      "path": "out/terminal-adapter-review-20261008/native-idle-baseline-run.log",
+      "sha256": "bd77f3263e515564a5134ea4364b4a73a722087ab431797c00cd968ef7d5b6b7",
+      "bytes": 1148
+    },
+    {
+      "path": "out/terminal-adapter-review-20261008/native-idle-baseline/both/process.log",
+      "sha256": "32aea470d971cc6ee7b5e34c51441075bc3f7ab3cf975539aa7c00a7ee53d6c7",
+      "bytes": 331
+    },
+    {
+      "path": "out/terminal-adapter-review-20261008/native-pty-final-run.log",
+      "sha256": "5b0b07421bdecbaf917b9a4d471c9150b429d2ae4e75c566902d703bde2c9f0f",
+      "bytes": 2101
+    },
+    {
+      "path": "out/terminal-adapter-review-20261008/native-pty-final/close/process.log",
+      "sha256": "ee4c8014f0b3b7956525715de1bbda19a3b866b736842b2d2109afc6b0481c70",
+      "bytes": 32
+    },
+    {
+      "path": "out/terminal-adapter-review-20261008/lua-suite-first-failed.log",
+      "sha256": "3911d9ad768f24e8e4b19a648ca335dfb9f909e44312ce665fddd37e36de6c59",
+      "bytes": 71816
+    }
+  ],
+  "native_idle_baseline_module": {
+    "path": "out/native-worker-module-review-20261008/after/linux/yaca_native.so",
+    "sha256": "345326168f0e3ae2a30f63b184a18838aa8f6c36b040364a8cc2e6c510b0648a",
+    "bytes": 112720
+  },
+  "input_faults_regression": [
+    {
+      "path": "out/terminal-adapter-review-20261008/terminal_input_faults",
+      "sha256": "be2ab96458fb0713bb9ca25066a5376286402437f154939b057722441790f115",
+      "bytes": 292192
+    },
+    {
+      "path": "out/terminal-adapter-review-20261008/input-faults-build.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "out/terminal-adapter-review-20261008/input-faults-regression.log",
+      "sha256": "6df4f88024e2b952edec71ec379ad4e783f1b8a795b93a350d3452c3aad8e1fc",
+      "bytes": 531
+    }
+  ],
+  "input_faults_sources": [
+    {
+      "path": ".tools/qualification/terminal_input_faults.c",
+      "sha256": "789aff9f69750adbad605cfb7161c95487553a58bdcc79d3f5ee413c20c24359",
+      "bytes": 19454
+    },
+    {
+      "path": ".tools/qualification/filesystem_fault_tracker.h",
+      "sha256": "ee81e1b5c1ba5574364036759bb52f40087839356766a12e087b97da18c93fad",
+      "bytes": 11868
+    },
+    {
+      "path": "out/node-r76-20261005/linux-core-r2/work/lua-5.5.1/src/liblua.a",
+      "sha256": "b9e3cb65881bafed563f37e7500c9a1967a069e1da09c34a012d0fb3152a5f12",
+      "bytes": 509994
+    }
+  ],
+  "bootstrap_regression": {
+    "total": 58,
+    "passed": 58,
+    "failed": 0,
+    "binding": {
+      "path": "out/terminal-adapter-review-20261008/bootstrap-recovery-focused.log",
+      "sha256": "35c4194e36d17aaeb6d1cfae790c265982aabecef580298a60c591ddbe28a10e",
+      "bytes": 6261
+    }
+  },
+  "coding_readiness": {
+    "status": "PASS",
+    "binding": {
+      "path": "out/terminal-adapter-review-20261008/coding-readiness-final.log",
+      "sha256": "f9c10f0230007134b2b744d62988573f3adb9ec189e8e1c5a90594e1921c847d",
+      "bytes": 4083
+    }
+  },
+  "comment_structure": {
+    "files": 255,
+    "declarations": 5603,
+    "violations": 0,
+    "inventory": {
+      "path": "out/terminal-adapter-review-20261008/comment-inventory.json",
+      "sha256": "fab2c85476a488f42c69f744f0b63f7b571deab2898fd51f22fefb44f768968b",
+      "bytes": 1251305
+    }
+  },
+  "complete_checks": [
+    {
+      "path": "out/terminal-adapter-review-20261008/complete_checks.sh",
+      "sha256": "b15dfab2b346f2063aedd59d07a9eb58b0de93f345992262285db4748dbd2670",
+      "bytes": 1485
+    },
+    {
+      "path": "out/terminal-adapter-review-20261008/complete-checks-run.log",
+      "sha256": "f3fd440c3fa985f5791c664437b9baaed4439f91009eff46929d44bff4d6e025",
+      "bytes": 172
+    },
+    {
+      "path": "out/terminal-adapter-review-20261008/create_evidence.py",
+      "sha256": "a1fca4a12c78edbc22ae6f3ed5e8d640d53d384a7c5a2d884d7e975837db3b74",
+      "bytes": 7644
+    }
+  ],
+  "semantic_review": "partial globally; this batch reviewed restoration acknowledgment and generation reset, ownership retention on rejected close, successful close superseding an earlier restoration failure, no new read after restoration, cancellation fact delivery, Linux VMIN with nonblocking idle input, independent kernel mode/flags observations, bootstrap unknown-restoration fixture and all affected comments",
+  "scope": "ten production-adapter cases plus five actual native/PTTY profiles; no Windows target rerun or final package qualification is implied; native forwarding failures are explicit doubles, kernel mode/descriptor state and empty-input behavior are actual observations",
+  "fixture_cleanup": "each owned Lua child exits or is stopped on a recorded bounded failure; both private PTY descriptors close; accepted profiles restore exact original termios/fd flags; no inherited user terminal or model endpoint is used",
+  "uncovered_scope": [
+    "main input coordinator failed-close ownership",
+    "Cygwin PTY failure/recovery",
+    "remaining native/main/helpers and global semantic Review",
+    "rebuilt final onefile/nine-package qualification"
+  ]
+}

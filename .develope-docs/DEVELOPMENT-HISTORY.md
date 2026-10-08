@@ -7,6 +7,7 @@
 
 | 时间 / 节点 | 主要成果 | 证据与适用范围 |
 | --- | --- | --- |
+| 2026-10-08，R85 terminal adapter 与 Linux raw | 修复失败关闭后的 owner/确认值/恢复状态和 Linux raw 空闲 EOF；十场景回归、五组实际 PTY/kernel 状态恢复通过 | [本日 Review](CODE-REVIEW-2026-10-08.md#r85终端适配器失败重试与-linux-raw-模式)、[R85](native-review/R85.json)；开发宿主 716/716、readiness PASS、255/5603/0；未扩大为新目标或发行包资格 |
 | 2026-10-08，R84 worker 代码生命周期 | 修复 Lua close 后活 worker 的 DLL 卸载，采用独立引用及原子 release/exit；双目标实际 DLL 和六个 setup 拒绝通过 | [本日 Review](CODE-REVIEW-2026-10-08.md#r84异步-worker-独立保留-dll-代码)、[R84](native-review/R84.json)；完整 706/706、readiness PASS，252/5574/0；最终单文件与九包待重建 |
 | 2026-10-08，R83 键盘重复与控制台模式 | 修复 raw 重复字符/退格、surrogate 配对和字节上限；两指定目标真实控制台各 86 例通过，另有持续 Lua 分配故障与 R82/R81 回归 | [本日 Review](CODE-REVIEW-2026-10-08.md#r83raw-键盘重复utf-16-配对与字节上限)；直接生产函数与自建控制台，不替代最终完整交互/发行包 |
 | 2026-10-08，恢复开发与 R82 | 同步 `origin/main` 至 `df38087`，修复 cooked reader 取消失败后的终端/worker 所有权；指定 Windows 目标各 176 例零泄漏 | [本日 Review](CODE-REVIEW-2026-10-08.md)；真实线程及有界 console/wait double，不扩展为真实控制台或最终发行资格 |

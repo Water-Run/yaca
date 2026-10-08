@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-10-08
 File: terminal.lua
 Description: Wraps terminal input and restoration as a bounded AsyncPort.
 ]]
@@ -192,6 +192,7 @@ function M.new(native, options)
     local handle
     local terminal_outcome
     local restored = false
+    local cancel_requested = false
     local pending_batch = {}
     local pending_batch_index = 1
     local pending_text = false
@@ -355,7 +356,7 @@ function M.new(native, options)
         if value == nil then
             raise_native(failure("NativeContract", "native terminal returned no handle"), 1)
         end
-        handle, state = value, "started"
+        handle, state, restored, cancel_requested = value, "started", false, false
         return true
     end
 
@@ -365,7 +366,7 @@ function M.new(native, options)
     --@param budget integer Maximum returned observations.
     --@return table events AsyncPort event array.
     --@error Raises for invalid state/arguments or native observation contract failure.
-    --@effect Polls native input and advances buffered text/terminal state.
+    --@effect Drains buffered observations; after acknowledged restore, reads no new native input unless an accepted cancellation still needs its terminal fact.
     function port:poll(now, budget)
         if state ~= "started" then error("terminal port is " .. state, 2) end
         if terminal_outcome then return {} end
@@ -376,6 +377,7 @@ function M.new(native, options)
         end
         local events = drain_pending({}, budget)
         if #events == budget or budget == 0 or terminal_outcome then return events end
+        if restored and not cancel_requested then return events end
         local remaining = budget - #events
         local ok, observations = call_native(
             native,
@@ -410,6 +412,7 @@ function M.new(native, options)
         if type(value) ~= "boolean" then
             raise_native(failure("NativeContract", "native terminal cancel result is invalid"), 1)
         end
+        if value then cancel_requested = true end
         return value
     end
 
@@ -437,11 +440,11 @@ function M.new(native, options)
         return { outcome = value.outcome }
     end
 
-    ---Restores input modes using an idempotent best-effort native primitive.
+    ---Restores the current input generation after native acknowledgment, or acknowledges an unstarted port without native effects.
     --@param self table Terminal AsyncPort before close.
     --@return boolean restored True after native restoration succeeds.
-    --@error Raises for a closed port or native restoration failure.
-    --@effect Attempts native terminal mode restoration once until successful.
+    --@error Raises for a closed port, native failure or a malformed success acknowledgment; unsuccessful attempts remain retryable.
+    --@effect Attempts native restoration until true/true is acknowledged; subsequent restore calls are idempotent.
     function port:restore()
         if restored then return true end
         if state == "created" then
@@ -451,15 +454,19 @@ function M.new(native, options)
         if state == "closed" then error("terminal port is closed", 2) end
         local ok, value = call_native(native, "terminal_restore", handle)
         if not ok then raise_native(value, 1) end
+        if value ~= true then
+            raise_native(failure("NativeContract", "native terminal restore acknowledgment is invalid"), 1)
+        end
         restored = true
         return true
     end
 
-    ---Restores terminal state and then releases the native handle.
+    ---Attempts restoration and releases ownership only after an acknowledged native close.
     --@param self table Started or joined terminal AsyncPort.
-    --@return boolean closed True after both operations succeed.
-    --@error Raises for invalid state or either native restore/close failure.
-    --@effect Attempts restoration, closes the handle, and marks state closed.
+    --@return boolean closed True after native close acknowledges its final restored/closed state, including recovery from a preliminary restore failure.
+    --@error Raises for invalid state or an unacknowledged native close; when both cleanup stages fail, preserves the first restoration diagnostic.
+    --@effect Attempts restoration before close; rejected close leaves the previous started/joined state and any acknowledged restoration intact.
+    --@ownership Retains the native handle after failed or malformed close; releases its Lua reference only after true/true close acknowledgment.
     function port:close()
         if state ~= "started" and state ~= "joined" then
             error("terminal port is " .. state, 2)
@@ -467,16 +474,26 @@ function M.new(native, options)
         local restore_error
         if not restored then
             local restored_ok, restored_value = call_native(native, "terminal_restore", handle)
-            if restored_ok then
+            if restored_ok and restored_value == true then
                 restored = true
+            elseif restored_ok then
+                restore_error = failure("NativeContract", "native terminal restore acknowledgment is invalid")
             else
                 restore_error = restored_value
             end
         end
         local close_ok, close_value = call_native(native, "terminal_close", handle)
+        if close_ok and close_value ~= true then
+            close_ok = false
+            close_value = failure("NativeContract", "native terminal close acknowledgment is invalid")
+        end
+        if not close_ok then
+            if restore_error then raise_native(restore_error, 1) end
+            raise_native(close_value, 1)
+        end
+        restored = true
         state = "closed"
-        if restore_error then raise_native(restore_error, 1) end
-        if not close_ok then raise_native(close_value, 1) end
+        handle = nil
         return true
     end
 
