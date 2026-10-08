@@ -1,4 +1,4 @@
-# 恢复开发与关闭路径 R82 / R83 / R84
+# 恢复开发与关闭路径 R82 / R83 / R84 / R85
 
 日期：2026-10-08。负责人要求同步最新进展、检查梳理并推进开发，按
 [D-083](DECISIONS.md#d-083-同步最新进展并恢复开发2026-10-08) 恢复。
@@ -152,3 +152,29 @@ R83 的 native/DLL 结果；已发布 R81 包不含 R84。
 原始专项、全套检查、精确基线与维护回归在 `out/review-20261008/r84/`，
 冻结来源与实际日志摘要见 [R84 清单](lua-review/R84.json)。
 整体语义 Review、主交互和正式资格继续按 TRACKING 收尾。
+
+## R85 管理输入面的 owner 保留与模式切换边界
+
+基线为 R84 提交 `23d9402`。`new_model_setup_input` 共用于模型、配置和 Context
+输入面。普通和时钟退化的 close 路径都在端口关闭失败后清空 active，最终清理
+因而把仍存活的终端当作已释放；失败模式切换还可能创建新终端覆盖旧 owner。
+
+修复只在确认 close 返回 true 后清空 active、模式及缓冲；失败保留 owner，并记录
+closing 和已经成功的 join。最终清理重试同一端口，避免重复 join；模式激活会先
+处理 pending cleanup，不能复用或替换未关闭的 owner。时钟退化仍尝试无时钟
+close，失败保留 owner，成功清理后继续如实报告时钟错误。
+
+新增真实 Model manager 控制流回归：准确输入连接测试同意后，typed close 拒绝、
+close 异常及收尾前时钟退化分别要求第二次清理成功；join 次数为 1/1/0，close
+均为 2。另在 Key 字段的 cooked→hidden 切换注入 close 失败，回到下一提示前必须
+先关闭旧终端。所有路径核对配置字节不变、零网络请求，不通过私有函数测试入口。
+
+最终维护测试与精确 R84 `src/` 在隔离 root 中运行为 **25/27**，两个新增 case
+确认未关闭 owner；修复后 **27/27**，连同 coordinator/native ports 专项通过。
+完整 suite **710/710**、完整 readiness **PASS**、全量结构清点 **250 文件 /
+5552 声明 / 0 缺项**。本批 close/activate 的参数、结果、失败优先级、join 状态、
+缓冲和 owner 边界及每个新 callback 完成人工语义核对。
+
+冻结源码、维护回归及实际输出绑定于 [R85 清单](lua-review/R85.json)，日志位于
+`out/review-20261008/r85/`。全仓语义 Review 仍为 partial，ApplicationCoordinator
+及后续交互内部继续核对；新三目标核心、九包及其旅程尚未完成。

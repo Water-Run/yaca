@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-10-08
 File: repl_input_surface_test.lua
 Description: Verifies each interactive surface reports its own cancellation code.
 ]]
@@ -540,11 +540,27 @@ local function model_test_harness(commands, settings)
         }
     end
     local composed, runtime, terminals, written, controls = harness(batches)
+    local clock_broken = false
+    if settings.close_failure then
+        local monotonic_now = composed.backend.clock_port.monotonic_now
+        -- Preserve the scripted clock until the selected consent boundary loses timing support.
+        --@param none No arguments; the closure observes the host-owned clock_broken control.
+        --@return integer|string Monotonic tick, or a deterministic invalid clock value after the injected degradation.
+        composed.backend.clock_port.monotonic_now = function()
+            if clock_broken then return "clock unavailable" end
+            return monotonic_now()
+        end
+    end
     local new_terminal = composed.backend.new_terminal
     --Constructs new terminal for this test scenario.
     --@param mode string Operating mode selected by the scenario.
     --@return any value Callback value consumed by the enclosing scenario assertion.
     composed.backend.new_terminal = function(mode)
+        if settings.mode_boundary then
+            for _, previous in ipairs(terminals) do
+                A.truthy(previous.closed, "new input must not replace an owner whose close failed")
+            end
+        end
         local terminal = new_terminal(mode)
         local poll = terminal.poll
         --Simulates the poll transition of a fake activity port for this suite.
@@ -554,7 +570,42 @@ local function model_test_harness(commands, settings)
         --@return table|any value Callback value consumed by the enclosing scenario assertion.
         terminal.poll = function(self, now, budget)
             if self.cancelled then return { { kind = "io_terminal" } } end
-            return poll(self, now, budget)
+            local events = poll(self, now, budget)
+            if settings.close_failure == "clock" then
+                for _, event in ipairs(events) do
+                    if event.kind == "user_action" and event.text == "TEST model-edit-1:1" then
+                        clock_broken = true
+                    end
+                end
+            end
+            return events
+        end
+        if settings.close_failure and #terminals == 1 then
+            local join = terminal.join
+            local close = terminal.close
+            terminal.close_calls, terminal.join_calls = 0, 0
+            -- Enforce the real terminal port's single successful join transition.
+            --@param self table Scripted terminal whose joined state and call count are retained.
+            --@param deadline integer Monotonic join deadline supplied by the input owner.
+            --@return table result Scripted terminal observation after the first join.
+            --@error Raises if cleanup retries incorrectly join an already joined owner.
+            terminal.join = function(self, deadline)
+                self.join_calls = self.join_calls + 1
+                A.falsy(self.joined, "a joined owner must not be joined twice")
+                return join(self, deadline)
+            end
+            -- Refuse the first close without releasing the owner, then allow final cleanup.
+            --@param self table Scripted terminal retained across the transient close failure.
+            --@return boolean closed False on the first typed rejection, true after actual close.
+            --@error Raises on the configured first exception-mode close.
+            terminal.close = function(self)
+                self.close_calls = self.close_calls + 1
+                if self.close_calls == 1 then
+                    if settings.close_failure == "exception" then error("transient close exception") end
+                    return false
+                end
+                return close(self)
+            end
         end
         return terminal
     end
@@ -587,11 +638,50 @@ local function model_test_harness(commands, settings)
     local called, result, err = pcall(main.run_model_manager, composed, runtime)
     main.check_model_connection = original
     A.truthy(called, result)
-    for _, terminal in ipairs(terminals) do A.truthy(terminal.closed) end
+    for _, terminal in ipairs(terminals) do
+        A.truthy(terminal.closed)
+        if terminal.close_calls then
+            A.equal(terminal.close_calls, 2)
+            A.equal(terminal.join_calls, settings.close_failure == "clock" and 0 or 1)
+        end
+    end
     return result, err, table.concat(written), calls, controls
 end
 
 local context_cases = {
+    {
+        name = "failed hidden-mode transition settles its cooked owner before another prompt starts",
+        -- Exercise the real Model editor after a close failure while changing from cooked input to hidden input.
+        --@param none No arguments; the case selects one transient close rejection at the first mode boundary.
+        --@return nil No value; assertions require the old owner closed before new input and unchanged configuration.
+        run = function()
+            local result, err, output, calls, controls = model_test_harness({
+                "set model-edit-1:1 Key", "quit",
+            }, { close_failure = "typed", mode_boundary = true })
+            A.truthy(result, A.render(err))
+            A.equal(result.state, "unchanged")
+            A.contains(output, "TerminalFailure")
+            A.equal(calls, 0)
+            A.equal(controls.bytes(CONFIG_PATH), source())
+        end,
+    },
+    {
+        name = "Model consent cleanup retries a retained terminal after native close failure",
+        -- Exercise real manager control flow: consent cleanup fails, then its finalizer must retry the same owner.
+        --@param none No arguments; the case selects typed, exception and degraded-clock failures in isolated harnesses.
+        --@return nil No value; assertions require restoration, zero online requests and unchanged configuration bytes.
+        run = function()
+            for _, mode in ipairs({ "typed", "exception", "clock" }) do
+                local result, err, output, calls, controls = model_test_harness({
+                    "test model-edit-1:1", "TEST model-edit-1:1",
+                }, { close_failure = mode })
+                A.falsy(result)
+                A.equal(err.code, mode == "clock" and "MonotonicClockDegraded" or "TerminalFailure")
+                A.equal(calls, 0, output)
+                A.equal(controls.bytes(CONFIG_PATH), source())
+            end
+        end,
+    },
     {
         name = "Model connection tests need exact consent and report current results without saving",
         --Verifies model connection tests need exact consent and report current results without saving.

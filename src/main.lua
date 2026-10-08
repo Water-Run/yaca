@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-10-05
+Date: 2026-10-08
 File: main.lua
 Description: Routes the offline bootstrap lifecycle from the unique composition root.
 ]]
@@ -11056,6 +11056,8 @@ local function new_model_setup_input(composed, runtime, label)
     local active = false
     local active_mode = false
     local terminal_ended = false
+    local terminal_joined = false
+    local active_closing = false
     local pending_events, pending_index = {}, 1
     local input = {}
 
@@ -11082,22 +11084,26 @@ local function new_model_setup_input(composed, runtime, label)
         return value
     end
 
-    ---Cancels, joins, and restores any active terminal input mode.
+    ---Cancels, joins, and closes the retained input owner without losing failed cleanup state.
     --@param none No arguments.
-    --@return boolean|nil closed Whether terminal restoration completed.
+    --@return boolean|nil closed True after confirmed close; nil for terminal or clock failure even if close succeeded.
     --@return table|nil err Structured terminal or clock failure.
+    --@effect Attempts bounded cancellation and join, then native restoration/close; clears buffered input only after confirmed release.
+    --@ownership Failed close retains the same terminal and completed join state for final cleanup retry.
     local function close_active()
         if not active then return true end
+        active_closing = true
         local observed_now, clock_error = now()
         if not observed_now then
-            -- Restoration does not require a clock or a successful join. Never
-            -- leave a raw secret field active after a degraded timing port.
+            -- Attempt restoration without timing or join; failed close must
+            -- keep the owner reachable for another cleanup attempt.
             local close_called, closed = pcall(active.close, active)
-            active, active_mode, terminal_ended = false, false, false
-            pending_events, pending_index = {}, 1
             if not close_called or closed ~= true then
                 return nil, failure("TerminalFailure", label .. " terminal state could not be restored")
             end
+            active, active_mode, terminal_ended = false, false, false
+            terminal_joined, active_closing = false, false
+            pending_events, pending_index = {}, 1
             return nil, clock_error
         end
         local primary_error
@@ -11158,17 +11164,21 @@ local function new_model_setup_input(composed, runtime, label)
                 end
             end
         end
-        local joined, join_result = pcall(
-            active.join,
-            active,
-            observed_now <= math.maxinteger - 5000 and observed_now + 5000
-                or observed_now
-        )
-        if not joined or type(join_result) ~= "table" then
-            primary_error = primary_error or failure(
-                "TerminalFailure",
-                label .. " input could not be joined"
+        if not terminal_joined then
+            local joined, join_result = pcall(
+                active.join,
+                active,
+                observed_now <= math.maxinteger - 5000 and observed_now + 5000
+                    or observed_now
             )
+            if not joined or type(join_result) ~= "table" then
+                primary_error = primary_error or failure(
+                    "TerminalFailure",
+                    label .. " input could not be joined"
+                )
+            else
+                terminal_joined = true
+            end
         end
         local close_called, closed = pcall(active.close, active)
         if not close_called or closed ~= true then
@@ -11176,22 +11186,26 @@ local function new_model_setup_input(composed, runtime, label)
                 "TerminalFailure",
                 label .. " terminal state could not be restored"
             )
+            return nil, primary_error
         end
         active = false
         active_mode = false
         terminal_ended = false
+        terminal_joined = false
+        active_closing = false
         pending_events, pending_index = {}, 1
         if primary_error then return nil, primary_error end
         return true
     end
 
-    ---Switches the input terminal to cooked or hidden raw mode.
+    ---Starts the requested mode after any previous owner has confirmed release.
     --@param mode string Requested terminal input mode.
     --@return boolean|nil active Whether the mode started.
     --@return table|nil err Structured mode-transition failure.
+    --@ownership A closing owner cannot be reused or replaced while cleanup remains incomplete.
     local function activate(mode)
-        if active_mode == mode then return true end
-        if pending_index <= #pending_events then
+        if active_mode == mode and not active_closing then return true end
+        if not active_closing and pending_index <= #pending_events then
             pending_events, pending_index = {}, 1
             return nil, failure("InputModeBoundary", "enter hidden values only after their separate input prompt")
         end
@@ -11212,6 +11226,8 @@ local function new_model_setup_input(composed, runtime, label)
         active = terminal
         active_mode = mode
         terminal_ended = false
+        terminal_joined = false
+        active_closing = false
         return true
     end
 

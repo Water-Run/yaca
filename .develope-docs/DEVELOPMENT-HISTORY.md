@@ -7,6 +7,7 @@
 
 | 时间 / 节点 | 主要成果 | 证据与适用范围 |
 | --- | --- | --- |
+| 2026-10-08，R85 管理输入 owner | close 失败保留 active/join 状态，最终清理重试同一终端，模式切换不覆盖旧 owner；时钟退化仍收尾 | [本日 Review](CODE-REVIEW-2026-10-08.md)、[R85](lua-review/R85.json)；精确 R84 反例 25/27，修复后 27/27；710/710、250/5552/0、readiness PASS |
 | 2026-10-08，R84 终端清理重试 | 修复 terminal native close 失败也标记 closed 的状态丢失；保留同一 started/joined owner、已恢复设置与先前错误优先级 | [本日 Review](CODE-REVIEW-2026-10-08.md)；精确 R83 源码反例 9/10，修复后 10/10；完整 708/708、250/5547/0、完整 readiness PASS |
 | 2026-10-08，R83 工作线程 DLL 引用 | 实际 loadlib/lua_close 确认 native DLL 先于存活 reader/writer 卸载；worker 独立持有 DLL，收尾后 FreeLibraryAndExitThread，双 worker 只在最后一个退出后卸载 | [本日 Review](CODE-REVIEW-2026-10-08.md)、[R83 证据](native-review/R83.json)；本机两架构各 26 场景及 terminal/process 回归通过，706/706、完整 readiness PASS，正式资格保留 |
 | 2026-10-08，恢复开发与 R82 | 从 `origin/main` 快进 15 个提交，按 D-083 恢复；修复 Windows cooked reader 取消失败后 GC 丢失资源所有者，补齐实际线程 detach/重试/启动竞争探针 | [本日 Review](CODE-REVIEW-2026-10-08.md)；本机两架构各 56 场景通过、基线各 30 个泄漏资源降为 0；R81 已发布 ZIP 未含修复，正式资格与全仓语义 Review 仍待完成 |

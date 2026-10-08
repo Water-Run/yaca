@@ -1,0 +1,115 @@
+{
+  "schema": "yaca-lua-review-evidence-v1",
+  "review_id": "R85",
+  "date": "2026-10-08",
+  "status": "verified-input-owner-subset",
+  "release_authorized": false,
+  "base_revision": "23d9402485ad44c8aaab2fb3e23f098ff78a7c3a",
+  "working_tree_changes": true,
+  "source_inputs": [
+    {
+      "path": "src/main.lua",
+      "size": 613707,
+      "sha256": "159340f5f30a128ec3ba7182915a46ccc442e0be45bcb64c0c3085a1dd1bf6a6"
+    },
+    {
+      "path": "test/integration/repl_input_surface_test.lua",
+      "size": 67275,
+      "sha256": "5a5d8b38aa23d74efb9e2b2f638ab508a9c7b8486fd5f60460e2bd0abde51a6c"
+    }
+  ],
+  "frozen_source_inputs": [
+    {
+      "path": "out/review-20261008/r85/after-source/src/main.lua",
+      "size": 613707,
+      "sha256": "159340f5f30a128ec3ba7182915a46ccc442e0be45bcb64c0c3085a1dd1bf6a6"
+    },
+    {
+      "path": "out/review-20261008/r85/after-source/test/integration/repl_input_surface_test.lua",
+      "size": 67275,
+      "sha256": "5a5d8b38aa23d74efb9e2b2f638ab508a9c7b8486fd5f60460e2bd0abde51a6c"
+    }
+  ],
+  "baseline_inputs": [
+    {
+      "path": "out/review-20261008/r85/before-source/src/main.lua",
+      "size": 612770,
+      "sha256": "aa6105c0b6f62dfc56437fc20fc2183774832e516711dbca5c3ddcf5bb37f43c"
+    },
+    {
+      "path": "out/review-20261008/r85/before-source/test/integration/repl_input_surface_test.lua",
+      "size": 67275,
+      "sha256": "5a5d8b38aa23d74efb9e2b2f638ab508a9c7b8486fd5f60460e2bd0abde51a6c"
+    }
+  ],
+  "observations": {
+    "baseline_cases": 27,
+    "baseline_failed": 2,
+    "fixed_cases": 27,
+    "fixed_failed": 0,
+    "complete_lua_suite": {
+      "total": 710,
+      "passed": 710,
+      "failed": 0
+    },
+    "comment_coverage": {
+      "files": 250,
+      "declarations": 5552,
+      "violations": 0
+    },
+    "coding_readiness": "PASS"
+  },
+  "logs": [
+    {
+      "path": "out/review-20261008/r85/before-final.log",
+      "size": 5002,
+      "sha256": "82b21b5ff35e6ce9f680614e5a100d25b9302ce5e260e9a44e1a656ea1c18627"
+    },
+    {
+      "path": "out/review-20261008/r85/after-final.log",
+      "size": 3437,
+      "sha256": "846c2d99d7b9396d57102f661addb890fcf0a9e771ae6bb5421717bfa44b0cd4"
+    },
+    {
+      "path": "out/review-20261008/r85/after.log",
+      "size": 8760,
+      "sha256": "81c0e81241ae908e0d04c7d56fdf58ca4a4f435a4a8b69f07b4998b28c9f6aba"
+    },
+    {
+      "path": "out/review-20261008/r85/full-suite.log",
+      "size": 70699,
+      "sha256": "b829205bba0fc2eae5b8e7189dc5c7fe379cfb24bab7e3284fbe40c4290b0dca"
+    },
+    {
+      "path": "out/review-20261008/r85/coding-readiness.log",
+      "size": 4213,
+      "sha256": "9795ab86a35922111c2ff358cb0bc4b4fa188fa559670d3c98c5dbf7b59b550c"
+    },
+    {
+      "path": "out/review-20261008/r85/validation.log",
+      "size": 918,
+      "sha256": "825166ecad4feadad229dde4e03c30405e705fac63ec24347ff043a53988471e"
+    },
+    {
+      "path": "out/review-20261008/r85/comment-inventory.txt",
+      "size": 1239495,
+      "sha256": "83c975cba19b115ce78a376868f3861b9e1fe62e5566d21e9da3206682aced7d"
+    }
+  ],
+  "scope": [
+    "actual Model manager consent cleanup retains one failed-close owner",
+    "final cleanup retries typed/exception/degraded-clock failures",
+    "successful join is not repeated during cleanup retry",
+    "hidden-mode boundary cannot replace an unclosed cooked owner",
+    "configuration bytes and zero online requests are preserved in the failure journeys"
+  ],
+  "semantic_review": {
+    "subset_complete": true,
+    "whole_repository": "partial"
+  },
+  "remaining_scope": [
+    "ApplicationCoordinator and remaining interaction semantic review",
+    "remaining source/tool provenance audit",
+    "current three-target core and nine-package qualification"
+  ]
+}
