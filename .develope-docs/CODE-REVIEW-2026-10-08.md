@@ -5,7 +5,7 @@
 本地无未提交修改，从 `4a9c4bc` 快进 15 个提交到
 `df38087c6c7855a45e94cf63b51528da4da0b345`。Windows Git 的 schannel 和
 OpenSSL 两次 TLS 拉取失败后，WSL Git 成功获取 `origin/main`；保留 `main`，
-没有创建分支、提交、推送或新预发布。R81 已交付九包与三平台 706/706 的记录
+同步阶段没有创建分支、提交、推送或新预发布。R81 已交付九包与三平台 706/706 的记录
 按原源码范围保留，不再重复 10 月 2 日已完成的 Python/full 装配工作。
 
 ## R82 反例与修复
@@ -206,3 +206,41 @@ finish_run 保留先前运行错误优先级；生产聊天入口失败后再做
 join 及新回归 callback 已逐项语义核对。精确来源与输出见
 [R86](lua-review/R86.json)，日志在 `out/review-20261008/r86/`。
 其余交互/辅助代码与三目标九包正式资格仍待完成，全仓语义 Review 为 partial。
+
+## 三目标核心重建、证据收口与暂停
+
+负责人最新要求“在下一个开发节点收尾暂停”，按
+[D-084](DECISIONS.md#d-084-三目标核心重建节点收尾后暂停2026-10-08)
+收口到 R82--R86 三目标核心节点。冻结输入为干净提交
+`163728ea7e6f58efeb01155038da0a68a8cc9e6a`；Windows 两架构和 Linux 的维护源码
+归档 SHA-256 均为 `0d5a0fa7937fbc7650508a8f95806a5dc9e78f44ab10aaa7b8cab34ade17f1e8`。
+三份清单和全部成员逐字节核对一致。收尾文档单独提交，产品代码未再改变。
+
+Windows 两核心由维护构建器、GCC 13-win32 交叉编译；实际新单文件在 Windows 11
+10.0.26220 上以 `--lua -E source/test/run.lua` 执行冻结源码完整 suite，Win32 经 WOW64，
+两者各 **713/713**。目标回执、原始输出、来源归档与核心摘要通过维护附件脚本重新绑定。
+--version 通过；隔离数据根的离线 Stage 1 有 12 项通过、3 项警告，结果为 partial，
+警告为配置未初始化和非 TTY，零联网请求。未创建数据根的首次失败日志保留，不能算通过。
+本节点不扩展为 XP、Win7 或指定 Server 2008 的新核心实测。
+
+Linux 在新的 CentOS 7.9 容器内串行原生构建，GCC 4.8.5-44、glibc 2.17-326.el7_9.3；
+容器共享 WSL2 6.18.40.1 内核。同次构建的 Lua/native 执行完整 suite **713/713**，
+onedir 和 onefile --version 均通过，ELF64、依赖白名单和 GLIBC 导入上限 2.17 检查通过。
+原 R81 容器与数据保留；缺少的 file 工具仅在新构建容器内通过启用签名校验的
+CentOS 7.9 归档源安装，RPM 清单与安装日志留存。构建容器退出后已移除。
+
+三核心、完整源码快照、构建/目标日志和复跑辅助代码保存在
+`out/core-node-r86-20261008/`，完整字节清单见
+[核心节点记录](candidates/core-node-r86-20261008.json)。逐项核对来源、实际命令、
+suite 汇总、环境边界与全部保留文件摘要；辅助代码的参数、返回、写盘、错误及
+文件所有权注释已人工核对。完整 coding readiness 沿用同一产品源码的 R86 PASS，
+全仓结构为 **250 文件 / 5556 声明 / 0 缺项**，收尾另检查文档状态和 Git diff。
+
+R81 缓存另恢复 Linux full notices，581396490 字节，SHA-256
+`64e2e68d17a745408d0c8bfbbd1e4d5ca4cf12a663344e8a3084d974971cb648`，
+与已提交 publication 回执一致；累计 13 件已核对输入。Linux full runtime 未完成，
+断点文件仅保留恢复进度，不接纳为工具输入。该恢复进程已停止，不留后台继续下载。
+
+本节点只本地提交到 main，未推送或新建预发布。开发按 D-084 暂停；剩余 Review、
+工具来源审计、新核心九包及 C32/C33/C34 见 TRACKING。全仓语义 Review 仍为 partial，
+阶段为 implemented-unqualified，Gate R 关闭，release_authorized=false。

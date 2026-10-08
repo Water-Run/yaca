@@ -2,7 +2,7 @@
   "schema": "yaca-restored-candidate-inputs-v1",
   "date": "2026-10-08",
   "source_tag": "v1.0.0-preview.20261006",
-  "scope": "R81 source, clean runtime/notices and evidence inputs",
+  "scope": "R81 source, clean runtime/notices, Linux full notices and evidence inputs",
   "status": "PASS",
   "release_authorized": false,
   "current_source_qualification": false,
@@ -22,6 +22,11 @@
       "name": "yaca-1.0.0-linux-x86_64-clean.zip",
       "bytes": 3653317,
       "sha256": "e1081f2a5bf4942b9fa8bd7997a297424c587b90336affc03e2ae65237be9979"
+    },
+    {
+      "name": "yaca-1.0.0-linux-x86_64-full-notices.zip",
+      "bytes": 581396490,
+      "sha256": "64e2e68d17a745408d0c8bfbbd1e4d5ca4cf12a663344e8a3084d974971cb648"
     },
     {
       "name": "yaca-1.0.0-preview-edition-audit.json",

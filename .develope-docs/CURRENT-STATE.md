@@ -1,21 +1,43 @@
 # 当前状态
 
 更新日期：2026-10-08。已从 `origin/main` 快进 15 个提交到 `df38087`，
-按 [D-083](DECISIONS.md#d-083-同步最新进展并恢复开发2026-10-08) 恢复开发。
+完成 D-083 的同步和续推，并按
+[D-084](DECISIONS.md#d-084-三目标核心重建节点收尾后暂停2026-10-08)
+在 R82--R86 三目标核心重建节点收尾后暂停。负责人恢复前不继续推进。
 本轮发现并修复 R82/R83：cooked reader 的 GC detach 遗留资源，以及 Lua 关闭
 后 DLL 先于存活 reader/stdin writer 被卸载。两架构的 R82 探针各从 30 个泄漏资源
 降为 0；R83 共 52 个 DLL/worker 场景通过，最后一个线程退出后才释放 DLL。
 R84 另修复 terminal native close 失败后无法重试同一 owner。
 R85 补齐管理输入面的同一 owner 保留、join 状态及失败模式切换后的清理。
 R86 让主协调器在 owner 未释放时保持 closing，并幂等重试未完成的清理。
-完整 Lua suite 713/713、完整 readiness PASS。证据见
+三目标新核心完整 suite 各 713/713、完整 readiness PASS。证据见
 [10 月 8 日 Review](CODE-REVIEW-2026-10-08.md)。剩余工作见 [TRACKING](TRACKING.md)。
 
 阶段为 `implemented-unqualified`，目标资格验证待完成；Release Gate R 为 `closed`，
 `release_authorized=false`。依据见 [readiness](contracts/readiness.lua)、
 [发行清单](../release/manifest.lua)及[依赖锁](../release/dependencies.lock)。
 
-## 当前候选
+## 当前开发核心
+
+产品版本为 `1.0.0`。包含 R82--R86 的三目标核心已从同一份干净维护源码重建：
+冻结提交为 `163728ea7e6f58efeb01155038da0a68a8cc9e6a`，源码归档 SHA-256 为
+`0d5a0fa7937fbc7650508a8f95806a5dc9e78f44ab10aaa7b8cab34ade17f1e8`。
+三份归档、清单及全部成员字节一致；开发测试、构建环境、原始日志与核心逐件绑定于
+[核心节点清单](candidates/core-node-r86-20261008.json)，本地产物在
+`out/core-node-r86-20261008/`。收尾文档在冻结源码后单独提交，产品代码未再改变。
+
+| 开发核心 | SHA-256 | 完整测试及环境 |
+| --- | --- | --- |
+| Linux x86_64 | `60c9a92b267e42e56af71157ada78b2e14da0add4f68362fe3cc6b6e5a5a7035` | 713/713；CentOS 7.9 容器、GCC 4.8.5-44、glibc 2.17，共享 WSL2 内核 |
+| Win32 x86 | `a921ae6aa186209f945397f4b989ddad2e8060cfad683c50e82f2bc7c7fd3187` | 713/713；Windows 11 x64 / WOW64 |
+| Win64 x86_64 | `a27542a58af6f96553985a334ceb0b5cbbcd440fa263468eb4f72147b680bb27` | 713/713；Windows 11 x64 |
+
+Windows 使用实际新单文件内嵌 Lua 执行冻结源码完整 suite，--version 通过；离线
+Stage 1 为 partial，仅有配置未初始化及非 TTY 警告，零网络请求。Linux 使用同次构建的
+Lua 和 native 运行完整 suite，另通过 onedir/onefile 版本冒烟及 ELF/glibc 导入闭包检查。
+最低 Windows 系统未在此节点重新实测；新核心的九包装配、旅程和正式资格仍待完成。
+
+## 已交付的 R81 候选
 
 产品版本为 `1.0.0`，本节点为
 [`v1.0.0-preview.20261006`](https://github.com/Water-Run/yaca/releases/tag/v1.0.0-preview.20261006)
@@ -31,7 +53,7 @@ R81 候选三目标从同一份完整维护源码快照构建：冻结提交为
 交付记录和暂停文档单独提交，交付时产品源码与冻结输入一致。
 当前开发源码另含 R82--R86，已发布的 R81 ZIP 不包含本轮修复。
 
-| 当前核心 | SHA-256 | 完整测试及环境 |
+| R81 已交付核心 | SHA-256 | 完整测试及环境 |
 | --- | --- | --- |
 | Linux x86_64 | `1bc7e3bd37b2b42765b437f4a7dd84b827b8c823e752d76cd9e983fc52be40b6` | 706/706；CentOS 7.9 用户态、GCC 4.8.5、glibc 2.17 |
 | Win32 x86 | `82053d9fedf7fc406140b6493671969bd20fbacaae2e9d088712d96c1a1771e0` | 706/706；Server 2008 non-R2 x64 / WOW64 |
@@ -68,7 +90,8 @@ C7 容器共享 Fedora 宿主内核；Windows 兼容底线仍按 XP SP3 x86、Wi
 
 附带工具输入沿用已核对且字节未改的来源。Windows 两目标输入位于
 `out/win32-full-staged-20261002/`、`out/win64-full-staged-20261002/`；Linux 输入位于
-`out/node-r76-20261005/linux-full-staged/`。这次九包重新绑定当前核心，不继承旧核心测试。
+`out/node-r76-20261005/linux-full-staged/`，均为原 R81 构建机路径。
+已交付的 R81 九包按当时核心绑定；本轮新核心尚未装配九包，不继承旧核心测试。
 Linux full 的 Git HTTPS、Perl、静态库和默认 SDK 闭包此前已构建并运行通过，来源和
 逐文件摘要仍由当前装配重新核对；最终工具来源语义审计保留为待完成。
 
@@ -108,9 +131,9 @@ R86 协调器专项 42/42，terminal 或 writer 未释放前不报告 closed，�
 本地和 GitHub 仅保留 `main`，默认分支为 `main`；候选 tag 属于发行标记。
 README.md、README-zh.md 和两份 quickstart 均描述 `1.0.0` 候选及资格待完成，
 中英文 README 的章节、命令参考和下载入口已对齐。开发入口、实施计划和资格手册
-以 D-083 的恢复指示为准。
+以 D-084 的节点暂停指示为准；本轮提交只保存在本地 main。
 
-从 [剩余事项](TRACKING.md) 接续 Review 与资格收尾；历史过程见
+当前按 D-084 暂停；恢复后从 [剩余事项](TRACKING.md) 接续 Review 与资格收尾；历史过程见
 [开发历程](DEVELOPMENT-HISTORY.md)。
 此前已授权的模型凭据属于原构建机的忽略目录，当前工作区未恢复，未进入源码包、
 候选包或公开证据。后续产物与在线旅程的依赖恢复见 TRACKING。
