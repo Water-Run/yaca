@@ -1,4 +1,4 @@
-# 恢复开发与关闭路径 R82 / R83 / R84 / R85
+# 恢复开发与关闭路径 R82--R86
 
 日期：2026-10-08。负责人要求同步最新进展、检查梳理并推进开发，按
 [D-083](DECISIONS.md#d-083-同步最新进展并恢复开发2026-10-08) 恢复。
@@ -187,3 +187,22 @@ close 异常及收尾前时钟退化分别要求第二次清理成功；join 次
 [恢复清单](candidates/restored-inputs-20261008.json) 记录精确字节。
 Windows urllib 下载两次遭遇 TLS EOF，已完成文件复核后通过 Linux curl 继续，
 失败与成功日志均保留。本轮未恢复 std/full runtime，不把缓存恢复当作当前源码资格。
+
+## R86 主交互协调器的关闭状态与清理重试
+
+基线为 `87e4b21`。terminal close 失败后协调器清空 terminal_started，finish_run
+也无条件报告 lifecycle=closed；Agent writer 未释放时同样误报 closed。
+最终三项 actual coordinator 回归与精确基线组合为 **39/42**，修复后 **42/42**。
+
+加入幂等 `coordinator:close()`，只清理尚未成功关闭的 Agent/draft 与 terminal。
+终端 close 失败保留启动及成功 join 状态；两个 owner 都确认释放前 lifecycle
+保持 closing。终端失败后重试不再次释放 writer 或重复 join；writer 失败后
+重试不再次关闭已释放终端。永久失败继续返回错误并保留 owner/status。
+finish_run 保留先前运行错误优先级；生产聊天入口失败后再做一次清理，仍返回
+原运行错误，不将重试成功改写为聊天成功。
+
+完整 suite **713/713**、完整 readiness **PASS**、全仓结构检查
+**250 文件 / 5556 声明 / 0 缺项**。关闭状态、依赖顺序、错误优先级、owner 缓存、
+join 及新回归 callback 已逐项语义核对。精确来源与输出见
+[R86](lua-review/R86.json)，日志在 `out/review-20261008/r86/`。
+其余交互/辅助代码与三目标九包正式资格仍待完成，全仓语义 Review 为 partial。

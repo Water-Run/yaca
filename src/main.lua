@@ -7655,6 +7655,8 @@ function M.new_application_coordinator(ports, options)
     local terminal_started = false
     local terminal_ended = false
     local terminal_outcome = false
+    local terminal_joined = false
+    local agent_closed = false
     local agent = admitted_ports.initial_agent or false
     local input_draft = ""
     local multiline = false
@@ -10236,10 +10238,11 @@ function M.new_application_coordinator(ports, options)
         )
     end
 
-    ---Joins, restores, and closes the terminal after coordinator completion.
+    ---Settles the terminal owner without losing a failed close or repeating a successful join.
     --@param none No arguments.
-    --@return boolean|nil closed Whether terminal restoration succeeded.
+    --@return boolean|nil closed True only after terminal close confirms release; nil on failure.
     --@return table|nil err Structured terminal lifecycle failure.
+    --@ownership Failed close retains terminal_started and completed join state for cleanup retry.
     local function close_terminal()
         if not terminal_started then return true end
         local observed_now = last_now or 0
@@ -10260,21 +10263,24 @@ function M.new_application_coordinator(ports, options)
                 end
             end
         end
-        if terminal_ended then
-            pcall(admitted_ports.terminal.join, admitted_ports.terminal, observed_now)
+        if terminal_ended and not terminal_joined then
+            local joined, join_result = pcall(
+                admitted_ports.terminal.join, admitted_ports.terminal, observed_now
+            )
+            terminal_joined = joined and type(join_result) == "table"
         end
         pcall(admitted_ports.terminal.restore, admitted_ports.terminal)
         local closed, close_result = pcall(
             admitted_ports.terminal.close,
             admitted_ports.terminal
         )
-        terminal_started = false
         if not closed or close_result ~= true then
             return nil, failure(
                 "TerminalRestoreFailure",
                 "terminal state could not be restored and closed"
             )
         end
+        terminal_started = false
         return true
     end
 
@@ -10377,18 +10383,41 @@ function M.new_application_coordinator(ports, options)
         )
     end
 
-    ---Closes both owners and reports the final interactive outcome.
+    ---Closes unsettled owners while preserving truthful closing status and completed ownership transitions.
+    --@param self table ApplicationCoordinator in created, closing or closed state; a running coordinator cannot be externally closed.
+    --@return boolean|nil closed True after both owners confirm cleanup; nil if either remains unsettled.
+    --@return table|nil err Structured Agent or terminal cleanup error.
+    --@effect Closes Agent activities before terminal cleanup; changes lifecycle to closed only after both succeed.
+    --@ownership Failed cleanup retains its owner for another close; successfully closed owners are not closed again.
+    function coordinator:close()
+        if lifecycle == "running" then
+            return nil, failure("CoordinatorState", "ApplicationCoordinator is still running")
+        end
+        if lifecycle == "closed" then return true end
+        lifecycle = "closing"
+        local agent_error
+        if not agent_closed then
+            local closed_agent
+            closed_agent, agent_error = close_agent("application-close")
+            agent_closed = closed_agent == true
+        end
+        local closed_terminal, terminal_error = close_terminal()
+        if agent_closed and closed_terminal then lifecycle = "closed" end
+        if not agent_closed then return nil, agent_error end
+        if not closed_terminal then return nil, terminal_error end
+        return true
+    end
+
+    ---Settles both owners and reports the final interactive outcome without hiding earlier failure.
     --@param primary_error table|nil Earlier failure that takes precedence.
     --@return table|nil result Immutable successful interactive result.
     --@return table|nil err Structured run or close failure.
     local function finish_run(primary_error)
         prompt_edit = false
-        local closed_agent, agent_error = close_agent("application-close")
-        local closed_terminal, terminal_error = close_terminal()
-        lifecycle = "closed"
+        lifecycle = "closing"
+        local closed, close_error = coordinator:close()
         if primary_error then return nil, primary_error end
-        if not closed_agent then return nil, agent_error end
-        if not closed_terminal then return nil, terminal_error end
+        if not closed then return nil, close_error end
         if terminal_outcome == "failed" or terminal_outcome == "unknown" then
             return nil, failure(
                 "TerminalFailure",
@@ -10968,7 +10997,9 @@ function M.run_interactive_chat(composed, chat, runtime, initial_agent)
         terminal_poll_events = 128,
     })
     if not coordinator then return fail_before_coordinator(coordinator_error) end
-    return coordinator:run()
+    local result, run_error = coordinator:run()
+    if not result then coordinator:close() end
+    return result, run_error
 end
 
 ---Encodes raw bytes as lowercase hexadecimal for safe diagnostics.

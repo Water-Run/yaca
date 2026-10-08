@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-10-08
 File: application_coordinator_test.lua
 Description: Verifies the interactive ApplicationCoordinator input, Agent, approval, and close paths.
 ]]
@@ -293,6 +293,10 @@ local function fixture(settings)
     --@param self table Fixture or port instance receiving this call.
     --@return table observed Outcome record with status cancelled.
     function terminal:join()
+        if settings.terminal_close_failures then
+            A.falsy(self.joined, "a settled terminal cannot be joined twice")
+            self.joined = true
+        end
         log[#log + 1] = "terminal-join"
         return { outcome = "cancelled" }
     end
@@ -305,9 +309,15 @@ local function fixture(settings)
     end
     --Simulates the close transition of a fake activity port for this suite.
     --@param self table Fixture or port instance receiving this call.
-    --@return boolean accepted Whether close succeeds in the fixture.
+    --@return boolean accepted True after the configured failures are exhausted; otherwise false.
+    --@effect Records each close and keeps failed-close ownership live.
     function terminal:close()
         log[#log + 1] = "terminal-close"
+        self.close_calls = (self.close_calls or 0) + 1
+        if settings.terminal_close_failures and self.close_calls <= settings.terminal_close_failures then
+            return false
+        end
+        self.closed = true
         return true
     end
 
@@ -889,9 +899,14 @@ local function fixture(settings)
     end
     --Simulates the close transition of a fake activity port for this suite.
     --@param self table Fixture or port instance receiving this call.
-    --@return boolean accepted Whether close succeeds in the fixture.
+    --@return boolean|nil accepted True on writer release; nil while the configured failure remains.
+    --@return table|nil err Typed transient writer failure, or nil after successful release.
     function chat_draft:close()
         log[#log + 1] = "chat-draft-close"
+        settings.chat_close_calls = (settings.chat_close_calls or 0) + 1
+        if settings.chat_close_failures and settings.chat_close_calls <= settings.chat_close_failures then
+            return nil, { code = "WriterCloseTransient", message = "writer close may be retried" }
+        end
         return true
     end
     local chat = {
@@ -962,6 +977,7 @@ local function fixture(settings)
     }))
     return {
         coordinator = coordinator,
+        terminal = terminal,
         log = log,
         blocks = blocks,
         prompts = prompts,
@@ -1396,6 +1412,82 @@ return {
                 A.falsy(table.concat(f.log, "|"):find("must not run", 1, true))
                 A.equal(f.log[#f.log - 1], "terminal-restore")
                 A.equal(f.log[#f.log], "terminal-close")
+            end,
+        },
+        {
+            name = "coordinator retains failed terminal cleanup and retries only unsettled owners",
+            -- Reject one terminal close after Agent cleanup, then require truthful closing status and same-owner recovery.
+            --@param none No arguments; the case uses the actual coordinator and scripted terminal lifecycle.
+            --@return nil No value; assertions require one Agent close, one terminal join and two terminal close attempts.
+            run = function()
+                local f = fixture({ terminal_close_failures = 1, batches = {
+                    { { kind = "user_action", action = "text", text = ".quit" },
+                      { kind = "user_action", action = "submit-or-queue" } },
+                    { { kind = "io_terminal", outcome = "cancelled" } },
+                } })
+                local result, err = f.coordinator:run()
+                A.falsy(result)
+                A.equal(err.code, "TerminalRestoreFailure")
+                A.equal(f.coordinator:status().lifecycle, "closing")
+                A.truthy(f.coordinator:status().terminal_started)
+                A.falsy(f.terminal.closed)
+                A.truthy(f.coordinator:close())
+                A.equal(f.coordinator:status().lifecycle, "closed")
+                A.falsy(f.coordinator:status().terminal_started)
+                A.truthy(f.terminal.closed)
+                A.equal(f.terminal.close_calls, 2)
+                local draft_closes, joins = 0, 0
+                for _, entry in ipairs(f.log) do
+                    if entry == "chat-draft-close" then draft_closes = draft_closes + 1 end
+                    if entry == "terminal-join" then joins = joins + 1 end
+                end
+                A.equal(draft_closes, 1)
+                A.equal(joins, 1)
+                A.truthy(f.coordinator:close())
+                A.equal(f.terminal.close_calls, 2)
+            end,
+        },
+        {
+            name = "coordinator retries the unsettled writer without closing a released terminal again",
+            -- Reject one draft close and require cleanup retry to touch only the remaining writer owner.
+            --@param none No arguments; the case starts the real coordinator with a transient writer-close failure.
+            --@return nil No value; assertions require truthful closing state and exactly one terminal release.
+            run = function()
+                local settings = { chat_close_failures = 1, batches = {
+                    { { kind = "user_action", action = "text", text = ".quit" },
+                      { kind = "user_action", action = "submit-or-queue" } },
+                } }
+                local f = fixture(settings)
+                local result, err = f.coordinator:run()
+                A.falsy(result)
+                A.equal(err.code, "WriterCloseTransient")
+                A.equal(f.coordinator:status().lifecycle, "closing")
+                A.truthy(f.terminal.closed)
+                A.truthy(f.coordinator:close())
+                A.equal(f.coordinator:status().lifecycle, "closed")
+                A.equal(settings.chat_close_calls, 2)
+                A.equal(f.terminal.close_calls, 1)
+            end,
+        },
+        {
+            name = "coordinator does not report closed while terminal cleanup keeps failing",
+            -- Keep a permanently rejected close observable as closing across explicit cleanup retries.
+            --@param none No arguments; the case configures two real coordinator cleanup attempts to fail.
+            --@return nil No value; assertions reject success, closed status and loss of the live terminal owner.
+            run = function()
+                local f = fixture({ terminal_close_failures = math.maxinteger, batches = {
+                    { { kind = "user_action", action = "text", text = ".quit" },
+                      { kind = "user_action", action = "submit-or-queue" } },
+                    { { kind = "io_terminal", outcome = "cancelled" } },
+                } })
+                A.falsy(f.coordinator:run())
+                local closed, close_error = f.coordinator:close()
+                A.falsy(closed)
+                A.equal(close_error.code, "TerminalRestoreFailure")
+                A.equal(f.coordinator:status().lifecycle, "closing")
+                A.truthy(f.coordinator:status().terminal_started)
+                A.falsy(f.terminal.closed)
+                A.equal(f.terminal.close_calls, 2)
             end,
         },
         {

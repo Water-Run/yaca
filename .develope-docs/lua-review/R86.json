@@ -1,0 +1,114 @@
+{
+  "schema": "yaca-lua-review-evidence-v1",
+  "review_id": "R86",
+  "date": "2026-10-08",
+  "status": "verified-coordinator-cleanup-subset",
+  "release_authorized": false,
+  "base_revision": "87e4b21602c4411c9c6a21445ef8be148b60a4a2",
+  "working_tree_changes": true,
+  "source_inputs": [
+    {
+      "path": "src/main.lua",
+      "size": 615475,
+      "sha256": "b89ec0ab8c00306c28d6568f8493419c8ddb744d1793a1ba88e6d8155ce9515d"
+    },
+    {
+      "path": "test/integration/application_coordinator_test.lua",
+      "size": 117429,
+      "sha256": "042cfdd3ed5858b59afe3a4753bcbba97756abe0702f22b11cb233509eca3ccd"
+    }
+  ],
+  "frozen_source_inputs": [
+    {
+      "path": "out/review-20261008/r86/after-source/src/main.lua",
+      "size": 615475,
+      "sha256": "b89ec0ab8c00306c28d6568f8493419c8ddb744d1793a1ba88e6d8155ce9515d"
+    },
+    {
+      "path": "out/review-20261008/r86/after-source/test/integration/application_coordinator_test.lua",
+      "size": 117429,
+      "sha256": "042cfdd3ed5858b59afe3a4753bcbba97756abe0702f22b11cb233509eca3ccd"
+    }
+  ],
+  "baseline_inputs": [
+    {
+      "path": "out/review-20261008/r86/before-source/src/main.lua",
+      "size": 613707,
+      "sha256": "159340f5f30a128ec3ba7182915a46ccc442e0be45bcb64c0c3085a1dd1bf6a6"
+    },
+    {
+      "path": "out/review-20261008/r86/before-source/test/integration/application_coordinator_test.lua",
+      "size": 117429,
+      "sha256": "042cfdd3ed5858b59afe3a4753bcbba97756abe0702f22b11cb233509eca3ccd"
+    }
+  ],
+  "observations": {
+    "baseline_cases": 42,
+    "baseline_failed": 3,
+    "fixed_cases": 42,
+    "fixed_failed": 0,
+    "complete_lua_suite": {
+      "total": 713,
+      "passed": 713,
+      "failed": 0
+    },
+    "comment_coverage": {
+      "files": 250,
+      "declarations": 5556,
+      "violations": 0
+    },
+    "coding_readiness": "PASS"
+  },
+  "logs": [
+    {
+      "path": "out/review-20261008/r86/before-final.log",
+      "size": 6938,
+      "sha256": "6b0d93b0e63947e4170c9f5279ce31900d03a23cac57a34cf9fa68be99871a46"
+    },
+    {
+      "path": "out/review-20261008/r86/after-final.log",
+      "size": 4996,
+      "sha256": "a0ae9f72058c9c52f836f53dd655c2ed49e2f6276bc5ceac3689deca1abfce53"
+    },
+    {
+      "path": "out/review-20261008/r86/after-related.log",
+      "size": 11769,
+      "sha256": "93783fb770c33da828d45d50ec57bf979eb4d6a31a98ad44ba2b8f6991ea0372"
+    },
+    {
+      "path": "out/review-20261008/r86/full-suite.log",
+      "size": 71064,
+      "sha256": "081644e06752cdb96a84f8858ab1819955cccd79a7c3b42d9566a226ab952077"
+    },
+    {
+      "path": "out/review-20261008/r86/coding-readiness.log",
+      "size": 4213,
+      "sha256": "2376cb862650cf197ec8f7ec7c37828a493263e9e4f9b88675488dbb897f62f3"
+    },
+    {
+      "path": "out/review-20261008/r86/validation.log",
+      "size": 1066,
+      "sha256": "accc9c93c4d709e4992c054bc5b56104b64d32384985dcc926fb665bd6a366e6"
+    },
+    {
+      "path": "out/review-20261008/r86/comment-inventory.txt",
+      "size": 1240232,
+      "sha256": "cd40005e7b01545e1e73730756ef4c0147c9effaaaf604ed210eb5a616d92f4b"
+    }
+  ],
+  "scope": [
+    "closing status and terminal_started truth after a failed close",
+    "idempotent cleanup retry does not release a settled Agent or rejoin a settled terminal",
+    "writer cleanup failure retains closing state after terminal release",
+    "permanent terminal close failure never reports closed"
+  ],
+  "semantic_review": {
+    "subset_complete": true,
+    "whole_repository": "partial"
+  },
+  "remaining_scope": [
+    "remaining interaction and helper semantic review",
+    "source/tool provenance audit",
+    "current three-target core and nine-package qualification"
+  ]
+}
