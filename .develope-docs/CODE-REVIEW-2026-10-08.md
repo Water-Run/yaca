@@ -178,3 +178,12 @@ close 异常及收尾前时钟退化分别要求第二次清理成功；join 次
 冻结源码、维护回归及实际输出绑定于 [R85 清单](lua-review/R85.json)，日志位于
 `out/review-20261008/r85/`。全仓语义 Review 仍为 partial，ApplicationCoordinator
 及后续交互内部继续核对；新三目标核心、九包及其旅程尚未完成。
+
+## R81 来源与证据缓存恢复
+
+从现存 GitHub 预发布恢复 12 个已交付附件：三目标 clean runtime/notices、
+三目标来源包、完整证据包、audit 与 SHA256SUMS。每件大小与 SHA-256 均逐项核对
+仓库已有 publication 回执，保存于忽略的 `out/release-cache-20261006/`；
+[恢复清单](candidates/restored-inputs-20261008.json) 记录精确字节。
+Windows urllib 下载两次遭遇 TLS EOF，已完成文件复核后通过 Linux curl 继续，
+失败与成功日志均保留。本轮未恢复 std/full runtime，不把缓存恢复当作当前源码资格。
