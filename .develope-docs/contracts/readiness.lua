@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-10-05
+Date: 2026-10-09
 File: readiness.lua
 Description: Maps implementation and release gates to required artifacts and proof tasks.
 ]]
@@ -133,7 +133,7 @@ return {
     gate("AR-P0-13", "qualification-bound", "actions.lua+argv-fixtures+tui-transcripts", "synthetic-parser/machine-contract-pass;target-argv/TTY-pending", "C12", "before-M4-complete"),
     gate("AR-P0-14", "qualification-bound", "platform.lua+release.lua+zero_surface.lua", "allowlists-frozen;TP-029-target-pending", "C04", "before-M10-complete"),
     gate("AR-P0-15", "qualification-bound", "platform.lua+context.lua+transport.lua", "TP-008-process-crash-modern;target-lock/kill-pending", "C17", "before-M5-complete"),
-    gate("AR-P0-16", "qualification-bound", "product.lua+release.lua+IMPLEMENTATION-PLAN.md", "luainstaller-1.3.0-modern;three-target-qualification-pending", "C32", "before-release"),
+    gate("AR-P0-16", "qualification-bound", "product.lua+release.lua+IMPLEMENTATION-PLAN.md", "luainstaller-1.5.0-modern;three-target-qualification-pending", "C32", "before-release"),
 
     gate("AR-P1-01", "qualification-bound", "formats.lua+format-fixtures", "TP-010-proven-modern;three-ABI-load-pending", "C08", "before-M10-complete"),
     gate("AR-P1-02", "qualification-bound", "transport.lua+transport-fixtures", "TP-006-proven-modern;target-TLS/proxy/CA-pending", "C19", "before-M6-complete"),

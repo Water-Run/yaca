@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Author: WaterRun
-# Date: 2026-09-23
+# Date: 2026-10-09
 # File: windows_package_win64.py
 # Description: Audit and assemble a win64 Windows preview without asserting target qualification.
 
@@ -88,7 +88,7 @@ def main():
     shutil.copyfile(cache / "cacert-2026-08-13.pem", licenses / "Mozilla-CA.pem")
     (docs / "COMPONENTS.txt").write_text(
         "yaca 0.1.0 preview: GPL-3.0-only\n"
-        "luainstaller 1.3.0 launcher/extractor: LGPL-3.0-or-later\n"
+        "luainstaller 1.5.0 launcher/extractor: LGPL-3.0-or-later\n"
         "Lua 5.5.1, LuaExpat 1.5.2, Expat 2.8.2: MIT\n"
         "curl 8.21.0: curl license; Mbed TLS 3.6.7: Apache-2.0\n"
         "Mozilla CA store 2026-08-13: MPL-2.0\n"
@@ -134,7 +134,7 @@ def main():
 
     components = [
         ("yaca", "0.1.0-preview", "GPL-3.0-only", output / "yaca-source.tar.gz"),
-        ("luainstaller", "1.3.0", "LGPL-3.0-or-later", cache / "luainstaller-97192d1.tar.gz"),
+        ("luainstaller", "1.5.0", "LGPL-3.0-or-later", cache / "luainstaller-a289a1b.tar.gz"),
         ("Lua", "5.5.1", "MIT", cache / "lua-5.5.1.tar.gz"),
         ("LuaExpat", "1.5.2", "MIT", cache / "luaexpat-1.5.2.tar.gz"),
         ("Expat", "2.8.2", "MIT", cache / "expat-2.8.2.tar.gz"),
@@ -174,7 +174,7 @@ def main():
         for name in (
             "lua-5.5.1.tar.gz", "luaexpat-1.5.2.tar.gz", "expat-2.8.2.tar.gz",
             "curl-8.21.0.tar.xz", "mbedtls-3.6.7.tar.bz2",
-            "luainstaller-97192d1.tar.gz", "cacert-2026-08-13.pem",
+            "luainstaller-a289a1b.tar.gz", "cacert-2026-08-13.pem",
         ):
             archive.add(cache / name, arcname="dependencies/" + name)
     # The shipped archive pre-creates the empty data root so a

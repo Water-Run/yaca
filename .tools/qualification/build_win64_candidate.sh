@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Author: WaterRun
-# Date: 2026-10-08
+# Date: 2026-10-09
 # File: build_win64_candidate.sh
 # Description: Builds and audits Windows x64 candidate payloads from pinned source inputs.
 
@@ -56,8 +56,8 @@ verify "$SOURCE_CACHE/expat-2.8.2.tar.gz" \
   ef7d1994f533c9e7343d6c19f31064fc8ebbcbcaa144be3812b4f43052a05f4c
 verify "$SOURCE_CACHE/luaexpat-1.5.2.tar.gz" \
   89d83f2141edec31be576425637216928221918fe95dc3854d1b7fd4c627213f
-verify "$SOURCE_CACHE/luainstaller-97192d1.tar.gz" \
-  9591cfa9c882c8b110a3aa10dc0a1de22f55ef70a26cf21ee4c087cf879423c2
+verify "$SOURCE_CACHE/luainstaller-a289a1b.tar.gz" \
+  186508eaedd5532cb59d7ee4a905d7d824e0ce82f68fc0ce5b13a4259dcf11b4
 verify "$SOURCE_CACHE/cacert-2026-08-13.pem" \
   f66dff1bdf8f96060b8177976f8b7d9254bc89bc4db933d769f7384d28480bc9
 
@@ -76,7 +76,7 @@ cp "$REPO_ROOT/.develope-docs/WINDOWS-PREVIEW-2026-09-14.md" "$YACA_SOURCE/.deve
 git -C "$REPO_ROOT" rev-parse HEAD >"$LOG_ROOT/base-revision.txt"
 git -C "$REPO_ROOT" diff --binary HEAD >"$LOG_ROOT/source-changes.patch"
 tar -C "$YACA_SOURCE" -czf "$OUTPUT_ROOT/yaca-source.tar.gz" .
-tar -C "$BUILDER_ROOT" -xzf "$SOURCE_CACHE/luainstaller-97192d1.tar.gz"
+tar -C "$BUILDER_ROOT" -xzf "$SOURCE_CACHE/luainstaller-a289a1b.tar.gz"
 for archive in lua-5.5.1 expat-2.8.2 luaexpat-1.5.2; do
   tar -C "$WORK_ROOT" -xzf "$SOURCE_CACHE/$archive.tar.gz"
 done

@@ -1,12 +1,17 @@
 # 当前状态
 
-更新日期：2026-10-08。核心已实现，R81 候选已发布；开发已按
+更新日期：2026-10-09。核心已实现，R81 候选已发布；开发已按
 [D-083](DECISIONS.md#d-083-同步项目并恢复开发2026-10-08) 恢复。
 `origin/main` 已同步至 `df38087`。剩余顺序见 [TRACKING](TRACKING.md)。
 
 阶段为 `implemented-unqualified`，目标资格验证待完成；Release Gate R 为 `closed`，
 `release_authorized=false`。依据见 [readiness](contracts/readiness.lua)、
 [发行清单](../release/manifest.lua)及[依赖锁](../release/dependencies.lock)。
+
+发行构建器现为 luainstaller 1.5.0，提交 `a289a1bed6c6dcf8ad4f11a1d9e28f2f2989adbf`，
+标签 `v1.5.0`。资源覆盖补丁已重放到该版本。1.5.0 用 XP 兼容的原生 Windows
+宿主代替 PowerShell，构建不再硬性要求 Lua 头文件，MinGW 启动器去掉 PE 时间戳。
+已发布的 R81 九包仍由 1.3.0 构建，不能当作这次钉扎的产物。
 
 ## 当前候选
 

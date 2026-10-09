@@ -1,11 +1,245 @@
 --[[
 Author: WaterRun
-Date: 2026-10-08
+Date: 2026-10-09
 File: main.lua
 Description: Routes the offline bootstrap lifecycle from the unique composition root.
 ]]
 
-local MODULE_NAME = ...
+local ENTRY_ARGUMENT = ...
+
+-- Reduce a script path to the form compared with this chunk's source.
+-- Backslashes become slashes, and a leading ./ is discarded. The result is
+-- only a comparison key and is not written back to package.path.
+--@param path string Process script path or chunk source path.
+--@return string Comparison form of path; an all-dot prefix becomes empty.
+local function comparison_path(path)
+    path = path:gsub("\\", "/")
+    while path:sub(1, 2) == "./" do path = path:sub(3) end
+    return path
+end
+
+-- Report whether this chunk was loaded from the process script file.
+-- Lua's debug source for a direct launch names that file. A packaged
+-- bootstrap loads the same text under a synthetic @chunk name, which does
+-- not match the executable in argv[0].
+--@param none No arguments.
+--@return boolean True only when debug.getinfo names the same file as argv[0].
+local function loaded_as_process_script()
+    if type(arg) ~= "table" or type(arg[0]) ~= "string" or arg[0] == "" then
+        return false
+    end
+    if type(debug) ~= "table" or type(debug.getinfo) ~= "function" then
+        return false
+    end
+    local info = debug.getinfo(1, "S")
+    local source = type(info) == "table" and info.source or nil
+    if type(source) ~= "string" or source:sub(1, 1) ~= "@" then return false end
+    source = comparison_path(source:sub(2))
+    local script = comparison_path(arg[0])
+    if source == "" or script == "" then return false end
+    if source == script then return true end
+    if #source > #script
+        and source:sub(-#script) == script
+        and source:sub(-#script - 1, -#script - 1) == "/"
+    then
+        return true
+    end
+    if #script > #source
+        and script:sub(-#source) == source
+        and script:sub(-#source - 1, -#source - 1) == "/"
+    then
+        return true
+    end
+    return false
+end
+
+-- Decide whether this chunk should run the product CLI and then exit.
+-- Lua 5.5 passes CLI arguments as the main chunk's varargs, so a nil check
+-- on that value cannot separate a direct launch from require("main").
+-- A packaged launch still calls this chunk with no varargs. Tests set
+-- YACA_TEST_ROOT before loading the file and must keep the module returned.
+--@param none No arguments.
+--@return boolean True for a packaged launch or a direct process script.
+local function running_as_process_entry()
+    if _G.YACA_TEST_ROOT ~= nil then return false end
+    if ENTRY_ARGUMENT == nil then return true end
+    if type(arg) ~= "table" or ENTRY_ARGUMENT ~= arg[1] then return false end
+    return loaded_as_process_script()
+end
+
+-- Prepend this file's own directory for a direct source launch.
+-- A packaged launch already resolves modules from the bundle. This must not
+-- search the caller's working directory first.
+--@param none No arguments.
+--@return nil No return value.
+--@effect Inserts this file's directory at the front of package.path.
+local function admit_source_module_directory()
+    if not loaded_as_process_script() then return end
+    if type(package) ~= "table" or type(package.path) ~= "string" then return end
+    if type(debug) ~= "table" or type(debug.getinfo) ~= "function" then return end
+    local info = debug.getinfo(1, "S")
+    local source = type(info) == "table" and info.source or nil
+    if type(source) ~= "string" or source:sub(1, 1) ~= "@" then return end
+    local directory = source:sub(2):match("^(.*)[/\\]")
+    if type(directory) ~= "string" or directory == "" then return end
+    local separator = directory:find("\\", 1, true) and "\\" or "/"
+    local pattern = directory .. separator .. "?.lua"
+    local current = package.path:match("^[^;]*")
+    if current == pattern then return end
+    package.path = pattern .. ";" .. package.path
+end
+
+-- Copy the arguments a packaged launch installs for the product entry.
+-- A direct Lua host also stores the interpreter path at negative indexes.
+-- Those slots are host metadata, not command arguments.
+--@param none No arguments.
+--@return table Dense argv table containing index zero and the positive arguments.
+local function process_entry_arguments()
+    local cleaned = {}
+    if type(arg) ~= "table" then return cleaned end
+    cleaned[0] = arg[0]
+    for index = 1, #arg do cleaned[index] = arg[index] end
+    return cleaned
+end
+
+-- Make the process script path absolute.
+-- Lua keeps a relative path when the script was named that way. PWD is the
+-- directory the host used to open that path. This does not search for modules.
+--@param source_path string Chunk path without the leading @.
+--@return string|nil path Absolute script path, or nil when it cannot be resolved.
+local function absolute_script_path(source_path)
+    local normalized = source_path:gsub("\\", "/")
+    if normalized:sub(1, 1) == "/" or normalized:match("^[A-Za-z]:/") ~= nil then
+        return source_path
+    end
+    if type(os) ~= "table" or type(os.getenv) ~= "function" then return nil end
+    local pwd = os.getenv("PWD")
+    if type(pwd) ~= "string" or pwd == "" then return nil end
+    local pwd_normalized = pwd:gsub("\\", "/")
+    if pwd_normalized:sub(1, 1) ~= "/" and pwd_normalized:match("^[A-Za-z]:/") == nil then
+        return nil
+    end
+    local separator = pwd:find("\\", 1, true) and "\\" or "/"
+    if pwd:sub(-1) == separator then return pwd .. source_path end
+    return pwd .. separator .. source_path
+end
+
+-- Resolve the absolute `.luai/native` directory for a direct source launch.
+-- A packaged bootstrap installs that directory itself. A raw Lua host leaves
+-- its own cpath first, which is not the bundled allowlisted suffix.
+--@param none No arguments.
+--@return string|nil directory Absolute native directory, or nil when this chunk is not that script.
+local function source_native_directory()
+    if not loaded_as_process_script() then return nil end
+    if type(debug) ~= "table" or type(debug.getinfo) ~= "function" then return nil end
+    local info = debug.getinfo(1, "S")
+    local source = type(info) == "table" and info.source or nil
+    if type(source) ~= "string" or source:sub(1, 1) ~= "@" then return nil end
+    local script_path = absolute_script_path(source:sub(2))
+    if script_path == nil then return nil end
+    local script_directory = script_path:match("^(.*)[/\\]")
+    if type(script_directory) ~= "string" or script_directory == "" then return nil end
+    local root = script_directory:match("^(.*)[/\\]")
+    if type(root) ~= "string" or root == "" then return nil end
+    local separator = root:find("\\", 1, true) and "\\" or "/"
+    return root .. separator .. ".luai" .. separator .. "native"
+end
+
+-- Prepend the source tree's bundled native template to package.cpath.
+--@param none No arguments.
+--@return nil No return value.
+--@effect Inserts one absolute `?.so` or `?.dll` template at the front of package.cpath.
+local function install_source_native_cpath()
+    local directory = source_native_directory()
+    if directory == nil then return end
+    if type(package) ~= "table" or type(package.cpath) ~= "string" then return end
+    local separator = directory:find("\\", 1, true) and "\\" or "/"
+    local extension = separator == "\\" and "dll" or "so"
+    local pattern = directory .. separator .. "?." .. extension
+    local current = package.cpath:match("^[^;]*")
+    if current == pattern then return end
+    package.cpath = pattern .. ";" .. package.cpath
+end
+
+-- Report whether this Lua host was built without a dynamic module loader.
+-- A missing module produces a different load error and must not take this path.
+--@param path string Absolute native module path passed to package.loadlib.
+--@return boolean True only when the host reports that dynamic libraries are disabled.
+local function dynamic_loader_disabled(path)
+    if type(path) ~= "string" or path == "" then return false end
+    if type(package) ~= "table" or type(package.loadlib) ~= "function" then
+        return true
+    end
+    local loader, message = package.loadlib(path, "luaopen_yaca_native")
+    if type(loader) == "function" then return false end
+    return type(message) == "string"
+        and message:find("dynamic libraries not enabled", 1, true) ~= nil
+end
+
+-- Read the release OS and architecture visible to a source launch.
+-- Pointer width is used first. A 32-bit development interpreter on an
+-- x86_64 Linux userspace still selects the linux-x86_64 release target.
+--@param none No arguments.
+--@return string operating_system `linux` or `windows`.
+--@return string architecture `x86_64` or `x86`.
+local function source_host_platform()
+    local windows = type(package) == "table"
+        and type(package.config) == "string"
+        and package.config:sub(1, 1) == "\\"
+    local architecture = "x86"
+    if type(string) == "table" and type(string.packsize) == "function"
+        and string.packsize("T") == 8
+    then
+        architecture = "x86_64"
+    elseif not windows and type(io) == "table" and type(io.open) == "function" then
+        local marker = io.open("/lib64/ld-linux-x86-64.so.2", "rb")
+        if marker then
+            marker:close()
+            architecture = "x86_64"
+        end
+    end
+    if windows then return "windows", architecture end
+    return "linux", architecture
+end
+
+-- Build the startup surface used when this host cannot load a native module.
+--@param none No arguments.
+--@return table native Narrow module admitted by version and help startup.
+local function source_host_native()
+    local operating_system, architecture = source_host_platform()
+    local native = {}
+
+    -- Report the ABI token this release admits.
+    --@param none No arguments.
+    --@return string abi Exact `yaca-native-v0.1.0` token.
+    function native.abi_version()
+        return "yaca-native-v0.1.0"
+    end
+
+    -- Report the source-launch release identity.
+    --@param none No arguments.
+    --@return table identity Operating system and architecture fields only.
+    function native.platform_identity()
+        return { os = operating_system, arch = architecture }
+    end
+
+    -- Report non-TTY descriptor facts.
+    -- Version and help do not require a terminal, and this host cannot ask the bundled module.
+    --@param none No arguments.
+    --@return table facts Explicit stdin, stdout, and stderr TTY flags.
+    function native.stdio_facts()
+        return {
+            stdin_is_tty = false,
+            stdout_is_tty = false,
+            stderr_is_tty = false,
+        }
+    end
+
+    return native
+end
+
+admit_source_module_directory()
+
 local compact = require("compact")
 local session = require("session")
 
@@ -13504,8 +13738,25 @@ default_runtime_dispatch = function(request, runtime)
     return { output = output, exit_value = successful and nil or result }
 end
 
-if MODULE_NAME == nil and _G.YACA_TEST_ROOT == nil then
-    os.exit(M.run_cli(arg), true)
+if running_as_process_entry() then
+    local arguments = process_entry_arguments()
+    local ports
+    if loaded_as_process_script() then
+        install_source_native_cpath()
+        local directory = source_native_directory()
+        local separator = "/"
+        if type(directory) == "string" and directory:find("\\", 1, true) then
+            separator = "\\"
+        end
+        local extension = separator == "\\" and "dll" or "so"
+        local module_path = type(directory) == "string"
+            and (directory .. separator .. "yaca_native." .. extension)
+            or ""
+        if dynamic_loader_disabled(module_path) then
+            ports = { native = source_host_native() }
+        end
+    end
+    os.exit(M.run_cli(arguments, ports), true)
 end
 
 return M

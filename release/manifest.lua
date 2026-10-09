@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-10-05
+Date: 2026-10-09
 File: manifest.lua
 Description: Declares the versioned runtime and release assembly manifest.
 ]]
@@ -69,20 +69,20 @@ return {
 
     dependencies = {
         luainstaller = {
-            version = "1.3.0", tag = "v1.3.0",
-            commit = "97192d1",
-            full_commit = "97192d100077b31b61dc8f94427e14df1c68a9eb",
+            version = "1.5.0", tag = "v1.5.0",
+            commit = "a289a1b",
+            full_commit = "a289a1bed6c6dcf8ad4f11a1d9e28f2f2989adbf",
             downstream_patches = {
                 {
-                    path = "release/patches/luainstaller-1.3.0-resources.patch",
-                    sha256 = "974cf25b51ab644c8af60a7f2524a5670b1fea38e35ad733267ac4775c5d9dff",
+                    path = "release/patches/luainstaller-1.5.0-resources.patch",
+                    sha256 = "25f5816a67a3d65f4a7ef74c9c744493f626b1aa657fb4b6451cd0bfbeb57443",
                     purpose = "explicit-hash-verified-resource-overlay",
-                    applies_to_revision = "97192d100077b31b61dc8f94427e14df1c68a9eb",
+                    applies_to_revision = "a289a1bed6c6dcf8ad4f11a1d9e28f2f2989adbf",
                     base_file_sha256 = {
-                        ["src/init.lua"] = "55694d5e1c349362206e24a3ee8670977e5ea40fd51f0a457b221c95a84fce2d",
+                        ["src/init.lua"] = "aea35743cbeee546fb7c5128f43a2326425020e5a780f4284f2865e8bd54df1c",
                         ["src/manifest.lua"] = "d86f856d0346a5f42a6611532f29f745f4dab10f892bc2cdf25148e134fc3065",
-                        ["src/bundler.lua"] = "502da4a599ee0565d11d6c58455a1834d3333f31f8c247e6ee8260fb1dafcfae",
-                        ["src/onefile.lua"] = "363e9a78d157821be7d6e222a4494c1f65998f5cc920c6f4cfcc0eee01dae610",
+                        ["src/bundler.lua"] = "b8f7fe1a41499c83da8172b935ca9410a9dda3ea7b2a4e87c3ad315afeaf6a17",
+                        ["src/onefile.lua"] = "67edbb961affcc496ad99a1bcdd342f07e0a2c488bed6de3442b8ac23e989a68",
                     },
                 },
             },
@@ -163,7 +163,7 @@ return {
         same_core_for_all_editions = true,
         tool_catalog = "release/tool-bundles.json",
         companion_notices = true,
-        builder = "luainstaller-1.3.0",
+        builder = "luainstaller-1.5.0",
         builder_mode = "onefile-from-qualified-onedir",
         lua_discovery = "manual-exact-allowlist",
         package_assembly = "explicit-files-only",

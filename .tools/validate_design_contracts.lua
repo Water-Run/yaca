@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-10-09
 File: validate_design_contracts.lua
 Description: Checks consistency and fixture coverage across the executable design contracts.
 ]]
@@ -264,8 +264,8 @@ check(product.package_invariants and product.package_invariants.data_root == "ex
 
 -- Release lock, proof pins and implementation module boundary.
 exact_set("release packaging targets", release.packaging and release.packaging.targets or {}, value_list(product.release_targets, "id"))
-check(release.packaging and release.packaging.luainstaller and release.packaging.luainstaller.version == "1.3.0", "luainstaller version must remain 1.3.0")
-check(release.packaging and release.packaging.luainstaller and release.packaging.luainstaller.tag == "v1.3.0" and release.packaging.luainstaller.commit == "97192d1", "luainstaller tag/commit drifted")
+check(release.packaging and release.packaging.luainstaller and release.packaging.luainstaller.version == "1.5.0", "luainstaller version must remain 1.5.0")
+check(release.packaging and release.packaging.luainstaller and release.packaging.luainstaller.tag == "v1.5.0" and release.packaging.luainstaller.commit == "a289a1b", "luainstaller tag/commit drifted")
 check(release.packaging and release.packaging.source_implementation_may_begin_before_target_qualification == true, "source implementation must not be circularly blocked by final qualification")
 check(release.packaging and release.packaging.target_failure_blocks_release == true, "target qualification failure must block release")
 for _, name in ipairs({ "lua", "expat", "luaexpat" }) do

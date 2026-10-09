@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-10-08
+Date: 2026-10-09
 File: bootstrap_test.lua
 Description: Verifies offline bootstrap routing, Agent gates, and bare-draft behavior.
 ]]
@@ -1872,9 +1872,14 @@ return {
                 local machine = table.concat(stdout)
                 A.contains(machine, '"kind":"version"')
                 A.contains(machine, '"outcome":"success"')
+                A.contains(machine, '"version":"1.0.0"')
                 A.contains(machine, '"release_target":"linux-x86_64"')
-                A.equal(calls.platform, 2)
-                A.equal(calls.stdio, 2)
+
+                stdout = {}
+                A.equal(main.run_cli({ [0] = "/opt/yaca", "--version" }, ports), 0)
+                A.equal(table.concat(stdout), "yaca 1.0.0 (linux-x86_64)\n")
+                A.equal(calls.platform, 3)
+                A.equal(calls.stdio, 3)
                 A.equal(calls.paths, 0)
             end,
         },

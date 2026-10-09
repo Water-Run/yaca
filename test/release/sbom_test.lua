@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-10-05
+Date: 2026-10-09
 File: sbom_test.lua
 Description: Verifies dependency provenance, licenses, and deterministic SPDX data.
 ]]
@@ -87,8 +87,8 @@ local function make_plan()
         hash("1")
     )
     launcher.lua_abi = "5.5"
-    launcher.builder_version = "1.3.0"
-    launcher.builder_commit = "97192d100077b31b61dc8f94427e14df1c68a9eb"
+    launcher.builder_version = "1.5.0"
+    launcher.builder_commit = "a289a1bed6c6dcf8ad4f11a1d9e28f2f2989adbf"
     launcher.mode = "onefile"
     launcher.upx = false
     local native = pending_artifact(
@@ -205,7 +205,7 @@ return {
                 A.equal(revisions, 2)
                 A.equal(
                     lock.components.luainstaller.revision,
-                    "97192d100077b31b61dc8f94427e14df1c68a9eb"
+                    "a289a1bed6c6dcf8ad4f11a1d9e28f2f2989adbf"
                 )
                 A.deep_equal(
                     manifest.dependencies.luainstaller.downstream_patches,
@@ -213,7 +213,7 @@ return {
                 )
                 A.equal(
                     lock.components.luainstaller.downstream_patches[1].sha256,
-                    "974cf25b51ab644c8af60a7f2524a5670b1fea38e35ad733267ac4775c5d9dff"
+                    "25f5816a67a3d65f4a7ef74c9c744493f626b1aa657fb4b6451cd0bfbeb57443"
                 )
                 A.equal(lock.components.curl.version, "8.21.0")
                 A.equal(

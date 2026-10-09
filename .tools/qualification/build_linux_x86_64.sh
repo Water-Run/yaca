@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Author: WaterRun
-# Date: 2026-10-05
+# Date: 2026-10-09
 # File: build_linux_x86_64.sh
 # Description: Builds pinned Linux candidates and records dependency, ABI and test evidence.
 
@@ -94,7 +94,7 @@ LUAEXPAT_ARCHIVE="$SOURCE_CACHE/luaexpat-1.5.2.tar.gz"
 CURL_ARCHIVE="$SOURCE_CACHE/curl-8.21.0.tar.xz"
 MBEDTLS_ARCHIVE="$SOURCE_CACHE/mbedtls-3.6.7.tar.bz2"
 CA_BUNDLE="$SOURCE_CACHE/cacert-2026-08-13.pem"
-LUAINSTALLER_ARCHIVE="$SOURCE_CACHE/luainstaller-97192d1.tar.gz"
+LUAINSTALLER_ARCHIVE="$SOURCE_CACHE/luainstaller-a289a1b.tar.gz"
 
 # Verify one source archive or patch against its pinned digest.
 #@param 1 string Input file path.
@@ -117,7 +117,7 @@ verify_sha256 "$LUAEXPAT_ARCHIVE" 89d83f2141edec31be576425637216928221918fe95dc3
 verify_sha256 "$CURL_ARCHIVE" aa1b66a70eace83dc624508745646c08ae561de512ab403adffb93ac87fc72e6
 verify_sha256 "$MBEDTLS_ARCHIVE" a7e8bcbec0e6f761b4af24f25677626b35f762f68eef79c08677a363212d11f6
 verify_sha256 "$CA_BUNDLE" f66dff1bdf8f96060b8177976f8b7d9254bc89bc4db933d769f7384d28480bc9
-verify_sha256 "$LUAINSTALLER_ARCHIVE" 9591cfa9c882c8b110a3aa10dc0a1de22f55ef70a26cf21ee4c087cf879423c2
+verify_sha256 "$LUAINSTALLER_ARCHIVE" 186508eaedd5532cb59d7ee4a905d7d824e0ce82f68fc0ce5b13a4259dcf11b4
 
 YACA_SOURCE="$WORK_ROOT/yaca"
 LUAINSTALLER_SOURCE="$WORK_ROOT/luainstaller"
@@ -131,17 +131,17 @@ tar -xJf "$CURL_ARCHIVE" -C "$WORK_ROOT"
 tar -xjf "$MBEDTLS_ARCHIVE" -C "$WORK_ROOT"
 
 verify_sha256 "$LUAINSTALLER_SOURCE/src/init.lua" \
-  55694d5e1c349362206e24a3ee8670977e5ea40fd51f0a457b221c95a84fce2d
+  aea35743cbeee546fb7c5128f43a2326425020e5a780f4284f2865e8bd54df1c
 verify_sha256 "$LUAINSTALLER_SOURCE/src/manifest.lua" \
   d86f856d0346a5f42a6611532f29f745f4dab10f892bc2cdf25148e134fc3065
 verify_sha256 "$LUAINSTALLER_SOURCE/src/bundler.lua" \
-  502da4a599ee0565d11d6c58455a1834d3333f31f8c247e6ee8260fb1dafcfae
+  b8f7fe1a41499c83da8172b935ca9410a9dda3ea7b2a4e87c3ad315afeaf6a17
 verify_sha256 "$LUAINSTALLER_SOURCE/src/onefile.lua" \
-  363e9a78d157821be7d6e222a4494c1f65998f5cc920c6f4cfcc0eee01dae610
-verify_sha256 "$YACA_SOURCE/release/patches/luainstaller-1.3.0-resources.patch" \
-  974cf25b51ab644c8af60a7f2524a5670b1fea38e35ad733267ac4775c5d9dff
+  67edbb961affcc496ad99a1bcdd342f07e0a2c488bed6de3442b8ac23e989a68
+verify_sha256 "$YACA_SOURCE/release/patches/luainstaller-1.5.0-resources.patch" \
+  25f5816a67a3d65f4a7ef74c9c744493f626b1aa657fb4b6451cd0bfbeb57443
 patch --batch --forward --fuzz=0 -d "$LUAINSTALLER_SOURCE" -p1 \
-  -i "$YACA_SOURCE/release/patches/luainstaller-1.3.0-resources.patch" \
+  -i "$YACA_SOURCE/release/patches/luainstaller-1.5.0-resources.patch" \
   >"$LOG_ROOT/luainstaller-patch.log" 2>&1
 
 COMMON_CFLAGS="-O2 -pipe -fPIC -march=x86-64 -mtune=generic -fno-strict-aliasing"
@@ -387,8 +387,8 @@ ldd "$NATIVE_OUTPUT" "$LXP_OUTPUT" "$ARTIFACT_ROOT/curl" \
   echo "build_jobs=1"
   echo "yaca_revision=$YACA_REVISION"
   echo "yaca_archive_sha256=$YACA_ARCHIVE_SHA256"
-  echo "luainstaller_revision=97192d100077b31b61dc8f94427e14df1c68a9eb"
-  echo "luainstaller_patch_sha256=974cf25b51ab644c8af60a7f2524a5670b1fea38e35ad733267ac4775c5d9dff"
+  echo "luainstaller_revision=a289a1bed6c6dcf8ad4f11a1d9e28f2f2989adbf"
+  echo "luainstaller_patch_sha256=25f5816a67a3d65f4a7ef74c9c744493f626b1aa657fb4b6451cd0bfbeb57443"
   echo "lua=5.5.1"
   echo "expat=2.8.2"
   echo "luaexpat=1.5.2"

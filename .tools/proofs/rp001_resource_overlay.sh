@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Author: WaterRun
-# Date: 2026-09-23
+# Date: 2026-10-09
 # File: rp001_resource_overlay.sh
 # Description: Builds and checks the pinned luainstaller resource-overlay patch on the host.
 
@@ -25,10 +25,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
-LUAINSTALLER_REVISION=97192d100077b31b61dc8f94427e14df1c68a9eb
+LUAINSTALLER_REVISION=a289a1bed6c6dcf8ad4f11a1d9e28f2f2989adbf
 LUAINSTALLER_URL=https://github.com/Water-Run/luainstaller.git
-PATCH_PATH="$REPO_ROOT/release/patches/luainstaller-1.3.0-resources.patch"
-PATCH_SHA256=974cf25b51ab644c8af60a7f2524a5670b1fea38e35ad733267ac4775c5d9dff
+PATCH_PATH="$REPO_ROOT/release/patches/luainstaller-1.5.0-resources.patch"
+PATCH_SHA256=25f5816a67a3d65f4a7ef74c9c744493f626b1aa657fb4b6451cd0bfbeb57443
 LUA_VERSION=5.5.1
 LUA_SHA256=1c4b4068d67061f2a2231ad2b5422e77acea1487ea9890f6320af614f4373dce
 LUA_URL=https://www.lua.org/ftp/lua-5.5.1.tar.gz
@@ -66,7 +66,7 @@ if [[ -z "$SOURCE_REPOSITORY" && -d "$REPO_ROOT/../luainstaller/.git" ]]; then
   SOURCE_REPOSITORY="$REPO_ROOT/../luainstaller"
 fi
 if [[ -z "$SOURCE_REPOSITORY" ]]; then
-  run_logged git clone --branch v1.3.0 --depth 1 "$LUAINSTALLER_URL" "$WORK_DIR/repository"
+  run_logged git clone --branch v1.5.0 --depth 1 "$LUAINSTALLER_URL" "$WORK_DIR/repository"
   SOURCE_REPOSITORY="$WORK_DIR/repository"
 fi
 if ! git -C "$SOURCE_REPOSITORY" cat-file -e "$LUAINSTALLER_REVISION^{commit}" 2>/dev/null; then
@@ -80,16 +80,16 @@ git -C "$SOURCE_REPOSITORY" archive "$LUAINSTALLER_REVISION" \
 
 verify_sha256 \
   "$WORK_DIR/upstream/src/init.lua" \
-  55694d5e1c349362206e24a3ee8670977e5ea40fd51f0a457b221c95a84fce2d
+  aea35743cbeee546fb7c5128f43a2326425020e5a780f4284f2865e8bd54df1c
 verify_sha256 \
   "$WORK_DIR/upstream/src/manifest.lua" \
   d86f856d0346a5f42a6611532f29f745f4dab10f892bc2cdf25148e134fc3065
 verify_sha256 \
   "$WORK_DIR/upstream/src/bundler.lua" \
-  502da4a599ee0565d11d6c58455a1834d3333f31f8c247e6ee8260fb1dafcfae
+  b8f7fe1a41499c83da8172b935ca9410a9dda3ea7b2a4e87c3ad315afeaf6a17
 verify_sha256 \
   "$WORK_DIR/upstream/src/onefile.lua" \
-  363e9a78d157821be7d6e222a4494c1f65998f5cc920c6f4cfcc0eee01dae610
+  67edbb961affcc496ad99a1bcdd342f07e0a2c488bed6de3442b8ac23e989a68
 verify_sha256 "$PATCH_PATH" "$PATCH_SHA256"
 run_logged patch --batch --forward --fuzz=0 -d "$WORK_DIR/upstream" -p1 -i "$PATCH_PATH"
 
