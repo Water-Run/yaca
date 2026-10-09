@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-10-09
 File: launcher.lua
 Description: Composes the locked official Lua interpreter and application entry points.
 ]]
@@ -10,6 +10,9 @@ local M = {}
 ---Embeds the upstream interpreter in the generated application translation unit.
 -- The caller supplies lua.c from the same verified source tree as the linked
 -- runtime. No second runtime, executable, module loader, or script parser exists.
+-- luainstaller 1.5.0 declares a minimal Lua API for its stock launcher. This
+-- unit also compiles the official interpreter, so that declaration is replaced
+-- with the real public headers before the two copies could disagree.
 --@param application string Generated luainstaller launcher source.
 --@param interpreter string Unmodified locked Lua src/lua.c source.
 --@param entry string native/yaca_entry.c source.
@@ -22,6 +25,12 @@ function M.wrap(application, interpreter, entry, headers)
         "locked application entry point changed")
     assert(interpreter:find("int main %(int argc, char %*%*argv%)"),
         "locked Lua interpreter entry point changed")
+    local replaced
+    application, replaced = application:gsub(
+        '\n#include "lua_min.h"\n',
+        '\n#include "lua.h"\n#include "lauxlib.h"\n#include "lualib.h"\n',
+        1)
+    assert(replaced == 1, "locked launcher no longer includes lua_min.h once")
     -- Installed Lua prefixes expose only public headers. Inline the two
     -- private headers from the verified source tree for both platform builds.
     for name, key in pairs({ ["lprefix.h"] = "prefix", ["llimits.h"] = "limits" }) do
