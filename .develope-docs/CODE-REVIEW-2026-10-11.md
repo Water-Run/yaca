@@ -72,6 +72,25 @@ R91 完整 readiness PASS，结构 266 文件 / 5741 声明 / 0 缺项。
 Windows 真实模型控制台、保留数据升级、最终九包、完整对应来源闭包和剩余全仓语义核对
 仍待完成。Gate R 保持关闭，开发按 D-085 继续。
 
+## R92 原生在线旅程与 Ask 额度、终态
+
+将审批、Lua 执行和跨进程随机 token 校验移至独立的 `terminal_evidence.py`，由 SSH
+和原生 Windows 驱动共用。共享模块在 Python 2.7/3 上可加载，既有 8 个反例通过。
+原生驱动新增显式 `--online`，使用既有隔离配置、真实控制台与 provider；仅在核对
+print(6*7) 的完整审批卡后提交一次允许。独立控制台固定宽度并保留逐阶段屏幕记录。
+
+R90 Win32 核心在 Server 2008 上完成 DeepSeek 真实模型问答、一次 Lua 审批执行、
+记忆 token 重开召回与模式恢复。Qwen 的同类旅程再次得到空白召回，失败证据保留。
+进一步核对发现 `build_ask_activity` 固定传入 1024，覆盖了 Model 的配置额度；
+所以 R91 的 4096/16384 配置差异不是实际 Ask 请求额度差异，之前一次通过不能据此归因。
+
+新增生产组合与 AgentLoop 反例：8192 配置被降为 1024；空白/部分 `length` 响应被记为
+completed；实际 adapter 的 cancelled 响应（incomplete=false）也被记为 completed。
+校准后的基线为 36/39，修复后 39/39。Ask 采用选定 Model 已验证的输出额度，未设置时
+沿用 4096 默认；既有时间和响应字节上限保留。length 记录 budget_exhausted，cancelled
+记录 cancelled，部分 body 按 interrupted 持久化；主轮次和请求身份不受影响。
+完整 Lua suite 733/733，产品源码变动需要新核心重建，R90 的 730/730 不代替该修复验收。
+
 ## R87 已释放终端的收尾确认
 
 R84 保留了首次 restore 错误的优先级，即使随后 native close 已完成实际恢复和关闭。

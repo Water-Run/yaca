@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-10-11
 File: production_agent_composition_test.lua
 Description: Verifies the production first-turn Agent composition and durable ordering.
 ]]
@@ -202,7 +202,7 @@ local function fixture(settings)
                 remote_model = "primary-remote",
                 key_configured = true,
                 context_length = 16000,
-                max_output_tokens = 1024,
+                max_output_tokens = settings.model_output_tokens or 1024,
                 system_prompt = "model",
                 streaming = "try",
                 tools_enabled = true,
@@ -1158,10 +1158,11 @@ local function fixture(settings)
             log[#log + 1] = "model-builder"
             return {}
         end,
-        --Constructs new ask request builder for this test scenario.
-        --@param ports table Ports supplied to the component under test.
-        --@param options table|nil Options configuring the exercised component.
-        --@return table record Fixture record emitted by the scenario callback.
+        -- Validate the production Ask composition and capture its actual Model output allowance.
+        --@param ports table Fresh generation and dependencies passed by the production composition root.
+        --@param options table Bound Ask identities, time limit and selected output-token limit.
+        --@return table builder Empty scripted builder accepted by the following activity fixture.
+        --@effect Records builder ordering and the admitted output allowance in the case-owned settings.
         new_ask_request_builder = function(ports, options)
             A.equal(ports.generation.id, "config-generation-2")
             A.equal(options.model_name, "Primary")
@@ -1169,7 +1170,8 @@ local function fixture(settings)
             A.equal(options.prompt_snapshot, "ask-prompt-snapshot-2")
             A.equal(options.tool_registry_snapshot, "registry-1")
             A.equal(options.maximum_request_time_ms, 120000)
-            A.equal(options.maximum_output_tokens, 1024)
+            A.equal(options.maximum_output_tokens, ports.generation.models.Primary.max_output_tokens or 4096)
+            settings.observed_ask_output_tokens = options.maximum_output_tokens
             log[#log + 1] = "ask-model-builder"
             return {}
         end,
@@ -2568,6 +2570,26 @@ return {
                 end
                 A.equal(tool_builds, 1)
                 A.truthy(ask_builder_index < ask_activity_index)
+            end,
+        },
+        {
+            name = "Ask composition retains the configured Model output budget",
+            -- Exercise the actual production Ask boundary with both a reasoning-sized budget and a tightened budget.
+            --@param none No arguments; every case owns a fresh generation and production composition fixture.
+            --@return nil No value; assertions require the configured limit to reach the request builder unchanged.
+            --@effect Starts only scripted ports; no network or native process runs.
+            run = function()
+                for _, budget in ipairs({ 8192, 512 }) do
+                    local settings = { model_output_tokens = budget }
+                    local f = fixture(settings)
+                    assert(f.main.start_published_agent(f.composed, f.chat, "implement the project", "terminal"))
+                    assert(f.capture({
+                        kind = "ask", text = "inspect durable facts", source = "terminal",
+                        context_generation = 2, active_turn_id = "turn-1", cause = { kind = "ask" },
+                    }))
+                    A.truthy(f.start_ask_model())
+                    A.equal(settings.observed_ask_output_tokens, budget)
+                end
             end,
         },
         {

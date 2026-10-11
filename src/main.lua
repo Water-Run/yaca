@@ -2896,8 +2896,10 @@ end
 --@param ask table Frozen Ask Model selection and Context identity.
 --@return table|nil activity Ask generation and Model activity.
 --@return table|nil err Structured builder or transport failure.
+--@effect Applies the selected Model's validated output limit while preserving Ask time and response-byte caps.
 local function build_ask_activity(composed, ask)
     local model_module = require("model")
+    local selected_model = ask.generation.models[ask.model]
     local views = readonly({
         resolve_view = composed.publication.resolve_view,
     }, "durable ask Model views")
@@ -2920,7 +2922,7 @@ local function build_ask_activity(composed, ask)
         default_connect_timeout_ms = 120000,
         maximum_request_time_ms = AGENT_RELEASE_OPTIONS.runtime.lanes.ask_active_time_ms,
         default_retry_base_delay_ms = 1000,
-        maximum_output_tokens = 1024,
+        maximum_output_tokens = selected_model and selected_model.max_output_tokens or 4096,
     })
     if not request_builder then return nil, builder_error end
     local activity_options, activity_options_error = scoped_model_activity_options(

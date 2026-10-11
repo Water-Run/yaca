@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-30
+Date: 2026-10-11
 File: review_queue_ask_test.lua
 Description: Verifies C27 review isolation and the queue, steer, and ask lanes.
 ]]
@@ -329,17 +329,17 @@ local function call(name, serial)
     }
 end
 
---Simulates the response port for this suite.
---@param request_id string|integer Request identity being completed.
---@param settings table|nil Fixture settings and scenario overrides.
---@return table observed Structured fixture record selected by the exercised branch.
+-- Build a canonical response wrapper with explicit text, terminal class and optional tool/control facts.
+--@param request_id string Bound request identity being completed.
+--@param settings table|nil Body, digest, finish_class, incomplete and tool/control overrides for one scenario.
+--@return table wrapper Canonical body/digest and normalized terminal response used by the actual loop.
 local function response(request_id, settings)
     settings = settings or {}
     local calls = settings.calls or {}
     local normalized = {
         content_blocks = {},
         tool_calls = calls,
-        finish_class = #calls > 0 and "tool_calls" or "stop",
+        finish_class = settings.finish_class or (#calls > 0 and "tool_calls" or "stop"),
         incomplete = settings.incomplete == true,
         tool_calls_validated = settings.incomplete ~= true,
         execution_admitted = false,
@@ -674,6 +674,56 @@ return {
                 A.equal(f.loop:status().state, "RequestingModel")
                 A.falsy(f.loop:status().turn_id == main_turn)
                 A.equal(f.snapshots[#f.snapshots].text, "ask answer")
+            end,
+        },
+        {
+            name = "provider output exhaustion retains partial Ask text without claiming completion",
+            -- Accept canonical length termination while keeping the main turn and its request untouched.
+            --@param none No arguments; isolated fixtures cover both empty and visible truncated answers.
+            --@return nil No value; assertions require budget_exhausted, interrupted durable text and an explicit error identity.
+            --@effect Appends only in-memory fixture events and invokes no tools or network.
+            run = function()
+                for _, body in ipairs({ "", "partial answer" }) do
+                    local f = fixture()
+                    assert(f.loop:submit_main(observed(f.loop, { text = "main", source = "user" })))
+                    local main_turn = f.loop:status().turn_id
+                    local main_request = f.loop:status().active_request_id
+                    local ask = assert(f.loop:start_ask(observed(f.loop, { text = "question", source = "user" })))
+                    local result = assert(f.loop:accept_ask_response(ask.ask_id, response(
+                        ask.request_id, { body = body, finish_class = "length" }
+                    )))
+                    A.equal(result.outcome, "budget_exhausted")
+                    A.equal(f.loop:status().turn_id, main_turn)
+                    A.equal(f.loop:status().active_request_id, main_request)
+                    A.equal(f.loop:status().ask_state, "idle")
+                    local messages = event_fields(f.events, "model_message")
+                    A.equal(messages[#messages].status, "interrupted")
+                    A.equal(messages[#messages].body, body)
+                    local endings = event_fields(f.events, "turn_ended")
+                    A.equal(endings[#endings].errorId, "AskBudgetExhausted")
+                end
+            end,
+        },
+        {
+            name = "canonical cancelled Ask settlement preserves its terminal class",
+            -- Match the actual adapter's cancelled response, whose incomplete flag remains false.
+            --@param none No arguments; one fixture retains an asynchronously cancelled Ask and a live main turn.
+            --@return nil No value; assertions require cancelled outcome and interrupted durable response metadata.
+            --@effect Records only synthetic durable events and port observations.
+            run = function()
+                local f = fixture({ ask_cancel = { outcome = "pending" } })
+                assert(f.loop:submit_main(observed(f.loop, { text = "main", source = "user" })))
+                local ask = assert(f.loop:start_ask(observed(f.loop, { text = "question", source = "user" })))
+                assert(f.loop:cancel_ask(observed(f.loop, { ask_id = ask.ask_id, reason = "user-cancel" })))
+                local result = assert(f.loop:settle_ask_cancel({
+                    ask_id = ask.ask_id, request_id = ask.request_id, outcome = "cancelled",
+                    response = response(ask.request_id, { body = "partial", finish_class = "cancelled" }),
+                }))
+                A.equal(result.outcome, "cancelled")
+                local messages = event_fields(f.events, "model_message")
+                A.equal(messages[#messages].status, "interrupted")
+                local endings = event_fields(f.events, "turn_ended")
+                A.equal(endings[#endings].errorId, "AskCancelled")
             end,
         },
         {

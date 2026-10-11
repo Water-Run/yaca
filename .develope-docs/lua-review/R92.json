@@ -1,0 +1,220 @@
+{
+  "schema": "yaca-source-review-v1",
+  "review": "R92",
+  "date": "2026-10-11",
+  "source_base": "d3045f8",
+  "status": "regression-pass",
+  "qualification": "pending",
+  "release_authorized": false,
+  "whole_repository_semantic_review": "partial",
+  "baseline": {
+    "total": 39,
+    "passed": 36,
+    "failed": 3
+  },
+  "after": {
+    "total": 39,
+    "passed": 39,
+    "failed": 0
+  },
+  "full_suite": {
+    "total": 733,
+    "passed": 733,
+    "failed": 0
+  },
+  "readiness": {
+    "status": "PASS",
+    "files": 267,
+    "declarations": 5745,
+    "violations": 0
+  },
+  "changes": [
+    "Ask uses the selected validated Model output allowance, defaulting to 4096.",
+    "Provider length and cancelled terminal responses no longer become completed Ask outcomes.",
+    "Partial terminal text is committed as interrupted while main-turn identity stays unchanged.",
+    "Native Windows and SSH drivers share Python 2/3 evidence checks; native online journeys require explicit --online."
+  ],
+  "evidence_correction": "R90 Ask transmitted at most 1024 tokens even when configuration said 16384; previous passing runs do not prove a larger effective Ask allowance.",
+  "native_discovery": {
+    "core_source": "b81d828",
+    "win32_deepseek": "PASS",
+    "win32_qwen": "empty recall, FAIL"
+  },
+  "manual_review": [
+    "selected generation to Ask builder limit propagation",
+    "Ask canonical terminal-class classification, partial persistence and main-turn isolation",
+    "shared approval/execution/recall checks and explicit native online input sequence"
+  ],
+  "boundaries": [
+    "Corrected product source requires core rebuilding and renewed target journeys.",
+    "Final edition assembly, upgrade, complete corresponding sources and remaining semantic review are pending."
+  ],
+  "evidence_root": "out/review-20261011/r92/frozen",
+  "files": [
+    {
+      "path": "src/main.lua",
+      "bytes": 628848,
+      "sha256": "4f5d6f5ba412cf2ce678a4cde7a8be2dd746efb71573f6f299f17d4651838a01"
+    },
+    {
+      "path": "src/runtime.lua",
+      "bytes": 262491,
+      "sha256": "0328e52b0aac013d11ea1527be7e37058801277ea36a517f2bc51df2f701d528"
+    },
+    {
+      "path": ".tools/qualification/terminal_evidence.py",
+      "bytes": 5470,
+      "sha256": "1d44dbc17ea135fe20c8eb5d33eeaa20b9453a1013def7e8cea9b4bab2180263"
+    },
+    {
+      "path": ".tools/qualification/agent_terminal_smoke.py",
+      "bytes": 11525,
+      "sha256": "e3f4e51f4873a475b937c1436bbd3b9d28605fe58d165d7b1e65146f1a34de30"
+    },
+    {
+      "path": ".tools/qualification/windows_console_agent_smoke.py",
+      "bytes": 26147,
+      "sha256": "fbe3ef0cec48fb83349b1a83385b76591770ce633fe4af7735056ae944108de2"
+    },
+    {
+      "path": "test/integration/production_agent_composition_test.lua",
+      "bytes": 142074,
+      "sha256": "ffefc31259b9ebf93d261d4d23b91fec691b7234a755d98f031d99e8553a6f32"
+    },
+    {
+      "path": "test/integration/review_queue_ask_test.lua",
+      "bytes": 41613,
+      "sha256": "38ccdd4eb601bc91cf0bc8abbc7edde98aaea7d0939bb3c3e6cc58b7acd8a524"
+    },
+    {
+      "path": "test/qualification/terminal_approval_test.py",
+      "bytes": 7142,
+      "sha256": "89b37fd5750ab2cab340e0eafcb4cfe8b13f91b845e13b281d4c289e01cac4a1"
+    },
+    {
+      "path": "out/review-20261011/r92/baseline/main.lua",
+      "bytes": 628621,
+      "sha256": "b7a809297c3348bf7cdc2508c11f45e4a571daab004b5f7fda6fd530f79c7ee4"
+    },
+    {
+      "path": "out/review-20261011/r92/baseline/runtime.lua",
+      "bytes": 262013,
+      "sha256": "9e0d99ac52ddc5a3494398041bb28220d9d6485ee903c6cd8d76468a03f9d539"
+    },
+    {
+      "path": "out/review-20261011/r92/ask-budget-baseline.log",
+      "bytes": 6704,
+      "sha256": "800e1fb0dc68f9d2adf33e49e55b503be4edd2afeb4ca896589dba502cdf3e7b"
+    },
+    {
+      "path": "out/review-20261011/r92/ask-budget-after.log",
+      "bytes": 4717,
+      "sha256": "c6bb269e1d9a80ae6e81f4e217e0e630894126cdb831564144bca99390222285"
+    },
+    {
+      "path": "out/review-20261011/r92/full-suite.log",
+      "bytes": 73281,
+      "sha256": "2691154bcd233d2dd79cb973bcc9bfc1ff8e351948f1efd46106c91bf74c285d"
+    },
+    {
+      "path": "out/review-20261011/r92/coding-readiness.log",
+      "bytes": 4565,
+      "sha256": "e044da020d301e02f6bdf55e14e986fe74c45856a318d8c96a2f9c6d4c7fd6d3"
+    },
+    {
+      "path": "out/review-20261011/r92/attempt2/native-online-results.json",
+      "bytes": 1175,
+      "sha256": "d6202166b6442833b5e244c85f18bb7f4499d7537020822f84f9990a66c9deb1"
+    },
+    {
+      "path": "out/review-20261011/r92/attempt2/evidence/win32-x86-deepseek/durable-token-turn.txt",
+      "bytes": 3704,
+      "sha256": "fb291ea531d3d330d149c811372cb5dc983cb991166f10ac0546bc9b8608a4b0"
+    },
+    {
+      "path": "out/review-20261011/r92/attempt2/evidence/win32-x86-deepseek/first-ask.txt",
+      "bytes": 1173,
+      "sha256": "519c46f957b99ab0010bc307bb8bb42d8608d319c44d91e09d7a3d29806bffe9"
+    },
+    {
+      "path": "out/review-20261011/r92/attempt2/evidence/win32-x86-deepseek/online-reopened-screen-state.txt",
+      "bytes": 337,
+      "sha256": "2bca696672f662fdf2c65fce080c3e88b4532acd253d4c4c15c9faa449cb552d"
+    },
+    {
+      "path": "out/review-20261011/r92/attempt2/evidence/win32-x86-deepseek/online-reopened-screen.txt",
+      "bytes": 740,
+      "sha256": "a74848d27ae5b3ba5419871399d21f0fce16c2bdbd01eed30cfc989d0775f0c0"
+    },
+    {
+      "path": "out/review-20261011/r92/attempt2/evidence/win32-x86-deepseek/online-screen-state.txt",
+      "bytes": 339,
+      "sha256": "fbe48636a1a6c9433e23707b2ed939b7d1ef2ee9b5478c344f6f80c7ae45a714"
+    },
+    {
+      "path": "out/review-20261011/r92/attempt2/evidence/win32-x86-deepseek/online-screen.txt",
+      "bytes": 3748,
+      "sha256": "4383b3d54d3a47b08db3b8fee2877c52a178cf48120c34f06d9b854212b43f1d"
+    },
+    {
+      "path": "out/review-20261011/r92/attempt2/evidence/win32-x86-deepseek/result.txt",
+      "bytes": 120,
+      "sha256": "b92f5697ed4bf6ad2a3550517a964c4ad0ac0dd36f803f4dc028189a094c8937"
+    },
+    {
+      "path": "out/review-20261011/r92/attempt2/evidence/win32-x86-deepseek/verified-approval.txt",
+      "bytes": 2064,
+      "sha256": "d5db2d03fbc01ea5a81738201ed610efd6882b5cac4e00e15ebd17c8e26939da"
+    },
+    {
+      "path": "out/review-20261011/r92/attempt2/evidence/win32-x86-deepseek/verified-lua-execution.txt",
+      "bytes": 3188,
+      "sha256": "db876b6e37eb84a5eccd77b89eb9a172b99839661fab77f524cd4407ea22b362"
+    },
+    {
+      "path": "out/review-20261011/r92/attempt2/evidence/win32-x86-deepseek/verified-recall.txt",
+      "bytes": 696,
+      "sha256": "ce6e2877f4a4a56391551f84dffef2fbcc6eeec547c1939e79fbe04778022565"
+    },
+    {
+      "path": "out/review-20261011/r92/attempt2/evidence/win32-x86-qwen/durable-token-turn.txt",
+      "bytes": 3226,
+      "sha256": "0ba51becddfb9dcbbe380cc320713cbedab6388b3cd48c2103c885e06a785924"
+    },
+    {
+      "path": "out/review-20261011/r92/attempt2/evidence/win32-x86-qwen/first-ask.txt",
+      "bytes": 1155,
+      "sha256": "0dfd9cc4b5df1f7f19424028635aff52b85cff52082c5ded534fccf842819c10"
+    },
+    {
+      "path": "out/review-20261011/r92/attempt2/evidence/win32-x86-qwen/online-reopened-screen-state.txt",
+      "bytes": 337,
+      "sha256": "8ca18f6a0239fc1ae890547973e5bd53e21569bd01dc00b41a62e10137b4560d"
+    },
+    {
+      "path": "out/review-20261011/r92/attempt2/evidence/win32-x86-qwen/online-reopened-screen.txt",
+      "bytes": 643,
+      "sha256": "c8ec457354b51019dcdd8ea060a278c387e9247168fcd8cfc861cac843274cac"
+    },
+    {
+      "path": "out/review-20261011/r92/attempt2/evidence/win32-x86-qwen/online-screen-state.txt",
+      "bytes": 339,
+      "sha256": "77922450fa09e297175e3098b6f6fb67c209024bcf07a65e63582b128c14e517"
+    },
+    {
+      "path": "out/review-20261011/r92/attempt2/evidence/win32-x86-qwen/online-screen.txt",
+      "bytes": 3270,
+      "sha256": "f2109fc6aa9276f9b4db72b26f0c35f150230467d35ec0b670b37fffb8382e4c"
+    },
+    {
+      "path": "out/review-20261011/r92/attempt2/evidence/win32-x86-qwen/verified-approval.txt",
+      "bytes": 2049,
+      "sha256": "ef6b2387dfb449d66b43850b519603bb905c97b5f8197c1599b8c5407b5a5467"
+    },
+    {
+      "path": "out/review-20261011/r92/attempt2/evidence/win32-x86-qwen/verified-lua-execution.txt",
+      "bytes": 2705,
+      "sha256": "34b4328bb93fbc9449da6bfc5d3cd0b47b1329036e887c4dfe993ccec06d0745"
+    }
+  ]
+}

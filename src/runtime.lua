@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-30
+Date: 2026-10-11
 File: runtime.lua
 Description: Owns the bounded single-threaded event pump and runtime primitives.
 ]]
@@ -4054,12 +4054,13 @@ function M.new_agent_loop(ports, options)
         }, nil, "canonical ask event"))
     end
 
-    ---Accepts one bounded canonical direct response and terminates the ask turn.
+    ---Accepts one bounded canonical direct response and preserves its actual terminal class.
     --@param self table AgentLoop instance.
     --@param ask_id string Active Ask turn identity.
     --@param wrapper table Canonical Model response wrapper.
-    --@return table|nil outcome Immutable completed or error Ask result.
+    --@return table|nil outcome Immutable completed, cancelled, budget-exhausted or error Ask result.
     --@return table|nil err Structured stale, clock, or durability failure.
+    --@effect Commits partial text as interrupted for cancellation or provider output exhaustion without changing the main turn.
     function loop:accept_ask_response(ask_id, wrapper)
         if halted then return nil, halt_error end
         if not ask or ask.id ~= ask_id then
@@ -4091,9 +4092,15 @@ function M.new_agent_loop(ports, options)
         local response_message_id = ask.id .. ":message:" .. tostring(message_serial)
         local outcome = "completed"
         local error_id
-        if wrapper.normalized.incomplete then
-            outcome = wrapper.normalized.finish_class == "cancelled" and "cancelled" or "error"
-            error_id = outcome == "cancelled" and "AskCancelled" or "AskResponseIncomplete"
+        local reason = wrapper.normalized.incomplete_reason or "ask-response"
+        if wrapper.normalized.finish_class == "cancelled" then
+            outcome, error_id = "cancelled", "AskCancelled"
+            reason = wrapper.normalized.incomplete_reason or ask.cancel_reason or "ask-cancelled"
+        elseif wrapper.normalized.finish_class == "length" then
+            outcome, error_id = "budget_exhausted", "AskBudgetExhausted"
+            reason = "ask-model-output-limit"
+        elseif wrapper.normalized.incomplete then
+            outcome, error_id = "error", "AskResponseIncomplete"
         end
         local receipt, commit_error = commit_events({ {
             type = "model_message",
@@ -4102,7 +4109,7 @@ function M.new_agent_loop(ports, options)
                 messageId = response_message_id,
                 requestId = ask.request_id,
                 role = "assistant",
-                status = wrapper.normalized.incomplete and "interrupted" or "complete",
+                status = outcome ~= "completed" and "interrupted" or "complete",
                 body = wrapper.canonical_body,
                 rawBytes = tostring(#wrapper.canonical_body),
                 digest = wrapper.canonical_digest,
@@ -4111,7 +4118,7 @@ function M.new_agent_loop(ports, options)
         if not receipt then return nil, commit_error end
         return finish_ask(
             outcome,
-            wrapper.normalized.incomplete_reason or "ask-response",
+            reason,
             error_id,
             {
                 message_id = response_message_id,

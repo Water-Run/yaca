@@ -10,7 +10,7 @@ import pathlib
 import unittest
 
 ROOT=pathlib.Path(__file__).resolve().parents[2]
-SPEC=importlib.util.spec_from_file_location('agent_terminal_smoke',ROOT/'.tools/qualification/agent_terminal_smoke.py')
+SPEC=importlib.util.spec_from_file_location('agent_terminal_smoke',ROOT/'.tools/qualification/terminal_evidence.py')
 TERMINAL=importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(TERMINAL)
 

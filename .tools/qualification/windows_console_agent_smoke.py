@@ -2,16 +2,18 @@
 # Author: WaterRun
 # Date: 2026-10-11
 # File: windows_console_agent_smoke.py
-# Description: Native Windows console journey with an in-process, credential-free mock API.
+# Description: Native Windows console setup and authorized online Agent journeys with recorded approvals, persistence and console restoration.
 
-"""Native Windows console journey with an in-process, credential-free mock API.
+"""Native Windows console setup and explicitly authorized online journeys.
 
 Supply a new candidate directory containing only yaca.exe. Tests first setup,
 pure Ask, persistence/reopen and console mode restoration. No real model is used.
 Run with Python 2.7 or 3 on the target Windows machine.
+With --online, use an already configured isolated directory and its real model.
 """
 from __future__ import print_function
 import argparse
+import binascii
 import ctypes as C
 from ctypes import wintypes as W
 import json
@@ -20,6 +22,7 @@ import re
 import subprocess
 import threading
 import time
+from terminal_evidence import verify_lua_approval, verify_lua_execution, verify_recalled_token
 try:
     from BaseHTTPServer import HTTPServer, BaseHTTPRequestHandler
 except ImportError:
@@ -60,10 +63,10 @@ class SCREEN(C.Structure):
 #@field y DWORD Unused initial window vertical position.
 #@field width DWORD Unused initial window width.
 #@field height DWORD Unused initial window height.
-#@field columns DWORD Unused requested screen columns.
-#@field rows DWORD Unused requested screen rows.
+#@field columns DWORD Requested 240-column buffer keeps bounded approval arguments on one line.
+#@field rows DWORD Requested 4000-row buffer avoids overwriting this bounded test's output.
 #@field fill DWORD Unused initial console attributes.
-#@field flags DWORD STARTF_USESHOWWINDOW makes the independently created test console hidden.
+#@field flags DWORD STARTF_USESHOWWINDOW and STARTF_USECOUNTCHARS select a hidden bounded test console.
 #@field show WORD SW_HIDE for the test's own console window.
 #@field reserved_size WORD Unused reserved byte count.
 #@field reserved_bytes void* Unused reserved data pointer.
@@ -110,24 +113,29 @@ class INPUT(C.Structure):
     _fields_ = [('type', W.WORD), ('event', EVENT)]
 
 
-# Run offline first setup, pure Ask, reopening and mode checks against the actual onefile in owned consoles.
+# Run offline setup or an explicitly authorized online Agent journey in independent native consoles.
 #@param none No arguments.
-#@return None No value after both actual child sessions and two synthetic responses pass.
+#@return None No value after the selected setup or real-model journey and both child mode checks pass.
 #@error Raises on invalid staging, incorrect request/output, child exit or mode mismatch.
-#@effect Starts a loopback mock HTTP server, writes isolated configuration/evidence and creates hidden native consoles.
+#@effect Offline mode starts a loopback fixture and creates configuration; online mode uses the existing model. Both write bounded evidence and create hidden consoles.
 #@ownership The finally block releases the current child handles and shuts down the owned server/thread.
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('directory')
     parser.add_argument('evidence')
+    parser.add_argument('--online', action='store_true', help='use the existing authorized real model configuration')
     args = parser.parse_args()
     root = os.path.abspath(args.directory)
     if not isinstance(root, text_type): root = root.decode('mbcs')
     evidence = os.path.abspath(args.evidence)
     assert not os.path.exists(evidence), 'evidence directory must be new'
     os.mkdir(evidence)
-    assert not os.path.exists(os.path.join(root, '__yaca__')), 'candidate must be unconfigured'
-    os.mkdir(os.path.join(root, 'workspace'))
+    if args.online:
+        assert os.path.isfile(os.path.join(root, '__yaca__', 'config.ini')), 'online candidate must be configured'
+        assert os.path.isdir(os.path.join(root, 'workspace')), 'online workspace must exist'
+    else:
+        assert not os.path.exists(os.path.join(root, '__yaca__')), 'candidate must be unconfigured'
+        os.mkdir(os.path.join(root, 'workspace'))
     kernel = C.windll.kernel32
     kernel.SetErrorMode(3)
     kernel.CreateFileW.restype = W.HANDLE
@@ -187,10 +195,12 @@ def main():
             self.end_headers()
             self.wfile.write(body)
 
-    server = HTTPServer(('127.0.0.1', 0), Provider)
-    thread = threading.Thread(target=server.serve_forever)
-    thread.daemon = True
-    thread.start()
+    server, thread = None, None
+    if not args.online:
+        server = HTTPServer(('127.0.0.1', 0), Provider)
+        thread = threading.Thread(target=server.serve_forever)
+        thread.daemon = True
+        thread.start()
 
     #@class Console Owns exactly one actual yaca child, its console input/output handles and captured mode baseline.
     #@field name str Safe probe label for the evidence filenames.
@@ -211,7 +221,8 @@ def main():
             self.name, self.input, self.output = name, None, None
             self.process = PROCESS()
             startup = STARTUP(); startup.cb = C.sizeof(startup)
-            startup.flags = 1; startup.show = 0
+            startup.flags = 9; startup.show = 0
+            startup.columns = 240; startup.rows = 4000
             command = C.create_unicode_buffer(subprocess.list2cmdline(
                 [os.path.join(root, 'yaca.exe')] + arguments))
             assert kernel.CreateProcessW(None, command, None, None, False, 0x14,
@@ -275,14 +286,15 @@ def main():
         #@param self Console Actual child owner whose screen is being observed.
         #@param value str Required literal output marker.
         #@param timeout float Maximum wait time in seconds.
+        #@param occurrence int Required marker count in the retained screen tail; defaults to one and prevents old completion markers satisfying later phases.
         #@return str text Screen tail containing the required marker.
         #@error Raises if the child exits or the wall-clock deadline expires before the marker.
         #@effect Polls and records the owned screen without sending input.
-        def expect(self, value, timeout=90):
+        def expect(self, value, timeout=90, occurrence=1):
             end = time.time() + timeout
             while time.time() < end:
                 data = self.screen()
-                if value in data: return data
+                if data.count(value) >= occurrence: return data
                 assert kernel.WaitForSingleObject(self.process.process, 0) == 258, 'child exited before ' + value
                 time.sleep(.05)
             raise AssertionError('console timed out before ' + value)
@@ -332,8 +344,64 @@ def main():
                 if handle and handle != C.c_void_p(-1).value: kernel.CloseHandle(handle)
             kernel.FreeConsole()
 
+    # Preserve one complete observed phase before later screen updates replace the live snapshot.
+    #@param name str Fixed evidence phase basename selected by this driver.
+    #@param screen str|unicode Actual native console text already read from the owned child.
+    #@return None No value; UTF-8 phase evidence is saved once.
+    #@effect Writes only the selected phase file below the new evidence directory.
+    def save_phase(name, screen):
+        path = os.path.join(evidence, name + '.txt')
+        assert not os.path.exists(path)
+        with open(path, 'wb') as stream:
+            stream.write(screen.encode('utf-8'))
+
     child = None
     try:
+        if args.online:
+            child = Console([], 'online')
+            child.expect('>>')
+            child.send('.status'); child.expect('state: draft-ready')
+            child.send('.multiline'); child.expect('Multiline input:')
+            child.send(u'\u4e2d\u6587 input check'); child.send('.show')
+            child.expect(u'\u4e2d\u6587 input check'); child.send('.cancel')
+            child.expect('Multiline draft discarded.')
+            child.send('.ask Reply with exactly: 42. Use no tools.')
+            screen = child.expect('Ask ask-1 outcome: completed', 180)
+            assert re.search(r'\[ASK ask-1\]\s+42\s', screen)
+            assert '[TOOL ' not in screen
+            save_phase('first-ask', screen)
+            child.send('Call the built-in lua tool exactly once with code print(6*7). '
+                       'Report the actual result briefly, then finish. Use no other tool.')
+            screen = child.expect('default: deny', 180)
+            verify_lua_approval(screen.encode('utf-8'))
+            save_phase('verified-approval', screen)
+            child.send('allow approval-1 once')
+            child.expect('Turn outcome: completed', 180)
+            child.send('.ask What was the numeric result? Answer with the number only.')
+            screen = child.expect('Ask ask-2 outcome: completed', 180)
+            assert re.search(r'\[ASK ask-2\]\s+42\s', screen)
+            verify_lua_execution(screen.encode('utf-8'))
+            save_phase('verified-lua-execution', screen)
+            token = 'yaca-memory-' + binascii.hexlify(os.urandom(8)).decode('ascii')
+            child.send('Remember this verification token in this conversation: ' + token
+                       + '. Reply with exactly STORED, then finish. Use no tools.')
+            screen = child.expect('Turn outcome: completed', 180, occurrence=2)
+            match = re.search(r'Context saved:.*\[([A-F0-9]{16})\]', screen)
+            assert match, 'saved Context identity is unavailable'
+            selector = match.group(1)
+            save_phase('durable-token-turn', screen)
+            child.finish(); child.close(); child = None
+            child = Console(['--continue', selector], 'online-reopened')
+            child.expect('>>')
+            child.send('.ask What verification token did I ask you to remember? Reply with the exact token only.')
+            screen = child.expect('Ask ask-3 outcome: completed', 180)
+            verify_recalled_token(screen.encode('utf-8'), token)
+            save_phase('verified-recall', screen)
+            child.finish()
+            with open(os.path.join(evidence, 'result.txt'), 'w') as stream:
+                stream.write('windows-console-agent=PASS provider=real approval=verified lua=once Ask=no-tools Context=nonce-recalled modes=restored\n')
+            print('windows-console-agent=PASS provider=real')
+            return
         child = Console([], 'first-run')
         for prompt, answer in [('Model name', 'ConsoleTest'), ('Protocol (', ''),
                 ('Enable this Model?', ''), ('Endpoint:', 'http://127.0.0.1:%d/chat' % server.server_port),
@@ -364,7 +432,8 @@ def main():
         print('windows-console-agent=PASS')
     finally:
         if child is not None: child.close()
-        server.shutdown(); server.server_close(); thread.join(5)
+        if server is not None:
+            server.shutdown(); server.server_close(); thread.join(5)
 
 
 if __name__ == '__main__':
