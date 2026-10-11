@@ -1,0 +1,323 @@
+{
+  "schema": "yaca-development-core-node-v1",
+  "node": "R90 merged source cores",
+  "date": "2026-10-11",
+  "status": "PASS",
+  "development_paused": false,
+  "source_commit": "b81d828415f3a9e41a7301c30ee6aa62ce1aa8f2",
+  "source_archive_sha256": "4e08a38931f59fe5753dc7e82540ec8efbbc15ad456c50da9e061a2dd3cb7aff",
+  "source_dirty": false,
+  "source_members": 455,
+  "source_scope": "clean b81d828 working tree including all maintained files",
+  "artifact_root": "out/core-node-r90-20261011",
+  "targets": [
+    {
+      "target": "win32-x86",
+      "core_sha256": "e5f680404db9a109bc0b2f64b978660399af369934882a1a03467e5f9557d559",
+      "tests": {
+        "total": 730,
+        "passed": 730,
+        "failed": 0
+      },
+      "environment": "Microsoft Windows [\u7248\u672c 6.0.6003]; designated Windows Server 2008 non-R2 x64, x86 via WOW64",
+      "full_test_scope": "actual onefile embedded Lua executing every frozen source test",
+      "qualification": "pending"
+    },
+    {
+      "target": "win64-x86_64",
+      "core_sha256": "9c871e2087ce95031c0c8d4b2be4ae555b7d26c52a59a95c101d421a9d85f25b",
+      "tests": {
+        "total": 730,
+        "passed": 730,
+        "failed": 0
+      },
+      "environment": "Microsoft Windows NT 10.0.26100.0; x64",
+      "full_test_scope": "actual onefile embedded Lua executing every frozen source test",
+      "qualification": "pending"
+    },
+    {
+      "target": "linux-x86_64",
+      "core_sha256": "c4e53c8b740a942b0ed92e2eaf808957f64ca09e4415b5ab11edcc52e5a0bc37",
+      "tests": {
+        "total": 730,
+        "passed": 730,
+        "failed": 0
+      },
+      "environment": "CentOS 7.9 userspace, GCC 4.8.5-44, glibc 2.17; shared Rocky Linux kernel 6.12.0-211.61.1.el10_2.x86_64",
+      "full_test_scope": "rebuilt C7 interpreter and native components; separate onefile/onedir and ELF/glibc closure checks",
+      "qualification": "pending"
+    }
+  ],
+  "coding_readiness": "PASS",
+  "comment_structure": {
+    "files": 266,
+    "declarations": 5740,
+    "violations": 0
+  },
+  "whole_repository_semantic_review": "partial",
+  "release_authorized": false,
+  "target_qualification_complete": false,
+  "online_stage2": {
+    "deepseek": "7/7",
+    "qwen": "7/7",
+    "scope": "rebuilt C7 core on the authorized modern Linux host; not a C7-container interactive conclusion"
+  },
+  "pending": [
+    "final nine-package assembly and journeys",
+    "complete corresponding-source closure",
+    "remaining semantic review",
+    "final release-gate assessment"
+  ],
+  "files": [
+    {
+      "path": "source/yaca-source.tar.gz",
+      "bytes": 2890812,
+      "sha256": "4e08a38931f59fe5753dc7e82540ec8efbbc15ad456c50da9e061a2dd3cb7aff"
+    },
+    {
+      "path": "source/snapshot.json",
+      "bytes": 78100,
+      "sha256": "b425007cb4701c20f2a2e56a69528bc8aee70d5f57052680bee26a1ace0db13c"
+    },
+    {
+      "path": "targets/win32-x86/full-test-summary.json",
+      "bytes": 649,
+      "sha256": "8fbefe5c86938185473b7f08d6aa6e4381e5570362aa68cd836a29f97d077e2a"
+    },
+    {
+      "path": "targets/win32-x86/companion/README.txt",
+      "bytes": 474,
+      "sha256": "f6f50030276d5dabd1d18b164b51ed4763f9e49c5c20110f0c8b2b91c5138656"
+    },
+    {
+      "path": "targets/win32-x86/companion/Install.cmd",
+      "bytes": 165,
+      "sha256": "e9d59f9058c60dcf857eac4e3315ca5e648267e7810ff170a34ec69063878ea9"
+    },
+    {
+      "path": "targets/win32-x86/companion/LICENSE",
+      "bytes": 35148,
+      "sha256": "8b1ba204bb69a0ade2bfcf65ef294a920f6bb361b317dba43c7ef29d96332b9b"
+    },
+    {
+      "path": "targets/win32-x86/companion/docs/full-test-target.log",
+      "bytes": 73541,
+      "sha256": "15774fffb4dee67f49b44ce4e312cc00021c15ec2f96b3b8ac2bfb9eec8e712f"
+    },
+    {
+      "path": "targets/win32-x86/companion/docs/build-summary.json",
+      "bytes": 2743,
+      "sha256": "bc0f2cb9692e2296ce43e375fbcde7c544d75cb4d24cf3fb153e2c00a0d2312d"
+    },
+    {
+      "path": "targets/win32-x86/companion/docs/COMPONENTS.txt",
+      "bytes": 412,
+      "sha256": "ced8770e5652d2572e126eaec7abb21365b2f265ed762faaa86586f8ded35432"
+    },
+    {
+      "path": "targets/win32-x86/companion/docs/WINDOWS-QUICKSTART.md",
+      "bytes": 4653,
+      "sha256": "e7e7208c89364d61e5fa23dab06eb53578927ef36fdbd6d137348d276558e129"
+    },
+    {
+      "path": "targets/win32-x86/companion/docs/SBOM.spdx.json",
+      "bytes": 6549,
+      "sha256": "5ae6a54d2de0f928fd538395698c1882ac353c31b154f748e1a9c72d7ff6fcaa"
+    },
+    {
+      "path": "targets/win32-x86/companion/docs/full-test-summary.json",
+      "bytes": 667,
+      "sha256": "7771ff376e8a6303d30e61b2f6e1a7da45a9e237a6f06c9c3d53a9c81ee72ac3"
+    },
+    {
+      "path": "targets/win32-x86/companion/docs/licenses/luainstaller-LGPL.txt",
+      "bytes": 7652,
+      "sha256": "e3a994d82e644b03a792a930f574002658412f62407f5fee083f2555c5f23118"
+    },
+    {
+      "path": "targets/win32-x86/companion/docs/licenses/curl.txt",
+      "bytes": 1088,
+      "sha256": "82f2f4427d6545ee5aaac4f0b80428da6cc8ba41c2cf5da3a03680ec327b9681"
+    },
+    {
+      "path": "targets/win32-x86/companion/docs/licenses/LuaExpat-MIT.html",
+      "bytes": 4157,
+      "sha256": "3159db3188bf04487ae2f0e845f9d18c636436d2d6a328ebbe7570d4989ca43a"
+    },
+    {
+      "path": "targets/win32-x86/companion/docs/licenses/Mozilla-CA.pem",
+      "bytes": 188900,
+      "sha256": "f66dff1bdf8f96060b8177976f8b7d9254bc89bc4db933d769f7384d28480bc9"
+    },
+    {
+      "path": "targets/win32-x86/companion/docs/licenses/Mbed-TLS.txt",
+      "bytes": 29852,
+      "sha256": "9b405ef4c89342f5eae1dd828882f931747f71001cfba7d114801039b52ad09b"
+    },
+    {
+      "path": "targets/win32-x86/companion/docs/licenses/Lua-MIT.html",
+      "bytes": 10776,
+      "sha256": "f6cb9082089df5bc843e7cf6cf55fac1a100b4d8a46c5272b6cac8f69856cdd6"
+    },
+    {
+      "path": "targets/win32-x86/companion/docs/licenses/Expat-MIT.txt",
+      "bytes": 1144,
+      "sha256": "31b15de82aa19a845156169a17a5488bf597e561b2c318d159ed583139b25e87"
+    },
+    {
+      "path": "targets/win32-x86/yaca.exe",
+      "bytes": 7561820,
+      "sha256": "e5f680404db9a109bc0b2f64b978660399af369934882a1a03467e5f9557d559"
+    },
+    {
+      "path": "targets/win32-x86/full-test-target.log",
+      "bytes": 73541,
+      "sha256": "15774fffb4dee67f49b44ce4e312cc00021c15ec2f96b3b8ac2bfb9eec8e712f"
+    },
+    {
+      "path": "targets/win64-x86_64/full-test-summary.json",
+      "bytes": 591,
+      "sha256": "d1100b8a866cb627469bda62dc85cb2f11501f10d9a8b35cc55d215be53d7bd8"
+    },
+    {
+      "path": "targets/win64-x86_64/companion/README.txt",
+      "bytes": 473,
+      "sha256": "57f6410a9855fb079bffafc74c06ae9400a46201861caa34a653e4268a95f0ca"
+    },
+    {
+      "path": "targets/win64-x86_64/companion/Install.cmd",
+      "bytes": 165,
+      "sha256": "e9d59f9058c60dcf857eac4e3315ca5e648267e7810ff170a34ec69063878ea9"
+    },
+    {
+      "path": "targets/win64-x86_64/companion/LICENSE",
+      "bytes": 35148,
+      "sha256": "8b1ba204bb69a0ade2bfcf65ef294a920f6bb361b317dba43c7ef29d96332b9b"
+    },
+    {
+      "path": "targets/win64-x86_64/companion/docs/full-test-target.log",
+      "bytes": 73541,
+      "sha256": "15774fffb4dee67f49b44ce4e312cc00021c15ec2f96b3b8ac2bfb9eec8e712f"
+    },
+    {
+      "path": "targets/win64-x86_64/companion/docs/build-summary.json",
+      "bytes": 2708,
+      "sha256": "a123eb519b7324179879d55fa7e6970019b0252fa034ed92b3ff98effe7a27e2"
+    },
+    {
+      "path": "targets/win64-x86_64/companion/docs/COMPONENTS.txt",
+      "bytes": 415,
+      "sha256": "2fe6812ff4a1b0d05767c5639ba311a34ae07238aefa3385761d43b79e72f680"
+    },
+    {
+      "path": "targets/win64-x86_64/companion/docs/WINDOWS-QUICKSTART.md",
+      "bytes": 4653,
+      "sha256": "e7e7208c89364d61e5fa23dab06eb53578927ef36fdbd6d137348d276558e129"
+    },
+    {
+      "path": "targets/win64-x86_64/companion/docs/SBOM.spdx.json",
+      "bytes": 6549,
+      "sha256": "9fc8ac00cc042facb55725cfe4800d0b461b066637332636f630924baf078b68"
+    },
+    {
+      "path": "targets/win64-x86_64/companion/docs/full-test-summary.json",
+      "bytes": 609,
+      "sha256": "b469a75ecf1623a3e28fefdeb7cc20829803234939ade3ed31f5005fd573082e"
+    },
+    {
+      "path": "targets/win64-x86_64/companion/docs/licenses/luainstaller-LGPL.txt",
+      "bytes": 7652,
+      "sha256": "e3a994d82e644b03a792a930f574002658412f62407f5fee083f2555c5f23118"
+    },
+    {
+      "path": "targets/win64-x86_64/companion/docs/licenses/curl.txt",
+      "bytes": 1088,
+      "sha256": "82f2f4427d6545ee5aaac4f0b80428da6cc8ba41c2cf5da3a03680ec327b9681"
+    },
+    {
+      "path": "targets/win64-x86_64/companion/docs/licenses/LuaExpat-MIT.html",
+      "bytes": 4157,
+      "sha256": "3159db3188bf04487ae2f0e845f9d18c636436d2d6a328ebbe7570d4989ca43a"
+    },
+    {
+      "path": "targets/win64-x86_64/companion/docs/licenses/Mozilla-CA.pem",
+      "bytes": 188900,
+      "sha256": "f66dff1bdf8f96060b8177976f8b7d9254bc89bc4db933d769f7384d28480bc9"
+    },
+    {
+      "path": "targets/win64-x86_64/companion/docs/licenses/Mbed-TLS.txt",
+      "bytes": 29852,
+      "sha256": "9b405ef4c89342f5eae1dd828882f931747f71001cfba7d114801039b52ad09b"
+    },
+    {
+      "path": "targets/win64-x86_64/companion/docs/licenses/Lua-MIT.html",
+      "bytes": 10776,
+      "sha256": "f6cb9082089df5bc843e7cf6cf55fac1a100b4d8a46c5272b6cac8f69856cdd6"
+    },
+    {
+      "path": "targets/win64-x86_64/companion/docs/licenses/Expat-MIT.txt",
+      "bytes": 1144,
+      "sha256": "31b15de82aa19a845156169a17a5488bf597e561b2c318d159ed583139b25e87"
+    },
+    {
+      "path": "targets/win64-x86_64/yaca.exe",
+      "bytes": 8096207,
+      "sha256": "9c871e2087ce95031c0c8d4b2be4ae555b7d26c52a59a95c101d421a9d85f25b"
+    },
+    {
+      "path": "targets/win64-x86_64/full-test-target.log",
+      "bytes": 73541,
+      "sha256": "15774fffb4dee67f49b44ce4e312cc00021c15ec2f96b3b8ac2bfb9eec8e712f"
+    },
+    {
+      "path": "targets/linux-x86_64/build-summary.txt",
+      "bytes": 777,
+      "sha256": "81aed0d53637133d27ec2299ab621dacf2041aafaece1e1d1cd45dd74c164f61"
+    },
+    {
+      "path": "targets/linux-x86_64/artifact-file.txt",
+      "bytes": 660,
+      "sha256": "dd83ccb392d48d29ac43d48519b7efa46f1eb0c0b59739754f3bc39517a2505e"
+    },
+    {
+      "path": "targets/linux-x86_64/artifact-ldd.txt",
+      "bytes": 784,
+      "sha256": "90db93f2b6ca1bf5b41204b02c29288fba3e74a6460b12589f9de82a85bf9f04"
+    },
+    {
+      "path": "targets/linux-x86_64/artifact-sha256.txt",
+      "bytes": 296,
+      "sha256": "322c878292e2ea83ab8f342d55be97b8af5a6acd4212d059d4e724df66decf85"
+    },
+    {
+      "path": "targets/linux-x86_64/yaca",
+      "bytes": 26733840,
+      "sha256": "c4e53c8b740a942b0ed92e2eaf808957f64ca09e4415b5ab11edcc52e5a0bc37"
+    },
+    {
+      "path": "targets/linux-x86_64/full-test-target.log",
+      "bytes": 72810,
+      "sha256": "48462f267ab5505de966cc4c0fa262ef4075d4387858582c415a27756d8b4188"
+    },
+    {
+      "path": "development-checks/full-suite.log",
+      "bytes": 72955,
+      "sha256": "b68f8e6b72ecc223cfdc1a907f343a1654edc054ac7d6f8b5d16dac64c105f42"
+    },
+    {
+      "path": "development-checks/coding-readiness.log",
+      "bytes": 4564,
+      "sha256": "dacf9fc1a62bef0123469334e8bbaed4ef530feba90442c0827366a5b9ea8379"
+    },
+    {
+      "path": "development-checks/linux-deepseek-stage2.log",
+      "bytes": 1680,
+      "sha256": "26b7e76022071def956fd54f7acc5d9ea14278b1a011380e94db5fd28f0de5e1"
+    },
+    {
+      "path": "development-checks/linux-qwen-stage2.log",
+      "bytes": 1680,
+      "sha256": "26b7e76022071def956fd54f7acc5d9ea14278b1a011380e94db5fd28f0de5e1"
+    }
+  ]
+}

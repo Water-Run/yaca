@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Author: WaterRun
-# Date: 2026-10-05
+# Date: 2026-10-11
 # File: terminal_approval_test.py
 # Description: Ensure online terminal probes approve only the explicit print-only Lua operation.
 
@@ -88,6 +88,15 @@ class ApprovalTest(unittest.TestCase):
                     b'[STATUS]\nAsk ask-37 outcome: completed\n')
         self.assertEqual(TERMINAL.verify_recalled_token(transcript,'yaca-memory-1234'),'ask-37')
 
+    # Accept the exact recovered nonce while allowing the Ask purpose's required uncertainty explanation.
+    #@param self ApprovalTest Test instance with no live model or terminal effects.
+    #@return None Assertions require the token on its own first answer line and one completed Ask identity.
+    def test_restored_token_with_uncertainty(self):
+        transcript=(b'Ask request accepted: ask-4\n[ASK ask-4]\nyaca-memory-1234\n\n'
+                    b'Uncertainty: the facts record the user request rather than an acknowledgment.\n'
+                    b'[STATUS]\nAsk ask-4 outcome: completed\n')
+        self.assertEqual(TERMINAL.verify_recalled_token(transcript,'yaca-memory-1234'),'ask-4')
+
     # Refuse guessed answers, split Ask identity, unfinished output and hidden tool activity.
     #@param self ApprovalTest Test instance.
     #@return None Assertions verify a restored session cannot pass without the exact committed token.
@@ -95,6 +104,9 @@ class ApprovalTest(unittest.TestCase):
         transcript=(b'Ask request accepted: ask-4\n[ASK ask-4]\nyaca-memory-1234\n'
                     b'[STATUS]\nAsk ask-4 outcome: completed\n')
         for value in (transcript.replace(b'yaca-memory-1234',b'42'),
+                      transcript.replace(b'yaca-memory-1234',b'token: yaca-memory-1234'),
+                      transcript.replace(b'yaca-memory-1234',b'yaca-memory-1234\nyaca-memory-9876'),
+                      transcript.replace(b'yaca-memory-1234',b'yaca-memory-1234\nyaca-memory-1234'),
                       transcript.replace(b'[ASK ask-4]',b'[ASK ask-1]'),
                       transcript.replace(b'outcome: completed',b'outcome: failed'),
                       transcript+b'[TOOL tool-1]\nname: lua\n'):

@@ -22,7 +22,7 @@ native close 的 true/true 表明恢复及释放完成；两阶段均失败仍�
 本地日期 Review 改名为 `CODE-REVIEW-2026-10-08-LOCAL.md` 并修正其链接。
 合并源码完整 suite **730/730**、coding readiness **PASS**；全仓注释结构
 **266 文件 / 5740 声明 / 0 缺项**。TP/RP 及 luainstaller 1.5.0 资源覆盖证明通过。
-日志位于 `out/review-20261011/sync/`。已有预览证据不冒充新源码结果；三核心待重建。
+日志位于 `out/review-20261011/sync/`。随后三核心已按 R90 重建并各过 730/730；已有预览证据仍保留其冻结源码范围。
 
 ## R90 附带软件索引的 composition 边界
 
@@ -35,6 +35,42 @@ native close 的 true/true 表明恢复及释放完成；两阶段均失败仍�
 同时核对 terminal ack/owner 与管理输入 close 路径，并修正 submission 的 string 参数注释。
 冻结基线、当前源码、测试及日志见 [R90](lua-review/R90.json)；此人工核对仅覆盖所列子面，
 全仓语义 Review 继续为 partial。
+
+## R90 三核心与 R91 目标旅程
+
+从干净 `b81d828` 冻结 455 个维护文件，三目标源码归档一致，SHA-256 为
+`4e08a38931f59fe5753dc7e82540ec8efbbc15ad456c50da9e061a2dd3cb7aff`。
+两 Windows 实际单文件内嵌 Lua 在指定 Server 2008 / WOW64 和 Windows 11 上各过
+730/730；Linux 在 C7.9 / GCC 4.8.5-44 / glibc 2.17 用户态各项构建与完整测试通过，
+共享 Rocky Linux 6.12 内核。50 个核心和日志字节绑定见
+[核心节点](candidates/core-node-r90-20261011.json)。
+
+本机 Docker 启动因 inference socket 报错退出。远端首次 C7 网络安装停滞，保留日志后
+终止自有容器；复用既有项目 C7 环境的独立镜像，再下载缺失 RPM，以仓库元数据摘要及
+C7 原始公钥校验签名后离线安装。未更改原项目容器；实际 RPM/编译器环境保留。
+
+三平台双模型 Stage 2 共六组，各 7/7，含鉴权、流式、工具/控制载体和取消。
+Linux 编译核心在授权现代 Linux 宿主完成双模型真实 SSH PTY：中文命令、首次纯 Ask、
+真实 print(6*7) 提议核对与一次审批执行、随机 token 的跨进程 Context 召回、退出/重开模式恢复。
+Qwen 的 4096 输出预算曾得到空白召回结果；16384 的同类旅程通过，失败文本与预算分别记录。
+此结果不扩展为 C7 容器互动或默认 provider 配置的普遍结论。
+
+实际登录装饰隐藏裸 `$ ` 提示符，驱动改为独立的无 profile Bash。Ask 系统层明确要求
+不确定性说明，DeepSeek 返回精确随机 token 后又解释证据边界；旧验收误把附加说明
+判为未召回。新增反例为 7/8，修复后 8/8：要求首个回答行是唯一精确 nonce、接受/输出/
+完成的 Ask ID 一致，拒绝错误/重复 nonce 和工具活动。
+
+两 Windows 原生独立隐藏控制台完成离线首次配置、中文输入、本地 mock 的纯 Ask、
+Context 重开和观察到的模式恢复；保存前无请求，后续两次 loopback 请求明确属于模拟接口。
+原生控制台结构、函数、参数/返回与句柄所有权已逐项注释和人工核对。ResumeThread
+拒绝此前会在进入清理 try 前抛错，遗留已创建的挂起子进程；现纳入创建后的统一清理。
+两目标实际创建后注入 resume 拒绝，确认自有 child 被终止、退出 124。
+
+R91 完整 readiness PASS，结构 266 文件 / 5741 声明 / 0 缺项。
+41 个源码/日志绑定、六组模型、双 Linux PTY、双 Windows 控制台和限制见
+[R91](qualification-review/R91.json)；所选证据扫描实际凭据零命中。
+Windows 真实模型控制台、保留数据升级、最终九包、完整对应来源闭包和剩余全仓语义核对
+仍待完成。Gate R 保持关闭，开发按 D-085 继续。
 
 ## R87 已释放终端的收尾确认
 

@@ -3,7 +3,8 @@
 更新日期：2026-10-11。
 
 yaca 已有通用 Agent 实现，远端 10 月 11 日预览版九包已发布；本地改动已与远端合并。
-合并源码完整 suite 730/730、coding readiness PASS；三核心和最终九包须重新构建。负责人按
+R90 三核心已从共同源码重建，实际目标各 730/730；R91 coding readiness PASS。
+六组真实模型 Stage 2、Linux 双模型 PTY 和 Windows 双目标首次配置控制台旅程已有证据。负责人按
 [D-085](DECISIONS.md#d-085-同步仓库并推进至可发布就绪2026-10-11) 恢复并推进至可发布就绪；
 阶段为 `implemented-unqualified`，Release Gate R 关闭。
 源码基线和验证结果统一见[当前状态](CURRENT-STATE.md)。

@@ -1,0 +1,273 @@
+{
+  "schema": "yaca-qualification-review-v1",
+  "review": "R91",
+  "date": "2026-10-11",
+  "source_scope": "qualification drivers for the frozen b81d828 R90 cores",
+  "core_source_commit": "b81d828415f3a9e41a7301c30ee6aa62ce1aa8f2",
+  "core_source_archive_sha256": "4e08a38931f59fe5753dc7e82540ec8efbbc15ad456c50da9e061a2dd3cb7aff",
+  "status": "reviewed-and-probed",
+  "qualification": "pending",
+  "release_authorized": false,
+  "development_paused": false,
+  "whole_repository_semantic_review": "partial",
+  "comment_structure": {
+    "files": 266,
+    "declarations": 5741,
+    "violations": 0
+  },
+  "coding_readiness": "PASS",
+  "recall_regression": {
+    "before": "7/8",
+    "after": "8/8"
+  },
+  "online_stage2": {
+    "linux-x86_64": {
+      "deepseek": "7/7",
+      "qwen": "7/7"
+    },
+    "win32-x86": {
+      "deepseek": "7/7",
+      "qwen": "7/7"
+    },
+    "win64-x86_64": {
+      "deepseek": "7/7",
+      "qwen": "7/7"
+    }
+  },
+  "linux_real_pty": {
+    "deepseek": "PASS",
+    "qwen": "PASS",
+    "deepseek_output_limit": 4096,
+    "qwen_output_limit": 16384,
+    "qwen_4096_empty_recall": "retained-failed-transcript"
+  },
+  "windows_native_console": {
+    "win32-x86": "offline first setup, pure Ask, reopen, observed modes PASS",
+    "win64-x86_64": "offline first setup, pure Ask, reopen, observed modes PASS",
+    "resume_refusal": "actual owned suspended child terminated with exit 124 on both targets"
+  },
+  "manual_review": [
+    "deterministic remote Bash command and PTY ownership",
+    "unique nonce, Ask identity/completion and no-tool recall checks",
+    "native console structure fields, functions and handle ownership",
+    "hidden independent consoles and cleanup after post-creation resume refusal"
+  ],
+  "boundaries": [
+    "Linux PTY ran on the authorized modern Linux host with the C7-built core.",
+    "Windows console first setup used a loopback mock provider; real provider evidence is the separate Stage 2 run.",
+    "Native console positive journeys preceded the resume-failure cleanup movement; the actual refusal probes used the final source.",
+    "Final nine packages, retained-data upgrade, remaining source closure and whole semantic review are pending."
+  ],
+  "selected_evidence_secret_scan": {
+    "status": "PASS",
+    "matches": 0
+  },
+  "evidence_root": "out/review-20261011/r91",
+  "files": [
+    {
+      "path": ".tools/qualification/agent_terminal_smoke.py",
+      "bytes": 16638,
+      "sha256": "a85e24c684b1a32a2d8ef3683fe4851ff2910b9b58489209c435c3110145985f"
+    },
+    {
+      "path": ".tools/qualification/windows_console_agent_smoke.py",
+      "bytes": 21528,
+      "sha256": "b5778927659fce4a7156def478c1a2c66bcd0711d78c7c29cd786bc7b7c2de8e"
+    },
+    {
+      "path": "test/qualification/terminal_approval_test.py",
+      "bytes": 7145,
+      "sha256": "120e716bdd2eb6c4d3c4c342bf8ba3e0d889a0b0557a62d64aed022d949461d8"
+    },
+    {
+      "path": ".develope-docs/candidates/core-node-r90-20261011.json",
+      "bytes": 11927,
+      "sha256": "fcd5d7bcc16fc4ac00516a9f943670f25e76a032c485a0ed5eaa8219ff8c6919"
+    },
+    {
+      "path": "out/review-20261011/sync/recall-verifier-before.log",
+      "bytes": 1177,
+      "sha256": "f84083c5f9376a11c27669c49537eec1b87ec2343146033e96d8f1a7134bcc71"
+    },
+    {
+      "path": "out/review-20261011/sync/recall-verifier-after.log",
+      "bytes": 251,
+      "sha256": "5e64a39bbefa99fc8a567bec404d02a07ce95d249e0ac14abaf312ac7e817027"
+    },
+    {
+      "path": "out/review-20261011/sync/linux-deepseek-stage2.log",
+      "bytes": 1680,
+      "sha256": "26b7e76022071def956fd54f7acc5d9ea14278b1a011380e94db5fd28f0de5e1"
+    },
+    {
+      "path": "out/review-20261011/sync/linux-qwen-stage2.log",
+      "bytes": 1680,
+      "sha256": "26b7e76022071def956fd54f7acc5d9ea14278b1a011380e94db5fd28f0de5e1"
+    },
+    {
+      "path": "out/review-20261011/sync/linux-deepseek-online-transcript-3.log",
+      "bytes": 7283,
+      "sha256": "2b728943884b4d3509e5f28491b336ee920704ccce75264af51c18acc6a2217b"
+    },
+    {
+      "path": "out/review-20261011/sync/linux-qwen-online-transcript-3.log",
+      "bytes": 6725,
+      "sha256": "a2b6ca97f017cd7dc37ce3539354f1ef39b6ebfcf4c225e6534a36e59dfb1e82"
+    },
+    {
+      "path": "out/review-20261011/sync/linux-qwen-online-transcript-4.log",
+      "bytes": 6846,
+      "sha256": "af770843033dd5b6cfb2503d747654571dea5722dafc2d25d98693eb01cd2e9c"
+    },
+    {
+      "path": "out/review-20261011/sync/linux-online-run-3.log",
+      "bytes": 936,
+      "sha256": "a3388c163b58aa081f9636f2cb0901e64096b89d296ac53c4be8352a89e5db89"
+    },
+    {
+      "path": "out/review-20261011/sync/linux-qwen-online-run-4.log",
+      "bytes": 292,
+      "sha256": "f95ae66b17b916caf4565f63fdc9d9a92039c474f226e6be92ecf2106446b3ae"
+    },
+    {
+      "path": "out/review-20261011/sync/windows-stage2-results.json",
+      "bytes": 2392,
+      "sha256": "c547f4dc681f65b01e606b1164242ce149af2f105043080b18f9512e895ed2f3"
+    },
+    {
+      "path": "out/review-20261011/sync/windows-console-cold-run.log",
+      "bytes": 240,
+      "sha256": "8fb03c2aad0e87ff68d2e2443fede26f58dbcda01d4fb7c3717b3ea9a96507c3"
+    },
+    {
+      "path": "out/review-20261011/sync/windows-console-resume-fault-run.log",
+      "bytes": 226,
+      "sha256": "fd12ad2c63b4196bdfabb84e4cbf0e61a76270cafcb996235d50af2d7d633423"
+    },
+    {
+      "path": "out/review-20261011/sync/windows_console_resume_fault.py",
+      "bytes": 3398,
+      "sha256": "fc50febe8e3c8adedab79a0e272ef9886f6dea26150c042c69a05f2d701f4f5e"
+    },
+    {
+      "path": "out/review-20261011/sync/c7-prerequisite-inputs.json",
+      "bytes": 10056,
+      "sha256": "338066bacca5951b8b8920cec761b9defdc350d7f4752d77bc90d452913d0af4"
+    },
+    {
+      "path": "out/review-20261011/sync/r91-final-readiness.log",
+      "bytes": 4565,
+      "sha256": "b2cabeb3bcf78a3bf779beeb2a00a32672db15c003e18454e0e327129bbacfb5"
+    },
+    {
+      "path": "out/review-20261011/sync/win32-x86-deepseek-stage2.log",
+      "bytes": 1703,
+      "sha256": "d7e2e6d9abb590f07494e359a96419dbd941e4a786e746d37b6fe07cdec4fbf7"
+    },
+    {
+      "path": "out/review-20261011/sync/win32-x86-qwen-stage2.log",
+      "bytes": 1703,
+      "sha256": "d7e2e6d9abb590f07494e359a96419dbd941e4a786e746d37b6fe07cdec4fbf7"
+    },
+    {
+      "path": "out/review-20261011/sync/win32-x86-console-cold.log",
+      "bytes": 28,
+      "sha256": "4688687582fa6ed3d9a9a379c9f03bfcf373a3e22ba59bc8a147c7e897fb6204"
+    },
+    {
+      "path": "out/review-20261011/sync/win32-x86-console-resume-fault.log",
+      "bytes": 63,
+      "sha256": "e1f34ffcfddba7af1b519b190dd7ca93cdd7474a40870d282762784773123014"
+    },
+    {
+      "path": "out/review-20261011/sync/windows-console-evidence/win32-x86/first-run-screen-state.txt",
+      "bytes": 353,
+      "sha256": "2a6dc6d7aa1d717d93319a436e8aeb835cb1e432f5ad8618398496823a336442"
+    },
+    {
+      "path": "out/review-20261011/sync/windows-console-evidence/win32-x86/first-run-screen.txt",
+      "bytes": 401,
+      "sha256": "8f2a30818cf8cd3cc957bab697592ad7d325ed97170d8bbd6960d29f71e60390"
+    },
+    {
+      "path": "out/review-20261011/sync/windows-console-evidence/win32-x86/reopened-screen-state.txt",
+      "bytes": 333,
+      "sha256": "92d36e6d2727f1e3eb9d23e8457f1c290082e349d9e30286de72bbcb92dbc222"
+    },
+    {
+      "path": "out/review-20261011/sync/windows-console-evidence/win32-x86/reopened-screen.txt",
+      "bytes": 446,
+      "sha256": "2d6671a62280e192057538ebae48cc2259a07b781d097dcef1e51c77a136cc0a"
+    },
+    {
+      "path": "out/review-20261011/sync/windows-console-evidence/win32-x86/request-1.json",
+      "bytes": 3568,
+      "sha256": "a947be54a053f3bbc67955723730612c6f0282144837a54394ae5fef7b639af5"
+    },
+    {
+      "path": "out/review-20261011/sync/windows-console-evidence/win32-x86/request-2.json",
+      "bytes": 3557,
+      "sha256": "cd51b2c734c91259f71201b3d86026540990259f82149016157e00c8c1ff51d7"
+    },
+    {
+      "path": "out/review-20261011/sync/windows-console-evidence/win32-x86/result.txt",
+      "bytes": 87,
+      "sha256": "514cb2f32934f8f2c01e4c52a78483dd691727dfd950c71d48feae0c2f4d3021"
+    },
+    {
+      "path": "out/review-20261011/sync/win64-x86_64-deepseek-stage2.log",
+      "bytes": 1703,
+      "sha256": "d7e2e6d9abb590f07494e359a96419dbd941e4a786e746d37b6fe07cdec4fbf7"
+    },
+    {
+      "path": "out/review-20261011/sync/win64-x86_64-qwen-stage2.log",
+      "bytes": 1703,
+      "sha256": "d7e2e6d9abb590f07494e359a96419dbd941e4a786e746d37b6fe07cdec4fbf7"
+    },
+    {
+      "path": "out/review-20261011/sync/win64-x86_64-console-cold.log",
+      "bytes": 28,
+      "sha256": "4688687582fa6ed3d9a9a379c9f03bfcf373a3e22ba59bc8a147c7e897fb6204"
+    },
+    {
+      "path": "out/review-20261011/sync/win64-x86_64-console-resume-fault.log",
+      "bytes": 63,
+      "sha256": "e1f34ffcfddba7af1b519b190dd7ca93cdd7474a40870d282762784773123014"
+    },
+    {
+      "path": "out/review-20261011/sync/windows-console-evidence/win64-x86_64/first-run-screen-state.txt",
+      "bytes": 325,
+      "sha256": "2a0f88b98df79022e0eb8fc350273df6b44091ea4f3e70e6e45fc8ba0ebff619"
+    },
+    {
+      "path": "out/review-20261011/sync/windows-console-evidence/win64-x86_64/first-run-screen.txt",
+      "bytes": 2033,
+      "sha256": "a47270fc10b745b4f242ef16a82114124d93f66cc04123631bdbd2c03b65f88f"
+    },
+    {
+      "path": "out/review-20261011/sync/windows-console-evidence/win64-x86_64/reopened-screen-state.txt",
+      "bytes": 336,
+      "sha256": "a228b3d16eecf47b3b0fd169c80d9660d6c5ad4aafca8ccd5fe56b6923fd9ce2"
+    },
+    {
+      "path": "out/review-20261011/sync/windows-console-evidence/win64-x86_64/reopened-screen.txt",
+      "bytes": 578,
+      "sha256": "44f12a21a996ca0f2387fe20b32c0125aed52cf9e42feb486437c158860fe3d5"
+    },
+    {
+      "path": "out/review-20261011/sync/windows-console-evidence/win64-x86_64/request-1.json",
+      "bytes": 3568,
+      "sha256": "9d934408015863c91b21a3383b1e3ac8e1b4b1148a50f1ef25ced40168fb4fe6"
+    },
+    {
+      "path": "out/review-20261011/sync/windows-console-evidence/win64-x86_64/request-2.json",
+      "bytes": 3557,
+      "sha256": "53c145739b0326437150c6268253eccffbb0c074079dc24ecc9b5c43fb0f71e6"
+    },
+    {
+      "path": "out/review-20261011/sync/windows-console-evidence/win64-x86_64/result.txt",
+      "bytes": 87,
+      "sha256": "514cb2f32934f8f2c01e4c52a78483dd691727dfd950c71d48feae0c2f4d3021"
+    }
+  ]
+}

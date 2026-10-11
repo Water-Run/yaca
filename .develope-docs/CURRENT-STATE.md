@@ -1,13 +1,14 @@
 # 当前状态
 
 更新日期：2026-10-11。核心已实现，远端 `v1.0.0-preview.20261011` 候选已发布。
-当前工作树已合并远端 `db9c5d5` 的 11 个提交与本地 11 个提交，完整 suite 730/730，coding readiness PASS。
+已合并远端 `db9c5d5` 的 11 个提交与本地 11 个提交；最近再次拉取远端无新增。
+R90 三目标完整 suite 各 730/730，R91 完整 coding readiness PASS。
 开发按 [D-085](DECISIONS.md#d-085-同步仓库并推进至可发布就绪2026-10-11) 继续至可发布就绪。
-构建源码为 `dc6ce1486158f8e76f6cb90490dd9d9242115c33`。剩余顺序见
+已发布预览版的构建源码为 `dc6ce1486158f8e76f6cb90490dd9d9242115c33`。剩余顺序见
 [TRACKING](TRACKING.md)。
 
-本文三核心、九包与 720/720 的结果属于已发布预览版的冻结源码；合并后的新源码
-尚未重新构建。合并保留本地压缩响应身份修复、协调器清理重试和工具来源档案，
+下文九包与 720/720 的结果属于已发布预览版的冻结源码。合并源码已在 R90 节点重建
+三核心，各通过 730/730；最终九包尚未装配。合并保留本地压缩响应身份修复、协调器清理重试和工具来源档案，
 并接纳远端键盘重复、PTY 子进程收尾、原生分配失败保护及 luainstaller 1.5.0。
 两条历史 Review 的编号不能混用：远端记录在
 [10 月 8 日 Review](CODE-REVIEW-2026-10-08.md)，本地历史在
@@ -17,6 +18,36 @@
 合并源码另修复 `.software` 引用不可见 composition 变量造成的崩溃，改由已接纳的
 只读索引端口取数。专项基线 115/116、修复后 116/116；全仓注释结构
 266 文件 / 5740 声明 / 0 缺项，冻结记录见 [R90](lua-review/R90.json)。
+
+## 合并后的 R90 开发核心
+
+三目标绑定干净源码 `b81d828415f3a9e41a7301c30ee6aa62ce1aa8f2`，455 个维护文件，
+统一源码归档 SHA-256 为 `4e08a38931f59fe5753dc7e82540ec8efbbc15ad456c50da9e061a2dd3cb7aff`。
+源码、核心和目标日志见 [R90 核心节点](candidates/core-node-r90-20261011.json)。
+
+| 目标 | 新核心 SHA-256 | 实际完整测试 |
+| --- | --- | --- |
+| Win32 x86 | `e5f680404db9a109bc0b2f64b978660399af369934882a1a03467e5f9557d559` | 730/730；指定 Server 2008 non-R2 x64 / WOW64，实际单文件内嵌 Lua |
+| Win64 x86_64 | `9c871e2087ce95031c0c8d4b2be4ae555b7d26c52a59a95c101d421a9d85f25b` | 730/730；Windows 11 10.0.26100，实际单文件内嵌 Lua |
+| Linux x86_64 | `c4e53c8b740a942b0ed92e2eaf808957f64ca09e4415b5ab11edcc52e5a0bc37` | 730/730；C7.9 用户态、GCC 4.8.5-44、glibc 2.17；共享 Rocky Linux 6.12 内核 |
+
+两 Windows 目标重算核心和全部源码成员摘要；Linux 重建解释器/native，并完成
+onefile/onedir 冒烟、ELF/glibc 导入闭包检查。最低 Windows 系统结果不扩展为本轮实测。
+Linux 编译核心在已授权现代 Linux 宿主上完成 DeepSeek、Qwen Stage 2 各 7/7。
+DeepSeek 真实 SSH PTY 旅程已完成 Lua 审批/执行、纯 Ask、跨进程随机 token 召回和模式恢复；
+Qwen 的召回阶段首次没有可见文本，将私有输出预算从 4096 增至 16384 后，完整同类旅程通过；
+原失败日志保留。此在线面尚不提升为 C7 容器交互结论。
+两 Windows 目标的双模型 Stage 2 也各过 7/7，共六组实际 provider 验证。
+两目标的独立隐藏控制台完成首次配置、中文输入、纯 Ask、Context 重开及观察模式恢复；
+首次配置使用本地无凭据模拟接口，真实模型证据来自另行执行的 Stage 2。
+
+资格驱动另固定远端 Bash，避免登录提示符装饰阻断验收；召回校验接受正确 nonce
+后的不确定性说明，仍拒绝错误/重复 token、分裂 Ask 身份和工具活动。新增反例基线
+7/8，修复后 8/8。控制台驱动补齐完整结构/函数语义注释，并将 ResumeThread 拒绝纳入
+创建后清理；两 Windows 实际挂起子进程故障均确认终止为 124。R91 完整 readiness PASS，
+全仓结构 266 文件 / 5741 声明 / 0 缺项；人工语义 Review 仍为 partial。
+源文件、实际日志、预算与范围在 [R91](qualification-review/R91.json) 的 41 个字节绑定中保存，
+所选公开证据的凭据扫描零命中。最终九包、保留数据升级、对应源码闭包和剩余语义 Review 继续执行。
 
 阶段为 `implemented-unqualified`，目标资格验证待完成；Release Gate R 为 `closed`，
 `release_authorized=false`。依据见 [readiness](contracts/readiness.lua)、

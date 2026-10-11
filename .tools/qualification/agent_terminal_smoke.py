@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Author: WaterRun
-# Date: 2026-10-05
+# Date: 2026-10-11
 # File: agent_terminal_smoke.py
 # Description: Exercise a deployed Windows or Linux candidate through a real SSH PTY.
 
@@ -96,8 +96,8 @@ def verify_lua_execution(transcript):
 # Verify the restored Ask uses its durable sequence and recalls only the hidden expected token.
 #@param transcript bytes One restored Ask transcript; the submitted question contains no answer token.
 #@param token str Random token committed by a main turn in the earlier process.
-#@return str Accepted Ask ID whose completed response consists only of token.
-#@error Raises for conflicting identities, a different answer, an incomplete response or tool activity.
+#@return str Accepted Ask ID whose completed response starts with the sole exact nonce; advisory uncertainty may follow.
+#@error Raises for conflicting identities, a different or duplicated nonce, an incomplete response or tool activity.
 def verify_recalled_token(transcript,token):
     plain=re.sub(rb'\x1b\[[0-?]*[ -/]*[@-~]',b'',transcript).replace(b'\r',b'')
     identities=re.findall(rb'^Ask request accepted: (ask-[0-9]+)$',plain,re.M)
@@ -105,7 +105,10 @@ def verify_recalled_token(transcript,token):
     identity=identities[0]
     answer=re.search(rb'(?:^|\n)\[ASK '+identity+rb'\]\n(.*?)\n\[STATUS\]\nAsk '
                      +identity+rb' outcome: completed(?:\n|$)',plain,re.S)
-    assert answer and answer[1].strip()==token.encode('utf-8'), \
+    body=answer[1].strip() if answer else b''
+    expected=token.encode('utf-8')
+    occurrences=re.findall(rb'yaca-memory-[A-Za-z0-9_-]+',body)
+    assert body.splitlines() and body.splitlines()[0]==expected and occurrences==[expected], \
         "reopened Context did not recall the earlier main turn's verification token"
     assert not re.search(rb'^\[TOOL ',plain,re.M), 'restored pure Ask invoked a tool'
     return identity.decode('ascii')
@@ -146,6 +149,10 @@ def main():
         if args.identity:
             command.extend(("-i", str(args.identity.resolve())))
         command.append(args.host)
+        # Use a deterministic POSIX shell on the real remote PTY. The driver
+        # already requires Bash/stty commands; login decorations must not hide
+        # its initial marker or receive application input.
+        command.append("env TERM=dumb PS1='$ ' /bin/bash --noprofile --norc -i")
     platform = "windows" if args.executable.endswith(".exe") else "linux"
     child = subprocess.Popen(
         command,

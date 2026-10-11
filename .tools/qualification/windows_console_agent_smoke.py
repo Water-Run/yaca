@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # Author: WaterRun
-# Date: 2026-09-23
+# Date: 2026-10-11
 # File: windows_console_agent_smoke.py
 # Description: Native Windows console journey with an in-process, credential-free mock API.
 
@@ -30,44 +30,92 @@ except NameError:
     text_type = str
 
 
-#@class COORD Owns the windows console agent smoke state and its resource lifetime.
+#@class COORD Mutable Win32 coordinate value passed by value to console APIs; owns no handles.
+#@field x SHORT Horizontal cell coordinate or buffer width.
+#@field y SHORT Vertical cell coordinate or buffer height.
 class COORD(C.Structure):
     _fields_ = [('x', W.SHORT), ('y', W.SHORT)]
-#@class RECT Owns the windows console agent smoke state and its resource lifetime.
+#@class RECT Mutable inclusive console viewport returned inside SCREEN; owns no resources.
+#@field left SHORT Leftmost visible column.
+#@field top SHORT First visible row.
+#@field right SHORT Rightmost visible column.
+#@field bottom SHORT Last visible row.
 class RECT(C.Structure):
     _fields_ = [(name, W.SHORT) for name in ('left', 'top', 'right', 'bottom')]
-#@class SCREEN Owns the windows console agent smoke state and its resource lifetime.
+#@class SCREEN Caller-owned CONSOLE_SCREEN_BUFFER_INFO storage filled by the Windows API.
+#@field size COORD Screen buffer dimensions in cells.
+#@field cursor COORD Current output cursor position.
+#@field attributes WORD Current text attributes.
+#@field window RECT Current visible viewport.
+#@field maximum COORD Maximum window dimensions supported by this console.
 class SCREEN(C.Structure):
     _fields_ = [('size', COORD), ('cursor', COORD), ('attributes', W.WORD),
                 ('window', RECT), ('maximum', COORD)]
-#@class STARTUP Owns the windows console agent smoke state and its resource lifetime.
+#@class STARTUP Caller-owned STARTUPINFOW layout borrowed only during CreateProcessW.
+#@field cb DWORD Complete structure size.
+#@field reserved LPWSTR Unused reserved pointer, kept null.
+#@field desktop LPWSTR Optional desktop selector, kept null.
+#@field title LPWSTR Optional console title, kept null.
+#@field x DWORD Unused initial window horizontal position.
+#@field y DWORD Unused initial window vertical position.
+#@field width DWORD Unused initial window width.
+#@field height DWORD Unused initial window height.
+#@field columns DWORD Unused requested screen columns.
+#@field rows DWORD Unused requested screen rows.
+#@field fill DWORD Unused initial console attributes.
+#@field flags DWORD STARTF_USESHOWWINDOW makes the independently created test console hidden.
+#@field show WORD SW_HIDE for the test's own console window.
+#@field reserved_size WORD Unused reserved byte count.
+#@field reserved_bytes void* Unused reserved data pointer.
+#@field input HANDLE Unused startup stdin override.
+#@field output HANDLE Unused startup stdout override.
+#@field error HANDLE Unused startup stderr override.
 class STARTUP(C.Structure):
     _fields_ = [('cb', W.DWORD), ('reserved', W.LPWSTR), ('desktop', W.LPWSTR),
         ('title', W.LPWSTR)] + [(name, W.DWORD) for name in
         ('x', 'y', 'width', 'height', 'columns', 'rows', 'fill', 'flags')] + [
         ('show', W.WORD), ('reserved_size', W.WORD), ('reserved_bytes', C.c_void_p),
         ('input', W.HANDLE), ('output', W.HANDLE), ('error', W.HANDLE)]
-#@class PROCESS Owns the windows console agent smoke state and its resource lifetime.
+#@class PROCESS Mutable PROCESS_INFORMATION returned for the one child exclusively owned by Console.
+#@field process HANDLE Child process reference closed by Console.close.
+#@field thread HANDLE Initial suspended thread reference closed by Console.close.
+#@field pid DWORD Child PID used for AttachConsole.
+#@field tid DWORD Initial child thread identity.
 class PROCESS(C.Structure):
     _fields_ = [('process', W.HANDLE), ('thread', W.HANDLE), ('pid', W.DWORD), ('tid', W.DWORD)]
-#@class CHARACTER Owns the windows console agent smoke state and its resource lifetime.
+#@class CHARACTER Win32 KEY_EVENT_RECORD character union; only its Unicode member is populated.
+#@field unicode WCHAR One UTF-16 BMP input character.
+#@field ascii char Alternate unused one-byte view.
 class CHARACTER(C.Union):
     _fields_ = [('unicode', W.WCHAR), ('ascii', C.c_char)]
-#@class KEY Owns the windows console agent smoke state and its resource lifetime.
+#@class KEY Mutable native key event copied into the independently owned test console input queue.
+#@field down BOOL True for each injected key-down record.
+#@field repeat WORD One logical repetition.
+#@field key WORD VK_RETURN for Enter, zero for ordinary injected text.
+#@field scan WORD Unused scan code, kept zero.
+#@field character CHARACTER Unicode character delivered to the child.
+#@field control DWORD Unused modifier flags, kept zero.
 class KEY(C.Structure):
     _fields_ = [('down', W.BOOL), ('repeat', W.WORD), ('key', W.WORD),
         ('scan', W.WORD), ('character', CHARACTER), ('control', W.DWORD)]
-#@class EVENT Owns the windows console agent smoke state and its resource lifetime.
+#@class EVENT Native INPUT_RECORD payload union with key data and ABI-sized padding.
+#@field key KEY Injected key event.
+#@field padding byte[16] Maintains the Windows event-union size.
 class EVENT(C.Union):
     _fields_ = [('key', KEY), ('padding', C.c_byte * 16)]
-#@class INPUT Owns the windows console agent smoke state and its resource lifetime.
+#@class INPUT Caller-owned INPUT_RECORD consumed synchronously by WriteConsoleInputW.
+#@field type WORD KEY_EVENT discriminator, set to one.
+#@field event EVENT One populated Unicode key payload.
 class INPUT(C.Structure):
     _fields_ = [('type', W.WORD), ('event', EVENT)]
 
 
-# Runs the windows console agent smoke command and reports its status.
+# Run offline first setup, pure Ask, reopening and mode checks against the actual onefile in owned consoles.
 #@param none No arguments.
-#@return None result No value; assertions cover the real Windows console Agent journey.
+#@return None No value after both actual child sessions and two synthetic responses pass.
+#@error Raises on invalid staging, incorrect request/output, child exit or mode mismatch.
+#@effect Starts a loopback mock HTTP server, writes isolated configuration/evidence and creates hidden native consoles.
+#@ownership The finally block releases the current child handles and shuts down the owned server/thread.
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('directory')
@@ -98,16 +146,21 @@ def main():
     kernel.TerminateProcess.argtypes = [W.HANDLE, W.UINT]
     requests = []
 
-    #@class Provider Owns the windows console agent smoke state and its resource lifetime.
+    #@class Provider One local synthetic request handler; main owns its HTTP server and mutable request ledger.
+    #@field headers HTTPMessage Inherited request headers inspected to reject credentials.
+    #@field rfile stream Inherited bounded request-body input.
+    #@field wfile stream Inherited response output closed by HTTPServer.
     class Provider(BaseHTTPRequestHandler):
         # Suppresses default proof-server request logging.
-        #@param self Provider Owner of the proof fixture and its resources.
-        #@param unused object The unused supplied to this proof operation.
-        #@return None No value; the operation updates proof state or raises on failure.
+        #@param self Provider Active loopback request handler.
+        #@param unused ... Ignored standard-library logging format and arguments.
+        #@return None No value; suppresses inherited stderr request logging.
         def log_message(self, *unused): pass
         # Handles a proof HTTP POST and records its request evidence.
-        #@param self Provider Owner of the proof fixture and its resources.
-        #@return None No value; the operation updates proof state or raises on failure.
+        #@param self Provider Active synthetic OpenAI-compatible request handler.
+        #@return None No value after one fixed 42 response is written.
+        #@error Raises for oversized/invalid bodies, credential headers or advertised tools.
+        #@effect Saves the request ledger and emits bounded streaming or JSON fixture bytes over loopback.
         def do_POST(self):
             length = int(self.headers.get('Content-Length', '0'))
             assert 0 < length <= 4 * 1024 * 1024
@@ -139,27 +192,36 @@ def main():
     thread.daemon = True
     thread.start()
 
-    #@class Console Owns the windows console agent smoke state and its resource lifetime.
+    #@class Console Owns exactly one actual yaca child, its console input/output handles and captured mode baseline.
+    #@field name str Safe probe label for the evidence filenames.
+    #@field input HANDLE Owned CONIN$ reference released by close.
+    #@field output HANDLE Owned original CONOUT$ reference used for mode checks.
+    #@field process PROCESS Owned child process/thread references and identifiers.
+    #@field before tuple[int,int] Console modes observed immediately after startup/attachment.
     class Console:
-        # Checks   init   in windows console agent smoke.
-        #@param self Console Owner of the proof fixture and its resources.
-        #@param arguments list[str] Argument vector for the child command.
-        #@param name str Selected fixture, component, or tool name.
-        #@return None result No value; creates and owns the console child process.
+        # Start the actual child in a new hidden console, then attach only this probe to its handles.
+        #@param self Console New owner with no previously acquired child.
+        #@param arguments list[str] Additional yaca arguments; empty for first setup.
+        #@param name str Evidence label identifying this child session.
+        #@return None No value after process, console handles and observed mode baseline are acquired.
+        #@error Raises on process creation, initial-thread resume, attachment or console API failure.
+        #@effect Starts the child suspended in a new console, resumes it, then detaches the probe's prior console.
+        #@ownership Owns returned process/thread and CONIN$/CONOUT$ handles; any post-creation failure closes acquired resources.
         def __init__(self, arguments, name):
             self.name, self.input, self.output = name, None, None
             self.process = PROCESS()
             startup = STARTUP(); startup.cb = C.sizeof(startup)
+            startup.flags = 1; startup.show = 0
             command = C.create_unicode_buffer(subprocess.list2cmdline(
                 [os.path.join(root, 'yaca.exe')] + arguments))
             assert kernel.CreateProcessW(None, command, None, None, False, 0x14,
                 None, os.path.join(root, 'workspace'), C.byref(startup), C.byref(self.process)), C.GetLastError()
-            assert kernel.ResumeThread(self.process.thread) != 0xffffffff
-            # XP completes console initialization during process startup.
-            # Attaching to the still-suspended process can retain a blank buffer.
-            time.sleep(.5)
-            kernel.FreeConsole()
             try:
+                assert kernel.ResumeThread(self.process.thread) != 0xffffffff
+                # XP completes console initialization during process startup.
+                # Attaching to the still-suspended process can retain a blank buffer.
+                time.sleep(.5)
+                kernel.FreeConsole()
                 assert kernel.AttachConsole(self.process.pid), C.GetLastError()
                 self.input = kernel.CreateFileW('CONIN$', 0xc0000000, 3, None, 3, 0, None)
                 self.output = kernel.CreateFileW('CONOUT$', 0xc0000000, 3, None, 3, 0, None)
@@ -168,8 +230,8 @@ def main():
                 self.close()
                 raise
 
-        # Checks modes in windows console agent smoke.
-        #@param self Console Owner of the proof fixture and its resources.
+        # Read mode flags from this owner's retained input and original output handles.
+        #@param self Console Attached child owner with valid retained handles.
         #@return tuple[int,int] modes Current console input and output mode flags.
         def modes(self):
             a, b = W.DWORD(), W.DWORD()
@@ -177,9 +239,11 @@ def main():
             assert kernel.GetConsoleMode(self.output, C.byref(b))
             return a.value, b.value
 
-        # Checks screen in windows console agent smoke.
-        #@param self Console Owner of the proof fixture and its resources.
-        #@return str text Current visible console screen contents.
+        # Read a bounded tail from the child's active screen buffer and save Unicode evidence.
+        #@param self Console Owner attached to the current actual child console.
+        #@return str text At most the last 400 populated screen rows, without trailing spaces.
+        #@error Raises on screen API failure or invalid returned row counts.
+        #@effect Replaces only this session's screen evidence; opens/closes one temporary active-buffer handle.
         def screen(self):
             state, received = SCREEN(), W.DWORD()
             # The application may activate its own screen buffer after startup.
@@ -208,10 +272,12 @@ def main():
             return data
 
         # Waits for the expected terminal transcript marker.
-        #@param self Console Owner of the proof fixture and its resources.
-        #@param value object Candidate value under validation.
+        #@param self Console Actual child owner whose screen is being observed.
+        #@param value str Required literal output marker.
         #@param timeout float Maximum wait time in seconds.
-        #@return str text Screen text after the expected marker appears.
+        #@return str text Screen tail containing the required marker.
+        #@error Raises if the child exits or the wall-clock deadline expires before the marker.
+        #@effect Polls and records the owned screen without sending input.
         def expect(self, value, timeout=90):
             end = time.time() + timeout
             while time.time() < end:
@@ -222,9 +288,11 @@ def main():
             raise AssertionError('console timed out before ' + value)
 
         # Sends one terminal input line to the running Agent.
-        #@param self Console Owner of the proof fixture and its resources.
-        #@param text object The text supplied to this proof operation.
-        #@return None No value; the operation updates proof state or raises on failure.
+        #@param self Console Owner of the input queue receiving the test line.
+        #@param text str|unicode BMP text submitted with one final Enter; no command is interpreted by this helper.
+        #@return None No value after every key-down record is acknowledged.
+        #@error Raises if a character cannot fit WCHAR or an input record is not accepted.
+        #@effect Injects only this child's native console queue through WriteConsoleInputW.
         def send(self, text):
             for character in text + '\r':
                 event, written = INPUT(), W.DWORD()
@@ -235,9 +303,11 @@ def main():
                 event.event.key.character.unicode = character
                 assert kernel.WriteConsoleInputW(self.input, C.byref(event), 1, C.byref(written)) and written.value == 1
 
-        # Checks finish in windows console agent smoke.
-        #@param self Console Owner of the proof fixture and its resources.
-        #@return None result No value; waits for and checks the console child exit.
+        # Request normal application close, then verify exit and restoration to the observed baseline.
+        #@param self Console Running child whose session is ready to quit.
+        #@return None No value after exit zero and matching input/output modes.
+        #@error Raises on a ten-second timeout, nonzero child status or mismatched mode flags.
+        #@effect Sends .quit, waits for child completion and records the final screen.
         def finish(self):
             self.send('.quit')
             assert kernel.WaitForSingleObject(self.process.process, 10000) == 0
@@ -246,9 +316,11 @@ def main():
             assert self.modes() == self.before, 'console modes were not restored'
             self.screen()
 
-        # Checks close in windows console agent smoke.
-        #@param self Console Owner of the proof fixture and its resources.
-        #@return None result No value; releases console and child-process handles.
+        # Release this probe's child and handles after success or failed assertions.
+        #@param self Console Owner closed exactly once by the enclosing lifecycle.
+        #@return None No value; releases retained process/thread/input/output handles and detaches the probe console.
+        #@effect Terminates only a still-running owned child with status 124 and waits up to five seconds.
+        #@ownership Consumes this owner's handle references; repeated close is not supported.
         def close(self):
             if self.process.process:
                 if kernel.WaitForSingleObject(self.process.process, 0) == 258:

@@ -7,7 +7,8 @@
 
 | 时间 / 节点 | 主要成果 | 证据与适用范围 |
 | --- | --- | --- |
-| 2026-10-11，远端同步与 R90 | 合并远端 11 个提交及本地 11 个提交，保留两条 Review 历史；修复 `.software` 读取越界变量，合并关闭确认和管理输入失效逻辑 | [本日 Review](CODE-REVIEW-2026-10-11.md)、[R90](lua-review/R90.json)；基线 115/116、修复 116/116、完整 730/730、readiness PASS、266/5740/0；新核心与正式资格待完成 |
+| 2026-10-11，R90 三核心与 R91 目标旅程 | 同一干净合并源码重建三核心并绑定实际目标各 730/730；六组 provider 各 7/7、Linux 双模型 PTY 和 Windows 双目标原生首次配置通过；修复驱动提示符/召回与恢复线程失败清理 | [核心节点](candidates/core-node-r90-20261011.json)、[R91](qualification-review/R91.json)；50 个核心件与 41 个资格件绑定，266/5741/0、readiness PASS；最终九包、升级、来源闭包和剩余语义 Review 待完成 |
+| 2026-10-11，远端同步与 R90 | 合并远端 11 个提交及本地 11 个提交，保留两条 Review 历史；修复 `.software` 读取越界变量，合并关闭确认和管理输入失效逻辑 | [本日 Review](CODE-REVIEW-2026-10-11.md)、[R90](lua-review/R90.json)；基线 115/116、修复 116/116、完整 730/730、readiness PASS、266/5740/0；正式资格待完成 |
 | 2026-10-08，R87 Cygwin stty ownership | 修复 timeout 后活 child，增加 suspended/job admission；双目标六项矩阵、指定 Cygwin 四组实际模式/回滚/retry 及原生回归通过 | [本日 Review](CODE-REVIEW-2026-10-08.md#r87cygwin-stty-子进程所有权与模式回滚)、[R87](native-review/R87.json)；TTY carrier 255 保留、独立 nonce receipt 已核对；720/720、readiness PASS、256/5628/0 |
 | 2026-10-08，R86 main input owner | 关闭失败时保留 owner、停止模式复用并缓存已成功 join；四项公开 REPL 故障/重试和未知恢复不发布验证通过 | [本日 Review](CODE-REVIEW-2026-10-08.md#r86main-输入协调器保留未关闭的-owner)、[R86](native-review/R86.json)；87/87 专项、720/720 完整、readiness PASS、255/5615/0；不替代物理机和最终包资格 |
 | 2026-10-08，R85 terminal adapter 与 Linux raw | 修复失败关闭后的 owner/确认值/恢复状态和 Linux raw 空闲 EOF；十场景回归、五组实际 PTY/kernel 状态恢复通过 | [本日 Review](CODE-REVIEW-2026-10-08.md#r85终端适配器失败重试与-linux-raw-模式)、[R85](native-review/R85.json)；开发宿主 716/716、readiness PASS、255/5603/0；未扩大为新目标或发行包资格 |
