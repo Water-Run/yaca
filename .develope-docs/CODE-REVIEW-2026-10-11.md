@@ -79,3 +79,35 @@ Linux 输入移至 `/home/linzh/.cache/yaca-release-readiness-20261011/tool-inpu
 当前正在按官方标签、版本和摘要取得真实对应源码与构建输入，Source 审计未完成。
 上游 w64devkit v2.9.0 的 Dockerfile 已经由 HTTPS 取得并解析其版本/摘要资料；
 未执行上游构建命令，也未沿用其中的 TLS 跳过选项。
+
+## R89 对应源码与构建资料绑定
+
+新增 audit_corresponding_sources.py 与 bundle_corresponding_sources.py，拒绝把 PE/ELF
+分发包或单份 portable ZIP 当作对应源码；显式 source-profile 逐成员核对路径、摘要与完整
+成员集合，构建器只接纳已锁定的源码/配方，拒绝输入越界、二进制替代、摘要漂移和覆盖已有
+输出。结构核对不代替源码闭包的人工审核，也不赋予运行或发布资格。
+
+编译器来源改为 w64devkit v2.9.0 的 23 项上游组件档案、标签仓库和 Dockerfile，共
+25 个成员。每项按官方配方 SHA-256 核对。BusyBox 原 frippery HTTPS 暂不可用，显式
+使用已核对的官方 GitHub 标签档案，PAX 绑定完整 commit 169694ebdba292f6533f78aeea678bfbb907396c；
+原配方摘要保留，不把不同压缩字节写成相同原档案。构建/打包配方一并提供。
+
+Windows curl 原来源目录包含 .libs 的构建链接和生成物；改为锁定的原始 curl 8.21.0、
+Mbed TLS 3.6.7 与四份维护配方，共 6 个成员。Python 3.4.10 / 3.8.20 改为各自原始
+CPython 源码、实际选用的依赖来源与构建/暂存配方，分别 7 / 9 个成员；旧二进制 ZIP
+不再充当来源。旧 SQLite/XZ 标签不存在时，明确记录对应版本的 SQLite 官方 amalgamation
+和 XZ 官方档案，未使用其他版本替代。微软运行库仍按实际随包 notices 描述，不标作开源。
+
+四份 Windows std/full 维护暂存脚本已调用同一来源构建器。本地为原恢复清单另写
+tool-inputs-source-reviewed.json，保持工具载荷字节不变；原始 recovery 记录留存。
+各 Windows 的结构来源缺项从 Git/编译器/Python/curl 收口到 Git 一项。
+
+来源检查与构建器专项 **7/7**，完整 coding readiness **PASS**，注释结构
+**255 文件 / 5586 声明 / 0 缺项**。参数、返回、归档所有权、写盘范围、错误与源码/二进制
+区别已人工核对。此批未改变产品 Lua/C 行为，当前完整 Lua suite 的 715/715 继续适用。
+维护源码、冻结副本、实际档案及日志见 [R89](tool-source-review/R89.json)。
+
+Git 对应依赖继续待完成：按实际 etc/package-versions.txt 获取来源包，34 条 Win64
+记录已找到，132 条暂未找到，Win32 的历史镜像缺项另列。已克隆官方 MSYS2/MINGW
+配方历史，下一步按精确版本和发行 revision 回溯补来源；不能只提供 Git 主仓库代填全部
+MSYS/Perl/SSL 依赖。最终三核心、九包及其旅程尚未重新验收，Gate R 关闭。

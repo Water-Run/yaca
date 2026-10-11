@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Author: WaterRun
-# Date: 2026-10-01
+# Date: 2026-10-11
 # File: prepare_win32_full.py
 # Description: Stage the win32 full toolbox from std staging, cross builds, and official portable packages.
 
@@ -16,6 +16,7 @@ import hashlib
 import json
 import pathlib
 import shutil
+import subprocess
 import sys
 import tarfile
 
@@ -76,9 +77,11 @@ def collect(output, directory):
     return payload
 
 
-# Runs the prepare win32 full command and reports its status.
-#@param none No arguments; all paths arrive through sys.argv.
+# Stage the Win32 full toolbox with pinned compiler and Python corresponding-source profiles.
+#@param none Parses std staging, build root, Python ZIP, source cache, payload cache and absent output from argv.
 #@return None result No value; writes the staged tree and tool-inputs.json.
+#@error Raises for rejected source bundles, invalid archives, missing inputs or failed filesystem operations.
+#@effect Copies payloads, extracts the selected Python ZIP and runs the maintained source bundler; staged programs do not run.
 def main():
     std_staged, root, py34_zip, cache, payloads, output = map(pathlib.Path, sys.argv[1:7])
     root = root.resolve()
@@ -123,13 +126,15 @@ def main():
         archive.add(cache / "sqlite-src-3530400.zip", arcname="sqlite-src-3530400.zip")
     shutil.copyfile(cache / "busybox-w32-FRP-6075-g169694ebd.tar.gz",
                     sources / "busybox/busybox-w32-FRP-6075-g169694ebd.tar.gz")
-    shutil.copyfile(payloads / "w64devkit-x86-2.9.0.7z.exe",
-                    sources / "compiler/w64devkit-x86-2.9.0.7z.exe")
+    subprocess.run([sys.executable, str(REPO / ".tools/qualification/bundle_corresponding_sources.py"),
+                    str(REPO / "release/windows-compiler-sources.lock.json"), str(cache),
+                    str(sources / "compiler/w64devkit-2.9.0-corresponding-source.tar.gz")], check=True)
     shutil.copyfile(payloads / "PortableGit-2.10.0-32-bit.7z.exe",
                     sources / "git/PortableGit-2.10.0-32-bit.7z.exe")
-    python_bundle = sources / "python3/python34-portable-closure.tar.gz"
-    with tarfile.open(python_bundle, "w:gz") as archive:
-        archive.add(py34_zip, arcname="python34-portable.zip")
+    python_bundle = sources / "python3/python34-windows-corresponding-source.tar.gz"
+    subprocess.run([sys.executable, str(REPO / ".tools/qualification/bundle_corresponding_sources.py"),
+                    str(REPO / "release/windows-python34-sources.lock.json"), str(cache),
+                    str(python_bundle)], check=True)
 
     specifications = (
         ("git", "git", "2.10.0", ["cmd/git.exe", "bin/git.exe"],
@@ -137,7 +142,7 @@ def main():
          "git/PortableGit-2.10.0-32-bit.7z.exe",
          "https://github.com/git-for-windows/git/releases/tag/v2.10.0.windows.1"),
         ("python3", "python3", "3.4.10", ["python.exe"], "Python-2.0.1",
-         ["LICENSE.txt"], "python3/python34-portable-closure.tar.gz",
+         ["LICENSE.txt"], "python3/python34-windows-corresponding-source.tar.gz",
          "https://www.python.org/downloads/release/python-3410/"),
         ("sqlite", "sqlite", "3.53.4", ["sqlite3.exe", "sqldiff.exe"],
          "Public-Domain-style sqlite blessing", ["LICENSE.md"],
@@ -152,7 +157,7 @@ def main():
          ["bin/gcc.exe", "bin/g++.exe", "bin/ld.exe", "bin/make.exe"],
          "GPL-3.0-or-later WITH GCC-exception-3.1",
          ["COPYING.MinGW-w64-runtime.txt"],
-         "compiler/w64devkit-x86-2.9.0.7z.exe",
+         "compiler/w64devkit-2.9.0-corresponding-source.tar.gz",
          "https://github.com/skeeto/w64devkit/releases/tag/v2.9.0"),
     )
     records = json.loads((std_staged / "tool-inputs.json").read_text())["tools"]

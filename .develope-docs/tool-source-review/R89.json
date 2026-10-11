@@ -1,0 +1,219 @@
+{
+  "schema": "yaca-tool-source-review-evidence-v1",
+  "review_id": "R89",
+  "date": "2026-10-11",
+  "status": "verified-compiler-curl-python-source-subset",
+  "release_authorized": false,
+  "target_qualification_complete": false,
+  "whole_repository_semantic_review": "partial",
+  "source_inputs": [
+    {
+      "path": ".tools/qualification/audit_corresponding_sources.py",
+      "bytes": 6752,
+      "sha256": "77944246db7194a565bd6d021e31051c143ed12d0e393bd8610fc8d8b88aefc2"
+    },
+    {
+      "path": ".tools/qualification/bundle_corresponding_sources.py",
+      "bytes": 6329,
+      "sha256": "4ca83adbc8a670c90cd6fd118fab0c9e930c44c4a7d6afd0fb0c71be9d183b40"
+    },
+    {
+      "path": ".tools/qualification/prepare_win32_std.py",
+      "bytes": 9561,
+      "sha256": "8a2f70ae9d6ad64c7d1a60a0f0addb6ec5336d4b8f7c813ad8fbe97337cf2630"
+    },
+    {
+      "path": ".tools/qualification/prepare_win64_std.py",
+      "bytes": 10124,
+      "sha256": "a9ddb13482b2cb165dfd05240d8be58792ee352a61647c974f4e5fcb34363a3a"
+    },
+    {
+      "path": ".tools/qualification/prepare_win32_full.py",
+      "bytes": 9606,
+      "sha256": "f68f652960c7c9ef7032b1521c8d4065cded265d1021a68733b6189be1526ea9"
+    },
+    {
+      "path": ".tools/qualification/prepare_win64_full.py",
+      "bytes": 9381,
+      "sha256": "32cb328a67c5db9e465b3ac8e4a91c0796a8975a541091565b8b2a1021b02c85"
+    },
+    {
+      "path": ".tools/run_coding_readiness.sh",
+      "bytes": 1526,
+      "sha256": "615725b5e715983fb5ca97def00a741972233a8f666dd86264566045ea1730ef"
+    },
+    {
+      "path": "test/qualification/corresponding_sources_test.py",
+      "bytes": 8372,
+      "sha256": "4e6cb44ab7f4790ecbf4d2773ddd4782f91acc83f00d0d55968c68a9204f2306"
+    },
+    {
+      "path": "release/windows-compiler-sources.lock.json",
+      "bytes": 13054,
+      "sha256": "ade955bfe7f8a152e2ecbde7b31daa446daf0d4c16648dea343904536171ecf6"
+    },
+    {
+      "path": "release/windows-curl-sources.lock.json",
+      "bytes": 1918,
+      "sha256": "2232804f3664a1846704e2c6ff984042cf1be068c733bfdeff132fd4a109afec"
+    },
+    {
+      "path": "release/windows-python34-sources.lock.json",
+      "bytes": 3972,
+      "sha256": "bc9af32cfbe3c9a43642e37d6e5b097ff1ae66ea4cb88c690e30f109694f62f9"
+    },
+    {
+      "path": "release/windows-python38-sources.lock.json",
+      "bytes": 6229,
+      "sha256": "3423fc97893a09bf68ca8b80ebdd0dc49bdf06bac69c12590722200903098ef4"
+    }
+  ],
+  "frozen_source_inputs": [
+    {
+      "path": "out/review-20261011/r89/after-source/.tools/qualification/audit_corresponding_sources.py",
+      "bytes": 6752,
+      "sha256": "77944246db7194a565bd6d021e31051c143ed12d0e393bd8610fc8d8b88aefc2"
+    },
+    {
+      "path": "out/review-20261011/r89/after-source/.tools/qualification/bundle_corresponding_sources.py",
+      "bytes": 6329,
+      "sha256": "4ca83adbc8a670c90cd6fd118fab0c9e930c44c4a7d6afd0fb0c71be9d183b40"
+    },
+    {
+      "path": "out/review-20261011/r89/after-source/.tools/qualification/prepare_win32_std.py",
+      "bytes": 9561,
+      "sha256": "8a2f70ae9d6ad64c7d1a60a0f0addb6ec5336d4b8f7c813ad8fbe97337cf2630"
+    },
+    {
+      "path": "out/review-20261011/r89/after-source/.tools/qualification/prepare_win64_std.py",
+      "bytes": 10124,
+      "sha256": "a9ddb13482b2cb165dfd05240d8be58792ee352a61647c974f4e5fcb34363a3a"
+    },
+    {
+      "path": "out/review-20261011/r89/after-source/.tools/qualification/prepare_win32_full.py",
+      "bytes": 9606,
+      "sha256": "f68f652960c7c9ef7032b1521c8d4065cded265d1021a68733b6189be1526ea9"
+    },
+    {
+      "path": "out/review-20261011/r89/after-source/.tools/qualification/prepare_win64_full.py",
+      "bytes": 9381,
+      "sha256": "32cb328a67c5db9e465b3ac8e4a91c0796a8975a541091565b8b2a1021b02c85"
+    },
+    {
+      "path": "out/review-20261011/r89/after-source/.tools/run_coding_readiness.sh",
+      "bytes": 1526,
+      "sha256": "615725b5e715983fb5ca97def00a741972233a8f666dd86264566045ea1730ef"
+    },
+    {
+      "path": "out/review-20261011/r89/after-source/test/qualification/corresponding_sources_test.py",
+      "bytes": 8372,
+      "sha256": "4e6cb44ab7f4790ecbf4d2773ddd4782f91acc83f00d0d55968c68a9204f2306"
+    },
+    {
+      "path": "out/review-20261011/r89/after-source/release/windows-compiler-sources.lock.json",
+      "bytes": 13054,
+      "sha256": "ade955bfe7f8a152e2ecbde7b31daa446daf0d4c16648dea343904536171ecf6"
+    },
+    {
+      "path": "out/review-20261011/r89/after-source/release/windows-curl-sources.lock.json",
+      "bytes": 1918,
+      "sha256": "2232804f3664a1846704e2c6ff984042cf1be068c733bfdeff132fd4a109afec"
+    },
+    {
+      "path": "out/review-20261011/r89/after-source/release/windows-python34-sources.lock.json",
+      "bytes": 3972,
+      "sha256": "bc9af32cfbe3c9a43642e37d6e5b097ff1ae66ea4cb88c690e30f109694f62f9"
+    },
+    {
+      "path": "out/review-20261011/r89/after-source/release/windows-python38-sources.lock.json",
+      "bytes": 6229,
+      "sha256": "3423fc97893a09bf68ca8b80ebdd0dc49bdf06bac69c12590722200903098ef4"
+    }
+  ],
+  "source_bundles": [
+    {
+      "path": "/home/linzh/.cache/yaca-release-readiness-20261011/sources/w64devkit-2.9.0-corresponding-source.tar.gz",
+      "bytes": 232372105,
+      "sha256": "0ccc540e49e5e5ba3da66185f6f62a3be868df1d514a6257724c3dd69a9cffd1"
+    },
+    {
+      "path": "/home/linzh/.cache/yaca-release-readiness-20261011/sources/curl-8.21.0-windows-corresponding-source.tar.gz",
+      "bytes": 8306237,
+      "sha256": "c67c3f96bc767a201545b48e016a4057b7cea6ea2320dfc2bcd7b6e96eb5e635"
+    },
+    {
+      "path": "/home/linzh/.cache/yaca-release-readiness-20261011/sources/python34-windows-corresponding-source.tar.gz",
+      "bytes": 29374586,
+      "sha256": "29b1a743c006ca0d8a483825e38f636ef5d50c86fc8c8ab5129ca5704c07f555"
+    },
+    {
+      "path": "/home/linzh/.cache/yaca-release-readiness-20261011/sources/python38-windows-corresponding-source.tar.gz",
+      "bytes": 41906799,
+      "sha256": "150fafeb0df9a955285018841bc441b4624e64880217eacb8fa84821982ffbd1"
+    }
+  ],
+  "tests": {
+    "source_audit_and_bundler": "7/7",
+    "coding_readiness": "PASS",
+    "comment_structure": {
+      "files": 255,
+      "declarations": 5586,
+      "violations": 0
+    },
+    "product_source_changed": false
+  },
+  "remaining_source_gaps": {
+    "tool": "Git for Windows dependency source closure",
+    "unavailable_source_package_records": {
+      "win32-x86": 131,
+      "win64-x86_64": 132
+    }
+  },
+  "logs": [
+    {
+      "path": "out/review-20261011/r89-source-tests-last.log",
+      "bytes": 105,
+      "sha256": "4190e6532da5d52050bd5ea71ff40310f4ffe0846610b4b159650675a5a9c2b2"
+    },
+    {
+      "path": "out/review-20261011/source-provenance-coding-readiness.log",
+      "bytes": 4564,
+      "sha256": "755cb9fe5ef6880cdcaee9b534ea2a4199da4104faa1ec89706d87dd5c28b945"
+    },
+    {
+      "path": "out/review-20261011/source-provenance-comment-coverage.log",
+      "bytes": 64,
+      "sha256": "6015440c4db52e3ce640d06658cf90aad21955d76558797f778e50a100b2ac23"
+    },
+    {
+      "path": "out/review-20261011/source-provenance-comment-inventory.txt",
+      "bytes": 1247599,
+      "sha256": "71959282827438b07c3a33b441641bc759cb293705b74cbfbb1f7bcb3848157d"
+    },
+    {
+      "path": "out/review-20261011/windows-source-binding-three-tools.log",
+      "bytes": 157,
+      "sha256": "f8ef506e0f064450c018e805b64797cea602d128898250ee735f81b4283a60e3"
+    },
+    {
+      "path": "out/review-20261011/tool-source-inspection.json",
+      "bytes": 1504170,
+      "sha256": "c9b7ffd046c3f4c0943c5b293ffba8652b23887d3d4c2b5ea1b7eaa8baf468c9"
+    },
+    {
+      "path": "out/review-20261011/w64devkit-source-inputs.json",
+      "bytes": 5784,
+      "sha256": "a70521e24b2680847c9d235ca9cd6ca2f512b14a42bb1ea53af3302b3abce1d6"
+    },
+    {
+      "path": "out/review-20261011/python-dependency-source-inputs.json",
+      "bytes": 4055,
+      "sha256": "ed74dc7b76d8a18e800b22b10c1e59e8246b547f4ca9b9d8737afa8e5497b667"
+    },
+    {
+      "path": "out/review-20261011/gfw-package-source-inputs.json",
+      "bytes": 137909,
+      "sha256": "58f1e030fe806b3b0e66e0aea19f5daf3b773cef2a87afac04088d4638efead2"
+    }
+  ]
+}

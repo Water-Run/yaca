@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Author: WaterRun
-# Date: 2026-09-29
+# Date: 2026-10-11
 # File: prepare_win64_std.py
 # Description: Stages the portable Windows x64 std tool tree and its hashed input manifest.
 
@@ -16,6 +16,7 @@ import hashlib
 import json
 import pathlib
 import shutil
+import subprocess
 import sys
 import tarfile
 
@@ -46,9 +47,11 @@ def leaf(value):
     return value
 
 
-# Runs the prepare win64 std command and reports its status.
-#@param none No arguments.
+# Stage the pinned Win64 std payload and clean curl/Mbed TLS source closure.
+#@param none Parses source cache, build, core, MSI inventory and absent staging output from argv.
 #@return None result No value; writes the staged tree and tool-inputs.json.
+#@error Raises on missing/changed source profile inputs, rejected source bundling or failed staging.
+#@effect Creates the portable tree and invokes the maintained source bundler; no staged program executes.
 def main():
     cache, build, core, inventory, output = map(pathlib.Path, sys.argv[1:6])
     if output.exists():
@@ -151,13 +154,9 @@ def main():
         archive.add(build / "putty-0.85", arcname="putty-0.85")
         for name in ("build_win64_std.sh", "prepare_win64_std.py"):
             archive.add(REPO / ".tools/qualification" / name, arcname=name)
-    with tarfile.open(sources / "curl-mbedtls-source.tar.gz", "w:gz") as archive:
-        for name in ("curl-8.21.0", "mbedtls-3.6.7"):
-            archive.add(core / "https/work" / name, arcname=name,
-                        # Omits compiler outputs from the bundled curl and mbedTLS sources.
-                        #@param item TarInfo Candidate source archive entry.
-                        #@return TarInfo|None Original entry, or None for a build output.
-                        filter=lambda item: None if item.name.endswith((".o", ".a", ".lo", ".exe")) else item)
+    subprocess.run([sys.executable, str(REPO / ".tools/qualification/bundle_corresponding_sources.py"),
+                    str(REPO / "release/windows-curl-sources.lock.json"), str(cache),
+                    str(sources / "curl-mbedtls-source.tar.gz")], check=True)
 
     records = []
     for identifier, directory_name, version, entries, license_id, notices, source_name, url in (

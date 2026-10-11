@@ -25,6 +25,7 @@ python3.13 test/qualification/terminal_approval_test.py
 python3.13 test/qualification/linux_full_staging_test.py
 python3.13 test/qualification/windows_test_evidence_test.py
 python3.13 test/qualification/restore_edition_inputs_test.py
+python3.13 test/qualification/corresponding_sources_test.py
 
 bin/lua55 .tools/validate_design_contracts.lua
 bin/lua55 .tools/validate_proof_evidence.lua

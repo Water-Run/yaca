@@ -1,0 +1,54 @@
+{
+  "schema": "yaca-corresponding-source-inputs-v1",
+  "tool": "curl",
+  "version": "8.21.0",
+  "targets": [
+    "win32-x86",
+    "win64-x86_64"
+  ],
+  "inputs": [
+    {
+      "path": "curl-8.21.0.tar.xz",
+      "destination": "upstream/curl-8.21.0.tar.xz",
+      "sha256": "aa1b66a70eace83dc624508745646c08ae561de512ab403adffb93ac87fc72e6",
+      "url": "https://curl.se/download/curl-8.21.0.tar.xz"
+    },
+    {
+      "path": "mbedtls-3.6.7.tar.bz2",
+      "destination": "upstream/mbedtls-3.6.7.tar.bz2",
+      "sha256": "a7e8bcbec0e6f761b4af24f25677626b35f762f68eef79c08677a363212d11f6",
+      "url": "https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.7/mbedtls-3.6.7.tar.bz2"
+    },
+    {
+      "path": ".tools/qualification/build_win32_xp_https_candidate.sh",
+      "origin": "repository",
+      "destination": "build/build_win32_xp_https_candidate.sh",
+      "sha256": "a5c1a1b0f856683f0e9348580cf6002cff53540e864c3a39f2d26c6ac844757e"
+    },
+    {
+      "path": ".tools/qualification/build_win64_https_candidate.sh",
+      "origin": "repository",
+      "destination": "build/build_win64_https_candidate.sh",
+      "sha256": "048be0f9139c6037f54a1b071a971ad95416c40913539838578bb4e3f92b50eb"
+    },
+    {
+      "path": ".tools/qualification/build_win32_std.sh",
+      "origin": "repository",
+      "destination": "build/build_win32_std.sh",
+      "sha256": "6fb9b7aed63d5ef1c13ad1bd3f3117ae47d4acb326d64eb1e7c9a7174e9d9f0b"
+    },
+    {
+      "path": ".tools/qualification/build_win64_std.sh",
+      "origin": "repository",
+      "destination": "build/build_win64_std.sh",
+      "sha256": "fca7446e587887f6afbb8b3ba27ab5ff0903cc87444fe50a7eb4fe673a39fd0e"
+    }
+  ],
+  "provenance": {
+    "dependency_lock": "release/dependencies.lock",
+    "backend": "Mbed TLS 3.6.7",
+    "sources": "pristine pinned upstream archives"
+  },
+  "manual_qualification": "pending",
+  "release_authorized": false
+}

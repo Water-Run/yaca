@@ -1,0 +1,145 @@
+#!/usr/bin/env python3
+# Author: WaterRun
+# Date: 2026-10-11
+# File: corresponding_sources_test.py
+# Description: Reject binary-only toolbox provenance and verify corresponding-source profile membership, digests and safe archive paths.
+
+import hashlib
+import importlib.util
+import io
+import json
+from pathlib import Path
+import tarfile
+import tempfile
+import unittest
+
+ROOT = Path(__file__).resolve().parents[2]
+SPEC = importlib.util.spec_from_file_location('corresponding_sources', ROOT / '.tools/qualification/audit_corresponding_sources.py')
+AUDIT = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(AUDIT)
+SPEC = importlib.util.spec_from_file_location('bundle_sources', ROOT / '.tools/qualification/bundle_corresponding_sources.py')
+BUNDLE = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(BUNDLE)
+
+
+#@class SourceAuditTest Small disposable source archives exercising actual structural failures.
+#@field temporary TemporaryDirectory Owns the isolated archive root and automatic cleanup.
+#@field root Path Absolute disposable directory used by every scenario.
+class SourceAuditTest(unittest.TestCase):
+    # Create one independent disposable source-archive directory.
+    #@param self SourceAuditTest Owner of this test's files and cleanup.
+    #@return None No value; stores the temporary root.
+    #@effect Creates a uniquely named directory and registers its cleanup.
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix='yaca-source-audit-')
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+
+    # Write a tiny real tar without executing any member data.
+    #@param self SourceAuditTest Fixture owner.
+    #@param files dict[str,bytes] Member names and exact data bytes, including deliberate unsafe test paths.
+    #@return Path Newly written fixture archive.
+    #@effect Creates only the fixture tar beneath the owned temporary root.
+    def archive(self, files):
+        path = self.root / 'source.tar.gz'
+        with tarfile.open(path, 'w:gz') as archive:
+            for name, content in files.items():
+                member = tarfile.TarInfo(name)
+                member.size = len(content)
+                archive.addfile(member, io.BytesIO(content))
+        return path
+
+    # Require an actual source member's digest and complete membership to verify its declared profile.
+    #@param self SourceAuditTest Fixture owner.
+    #@return None No value; assertions require valid profile acknowledgement and rejection after changed source bytes.
+    #@effect Writes two tiny source-archive variants in this test's owned directory.
+    def test_verified_profile_binds_member_bytes(self):
+        source = b'original source data'
+        profile = {'schema': 'yaca-corresponding-source-v1',
+                   'files': [{'path': 'upstream/source.tar.xz', 'sha256': hashlib.sha256(source).hexdigest()}]}
+        path = self.archive({'source-profile.json': json.dumps(profile).encode(), 'upstream/source.tar.xz': source})
+        self.assertTrue(AUDIT.inspect(path)['profile_verified'])
+        path = self.archive({'source-profile.json': json.dumps(profile).encode(), 'upstream/source.tar.xz': b'changed'})
+        self.assertFalse(AUDIT.inspect(path)['profile_verified'])
+        self.assertIn('source-profile digest differs: upstream/source.tar.xz', AUDIT.inspect(path)['findings'])
+
+    # Reject the executable distributions that were incorrectly attached as Windows Git/compiler source.
+    #@param self SourceAuditTest Fixture owner.
+    #@return None No value; assertions require a binary-source finding for both PE and ELF markers.
+    #@effect Writes fixture bytes without launching any binary.
+    def test_binary_distributions_are_rejected(self):
+        for magic in (b'MZ', b'\x7fELF'):
+            path = self.root / 'binary'
+            path.write_bytes(magic + b'fixture')
+            self.assertEqual(AUDIT.inspect(path)['kind'], 'binary-distribution')
+            self.assertTrue(AUDIT.inspect(path)['findings'])
+
+    # Reject the old Python closure's lone portable ZIP instead of treating packaging as dependency source.
+    #@param self SourceAuditTest Fixture owner.
+    #@return None No value; assertions require a binary-only closure finding.
+    #@effect Creates one tiny tar containing a nonexecuted binary-archive fixture.
+    def test_lone_portable_binary_zip_is_rejected(self):
+        path = self.archive({'python38-portable.zip': b'PK fixture'})
+        self.assertTrue(AUDIT.inspect(path)['findings'])
+
+    # Refuse unsafe members even when a profile could otherwise conceal them.
+    #@param self SourceAuditTest Fixture owner.
+    #@return None No value; assertions require path traversal rejection without extraction.
+    #@effect Creates a deliberately unsafe tar only inside the disposable test root.
+    def test_unsafe_source_member_is_rejected(self):
+        path = self.archive({'../escaped-source': b'fixture'})
+        self.assertTrue(AUDIT.inspect(path)['findings'])
+
+    # Verify production bundling and auditing agree on the complete admitted source bytes.
+    #@param self SourceAuditTest Fixture owner.
+    #@return None No value; assertions require a verified archive and refusal to replace it.
+    #@effect Creates a source-data fixture and one production corresponding-source bundle.
+    def test_production_bundle_is_verified_without_replacing_existing_output(self):
+        source = self.root / 'upstream.tar.xz'
+        source.write_bytes(b'fixture upstream source')
+        profile = {'schema': 'yaca-corresponding-source-inputs-v1', 'tool': 'fixture', 'version': '1',
+                   'inputs': [{'path': source.name, 'destination': 'upstream/source.tar.xz',
+                               'sha256': hashlib.sha256(source.read_bytes()).hexdigest()}]}
+        output = self.root / 'bundled.tar.gz'
+        BUNDLE.bundle(profile, self.root, output)
+        self.assertTrue(AUDIT.inspect(output)['profile_verified'])
+        before = output.read_bytes()
+        with self.assertRaisesRegex(ValueError, 'already exists'):
+            BUNDLE.bundle(profile, self.root, output)
+        self.assertEqual(output.read_bytes(), before)
+
+    # Reject changed input bytes and executable distributions before publishing a source bundle.
+    #@param self SourceAuditTest Fixture owner.
+    #@return None No value; assertions require both failures and no accepted output archive.
+    #@effect Rewrites only this test's input fixture and attempts production bundling.
+    def test_production_bundle_rejects_changed_or_binary_inputs(self):
+        source = self.root / 'input'
+        source.write_bytes(b'original source')
+        profile = {'schema': 'yaca-corresponding-source-inputs-v1', 'tool': 'fixture', 'version': '1',
+                   'inputs': [{'path': source.name, 'destination': 'source.dat',
+                               'sha256': hashlib.sha256(source.read_bytes()).hexdigest()}]}
+        output = self.root / 'rejected.tar.gz'
+        source.write_bytes(b'changed source')
+        with self.assertRaisesRegex(ValueError, 'differs'):
+            BUNDLE.bundle(profile, self.root, output)
+        source.write_bytes(b'MZ binary distribution')
+        profile['inputs'][0]['sha256'] = hashlib.sha256(source.read_bytes()).hexdigest()
+        with self.assertRaisesRegex(ValueError, 'compiled distribution'):
+            BUNDLE.bundle(profile, self.root, output)
+        self.assertFalse(output.exists())
+
+    # Keep source-profile input paths confined to their declared cache rather than accepting traversal.
+    #@param self SourceAuditTest Fixture owner.
+    #@return None No value; assertions require an unsafe-path error before any output exists.
+    #@effect Attempts bundling using an invalid path record without reading outside the owned input root.
+    def test_source_input_traversal_is_rejected(self):
+        profile = {'schema': 'yaca-corresponding-source-inputs-v1', 'tool': 'fixture', 'version': '1',
+                   'inputs': [{'path': '../outside', 'destination': 'source', 'sha256': '0' * 64}]}
+        output = self.root / 'rejected-traversal.tar.gz'
+        with self.assertRaisesRegex(ValueError, 'unsafe corresponding-source input path'):
+            BUNDLE.bundle(profile, self.root, output)
+        self.assertFalse(output.exists())
+
+
+if __name__ == '__main__':
+    unittest.main()

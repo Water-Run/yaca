@@ -12,7 +12,7 @@ R85 补齐管理输入面的同一 owner 保留、join 状态及失败模式切�
 R86 让主协调器在 owner 未释放时保持 closing，并幂等重试未完成的清理。
 R87 让终端适配器幂等确认已完成的原生释放，避免先前恢复错误令协调器持续 closing。
 R88 补齐压缩响应身份先于时钟/重试的边界。当前完整 Lua suite 715/715、
-完整 readiness PASS，结构检查 252/5572/0；R86 已构建核心各 713/713，尚未包含 R87/R88。证据见
+完整 readiness PASS，结构检查 255/5586/0；R86 已构建核心各 713/713，尚未包含 R87/R88。证据见
 [10 月 11 日 Review](CODE-REVIEW-2026-10-11.md)。剩余工作见 [TRACKING](TRACKING.md)。
 
 阶段为 `implemented-unqualified`，目标资格验证待完成；Release Gate R 为 `closed`，
@@ -101,7 +101,7 @@ Linux full 的 Git HTTPS、Perl、静态库和默认 SDK 闭包此前已构建�
 ## 注释与语义 Review
 
 本轮完整 coding readiness **PASS**；全仓注释结构为
-**252 文件 / 5572 声明 / 0 缺项**。检查器反例、装配/审计/旅程回归、四校验器和
+**255 文件 / 5586 声明 / 0 缺项**。检查器反例、装配/审计/旅程回归、四校验器和
 全部 TP/RP 通过，本轮构建与完整检查经资源守卫串行运行。
 
 R78--R81 对相应生产函数及维护探针完成人工语义核对和三平台故障取证，冻结输入与
@@ -128,6 +128,8 @@ R87 关闭确认专项相关三套 80/80，实际 adapter 与 coordinator 组合
 能够被收尾确认且不重复 native release，见 [R87](lua-review/R87.json)。
 R88 压缩专项 13/13，五种旧/无身份响应边界不改变当前 owner、时钟和回执；
 compact.lua 全册完成人工语义核对，见 [R88](lua-review/R88.json)。
+R89 补齐 Windows 编译器、curl、Python 对应源码及配方的字节绑定，来源检查/构建器
+专项 7/7；Git 依赖闭包继续补齐，见 [R89](tool-source-review/R89.json)。
 
 全仓人工语义 Review 仍为 **partial**。后续原生/main 交互内部和部分测试辅助代码
 尚未完成，真实控制台 emergency cancellation 仍需对应运行证据，不用结构覆盖或

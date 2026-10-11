@@ -1,0 +1,292 @@
+{
+  "schema": "yaca-corresponding-source-inputs-v1",
+  "tool": "compiler",
+  "version": "w64devkit-2.9.0",
+  "targets": [
+    "win32-x86",
+    "win64-x86_64"
+  ],
+  "inputs": [
+    {
+      "path": "binutils-2.47.tar.xz",
+      "destination": "upstream/binutils-2.47.tar.xz",
+      "sha256": "154ab23b60070e8f27013c22977f1129425d67d1e8acd6e13010e617811e4cff",
+      "url": "https://ftp.gnu.org/gnu/binutils/binutils-2.47.tar.xz"
+    },
+    {
+      "path": "gcc-16.1.0.tar.xz",
+      "destination": "upstream/gcc-16.1.0.tar.xz",
+      "sha256": "50efb4d94c3397aff3b0d61a5abd748b4dd31d9d3f2ab7be05b171d36a510f79",
+      "url": "https://ftp.gnu.org/gnu/gcc/gcc-16.1.0/gcc-16.1.0.tar.xz"
+    },
+    {
+      "path": "gmp-6.3.0.tar.xz",
+      "destination": "upstream/gmp-6.3.0.tar.xz",
+      "sha256": "a3c2b80201b89e68616f4ad30bc66aee4927c3ce50e33929ca819d5c43538898",
+      "url": "https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz"
+    },
+    {
+      "path": "mpc-1.4.1.tar.xz",
+      "destination": "upstream/mpc-1.4.1.tar.xz",
+      "sha256": "91204cd32f164bd3b7c992d4a6a8ce6519511aadab30f78b6982d0bf8d73e931",
+      "url": "https://ftp.gnu.org/gnu/mpc/mpc-1.4.1.tar.xz"
+    },
+    {
+      "path": "mpfr-4.2.2.tar.xz",
+      "destination": "upstream/mpfr-4.2.2.tar.xz",
+      "sha256": "b67ba0383ef7e8a8563734e2e889ef5ec3c3b898a01d00fa0a6869ad81c6ce01",
+      "url": "https://ftp.gnu.org/gnu/mpfr/mpfr-4.2.2.tar.xz"
+    },
+    {
+      "path": "mingw-w64-v14.0.0.tar.bz2",
+      "destination": "upstream/mingw-w64-v14.0.0.tar.bz2",
+      "sha256": "6eaf921d9eb987d3820b364ea9775bc19b965ec81490b6fdd716526c28e1995c",
+      "url": "https://downloads.sourceforge.net/project/mingw-w64/mingw-w64/mingw-w64-release/mingw-w64-v14.0.0.tar.bz2"
+    },
+    {
+      "path": "gdb-17.2.tar.xz",
+      "destination": "upstream/gdb-17.2.tar.xz",
+      "sha256": "1c036c0d72e4b3d1fb5c94c88632add6f9d76f4d7c4d2ea793c12a9f19a3228c",
+      "url": "https://ftp.gnu.org/gnu/gdb/gdb-17.2.tar.xz"
+    },
+    {
+      "path": "expat-2.8.2.tar.xz",
+      "destination": "upstream/expat-2.8.2.tar.xz",
+      "sha256": "3ad89b8588e6644bd4e49981480d48b21289eebbcd4f0a1a4afb1c29f99b6ab4",
+      "url": "https://github.com/libexpat/libexpat/releases/download/R_2_8_2/expat-2.8.2.tar.xz"
+    },
+    {
+      "path": "libiconv-1.19.tar.gz",
+      "destination": "upstream/libiconv-1.19.tar.gz",
+      "sha256": "88dd96a8c0464eca144fc791ae60cd31cd8ee78321e67397e25fc095c4a19aa6",
+      "url": "https://ftp.gnu.org/gnu/libiconv/libiconv-1.19.tar.gz"
+    },
+    {
+      "path": "PDCurses-3.9.tar.gz",
+      "destination": "upstream/PDCurses-3.9.tar.gz",
+      "sha256": "590dbe0f5835f66992df096d3602d0271103f90cf8557a5d124f693c2b40d7ec",
+      "url": "https://downloads.sourceforge.net/project/pdcurses/pdcurses/3.9/PDCurses-3.9.tar.gz"
+    },
+    {
+      "path": "make-4.4.1.tar.gz",
+      "destination": "upstream/make-4.4.1.tar.gz",
+      "sha256": "dd16fb1d67bfab79a72f5e8390735c49e3e8e70b4945a15ab1f81ddb78658fb3",
+      "url": "https://ftp.gnu.org/gnu/make/make-4.4.1.tar.gz"
+    },
+    {
+      "path": "busybox-w32-FRP-6075-g169694ebd.tar.gz",
+      "destination": "upstream/busybox-w32-FRP-6075-g169694ebd.tar.gz",
+      "sha256": "aa953010f16989cec8e165c5ffddaa9f6633f65670e20d5d7678c987d776f1d7",
+      "url": "https://codeload.github.com/rmyorston/busybox-w32/tar.gz/refs/tags/FRP-6075-g169694ebd"
+    },
+    {
+      "path": "vim-9.0.tar.bz2",
+      "destination": "upstream/vim-9.0.tar.bz2",
+      "sha256": "a6456bc154999d83d0c20d968ac7ba6e7df0d02f3cb6427fb248660bacfb336e",
+      "url": "https://mirror.math.princeton.edu/pub/vim/unix/vim-9.0.tar.bz2"
+    },
+    {
+      "path": "ctags-6.2.1.tar.gz",
+      "destination": "upstream/ctags-6.2.1.tar.gz",
+      "sha256": "f56829e9a576025e98955597ee967099a871987b3476fbd8dbbc2b9dc921f824",
+      "url": "https://github.com/universal-ctags/ctags/archive/refs/tags/v6.2.1.tar.gz"
+    },
+    {
+      "path": "zstd-1.5.7.tar.gz",
+      "destination": "upstream/zstd-1.5.7.tar.gz",
+      "sha256": "eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3",
+      "url": "https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-1.5.7.tar.gz"
+    },
+    {
+      "path": "ccache-4.13.6.tar.xz",
+      "destination": "upstream/ccache-4.13.6.tar.xz",
+      "sha256": "a7de667ca08cf67c3c8af9f213f6aa701a1188a2b3163fb74483858ce5e79fbb",
+      "url": "https://github.com/ccache/ccache/releases/download/v4.13.6/ccache-4.13.6.tar.xz"
+    },
+    {
+      "path": "xxHash-0.8.3.tar.gz",
+      "destination": "upstream/xxHash-0.8.3.tar.gz",
+      "sha256": "aae608dfe8213dfd05d909a57718ef82f30722c392344583d3f39050c7f29a80",
+      "url": "https://github.com/Cyan4973/xxhash/archive/refs/tags/v0.8.3.tar.gz"
+    },
+    {
+      "path": "ninja-1.13.2.tar.gz",
+      "destination": "upstream/ninja-1.13.2.tar.gz",
+      "sha256": "974d6b2f4eeefa25625d34da3cb36bdcebe7fbce40f4c16ac0835fd1c0cbae17",
+      "url": "https://github.com/ninja-build/ninja/archive/refs/tags/v1.13.2.tar.gz"
+    },
+    {
+      "path": "cmake-4.4.0.tar.gz",
+      "destination": "upstream/cmake-4.4.0.tar.gz",
+      "sha256": "65757f442fdd242e27f1728fc26dc0cba4164f7a0791a5c788631c00080369bc",
+      "url": "https://github.com/Kitware/CMake/releases/download/v4.4.0/cmake-4.4.0.tar.gz"
+    },
+    {
+      "path": "dcmake-1.7.1.tar.gz",
+      "destination": "upstream/dcmake-1.7.1.tar.gz",
+      "sha256": "9d7388088cd03fa7d47e287809f86eee28f02fa6f57bbffa2b556f70dcd8adf9",
+      "url": "https://github.com/skeeto/dcmake/releases/download/v1.7.1/dcmake-1.7.1.tar.gz"
+    },
+    {
+      "path": "7z2301-src.tar.xz",
+      "destination": "upstream/7z2301-src.tar.xz",
+      "sha256": "356071007360e5a1824d9904993e8b2480b51b570e8c9faf7c0f58ebe4bf9f74",
+      "url": "https://downloads.sourceforge.net/project/sevenzip/7-Zip/23.01/7z2301-src.tar.xz"
+    },
+    {
+      "path": "aas-sign-1.1.0.tar.gz",
+      "destination": "upstream/aas-sign-1.1.0.tar.gz",
+      "sha256": "4ba127b0434f6e0f8af639e51a0c961e95b5adeb06391dd6ef02445e0b027c3f",
+      "url": "https://github.com/skeeto/aas-sign/releases/download/v1.1.0/aas-sign-1.1.0.tar.gz"
+    },
+    {
+      "path": "nsis-3.12-src.tar.bz2",
+      "destination": "upstream/nsis-3.12-src.tar.bz2",
+      "sha256": "f3ed7a8e4aa2cf4e8cf47d3b563a02559e0cb4934db2662b2f9661b824e2b186",
+      "url": "https://downloads.sourceforge.net/project/nsis/NSIS%203/3.12/nsis-3.12-src.tar.bz2"
+    },
+    {
+      "path": "w64devkit-2.9.0-source.tar.gz",
+      "destination": "upstream/w64devkit-2.9.0-source.tar.gz",
+      "sha256": "2d23fe8adb201ebd3ee6e4b592fa0cf9a3d3535df1fd999265e87982b68255f1",
+      "url": "https://codeload.github.com/skeeto/w64devkit/tar.gz/refs/tags/v2.9.0"
+    },
+    {
+      "path": "w64devkit-2.9.0-Dockerfile",
+      "destination": "build/Dockerfile",
+      "sha256": "9b35a7e25022ec1148c401184a3302aced543f3ebbe1f48efc1dbb30a1c2c432",
+      "url": "https://raw.githubusercontent.com/skeeto/w64devkit/v2.9.0/Dockerfile"
+    }
+  ],
+  "provenance": {
+    "recipe_url": "https://raw.githubusercontent.com/skeeto/w64devkit/v2.9.0/Dockerfile",
+    "recipe_sha256": "9b35a7e25022ec1148c401184a3302aced543f3ebbe1f48efc1dbb30a1c2c432",
+    "upstream_sources": [
+      {
+        "file": "binutils-2.47.tar.xz",
+        "sha256": "154ab23b60070e8f27013c22977f1129425d67d1e8acd6e13010e617811e4cff",
+        "url": "https://ftp.gnu.org/gnu/binutils/binutils-2.47.tar.xz"
+      },
+      {
+        "file": "gcc-16.1.0.tar.xz",
+        "sha256": "50efb4d94c3397aff3b0d61a5abd748b4dd31d9d3f2ab7be05b171d36a510f79",
+        "url": "https://ftp.gnu.org/gnu/gcc/gcc-16.1.0/gcc-16.1.0.tar.xz"
+      },
+      {
+        "file": "gmp-6.3.0.tar.xz",
+        "sha256": "a3c2b80201b89e68616f4ad30bc66aee4927c3ce50e33929ca819d5c43538898",
+        "url": "https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz"
+      },
+      {
+        "file": "mpc-1.4.1.tar.xz",
+        "sha256": "91204cd32f164bd3b7c992d4a6a8ce6519511aadab30f78b6982d0bf8d73e931",
+        "url": "https://ftp.gnu.org/gnu/mpc/mpc-1.4.1.tar.xz"
+      },
+      {
+        "file": "mpfr-4.2.2.tar.xz",
+        "sha256": "b67ba0383ef7e8a8563734e2e889ef5ec3c3b898a01d00fa0a6869ad81c6ce01",
+        "url": "https://ftp.gnu.org/gnu/mpfr/mpfr-4.2.2.tar.xz"
+      },
+      {
+        "file": "mingw-w64-v14.0.0.tar.bz2",
+        "sha256": "6eaf921d9eb987d3820b364ea9775bc19b965ec81490b6fdd716526c28e1995c",
+        "url": "https://downloads.sourceforge.net/project/mingw-w64/mingw-w64/mingw-w64-release/mingw-w64-v14.0.0.tar.bz2"
+      },
+      {
+        "file": "gdb-17.2.tar.xz",
+        "sha256": "1c036c0d72e4b3d1fb5c94c88632add6f9d76f4d7c4d2ea793c12a9f19a3228c",
+        "url": "https://ftp.gnu.org/gnu/gdb/gdb-17.2.tar.xz"
+      },
+      {
+        "file": "expat-2.8.2.tar.xz",
+        "sha256": "3ad89b8588e6644bd4e49981480d48b21289eebbcd4f0a1a4afb1c29f99b6ab4",
+        "url": "https://github.com/libexpat/libexpat/releases/download/R_2_8_2/expat-2.8.2.tar.xz"
+      },
+      {
+        "file": "libiconv-1.19.tar.gz",
+        "sha256": "88dd96a8c0464eca144fc791ae60cd31cd8ee78321e67397e25fc095c4a19aa6",
+        "url": "https://ftp.gnu.org/gnu/libiconv/libiconv-1.19.tar.gz"
+      },
+      {
+        "file": "PDCurses-3.9.tar.gz",
+        "sha256": "590dbe0f5835f66992df096d3602d0271103f90cf8557a5d124f693c2b40d7ec",
+        "url": "https://downloads.sourceforge.net/project/pdcurses/pdcurses/3.9/PDCurses-3.9.tar.gz"
+      },
+      {
+        "file": "make-4.4.1.tar.gz",
+        "sha256": "dd16fb1d67bfab79a72f5e8390735c49e3e8e70b4945a15ab1f81ddb78658fb3",
+        "url": "https://ftp.gnu.org/gnu/make/make-4.4.1.tar.gz"
+      },
+      {
+        "file": "busybox-w32-FRP-6075-g169694ebd.tgz",
+        "sha256": "44401413c86a839deeec3eba088af244a1594f18ff9fd0622811100e4cc2e7b4",
+        "url": "https://frippery.org/files/busybox/busybox-w32-FRP-6075-g169694ebd.tgz",
+        "accepted_source_variant": {
+          "file": "busybox-w32-FRP-6075-g169694ebd.tar.gz",
+          "sha256": "aa953010f16989cec8e165c5ffddaa9f6633f65670e20d5d7678c987d776f1d7",
+          "url": "https://codeload.github.com/rmyorston/busybox-w32/tar.gz/refs/tags/FRP-6075-g169694ebd",
+          "git_commit": "169694ebdba292f6533f78aeea678bfbb907396c",
+          "reason": "frippery TLS unavailable; original recipe archive SHA-256 is retained separately"
+        }
+      },
+      {
+        "file": "vim-9.0.tar.bz2",
+        "sha256": "a6456bc154999d83d0c20d968ac7ba6e7df0d02f3cb6427fb248660bacfb336e",
+        "url": "https://mirror.math.princeton.edu/pub/vim/unix/vim-9.0.tar.bz2"
+      },
+      {
+        "file": "ctags-6.2.1.tar.gz",
+        "sha256": "f56829e9a576025e98955597ee967099a871987b3476fbd8dbbc2b9dc921f824",
+        "url": "https://github.com/universal-ctags/ctags/archive/refs/tags/v6.2.1.tar.gz"
+      },
+      {
+        "file": "zstd-1.5.7.tar.gz",
+        "sha256": "eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3",
+        "url": "https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-1.5.7.tar.gz"
+      },
+      {
+        "file": "ccache-4.13.6.tar.xz",
+        "sha256": "a7de667ca08cf67c3c8af9f213f6aa701a1188a2b3163fb74483858ce5e79fbb",
+        "url": "https://github.com/ccache/ccache/releases/download/v4.13.6/ccache-4.13.6.tar.xz"
+      },
+      {
+        "file": "xxHash-0.8.3.tar.gz",
+        "sha256": "aae608dfe8213dfd05d909a57718ef82f30722c392344583d3f39050c7f29a80",
+        "url": "https://github.com/Cyan4973/xxhash/archive/refs/tags/v0.8.3.tar.gz"
+      },
+      {
+        "file": "ninja-1.13.2.tar.gz",
+        "sha256": "974d6b2f4eeefa25625d34da3cb36bdcebe7fbce40f4c16ac0835fd1c0cbae17",
+        "url": "https://github.com/ninja-build/ninja/archive/refs/tags/v1.13.2.tar.gz"
+      },
+      {
+        "file": "cmake-4.4.0.tar.gz",
+        "sha256": "65757f442fdd242e27f1728fc26dc0cba4164f7a0791a5c788631c00080369bc",
+        "url": "https://github.com/Kitware/CMake/releases/download/v4.4.0/cmake-4.4.0.tar.gz"
+      },
+      {
+        "file": "dcmake-1.7.1.tar.gz",
+        "sha256": "9d7388088cd03fa7d47e287809f86eee28f02fa6f57bbffa2b556f70dcd8adf9",
+        "url": "https://github.com/skeeto/dcmake/releases/download/v1.7.1/dcmake-1.7.1.tar.gz"
+      },
+      {
+        "file": "7z2301-src.tar.xz",
+        "sha256": "356071007360e5a1824d9904993e8b2480b51b570e8c9faf7c0f58ebe4bf9f74",
+        "url": "https://downloads.sourceforge.net/project/sevenzip/7-Zip/23.01/7z2301-src.tar.xz"
+      },
+      {
+        "file": "aas-sign-1.1.0.tar.gz",
+        "sha256": "4ba127b0434f6e0f8af639e51a0c961e95b5adeb06391dd6ef02445e0b027c3f",
+        "url": "https://github.com/skeeto/aas-sign/releases/download/v1.1.0/aas-sign-1.1.0.tar.gz"
+      },
+      {
+        "file": "nsis-3.12-src.tar.bz2",
+        "sha256": "f3ed7a8e4aa2cf4e8cf47d3b563a02559e0cb4934db2662b2f9661b824e2b186",
+        "url": "https://downloads.sourceforge.net/project/nsis/NSIS%203/3.12/nsis-3.12-src.tar.bz2"
+      }
+    ],
+    "source_archive_pins": "official-recipe-or-explicit-GitHub-tag-variant"
+  },
+  "manual_qualification": "pending",
+  "release_authorized": false
+}

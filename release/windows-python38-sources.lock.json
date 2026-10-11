@@ -1,0 +1,143 @@
+{
+  "schema": "yaca-corresponding-source-inputs-v1",
+  "tool": "python3",
+  "version": "3.8.20",
+  "targets": [
+    "win64-x86_64"
+  ],
+  "inputs": [
+    {
+      "path": "Python-3.8.20.tgz",
+      "destination": "upstream/Python-3.8.20.tgz",
+      "sha256": "9f2d5962c2583e67ef75924cd56d0c1af78bf45ec57035cf8a2cc09f74f4bf78",
+      "url": "https://www.python.org/ftp/python/3.8.20/Python-3.8.20.tgz"
+    },
+    {
+      "path": "cpython-source-deps-bzip2-1.0.8.tar.gz",
+      "destination": "upstream/cpython-source-deps-bzip2-1.0.8.tar.gz",
+      "sha256": "ab8d1b0cc087c20d4c32c0e4fcf7d0c733a95da12cedc6d63b3f0a9af07427e2",
+      "url": "https://codeload.github.com/python/cpython-source-deps/tar.gz/refs/tags/bzip2-1.0.8"
+    },
+    {
+      "path": "cpython-source-deps-libffi-3.3.0.tar.gz",
+      "destination": "upstream/cpython-source-deps-libffi-3.3.0.tar.gz",
+      "sha256": "e53dbda5bccd5aa8a0371773eca0fc131583e42862cfe9f68c52fc78ad134076",
+      "url": "https://codeload.github.com/python/cpython-source-deps/tar.gz/refs/tags/libffi-3.3.0"
+    },
+    {
+      "path": "cpython-source-deps-openssl-1.1.1w.tar.gz",
+      "destination": "upstream/cpython-source-deps-openssl-1.1.1w.tar.gz",
+      "sha256": "0d3d88a3a3707a6fff3587823101b51418da47f824e97734f0c5d6f994870369",
+      "url": "https://codeload.github.com/python/cpython-source-deps/tar.gz/refs/tags/openssl-1.1.1w"
+    },
+    {
+      "path": "cpython-source-deps-sqlite-3.35.5.0.tar.gz",
+      "destination": "upstream/cpython-source-deps-sqlite-3.35.5.0.tar.gz",
+      "sha256": "f3bfed6a3d906412f96986961f4844f5500e7d334afffed9d083ca446228f2c5",
+      "url": "https://codeload.github.com/python/cpython-source-deps/tar.gz/refs/tags/sqlite-3.35.5.0"
+    },
+    {
+      "path": "cpython-source-deps-xz-5.2.2.tar.gz",
+      "destination": "upstream/cpython-source-deps-xz-5.2.2.tar.gz",
+      "sha256": "46c61b5c76ab16d18c8a091c4ad91cf53c86266510bafe26bfc382a84ae58660",
+      "url": "https://codeload.github.com/python/cpython-source-deps/tar.gz/refs/tags/xz-5.2.2"
+    },
+    {
+      "path": "cpython-source-deps-zlib-1.3.1.tar.gz",
+      "destination": "upstream/cpython-source-deps-zlib-1.3.1.tar.gz",
+      "sha256": "e3f3fb32564952006eb18b091ca8464740e5eca29d328cfb0b2da22768e0b638",
+      "url": "https://codeload.github.com/python/cpython-source-deps/tar.gz/refs/tags/zlib-1.3.1"
+    },
+    {
+      "path": ".tools/qualification/build_python38_windows.py",
+      "origin": "repository",
+      "destination": "build/build_python38_windows.py",
+      "sha256": "59e154eb0b9e85ff37ea2ea7b4d4df752140cbd1346d870fcc7c6fb35befc31f"
+    },
+    {
+      "path": ".tools/qualification/stage_python38_windows.py",
+      "origin": "repository",
+      "destination": "build/stage_python38_windows.py",
+      "sha256": "02aae5df37b57242ab407170b4b2455f069d3bfe2658e9031fb9ae04f1c972a9"
+    }
+  ],
+  "provenance": {
+    "dependencies": [
+      {
+        "requested_tag": "bzip2-1.0.8",
+        "accepted_source": {
+          "tag": "bzip2-1.0.8",
+          "file": "cpython-source-deps-bzip2-1.0.8.tar.gz",
+          "url": "https://codeload.github.com/python/cpython-source-deps/tar.gz/refs/tags/bzip2-1.0.8",
+          "status": "downloaded",
+          "sha256": "ab8d1b0cc087c20d4c32c0e4fcf7d0c733a95da12cedc6d63b3f0a9af07427e2",
+          "git_commit": "05301997b2f9590f49c672cf3dfd3d3dfa7ad521",
+          "regular_members": 56
+        }
+      },
+      {
+        "requested_tag": "libffi-3.3.0",
+        "accepted_source": {
+          "tag": "libffi-3.3.0",
+          "file": "cpython-source-deps-libffi-3.3.0.tar.gz",
+          "url": "https://codeload.github.com/python/cpython-source-deps/tar.gz/refs/tags/libffi-3.3.0",
+          "status": "downloaded",
+          "sha256": "e53dbda5bccd5aa8a0371773eca0fc131583e42862cfe9f68c52fc78ad134076",
+          "git_commit": "35a5081d073058159e8db96c43029f88c1da501a",
+          "regular_members": 397
+        }
+      },
+      {
+        "requested_tag": "openssl-1.1.1w",
+        "accepted_source": {
+          "tag": "openssl-1.1.1w",
+          "file": "cpython-source-deps-openssl-1.1.1w.tar.gz",
+          "url": "https://codeload.github.com/python/cpython-source-deps/tar.gz/refs/tags/openssl-1.1.1w",
+          "status": "downloaded",
+          "sha256": "0d3d88a3a3707a6fff3587823101b51418da47f824e97734f0c5d6f994870369",
+          "git_commit": "91b2ed4d79363e8f741b5beb2425a87687f767df",
+          "regular_members": 3104
+        }
+      },
+      {
+        "requested_tag": "sqlite-3.35.5.0",
+        "accepted_source": {
+          "tag": "sqlite-3.35.5.0",
+          "file": "cpython-source-deps-sqlite-3.35.5.0.tar.gz",
+          "url": "https://codeload.github.com/python/cpython-source-deps/tar.gz/refs/tags/sqlite-3.35.5.0",
+          "status": "downloaded",
+          "sha256": "f3bfed6a3d906412f96986961f4844f5500e7d334afffed9d083ca446228f2c5",
+          "git_commit": "1106b0e116a153a93281cd2542fb391310027da2",
+          "regular_members": 5
+        }
+      },
+      {
+        "requested_tag": "xz-5.2.2",
+        "accepted_source": {
+          "tag": "xz-5.2.2",
+          "file": "cpython-source-deps-xz-5.2.2.tar.gz",
+          "url": "https://codeload.github.com/python/cpython-source-deps/tar.gz/refs/tags/xz-5.2.2",
+          "status": "downloaded",
+          "sha256": "46c61b5c76ab16d18c8a091c4ad91cf53c86266510bafe26bfc382a84ae58660",
+          "git_commit": "60cae1c5a1e18227b3d6cdc4da4b3903d692f8cc",
+          "regular_members": 453
+        }
+      },
+      {
+        "requested_tag": "zlib-1.3.1",
+        "accepted_source": {
+          "tag": "zlib-1.3.1",
+          "file": "cpython-source-deps-zlib-1.3.1.tar.gz",
+          "url": "https://codeload.github.com/python/cpython-source-deps/tar.gz/refs/tags/zlib-1.3.1",
+          "status": "downloaded",
+          "sha256": "e3f3fb32564952006eb18b091ca8464740e5eca29d328cfb0b2da22768e0b638",
+          "git_commit": "4dc98e1909830e2bdc2a9cc2236e3c5d5037335b",
+          "regular_members": 253
+        }
+      }
+    ],
+    "Microsoft_runtime": "unchanged app-local redistributables with shipped vendor notices; source profile does not classify them as open-source"
+  },
+  "manual_qualification": "pending",
+  "release_authorized": false
+}

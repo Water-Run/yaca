@@ -1,0 +1,99 @@
+{
+  "schema": "yaca-corresponding-source-inputs-v1",
+  "tool": "python3",
+  "version": "3.4.10",
+  "targets": [
+    "win32-x86"
+  ],
+  "inputs": [
+    {
+      "path": "Python-3.4.10.tgz",
+      "destination": "upstream/Python-3.4.10.tgz",
+      "sha256": "217757699249ab432571b381386d441e12b433100ab5f908051fcb7cced2539d",
+      "url": "https://www.python.org/ftp/python/3.4.10/Python-3.4.10.tgz"
+    },
+    {
+      "path": "cpython-source-deps-bzip2-1.0.6.tar.gz",
+      "destination": "upstream/cpython-source-deps-bzip2-1.0.6.tar.gz",
+      "sha256": "45ffd995f8b4665e262cd79b35352f3b09fa06a71fa621b8ba30e7be59be9cb1",
+      "url": "https://codeload.github.com/python/cpython-source-deps/tar.gz/refs/tags/bzip2-1.0.6"
+    },
+    {
+      "path": "cpython-source-deps-openssl-1.0.2k.tar.gz",
+      "destination": "upstream/cpython-source-deps-openssl-1.0.2k.tar.gz",
+      "sha256": "b745566703a6e3bb5ecc8a60a447da8196468ef85a2a23230e76e1579d1b9a19",
+      "url": "https://codeload.github.com/python/cpython-source-deps/tar.gz/refs/tags/openssl-1.0.2k"
+    },
+    {
+      "path": "sqlite-amalgamation-3081100.zip",
+      "destination": "upstream/sqlite-amalgamation-3081100.zip",
+      "sha256": "09a8a28ce76db0d438852b8698124293fa0c0f0105c9fe79b9e1c2164ba9bcf6",
+      "url": "https://sqlite.org/2015/sqlite-amalgamation-3081100.zip"
+    },
+    {
+      "path": "xz-5.0.5.tar.xz",
+      "destination": "upstream/xz-5.0.5.tar.xz",
+      "sha256": "3515c74d170d0f6ec00820de63106ad16c07bae55a59c174b4741242c76264a4",
+      "url": "https://tukaani.org/xz/xz-5.0.5.tar.xz"
+    },
+    {
+      "path": ".tools/qualification/build_python34_windows.py",
+      "origin": "repository",
+      "destination": "build/build_python34_windows.py",
+      "sha256": "3f957a75cd3bf1785dea61bffb94ad2b5f3a2accde611932c56c8d3162b0a5fe"
+    },
+    {
+      "path": ".tools/qualification/stage_python34_windows.py",
+      "origin": "repository",
+      "destination": "build/stage_python34_windows.py",
+      "sha256": "c9275f6039025c0d8e223e2470a90c58eb80967614644deab43bf35e853eee9d"
+    }
+  ],
+  "provenance": {
+    "dependencies": [
+      {
+        "requested_tag": "bzip2-1.0.6",
+        "accepted_source": {
+          "tag": "bzip2-1.0.6",
+          "file": "cpython-source-deps-bzip2-1.0.6.tar.gz",
+          "url": "https://codeload.github.com/python/cpython-source-deps/tar.gz/refs/tags/bzip2-1.0.6",
+          "status": "downloaded",
+          "sha256": "45ffd995f8b4665e262cd79b35352f3b09fa06a71fa621b8ba30e7be59be9cb1",
+          "git_commit": "4de02292990ec6258c6220a78ff60cc92a34938f",
+          "regular_members": 56
+        }
+      },
+      {
+        "requested_tag": "openssl-1.0.2k",
+        "accepted_source": {
+          "tag": "openssl-1.0.2k",
+          "file": "cpython-source-deps-openssl-1.0.2k.tar.gz",
+          "url": "https://codeload.github.com/python/cpython-source-deps/tar.gz/refs/tags/openssl-1.0.2k",
+          "status": "downloaded",
+          "sha256": "b745566703a6e3bb5ecc8a60a447da8196468ef85a2a23230e76e1579d1b9a19",
+          "git_commit": "ccd3ab4afffe6faba1d85a02075238276df29cae",
+          "regular_members": 2487
+        }
+      },
+      {
+        "requested_tag": "sqlite-3.8.11.0",
+        "accepted_source": {
+          "file": "sqlite-amalgamation-3081100.zip",
+          "sha256": "09a8a28ce76db0d438852b8698124293fa0c0f0105c9fe79b9e1c2164ba9bcf6",
+          "url": "https://sqlite.org/2015/sqlite-amalgamation-3081100.zip"
+        }
+      },
+      {
+        "requested_tag": "xz-5.0.5",
+        "accepted_source": {
+          "file": "xz-5.0.5.tar.xz",
+          "sha256": "3515c74d170d0f6ec00820de63106ad16c07bae55a59c174b4741242c76264a4",
+          "url": "https://tukaani.org/xz/xz-5.0.5.tar.xz"
+        }
+      }
+    ],
+    "Microsoft_runtime": "unchanged app-local redistributables with shipped vendor notices; source profile does not classify them as open-source"
+  },
+  "manual_qualification": "pending",
+  "release_authorized": false
+}
