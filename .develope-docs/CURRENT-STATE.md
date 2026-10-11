@@ -1,66 +1,50 @@
 # 当前状态
 
-更新日期：2026-10-11。本轮已重新拉取 `origin/main`，远端没有新增提交；本地
-`main` 保留 R82--R86 节点的 7 个提交，基线为 `a1f47d8`。负责人按
-[D-085](DECISIONS.md#d-085-同步仓库并推进至可发布就绪2026-10-11)
-恢复开发，目标为满足发布条件的就绪版本。剩余语义 Review、九包和资格继续推进。
-此前修复 R82/R83：cooked reader 的 GC detach 遗留资源，以及 Lua 关闭
-后 DLL 先于存活 reader/stdin writer 被卸载。两架构的 R82 探针各从 30 个泄漏资源
-降为 0；R83 共 52 个 DLL/worker 场景通过，最后一个线程退出后才释放 DLL。
-R84 另修复 terminal native close 失败后无法重试同一 owner。
-R85 补齐管理输入面的同一 owner 保留、join 状态及失败模式切换后的清理。
-R86 让主协调器在 owner 未释放时保持 closing，并幂等重试未完成的清理。
-R87 让终端适配器幂等确认已完成的原生释放，避免先前恢复错误令协调器持续 closing。
-R88 补齐压缩响应身份先于时钟/重试的边界。当前完整 Lua suite 715/715、
-完整 readiness PASS，结构检查 255/5586/0；R86 已构建核心各 713/713，尚未包含 R87/R88。证据见
-[10 月 11 日 Review](CODE-REVIEW-2026-10-11.md)。剩余工作见 [TRACKING](TRACKING.md)。
+更新日期：2026-10-11。核心已实现，远端 `v1.0.0-preview.20261011` 候选已发布。
+当前工作树已合并远端 `db9c5d5` 的 11 个提交与本地 11 个提交，完整 suite 730/730，coding readiness PASS。
+开发按 [D-085](DECISIONS.md#d-085-同步仓库并推进至可发布就绪2026-10-11) 继续至可发布就绪。
+构建源码为 `dc6ce1486158f8e76f6cb90490dd9d9242115c33`。剩余顺序见
+[TRACKING](TRACKING.md)。
+
+本文三核心、九包与 720/720 的结果属于已发布预览版的冻结源码；合并后的新源码
+尚未重新构建。合并保留本地压缩响应身份修复、协调器清理重试和工具来源档案，
+并接纳远端键盘重复、PTY 子进程收尾、原生分配失败保护及 luainstaller 1.5.0。
+两条历史 Review 的编号不能混用：远端记录在
+[10 月 8 日 Review](CODE-REVIEW-2026-10-08.md)，本地历史在
+[本地 10 月 8 日 Review](CODE-REVIEW-2026-10-08-LOCAL.md)，本轮见
+[10 月 11 日 Review](CODE-REVIEW-2026-10-11.md)。全仓语义 Review 仍为 partial。
+
+合并源码另修复 `.software` 引用不可见 composition 变量造成的崩溃，改由已接纳的
+只读索引端口取数。专项基线 115/116、修复后 116/116；全仓注释结构
+266 文件 / 5740 声明 / 0 缺项，冻结记录见 [R90](lua-review/R90.json)。
 
 阶段为 `implemented-unqualified`，目标资格验证待完成；Release Gate R 为 `closed`，
 `release_authorized=false`。依据见 [readiness](contracts/readiness.lua)、
 [发行清单](../release/manifest.lua)及[依赖锁](../release/dependencies.lock)。
 
-## 最近开发核心（R86）
+发行构建器现为 luainstaller 1.5.0，提交 `a289a1bed6c6dcf8ad4f11a1d9e28f2f2989adbf`，
+标签 `v1.5.0`。资源覆盖补丁已重放到该版本。1.5.0 用 XP 兼容的原生 Windows
+宿主代替 PowerShell，构建不再硬性要求 Lua 头文件，MinGW 启动器去掉 PE 时间戳。
+当前预发布九包由 1.5.0 构建。更早的 `v1.0.0-preview.20261006` 仍是 1.3.0 产物。
 
-产品版本为 `1.0.0`。包含 R82--R86 的三目标核心已从同一份干净维护源码重建：
-冻结提交为 `163728ea7e6f58efeb01155038da0a68a8cc9e6a`，源码归档 SHA-256 为
-`0d5a0fa7937fbc7650508a8f95806a5dc9e78f44ab10aaa7b8cab34ade17f1e8`。
-三份归档、清单及全部成员字节一致；开发测试、构建环境、原始日志与核心逐件绑定于
-[核心节点清单](candidates/core-node-r86-20261008.json)，本地产物在
-`out/core-node-r86-20261008/`。R86 收尾文档在冻结源码后单独提交；本轮源码另含
-R87/R88，最终核心尚未重建，不把 R86 的摘要和测试用于当前源码资格。
+## 已发布预览候选
 
-| 开发核心 | SHA-256 | 完整测试及环境 |
+产品版本为 `1.0.0`，当前下载入口为
+[`v1.0.0-preview.20261011`](https://github.com/Water-Run/yaca/releases/tag/v1.0.0-preview.20261011)
+候选预发布。源码包含 R77--R88：此前的文件系统、进程和终端修复，以及原生熵与
+SHA-256 在 Lua 分配失败时的保留。R82--R87 的核对见
+[10 月 8 日 Review](CODE-REVIEW-2026-10-08.md)。
+
+本节点三目标从同一份完整维护源码快照构建：冻结提交为
+`dc6ce1486158f8e76f6cb90490dd9d9242115c33`，源码归档 SHA-256 为
+`510fd3d073f8dd0d7528d20a2ce2b54c377abe2ef2de999e5f03efb9ea4612fa`，
+426 个成员。三份归档及逐成员字节一致，冻结时工作树干净。发行 tag 指向这份冻结提交。
+
+| 当前核心 | SHA-256 | 完整测试及环境 |
 | --- | --- | --- |
-| Linux x86_64 | `60c9a92b267e42e56af71157ada78b2e14da0add4f68362fe3cc6b6e5a5a7035` | 713/713；CentOS 7.9 容器、GCC 4.8.5-44、glibc 2.17，共享 WSL2 内核 |
-| Win32 x86 | `a921ae6aa186209f945397f4b989ddad2e8060cfad683c50e82f2bc7c7fd3187` | 713/713；Windows 11 x64 / WOW64 |
-| Win64 x86_64 | `a27542a58af6f96553985a334ceb0b5cbbcd440fa263468eb4f72147b680bb27` | 713/713；Windows 11 x64 |
-
-Windows 使用实际新单文件内嵌 Lua 执行冻结源码完整 suite，--version 通过；离线
-Stage 1 为 partial，仅有配置未初始化及非 TTY 警告，零网络请求。Linux 使用同次构建的
-Lua 和 native 运行完整 suite，另通过 onedir/onefile 版本冒烟及 ELF/glibc 导入闭包检查。
-最低 Windows 系统未在此节点重新实测；新核心的九包装配、旅程和正式资格仍待完成。
-
-## 已交付的 R81 候选
-
-产品版本为 `1.0.0`，本节点为
-[`v1.0.0-preview.20261006`](https://github.com/Water-Run/yaca/releases/tag/v1.0.0-preview.20261006)
-候选预发布。源码已包含 R77--R81：Windows reparse 解码、原生文件系统资源生命周期、
-发布身份验证资源保留、进程启动请求捕获，以及终端输入投影和 mode 字符串保留。
-具体缺陷、反例和逐项语义核对在 [10 月 6 日 Review](CODE-REVIEW-2026-10-06.md)，
-R77 原始证据在 [10 月 5 日 Review](CODE-REVIEW-2026-10-05.md)。
-
-R81 候选三目标从同一份完整维护源码快照构建：冻结提交为
-`d215a8d9d14683fb6acd2ee51e8f7879d9976f6d`，源码归档 SHA-256 为
-`a6c160a9ff28a11118da7dc4606e217d763c3049f496f5bb5d5597966fbd07bf`，
-406 个成员。三份归档及逐成员字节一致，冻结时工作树干净。构建后的候选清单、
-交付记录和暂停文档单独提交，交付时产品源码与冻结输入一致。
-当前开发源码另含 R82--R86，已发布的 R81 ZIP 不包含本轮修复。
-
-| R81 已交付核心 | SHA-256 | 完整测试及环境 |
-| --- | --- | --- |
-| Linux x86_64 | `1bc7e3bd37b2b42765b437f4a7dd84b827b8c823e752d76cd9e983fc52be40b6` | 706/706；CentOS 7.9 用户态、GCC 4.8.5、glibc 2.17 |
-| Win32 x86 | `82053d9fedf7fc406140b6493671969bd20fbacaae2e9d088712d96c1a1771e0` | 706/706；Server 2008 non-R2 x64 / WOW64 |
-| Win64 x86_64 | `b732ebea7d014435d6c78166241995bb762183f636ad2a97c18414814ff42c73` | 706/706；Windows 11 x64 |
+| Linux x86_64 | `4bdf39fc072e54a4d41f27091f23fd851887b6dfeb5ab90f396fe4580c6cae56` | 720/720；CentOS 7.9 用户态、GCC 4.8.5、glibc 2.17 |
+| Win32 x86 | `7e65a0e7dee5b7d8da00865b828f081f0f969ec27d0535648c5decdac5c97ea5` | 720/720；Server 2008 non-R2 x64 / WOW64 |
+| Win64 x86_64 | `4d6d2606694bc9c416a73a3d730bb84725ce260be90786b841b260300ae85210` | 720/720；Windows 11 x64 |
 
 Windows 两目标的完整 suite 使用实际单文件的内嵌 Lua 执行冻结源码测试，核心摘要在
 目标端重算一致；回执、原始日志、源码归档及核心逐字节绑定。Linux 在 C7 用户态
@@ -75,10 +59,10 @@ C7 容器共享 Fedora 宿主内核；Windows 兼容底线仍按 XP SP3 x86、Wi
 工具、整体移动、卸载和自有临时目录无残留。首次配置、模型、升级与完整交互不在
 这一离线结论中。
 
-字节清单及证据边界见 [本节点清单](candidates/1.0.0-preview.20261006.json)，
-原始记录位于 R81 构建机的 `out/node-r81-publish-20261006/`。配套证据、三目标来源包和
-`SHA256SUMS.txt` 随候选附件交付。 GitHub 的 24 个附件大小与 SHA-256
-均与本地一致，远端回执见 [发布核对](candidates/1.0.0-preview.20261006-publication.json)。
+字节清单及证据边界见 [本节点清单](candidates/1.0.0-preview.20261011.json)，
+原始记录位于 `out/node-r88-publish-20261011/`。配套证据、三目标来源包和
+`SHA256SUMS.txt` 随候选附件交付。GitHub 的 24 个附件大小与 SHA-256
+均与本地一致，远端回执见 [发布核对](candidates/1.0.0-preview.20261011-publication.json)。
 
 ## 已有能力
 
@@ -93,16 +77,15 @@ C7 容器共享 Fedora 宿主内核；Windows 兼容底线仍按 XP SP3 x86、Wi
 
 附带工具输入沿用已核对且字节未改的来源。Windows 两目标输入位于
 `out/win32-full-staged-20261002/`、`out/win64-full-staged-20261002/`；Linux 输入位于
-`out/node-r76-20261005/linux-full-staged/`，均为原 R81 构建机路径。
-已交付的 R81 九包按当时核心绑定；本轮新核心尚未装配九包，不继承旧核心测试。
+`out/node-r76-20261005/linux-full-staged/`。这次九包重新绑定当前核心，不继承旧核心测试。
 Linux full 的 Git HTTPS、Perl、静态库和默认 SDK 闭包此前已构建并运行通过，来源和
 逐文件摘要仍由当前装配重新核对；最终工具来源语义审计保留为待完成。
 
-## 注释与语义 Review
+## 已发布源码的注释与语义 Review
 
-本轮完整 coding readiness **PASS**；全仓注释结构为
-**255 文件 / 5586 声明 / 0 缺项**。检查器反例、装配/审计/旅程回归、四校验器和
-全部 TP/RP 通过，本轮构建与完整检查经资源守卫串行运行。
+已发布源码在开发宿主的完整 Lua suite **720/720**、coding readiness **PASS**，全仓注释结构为
+**257 文件 / 5658 声明 / 0 缺项**。检查器反例、发行/旅程回归、四校验器和
+全部 TP/RP 通过；构建、完整测试和容器均经资源守卫串行运行。
 
 R78--R81 对相应生产函数及维护探针完成人工语义核对和三平台故障取证，冻结输入与
 日志分别绑定于 [R78](native-review/R78.json)、[R79](native-review/R79.json)、
@@ -110,39 +93,52 @@ R78--R81 对相应生产函数及维护探针完成人工语义核对和三平�
 临时字符串 GC 反例另有 sanitizer 前后证据。Windows cooked 投影使用有界
 completed reader double；该证据不替代真实控制台交互或 emergency cancellation。
 
-本轮补齐 cooked reader detach 所有权：终端与 worker 分别持有原子引用；GC
-释放终端引用和线程句柄，未结束的 worker 保留其记录，结束后释放最后引用。
-本机 Win32/Win64 各覆盖 56 个实际线程场景，既有两架构 cooked reader 和
-三平台 terminal input 故障回归均通过。源码与实际日志绑定于
-[R82](native-review/R82.json)。R83 为 reader/writer 单独保留所属 DLL 引用，启动
-失败收回，正常或错误 IO 后在终止线程的同一步释放；两架构各 26 场景、既有
-terminal/process 故障回归和 Linux native 编译通过，绑定于
-[R83](native-review/R83.json)。真实控制台和最低 Windows 系统实测不扩展。
-R84 保留关闭失败的 started/joined 句柄，仅在原生关闭成功后推进状态；专项
-10/10，含同句柄恢复、异常及先前错误优先级，见本轮 Review。
-R85 对实际 Model manager 的收尾/Key 模式切换通过 27/27，保留失败关闭的
-active owner 与成功 join，避免新输入覆盖，见 [R85](lua-review/R85.json)。
-R86 协调器专项 42/42，terminal 或 writer 未释放前不报告 closed，重试只处理
-未完成 owner；生产运行失败后再尝试清理，见 [R86](lua-review/R86.json)。
-R87 关闭确认专项相关三套 80/80，实际 adapter 与 coordinator 组合确保此前释放
-能够被收尾确认且不重复 native release，见 [R87](lua-review/R87.json)。
-R88 压缩专项 13/13，五种旧/无身份响应边界不改变当前 owner、时钟和回执；
-compact.lua 全册完成人工语义核对，见 [R88](lua-review/R88.json)。
-R89 补齐 Windows 编译器、curl、Python 对应源码及配方的字节绑定，来源检查/构建器
-专项 7/7；Git 依赖闭包继续补齐，见 [R89](tool-source-review/R89.json)。
+R82 修复 Windows cooked reader 取消失败后的 detach 所有权：终端关闭其线程句柄并
+释放自己的引用，仍运行的 worker 保留独立引用，最后一次释放回收缓冲区和记录。
+指定 Server 2008 Win32 与当前 Server 2025 Win64 目标各 176 例，修复前
+160 次缓冲区泄漏及 80 次句柄泄漏，修复后
+均为零；三平台输入故障回归及两 Windows reader 回归通过。探针使用真实线程和
+有界 console/wait double，不替代真实控制台交互；永久未返回的 worker 仍保留所需资源。
+R83 修复 raw 键盘字符/退格的重复次数、UTF-16 配对和字节上限分类。两指定 Windows
+目标各 86 个真实自建控制台检查通过；原模式、句柄数及真实 cooked 取消/终态通过。
+新键盘分配故障每目标覆盖 54 个初始阈值，54 次初始和 36 次重复异常后内容恢复通过，
+18 次暖调用未到达初始阈值，原生泄漏为零。已有 R82/R81 回归通过。
+R84 修复 reader/stdin writer 超出 Lua 状态生命周期后的 DLL 代码保留。两指定
+Windows 各验证 reader/writer 的实际 Lua close、DLL 仍映射及最终卸载，六个
+startup 拒绝分支通过；最终原生块/引用为零，按独立 first-use pipe control
+测得的基线无句柄增长。R80--R83 及 Linux 输入/启动/进程流回归通过。
+R85 修复终端适配器的恢复/关闭确认值、失败 owner 重试、输入代恢复标记和恢复后
+停止新读取；另修复 Linux raw 空闲读被当成 EOF。十个新增场景、五个实际 native/PTY
+模式与 fd flags 恢复场景通过；配置恢复未知时不发布的 bootstrap 回归通过。
+本批未重跑 Windows 目标，不沿用旧核心的完整结果作为当前源码验收。
+R86 将失败关闭的 owner 保留到 main 输入协调器，停止旧模式复用，记住成功 join
+而不重放收尾阶段；公开配置 REPL 的拒绝/异常/时钟失效/永久失败及相邻回归
+87/87 通过。未关闭旧 owner 时不建立新输入代，未知恢复仍不发布配置。
+R87 为 host stty 建立 suspended/job admission，避免 timeout 返回后留下可继续
+修改模式的 child。两 Windows 各六项生命周期/fault matrix 零失败，原生回归通过；
+指定 Cygwin PTY 的四组实际 mode/rollback/retry 恢复一致，唯一目标 receipt 和
+独立 carrier 已核对，TTY carrier 的 255 保留为传输边界。
+R82--R88 已进入 `v1.0.0-preview.20261011`。三平台完整 suite 均为 720/720，九包完整性核对通过，CentOS 7 三档离线核心旅程通过。目标资格验证仍待完成。
 
-全仓人工语义 Review 仍为 **partial**。后续原生/main 交互内部和部分测试辅助代码
-尚未完成，真实控制台 emergency cancellation 仍需对应运行证据，不用结构覆盖或
-本节点打包通过代替这些核对。C32/C33/C34 剩余正式资格见 TRACKING，Gate R 保持关闭。
+全仓人工语义 Review 仍为 **partial**。R82 所有权及 R83 原生键盘投影/模式错误
+子面、R84 worker DLL 生命周期、R85/R86 adapter/main 及 R87 Cygwin PTY 子面
+已核对；其余交互/原生内部和部分测试辅助代码仍待完成。
+R82 的 12 个、R83 的 16 个及 R84 的 28 个接收件 SHA-256 与本地一致，源码、日志
+和环境在 [R82](native-review/R82.json)、[R83](native-review/R83.json)、
+[R84](native-review/R84.json) 绑定，R85 的冻结源码和实际 native/PTY 在
+[R85](native-review/R85.json) 绑定，main owner 子面在
+[R86](native-review/R86.json) 绑定，PTY 子面在 [R87](native-review/R87.json) 绑定。
+证据边界见
+[10 月 8 日 Review](CODE-REVIEW-2026-10-08.md)。C32/C33/C34 剩余正式资格
+见 TRACKING，Gate R 保持关闭。
 
 ## 开发与仓库状态
 
 本地和 GitHub 仅保留 `main`，默认分支为 `main`；候选 tag 属于发行标记。
 README.md、README-zh.md 和两份 quickstart 均描述 `1.0.0` 候选及资格待完成，
 中英文 README 的章节、命令参考和下载入口已对齐。开发入口、实施计划和资格手册
-以 D-085 的恢复指示为准；本轮提交只保存在本地 main。
+以 D-085 的继续开发指示为准。
 
-当前从 [剩余事项](TRACKING.md) 接续 Review 与资格收尾；历史过程见
+继续按 [剩余事项](TRACKING.md) 推进 Review 和正式资格；历史过程见
 [开发历程](DEVELOPMENT-HISTORY.md)。
-负责人本轮已重新提供模型输入，两端模型发现通过，私有配置保存在独立缓存。
-凭据未进入源码包、候选包或公开证据；最终核心的在线旅程见 TRACKING。
+此前已授权的模型凭据仍留在忽略的私有目录，未进入源码包、候选包或公开证据。

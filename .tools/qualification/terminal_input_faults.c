@@ -110,6 +110,8 @@ static void terminal_prepare(yaca_terminal *terminal, FILE *input, terminal_case
     /* The completed double has only the terminal reference; no worker was launched. */
     read->references = 1;
     read->capacity = 256U;
+    /* This completed-reader double has only the terminal reference. */
+    read->references = 1;
     read->received = kind == TERMINAL_COOKED_TEXT ? 256U : 0U;
     for (index = 0U; index < 256U; ++index) read->wide[index] = L't';
     read->thread = CreateEventW(NULL, TRUE, TRUE, NULL);

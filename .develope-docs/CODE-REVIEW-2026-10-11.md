@@ -1,8 +1,40 @@
-# 恢复开发与关闭、压缩边界 R87--R88
+# 恢复开发、来源收口与远端同步
 
 日期：2026-10-11。负责人按 [D-085](DECISIONS.md#d-085-同步仓库并推进至可发布就绪2026-10-11)
-要求同步并推进到可发布就绪。本轮已拉取 `origin/main`，远端无新增提交；本地保留
-R82--R86 的 7 个提交，从 `a1f47d8` 接续。指定 Server 2008 的 Cygwin SSH 可达。
+要求同步并推进到可发布就绪。本轮最初拉取时远端无新增提交，从 `a1f47d8` 接续；
+随后按再次同步要求拉取到 `db9c5d5`，发现远端新增 11 个提交并与本地 11 个提交合并。
+指定 Server 2008 的 Cygwin SSH 可达。
+
+## 合并远端 10 月 11 日预览节点
+
+远端节点含 luainstaller 1.5.0、键盘重复、PTY stty 子进程收尾、原生熵/SHA-256
+分配失败保护及 24 个已发布附件记录。原生重叠修复采用远端已取证实现，保留本地
+协调器幂等收尾、成功 join 缓存、压缩请求身份拒绝和工具来源档案。
+管理输入在关闭前同时使模式与缓冲失效，关闭失败保留同一 owner 及已完成 join。
+
+terminal close 合并真实确认值校验与已关闭 owner 的幂等确认：初步 restore 失败后，
+native close 的 true/true 表明恢复及释放完成；两阶段均失败仍保留初步诊断和 owner。
+原本要求“成功关闭仍报告初步 restore 错误”的两项本地测试按该确认契约更新；
+下文 R87 为修复当时的历史语义，冻结证据不重写。
+
+远端 Review 原名保留。本地重叠的两份原生清单逐字节保存在
+`native-review/local-20261008-R82.json`、`native-review/local-20261008-R83.json`；
+本地日期 Review 改名为 `CODE-REVIEW-2026-10-08-LOCAL.md` 并修正其链接。
+合并源码完整 suite **730/730**、coding readiness **PASS**；全仓注释结构
+**266 文件 / 5740 声明 / 0 缺项**。TP/RP 及 luainstaller 1.5.0 资源覆盖证明通过。
+日志位于 `out/review-20261011/sync/`。已有预览证据不冒充新源码结果；三核心待重建。
+
+## R90 附带软件索引的 composition 边界
+
+`.software` 的嵌套 reader 在 coordinator 中访问不在词法作用域内的 `composed`，
+列表查询直接抛错。新增真实 coordinator 回归注入可用索引，要求只读列表、不发布 Agent。
+合并源码基线专项 **115/116**，唯一失败为 `global composed` 空值索引。
+
+修复将有界目录/文件读取留在生产 composition 绑定，coordinator 通过可选 callable
+端口读取描述；无 reader、异常或 render 错误保留结构化诊断。修复后专项 **116/116**。
+同时核对 terminal ack/owner 与管理输入 close 路径，并修正 submission 的 string 参数注释。
+冻结基线、当前源码、测试及日志见 [R90](lua-review/R90.json)；此人工核对仅覆盖所列子面，
+全仓语义 Review 继续为 partial。
 
 ## R87 已释放终端的收尾确认
 

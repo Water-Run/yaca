@@ -78,6 +78,8 @@ static void prepare(yaca_terminal_read *read, DWORD length)
   DWORD index;
 
   memset(read, 0, sizeof(*read));
+  /* The synchronous worker releases one reference; the stack fixture retains
+  ** the other and explicitly releases only its separately allocated buffer. */
   read->references = 2;
   read->capacity = 65538U;
   read->wide = (WCHAR *)calloc(read->capacity + 1U, sizeof(WCHAR));

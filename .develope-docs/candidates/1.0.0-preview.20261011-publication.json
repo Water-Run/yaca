@@ -1,0 +1,137 @@
+{
+  "schema": "yaca-github-candidate-publication-v1",
+  "status": "PASS",
+  "phase": "published",
+  "tag": "v1.0.0-preview.20261011",
+  "source_commit": "dc6ce1486158f8e76f6cb90490dd9d9242115c33",
+  "prerelease": true,
+  "release_authorized": false,
+  "target_qualification_complete": false,
+  "development_paused": false,
+  "url": "https://github.com/Water-Run/yaca/releases/tag/v1.0.0-preview.20261011",
+  "asset_count": 24,
+  "asset_bytes": 3072561906,
+  "sha256sums_sha256": "36a7e72426f9cc0bb48b41db190b89135cacb0e9c6914a24e1d8686422e8b9d2",
+  "assets": [
+    {
+      "name": "SHA256SUMS.txt",
+      "bytes": 2385,
+      "sha256": "36a7e72426f9cc0bb48b41db190b89135cacb0e9c6914a24e1d8686422e8b9d2"
+    },
+    {
+      "name": "yaca-1.0.0-linux-x86_64-clean-notices.zip",
+      "bytes": 13060017,
+      "sha256": "fd9c0c9a2116e119a754092d61f4efd87f62e7cff8fd246fd2723ba204a94db7"
+    },
+    {
+      "name": "yaca-1.0.0-linux-x86_64-clean.zip",
+      "bytes": 3680491,
+      "sha256": "de6c41ee34d3a230757c13c8f22ea19c1f2a93b52a38e9c76c443e277b2aaeb7"
+    },
+    {
+      "name": "yaca-1.0.0-linux-x86_64-full-notices.zip",
+      "bytes": 581520443,
+      "sha256": "e63e9fe7a9adfc7aa57ddfb7a526e27f833527438a41c70fd6ade66adfc6fe44"
+    },
+    {
+      "name": "yaca-1.0.0-linux-x86_64-full.zip",
+      "bytes": 1181307169,
+      "sha256": "b268e3a67c3a2179ff04bad93e130eb7884516e223bb49137cf13ef1c61e4387"
+    },
+    {
+      "name": "yaca-1.0.0-linux-x86_64-std-notices.zip",
+      "bytes": 52247276,
+      "sha256": "68525781dde6fc6ad9d58f6f72d39a71b59182ba24b853a563838c9289e4e8b5"
+    },
+    {
+      "name": "yaca-1.0.0-linux-x86_64-std.zip",
+      "bytes": 38968174,
+      "sha256": "8d7516ca8c0f43cbc962b1ced13dd76d64714520ce737e722be0bcbe5f4f92c7"
+    },
+    {
+      "name": "yaca-1.0.0-preview-edition-audit.json",
+      "bytes": 9536,
+      "sha256": "7b57822b2ee44dc554c18986ac79a0e25905541ab4950c181c7bc584cdaf6fd7"
+    },
+    {
+      "name": "yaca-1.0.0-preview-linux-x86_64-source.tar.gz",
+      "bytes": 13209303,
+      "sha256": "d858883372ffdc3ed2b8d7c8d6b78da206fef6e3020063d4ff3ecee13879f64e"
+    },
+    {
+      "name": "yaca-1.0.0-preview-qualification-evidence.zip",
+      "bytes": 132050,
+      "sha256": "8b18706019ec7916c0b515df85404c69ae9793d1d093127bc7d7f5a9cc62f817"
+    },
+    {
+      "name": "yaca-1.0.0-preview-win32-x86-source.tar.gz",
+      "bytes": 19563672,
+      "sha256": "98755e8e93339cdadb4ee0a4a4f4be254423482e32bdafb782c08f25586476f2"
+    },
+    {
+      "name": "yaca-1.0.0-preview-win64-x86_64-source.tar.gz",
+      "bytes": 19652041,
+      "sha256": "e58b0d10d31702fc5c3b348e95742233f1406f08c0a8a8c59626e0859467d79a"
+    },
+    {
+      "name": "yaca-1.0.0-win32-x86-clean-notices.zip",
+      "bytes": 169053,
+      "sha256": "669ff7d2c6674cce0ad244cc4c0772840a2616595b18995047035d0a41ab0c2d"
+    },
+    {
+      "name": "yaca-1.0.0-win32-x86-clean.zip",
+      "bytes": 2518301,
+      "sha256": "63b5f64d0b79d33f93d364e16f4f788482f468d5835f5046390bbe6e55004374"
+    },
+    {
+      "name": "yaca-1.0.0-win32-x86-full-notices.zip",
+      "bytes": 168080246,
+      "sha256": "25b85b918c65c18a81e5c383bf8835a2012c872022dd7fca86dfaedbb2392b3a"
+    },
+    {
+      "name": "yaca-1.0.0-win32-x86-full.zip",
+      "bytes": 271086679,
+      "sha256": "58d9765098acc69d14d787387e580d01b2feba754dc86716af799a09349f5a01"
+    },
+    {
+      "name": "yaca-1.0.0-win32-x86-std-notices.zip",
+      "bytes": 42574990,
+      "sha256": "1bee08a23b42e541b0204decda186352f17168b6b6a07face1ac569953b78d9f"
+    },
+    {
+      "name": "yaca-1.0.0-win32-x86-std.zip",
+      "bytes": 22376466,
+      "sha256": "20a70d7cd45006d397a4a4a6ba60ea1735c1c6c31016026ffb475fececaaa43c"
+    },
+    {
+      "name": "yaca-1.0.0-win64-x86_64-clean-notices.zip",
+      "bytes": 169003,
+      "sha256": "7ae0c2e724d55a8f882d557d0cab6ec2ac2f15b258be5d64bb761c42f94bacbd"
+    },
+    {
+      "name": "yaca-1.0.0-win64-x86_64-clean.zip",
+      "bytes": 2573390,
+      "sha256": "f8465cb1a399bec352baa0b0fa23cd8ecab60ff876e4e613ca6cbe9716c8ec23"
+    },
+    {
+      "name": "yaca-1.0.0-win64-x86_64-full-notices.zip",
+      "bytes": 208931600,
+      "sha256": "e0f3eefea3d3d4bc1545e1156fc8216801d084dfe441b3f16abd4653d54657b9"
+    },
+    {
+      "name": "yaca-1.0.0-win64-x86_64-full.zip",
+      "bytes": 363309069,
+      "sha256": "3f5aff80254cf619b32864d51f47edc7c2e3312502b19cbc911eea39d962a7ce"
+    },
+    {
+      "name": "yaca-1.0.0-win64-x86_64-std-notices.zip",
+      "bytes": 43589843,
+      "sha256": "e7671d9a6a8276921bd7a8e041298a3de97895e9c09a330eb802b84464dae9f4"
+    },
+    {
+      "name": "yaca-1.0.0-win64-x86_64-std.zip",
+      "bytes": 23830709,
+      "sha256": "1e2c76be08cbb7d53a955f0f589d2293d64251908204b6df3ea3653d7549cd75"
+    }
+  ]
+}

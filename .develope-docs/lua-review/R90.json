@@ -1,0 +1,125 @@
+{
+  "schema": "yaca-source-review-v1",
+  "date": "2026-10-11",
+  "review": "R90",
+  "source_scope": "merged working tree",
+  "local_parent": "26d4c43b7c6bf57abc351073845c570acf5c75a7",
+  "upstream_parent": "db9c5d57948e45b247dea49f0127b2375e5c3378",
+  "status": "regression-pass",
+  "qualification": "pending",
+  "release_authorized": false,
+  "whole_repository_semantic_review": "partial",
+  "changes": [
+    "Read bundled entries through an admitted coordinator port rather than the absent global composed.",
+    "Production binds the bounded filesystem reader; local listing starts no Agent or Model work.",
+    "Preserve rendering errors and validate the optional reader type.",
+    "Merge acknowledged native terminal recovery with idempotent already-closed confirmation.",
+    "Invalidate management input mode and buffered events before cleanup while retaining failed owners."
+  ],
+  "baseline": {
+    "source": {
+      "path": "baseline/src/main.lua",
+      "bytes": 626823,
+      "sha256": "9fc64361d96dfbb6df9ad6cef8a84ff8c8bbee4db2cf44553d41da4e17b918fa"
+    },
+    "total": 116,
+    "passed": 115,
+    "failed": 1,
+    "failure": "software listing: attempt to index a nil value (global composed)"
+  },
+  "after": {
+    "total": 116,
+    "passed": 116,
+    "failed": 0
+  },
+  "full_suite": {
+    "total": 730,
+    "passed": 730,
+    "failed": 0
+  },
+  "readiness": {
+    "status": "PASS",
+    "comment_files": 266,
+    "comment_declarations": 5740,
+    "comment_violations": 0
+  },
+  "manual_review": [
+    "Coordinator reader admission, production filesystem reader, local software rendering and composition binding.",
+    "Terminal adapter restoration/close acknowledgment and both retained local regressions.",
+    "Main management close owner retention, mode invalidation and successful join caching.",
+    "Submission annotation corrected from table to actual admitted string action."
+  ],
+  "boundaries": [
+    "Historical preview core/package results do not qualify this merged working tree.",
+    "Final three-core and nine-package builds, online journeys and Git dependency source closure remain pending.",
+    "Other native/main internals and test helpers still require semantic review."
+  ],
+  "evidence_directory": "out/review-20261011/sync/frozen",
+  "files": [
+    {
+      "path": "src/main.lua",
+      "bytes": 628621,
+      "sha256": "b7a809297c3348bf7cdc2508c11f45e4a571daab004b5f7fda6fd530f79c7ee4"
+    },
+    {
+      "path": "src/terminal.lua",
+      "bytes": 59761,
+      "sha256": "3df6767b1e108dd4377e6052481f8a44065b33e454a7e87d5821e2b2582581e5"
+    },
+    {
+      "path": "src/compact.lua",
+      "bytes": 91654,
+      "sha256": "3ac6bd180cf555693350e5e4fe0ea4cee0566a12eb9dcedbdb7834a62ccbcf1b"
+    },
+    {
+      "path": "test/integration/application_coordinator_test.lua",
+      "bytes": 124930,
+      "sha256": "f84d3a75722f4bb68b22a64833cf41a69cb01ac1c76f282e5f1765385ea84b36"
+    },
+    {
+      "path": "test/integration/native_ports_test.lua",
+      "bytes": 40984,
+      "sha256": "bdf00fa0e5753c6fd93a52c7739108244435f3a2b1f9556b7a89e3a2781cd8a6"
+    },
+    {
+      "path": "test/integration/terminal_close_test.lua",
+      "bytes": 18115,
+      "sha256": "f5d22834696df205fff6817ea6983c00bcc034ea9cb2740b44f3345fb82174a3"
+    },
+    {
+      "path": ".tools/run_coding_readiness.sh",
+      "bytes": 1526,
+      "sha256": "615725b5e715983fb5ca97def00a741972233a8f666dd86264566045ea1730ef"
+    },
+    {
+      "path": "release/dependencies.lock",
+      "bytes": 13303,
+      "sha256": "68536b9c572efc3093df0c2bf9cb0f70232720caaff80b5240caf61d61e274c4"
+    },
+    {
+      "path": "release/patches/luainstaller-1.5.0-resources.patch",
+      "bytes": 21039,
+      "sha256": "25f5816a67a3d65f4a7ef74c9c744493f626b1aa657fb4b6451cd0bfbeb57443"
+    },
+    {
+      "path": "out/review-20261011/sync/merged-before-software.log",
+      "bytes": 13508,
+      "sha256": "91dfb9f2bcc2538f3d14586209848882d64e63866f51510691944c369e57141c"
+    },
+    {
+      "path": "out/review-20261011/sync/merged-after-software.log",
+      "bytes": 12736,
+      "sha256": "412e753a6d12f875d6a6275a32587368bae4726ed14ef6d2105fd745bd0257b7"
+    },
+    {
+      "path": "out/review-20261011/sync/full-suite.log",
+      "bytes": 72955,
+      "sha256": "b68f8e6b72ecc223cfdc1a907f343a1654edc054ac7d6f8b5d16dac64c105f42"
+    },
+    {
+      "path": "out/review-20261011/sync/coding-readiness.log",
+      "bytes": 4564,
+      "sha256": "dacf9fc1a62bef0123469334e8bbaed4ef530feba90442c0827366a5b9ea8379"
+    }
+  ]
+}

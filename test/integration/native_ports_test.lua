@@ -634,10 +634,10 @@ return {
                 local terminal = load_module("terminal")
                 local native = success_native()
                 local close_calls = 0
-                -- Refuse explicit restoration so close must preserve this error while still settling ownership.
+                -- Refuse explicit restoration so acknowledged native close must complete the remaining restoration work.
                 --@param handle table Started terminal owner whose restoration is being attempted.
                 --@return boolean accepted Always false for this isolated explicit-restore control.
-                --@return table err Typed error retained by the port's close call.
+                --@return table err Preliminary restore error superseded only by acknowledged native close.
                 native.terminal_restore = function(handle)
                     A.equal(handle.terminal, 1)
                     return false, { code = "RestoreTransient", message = "first restore failed" }
@@ -653,9 +653,9 @@ return {
                 end
                 local port = assert(terminal.new(native, { mode = "cooked", maximum_input_bytes = 16 }))
                 port:start(1)
-                local closed, close_error = pcall(port.close, port)
-                A.falsy(closed)
-                A.truthy(tostring(close_error):find("RestoreTransient", 1, true))
+                local closed, acknowledged = pcall(port.close, port)
+                A.truthy(closed)
+                A.equal(acknowledged, true)
                 A.truthy(port:close())
                 A.equal(close_calls, 1)
             end,

@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-26
+Date: 2026-10-09
 File: release.lua
 Description: Defines target packages, dependency provenance and release admission requirements.
 ]]
@@ -15,7 +15,7 @@ return {
     same_core_for_all_editions = true,
     tool_catalog = "release/tool-bundles.json",
     companion_notices = true,
-    luainstaller = { version = "1.3.0", tag = "v1.3.0", commit = "97192d1" },
+    luainstaller = { version = "1.5.0", tag = "v1.5.0", commit = "a289a1b" },
     targets = { "win32-x86", "win64-x86_64", "linux-x86_64" },
     target_qualification = "independent-full-matrix-before-release",
     source_implementation_may_begin_before_target_qualification = true,

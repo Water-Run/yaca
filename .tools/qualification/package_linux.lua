@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-10-09
 File: package_linux.lua
 Description: Builds the Linux onedir prerequisite and onefile candidate from exact inputs.
 ]]
@@ -34,6 +34,8 @@ harness.install_loader()
 
 local hash = require("luainstaller.hash")
 local luainstaller = require("luainstaller")
+local toolchain = require("luainstaller.toolchain")
+local compile_launcher = toolchain.compile
 
 --Reads the complete fixture file for package linux.
 --@param path string File or Context path exercised by the case.
@@ -45,6 +47,45 @@ local function read_bytes(path)
     local closed, close_error = handle:close()
     if not closed then fail(close_error) end
     return bytes
+end
+
+-- Copy the official public headers onto the directory the pinned compiler already searches.
+-- luainstaller 1.5.0 writes only lua_min.h there. The wrapped launcher also
+-- compiles lua.c, which includes the real headers.
+--@param directory string Absolute include directory named by the compiler options.
+--@return nil No return value.
+--@effect Creates or replaces lua.h, luaconf.h, lauxlib.h, and lualib.h in directory.
+--@error Exits the process when a header cannot be read or written.
+local function install_public_lua_headers(directory)
+    local names = { "lua.h", "luaconf.h", "lauxlib.h", "lualib.h" }
+    for index = 1, #names do
+        local name = names[index]
+        local bytes = read_bytes(lua_source .. "/" .. name)
+        local handle, open_error = io.open(directory .. "/" .. name, "wb")
+        if not handle then fail(open_error) end
+        local written, write_error = handle:write(bytes)
+        if not written then fail(write_error) end
+        local closed, close_error = handle:close()
+        if not closed then fail(close_error) end
+    end
+end
+
+-- Place the interpreter headers before the pinned launcher compilation runs.
+-- The compiler command itself stays the one luainstaller 1.5.0 builds.
+--@param config table Toolchain selected by luainstaller for this launch.
+--@param source_path string Generated C translation unit.
+--@param output_path string Executable path requested by the bundler.
+--@param opts table|nil Compile options. lua_header_dir or work_dir is the include directory.
+--@return boolean ok True when the pinned compiler succeeds.
+--@return string|nil output Compiler output, or the reason the header directory is absent.
+--@return string|nil descriptor Command text returned by the pinned compiler.
+toolchain.compile = function(config, source_path, output_path, opts)
+    local directory = type(opts) == "table" and (opts.lua_header_dir or opts.work_dir) or nil
+    if type(directory) ~= "string" or directory == "" then
+        return false, "the launcher compile did not name a header directory", nil
+    end
+    install_public_lua_headers(directory)
+    return compile_launcher(config, source_path, output_path, opts)
 end
 
 local release_chunk, release_error = loadfile(

@@ -966,6 +966,7 @@ local function fixture(settings)
         chat = chat,
         draft_models = draft_models,
         context_switch = context_switch,
+        bundled_entries = settings.bundled_entries,
         agent_factory = agent_factory,
         initial_agent = settings.initial_agent and constructed_agent or nil,
     }, {
@@ -1416,10 +1417,10 @@ return {
             end,
         },
         {
-            name = "coordinator confirms a released terminal after an earlier adapter restore failure",
-            -- Use the actual terminal adapter so a restore error and successful native release cannot strand the coordinator in closing.
+            name = "coordinator accepts acknowledged native recovery after an adapter restore failure",
+            -- Use the actual terminal adapter so acknowledged native recovery can settle the coordinator after a preliminary restore error.
             --@param none No arguments; the case owns a real coordinator/terminal pair and bounded native terminal doubles.
-            --@return nil No value; assertions require the original run error, successful cleanup retry and exactly one native release.
+            --@return nil No value; assertions require successful cleanup, closed lifecycle and exactly one native release across repeated coordinator close.
             --@effect Runs an offline fixture without filesystem, network or real console effects.
             run = function()
                 local f = fixture()
@@ -1471,7 +1472,7 @@ return {
                 -- Fail explicit restoration while allowing the later native close primitive to restore and release.
                 --@param owner table Case-owned terminal handle.
                 --@return boolean accepted False for the two explicit restore attempts.
-                --@return table err Transient restoration failure retained by the first close.
+                --@return table err Preliminary restoration failure superseded by acknowledged native recovery.
                 --@effect Counts explicit restoration attempts.
                 native.terminal_restore = function(owner)
                     A.equal(owner, handle)
@@ -1496,10 +1497,8 @@ return {
                     f.terminal[method] = port[method]
                 end
                 local result, err = f.coordinator:run()
-                A.falsy(result)
-                A.equal(err.code, "TerminalRestoreFailure")
-                A.equal(f.coordinator:status().lifecycle, "closing")
-                A.truthy(f.coordinator:close())
+                A.truthy(result)
+                A.falsy(err)
                 A.equal(f.coordinator:status().lifecycle, "closed")
                 A.falsy(f.coordinator:status().terminal_started)
                 A.truthy(f.coordinator:close())
@@ -1733,6 +1732,31 @@ return {
                 local saved_rendered = A.render(saved.blocks)
                 A.contains(saved_rendered, "next turn prompt")
                 A.contains(saved_rendered, "applies on the next turn")
+            end,
+        },
+        {
+            name = "software listing uses its admitted reader without publishing an Agent",
+            -- Render the optional software index through an explicit coordinator port rather than an unavailable composition-root variable.
+            --@param none No arguments; the case owns a local software reader and unsaved coordinator.
+            --@return nil No value; assertions require one index read, visible entries and no first-turn publication.
+            --@effect Runs deterministic ports without filesystem or network effects.
+            run = function()
+                local reads = 0
+                local settings = { batches = input_lines({ ".software", ".quit" }) }
+                -- Return the already admitted optional software entries for local display only.
+                --@param none No arguments; this fixture reader owns its entry array.
+                --@return table entries One valid portable software description.
+                --@effect Counts reader calls without starting Model work.
+                settings.bundled_entries = function()
+                    reads = reads + 1
+                    return { { name = "fixture-python", summary = "portable Python for offline verification" } }
+                end
+                local f = fixture(settings)
+                assert(f.coordinator:run())
+                A.equal(reads, 1)
+                A.contains(A.render(f.blocks), "fixture-python")
+                A.contains(A.render(f.blocks), "portable Python for offline verification")
+                A.falsy(table.concat(f.log, "|"):find("factory:", 1, true))
             end,
         },
         {

@@ -1,0 +1,135 @@
+{
+  "schema": "yaca-native-review-evidence-v1",
+  "review_id": "R86",
+  "date": "2026-10-08",
+  "status": "verified-source-subset",
+  "release_authorized": false,
+  "target_qualification_complete": false,
+  "published_candidate_contains_fix": false,
+  "source_inputs": {
+    "base_revision": "7a7a98aa3579c918b3cbb2444adbe085b0a0f8c8",
+    "files": [
+      {
+        "path": "src/main.lua",
+        "sha256": "50348fcb5982a683fa640a153e5992bc3759c0d36bba202ce9ac329a26d436bf"
+      },
+      {
+        "path": "src/terminal.lua",
+        "sha256": "4a38feef1def9685186c3f85b3ba696d2d5c0a073716e6cd28e6d78d3e41829a"
+      },
+      {
+        "path": "test/integration/bootstrap_test.lua",
+        "sha256": "76098d549f9b3a66cbfeb85e6205650f2c2765761d265d74fe62d6a4d40d418e"
+      }
+    ]
+  },
+  "baseline_inputs": {
+    "revision": "7a7a98aa3579c918b3cbb2444adbe085b0a0f8c8",
+    "bindings": [
+      {
+        "path": "out/setup-input-owner-review-20261008/before-source/src/main.lua",
+        "sha256": "aa6105c0b6f62dfc56437fc20fc2183774832e516711dbca5c3ddcf5bb37f43c",
+        "bytes": 612770
+      },
+      {
+        "path": "out/setup-input-owner-review-20261008/before-source/src/terminal.lua",
+        "sha256": "4a38feef1def9685186c3f85b3ba696d2d5c0a073716e6cd28e6d78d3e41829a",
+        "bytes": 59578
+      },
+      {
+        "path": "out/setup-input-owner-review-20261008/before-source/test/integration/bootstrap_test.lua",
+        "sha256": "76098d549f9b3a66cbfeb85e6205650f2c2765761d265d74fe62d6a4d40d418e",
+        "bytes": 195104
+      }
+    ]
+  },
+  "baseline_public_repl": {
+    "total": 52,
+    "passed": 47,
+    "failed": 5,
+    "binding": {
+      "path": "out/setup-input-owner-review-20261008/baseline-final-bootstrap.log",
+      "sha256": "2f29b51bbc2f66a7383d0e4b1d9ce65f8f36d982593817e8456b3296dcb203bd",
+      "bytes": 10264
+    }
+  },
+  "focused_fixed": {
+    "total": 87,
+    "passed": 87,
+    "failed": 0,
+    "binding": {
+      "path": "out/setup-input-owner-review-20261008/focused-final.log",
+      "sha256": "1f0d7531506aecece323b84639ea856ea08bf6766c9503b929207a3b7638ca4e",
+      "bytes": 9555
+    }
+  },
+  "full_suite": {
+    "total": 720,
+    "passed": 720,
+    "failed": 0,
+    "binding": {
+      "path": "out/setup-input-owner-review-20261008/lua-suite-final.log",
+      "sha256": "64ddc0108cf7dbaef39a97ea5f4762bdf4e7a95abeb79228de44dfd9f1769d1b",
+      "bytes": 71664
+    }
+  },
+  "coding_readiness": {
+    "status": "PASS",
+    "binding": {
+      "path": "out/setup-input-owner-review-20261008/coding-readiness-final.log",
+      "sha256": "33cf3a06b302a08f233f565293ff47fad7d9a9e8a84b6e234420ad41bdabb974",
+      "bytes": 4083
+    }
+  },
+  "comment_structure": {
+    "files": 255,
+    "declarations": 5615,
+    "violations": 0,
+    "inventory": {
+      "path": "out/setup-input-owner-review-20261008/comment-inventory.json",
+      "sha256": "9cba63fe495ac3d6c985d3401c13200e877691568573754849b83146155de6c0",
+      "bytes": 1253682
+    }
+  },
+  "checks": [
+    {
+      "path": "out/setup-input-owner-review-20261008/complete_checks.sh",
+      "sha256": "74abaedbe356a01cbdc7ade46a4830557e1b6ff2b18bc5165826995832260a7f",
+      "bytes": 951
+    },
+    {
+      "path": "out/setup-input-owner-review-20261008/complete-checks-run.log",
+      "sha256": "20836c83afee56b73dd3b2dc6fb162a36250012d2448f06f609bcbfcbdd0ce0c",
+      "bytes": 172
+    },
+    {
+      "path": "out/setup-input-owner-review-20261008/create_evidence.py",
+      "sha256": "cafee245a5a5deb41b106c34948ccb212a030de83c6181c53b61acad80ec8c67",
+      "bytes": 4998
+    }
+  ],
+  "retained_initial_failures": [
+    {
+      "path": "out/setup-input-owner-review-20261008/baseline-bootstrap.log",
+      "sha256": "cf25ff8829f52cc875785860fa25bcc764e4f21e4b1a278dd7be5f9bf57eb0ee",
+      "bytes": 8863
+    },
+    {
+      "path": "out/setup-input-owner-review-20261008/fixed-first-syntax-failed.log",
+      "sha256": "38c2adbd693c94206e464eb1e671b0fe95bd2dd23161e6bb28c72afa5675bef8",
+      "bytes": 3228
+    },
+    {
+      "path": "out/setup-input-owner-review-20261008/fixed-fixture-stage-failed.log",
+      "sha256": "f3668c36b2ea6401f702e43692e5721f15315c3c4a7e4d928ece5e9af536ad38",
+      "bytes": 12392
+    }
+  ],
+  "scope": "actual production run_cli/configuration REPL, main input coordinator and terminal adapter; explicit narrow native doubles reject/raise on close, track real fixture ownership and refuse overlapping generations or duplicate native joins; no physical OS/model/package qualification is inferred",
+  "semantic_review": "partial globally; reviewed mode invalidation before cleanup, discard of prior buffered input, acknowledged-close ownership release in normal/degraded-clock branches, remembered join, same-owner close retry, no replacement generation while owned, persistent unknown-restoration fixture and all affected functions/comments",
+  "uncovered_scope": [
+    "Cygwin PTY failure/recovery",
+    "remaining main/native/helpers and global semantic Review",
+    "final three-target core rebuild and nine-package journeys/qualification"
+  ]
+}

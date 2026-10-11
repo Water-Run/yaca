@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-10-05
+Date: 2026-10-09
 File: package_layout_test.lua
 Description: Verifies exact minimal candidate package assembly policy.
 ]]
@@ -115,8 +115,8 @@ end
 local function inputs(target_id)
     local target = assert(TARGETS[target_id])
     local launcher = artifact(target_id, "launcher", manifest.product_version, hash("1"))
-    launcher.builder_version = "1.3.0"
-    launcher.builder_commit = "97192d100077b31b61dc8f94427e14df1c68a9eb"
+    launcher.builder_version = "1.5.0"
+    launcher.builder_commit = "a289a1bed6c6dcf8ad4f11a1d9e28f2f2989adbf"
     launcher.mode = "onefile"
     launcher.upx = false
     local curl = artifact(target_id, "curl", "8.21.0", hash("4"))
@@ -216,10 +216,10 @@ return {
             --@return nil No value; assertions verify onedir prerequisite and onefile payload are explicit and minimal.
             run = function()
                 local plan = assert(planner.plan("linux-x86_64", inputs("linux-x86_64")))
-                A.equal(plan.luainstaller.version, "1.3.0")
+                A.equal(plan.luainstaller.version, "1.5.0")
                 A.equal(
                     plan.luainstaller.commit,
-                    "97192d100077b31b61dc8f94427e14df1c68a9eb"
+                    "a289a1bed6c6dcf8ad4f11a1d9e28f2f2989adbf"
                 )
                 A.deep_equal(
                     plan.luainstaller.downstream_patches,
@@ -227,7 +227,7 @@ return {
                 )
                 A.equal(
                     plan.luainstaller.downstream_patches[1].sha256,
-                    "974cf25b51ab644c8af60a7f2524a5670b1fea38e35ad733267ac4775c5d9dff"
+                    "25f5816a67a3d65f4a7ef74c9c744493f626b1aa657fb4b6451cd0bfbeb57443"
                 )
                 A.equal(plan.luainstaller.prerequisite_mode, "onedir")
                 A.equal(plan.luainstaller.final_mode, "onefile")
@@ -407,7 +407,7 @@ return {
                 local plan = assert(planner.plan("linux-x86_64", inputs("linux-x86_64")))
                 A.falsy(plan.historical_bin_inputs)
                 A.equal(plan.inner_payload[3].role, "curl")
-                A.equal(plan.luainstaller.version, "1.3.0")
+                A.equal(plan.luainstaller.version, "1.5.0")
             end,
         },
     },

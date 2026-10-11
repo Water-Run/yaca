@@ -10,6 +10,7 @@
 
 当前执行已进入 C32--C34 收尾：九包候选已装配，已实现逐文件/来源/SPDX 汇总校验和
 Linux 三档的真实 PTY 离线核心旅程；最终目标交互旅程与部分证据仍待完成，实机范围按 D-077。
+发行构建器现钉 luainstaller 1.5.0（`a289a1b`）。已发布九包由 1.3.0 构建，收口时按新钉重建。
 已装配条目不再列为待实现；源码修复后
 重新进入统一目标构建，具体依赖和退出条件由 TRACKING 维护。
 
@@ -19,7 +20,7 @@ D-074 明确工具面 Lua 和纯问答 `.ask`，D-075/D-076 要求完整实现�
 现有核心继续按实测缺陷修补，旧实施候选中的架构重写、旧接口迁移不作为前置工作。
 
 C01--C31 已有实现与测试，不等于其中所有目标 hard gate 已通过。
-R81 节点已打包推送；R82--R86 三目标核心节点已收口，按 D-085 继续到可发布就绪，Gate R 关闭。
+10 月 11 日预览版已发布；合并源码按 D-085 继续到可发布就绪，Gate R 关闭。
 
 负责人按 D-085 要求同步并推进至可发布就绪，覆盖 D-084 的暂停安排。
 剩余 Review 和 C32--C34 事项按 TRACKING 执行。下文 C01--C34
@@ -207,7 +208,7 @@ M8 完成才得到最小端到端 Agent；在此之前 README 仍必须写“未
 
 | Task | Files | Tests 与唯一退出条件 | Commit |
 | --- | --- | --- | --- |
-| C31 | `release/manifest.lua`, `release/luainstaller.lua`, `release/dependencies.lock` | `package_layout_test.lua`, `sbom_test.lua`；luainstaller 1.3.0 pin、最小 allowlist、curl/CA final lock、license/SBOM、无历史 `bin/` 整包复制 | `build: assemble minimal target packages` |
+| C31 | `release/manifest.lua`, `release/luainstaller.lua`, `release/dependencies.lock` | `package_layout_test.lua`, `sbom_test.lua`；luainstaller 1.5.0 pin、最小 allowlist、curl/CA final lock、license/SBOM、无历史 `bin/` 整包复制 | `build: assemble minimal target packages` |
 | C32 | `test/qualification/win32.lua`, `test/qualification/win64.lua`, `test/qualification/linux.lua` | `test/qualification/`；三目标各自原生构建、运行、全测试与 target proofs；一平台失败不能被另两平台替代 | `test: qualify all release targets` |
 | C33 | `.tools/check_zero_surface.lua`, `test/release/journeys.lua`, `.tools/qualification/edition_journey.py` | `clean_machine_test.lua`, `edition_journey_test.py`；按 D-073 验收三目标各 clean/std/full 的布局、配置→新建/恢复→退出→升级→卸载与工具；core/edition 分别核对允许表面，离线核心通过不替代在线或目标旅程 | `test: prove release journeys and zero surface` |
 | C34 | `README.md`, `README-zh.md`, `docs/`, `release/evidence/`, `.tools/qualification/audit_editions.py` | `audit_editions_test.py`、`.tools/check_documentation_truth.lua`；公开声明只描述已通过能力，九包核心一致且每包 SHA-256/license/SBOM/build/test summary 齐全 | `docs: publish qualified release evidence` |

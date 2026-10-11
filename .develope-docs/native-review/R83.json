@@ -5,887 +5,475 @@
   "status": "verified-native-subset",
   "release_authorized": false,
   "target_qualification_complete": false,
+  "published_candidate_contains_fix": false,
   "source_inputs": {
-    "base_revision": "1456a160fbef52250b7e6540e1209e0ef43b9963",
-    "working_tree_changes": true,
+    "base_revision": "5fc23ac2a8afcc1109ac3cbaaac366f1850dc342",
     "files": [
       {
-        "path": "out/review-20261008/r83-complete/after/source/.tools/qualification/filesystem_fault_tracker.h",
-        "size": 11868,
+        "path": ".tools/qualification/build_win64_candidate.sh",
+        "sha256": "b74bc8ebdf65db4bb442b4d015463792f1ac59f1859bfc840e1ed517a57bac44"
+      },
+      {
+        "path": ".tools/qualification/build_windows_candidate.sh",
+        "sha256": "4ae69b4d30450a45a4dc4b4b3be8a05cad97944e48100b06924524b407d3aec2"
+      },
+      {
+        "path": ".tools/qualification/filesystem_fault_tracker.h",
         "sha256": "ee81e1b5c1ba5574364036759bb52f40087839356766a12e087b97da18c93fad"
       },
       {
-        "path": "out/review-20261008/r83-complete/after/source/.tools/qualification/native_component_probe.c",
-        "size": 1857,
-        "sha256": "9be0c188df7324dc00bf1de5fa10183f0462febc0d9f5f32488d818a7a82fe80"
+        "path": ".tools/qualification/terminal_input_faults.c",
+        "sha256": "789aff9f69750adbad605cfb7161c95487553a58bdcc79d3f5ee413c20c24359"
       },
       {
-        "path": "out/review-20261008/r83-complete/after/source/.tools/qualification/process_start_faults.c",
-        "size": 18677,
-        "sha256": "045a47f16fbe050a618383b92f92f8dfc55edc468e2ef983cca4a6b999383310"
+        "path": ".tools/qualification/windows_console_lifetime_faults.c",
+        "sha256": "53ebcb8ed0fe4d5615eeb66b6074c9f05371f4ecab431e9e6a4c768a3518134a"
       },
       {
-        "path": "out/review-20261008/r83-complete/after/source/.tools/qualification/process_stream_faults.c",
-        "size": 15332,
-        "sha256": "b8289b6ed97cb1e2f8886399b0991e4a8864e857942d4f4b496198f4c316bb91"
+        "path": ".tools/qualification/windows_console_reader_smoke.c",
+        "sha256": "dd8e64d52f7ca65914a52cebd9972271844b12a948caf3e3afe156818693e5f1"
       },
       {
-        "path": "out/review-20261008/r83-complete/after/source/.tools/qualification/terminal_input_faults.c",
-        "size": 19470,
-        "sha256": "60efbc8ef117a477289f2a64cf316026bc1f2406a3698180bb5c0ab81fb2350b"
+        "path": ".tools/qualification/windows_keyboard_faults.c",
+        "sha256": "f87061c489ffd8587b9fe870119f705073e4af71316f7003ea0dbc08afa259d0"
       },
       {
-        "path": "out/review-20261008/r83-complete/after/source/.tools/qualification/windows_console_reader_smoke.c",
-        "size": 5161,
-        "sha256": "47534e0eda75e5b1e2ecb97b7ffc392430085a078a7b8454191cb737c5e2463f"
+        "path": ".tools/qualification/windows_terminal_input_smoke.c",
+        "sha256": "a1f5fc621392486ef088fd6126880c995aa02204dd1166cc99a267fce48c69b1"
       },
       {
-        "path": "out/review-20261008/r83-complete/after/source/.tools/qualification/windows_cooked_lifetime_smoke.c",
-        "size": 16926,
-        "sha256": "66936c57efa00a0719c934f89cb65f44d5ce3feb0926f1fc9e7b863d7d0d5e91"
-      },
-      {
-        "path": "out/review-20261008/r83-complete/after/source/.tools/qualification/windows_worker_fixture.h",
-        "size": 2363,
-        "sha256": "bed4d3aa6f659f6090fcfb7388080fbc974f74a2cdca14101376a95f7b0f99cf"
-      },
-      {
-        "path": "out/review-20261008/r83-complete/after/source/.tools/qualification/windows_worker_lifetime_fixture.c",
-        "size": 11398,
-        "sha256": "3220b42d54b62ce2cd47a32d04f6ff99fb4bd4a66bdf0a6feeb5e4b2ade189dc"
-      },
-      {
-        "path": "out/review-20261008/r83-complete/after/source/.tools/qualification/windows_worker_lifetime_smoke.c",
-        "size": 8357,
-        "sha256": "405ae0e9232ce5c3a85164db368ce23374b5b840917b995353b3cc48bad55c14"
-      },
-      {
-        "path": "out/review-20261008/r83-complete/after/source/native/lxp_build.lua",
-        "size": 4128,
+        "path": "native/lxp_build.lua",
         "sha256": "97bcc6822ae6af6e0ed70c74585c3924845fdee0b3bdace222f171a7071b6fe0"
       },
       {
-        "path": "out/review-20261008/r83-complete/after/source/native/yaca_entry.c",
-        "size": 2076,
+        "path": "native/yaca_entry.c",
         "sha256": "e37392e19da463ad55848d6d2550056958ea3084fa3f842b994f798b82bc59a8"
       },
       {
-        "path": "out/review-20261008/r83-complete/after/source/native/yaca_lua_windows.h",
-        "size": 7545,
+        "path": "native/yaca_lua_windows.h",
         "sha256": "92f9d56314c8cda74a6eb6e5792688143d5c8d7c7b1a1385ee12817c1f610194"
       },
       {
-        "path": "out/review-20261008/r83-complete/after/source/native/yaca_native.c",
-        "size": 432290,
-        "sha256": "5cf56aef6373d8aed0b937b54dbd95b9002ec152e61aad5329e22b2e9b24ce88"
+        "path": "native/yaca_native.c",
+        "sha256": "261fe293404bd88908e7bd93a3084016c7a67ef24af6ac75419749197d6d645d"
       },
       {
-        "path": "out/review-20261008/r83-complete/after/source/native/yaca_onefile_entry.c",
-        "size": 1281,
+        "path": "native/yaca_onefile_entry.c",
         "sha256": "4e59947998f7a9477cc768188c81e268bbf377db42fe27b9172a47a0ae85f9d4"
       },
       {
-        "path": "out/review-20261008/r83-complete/after/source/native/yaca_onefile_windows.h",
-        "size": 12184,
+        "path": "native/yaca_onefile_windows.h",
         "sha256": "269f3b37b89d53970eb4c5d6947e31f2db7627d153871dd33da3697294dd7c37"
       },
       {
-        "path": "out/review-20261008/r83-complete/after/source/native/yaca_pty.h",
-        "size": 9939,
+        "path": "native/yaca_pty.h",
         "sha256": "a9be6b177388ee15e656aba3a4080f00d13bd4bc3ad411af4bd8095a0d3d8c01"
       },
       {
-        "path": "out/review-20261008/r83-complete/after/source/native/yaca_supervisor.h",
-        "size": 9977,
+        "path": "native/yaca_supervisor.h",
         "sha256": "2315e15885d914923a44ba55ae5c65a976c56b1aa4b6731cc87b86d72d2164f6"
       },
       {
-        "path": "out/review-20261008/r83-complete/after/source/native/yaca_text.h",
-        "size": 27950,
+        "path": "native/yaca_text.h",
         "sha256": "82e057d215a77470166e79876dab5c6a7fd38a5d0856229f76e7c1b93a47bbc7"
-      }
-    ],
-    "build_scripts": [
-      {
-        "path": ".tools/qualification/build_windows_candidate.sh",
-        "size": 12216,
-        "sha256": "1d0504c1a2def21bfbcc064eda740a674ec39388d71ebd4f9972549c26d8df83"
-      },
-      {
-        "path": ".tools/qualification/build_win64_candidate.sh",
-        "size": 11494,
-        "sha256": "eec196e50e8b8b419b4ea32552b4b7230ab0669301805c3becb5e193941f411f"
       }
     ]
   },
-  "baseline_source_inputs": {
-    "revision": "1456a160fbef52250b7e6540e1209e0ef43b9963",
-    "native_scope": "exact git archive HEAD native/",
-    "probe_scope": "same final DLL fixture/header/host sources",
+  "baseline_inputs": {
+    "revision": "5fc23ac2a8afcc1109ac3cbaaac366f1850dc342",
     "files": [
       {
-        "path": "out/review-20261008/r83-complete/before/source/.tools/qualification/windows_worker_fixture.h",
-        "size": 2363,
-        "sha256": "bed4d3aa6f659f6090fcfb7388080fbc974f74a2cdca14101376a95f7b0f99cf"
+        "path": ".tools/qualification/windows_terminal_input_smoke.c",
+        "sha256": "a1f5fc621392486ef088fd6126880c995aa02204dd1166cc99a267fce48c69b1"
       },
       {
-        "path": "out/review-20261008/r83-complete/before/source/.tools/qualification/windows_worker_lifetime_fixture.c",
-        "size": 11398,
-        "sha256": "3220b42d54b62ce2cd47a32d04f6ff99fb4bd4a66bdf0a6feeb5e4b2ade189dc"
-      },
-      {
-        "path": "out/review-20261008/r83-complete/before/source/.tools/qualification/windows_worker_lifetime_smoke.c",
-        "size": 8357,
-        "sha256": "405ae0e9232ce5c3a85164db368ce23374b5b840917b995353b3cc48bad55c14"
-      },
-      {
-        "path": "out/review-20261008/r83-complete/before/source/native/lxp_build.lua",
-        "size": 4128,
+        "path": "native/lxp_build.lua",
         "sha256": "97bcc6822ae6af6e0ed70c74585c3924845fdee0b3bdace222f171a7071b6fe0"
       },
       {
-        "path": "out/review-20261008/r83-complete/before/source/native/yaca_entry.c",
-        "size": 2076,
+        "path": "native/yaca_entry.c",
         "sha256": "e37392e19da463ad55848d6d2550056958ea3084fa3f842b994f798b82bc59a8"
       },
       {
-        "path": "out/review-20261008/r83-complete/before/source/native/yaca_lua_windows.h",
-        "size": 7545,
+        "path": "native/yaca_lua_windows.h",
         "sha256": "92f9d56314c8cda74a6eb6e5792688143d5c8d7c7b1a1385ee12817c1f610194"
       },
       {
-        "path": "out/review-20261008/r83-complete/before/source/native/yaca_native.c",
-        "size": 429226,
-        "sha256": "05f58f443ec65b8fdef5830930a13df868c5372b5d5ef578214c29b3b2b842e4"
+        "path": "native/yaca_native.c",
+        "sha256": "5cc3c4c7cb67f604b8cb44ae4ba46866c4bc70981e88f4526ba9670055685271"
       },
       {
-        "path": "out/review-20261008/r83-complete/before/source/native/yaca_onefile_entry.c",
-        "size": 1281,
+        "path": "native/yaca_onefile_entry.c",
         "sha256": "4e59947998f7a9477cc768188c81e268bbf377db42fe27b9172a47a0ae85f9d4"
       },
       {
-        "path": "out/review-20261008/r83-complete/before/source/native/yaca_onefile_windows.h",
-        "size": 12184,
+        "path": "native/yaca_onefile_windows.h",
         "sha256": "269f3b37b89d53970eb4c5d6947e31f2db7627d153871dd33da3697294dd7c37"
       },
       {
-        "path": "out/review-20261008/r83-complete/before/source/native/yaca_pty.h",
-        "size": 9939,
+        "path": "native/yaca_pty.h",
         "sha256": "a9be6b177388ee15e656aba3a4080f00d13bd4bc3ad411af4bd8095a0d3d8c01"
       },
       {
-        "path": "out/review-20261008/r83-complete/before/source/native/yaca_supervisor.h",
-        "size": 9977,
+        "path": "native/yaca_supervisor.h",
         "sha256": "2315e15885d914923a44ba55ae5c65a976c56b1aa4b6731cc87b86d72d2164f6"
       },
       {
-        "path": "out/review-20261008/r83-complete/before/source/native/yaca_text.h",
-        "size": 27950,
+        "path": "native/yaca_text.h",
         "sha256": "82e057d215a77470166e79876dab5c6a7fd38a5d0856229f76e7c1b93a47bbc7"
       }
     ]
   },
   "targets": [
     {
-      "target": "win32-x86",
-      "environment": "Windows 11 Pro for Workstations Insider Preview 10.0.26220",
-      "compatibility_floor": "XP SP3 / _WIN32_WINNT=0x0501",
-      "baseline_failures": 4,
-      "fixed_scenarios": 26,
-      "fixed_native_blocks": 0,
-      "fixed_module_residency": 0,
-      "real_operations": [
-        "Lua package.loadlib",
-        "lua_close",
-        "CreateThread",
-        "GetModuleHandle",
-        "thread waits",
-        "OS handle accounting"
-      ],
-      "double_scope": "bounded console/pipe IO and selected module/thread startup failures",
-      "artifacts": [
-        {
-          "path": "out/review-20261008/r83-complete/before/win32/fixture-build.log",
-          "size": 0,
-          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/before/win32/host-build.log",
-          "size": 0,
-          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/before/win32/lua55.dll",
-          "size": 599763,
-          "sha256": "0fe6d0f958af72ed9628ed29802891400d2595158bec0a57290c8aa5e09a34fd"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/before/win32/native-worker-fixture.dll",
-          "size": 407376,
-          "sha256": "c7b7f221484462e259202a138168d550ba6278905677dd3c5cdc3988b2a5e12b"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/before/win32/reader-io-error.log",
-          "size": 91,
-          "sha256": "4a20283733eab43eed11861b70064a7c1583a9fa853a6fbd622c9a616af5b0b7"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/before/win32/reader-normal.log",
-          "size": 89,
-          "sha256": "160ee5e1e1e5056e2522336178ead45530311cfae8da71f80b89f89441aab913"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/before/win32/windows_worker_lifetime_smoke.exe",
-          "size": 250363,
-          "sha256": "ebc1ab49c88063ae96a6771bbd46688bd4f618ee857e1f964770bb5c084c4b4f"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/before/win32/writer-io-error.log",
-          "size": 91,
-          "sha256": "327e1535b41ed473e3643da22b5a5b288908046beac607d3e8109043cd372353"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/before/win32/writer-normal.log",
-          "size": 89,
-          "sha256": "0509a8bc712029cdfb31789657d303047a85df94d179603a1758a23480c80a01"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/both-normal-1.log",
-          "size": 146,
-          "sha256": "5d3e0be58f735eea3489631c14a840c882de034113cfe51563722af2656d250d"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/both-normal-2.log",
-          "size": 146,
-          "sha256": "5d3e0be58f735eea3489631c14a840c882de034113cfe51563722af2656d250d"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/fixture-build.log",
-          "size": 0,
-          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/host-build.log",
-          "size": 0,
-          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/lua55.dll",
-          "size": 599763,
-          "sha256": "0fe6d0f958af72ed9628ed29802891400d2595158bec0a57290c8aa5e09a34fd"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/native-worker-fixture.dll",
-          "size": 408205,
-          "sha256": "19d20f5807e9783eda18687214752556a8e3f78ad4a80188198cdb8b53a4ceb3"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/native_component_probe-build.log",
-          "size": 0,
-          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/native_component_probe.exe",
-          "size": 239590,
-          "sha256": "b4e1c591427c95f2037bdcdf423b5bba320087af2e283b711efa8658115c99a2"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/process_start_faults-build.log",
-          "size": 0,
-          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/process_start_faults.exe",
-          "size": 438530,
-          "sha256": "7fa3f188d76f672a4752fa1c2055011f9c01868741e7a70419de33b6831d11a3"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/process_start_faults.log",
-          "size": 613,
-          "sha256": "bf9288e7fd0cec95c3044d7dbe32c4c2cbc77224f93361a06fe2326d04086f32"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/process_stream_faults-build.log",
-          "size": 0,
-          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/process_stream_faults.exe",
-          "size": 440424,
-          "sha256": "f800bb5f4b07973e247b079830345e49883ee480a480fbdf99fbe5099c4cf148"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/process_stream_faults.log",
-          "size": 81,
-          "sha256": "f5741efb7af3316dbadfad6d25f5c3549ef3d8b1c4ed87e26ae67c72f5a28963"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/reader-early-exit-1.log",
-          "size": 152,
-          "sha256": "8f7cc4535752fe54ca1dcb6182058e1acc56a5366db146270373b405bed108bf"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/reader-early-exit-2.log",
-          "size": 152,
-          "sha256": "8f7cc4535752fe54ca1dcb6182058e1acc56a5366db146270373b405bed108bf"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/reader-io-error-1.log",
-          "size": 150,
-          "sha256": "952d38a38079a36bb863c6a8dbb608aa0bb107d833d7db4e5d4fc71a927d0b94"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/reader-io-error-2.log",
-          "size": 150,
-          "sha256": "952d38a38079a36bb863c6a8dbb608aa0bb107d833d7db4e5d4fc71a927d0b94"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/reader-module-query-1.log",
-          "size": 154,
-          "sha256": "124e4b9627475257244eb574171de0735100bb58c68660c214b19fbf9627bb79"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/reader-module-query-2.log",
-          "size": 154,
-          "sha256": "124e4b9627475257244eb574171de0735100bb58c68660c214b19fbf9627bb79"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/reader-module-retain-1.log",
-          "size": 155,
-          "sha256": "656054d6009a9139007613fc248101bfd112e831f36ec403c27af33823942020"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/reader-module-retain-2.log",
-          "size": 155,
-          "sha256": "656054d6009a9139007613fc248101bfd112e831f36ec403c27af33823942020"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/reader-normal-1.log",
-          "size": 148,
-          "sha256": "dc0542389221bd507ca4091c5ac9eb04eeaa5378ad91b1719ce154592477c464"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/reader-normal-2.log",
-          "size": 148,
-          "sha256": "d3506cb3a0e45e7f9306d32c3a822d4eb4d537cb92264909941f0b516d08ddbc"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/reader-thread-start-1.log",
-          "size": 154,
-          "sha256": "190aa4f031711378f1fc99c44016308de58429ad686e3ec60bac60da890550e2"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/reader-thread-start-2.log",
-          "size": 154,
-          "sha256": "190aa4f031711378f1fc99c44016308de58429ad686e3ec60bac60da890550e2"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/terminal_input_faults-build.log",
-          "size": 0,
-          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/terminal_input_faults.exe",
-          "size": 440423,
-          "sha256": "d7fc1fc6339974cdfe2324c2c8ea4cc70cfa90261dabc9b8e63591c4fd62e0d9"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/terminal_input_faults.log",
-          "size": 594,
-          "sha256": "61d6ed8dc0419d38ecfe15969c78a00401f936f16c6e2b685197595de6bd2050"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/windows_console_reader_smoke-build.log",
-          "size": 0,
-          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/windows_console_reader_smoke.exe",
-          "size": 422378,
-          "sha256": "d0f6909dc449dc4bb12dc69ded1c696d72bd0a44664eaa3abf1a9ec3a3e7c166"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/windows_console_reader_smoke.log",
-          "size": 34,
-          "sha256": "3ec0d7ad944a7fd72b8d0bd5a4d10e19dd59a0bfb94f8808444022efa8b07342"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/windows_cooked_lifetime_smoke-build.log",
-          "size": 0,
-          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/windows_cooked_lifetime_smoke.exe",
-          "size": 440699,
-          "sha256": "1a5fd9834740e31dc0d4c123ea899c9d8a824839f4064d36fe77a21da735fde2"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/windows_cooked_lifetime_smoke.log",
-          "size": 564,
-          "sha256": "e06f19777df1abf3098a30ecf3d377991355e9a46ba5177b535bfbce3b758260"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/windows_worker_lifetime_smoke.exe",
-          "size": 250363,
-          "sha256": "2959ad986261a7970598816c9c19d775c7085ea322dd45aae6f8ada42accb771"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/writer-early-exit-1.log",
-          "size": 152,
-          "sha256": "eff9afca6c9b4751130d5bc7b8a7bbe64bc2f5eba80b0b56405daa32937c9821"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/writer-early-exit-2.log",
-          "size": 152,
-          "sha256": "eff9afca6c9b4751130d5bc7b8a7bbe64bc2f5eba80b0b56405daa32937c9821"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/writer-io-error-1.log",
-          "size": 150,
-          "sha256": "ee3dbc850c3a5ea6eaf7c21f5c8ad6b91e86cf30fec8f321225f4e1afc362c69"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/writer-io-error-2.log",
-          "size": 150,
-          "sha256": "ee3dbc850c3a5ea6eaf7c21f5c8ad6b91e86cf30fec8f321225f4e1afc362c69"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/writer-module-query-1.log",
-          "size": 154,
-          "sha256": "7ee2df9715ba41fff6d2944d22cb52e64474c217f0d159f1772010f3b60cf522"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/writer-module-query-2.log",
-          "size": 154,
-          "sha256": "7ee2df9715ba41fff6d2944d22cb52e64474c217f0d159f1772010f3b60cf522"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/writer-module-retain-1.log",
-          "size": 155,
-          "sha256": "6277b6dcf6cac3409b23c01ceedabc53d8a43dd2b5eb6376888da3f4586eb2ea"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/writer-module-retain-2.log",
-          "size": 155,
-          "sha256": "6277b6dcf6cac3409b23c01ceedabc53d8a43dd2b5eb6376888da3f4586eb2ea"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/writer-normal-1.log",
-          "size": 148,
-          "sha256": "f95bcdf5fe135d549e0ecc6011788cc4b37268cd85b67d599669edc157d3ed6e"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/writer-normal-2.log",
-          "size": 148,
-          "sha256": "f95bcdf5fe135d549e0ecc6011788cc4b37268cd85b67d599669edc157d3ed6e"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/writer-thread-start-1.log",
-          "size": 154,
-          "sha256": "be96ae318fec51f7bf2c2f8d55d3475c74cf8bece50b3df98f6ff4da448b3e3f"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win32/writer-thread-start-2.log",
-          "size": 154,
-          "sha256": "be96ae318fec51f7bf2c2f8d55d3475c74cf8bece50b3df98f6ff4da448b3e3f"
-        }
-      ]
-    },
-    {
-      "target": "win64-x86_64",
-      "environment": "Windows 11 Pro for Workstations Insider Preview 10.0.26220",
-      "compatibility_floor": "Win7 SP1 / _WIN32_WINNT=0x0601",
-      "baseline_failures": 4,
-      "fixed_scenarios": 26,
-      "fixed_native_blocks": 0,
-      "fixed_module_residency": 0,
-      "real_operations": [
-        "Lua package.loadlib",
-        "lua_close",
-        "CreateThread",
-        "GetModuleHandle",
-        "thread waits",
-        "OS handle accounting"
-      ],
-      "double_scope": "bounded console/pipe IO and selected module/thread startup failures",
-      "artifacts": [
-        {
-          "path": "out/review-20261008/r83-complete/before/win64/fixture-build.log",
-          "size": 0,
-          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/before/win64/host-build.log",
-          "size": 0,
-          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/before/win64/lua55.dll",
-          "size": 709689,
-          "sha256": "0acbd828c283e9d34e8850a45ac23d6fc9afcce79083ac2d57cc3f773d45e385"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/before/win64/native-worker-fixture.dll",
-          "size": 398375,
-          "sha256": "3af43f5520d892c56ae8175f4143bee8c1e312b7063b9588c3c7f1454110db91"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/before/win64/reader-io-error.log",
-          "size": 91,
-          "sha256": "4a20283733eab43eed11861b70064a7c1583a9fa853a6fbd622c9a616af5b0b7"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/before/win64/reader-normal.log",
-          "size": 89,
-          "sha256": "160ee5e1e1e5056e2522336178ead45530311cfae8da71f80b89f89441aab913"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/before/win64/windows_worker_lifetime_smoke.exe",
-          "size": 262378,
-          "sha256": "97f82ece843f0d4c700fd6302a628ce9503efd6dae2b2993a4c3a4197f363289"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/before/win64/writer-io-error.log",
-          "size": 91,
-          "sha256": "327e1535b41ed473e3643da22b5a5b288908046beac607d3e8109043cd372353"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/before/win64/writer-normal.log",
-          "size": 89,
-          "sha256": "0509a8bc712029cdfb31789657d303047a85df94d179603a1758a23480c80a01"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/both-normal-1.log",
-          "size": 146,
-          "sha256": "93a01d8633ae4841b32c760c0d947f2465042655956e02838d455563a84f1a19"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/both-normal-2.log",
-          "size": 146,
-          "sha256": "93a01d8633ae4841b32c760c0d947f2465042655956e02838d455563a84f1a19"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/fixture-build.log",
-          "size": 0,
-          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/host-build.log",
-          "size": 0,
-          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/lua55.dll",
-          "size": 709689,
-          "sha256": "0acbd828c283e9d34e8850a45ac23d6fc9afcce79083ac2d57cc3f773d45e385"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/native-worker-fixture.dll",
-          "size": 399388,
-          "sha256": "25e114e193e650b9f20c69b6e309a0807e31353fe0360407502fbaeada829fb0"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/native_component_probe-build.log",
-          "size": 0,
-          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/native_component_probe.exe",
-          "size": 251260,
-          "sha256": "218a1a68d77e899d6a19905e36bf54b65754139efb020712b6ff89f8972d5014"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/process_start_faults-build.log",
-          "size": 0,
-          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/process_start_faults.exe",
-          "size": 439816,
-          "sha256": "23911991d256064bd0b7705dbefb290c9f96495b795b198a40d3bd0b9870f9d3"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/process_start_faults.log",
-          "size": 613,
-          "sha256": "bf9288e7fd0cec95c3044d7dbe32c4c2cbc77224f93361a06fe2326d04086f32"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/process_stream_faults-build.log",
-          "size": 0,
-          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/process_stream_faults.exe",
-          "size": 440763,
-          "sha256": "a2cb625128e2583757ff2d88bb214b68de19b70559161fd9c15e06ad7f1d0450"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/process_stream_faults.log",
-          "size": 81,
-          "sha256": "f5741efb7af3316dbadfad6d25f5c3549ef3d8b1c4ed87e26ae67c72f5a28963"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/reader-early-exit-1.log",
-          "size": 152,
-          "sha256": "7b0c100b2da2d0ac74d699ac4834b309bbf1dcb1f75036347cf942d509473c07"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/reader-early-exit-2.log",
-          "size": 152,
-          "sha256": "7b0c100b2da2d0ac74d699ac4834b309bbf1dcb1f75036347cf942d509473c07"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/reader-io-error-1.log",
-          "size": 150,
-          "sha256": "79b21dce12f0d6c3720f31968fe5d74dba52ca6dfe838a6aa1e565813b89263a"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/reader-io-error-2.log",
-          "size": 150,
-          "sha256": "79b21dce12f0d6c3720f31968fe5d74dba52ca6dfe838a6aa1e565813b89263a"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/reader-module-query-1.log",
-          "size": 154,
-          "sha256": "ad73b419829891da5ae29c0fcc6f6e132ec2962799d7a00534def3d1e03bdddc"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/reader-module-query-2.log",
-          "size": 154,
-          "sha256": "ad73b419829891da5ae29c0fcc6f6e132ec2962799d7a00534def3d1e03bdddc"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/reader-module-retain-1.log",
-          "size": 155,
-          "sha256": "59927294d95bb775d3c86fbf41966784cd1e16a10815e00edae9145b5c02277f"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/reader-module-retain-2.log",
-          "size": 155,
-          "sha256": "59927294d95bb775d3c86fbf41966784cd1e16a10815e00edae9145b5c02277f"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/reader-normal-1.log",
-          "size": 148,
-          "sha256": "b3cd081f9cbba4ecf4520893c297d28b5382433554e74700ee3e8e429e2574e4"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/reader-normal-2.log",
-          "size": 148,
-          "sha256": "de52edc145a4fd54a6f9165d11ebc7a809c867907fc5d0d7c4653b8cd42aa6da"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/reader-thread-start-1.log",
-          "size": 154,
-          "sha256": "d5615aa6f202be4a94abacb10fed2f6cc75904729bc361a5c8b43f01e0e9a81d"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/reader-thread-start-2.log",
-          "size": 154,
-          "sha256": "d5615aa6f202be4a94abacb10fed2f6cc75904729bc361a5c8b43f01e0e9a81d"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/terminal_input_faults-build.log",
-          "size": 0,
-          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/terminal_input_faults.exe",
-          "size": 441227,
-          "sha256": "e1fba9c39f296b9dcc90960ece71ea9adc96c2592e9055a574444319d130a72c"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/terminal_input_faults.log",
-          "size": 594,
-          "sha256": "61d6ed8dc0419d38ecfe15969c78a00401f936f16c6e2b685197595de6bd2050"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/windows_console_reader_smoke-build.log",
-          "size": 0,
-          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/windows_console_reader_smoke.exe",
-          "size": 422577,
-          "sha256": "c0b4ef8b7824542591932772d3b2b94437216006fc1a2544ed7ca744582a5fb2"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/windows_console_reader_smoke.log",
-          "size": 34,
-          "sha256": "3ec0d7ad944a7fd72b8d0bd5a4d10e19dd59a0bfb94f8808444022efa8b07342"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/windows_cooked_lifetime_smoke-build.log",
-          "size": 0,
-          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/windows_cooked_lifetime_smoke.exe",
-          "size": 439966,
-          "sha256": "9a4b680e5a046620dfca9a2f173f09ff93fbb307c38796019e4dc38eaffafe1e"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/windows_cooked_lifetime_smoke.log",
-          "size": 564,
-          "sha256": "e06f19777df1abf3098a30ecf3d377991355e9a46ba5177b535bfbce3b758260"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/windows_worker_lifetime_smoke.exe",
-          "size": 262378,
-          "sha256": "b3f96e372ead7b2052c2fd47a51921390ac07efad7464e58dd8d9f0e4be78ba9"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/writer-early-exit-1.log",
-          "size": 152,
-          "sha256": "eb28dadd92d7b76e287dec2a06f0ecc4a3ac8bbd5646c304933fcfa292f2075d"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/writer-early-exit-2.log",
-          "size": 152,
-          "sha256": "eb28dadd92d7b76e287dec2a06f0ecc4a3ac8bbd5646c304933fcfa292f2075d"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/writer-io-error-1.log",
-          "size": 150,
-          "sha256": "c042ea304e2c9fa8c7bc06a8426e0a503ccf8a954fb5b2cdfae48f71eb646939"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/writer-io-error-2.log",
-          "size": 150,
-          "sha256": "c042ea304e2c9fa8c7bc06a8426e0a503ccf8a954fb5b2cdfae48f71eb646939"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/writer-module-query-1.log",
-          "size": 154,
-          "sha256": "aba5ed0a0f26905ddd58e50e70700cbe2d27cc730299c3cb3b591f2f4d1fe058"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/writer-module-query-2.log",
-          "size": 154,
-          "sha256": "aba5ed0a0f26905ddd58e50e70700cbe2d27cc730299c3cb3b591f2f4d1fe058"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/writer-module-retain-1.log",
-          "size": 155,
-          "sha256": "c8e989a12fccf5c39bf2995179e9bc5848868f8b4b55d7ea853ac0152aab1f95"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/writer-module-retain-2.log",
-          "size": 155,
-          "sha256": "c8e989a12fccf5c39bf2995179e9bc5848868f8b4b55d7ea853ac0152aab1f95"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/writer-normal-1.log",
-          "size": 148,
-          "sha256": "d6649ce22da0655abeefa472cc43e56a9737914e217f9825b68f6f9767ab3e44"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/writer-normal-2.log",
-          "size": 148,
-          "sha256": "d6649ce22da0655abeefa472cc43e56a9737914e217f9825b68f6f9767ab3e44"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/writer-thread-start-1.log",
-          "size": 154,
-          "sha256": "5ee15cdae466aa702aefe48c95fc24b56fee00b505f78d39a9cabcef86b923a7"
-        },
-        {
-          "path": "out/review-20261008/r83-complete/after/win64/writer-thread-start-2.log",
-          "size": 154,
-          "sha256": "5ee15cdae466aa702aefe48c95fc24b56fee00b505f78d39a9cabcef86b923a7"
-        }
-      ]
-    }
-  ],
-  "linux_regression": [
-    {
-      "path": "out/review-20261008/r83-complete/after/linux/native-build.log",
-      "size": 0,
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-    },
-    {
-      "path": "out/review-20261008/r83-complete/after/linux/yaca_native.so",
-      "size": 116888,
-      "sha256": "113f76e06b25424cd4aaddc32d152902d3ec530bd821e072aa89559d440c36b3"
-    }
-  ],
-  "validation": {
-    "lua_suite": {
-      "total": 706,
-      "passed": 706,
-      "failed": 0
-    },
-    "comment_coverage": {
-      "files": 250,
-      "declarations": 5541,
-      "violations": 0
-    },
-    "coding_readiness": "PASS",
-    "resource_guard": "serialized",
-    "logs": [
-      {
-        "path": "out/review-20261008/r83-complete/validation.log",
-        "size": 818,
-        "sha256": "0bb641f71db93f97bf2dd3d1db50197614d9d636d0896ed6224638ade65e386d"
+      "target": "win32",
+      "observed_os_caption": "Microsoft? Windows Server? 2008 Enterprise (无 Hyper-V)",
+      "observed_os_version": "6.0.6003",
+      "environment": {
+        "path": "out/native-input-mode-review-20261008/win32-environment.log",
+        "sha256": "047dccfdcc4e615a80945054b1a50ee8861ec6ae97a4ccea06dda3b00c7f9c32",
+        "bytes": 138
       },
-      {
-        "path": "out/review-20261008/r83-complete/full-suite.log",
-        "size": 70250,
-        "sha256": "ea2031c3d465ef3393da0d4c39f086c814fc72e0a0e231174319e489ba0a959e"
+      "baseline": {
+        "console_checks": 86,
+        "console_failures": 26,
+        "original_mode_restored": true,
+        "process_handle_count_stable": true,
+        "probe_exit_code": 1,
+        "allocation_faults": null,
+        "receiver_hashes_matched": 2,
+        "bindings": [
+          {
+            "path": "out/native-input-mode-review-20261008/win32-before-run.log",
+            "sha256": "17e4d27e9f0ec0c06634552d6b1c23399df06eff381bcaef3fc6b1a2f9b33d4c",
+            "bytes": 1130
+          },
+          {
+            "path": "out/native-input-mode-review-20261008/win32-before-digests.log",
+            "sha256": "7ac6ede1433af72e5fe61c9ff4ee8477924ee56b959cb66da80c99f4249f0823",
+            "bytes": 193
+          },
+          {
+            "path": "out/native-input-mode-review-20261008/before/win32/windows_terminal_input_smoke.exe",
+            "sha256": "de9401d499c000a64430329b380f2f9e6f40f5f9f642ae7d144695e1c7dbf8c9",
+            "bytes": 490992
+          },
+          {
+            "path": "out/native-input-mode-review-20261008/before/win32/lua55.dll",
+            "sha256": "3a01621ce0b2a7e973aef32f6ed23820620055af095be57bba96ce64dbbdaae3",
+            "bytes": 696873
+          }
+        ]
       },
-      {
-        "path": "out/review-20261008/r83-complete/coding-readiness.log",
-        "size": 4213,
-        "sha256": "b2415a231b0e8be8a6f48998d85dbd5f7db7f338bae4cfcd2d584bb9c3c1d7f9"
+      "fixed": {
+        "console_checks": 86,
+        "console_failures": 0,
+        "original_mode_restored": true,
+        "process_handle_count_stable": true,
+        "probe_exit_code": 0,
+        "allocation_faults": {
+          "cases": 54,
+          "cold_memory_exceptions": 54,
+          "repeat_memory_exceptions": 36,
+          "warmed_polls_below_threshold": 18,
+          "same_owner_exact_recovery_cycles": 2,
+          "native_leaks": 0,
+          "ownership_errors": 0
+        },
+        "receiver_hashes_matched": 6,
+        "bindings": [
+          {
+            "path": "out/native-input-mode-review-20261008/win32-after-run.log",
+            "sha256": "ce4589c76993a4a270e6b0794c350597866c11141a8a520928b870bf30b589fa",
+            "bytes": 1142
+          },
+          {
+            "path": "out/native-input-mode-review-20261008/win32-after-digests.log",
+            "sha256": "314a5b9ccc83f0527c92f57d1af2b37ad932f70164d5fd22a9cf6c5c2db1378e",
+            "bytes": 580
+          },
+          {
+            "path": "out/native-input-mode-review-20261008/after/win32/terminal_input_faults.exe",
+            "sha256": "d4bc56036e23d5e453c2dc702b5f134c365bc7d1fb122d22c82f8e03ceb2bf8f",
+            "bytes": 492411
+          },
+          {
+            "path": "out/native-input-mode-review-20261008/after/win32/windows_console_lifetime_faults.exe",
+            "sha256": "e10cc4b7c58db30fee3e210ff0d47890c4bf0da5abf814c25731e535f7a7e5d0",
+            "bytes": 514701
+          },
+          {
+            "path": "out/native-input-mode-review-20261008/after/win32/windows_console_reader_smoke.exe",
+            "sha256": "f1b8c2cf9bb38c102d46efa3117ecd8dcc10ac921ad14c86c562c2621d07953c",
+            "bytes": 472711
+          },
+          {
+            "path": "out/native-input-mode-review-20261008/after/win32/windows_keyboard_faults.exe",
+            "sha256": "449a2e6ac6d048673b769695b25977572c9fb9aac9068d69fd09ea1f890ee06f",
+            "bytes": 484395
+          },
+          {
+            "path": "out/native-input-mode-review-20261008/after/win32/windows_terminal_input_smoke.exe",
+            "sha256": "b7ba4520062d760d41d4146713e8e54d8fd64ff541292ddc3d493c03268d16c1",
+            "bytes": 491504
+          },
+          {
+            "path": "out/native-input-mode-review-20261008/after/win32/lua55.dll",
+            "sha256": "3a01621ce0b2a7e973aef32f6ed23820620055af095be57bba96ce64dbbdaae3",
+            "bytes": 696873
+          }
+        ]
       },
-      {
-        "path": "out/review-20261008/r83-complete/comment-inventory.txt",
-        "size": 1237397,
-        "sha256": "10715f6b8ac895786c56ae1ce03e86f67b430a1eb67a45ab7385d6f488c2693f"
-      },
-      {
-        "path": "out/review-20261008/r83-baseline-complete.log",
-        "size": 865,
-        "sha256": "32d42f4a87cd1f53c9e8ed883bd802fe208d50a7050b9a98528fed4532479e48"
-      },
-      {
-        "path": "out/review-20261008/r83-after-complete.log",
-        "size": 9083,
-        "sha256": "55b5f0553dc557d0ecad776423d8acdbe1eb72e362d4df95f17bde7f823d0c9f"
-      },
-      {
-        "path": "out/review-20261008/r83-baseline.sh",
-        "size": 2528,
-        "sha256": "d7dcdeb4dc6aa9b96cb3804baec8410aab0f2c0c36bde9bb56e9cc0d114d3fea"
-      },
-      {
-        "path": "out/review-20261008/r83-after.sh",
-        "size": 4328,
-        "sha256": "2c8877f7af9a1b2ded50334d6ceb78e2fd51d3ff81f9a29bfccc91352b4a9e49"
-      },
-      {
-        "path": "out/review-20261008/r83-verify.sh",
-        "size": 966,
-        "sha256": "4022f518312e8b72eb517c3c5f143dced854ec12a028559caa34f4a7f9a8e86b"
+      "lua_import_library": {
+        "path": "out/node-r76-20261005/win32-core/work/lua-5.5.1/src/liblua55.a",
+        "sha256": "b77ccb824ddf0df51927e62f77a6363468c51323d3604a5ab5d83b0b9226437d",
+        "bytes": 101114
       }
+    },
+    {
+      "target": "win64",
+      "observed_os_caption": "Microsoft Windows Server 2025 Standard",
+      "observed_os_version": "10.0.26100",
+      "environment": {
+        "path": "out/native-input-mode-review-20261008/win64-environment.log",
+        "sha256": "abb9c42b091557c1e60a40b89476dbe5b5eeedde060955f7cb65b61c41ab13aa",
+        "bytes": 121
+      },
+      "baseline": {
+        "console_checks": 86,
+        "console_failures": 26,
+        "original_mode_restored": true,
+        "process_handle_count_stable": true,
+        "probe_exit_code": 1,
+        "allocation_faults": null,
+        "receiver_hashes_matched": 2,
+        "bindings": [
+          {
+            "path": "out/native-input-mode-review-20261008/win64-before-run.log",
+            "sha256": "80f3bb49c802918c6c435dbaee166e70b651d50f802568cde9d3543665781c6d",
+            "bytes": 1131
+          },
+          {
+            "path": "out/native-input-mode-review-20261008/win64-before-digests.log",
+            "sha256": "65b3c84d0bf225df3d671ace05b6a2d16c06a0bd0274538f03563ac8511416b5",
+            "bytes": 195
+          },
+          {
+            "path": "out/native-input-mode-review-20261008/before/win64/windows_terminal_input_smoke.exe",
+            "sha256": "75820927de794eed65f9d51fde9dffab6140c08013f8530e5e83b0abb2014790",
+            "bytes": 485310
+          },
+          {
+            "path": "out/native-input-mode-review-20261008/before/win64/lua55.dll",
+            "sha256": "5aae77d9330d72f7a747b7f96309494d52c8f3413e8a09fb9f872da8c31c0b00",
+            "bytes": 753984
+          }
+        ]
+      },
+      "fixed": {
+        "console_checks": 86,
+        "console_failures": 0,
+        "original_mode_restored": true,
+        "process_handle_count_stable": true,
+        "probe_exit_code": 0,
+        "allocation_faults": {
+          "cases": 54,
+          "cold_memory_exceptions": 54,
+          "repeat_memory_exceptions": 36,
+          "warmed_polls_below_threshold": 18,
+          "same_owner_exact_recovery_cycles": 2,
+          "native_leaks": 0,
+          "ownership_errors": 0
+        },
+        "receiver_hashes_matched": 6,
+        "bindings": [
+          {
+            "path": "out/native-input-mode-review-20261008/win64-after-run.log",
+            "sha256": "601eaaabacdc85c2c18b2fd575a571f55228da1f43489802f12259b5f938797b",
+            "bytes": 1143
+          },
+          {
+            "path": "out/native-input-mode-review-20261008/win64-after-digests.log",
+            "sha256": "2491a8bad09ae926fec61e4d22f4b1b21ac9dfb95c565fc9c8e44b549cd4bacc",
+            "bytes": 586
+          },
+          {
+            "path": "out/native-input-mode-review-20261008/after/win64/terminal_input_faults.exe",
+            "sha256": "335121fb23a4207052551376eeb99076490086ab6e2eb0a254d2baeec9487633",
+            "bytes": 487829
+          },
+          {
+            "path": "out/native-input-mode-review-20261008/after/win64/windows_console_lifetime_faults.exe",
+            "sha256": "3c0a7a9d3941df4dbef945d462d6728b0df1d713a6278f06b30c0f9f174aa95a",
+            "bytes": 501398
+          },
+          {
+            "path": "out/native-input-mode-review-20261008/after/win64/windows_console_reader_smoke.exe",
+            "sha256": "10b231c902e1ea197d02cabb99e884cdad3301144c379410c45fa779c1465d62",
+            "bytes": 467005
+          },
+          {
+            "path": "out/native-input-mode-review-20261008/after/win64/windows_keyboard_faults.exe",
+            "sha256": "96a1d1bfbbef02268f884b3d26239d5f60a43e658e715b792a600a95d082fa53",
+            "bytes": 480401
+          },
+          {
+            "path": "out/native-input-mode-review-20261008/after/win64/windows_terminal_input_smoke.exe",
+            "sha256": "e09221124bbe8d1c1c69df69729663967d0cfcf73bed4f4046a68abf40c4d8f2",
+            "bytes": 485310
+          },
+          {
+            "path": "out/native-input-mode-review-20261008/after/win64/lua55.dll",
+            "sha256": "5aae77d9330d72f7a747b7f96309494d52c8f3413e8a09fb9f872da8c31c0b00",
+            "bytes": 753984
+          }
+        ]
+      },
+      "lua_import_library": {
+        "path": "out/node-r76-20261005/win64-core/work/lua-5.5.1/src/liblua55.a",
+        "sha256": "f65d19a6761fb2458ca85a274eecc91954c228029279e678165613f6708cca6c",
+        "bytes": 98552
+      }
+    }
+  ],
+  "compiler_flags": [
+    "-std=c99",
+    "-Wall",
+    "-Wextra",
+    "-Werror",
+    "-O2"
+  ],
+  "platform_flags": {
+    "win32": [
+      "_WIN32_WINNT=0x0501",
+      "-DLUA_BUILD_AS_DLL",
+      "-static-libgcc"
+    ],
+    "win64": [
+      "_WIN32_WINNT=0x0601",
+      "-DLUA_BUILD_AS_DLL",
+      "-static-libgcc"
     ]
   },
-  "semantic_review": {
-    "subset_complete": true,
-    "whole_repository": "partial",
-    "scope": [
-      "DLL/executable detection by stable module address",
-      "worker-exclusive DLL reference and startup failure cleanup",
-      "save module before last storage release",
-      "FreeLibraryAndExitThread sequencing",
-      "two workers retain module until the last exits",
-      "real Lua library bookkeeping and fixture ownership"
-    ]
+  "build_and_transport": [
+    {
+      "path": "out/native-input-mode-review-20261008/build_baseline.sh",
+      "sha256": "0884e6e319dc2e2497dbbbdac22543095198220d70c43d75b9ac5020861c23ce",
+      "bytes": 1045
+    },
+    {
+      "path": "out/native-input-mode-review-20261008/baseline-build-targets-run.log",
+      "sha256": "27bf5a2d0917b2a05e749402795a2aa16f9dec14cfb82bf76a836c3dc5f031b4",
+      "bytes": 351
+    },
+    {
+      "path": "out/native-input-mode-review-20261008/build_probes.sh",
+      "sha256": "08519393aac31748219347932289878ab4f075d92f8fa1391a1e8393ba3b7fd0",
+      "bytes": 2654
+    },
+    {
+      "path": "out/native-input-mode-review-20261008/final-probes-run.log",
+      "sha256": "0a64489debce7bc1afcb2de8075aae06ae9b30d231a84324af2059eff399495d",
+      "bytes": 156
+    },
+    {
+      "path": "out/native-input-mode-review-20261008/final-verification-run.log",
+      "sha256": "d253ce84bf760dbb939327ee0624e9d895b9ff01010332f506decc27f3d3962e",
+      "bytes": 172
+    },
+    {
+      "path": "out/native-input-mode-review-20261008/run_targets.py",
+      "sha256": "21a9ef5d50ddf1b373058aede17adac23aec165a53cb24d6a58c9183502233fb",
+      "bytes": 5547
+    },
+    {
+      "path": "out/native-input-mode-review-20261008/create_evidence.py",
+      "sha256": "9ae791e351cf657a1c601208e5a1ea08776f4c54cd376c1aef1a92f8468d83d9",
+      "bytes": 9371
+    }
+  ],
+  "retained_initial_failure": [
+    {
+      "path": "out/native-input-mode-review-20261008/fixed-build-targets-first-failed.log",
+      "sha256": "1df26a79f6e522ef5034558ba1bb1a69fd5e5c7b2b534126e586bd4a6f4b9335",
+      "bytes": 147
+    },
+    {
+      "path": "out/native-input-mode-review-20261008/after/win32/windows_keyboard_faults-first-failed.log",
+      "sha256": "24174970e8b5a2836209f48de560a29d6ec3680a075b8775e4bfe8d757b8cea4",
+      "bytes": 450
+    }
+  ],
+  "linux_native_regression": [
+    {
+      "path": "out/native-input-mode-review-20261008/after/linux/yaca_native.so",
+      "sha256": "345326168f0e3ae2a30f63b184a18838aa8f6c36b040364a8cc2e6c510b0648a",
+      "bytes": 112720
+    },
+    {
+      "path": "out/native-input-mode-review-20261008/after/linux/native-build.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "out/native-input-mode-review-20261008/after/linux/terminal_input_faults",
+      "sha256": "8cccd202e86a12bd1348ac3281e87b543ac89513b88163d058c1e99157811356",
+      "bytes": 292192
+    },
+    {
+      "path": "out/native-input-mode-review-20261008/after/linux/input-build.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "out/native-input-mode-review-20261008/linux-input-regression.log",
+      "sha256": "f8d029d6abe4753db42e854cda4af35e5cc6edd831a2576c7cb0317215bce589",
+      "bytes": 384
+    }
+  ],
+  "full_suite": {
+    "scope": "development-host Lua suite",
+    "status": "PASS",
+    "total": 706,
+    "passed": 706,
+    "failed": 0,
+    "binding": {
+      "path": "out/native-input-mode-review-20261008/lua-suite-final.log",
+      "sha256": "ea2031c3d465ef3393da0d4c39f086c814fc72e0a0e231174319e489ba0a959e",
+      "bytes": 70250
+    }
   },
-  "remaining_scope": [
-    "real console interaction and emergency cancellation",
-    "R83 execution on provided Server 2008 environment",
-    "remaining native/main and helper semantic review",
-    "final three-target core and nine-package qualification"
+  "coding_readiness": {
+    "status": "PASS",
+    "binding": {
+      "path": "out/native-input-mode-review-20261008/coding-readiness-final.log",
+      "sha256": "ff16d4e210da53ffdeff87c46e5896ebb4e410d9cfe45db21e5fd3a5f7512b27",
+      "bytes": 4083
+    }
+  },
+  "comment_structure": {
+    "files": 249,
+    "declarations": 5548,
+    "violations": 0,
+    "inventory": {
+      "path": "out/native-input-mode-review-20261008/comment-inventory.json",
+      "sha256": "399dba918c00b552c8efc264992fc89dd8c603269c1c649368d1e13852327990",
+      "bytes": 1238422
+    }
+  },
+  "complete_checks": {
+    "path": "out/native-input-mode-review-20261008/complete_checks.sh",
+    "sha256": "f666a3208053c57cd9971fbc97e0dfe20c262513fbf1887c9c0efba7cc736b04",
+    "bytes": 797
+  },
+  "semantic_review": "partial globally; this subset reviewed complete bounded text repetition, strict surrogate state/count pairing and rejection cleanup, division before byte-length multiplication, Lua buffer ownership, unchanged command precedence, native mode retry truth and every affected helper/comment",
+  "scope": "production raw/restore/close/cooked functions on owned actual Windows consoles with real input APIs; only mode-setting rejection is injected; separate bounded KEY_EVENT doubles exercise every observed cold Lua growth threshold and warmed same-owner recovery",
+  "fixture_cleanup": "owned console input and Lua states closed after exact mode restoration; no native/thread handle growth; baseline mismatch labels retained; no inherited console changed and no model called; assigned receiver artifacts/logs retained",
+  "uncovered_scope": [
+    "final application input and complete user/model journeys",
+    "Cygwin PTY fault/restore paths",
+    "native worker DLL lifetime across Lua state destruction",
+    "remaining main/helpers and global semantic Review",
+    "rebuilt final onefile/nine-package qualification"
   ]
 }

@@ -1,0 +1,741 @@
+{
+  "schema": "yaca-native-review-evidence-v1",
+  "review_id": "R84",
+  "date": "2026-10-08",
+  "status": "verified-native-subset",
+  "release_authorized": false,
+  "target_qualification_complete": false,
+  "published_candidate_contains_fix": false,
+  "source_inputs": {
+    "base_revision": "f128838f736dc492ec6f802ae9a1637fe16b8b13",
+    "files": [
+      {
+        "path": ".tools/qualification/build_win64_candidate.sh",
+        "sha256": "90e7889b46e74773d27ee30e002212dca2fa6778d19f574446d0a59aa9104bef"
+      },
+      {
+        "path": ".tools/qualification/build_windows_candidate.sh",
+        "sha256": "4e993648ef878e16cbb508f62090b3e86fd3cb7dda78d436e9da94432c313603"
+      },
+      {
+        "path": ".tools/qualification/filesystem_fault_tracker.h",
+        "sha256": "ee81e1b5c1ba5574364036759bb52f40087839356766a12e087b97da18c93fad"
+      },
+      {
+        "path": ".tools/qualification/native_component_probe.c",
+        "sha256": "9be0c188df7324dc00bf1de5fa10183f0462febc0d9f5f32488d818a7a82fe80"
+      },
+      {
+        "path": ".tools/qualification/process_start_faults.c",
+        "sha256": "045a47f16fbe050a618383b92f92f8dfc55edc468e2ef983cca4a6b999383310"
+      },
+      {
+        "path": ".tools/qualification/process_stream_faults.c",
+        "sha256": "b8289b6ed97cb1e2f8886399b0991e4a8864e857942d4f4b496198f4c316bb91"
+      },
+      {
+        "path": ".tools/qualification/terminal_input_faults.c",
+        "sha256": "789aff9f69750adbad605cfb7161c95487553a58bdcc79d3f5ee413c20c24359"
+      },
+      {
+        "path": ".tools/qualification/windows_console_lifetime_faults.c",
+        "sha256": "53ebcb8ed0fe4d5615eeb66b6074c9f05371f4ecab431e9e6a4c768a3518134a"
+      },
+      {
+        "path": ".tools/qualification/windows_console_reader_smoke.c",
+        "sha256": "dd8e64d52f7ca65914a52cebd9972271844b12a948caf3e3afe156818693e5f1"
+      },
+      {
+        "path": ".tools/qualification/windows_keyboard_faults.c",
+        "sha256": "f87061c489ffd8587b9fe870119f705073e4af71316f7003ea0dbc08afa259d0"
+      },
+      {
+        "path": ".tools/qualification/windows_terminal_input_smoke.c",
+        "sha256": "a1f5fc621392486ef088fd6126880c995aa02204dd1166cc99a267fce48c69b1"
+      },
+      {
+        "path": ".tools/qualification/windows_worker_dll_fixture.h",
+        "sha256": "0bd7e0d4e42499d78fb02daf30eedc356c6aaaec5d062bb44bb1965871248525"
+      },
+      {
+        "path": ".tools/qualification/windows_worker_dll_lifetime.c",
+        "sha256": "e2044ddf9f470c7031396ca8c0f97f5886b736dea14931f3f4e318a3619312cd"
+      },
+      {
+        "path": ".tools/qualification/windows_worker_dll_probe.c",
+        "sha256": "8b45c3ecdc8bed83558f7fc81f5bb751de11e5b9f6d1be240e0e59d50d8725a6"
+      },
+      {
+        "path": "native/lxp_build.lua",
+        "sha256": "97bcc6822ae6af6e0ed70c74585c3924845fdee0b3bdace222f171a7071b6fe0"
+      },
+      {
+        "path": "native/yaca_entry.c",
+        "sha256": "e37392e19da463ad55848d6d2550056958ea3084fa3f842b994f798b82bc59a8"
+      },
+      {
+        "path": "native/yaca_lua_windows.h",
+        "sha256": "92f9d56314c8cda74a6eb6e5792688143d5c8d7c7b1a1385ee12817c1f610194"
+      },
+      {
+        "path": "native/yaca_native.c",
+        "sha256": "769ce793bcea3cff8d655dcbeb267b60d7e4eba0e8582ddc6e8c852b4a499a2f"
+      },
+      {
+        "path": "native/yaca_onefile_entry.c",
+        "sha256": "4e59947998f7a9477cc768188c81e268bbf377db42fe27b9172a47a0ae85f9d4"
+      },
+      {
+        "path": "native/yaca_onefile_windows.h",
+        "sha256": "269f3b37b89d53970eb4c5d6947e31f2db7627d153871dd33da3697294dd7c37"
+      },
+      {
+        "path": "native/yaca_pty.h",
+        "sha256": "a9be6b177388ee15e656aba3a4080f00d13bd4bc3ad411af4bd8095a0d3d8c01"
+      },
+      {
+        "path": "native/yaca_supervisor.h",
+        "sha256": "2315e15885d914923a44ba55ae5c65a976c56b1aa4b6731cc87b86d72d2164f6"
+      },
+      {
+        "path": "native/yaca_text.h",
+        "sha256": "82e057d215a77470166e79876dab5c6a7fd38a5d0856229f76e7c1b93a47bbc7"
+      }
+    ]
+  },
+  "baseline_inputs": {
+    "revision": "f128838f736dc492ec6f802ae9a1637fe16b8b13",
+    "files": [
+      {
+        "path": ".tools/qualification/windows_worker_dll_fixture.h",
+        "sha256": "0bd7e0d4e42499d78fb02daf30eedc356c6aaaec5d062bb44bb1965871248525"
+      },
+      {
+        "path": ".tools/qualification/windows_worker_dll_lifetime.c",
+        "sha256": "e2044ddf9f470c7031396ca8c0f97f5886b736dea14931f3f4e318a3619312cd"
+      },
+      {
+        "path": ".tools/qualification/windows_worker_dll_probe.c",
+        "sha256": "8b45c3ecdc8bed83558f7fc81f5bb751de11e5b9f6d1be240e0e59d50d8725a6"
+      },
+      {
+        "path": "native/lxp_build.lua",
+        "sha256": "97bcc6822ae6af6e0ed70c74585c3924845fdee0b3bdace222f171a7071b6fe0"
+      },
+      {
+        "path": "native/yaca_entry.c",
+        "sha256": "e37392e19da463ad55848d6d2550056958ea3084fa3f842b994f798b82bc59a8"
+      },
+      {
+        "path": "native/yaca_lua_windows.h",
+        "sha256": "92f9d56314c8cda74a6eb6e5792688143d5c8d7c7b1a1385ee12817c1f610194"
+      },
+      {
+        "path": "native/yaca_native.c",
+        "sha256": "261fe293404bd88908e7bd93a3084016c7a67ef24af6ac75419749197d6d645d"
+      },
+      {
+        "path": "native/yaca_onefile_entry.c",
+        "sha256": "4e59947998f7a9477cc768188c81e268bbf377db42fe27b9172a47a0ae85f9d4"
+      },
+      {
+        "path": "native/yaca_onefile_windows.h",
+        "sha256": "269f3b37b89d53970eb4c5d6947e31f2db7627d153871dd33da3697294dd7c37"
+      },
+      {
+        "path": "native/yaca_pty.h",
+        "sha256": "a9be6b177388ee15e656aba3a4080f00d13bd4bc3ad411af4bd8095a0d3d8c01"
+      },
+      {
+        "path": "native/yaca_supervisor.h",
+        "sha256": "2315e15885d914923a44ba55ae5c65a976c56b1aa4b6731cc87b86d72d2164f6"
+      },
+      {
+        "path": "native/yaca_text.h",
+        "sha256": "82e057d215a77470166e79876dab5c6a7fd38a5d0856229f76e7c1b93a47bbc7"
+      }
+    ]
+  },
+  "targets": [
+    {
+      "target": "win32",
+      "observed_os_caption": "Microsoft? Windows Server? 2008 Enterprise (无 Hyper-V)",
+      "observed_os_version": "6.0.6003",
+      "environment": {
+        "path": "out/native-worker-module-review-20261008/win32-environment.log",
+        "sha256": "047dccfdcc4e615a80945054b1a50ee8861ec6ae97a4ccea06dda3b00c7f9c32",
+        "bytes": 138
+      },
+      "baseline": {
+        "reader": {
+          "module_mapped_before_close": 1,
+          "module_mapped_after_close": 0,
+          "thread_live_after_close": 1,
+          "native_blocks_while_gated": 2,
+          "worker_module_references_while_gated": 0,
+          "probe_exit_code": 1,
+          "binding": {
+            "path": "out/native-worker-module-review-20261008/win32-before-reader.log",
+            "sha256": "ba944eab85bd63169214c9fda0b936a1f07ba02859d1ca68202d53097ebff0f1",
+            "bytes": 149
+          }
+        },
+        "writer": {
+          "module_mapped_before_close": 1,
+          "module_mapped_after_close": 0,
+          "thread_live_after_close": 1,
+          "native_blocks_while_gated": 2,
+          "worker_module_references_while_gated": 0,
+          "probe_exit_code": 1,
+          "binding": {
+            "path": "out/native-worker-module-review-20261008/win32-before-writer.log",
+            "sha256": "5ca97e7f9791914d39ba62c9236183f7ce2caba402e79082d74cad5ed367c616",
+            "bytes": 192
+          }
+        }
+      },
+      "fixed": {
+        "reader": {
+          "module_mapped_before_close": 1,
+          "module_mapped_after_close": 1,
+          "thread_live_after_close": 1,
+          "native_blocks_while_gated": 2,
+          "worker_module_references_while_gated": 1,
+          "probe_exit_code": 0,
+          "binding": {
+            "path": "out/native-worker-module-review-20261008/win32-after-reader.log",
+            "sha256": "33ced19172dabf1bcee535f5e5f62a55e4db54bbfdf5a37b63e22391685ba081",
+            "bytes": 322
+          }
+        },
+        "writer": {
+          "module_mapped_before_close": 1,
+          "module_mapped_after_close": 1,
+          "thread_live_after_close": 1,
+          "native_blocks_while_gated": 2,
+          "worker_module_references_while_gated": 1,
+          "probe_exit_code": 0,
+          "binding": {
+            "path": "out/native-worker-module-review-20261008/win32-after-writer.log",
+            "sha256": "a64a206e341ff2bc03cdb0f5a9f9c2d2510706d64f7e0cf0fddf2aa58b7ea791",
+            "bytes": 461
+          }
+        }
+      },
+      "setup_failure_controls": [
+        {
+          "path": "out/native-worker-module-review-20261008/win32-after-reader-startup-1.log",
+          "sha256": "544569fdc8377b90edbbe3dcff69ec07dacc8d8f54c96e0f50e0de70f65f7501",
+          "bytes": 109
+        },
+        {
+          "path": "out/native-worker-module-review-20261008/win32-after-reader-startup-2.log",
+          "sha256": "fc571b838c0c1999e5f2d70fc0ebe6c61405922cc4d5f04806aa53688848bfef",
+          "bytes": 109
+        },
+        {
+          "path": "out/native-worker-module-review-20261008/win32-after-reader-startup-3.log",
+          "sha256": "9c812f8babfee2814bc1134957da6404c814a49c739332900241d3e4bee80b6e",
+          "bytes": 109
+        },
+        {
+          "path": "out/native-worker-module-review-20261008/win32-after-writer-startup-1.log",
+          "sha256": "5298843ebe02068c68ec7d7fc2c15109241089510c4eb57ecfb260fc62d816d8",
+          "bytes": 152
+        },
+        {
+          "path": "out/native-worker-module-review-20261008/win32-after-writer-startup-2.log",
+          "sha256": "13b602241ae98025858eb975897659c3a5a02cfc9bc8822abd18d787b8c95c77",
+          "bytes": 152
+        },
+        {
+          "path": "out/native-worker-module-review-20261008/win32-after-writer-startup-3.log",
+          "sha256": "7c53399357c9727d93ee63d66216883870bb4f44f1107eeecacb66a4c7577efc",
+          "bytes": 152
+        }
+      ],
+      "regressions": {
+        "path": "out/native-worker-module-review-20261008/win32-after-regressions.log",
+        "sha256": "ca31f17da7caf6333ff5f1338c981ce55ff9d70b9b4ba0c5ea5e5caa036b1614",
+        "bytes": 1823
+      },
+      "process_stream_allocation_sites": 16,
+      "received_baseline": {
+        "matched": 3,
+        "bindings": [
+          {
+            "path": "out/native-worker-module-review-20261008/win32-before-digests.log",
+            "sha256": "7a0c7167eb78cd92b3a7d1d5e28edac1f5fa41a721fc13240cba44b0f71debdb",
+            "bytes": 279
+          },
+          {
+            "path": "out/native-worker-module-review-20261008/before/win32/windows_worker_dll_lifetime.exe",
+            "sha256": "b3388d72ddad6b3886fc8b62c660f4719feff9a1a562e21a52599913a4b5a895",
+            "bytes": 275416
+          },
+          {
+            "path": "out/native-worker-module-review-20261008/before/win32/lua55.dll",
+            "sha256": "3a01621ce0b2a7e973aef32f6ed23820620055af095be57bba96ce64dbbdaae3",
+            "bytes": 696873
+          },
+          {
+            "path": "out/native-worker-module-review-20261008/before/win32/worker_dll_probe.dll",
+            "sha256": "65cd5b1d2b12bc2609404e494c585b6327e03e3b98ef2e2e931ffb831cea6f5e",
+            "bytes": 448910
+          }
+        ]
+      },
+      "received_fixed": {
+        "matched": 11,
+        "bindings": [
+          {
+            "path": "out/native-worker-module-review-20261008/win32-after-digests.log",
+            "sha256": "dc9282ea334249bd5eecea4dac45289c9a605aa990fcb3db42af7b3d5e74928b",
+            "bytes": 1041
+          },
+          {
+            "path": "out/native-worker-module-review-20261008/after/win32/native_component_probe.exe",
+            "sha256": "4f81b702919d9552a879ef260d4aec7f9a0b2afdd321401450cc58dc1b7e292d",
+            "bytes": 265672
+          },
+          {
+            "path": "out/native-worker-module-review-20261008/after/win32/process_start_faults.exe",
+            "sha256": "d344bf19f237500eea9d0b4940f69e72b5122f33b5f63a9b0a136d88dd203005",
+            "bytes": 491732
+          },
+          {
+            "path": "out/native-worker-module-review-20261008/after/win32/process_stream_faults.exe",
+            "sha256": "99e241f53af23f6aa83a14e34f95cf6223555cc879e943acecc325871b779b58",
+            "bytes": 493774
+          },
+          {
+            "path": "out/native-worker-module-review-20261008/after/win32/terminal_input_faults.exe",
+            "sha256": "2f72ee1b786916039ba278cba82d291cf39c51f34c721e7aa8e87b606d1899a0",
+            "bytes": 493939
+          },
+          {
+            "path": "out/native-worker-module-review-20261008/after/win32/windows_console_lifetime_faults.exe",
+            "sha256": "8e9196728a2e0dc397bd4e5d06cc006b6f2288a51b366ea5cab2d85d6f3198ba",
+            "bytes": 516229
+          },
+          {
+            "path": "out/native-worker-module-review-20261008/after/win32/windows_console_reader_smoke.exe",
+            "sha256": "090bac845a0848905ca8206becec298dac848d883aadb2ddaa5dfbb3e60bd9fc",
+            "bytes": 473727
+          },
+          {
+            "path": "out/native-worker-module-review-20261008/after/win32/windows_keyboard_faults.exe",
+            "sha256": "8633eb3b023aafcc54c102e3c8cb4a887e8204d94f12f56a35ac0356204f0d74",
+            "bytes": 485411
+          },
+          {
+            "path": "out/native-worker-module-review-20261008/after/win32/windows_terminal_input_smoke.exe",
+            "sha256": "3c5489f63d62c7e392589086a5846a8d6351fde04a91a28de476e36a79651364",
+            "bytes": 492520
+          },
+          {
+            "path": "out/native-worker-module-review-20261008/after/win32/windows_worker_dll_lifetime.exe",
+            "sha256": "6e6e74e6a1e291e62e4182aa5f27850d63759039617a14d0bdf2a56972861b7b",
+            "bytes": 275416
+          },
+          {
+            "path": "out/native-worker-module-review-20261008/after/win32/lua55.dll",
+            "sha256": "3a01621ce0b2a7e973aef32f6ed23820620055af095be57bba96ce64dbbdaae3",
+            "bytes": 696873
+          },
+          {
+            "path": "out/native-worker-module-review-20261008/after/win32/worker_dll_probe.dll",
+            "sha256": "93c24b7d9f235975671600c4f1f70934788982aa6364ca7bd61ec1c14535e6f9",
+            "bytes": 450000
+          }
+        ]
+      },
+      "lua_import_library": {
+        "path": "out/node-r76-20261005/win32-core/work/lua-5.5.1/src/liblua55.a",
+        "sha256": "b77ccb824ddf0df51927e62f77a6363468c51323d3604a5ab5d83b0b9226437d",
+        "bytes": 101114
+      }
+    },
+    {
+      "target": "win64",
+      "observed_os_caption": "Microsoft Windows Server 2025 Standard",
+      "observed_os_version": "10.0.26100",
+      "environment": {
+        "path": "out/native-worker-module-review-20261008/win64-environment.log",
+        "sha256": "abb9c42b091557c1e60a40b89476dbe5b5eeedde060955f7cb65b61c41ab13aa",
+        "bytes": 121
+      },
+      "baseline": {
+        "reader": {
+          "module_mapped_before_close": 1,
+          "module_mapped_after_close": 0,
+          "thread_live_after_close": 1,
+          "native_blocks_while_gated": 2,
+          "worker_module_references_while_gated": 0,
+          "probe_exit_code": 1,
+          "binding": {
+            "path": "out/native-worker-module-review-20261008/win64-before-reader.log",
+            "sha256": "1b023eb6cb95302719d765cac725aee74495209ab305377b2681a044d68caa1d",
+            "bytes": 150
+          }
+        },
+        "writer": {
+          "module_mapped_before_close": 1,
+          "module_mapped_after_close": 0,
+          "thread_live_after_close": 1,
+          "native_blocks_while_gated": 2,
+          "worker_module_references_while_gated": 0,
+          "probe_exit_code": 1,
+          "binding": {
+            "path": "out/native-worker-module-review-20261008/win64-before-writer.log",
+            "sha256": "6238e8624c1a865942af823d3bed199c0ab5f23d375d0d1c10f4dc4b564be780",
+            "bytes": 193
+          }
+        }
+      },
+      "fixed": {
+        "reader": {
+          "module_mapped_before_close": 1,
+          "module_mapped_after_close": 1,
+          "thread_live_after_close": 1,
+          "native_blocks_while_gated": 2,
+          "worker_module_references_while_gated": 1,
+          "probe_exit_code": 0,
+          "binding": {
+            "path": "out/native-worker-module-review-20261008/win64-after-reader.log",
+            "sha256": "bd69249a2fe3832080dd17201559764482ead1ee437875341a9eee63df5dcb5c",
+            "bytes": 323
+          }
+        },
+        "writer": {
+          "module_mapped_before_close": 1,
+          "module_mapped_after_close": 1,
+          "thread_live_after_close": 1,
+          "native_blocks_while_gated": 2,
+          "worker_module_references_while_gated": 1,
+          "probe_exit_code": 0,
+          "binding": {
+            "path": "out/native-worker-module-review-20261008/win64-after-writer.log",
+            "sha256": "ea500745cdef9e74dc230ffac808c4a7147be6bc3cbfe3ff01a077ecec53c6cb",
+            "bytes": 486
+          }
+        }
+      },
+      "setup_failure_controls": [
+        {
+          "path": "out/native-worker-module-review-20261008/win64-after-reader-startup-1.log",
+          "sha256": "544569fdc8377b90edbbe3dcff69ec07dacc8d8f54c96e0f50e0de70f65f7501",
+          "bytes": 109
+        },
+        {
+          "path": "out/native-worker-module-review-20261008/win64-after-reader-startup-2.log",
+          "sha256": "fc571b838c0c1999e5f2d70fc0ebe6c61405922cc4d5f04806aa53688848bfef",
+          "bytes": 109
+        },
+        {
+          "path": "out/native-worker-module-review-20261008/win64-after-reader-startup-3.log",
+          "sha256": "9c812f8babfee2814bc1134957da6404c814a49c739332900241d3e4bee80b6e",
+          "bytes": 109
+        },
+        {
+          "path": "out/native-worker-module-review-20261008/win64-after-writer-startup-1.log",
+          "sha256": "de9c8be27b74fe93a6a22f9043f4e343cc15ae26aa8d9e59532368fa37806fa2",
+          "bytes": 152
+        },
+        {
+          "path": "out/native-worker-module-review-20261008/win64-after-writer-startup-2.log",
+          "sha256": "94accf3ca1c66a96229f105d9df9c7d208b19ae6039f8b335090e403e74e7d1e",
+          "bytes": 152
+        },
+        {
+          "path": "out/native-worker-module-review-20261008/win64-after-writer-startup-3.log",
+          "sha256": "ed362cb1c8168e7cc052805e24b101e6e15b2e6cfaf45d98e76b53db849f1da4",
+          "bytes": 152
+        }
+      ],
+      "regressions": {
+        "path": "out/native-worker-module-review-20261008/win64-after-regressions.log",
+        "sha256": "efdd0d9725e41b40ee563c4bb01814ea510211386afa721deaa14d89c67231dd",
+        "bytes": 1823
+      },
+      "process_stream_allocation_sites": 16,
+      "received_baseline": {
+        "matched": 3,
+        "bindings": [
+          {
+            "path": "out/native-worker-module-review-20261008/win64-before-digests.log",
+            "sha256": "31f92dfd549fa89a267553d1ade25ad6c871117b5adcaeeec7375879be13a0a2",
+            "bytes": 282
+          },
+          {
+            "path": "out/native-worker-module-review-20261008/before/win64/windows_worker_dll_lifetime.exe",
+            "sha256": "adf14bd93512d970066ca51d46cac9004dfef74f9d4b018b4ea6aa4a45d44e6a",
+            "bytes": 288948
+          },
+          {
+            "path": "out/native-worker-module-review-20261008/before/win64/lua55.dll",
+            "sha256": "5aae77d9330d72f7a747b7f96309494d52c8f3413e8a09fb9f872da8c31c0b00",
+            "bytes": 753984
+          },
+          {
+            "path": "out/native-worker-module-review-20261008/before/win64/worker_dll_probe.dll",
+            "sha256": "9ccc80bc3e638cc4eec232c594ac21c4653086c72b60538f4d947e0183e18a9d",
+            "bytes": 437695
+          }
+        ]
+      },
+      "received_fixed": {
+        "matched": 11,
+        "bindings": [
+          {
+            "path": "out/native-worker-module-review-20261008/win64-after-digests.log",
+            "sha256": "e1936b412da8a8f2261ac2f6b88fd355fd418d9ae9d88ec97ae0e02518f13e90",
+            "bytes": 1052
+          },
+          {
+            "path": "out/native-worker-module-review-20261008/after/win64/native_component_probe.exe",
+            "sha256": "8fd0705b1b981441ae51818017d37aa36a5c420edcc301117e4c934ce7f1a13c",
+            "bytes": 279112
+          },
+          {
+            "path": "out/native-worker-module-review-20261008/after/win64/process_start_faults.exe",
+            "sha256": "2a6d3f3e1b0771dea372283dad9f40deae791a46716e543e5794ea0e5a3d8f24",
+            "bytes": 486275
+          },
+          {
+            "path": "out/native-worker-module-review-20261008/after/win64/process_stream_faults.exe",
+            "sha256": "728667a6da9de9d7e5130cf980ed4c8d1af9aed6116644d7e26b64dbed22017e",
+            "bytes": 488386
+          },
+          {
+            "path": "out/native-worker-module-review-20261008/after/win64/terminal_input_faults.exe",
+            "sha256": "c0c221c497977188dc7abf391efce49a59e527c64dddd15a1e92b140b1d24452",
+            "bytes": 489022
+          },
+          {
+            "path": "out/native-worker-module-review-20261008/after/win64/windows_console_lifetime_faults.exe",
+            "sha256": "2d9c891e7366d38cf72681c2fb09a87ec0de48c84f8a248cdc1187fcd53f53ff",
+            "bytes": 503103
+          },
+          {
+            "path": "out/native-worker-module-review-20261008/after/win64/windows_console_reader_smoke.exe",
+            "sha256": "d2dd18b8427913f0e8b5fb3c1ec902b47cd8344ce7bb7982e5e9d243ed320de2",
+            "bytes": 468710
+          },
+          {
+            "path": "out/native-worker-module-review-20261008/after/win64/windows_keyboard_faults.exe",
+            "sha256": "54b4950e6767539b8121307fb453a45bb80bbc1356c847c208fde2f81236d51e",
+            "bytes": 481594
+          },
+          {
+            "path": "out/native-worker-module-review-20261008/after/win64/windows_terminal_input_smoke.exe",
+            "sha256": "1e4e5dd54ebf35987a3c85670a4cb2359f5492b6fff87d0784ca39d324e4ce1f",
+            "bytes": 486503
+          },
+          {
+            "path": "out/native-worker-module-review-20261008/after/win64/windows_worker_dll_lifetime.exe",
+            "sha256": "5e755ab944028975ac3c84587826009c9d1e39c46e69dbc4f85a6f2a9360919d",
+            "bytes": 288948
+          },
+          {
+            "path": "out/native-worker-module-review-20261008/after/win64/lua55.dll",
+            "sha256": "5aae77d9330d72f7a747b7f96309494d52c8f3413e8a09fb9f872da8c31c0b00",
+            "bytes": 753984
+          },
+          {
+            "path": "out/native-worker-module-review-20261008/after/win64/worker_dll_probe.dll",
+            "sha256": "884a182ccfb01b87e52eae4d5e966e44ee26906b92ca5b9291cf914fa6f1877b",
+            "bytes": 438272
+          }
+        ]
+      },
+      "lua_import_library": {
+        "path": "out/node-r76-20261005/win64-core/work/lua-5.5.1/src/liblua55.a",
+        "sha256": "f65d19a6761fb2458ca85a274eecc91954c228029279e678165613f6708cca6c",
+        "bytes": 98552
+      }
+    }
+  ],
+  "compiler_flags": [
+    "-std=c99",
+    "-Wall",
+    "-Wextra",
+    "-Werror",
+    "-O2"
+  ],
+  "platform_flags": {
+    "win32": [
+      "_WIN32_WINNT=0x0501",
+      "-DLUA_BUILD_AS_DLL",
+      "-static-libgcc"
+    ],
+    "win64": [
+      "_WIN32_WINNT=0x0601",
+      "-DLUA_BUILD_AS_DLL",
+      "-static-libgcc"
+    ]
+  },
+  "build_and_transport": [
+    {
+      "path": "out/native-worker-module-review-20261008/build_baseline.sh",
+      "sha256": "09cd44aff3be1915cbe38719da69cfeff6ded555e2db2471938482a442b81071",
+      "bytes": 1406
+    },
+    {
+      "path": "out/native-worker-module-review-20261008/baseline-build-final.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "out/native-worker-module-review-20261008/baseline-targets-final.log",
+      "sha256": "2cde4c2bc54383d98d4849419a985df0edc506375e1d7d3423a64656ac83d175",
+      "bytes": 222
+    },
+    {
+      "path": "out/native-worker-module-review-20261008/build_fixed.sh",
+      "sha256": "4b7b33190c83a61e0ed5d836a34442c70025fbd6a55e0e11fc212930b01e8c25",
+      "bytes": 2646
+    },
+    {
+      "path": "out/native-worker-module-review-20261008/fixed-build-targets-final.log",
+      "sha256": "594c90d53b9c78e5a0d23420b00b29456c197023c0c6081bee4c9cb3270a130c",
+      "bytes": 708
+    },
+    {
+      "path": "out/native-worker-module-review-20261008/paired-final-run.log",
+      "sha256": "cd91f919b4142b3fd566711fb304bfee4819ce70abfff34e28ad03c3551ea1df",
+      "bytes": 147
+    },
+    {
+      "path": "out/native-worker-module-review-20261008/run_targets.py",
+      "sha256": "499245aba4b5f2e0df0c7edad26aa6214368bec334a0506d2ca4ad9d3ca1fa57",
+      "bytes": 7444
+    },
+    {
+      "path": "out/native-worker-module-review-20261008/create_evidence.py",
+      "sha256": "6f8eb7b920c4af8489bb78979b36b75cbeb552b7e3a88c0833b5489d9652cb59",
+      "bytes": 11545
+    }
+  ],
+  "linux_regressions": [
+    {
+      "path": "out/native-worker-module-review-20261008/after/linux/yaca_native.so",
+      "sha256": "345326168f0e3ae2a30f63b184a18838aa8f6c36b040364a8cc2e6c510b0648a",
+      "bytes": 112720
+    },
+    {
+      "path": "out/native-worker-module-review-20261008/after/linux/native-build.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "out/native-worker-module-review-20261008/linux-input-regression.log",
+      "sha256": "f8d029d6abe4753db42e854cda4af35e5cc6edd831a2576c7cb0317215bce589",
+      "bytes": 384
+    },
+    {
+      "path": "out/native-worker-module-review-20261008/linux-startup-regression.log",
+      "sha256": "8e1b38e370e0bf7f703a787a02d2e172e2e47f1603898641f50bcc5060657dde",
+      "bytes": 603
+    },
+    {
+      "path": "out/native-worker-module-review-20261008/linux-stream-regression.log",
+      "sha256": "2ba8efc2da2bcf13adbb194ef6f319c323124594830e8026dc2dad8570c4786d",
+      "bytes": 80
+    }
+  ],
+  "retained_initial_failures_and_control": [
+    {
+      "path": "out/native-worker-module-review-20261008/baseline-build-first-failed.log",
+      "sha256": "eeaa76dd46773022029664bf02039be1a48a1cdab809a01440412a655c411563",
+      "bytes": 147
+    },
+    {
+      "path": "out/native-worker-module-review-20261008/before/win32/windows_worker_dll_probe-first-failed.log",
+      "sha256": "8873bd32fad0af84e15fd4b27ec4e0a73adb2c6ec957727f074993885478380b",
+      "bytes": 205
+    },
+    {
+      "path": "out/native-worker-module-review-20261008/baseline-targets-first-failed.log",
+      "sha256": "f586f38eccaae575797019b0bbc87c84267a93e4697ed87d8277650930d5a6c2",
+      "bytes": 925
+    },
+    {
+      "path": "out/native-worker-module-review-20261008/win32-before-transfer-first-failed.log",
+      "sha256": "40c01c1251b83c580cc4b923efee411a576085d8e8089153b4b286f706fb4934",
+      "bytes": 240
+    },
+    {
+      "path": "out/native-worker-module-review-20261008/win32-after-writer-first-failed.log",
+      "sha256": "9a95dec2829bf19b87556ab2021a35312dd9a4c34cd22b0daf1a8af983634f1b",
+      "bytes": 469
+    },
+    {
+      "path": "out/native-worker-module-review-20261008/writer-handle-diagnostic.log",
+      "sha256": "fb36af6bff79336ae44995831882d62e85cb4f85a3fbd21f719f8d8345ceb225",
+      "bytes": 644
+    },
+    {
+      "path": "out/native-worker-module-review-20261008/writer-pipe-diagnostic.log",
+      "sha256": "fd698c3114c9c57472c9c83182f018e69b62e5b05712acacf7d098340f71a51a",
+      "bytes": 740
+    },
+    {
+      "path": "out/native-worker-module-review-20261008/writer-warmup-diagnostic.log",
+      "sha256": "51705046eec0773ae94e458222cb80bf77f580274cfcffc590c27500ce4badb2",
+      "bytes": 577
+    }
+  ],
+  "full_suite": {
+    "scope": "development-host Lua suite",
+    "status": "PASS",
+    "total": 706,
+    "passed": 706,
+    "failed": 0,
+    "binding": {
+      "path": "out/native-worker-module-review-20261008/lua-suite-final.log",
+      "sha256": "ea2031c3d465ef3393da0d4c39f086c814fc72e0a0e231174319e489ba0a959e",
+      "bytes": 70250
+    }
+  },
+  "coding_readiness": {
+    "status": "PASS",
+    "binding": {
+      "path": "out/native-worker-module-review-20261008/coding-readiness-final.log",
+      "sha256": "561ba4880b288605952ff309affcf38a30d5c6c3dd73fd20914e577665a392f6",
+      "bytes": 4083
+    }
+  },
+  "comment_structure": {
+    "files": 252,
+    "declarations": 5574,
+    "violations": 0,
+    "inventory": {
+      "path": "out/native-worker-module-review-20261008/comment-inventory.json",
+      "sha256": "dfb145712797a7254a51ea0aaec284cf589150ebd98f37a783303776b19d5bab",
+      "bytes": 1245035
+    }
+  },
+  "complete_checks": [
+    {
+      "path": "out/native-worker-module-review-20261008/complete_checks.sh",
+      "sha256": "f173c1f3157ee904f5955bd8404a371e8b3979d9d2e0068584ee477454b84286",
+      "bytes": 2029
+    },
+    {
+      "path": "out/native-worker-module-review-20261008/complete-checks-run.log",
+      "sha256": "fe3711895905a18c187f177682d58470379e3ce630b93ac1466369d17239002c",
+      "bytes": 172
+    }
+  ],
+  "scope": "real Lua package.loadlib DLL lifetime, production reader/writer helpers and userdata GC, host-gated bounded I/O; baseline exits its isolated process before resuming any unmapped frame; fixed workers release buffers/pipe/module and atomically exit",
+  "semantic_review": "partial globally; this subset reviewed callback-address lookup while the caller retains code, executable/DLL distinction, worker reference transfer, saved module before final record release, atomic DLL release/thread exit, failure cleanup/last-error preservation, probe boundaries and all affected comments",
+  "fixture_cleanup": "fixed workers independently joined; native buffers/module references zero; actual writer pipe closed; observed code image unloaded; handles stable against separately measured first-use pipe initialization; assigned receiver artifacts and raw logs retained",
+  "uncovered_scope": [
+    "permanently blocked worker termination",
+    "complete final application/onefile/nine-package qualification",
+    "Cygwin PTY failure/recovery",
+    "terminal Lua adapter failed-close semantics",
+    "remaining main/helpers and global semantic Review"
+  ]
+}

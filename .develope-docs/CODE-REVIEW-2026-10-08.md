@@ -1,246 +1,349 @@
-# 恢复开发与关闭路径 R82--R86
+# 原生终端生命周期与键盘输入 Review
 
-日期：2026-10-08。负责人要求同步最新进展、检查梳理并推进开发，按
-[D-083](DECISIONS.md#d-083-同步最新进展并恢复开发2026-10-08) 恢复。
-本地无未提交修改，从 `4a9c4bc` 快进 15 个提交到
-`df38087c6c7855a45e94cf63b51528da4da0b345`。Windows Git 的 schannel 和
-OpenSSL 两次 TLS 拉取失败后，WSL Git 成功获取 `origin/main`；保留 `main`，
-同步阶段没有创建分支、提交、推送或新预发布。R81 已交付九包与三平台 706/706 的记录
-按原源码范围保留，不再重复 10 月 2 日已完成的 Python/full 装配工作。
+## R82：Windows cooked reader 的取消失败与最终释放
 
-## R82 反例与修复
+开发按 [D-083](DECISIONS.md#d-083-同步项目并恢复开发2026-10-08) 恢复。
+`git fetch origin --prune` 和 `git pull --ff-only` 完成；基线为
+`df38087c6c7855a45e94cf63b51528da4da0b345`，远端没有新增源码提交。
 
-`l_terminal_gc` 在 `cancel_windows_cooked_read` 失败后只把 `cooked_read` 置空。
-worker 的 heap record 不引用 Lua userdata，避免了该处直接访问已回收 userdata，
-但 worker 结束时也不释放 record、wide buffer 或 thread handle，三个资源均永久遗留。
+### 缺陷和修复
 
-修复为独立引用计数：在 `CreateThread` 前设立终端和 worker 两份引用。终端完成
-读取或 emergency detach 时清空其指针、关闭其 thread handle、释放终端引用；
-worker 存储结果后释放另一引用，最后一份引用释放 record 与 wide buffer。
-worker 不读取线程句柄，也不访问 Lua。启动失败仍直接收回未转移的分配。
-显式 cancel/restore/close 的失败保持原来的 owner 和 OS 错误，可由调用方重试。
+`l_terminal_gc` 在 `cancel_windows_cooked_read` 失败时直接丢弃 `cooked_read`。
+worker 使用独立堆记录，不会访问已被收集的 userdata，但返回后没有释放堆记录、
+wide buffer 和原线程句柄的路径。显式 cancel/restore/close 失败会保留 owner，
+供调用方重试；最终 GC 丢弃该 owner 时仍会发生泄漏。
 
-创建前建立两份引用也覆盖 worker 先于 `CreateThread` 返回而结束的情况；该调度
-可能性按 [Microsoft CreateThread 文档](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createthread)
-核对。保留既有 XP 可用的原子引用模式，没有引入新的操作系统版本依赖。
+R82 为 reader 加入原子引用计数。创建线程之前初始化终端和 worker 两个引用；
+worker 在最后一次访问 `received` 后释放其引用。终端正常 join 或 emergency detach
+时先清空 `cooked_read`，关闭自己持有的线程句柄，再释放终端引用。最后一个引用
+释放 wide buffer 和记录。线程在 `CreateThread` 返回前完成时，终端引用仍保持记录
+有效；GC 先于 worker 完成时，worker 引用保持缓冲区有效。
 
-既有 `windows_console_reader_smoke.c` 的直接 callback 夹具为 stack record，
-显式保留 caller 引用；R81 的 completed-reader double 没有真实 worker，
-只持有终端引用。两类 fixture 的初始化同步调整，没有扩大其真实控制台证据范围。
+显式端口的拒绝、重试和返回形状保持原有语义。GC 的恢复模式尝试也保留原有次序。
+失败 detach 不宣称线程已经终止；永久未返回的 worker 保留自己仍需要的资源，
+直到线程返回或进程结束。线程句柄关闭不等于终止线程，原子释放采用兼容 XP 的
+`InterlockedDecrement`。依据为微软的 [CloseHandle](https://learn.microsoft.com/en-us/windows/win32/api/handleapi/nf-handleapi-closehandle)
+与 [InterlockedDecrement](https://learn.microsoft.com/en-us/windows/win32/api/winnt/nf-winnt-interlockeddecrement) 文档。
 
-## 故障取证
+已更新 completed-reader 和同步 reader 夹具的所有权初始化。两条 Windows 构建入口
+纳入维护探针 `windows_console_lifetime_faults.c`。未增加公开 native 接口。
 
-新增 `windows_cooked_lifetime_smoke.c`，直接包含生产 native；`CreateThread`、
-Lua userdata GC、线程等待、复制句柄及 OS handle count 都是真实操作。
-`ReadConsoleW`、synthetic Enter 和取消错误使用同步事件控制的有界 double，
-每个 worker 最多等待五秒，不读取用户控制台。原生分配计数跨线程使用原子操作。
+### 对照与回归
 
-每架构各 56 个场景：六个 setup 失败/恢复、八个显式取消失败/重试、十个
-实际 Lua state GC/detach，以及 32 个 worker 在创建调用返回前已结束的竞争控制。
-五种 detach 覆盖注入失败、零写入、join 超时、wait 失败、worker 完成后注入报错；
-各重复两次。只有确认基线 worker 已停止且确有泄漏后才救援清理，救援不计为通过。
+新探针直接包含生产源码，实际启动 Windows 线程；ReadConsoleW、WriteConsoleInputW
+及取消等待的故障通过有界 double 注入。线程暂停在读入处，实际 Lua GC 或 lua_close
+先销毁终端 owner 和状态，再放行 worker 写入缓冲区并返回。另一组在 CreateThread
+返回前完成 worker，另有完成与 finalization 的并发调度。
 
-| 本机运行面 | 精确 df38087 native 基线 | 修复后 | 既有回归 |
+取消矩阵包含 synthetic Enter 拒绝、成功但零条写入、join 超时和初始 wait 失败；
+分别检查显式 cancel/restore/close 的失败后同 owner 重试，及 GC/lua_close detach。
+每个固定失败场景执行两轮，两个完成调度各执行 64 轮。启动另覆盖两次原生分配和
+线程创建失败后的同 owner 恢复。每次以独立副本的真实线程句柄 join 后核对所有缓冲
+和进程句柄数；只有确认的旧实现泄漏才由探针救援，救援不计为产品成功。
+
+| 环境 | 检查数 | 基线缓冲区 / 句柄泄漏 | 修复后缓冲区 / 句柄泄漏 |
 | --- | --- | --- | --- |
-| Win32 / Windows 11 WOW64 | 20 内存块 + 10 thread handles；探针退出 1 | 0 泄漏，56 场景通过 | cooked reader PASS；terminal input 零泄漏/所有权错误/协议失败 |
-| Win64 / Windows 11 x64 | 20 内存块 + 10 thread handles；探针退出 1 | 0 泄漏，56 场景通过 | cooked reader PASS；terminal input 零泄漏/所有权错误/协议失败 |
-| Linux / Ubuntu WSL2 | Windows 专属反例不适用 | 当前 native 模块编译通过 | terminal input 零泄漏/所有权错误/协议失败 |
+| Server 2008 non-R2 x64 / Win32 WOW64 | 176 | 160 / 80 | 0 / 0 |
+| Server 2025 Standard x64 / Win64 | 176 | 160 / 80 | 0 / 0 |
 
-Windows 宿主为 Windows 11 Pro for Workstations Insider Preview `10.0.26220`。
-两架构使用缓存的私有 GCC 13-win32 工具链；Lua 5.5.1 源归档按已锁定
-`1c4b4068...` 核对，Win32 DLL/import library 本轮串行构建，Win64 复用已核对缓存。
-编译使用 C99、`-Wall -Wextra -Werror -O2`；Win32 `_WIN32_WINNT=0x0501`、
-subsystem 5.01，Win64 `_WIN32_WINNT=0x0601`、subsystem 6.01。
-本轮未在 Server 2008、XP 或 Win7 重新运行，不能把现代宿主结果写成最低系统实测。
+本次读取的两个 OS 版本分别为 6.0.6003 和 10.0.26100。既有 Win64 SSH 目标当前
+实际系统是 Server 2025，与 R81 历史记录的 Windows 11 不同；本批按实际环境记录，
+不将历史系统名代入当前日志。
 
-两条 Windows 构建入口纳入维护探针；旧独立 Win64 入口也改用现有
-`source_snapshot.py`，使未暂存的新回归文件进入维护源码快照，忽略的凭据与缓存
-继续排除。既有 source snapshot 回归负责其字节与过滤规则。
+两目标原有 R81 输入故障、UTF-16 片段/surrogate、EOF 与错误 reader 回归通过；
+Linux 从同份源码严格构建 native 模块及输入故障探针，输入故障回归零泄漏、
+零所有权/协议错误。编译为 C99、`-Wall -Wextra -Werror -O2`；Windows 的最低
+API 宏分别保持 0x0501/0x0601。以上是原生函数专项，不替代真实控制台交互、
+终端模式故障或最低系统实测。
 
-## 完整检查与人工语义 Review
+### 验收与 Review 范围
 
-同步后的基线及修复后的完整 Lua suite 均 **706/706**。完整 coding readiness
-**PASS**；Python **3.13.16** 与固定解析器的全仓注释清点为
-**247 文件 / 5524 声明 / 0 缺项**。检查器反例 15/15、装配/发行审计/旅程/
-源码快照/审批/Linux full staging/Windows 证据回归共 50/50 通过。
-四校验器分别 7739 / 56 / 567 / 5，通过且 Gate R 仍关闭。
-TP-003/006/008/010、RP-001 全链通过，TP-010 为 5,564,743 条断言。
+完整 Lua suite **706/706**，coding readiness **PASS**；全仓注释结构检查
+**247 文件 / 5527 声明 / 0 缺项**。检查器反例 15/15、装配/审计/旅程回归、
+四校验器和全部 TP/RP 通过；完整检查与构建/实机运行均经资源守卫串行执行。
 
-首次 readiness 在 TP-008 因宿主缺少 `xmllint` 停止，失败日志保留为
-`coding-readiness-first.log`。通过 Ubuntu 官方包下载并在本轮隔离目录提取
-`libxml2-utils`，未安装到系统；补齐 PATH 后完整链复跑通过。解析器与 Python
-也在忽略的开发目录内，不增加产品或发行运行时依赖。
+已人工逐项核对生产 reader 类型、两个引用的初始化、线程抢先返回、GC detach、
+正常 join、线程/缓冲区分离释放、startup 部分获取清理及所有调用点。探针逐项核对
+线程门限、独立观察句柄、失败保留、同 owner 重试、实际状态销毁、完成调度和
+救援仅在真实线程 join 后执行；所有函数、类型、回调及构建注释已核对。
+全仓人工语义 Review 仍为 **partial**。下一面为原生键盘输入投影、终端模式错误
+路径及 main 交互内部，不以本批通过替代这些审核。
 
-人工核对了终端/worker 两份引用的建立和释放、启动失败、worker 提前完成、
-完成后的投影重试、显式取消失败保留、GC detach 的句柄收回、原生分配跟踪，
-以及既有两类 fixture 的所有者边界。此子面已核对，全仓语义 Review 仍为 partial。
-真实控制台取消/回显和最终包旅程未由 double 替代。
+15 个维护输入与 10 个基线输入、实际探针/DLL、Lua import library、原始日志、
+完整检查及声明清点绑定在 [R82 证据](native-review/R82.json)。目标端重算的
+12 个接收件摘要全部与本地一致。
+原始失败、编译、实机和回归日志在 `out/native-console-lifetime-review-20261008/`。
+已发布 R81 候选不含 R82；新的最终单文件/九包尚未统一重建。Gate R 保持关闭，
+`release_authorized=false`，目标资格验证待完成。
 
-原始输入、二进制、Lua 依赖、构建和测试日志在 `out/review-20261008/`；
-本轮摘要清单在 [`native-review/R82.json`](native-review/R82.json)。R81 已发布 ZIP
-未改变，也不包含 R82。后续 Review、统一重建、C32/C33/C34 和正式 Gate R 仍待完成。
+## R83：raw 键盘重复、UTF-16 配对与字节上限
 
-## R83 DLL 卸载后的线程代码生命周期
+基线为 R82 提交 `5fc23ac`。`push_windows_key_action` 忽略 `wRepeatCount`，
+合并的连续字符和退格只发出一次。它还把合法 Unicode 的字节限额返回成
+`InvalidEncoding`；连续 high surrogate 会覆盖已有的半个字符，不拒绝畸形序列。
+微软 [KEY_EVENT_RECORD](https://learn.microsoft.com/en-us/windows/console/key-event-record-str)
+明确说明重复按键可能合并在一个 record 中，不能只按 record 数量计字符。
 
-R82 已形成本地提交 `1456a16`，尚未推送。继续检查发现仅保留 heap record
-仍不够：生产 `package.loadlib` 加载 native DLL，Lua 5.5.1 的 library string
-在 `lua_close` 中调用 `FreeLibrary`。cooked reader 或异步 stdin writer 仍在
-阻塞时，其 DLL 代码会先被卸载，线程之后可能返回已经释放的代码地址。
+修复为每个 text action 保留完整重复次数，UTF-8 重复存储使用 Lua-owned buffer，
+分配错误不泄漏独立原生缓冲区。先用除法检查总字节上限，再计算长度和复制。
+high surrogate 同时保留重复次数，low surrogate 必须匹配；重复 high 或次数不匹配
+返回 `InvalidEncoding` 并清空半字符状态。合法输入超过上限返回 `Limit`。
+Enter/Esc 继续按一个 record 发出一个命令，既有修饰键优先级和零次数单键后备保留。
 
-新增 `windows_worker_lifetime_fixture.c` DLL、共享 host context 和
-`windows_worker_lifetime_smoke.c`。通过实际 Lua `package.loadlib` 加载实际
-DLL，启动生产 reader/writer、关闭实际 Lua state，再核对 DLL 映射和实际线程状态。
-IO 使用私有事件控制的有界 double；不操作用户控制台。精确 R82 native 与同一份
-最终维护探针组合，在两个架构各四个场景均确认 `module_resident=0 worker_live=1`。
-反例进程立即退出，不再唤醒已经失去 DLL 映射的线程。
+维护探针 `windows_terminal_input_smoke.c` 自建真实 Windows 控制台，通过实际
+WriteConsoleInputW/ReadConsoleInputW 验证 ASCII、两/三/四字节字符、退格、最大
+WORD 次数、跨 poll 的 surrogate、畸形后的同 owner 恢复及字节限额。
+同时验证 raw 入场、restore 和 close 的 setter 拒绝及重试；仅 SetConsoleMode 的
+拒绝用 double 注入，实际模式前后读回比较。另在真实控制台启动 cooked reader，
+通过生产 synthetic Enter 取消、join 并核对终态与恢复模式。所有输入仅为固定非秘密
+夹具，测试进程独占其控制台，不修改 SSH 终端或调用模型。
 
-修复在启动前通过私有数据地址定位所属模块。DLL 场景获取一份 worker 独占引用，
-EXE 场景不获取；启动失败收回引用并保留原始 OS 错误。worker 先保存模块引用，
-再完成 IO、句柄和 storage 收尾，最后由 `FreeLibraryAndExitThread` 释放 DLL 并
-结束线程，避免在自身 DLL 已卸载后返回。终端与 process owner 不释放这份引用。
-多线程各持有一份，最后一个 worker 退出才允许 DLL 被实际卸载。
+| 指定环境 | 真实控制台检查 | 基线失败 | 修复后失败 | 最终模式 / 句柄 |
+| --- | --- | --- | --- | --- |
+| Server 2008 non-R2 x64 / Win32 WOW64 | 86 | 26 | 0 | 原模式恢复 / 无增长 |
+| Server 2025 Standard x64 / Win64 | 86 | 26 | 0 | 原模式恢复 / 无增长 |
 
-模块按地址定位和引用规则依据
-[GetModuleHandleExW](https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-getmodulehandleexw)，
-结束时的释放顺序依据
-[FreeLibraryAndExitThread](https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-freelibraryandexitthread)。
-两 API 最低支持 XP，不使用永久 PIN 标志；借用的 unchanged-refcount 句柄不交给
-FreeLibrary。主程序代码仍保持原来的正常 callback 返回路径。
+`windows_keyboard_faults.c` 另使用有界 KEY_EVENT double，对三种大重复文本分别
+枚举 18 个 Lua 增长分配点；每目标共 54 个阈值，持续拒绝包含 emergency GC 重试。
+每例在同一 terminal owner 尝试相同阈值两次，每次后提供新的夹具输入并核对完整
+UTF-8 字节；不把消耗的原记录记作成功重放，也不手工重置 owner 的 surrogate 状态。
+实测每目标 54 次初始内存异常、36 次重复内存异常，另 18 次暖状态调用成功：
+初次创建的 Lua buffer 元表等结构已保留，暖调用没有到达对应初始阈值。
+这 18 次不记作注入异常。两轮内容恢复均通过，原生泄漏和所有权错误均为零。
 
-本机 Win32/Win64 各 **26** 个场景：两轮 reader/writer 的正常 IO、IO 错误、
-模块查询失败、模块引用获取失败、线程启动失败与提前退出，以及两轮双 worker。
-所有场景通过，最终 DLL 未驻留、原生 block 为 0、OS 句柄恢复基线。
-双 worker 在 writer 先退出后核对 DLL 仍在、reader 的两个 block 仍由它持有；
-reader 退出后才允许卸载。两架构既有 cooked/terminal、process stream/start
-故障回归也通过。Linux 当前 native 编译通过，Windows 专属卸载反例不扩展到 Linux。
+两 Windows 的 R82 176 例生命周期、R81 输入投影和 bounded cooked-reader 回归
+通过；Linux 严格构建同份 native 和输入故障探针，输入故障回归通过。编译使用 C99、
+`-Wall -Wextra -Werror -O2`，Windows API 宏仍为 0x0501/0x0601。
+首次新增探针严格构建遇到共享 tracker 中 getter helper 未使用的告警；保留失败日志，
+在本窄探针显式引用共享符号后重建，未关闭告警或执行无关 getter 伪充键盘测试。
 
-先完成一次 Lua 标准库与 Windows pipe 初始化，再测每个 owner 的实际句柄数。
-首次未预热导致的一次性缓存计数差异及错误的 nil/error fixture 断言保留在
-`out/review-20261008/r83/`、`r83-final/`；最终证据只使用 `r83-complete/`。
-原生 failure 实际为 false/error，探针已与生产返回协议对齐，没有放宽资源断言。
-两条 Windows 构建入口纳入 DLL/host 探针，fixture 不进入产品 runtime。
+完整 Lua suite **706/706**、coding readiness **PASS**，全仓注释结构为
+**249 文件 / 5548 声明 / 0 缺项**。检查器反例、发行/旅程回归、四校验器和
+全部 TP/RP 通过。人工已逐项核对重复计数、缓冲区所有权、乘法限额、半字符失败清理、命令
+保留行为及探针的真实控制台/故障 double 边界。全仓语义 Review 仍为 partial，
+剩余异步线程的 DLL 生命周期、Cygwin PTY 失败路径、终端 Lua 适配器的失败关闭、
+main 交互内部和测试辅助代码继续核对。
 
-冻结的 native 与维护探针、各架构 Lua 依赖、二进制、原始 stdout 与构建日志
-保存在 `out/review-20261008/r83-complete/`，逐项摘要见
-[`native-review/R83.json`](native-review/R83.json)。本轮结构检查 **250 文件 / 5541 声明 /
-0 缺项**；完整 Lua **706/706**、完整 readiness 全链 **PASS**。
-本批 worker DLL/storage/pipe/thread 所有权、失败回收、返回协议和所有探针已完成人工
-语义核对。正式源码冻结和三目标九包重建仍待后续 Review，全仓语义 Review 保持 partial。
+17 个维护输入、10 个基线输入、目标编译件、完整检查及实际环境绑定在
+[R83 证据](native-review/R83.json)。16 个接收件的目标端 SHA-256 与本地一致。
+原始输入、失败/成功日志与编译件位于 `out/native-input-mode-review-20261008/`。
+本批直接验证生产函数，仍不替代最终单文件、完整交互旅程或最低系统实测。
+已发布 R81 不含 R82/R83，最终三目标九包待统一重建，Gate R 继续关闭。
 
-## R84 终端关闭失败后的同句柄重试
+## R84：异步 worker 独立保留 DLL 代码
 
-基线为 R83 提交 `6a6dae4`。`terminal.lua` 的 `port:close()` 在 native
-`terminal_close` 返回失败或抛错后也无条件标记 `closed`，下一次清理只能得到
-"terminal port is closed"，原生 owner 尚未释放却失去重试入口。
-process 适配器已经只在 native 关闭成功后推进状态；terminal 现遵守同一所有权边界。
+基线为 `f128838f736dc492ec6f802ae9a1637fe16b8b13`。生产 loader 通过
+`package.loadlib` 打开 native DLL；固定 Lua 5.5.1 的 `loadlib.c` 以 library string
+保存引用，在 Lua 状态销毁时调用 FreeLibrary。原生 cooked reader 和 stdin writer
+虽然独立持有堆记录，仍在此 DLL 的代码中执行，没有独立 loader 引用。
 
-窄修复只在 `close_ok` 为真时改变状态。native close 失败保留原来的 started/joined
-owner；成功恢复的设置不重复恢复，失败恢复可再尝试。原有错误优先级保留；如果
-native close 实际成功而此前 restore 失败，仍报告先前错误，但 owner 已关闭，
-不能为重试而再次触碰已释放的句柄。
+维护 DLL `windows_worker_dll_probe.c` 直接包含生产源码，以真实 package.loadlib
+载入；host `windows_worker_dll_lifetime.c` 运行实际 reader/writer helper 和实际
+userdata GC。线程暂停于有界 I/O double，host 销毁 Lua 状态，再用 VirtualQuery
+及 GetModuleHandle 检查代码映射，同时独立线程句柄仍为 WAIT_TIMEOUT。
+旧实现四组都证实活线程的 DLL 已被卸载。baseline 在不放行线程的情况下以
+ExitProcess 结束其独占测试进程，不执行已经失效的 DLL 返回路径，也不把 OS
+收回夹具资源记作产品成功。
 
-新增两个 integration case，覆盖 joined 的 typed close 拒绝、started 的 restore
-与 close 连续失败、native close 异常，以及先前 restore 失败但实际 close 成功。
-最新维护回归与精确 R83 `src/` 在隔离 test root 中组合：专项 **9/10**，原失败为
-第二次关闭被错误的 closed 状态拒绝；修复后 **10/10**，核对同一个原生 handle、
-restore/close 次数及成功后不二次释放。
+修复先按 callback 地址辨认模块。当前调用方在解析期间仍持有该代码；如果代码
+编入 EXE，不取得 DLL 引用。DLL entry 在 CreateThread 前取得独立引用，成功后
+归 worker 所有；模块解析、引用获取或线程创建失败均保持原错误码，释放已取得的
+堆记录及引用，保留 caller 的 pipe 所有权。
+worker 先保存 module handle，再完成 pipe/记录释放；最终通过
+FreeLibraryAndExitThread 一次完成 DLL 释放与线程退出，避免 FreeLibrary 后
+返回已卸载代码。这里不使用永久 PIN。两个 API 都符合 XP 编译底线，依据为微软
+[GetModuleHandleExW](https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-getmodulehandleexw)
+及 [FreeLibraryAndExitThread](https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-freelibraryandexitthread)。
 
-完整 Lua suite **708/708**，完整 coding readiness **PASS**；全仓结构清点
-**250 文件 / 5547 声明 / 0 缺项**。修改后的 close 参数、返回、错误先后、状态与
-所有权注释及每个测试 callback 已逐项核对。该批没有修改 C 或发行版本，不重写
-R83 的 native/DLL 结果；已发布 R81 包不含 R84。
-原始专项、全套检查、精确基线与维护回归在 `out/review-20261008/r84/`，
-冻结来源与实际日志摘要见 [R84 清单](lua-review/R84.json)。
-整体语义 Review、主交互和正式资格继续按 TRACKING 收尾。
+| 指定环境 / worker | 基线 Lua close 后映射 / 活线程 | 修复后 close / join 后映射 | 最终原生块 / module 引用 |
+| --- | --- | --- | --- |
+| Server 2008 Win32 · reader | 0 / 1 | 1 / 0 | 0 / 0 |
+| Server 2008 Win32 · writer | 0 / 1 | 1 / 0 | 0 / 0 |
+| Server 2025 Win64 · reader | 0 / 1 | 1 / 0 | 0 / 0 |
+| Server 2025 Win64 · writer | 0 / 1 | 1 / 0 | 0 / 0 |
 
-## R85 管理输入面的 owner 保留与模式切换边界
+每目标另有 reader/writer 各三项 setup 拒绝：地址查询失败、DLL retain 失败，以及
+成功 retain 后 CreateThread 失败。实际错误码、零原生块/引用、DLL 卸载和句柄
+基线一致均通过。Writer 的 write pipe 实际关闭，独立 host read end 在 join 后关闭。
 
-基线为 R84 提交 `23d9402`。`new_model_setup_input` 共用于模型、配置和 Context
-输入面。普通和时钟退化的 close 路径都在端口关闭失败后清空 active，最终清理
-因而把仍存活的终端当作已释放；失败模式切换还可能创建新终端覆盖旧 owner。
+首次 Win32 writer 运行在所有 Native/DLL 资源已释放后仍比未经初始化的基线多一
+句柄。独立 control 在不加载 native DLL 的情况下调用 CreatePipe 并关闭返回两端，
+自身也使计数从 39 增为 40；按该初始化后的基线，writer 前后均为 40。Win64
+同样测得首次 pipe control 从 70 增为 71，writer 前后均为 71。因此记录的是实际
+first-use 初始化边界，不用忽略句柄检查或 probe 救援来制造通过。
+首次 DLL 编译的 opener import/export 注解错误及首次空载荷 scp、writer 句柄断言
+失败全部保留。qualification wrapper 仅为可调用的自身 opener 设置 export；Lua
+API 保持 import，生产函数体保持冻结输入。完善计数后，两个 phase 用相同维护
+probe 字节重跑；旧记录和编译件保存在 `initial-proof/`。
 
-修复只在确认 close 返回 true 后清空 active、模式及缓冲；失败保留 owner，并记录
-closing 和已经成功的 join。最终清理重试同一端口，避免重复 join；模式激活会先
-处理 pending cleanup，不能复用或替换未关闭的 owner。时钟退化仍尝试无时钟
-close，失败保留 owner，成功清理后继续如实报告时钟错误。
+R80 启动/进程流、R81 输入、R82 176 例生命周期、R83 86 个真实控制台检查及其
+54 阈值分配故障回归在两目标通过。Linux 从同份源码严格构建 native 和
+输入/启动/进程流探针，回归通过。完整 Lua suite **706/706**、coding readiness
+**PASS**；全仓注释结构 **252 文件 / 5574 声明 / 0 缺项**，四校验器及全部
+TP/RP 通过。构建、目标运行及完整检查均经资源守卫串行执行。
 
-新增真实 Model manager 控制流回归：准确输入连接测试同意后，typed close 拒绝、
-close 异常及收尾前时钟退化分别要求第二次清理成功；join 次数为 1/1/0，close
-均为 2。另在 Key 字段的 cooked→hidden 切换注入 close 失败，回到下一提示前必须
-先关闭旧终端。所有路径核对配置字节不变、零网络请求，不通过私有函数测试入口。
+人工逐项核对借用/retained 引用的区分、EXE 分支、线程创建前转移、startup 失败
+清理及错误码、记录最后访问后的 module 保存、原子 exit、GC 顺序，以及探针
+不执行已卸载代码的界限、first-use control、pipe/观察句柄与声明注释。
+全仓语义 Review 仍为 **partial**；下一面为终端 Lua adapter 的失败关闭、
+Cygwin PTY 失败/恢复及 main 交互内部。不宣称能终止永久阻塞的 worker。
 
-最终维护测试与精确 R84 `src/` 在隔离 root 中运行为 **25/27**，两个新增 case
-确认未关闭 owner；修复后 **27/27**，连同 coordinator/native ports 专项通过。
-完整 suite **710/710**、完整 readiness **PASS**、全量结构清点 **250 文件 /
-5552 声明 / 0 缺项**。本批 close/activate 的参数、结果、失败优先级、join 状态、
-缓冲和 owner 边界及每个新 callback 完成人工语义核对。
+23 个维护输入、12 个基线输入、目标程序/DLL、实际环境、原始日志和完整检查
+绑定在 [R84 证据](native-review/R84.json)，28 个接收件摘要与本地一致。
+原始记录位于 `out/native-worker-module-review-20261008/`。生产 native 接口和产品
+版本未变；最终单文件和九包仍需重建，已发布 R81 不含 R82--R84。Gate R 保持关闭。
 
-冻结源码、维护回归及实际输出绑定于 [R85 清单](lua-review/R85.json)，日志位于
-`out/review-20261008/r85/`。全仓语义 Review 仍为 partial，ApplicationCoordinator
-及后续交互内部继续核对；新三目标核心、九包及其旅程尚未完成。
+## R85：终端适配器失败重试与 Linux raw 模式
 
-## R81 来源与证据缓存恢复
+基线为 `53d842c`。`src/terminal.lua` 的 close 在 native close 失败时仍把 port
+标为 closed，失去原生 owner 的重试入口；restore 失败、随后 close 实际恢复并
+关闭成功时，又报出已经过时的 restore 错误。restore/close 接纳任何 true-status
+响应而未核对第二个 true acknowledgment。另有 created port 提前 restore 后，
+其标记未在 start 时重置，使后续实际恢复被跳过。
 
-从现存 GitHub 预发布恢复 12 个已交付附件：三目标 clean runtime/notices、
-三目标来源包、完整证据包、audit 与 SHA256SUMS。每件大小与 SHA-256 均逐项核对
-仓库已有 publication 回执，保存于忽略的 `out/release-cache-20261006/`；
-[恢复清单](candidates/restored-inputs-20261008.json) 记录精确字节。
-Windows urllib 下载两次遭遇 TLS EOF，已完成文件复核后通过 Linux curl 继续，
-失败与成功日志均保留。本轮未恢复 std/full runtime，不把缓存恢复当作当前源码资格。
+现在仅在 native close 返回 true/true 后记录 restored/closed 并释放 handle 引用。
+失败、异常或错误确认值保留 started/joined 状态，已经成功恢复的标记保留，下一次
+close 不重复恢复。最终 close 的实际恢复保证可消除预先恢复失败；若两个阶段都
+失败，仍报告首个恢复错误。start 接纳新 owner 时重置该输入代的恢复/取消状态。
 
-## R86 主交互协调器的关闭状态与清理重试
+真实 PTY 揭示两个相关问题。Linux raw 使用 VMIN=0/VTIME=0，空闲 read 返回零
+而被当作 EOF；改用 VMIN=1，仍由 O_NONBLOCK 提供异步行为。Linux 的实际空闲
+poll 现在返回空批次，真实 EOF 的原有处理保留。依据见
+[termios 非规范模式](https://man7.org/linux/man-pages/man3/termios.3.html)；不把 Linux
+实测扩大为所有 POSIX 系统相同的 O_NONBLOCK/VMIN 优先级。
+成功 restore 会恢复 stdin 的原始阻塞设置，之后直接 native poll 又可能挂起。
+适配器现在只排空已缓存的事实，未接受取消时停止新 native 读取；接受取消后仍可
+观察原生 cancelled 终态。close 保留 owner 的目的包括可靠清理重试，不意味着
+已经恢复的输入仍按 raw 模式读入。
 
-基线为 `87e4b21`。terminal close 失败后协调器清空 terminal_started，finish_run
-也无条件报告 lifecycle=closed；Agent writer 未释放时同样误报 closed。
-最终三项 actual coordinator 回归与精确基线组合为 **39/42**，修复后 **42/42**。
+新增十个适配器生命周期场景，冻结基线同一测试为 **1/10 通过、9/10 失败**。
+修复后专项及既有 native-port/line-editor 回归 **26/26**。其中覆盖 started/joined
+重试、异常、false/nil/table 确认值、成功 close 的恢复保证、启动前 restore，以及
+已恢复后的空闲 poll/取消事实。
 
-加入幂等 `coordinator:close()`，只清理尚未成功关闭的 Agent/draft 与 terminal。
-终端 close 失败保留启动及成功 join 状态；两个 owner 都确认释放前 lifecycle
-保持 closing。终端失败后重试不再次释放 writer 或重复 join；writer 失败后
-重试不再次关闭已释放终端。永久失败继续返回错误并保留 owner/status。
-finish_run 保留先前运行错误优先级；生产聊天入口失败后再做一次清理，仍返回
-原运行错误，不将重试成功改写为聊天成功。
+维护 `terminal_adapter_pty_smoke.py` 用独立 Linux PTY 和实际 native owner 验证
+五组：两阶段拒绝、仅 close 拒绝、joined 拒绝、最终 close 恢复、启动前 restore。
+仅拒绝发生于明确的 forwarding double；父进程实际读回 termios 和 fd flags，
+核对 raw 检查点、最终原始模式及标记完全一致。两个实现层的反例独立保留：固定
+Lua 搭配旧 native 仍得到错误 EOF；修复 raw idle 后，已恢复的 close 拒绝场景曾在
+旧 poll 路径阻塞并触发十秒超时。驱动只结束自己的子进程并关闭自有 PTY，两项
+修复后五组全部通过，没有读取用户输入或调用模型。
 
-完整 suite **713/713**、完整 readiness **PASS**、全仓结构检查
-**250 文件 / 5556 声明 / 0 缺项**。关闭状态、依赖顺序、错误优先级、owner 缓存、
-join 及新回归 callback 已逐项语义核对。精确来源与输出见
-[R86](lua-review/R86.json)，日志在 `out/review-20261008/r86/`。
-其余交互/辅助代码与三目标九包正式资格仍待完成，全仓语义 Review 为 partial。
+全量回归发现 Model setup 的旧 unknown-restoration double 同时返回 native close
+成功，违反实际 C 端“成功 close 已恢复”的保证。已令未知状态的 close 同样拒绝，
+保持“恢复未知不发布配置、不显示 Key”验收要求，bootstrap/恢复专项 **58/58**。
+首次独立加载测试未继承 runner 标准函数的失败也保留；补齐局部 environment 的
+明确 __index 后重跑，不把这些夹具错误计为产品反例。
 
-## 三目标核心重建、证据收口与暂停
+完整 Lua suite **716/716**、coding readiness **PASS**，全仓注释结构
+**255 文件 / 5603 声明 / 0 缺项**。四校验器及全部 TP/RP 通过，当前 native 输入
+持续分配故障回归零泄漏/所有权/协议错误。构建、PTY 与完整检查均经资源守卫
+串行运行。本批实际系统为当前 Linux 开发宿主，不宣称新 Windows/最低系统或
+最终单文件验收通过。
 
-负责人最新要求“在下一个开发节点收尾暂停”，按
-[D-084](DECISIONS.md#d-084-三目标核心重建节点收尾后暂停2026-10-08)
-收口到 R82--R86 三目标核心节点。冻结输入为干净提交
-`163728ea7e6f58efeb01155038da0a68a8cc9e6a`；Windows 两架构和 Linux 的维护源码
-归档 SHA-256 均为 `0d5a0fa7937fbc7650508a8f95806a5dc9e78f44ab10aaa7b8cab34ade17f1e8`。
-三份清单和全部成员逐字节核对一致。收尾文档单独提交，产品代码未再改变。
+人工核对当前输入代状态、确认值、错误优先级、失败引用保留、取消事实和缓存排空、
+Linux 最小字符/非阻塞组合、独立 PTY 观察与清理，以及所有新增/改动函数及注释。
+全仓语义 Review 仍为 partial。下一项是 main 输入协调器关闭失败后的 owner
+保留及 Cygwin PTY 失败/恢复，然后继续其余交互内部和辅助代码。
 
-Windows 两核心由维护构建器、GCC 13-win32 交叉编译；实际新单文件在 Windows 11
-10.0.26220 上以 `--lua -E source/test/run.lua` 执行冻结源码完整 suite，Win32 经 WOW64，
-两者各 **713/713**。目标回执、原始输出、来源归档与核心摘要通过维护附件脚本重新绑定。
---version 通过；隔离数据根的离线 Stage 1 有 12 项通过、3 项警告，结果为 partial，
-警告为配置未初始化和非 TTY，零联网请求。未创建数据根的首次失败日志保留，不能算通过。
-本节点不扩展为 XP、Win7 或指定 Server 2008 的新核心实测。
+17 个维护输入、14 个基线输入、实际解释器/native 模块、十场景反例、五组 PTY
+和完整检查在 [R85 证据](native-review/R85.json) 绑定，原始记录位于
+`out/terminal-adapter-review-20261008/`。发行版本及接口名称未变，已发布 R81 不含
+R82--R85；最终三目标九包待统一重建，Gate R 保持关闭。
 
-Linux 在新的 CentOS 7.9 容器内串行原生构建，GCC 4.8.5-44、glibc 2.17-326.el7_9.3；
-容器共享 WSL2 6.18.40.1 内核。同次构建的 Lua/native 执行完整 suite **713/713**，
-onedir 和 onefile --version 均通过，ELF64、依赖白名单和 GLIBC 导入上限 2.17 检查通过。
-原 R81 容器与数据保留；缺少的 file 工具仅在新构建容器内通过启用签名校验的
-CentOS 7.9 归档源安装，RPM 清单与安装日志留存。构建容器退出后已移除。
+## R86：main 输入协调器保留未关闭的 owner
 
-三核心、完整源码快照、构建/目标日志和复跑辅助代码保存在
-`out/core-node-r86-20261008/`，完整字节清单见
-[核心节点记录](candidates/core-node-r86-20261008.json)。逐项核对来源、实际命令、
-suite 汇总、环境边界与全部保留文件摘要；辅助代码的参数、返回、写盘、错误及
-文件所有权注释已人工核对。完整 coding readiness 沿用同一产品源码的 R86 PASS，
-全仓结构为 **250 文件 / 5556 声明 / 0 缺项**，收尾另检查文档状态和 Git diff。
+基线为 `7a7a98a`。R85 已保留 adapter 的失败关闭 owner，但 main 的
+`new_model_setup_input.close_active` 在正常与时钟失效两个分支仍无条件清空
+active。旧 owner 未关闭时可启动替代终端；同模式还可能复用已完成 join 的端口。
+这会丢失重试入口，或在下次 poll/cancel/join 时触发状态错误。
 
-R81 缓存另恢复 Linux full notices，581396490 字节，SHA-256
-`64e2e68d17a745408d0c8bfbbd1e4d5ca4cf12a663344e8a3084d974971cb648`，
-与已提交 publication 回执一致；累计 13 件已核对输入。Linux full runtime 未完成，
-断点文件仅保留恢复进度，不接纳为工具输入。该恢复进程已停止，不留后台继续下载。
+修复在收尾开始时停止旧模式复用、清除原输入批次，只有 close 明确返回 true 才
+释放 active。保存已经成功的 join，重试只继续未完成的关闭；不重复 cancel/join。
+时钟失效时仍直接尝试 close，拒绝时保留 owner。activate 需要先确认原 owner 已
+关闭，再创建新输入代。既有取消、时钟和终态失败仍报告，不把成功回收当作此前
+操作没有失败，也不自动发布配置或重放输入。
 
-本节点只本地提交到 main，未推送或新建预发布。开发按 D-084 暂停；剩余 Review、
-工具来源审计、新核心九包及 C32/C33/C34 见 TRACKING。全仓语义 Review 仍为 partial，
-阶段为 implemented-unqualified，Gate R 关闭，release_authorized=false。
+四项新的公开配置 REPL 场景覆盖 cooked close 拒绝、close 异常、时钟失效后的
+raw close 拒绝，以及永久拒绝。独立 native double 记录真实 fixture owner 状态，
+在未关闭的旧 owner 上拒绝创建新 owner，并拒绝重复 native join。旧代码四项
+均失败；同一冻结 main/adapter 配合最终测试时，bootstrap 共 52 项、47 通过/
+5 失败，第五项来自现有未知恢复场景未发生新的清理重试。
+
+修复后 bootstrap/adapter/REPL 专项 **87/87**，正常和异常的关闭均在同 owner 上
+再次尝试成功，已完成 cancel/join 各一次；时钟失效路径不伪造 join，仍返回失败
+但实际清理重试通过。永久拒绝不开始替代输入代，返回失败且配置字节未变。
+现有 Model setup 的 unknown-restoration double 改为持续拒绝第三次及之后的
+恢复，并核对第四次真实重试；它不会在恢复仍未知时发出成功 close acknowledgment。
+秘密值不显示、配置不发布的验收保持。
+
+首次实现的多余 end 语法错误，以及首次故障计划对每个 cooked owner 都拒绝一次
+导致的夹具失败保留。计划现明确只选定第一个匹配 owner，final phase 由相同
+维护测试与冻结基线重跑，不把这些初次错误计入正式源码结果。
+
+完整 Lua suite **720/720**、coding readiness **PASS**，全仓注释结构
+**255 文件 / 5615 声明 / 0 缺项**。四校验器和全部 TP/RP 通过，完整检查由资源
+守卫串行执行。人工核对 active/mode/pending 的边界、两分支的保留/释放、join
+阶段缓存、activate 准入、未知恢复重试及所有新增/改动声明注释。
+本批是生产 CLI、main 协调器与 adapter 的 source/double 验证；没有新物理机或
+包运行结论。Cygwin PTY 失败/恢复和剩余交互/原生/辅助代码仍待继续 Review。
+
+三份维护输入及冻结 main/adapter/最终测试、失败/成功日志和完整验收在
+[R86 证据](native-review/R86.json) 绑定，原始记录位于
+`out/setup-input-owner-review-20261008/`。全仓语义 Review 仍为 partial；已发布
+R81 不含 R82--R86，最终三目标九包待统一重建，Gate R 保持关闭。
+
+## R87：Cygwin stty 子进程所有权与模式回滚
+
+基线为 `c95e9f2`。`yaca_stty` 在三秒等待失败后不核对 direct termination 与随后
+等待的结果，就关闭 child handle 并返回。独立有限子进程探针在两指定 Windows
+目标注入初始 timeout 和 TerminateProcess 拒绝，证实 helper 已返回 0 时子进程
+仍活着。probe 先记录，再救援结束并 join 该自有 child，不把救援当作产品成功。
+
+修复在执行 stty 前建立独立 kill-on-close job。child 以 suspended 方式创建，只有
+成功 assign 后才 resume；建立 job、设置限制、assign 或 resume 失败不执行 stty。
+沿用 native process port 的 parent-job 规则：只有父 job 允许 BREAKAWAY_OK 时才
+请求 breakaway，兼容 XP/Server 2008 的单 job 限制。收尾关闭独立 job，观察 child，
+对未完成或未 assign 的 suspended child 继续执行有界 termination/join，并关闭
+各自进程/线程/pipe/NUL/input duplicate handles。没有 shell、系统安装或新接口。
+API 行为依据微软 [TerminateProcess](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-terminateprocess)
+和 [Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)。
+
+| 指定环境 | 基线 lifetime cases / 活 child | 修复后 matrix cases / 失败 / 活 child |
+| --- | --- | --- |
+| Server 2008 non-R2 x64 / Win32 WOW64 | 2 / 1 | 6 / 0 / 0 |
+| Server 2025 Standard x64 / Win64 | 2 / 1 | 6 / 0 / 0 |
+
+六项包含正常 stdout、timeout/direct-termination 拒绝，以及 job creation、limit、
+assign、resume 拒绝。所有实际观察 child 都 join，句柄数保持初始化后的基线。
+首次普通 child 检查曾多一句柄；独立 warmup control 创建/关闭 NUL 没有增加，
+单独创建有限 child、等待并关闭其两个 handles 后，Win32 从 38 增至 39，Win64
+从 74 增至 79。其后生产 helper 前后相等，不按未知增量忽略句柄检查。
+初次计数失败与第一次因已有 guarded work 被拒绝的日志保留。
+
+实际 Server 2008 / Cygwin SSH PTY 另运行四组：raw、cooked、实际 mode apply 后
+注入非零退出报告的 rollback，以及 rollback 报告失败后的 active 保留/再次 restore。
+拒绝仅改变回报，实际 host stty 命令执行和前后 serialized mode 都独立比较。
+原 host 模式恢复一致，probe exit=0；session shell 的 EXIT trap 额外恢复其原模式。
+旧 SSH 的 TTY carrier 在共享/独立连接两次都返回 255，但完整输出和 probe 为 0。
+最终由唯一 nonce 的目标端 receipt 记录 probe status、前后 mode 和程序 SHA-256，
+通过独立非 TTY carrier（exit=0）取回并逐项核对。保留 255，结论基于该明确回执，
+不把 TTY transport 写作成功。
+
+完整人工通读 PTY name query、PATH/stty/Cygwin DLL lookup、process helper、mode
+snapshot validation、entry rollback 和 restore 所有权；纠正 query callback 第二/三
+参数的旧反向注释，补齐各函数真实副作用与失败语义。没有更改 pipe-name 识别策略。
+两 Windows 的 R80 startup/stream、R81 input、R82 lifetime、R83 raw/keyboard、
+R84 DLL lifetime/setup 控制回归通过；固定 API 宏仍为 0x0501/0x0601，严格 C99
+`-Wall -Wextra -Werror -O2`。两个 Windows builder 已纳入维护探针。
+
+开发宿主完整 suite **720/720**、coding readiness **PASS**，全仓注释结构
+**256 文件 / 5628 声明 / 0 缺项**；四校验器和全部 TP/RP 通过。所有构建、
+实机/PTY 和完整检查经资源守卫串行执行。已 Review 的是上述生产子面，不将
+单 API fault 覆盖扩大为任意组合 OS 故障、最低系统实测或最终包资格。
+
+24 个维护输入、10 个基线输入、实际程序/DLL、环境、receiver/live receipt、
+原始日志和完整检查绑定在 [R87 证据](native-review/R87.json)，26 个接收件摘要
+与本地一致。原始记录位于 `out/cygwin-pty-review-20261008/`。全仓语义 Review
+仍为 partial，剩余原生/交互内部及辅助代码继续核对。已发布 R81 不含 R82--R87，
+最终三目标九包待重建，Gate R 保持关闭。

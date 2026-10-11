@@ -2,18 +2,19 @@
 
 更新日期：2026-10-11。
 
-yaca 已有通用 Agent 实现，R81 九包已交付；本轮 R82--R86 三目标核心重建与
-各 713/713 完整 suite 已收口。负责人按
+yaca 已有通用 Agent 实现，远端 10 月 11 日预览版九包已发布；本地改动已与远端合并。
+合并源码完整 suite 730/730、coding readiness PASS；三核心和最终九包须重新构建。负责人按
 [D-085](DECISIONS.md#d-085-同步仓库并推进至可发布就绪2026-10-11) 恢复并推进至可发布就绪；
 阶段为 `implemented-unqualified`，Release Gate R 关闭。
 源码基线和验证结果统一见[当前状态](CURRENT-STATE.md)。
 
-新核心包含 R82--R86 的线程、输入 owner 及关闭状态修复；新核心九包、
-目标资格与全仓语义 Review 仍待完成。
+合并源码包含两边的资源所有权、响应身份、构建器及来源收口改动。
+新核心九包、目标资格与全仓语义 Review 仍待完成。
 执行事项和验收条件统一见[剩余工作](TRACKING.md)，复跑方法见
 [资格执行手册](QUALIFICATION-RUNBOOK.md)，证据见
 [10 月 6 日 Review](CODE-REVIEW-2026-10-06.md)。本轮续推见
 [10 月 8 日 Review](CODE-REVIEW-2026-10-08.md)。实机范围按 D-077。
+本地历史另见 [本地 Review](CODE-REVIEW-2026-10-08-LOCAL.md)，两边编号分别保留。
 本轮继续记录于 [10 月 11 日 Review](CODE-REVIEW-2026-10-11.md)。
 
 ## 从这里继续

@@ -49,26 +49,6 @@ Description: Portable narrow native ports for filesystem, process, terminal, sys
  */
 extern BOOLEAN WINAPI SystemFunction036(PVOID buffer, ULONG length);
 
-static const char yaca_worker_module_anchor = 0;
-
-/* Retain the DLL containing worker code before starting a thread that may outlive Lua.
- * @param module HMODULE* Receives one owned DLL reference, or NULL when this code belongs to the process executable.
- * @return int One after retention or executable detection; zero with the original OS error on lookup/retention failure.
- * @effect Looks up this module by a private data address and increments only DLL reference counts.
- * @ownership The calling Lua loader keeps the module live during lookup; the worker releases the acquired reference with FreeLibraryAndExitThread.
- */
-static int retain_windows_worker_module(HMODULE *module)
-{
-  HMODULE observed;
-  *module = NULL;
-  if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS
-      | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-      (LPCWSTR)&yaca_worker_module_anchor, &observed)) return 0;
-  if (observed == GetModuleHandleW(NULL)) return 1;
-  return GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
-    (LPCWSTR)&yaca_worker_module_anchor, module) != 0;
-}
-
 #else
 
 #include <fcntl.h>
@@ -136,14 +116,66 @@ typedef struct yaca_file
 } yaca_file;
 
 #if defined(_WIN32)
+/* Retain the DLL containing a worker entry while its current caller still keeps that code mapped.
+ * @param entry LPTHREAD_START_ROUTINE Fixed production worker entry whose module is being retained.
+ * @param module HMODULE* Receives one owned DLL reference, or NULL when the entry belongs to the process executable.
+ * @return int One after successful resolution/retention; zero with GetLastError preserved on API failure.
+ * @effect Queries by code address and increments only a DLL's loader reference count.
+ * @ownership The caller transfers this reference to the created worker, or releases it if thread creation fails.
+ */
+static int retain_windows_thread_module(LPTHREAD_START_ROUTINE entry, HMODULE *module)
+{
+  HMODULE current;
+  HMODULE executable;
+  /* @struct entry_address Flat Windows view of the fixed worker's code address for module lookup.
+   * @field routine LPTHREAD_START_ROUTINE Borrowed callback whose containing module is still held by this caller.
+   * @field address LPCWSTR Same address bits used only with GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS.
+   */
+  union { LPTHREAD_START_ROUTINE routine; LPCWSTR address; } entry_address;
+  *module = NULL;
+  entry_address.routine = entry;
+  if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS
+      | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, entry_address.address, &current))
+  {
+    return 0;
+  }
+  executable = GetModuleHandleW(NULL);
+  if (executable == NULL)
+  {
+    return 0;
+  }
+  if (current == executable)
+  {
+    return 1;
+  }
+  return GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+    entry_address.address, module) != 0;
+}
+
+/* Finish a worker without returning through DLL code that its final release could unmap.
+ * @param module HMODULE Owned worker DLL reference, or NULL for an entry compiled into the executable.
+ * @param outcome DWORD Final worker exit code.
+ * @return DWORD outcome for an executable entry; a DLL worker terminates here without returning.
+ * @effect Releases a non-NULL module and exits the current thread atomically through Windows.
+ * @ownership Consumes the DLL reference after all worker record accesses and releases are complete.
+ */
+static DWORD finish_windows_thread_module(HMODULE module, DWORD outcome)
+{
+  if (module != NULL)
+  {
+    FreeLibraryAndExitThread(module, outcome);
+  }
+  return outcome;
+}
+
 /* @struct yaca_process_input Reference-counted asynchronous stdin writer for a Windows process.
- * @field pipe HANDLE Pipe handle used for child communication.
- * @field thread HANDLE Worker thread handle owned by this state.
- * @field bytes char* Owned byte buffer awaiting transfer.
- * @field length size_t Valid byte or character length in the buffer.
- * @field error_value DWORD Operating-system error captured by the worker.
- * @field references volatile_LONG Outstanding process and worker references to the asynchronous input block.
- * @field module HMODULE DLL reference exclusively owned by the worker until thread exit; NULL for executable-local code.
+ * @field pipe HANDLE Write end owned and closed by the successfully started worker.
+ * @field thread HANDLE Worker handle owned and closed by the process owner.
+ * @field bytes char* Copied stdin bytes freed with this record after its final reference.
+ * @field length size_t Exact copied byte count the worker attempts to write.
+ * @field error_value DWORD Write failure published before worker completion, or zero for normal/peer-closed input.
+ * @field references volatile_LONG Process-owner and worker references released atomically.
+ * @field module HMODULE Code reference owned only by the worker; NULL for executable-linked entry code.
  */
 typedef struct yaca_process_input
 {
@@ -156,11 +188,10 @@ typedef struct yaca_process_input
   HMODULE module;
 } yaca_process_input;
 
-/* Release one process or worker reference to independently retained stdin storage.
- * @param input yaca_process_input* Live input record whose caller owns one outstanding reference.
- * @return void No value; the record remains live only while another reference is held.
- * @effect Atomically releases the reference and frees its byte buffer and record at zero.
- * @ownership The worker separately closes its pipe and releases its DLL reference; this helper does neither.
+/* Release one process-input reference after its caller's final record access.
+ * @param input yaca_process_input* Shared record for which this caller holds exactly one reference.
+ * @return void No value; the final release frees its copied bytes and record.
+ * @ownership Consumes this reference; pipe closure and the worker's separate module release belong to the worker.
  */
 static void release_process_input(yaca_process_input *input)
 {
@@ -261,15 +292,15 @@ static void reap_abandoned_supervisors(void)
 #endif
 
 #if defined(_WIN32)
-/* @struct yaca_terminal_read Independently retained Windows console worker and buffered input.
- * @field input HANDLE Borrowed console input; the worker does not close the host handle.
- * @field thread HANDLE Worker handle owned and closed by the terminal, including emergency detach.
- * @field wide WCHAR* Owned wide-character input buffer.
- * @field capacity DWORD Allocated element capacity of the buffer or vector.
- * @field received volatile_DWORD Code units copied before the worker completes.
- * @field error_value volatile_DWORD ReadConsoleW or invalid-count error consumed after worker completion.
- * @field references volatile_LONG Terminal and worker references; final release frees the record and wide buffer.
- * @field module HMODULE DLL reference exclusively owned by the reader until thread exit; NULL for executable-local code.
+/* @struct yaca_terminal_read Shared heap state retained independently by the terminal and its console reader.
+ * @field input HANDLE Borrowed console input; the worker does not close it.
+ * @field thread HANDLE Worker handle closed when the terminal releases its reference, even on emergency detach.
+ * @field wide WCHAR* Input buffer freed with the record after the final reference is released.
+ * @field capacity DWORD Maximum wide-character count the worker can fill.
+ * @field received volatile_DWORD Character count published before worker completion.
+ * @field error_value volatile_DWORD Console read error published before worker completion.
+ * @field references volatile_LONG Terminal and worker references; initialized before thread creation and released atomically.
+ * @field module HMODULE DLL reference owned only by the worker until atomic thread exit; NULL for executable-linked code.
  */
 typedef struct yaca_terminal_read
 {
@@ -283,11 +314,10 @@ typedef struct yaca_terminal_read
   HMODULE module;
 } yaca_terminal_read;
 
-/* Release one terminal or worker reference without requiring a live Lua owner.
- * @param read yaca_terminal_read* Independently allocated record with one reference owned by the caller.
- * @return void No value; the record remains valid only while another reference is held.
- * @effect Atomically releases the reference and frees the wide buffer and record at zero.
- * @ownership The terminal closes the thread handle separately; this helper never accesses Lua userdata.
+/* Release one console-reader reference without accessing its terminal or Lua state.
+ * @param read yaca_terminal_read* Heap record for which the caller owns exactly one reference.
+ * @return void No value; the final release frees the wide buffer and record.
+ * @ownership Consumes the caller's reference; the terminal separately closes its owned thread handle.
  */
 static void release_windows_cooked_read(yaca_terminal_read *read)
 {
@@ -304,6 +334,7 @@ static void release_windows_cooked_read(yaca_terminal_read *read)
  * @field original_mode DWORD|termios Host terminal mode captured before this session changes it.
  * @field input_type DWORD Windows handle type used to select console or pipe input.
  * @field pending_high_surrogate WCHAR First UTF-16 code unit awaiting its matching low surrogate.
+ * @field pending_high_repeat_count WORD Repetition count retained with the high surrogate; a low surrogate must have the same count.
  * @field cooked_mode int Whether Windows console line editing is currently enabled.
  * @field cooked_read yaca_terminal_read* Active asynchronous Windows console read, if any.
  * @field pty yaca_pty_state Cygwin PTY mode and restoration state.
@@ -324,6 +355,7 @@ typedef struct yaca_terminal
   DWORD original_mode;
   DWORD input_type;
   WCHAR pending_high_surrogate;
+  WORD pending_high_repeat_count;
   int cooked_mode;
   yaca_terminal_read *cooked_read;
   yaca_pty_state pty;
@@ -8859,7 +8891,8 @@ cleanup:
 
 /* Reads the host monotonic clock in milliseconds.
  * @param none No arguments.
- * @return lua_Integer result Byte count, offset, or numeric value for native monotonic milliseconds.
+ * @return lua_Integer Nonnegative representable milliseconds from QPC/CLOCK_MONOTONIC; minus one for unavailable/invalid/overflowing observations.
+ * @effect Reads only the native monotonic source; does not substitute wall-clock time or change domain state.
  */
 static lua_Integer native_monotonic_milliseconds(void)
 {
@@ -9574,11 +9607,11 @@ static int write_windows_pipe(HANDLE handle, const char *bytes, size_t length)
   return 1;
 }
 
-/* Write independently retained stdin bytes, release their owner, then end the worker safely outside an unloadable DLL.
- * @param opaque LPVOID Input record carrying the worker's storage and optional DLL references.
- * @return DWORD Zero thread exit status for executable-local code; the DLL path terminates with zero status without returning.
- * @effect Writes the bounded pipe payload, records IO failure, closes the pipe and releases its input reference.
- * @ownership Saves the worker-owned DLL reference before the input can be freed, then releases it through FreeLibraryAndExitThread.
+/* Write retained child stdin bytes and release storage plus code ownership independently of Lua.
+ * @param opaque LPVOID Shared process-input record retaining this worker's reference and optional DLL reference.
+ * @return DWORD Zero for executable-linked code; a DLL worker exits atomically after publishing any write failure.
+ * @effect Writes the copied bytes, records non-peer write errors and closes the worker-owned pipe.
+ * @ownership Releases its record reference after its final access, then consumes the saved module reference without returning through an unloaded DLL.
  */
 static DWORD WINAPI write_process_input(LPVOID opaque)
 {
@@ -9588,17 +9621,16 @@ static DWORD WINAPI write_process_input(LPVOID opaque)
     input->error_value = GetLastError();
   CloseHandle(input->pipe);
   release_process_input(input);
-  if (module != NULL) FreeLibraryAndExitThread(module, 0U);
-  return 0;
+  return finish_windows_thread_module(module, 0U);
 }
 
 /* Starts a worker that writes bounded stdin bytes to the child.
- * @param pipe HANDLE Interprocess communication pipe or its handle.
- * @param bytes const_char* Raw byte buffer supplied to the native operation.
- * @param length size_t Byte or wide-character length of the supplied buffer.
- * @return yaca_process_input*|NULL result New owner shared with its worker, or NULL with the setup OS error.
- * @effect Copies the payload, retains DLL code if needed and starts the worker; all partial storage/module acquisition is released on failure.
- * @ownership Success transfers pipe ownership to the worker; failure leaves the caller's pipe owned by the caller.
+ * @param pipe HANDLE Caller-owned write end transferred to the worker only after successful thread creation.
+ * @param bytes const_char* Borrowed bounded input copied before the worker starts.
+ * @param length size_t Positive input byte count supplied by validated process startup.
+ * @return yaca_process_input* Shared process/worker record on success; NULL after full setup cleanup with GetLastError set.
+ * @effect Allocates copied input, retains worker DLL code when needed and starts one writing thread.
+ * @ownership The process owns the returned thread handle/reference; the worker owns the pipe/reference/module. Failure leaves pipe ownership with the caller.
  */
 static yaca_process_input *start_process_input(HANDLE pipe, const char *bytes, size_t length)
 {
@@ -9611,10 +9643,12 @@ static yaca_process_input *start_process_input(HANDLE pipe, const char *bytes, s
   input->pipe = pipe;
   input->length = length;
   input->references = 2; /* process owner + writer thread */
-  if (!retain_windows_worker_module(&input->module))
+  if (!retain_windows_thread_module(write_process_input, &input->module))
   {
     DWORD error_value = GetLastError();
-    free(input->bytes); free(input); SetLastError(error_value);
+    free(input->bytes);
+    free(input);
+    SetLastError(error_value);
     return NULL;
   }
   input->thread = CreateThread(NULL, 0, write_process_input, input, 0, NULL);
@@ -11478,13 +11512,13 @@ static yaca_terminal *check_terminal(lua_State *L, int index)
 #if defined(_WIN32)
 /* Declares cancellation of the active Windows cooked-line reader.
  * @param terminal yaca_terminal* Terminal owner whose reader is cancelled.
- * @return int cancelled Whether a cancellation request was accepted.
+ * @return int One when no reader remains after join; zero on failure with ownership retained.
  */
 static int cancel_windows_cooked_read(yaca_terminal *terminal);
-/* Declare release of the terminal's reader ownership, including an active detached worker.
- * @param terminal yaca_terminal* Owner whose cooked_read pointer and thread handle are released.
- * @return void No value; a still-running worker retains its independent storage reference.
- * @effect Clears the owner pointer, closes the worker handle, and releases the terminal reference.
+/* Declares release of the terminal's independent cooked-reader ownership.
+ * @param terminal yaca_terminal* Owner detaching its active or completed reader.
+ * @return void No value; closes the terminal-owned thread handle and releases its reference.
+ * @ownership A running worker retains its own reference until it finishes without using Lua.
  */
 static void free_windows_cooked_read(yaca_terminal *terminal);
 #endif
@@ -11522,11 +11556,11 @@ static int restore_terminal(yaca_terminal *terminal)
   return 1;
 }
 
-/* Finalize a terminal, retaining any uncancellable worker independently of collected userdata.
- * @param L lua_State* Argument 1 is the terminal userdata being collected.
- * @return int Zero Lua results; restoration failures are not raised from this finalizer.
- * @effect Attempts cancellation and restoration, releases reader ownership, and marks the terminal closed.
- * @ownership A detached worker frees its own record after ReadConsoleW eventually finishes.
+/* Finalize terminal ownership and attempt restoration without projecting Lua results.
+ * @param L lua_State* Argument one may be a terminal userdata awaiting finalization.
+ * @return int Zero Lua results, including when emergency cancellation or restoration fails.
+ * @effect Attempts cooked-reader cancellation and restores the captured terminal settings.
+ * @ownership Failed emergency cancellation releases the terminal reference; the active worker owns its remaining heap lifetime.
  */
 static int l_terminal_gc(lua_State *L)
 {
@@ -11538,8 +11572,6 @@ static int l_terminal_gc(lua_State *L)
 #if defined(_WIN32)
     if (!cancel_windows_cooked_read(terminal))
     {
-      /* Drop the terminal reference and handle while the worker keeps its
-      ** independent record alive until the outstanding read finishes. */
       free_windows_cooked_read(terminal);
     }
 #endif
@@ -11613,10 +11645,11 @@ static void push_terminal_fact(lua_State *L, yaca_terminal *terminal)
 
 #if defined(_WIN32)
 
-/* Encodes one Unicode scalar into its UTF-8 byte sequence.
- * @param codepoint unsigned_long The codepoint bound to encode utf8 codepoint.
- * @param output char_[4] Caller-provided output buffer or result destination.
- * @return size_t result Byte count, offset, or numeric value for encode utf8 codepoint.
+/* Encode one admitted Unicode scalar without allocating or retaining its destination.
+ * @param codepoint unsigned_long Scalar already validated by the strict Windows key decoder.
+ * @param output char[4] Borrowed destination with capacity for the longest UTF-8 scalar.
+ * @return size_t Exact encoded byte count, from one through four.
+ * @effect Writes only the encoded prefix of output.
  */
 static size_t encode_utf8_codepoint(unsigned long codepoint, char output[4])
 {
@@ -11645,11 +11678,14 @@ static size_t encode_utf8_codepoint(unsigned long codepoint, char output[4])
   return 4;
 }
 
-/* Pushes windows key action fields onto the Lua stack.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @param terminal yaca_terminal* Terminal owner whose input and mode state are managed.
- * @param key const_KEY_EVENT_RECORD* Selected metadata or table key.
- * @return int result 1 when an action was pushed, 0 when no action was emitted, -1 on invalid input.
+/* Project a console key record with exact bounded text repetition and strict UTF-16 pairing.
+ * @param L lua_State* State receiving exactly one action when projection succeeds.
+ * @param terminal yaca_terminal* Owner retaining a partial surrogate and its repetition count across polls.
+ * @param key const_KEY_EVENT_RECORD* Borrowed OS key record; zero repeat metadata keeps the single-key fallback.
+ * @return int One for an action, zero for key-up/modifier/partial input, minus one for invalid UTF-16, minus two for a byte limit.
+ * @error Lua allocation may raise; consumed key records are not replayed and temporary bytes remain Lua-owned.
+ * @effect Updates partial-surrogate state; Enter/Esc remain one command per record with existing modifier precedence.
+ * @ownership Repeated UTF-8 storage belongs to a Lua buffer/string until the action owns its copied text.
  */
 static int push_windows_key_action(
   lua_State *L,
@@ -11661,6 +11697,11 @@ static int push_windows_key_action(
   unsigned long codepoint;
   char bytes[4];
   size_t length;
+  WORD repeats;
+  size_t total;
+  size_t index;
+  char *repeated;
+  luaL_Buffer input;
 
   if (!key->bKeyDown)
   {
@@ -11697,45 +11738,66 @@ static int push_windows_key_action(
   {
     return 0;
   }
+  repeats = key->wRepeatCount == 0U ? 1U : key->wRepeatCount;
   if (character >= 0xD800U && character <= 0xDBFFU)
   {
+    if (terminal->pending_high_surrogate != 0)
+    {
+      terminal->pending_high_surrogate = 0;
+      terminal->pending_high_repeat_count = 0;
+      return -1;
+    }
     terminal->pending_high_surrogate = character;
+    terminal->pending_high_repeat_count = repeats;
     return 0;
   }
   if (character >= 0xDC00U && character <= 0xDFFFU)
   {
-    if (terminal->pending_high_surrogate == 0)
+    if (terminal->pending_high_surrogate == 0
+        || terminal->pending_high_repeat_count != repeats)
     {
+      terminal->pending_high_surrogate = 0;
+      terminal->pending_high_repeat_count = 0;
       return -1;
     }
     codepoint = 0x10000UL
       + (((unsigned long)terminal->pending_high_surrogate - 0xD800UL) << 10)
       + ((unsigned long)character - 0xDC00UL);
     terminal->pending_high_surrogate = 0;
+    terminal->pending_high_repeat_count = 0;
   }
   else
   {
     if (terminal->pending_high_surrogate != 0)
     {
       terminal->pending_high_surrogate = 0;
+      terminal->pending_high_repeat_count = 0;
       return -1;
     }
     codepoint = (unsigned long)character;
   }
   length = encode_utf8_codepoint(codepoint, bytes);
-  if (length > terminal->maximum_input_bytes)
+  if ((size_t)repeats > terminal->maximum_input_bytes / length)
   {
-    return -1;
+    return -2;
   }
-  push_terminal_action(L, "text", bytes, length);
+  total = length * (size_t)repeats;
+  repeated = luaL_buffinitsize(L, &input, total);
+  for (index = 0U; index < (size_t)repeats; ++index)
+  {
+    memcpy(repeated + index * length, bytes, length);
+  }
+  luaL_pushresultsize(&input, total);
+  push_terminal_action(L, "text", lua_tostring(L, -1), total);
+  lua_remove(L, -2);
   return 1;
 }
 
-/* Read one cooked line into independently retained storage, then release the worker reference.
- * @param opaque LPVOID Heap reader record whose worker reference was established before CreateThread.
- * @return DWORD Zero thread exit status for executable-local code; the DLL path terminates with zero status without returning.
- * @effect Calls bounded-size ReadConsoleW operations and releases storage if the terminal already detached.
- * @ownership Does not access Lua or the terminal userdata; saves and releases its DLL reference after storage cleanup with FreeLibraryAndExitThread.
+/* Reads one cooked Windows console line in a worker thread.
+ * @param opaque LPVOID Shared heap reader retaining this worker's independent reference.
+ * @return DWORD Zero for executable-linked code; a DLL worker exits atomically after publishing its character count and OS error.
+ * @effect Blocks in bounded-size console reads until a line, EOF, read error or buffer limit.
+ * @ownership Releases the worker record reference, then its saved module reference; never accesses Lua terminal/state or closes borrowed input.
  */
 static DWORD WINAPI windows_cooked_reader(LPVOID opaque)
 {
@@ -11778,8 +11840,7 @@ static DWORD WINAPI windows_cooked_reader(LPVOID opaque)
   }
   read->received = offset;
   release_windows_cooked_read(read);
-  if (module != NULL) FreeLibraryAndExitThread(module, 0U);
-  return 0;
+  return finish_windows_thread_module(module, 0U);
 }
 
 /*
@@ -11787,11 +11848,11 @@ static DWORD WINAPI windows_cooked_reader(LPVOID opaque)
 ** preserves the host console's live XP-era echo, backspace, cursor, and IME
 ** behavior without blocking the Agent event loop while a draft is unfinished.
 */
-/* Start a cooked reader with separate terminal and worker references established before launch.
- * @param terminal yaca_terminal* Live owner with borrowed console input and an input byte bound.
- * @return int One when a reader already exists or starts successfully; zero with an OS error on setup failure.
- * @effect Allocates bounded reader storage, retains DLL code and starts a ReadConsoleW worker; partial setup is released.
- * @ownership The terminal owns the thread handle and one storage reference; the worker owns the other and the optional DLL reference.
+/* Starts an asynchronous cooked Windows console read.
+ * @param terminal yaca_terminal* Owner retaining its current reader or receiving a new independent heap record.
+ * @return int One for an existing or newly started reader; zero after complete setup cleanup, with GetLastError set.
+ * @effect Allocates a bounded wide buffer, retains worker DLL code when needed and starts one console-reading thread.
+ * @ownership Publishes both record references before starting; the terminal owns the thread handle, the worker owns its independent record/module references.
  */
 static int start_windows_cooked_read(yaca_terminal *terminal)
 {
@@ -11830,7 +11891,7 @@ static int start_windows_cooked_read(yaca_terminal *terminal)
   read->input = terminal->input;
   read->capacity = (DWORD)capacity;
   read->references = 2;
-  if (!retain_windows_worker_module(&read->module))
+  if (!retain_windows_thread_module(windows_cooked_reader, &read->module))
   {
     error_value = GetLastError();
     free(read->wide);
@@ -11858,11 +11919,10 @@ static int start_windows_cooked_read(yaca_terminal *terminal)
   return 1;
 }
 
-/* Release the terminal reference and handle for a completed or emergency-detached reader.
- * @param terminal yaca_terminal* Owner whose cooked_read pointer is cleared, or whose reader is already absent.
- * @return void No value; an absent reader requires no work.
- * @effect Closes the terminal-owned thread handle and atomically releases its storage reference.
- * @ownership A running worker keeps its buffer and record until its own final release.
+/* Detach the terminal's cooked reader after join or failed emergency cancellation.
+ * @param terminal yaca_terminal* Owner whose current reader may be running, completed or absent.
+ * @return void No value; clears cooked_read, closes the owned thread handle and releases the terminal reference.
+ * @ownership The worker retains independent access to its buffer until its own final release; this does not terminate it.
  */
 static void free_windows_cooked_read(yaca_terminal *terminal)
 {
@@ -12180,7 +12240,10 @@ static int l_terminal_start(lua_State *L)
       {
         next_mode = terminal->original_mode;
         next_mode.c_lflag &= (tcflag_t)~(ICANON | ECHO);
-        next_mode.c_cc[VMIN] = 0;
+        /* O_NONBLOCK provides asynchronous polling. Requiring one character
+        ** keeps an empty Linux raw TTY at EAGAIN instead of polling-mode zero,
+        ** which the input port correctly reserves for actual EOF. */
+        next_mode.c_cc[VMIN] = 1;
         next_mode.c_cc[VTIME] = 0;
         if (tcsetattr(terminal->input, TCSANOW, &next_mode) != 0
             )
@@ -12335,6 +12398,11 @@ static int l_terminal_poll(lua_State *L)
           continue;
         }
         action_result = push_windows_key_action(L, terminal, &record.Event.KeyEvent);
+        if (action_result == -2)
+        {
+          lua_pop(L, 1);
+          return push_failure(L, "Limit", "terminal key text exceeds its byte limit");
+        }
         if (action_result < 0)
         {
           lua_pop(L, 1);
@@ -12588,20 +12656,21 @@ static const uint32_t yaca_sha256_constants[64] = {
   UINT32_C(0xc67178f2),
 };
 
-/* Rotates one SHA-256 word by the requested bit count.
- * @param value uint32_t Candidate value being converted or checked.
- * @param count unsigned_int Number of values to inspect or emit.
- * @return uint32_t result Input word rotated right by the requested bit count.
+/* Rotate one SHA-256 word using a fixed algorithm rotation strictly between zero and 32.
+ * @param value uint32_t Word supplied by the compression schedule or round state.
+ * @param count unsigned_int Valid fixed rotation count from one through 31; callers enforce this precondition.
+ * @return uint32_t The rotated 32-bit word.
  */
 static uint32_t sha256_rotate_right(uint32_t value, unsigned int count)
 {
   return (value >> count) | (value << (32U - count));
 }
 
-/* Overwrites secret-bearing memory before release.
- * @param memory void* The memory bound to secure zero.
- * @param length size_t Byte or wide-character length of the supplied buffer.
- * @return void result Overwrites the supplied secret-bearing memory before it is released.
+/* Overwrite a borrowed byte range through volatile stores without releasing its ownership.
+ * @param memory void* Writable range; NULL is allowed only when length is zero.
+ * @param length size_t Exact byte count to overwrite, including structure padding when supplied by a caller.
+ * @return void No value; does not allocate or call Lua.
+ * @effect Writes zeros to every selected byte before the caller reuses/releases that range.
  */
 static void secure_zero(void *memory, size_t length)
 {
@@ -12615,15 +12684,32 @@ static void secure_zero(void *memory, size_t length)
   }
 }
 
-/* Implements the Lua secure random native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Copy a caller-retained native byte range into one Lua string inside a protected call.
+ * @param L lua_State* Arguments are a private lightuserdata byte pointer and a caller-validated positive byte count.
+ * @return int One exact byte string; no normal return on Lua allocation failure.
+ * @error Lua string allocation may raise to the protected caller, which owns and wipes the borrowed source.
+ * @ownership Borrows the byte range only during this synchronous call; the returned string owns its independent copy.
+ */
+static int push_native_bytes(lua_State *L)
+{
+  const char *bytes = (const char *)lua_touserdata(L, 1);
+  size_t length = (size_t)lua_tointeger(L, 2);
+  lua_pushlstring(L, bytes, length);
+  return 1;
+}
+
+/* Read bounded OS entropy and wipe native temporary storage even when Lua result allocation fails.
+ * @param L lua_State* Argument one is an integer byte count from one through 64.
+ * @return int One exact random byte string after successful acquisition and result allocation.
+ * @error Raises for invalid count, unavailable/read/close failure or Lua allocation; native bytes are wiped after any completed entropy attempt.
+ * @effect Reads Advapi32 entropy or an owned /dev/urandom descriptor; no deterministic fallback is used.
  */
 static int l_secure_random(lua_State *L)
 {
   lua_Integer requested;
   unsigned char bytes[64];
   size_t length;
+  int status;
 
   requested = luaL_checkinteger(L, 1);
   if (requested < 1 || requested > (lua_Integer)sizeof(bytes))
@@ -12631,6 +12717,10 @@ static int l_secure_random(lua_State *L)
     return luaL_error(L, "secure random byte count must be from 1 through 64");
   }
   length = (size_t)requested;
+  luaL_checkstack(L, 3, "secure random result");
+  lua_pushcfunction(L, push_native_bytes);
+  lua_pushlightuserdata(L, bytes);
+  lua_pushinteger(L, (lua_Integer)length);
 #if defined(_WIN32)
   if (!SystemFunction036(bytes, (ULONG)length))
   {
@@ -12678,15 +12768,17 @@ static int l_secure_random(lua_State *L)
     }
   }
 #endif
-  lua_pushlstring(L, (const char *)bytes, length);
+  status = lua_pcall(L, 2, 1, 0);
   secure_zero(bytes, sizeof(bytes));
+  if (status != LUA_OK) return lua_error(L);
   return 1;
 }
 
-/* Compresses one complete SHA-256 block into the hash state.
- * @param context yaca_sha256* Incremental hash or process context being updated.
- * @param block const_unsigned_char_[64] The block bound to sha256 transform.
- * @return void result Compresses one complete 64-byte block into the SHA-256 chaining state.
+/* Compress one complete block into the caller's SHA-256 chaining words.
+ * @param context yaca_sha256* Initialized hash state receiving the compression result.
+ * @param block const_unsigned_char[64] Borrowed complete block read without modifying it.
+ * @return void No value; clears its temporary message schedule before returning.
+ * @effect Adds the completed round state into context->state; no byte-count or closed flag is changed here.
  */
 static void sha256_transform(yaca_sha256 *context, const unsigned char block[64])
 {
@@ -12772,9 +12864,9 @@ static void sha256_transform(yaca_sha256 *context, const unsigned char block[64]
   secure_zero(words, sizeof(words));
 }
 
-/* Initializes a new SHA-256 hash state.
- * @param context yaca_sha256* Incremental hash or process context being updated.
- * @return void result Initializes SHA-256 chaining words and clears the partial-block count.
+/* Initialize a fresh hash state using the fixed SHA-256 initial chaining words.
+ * @param context yaca_sha256* Caller-owned storage overwritten in full, including counts/buffer/closed state.
+ * @return void No value; the initialized context is open with an empty partial block.
  */
 static void sha256_initialize(yaca_sha256 *context)
 {
@@ -12789,11 +12881,12 @@ static void sha256_initialize(yaca_sha256 *context)
   context->state[7] = UINT32_C(0x5be0cd19);
 }
 
-/* Absorbs bounded bytes into an open SHA-256 state.
- * @param context yaca_sha256* Incremental hash or process context being updated.
- * @param bytes const_unsigned_char* Raw byte buffer supplied to the native operation.
- * @param length size_t Byte or wide-character length of the supplied buffer.
- * @return int result 1 after absorbing all bytes; 0 if the hash is closed or length overflows.
+/* Absorb an admitted byte range without overflowing SHA-256's 64-bit bit-length encoding.
+ * @param context yaca_sha256* Initialized open context; the caller checks its lifecycle before invoking this helper.
+ * @param bytes const_unsigned_char* Borrowed input range, allowed to be empty when length is zero.
+ * @param length size_t Exact input byte count.
+ * @return int One after all bytes are absorbed; zero for algorithm-length overflow before any mutation.
+ * @effect Advances byte_count, chaining words and bounded partial-block storage only on admitted length.
  */
 static int sha256_append(
   yaca_sha256 *context,
@@ -12832,10 +12925,11 @@ static int sha256_append(
   return 1;
 }
 
-/* Pads the last block and writes a complete SHA-256 digest.
- * @param context yaca_sha256* Incremental hash or process context being updated.
- * @param digest unsigned_char_[32] SHA-256 digest bytes used for comparison or formatting.
- * @return void result Writes the final 32-byte digest and marks the hash state closed.
+/* Finalize a caller-owned hash copy without deciding the original owner's lifecycle.
+ * @param context yaca_sha256* Initialized copy mutated by padding and final compression.
+ * @param digest unsigned_char[32] Caller-owned output receiving the exact big-endian digest.
+ * @return void No value; does not set closed or wipe the supplied context.
+ * @effect Mutates only this copy and writes the digest; the caller owns subsequent zeroization.
  */
 static void sha256_finalize(yaca_sha256 *context, unsigned char digest[32])
 {
@@ -12868,18 +12962,21 @@ static void sha256_finalize(yaca_sha256 *context, unsigned char digest[32])
   }
 }
 
-/* Validates and borrows an open Lua SHA-256 userdata.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return yaca_sha256* result Borrowed live SHA-256 userdata; raises a Lua error for wrong or closed handles.
+/* Validate the SHA-256 userdata type without assuming whether it is open or closed.
+ * @param L lua_State* Argument one is the candidate hash owner.
+ * @return yaca_sha256* Borrowed typed userdata; operation-specific callers separately check closed.
+ * @error Raises for a wrong userdata type.
  */
 static yaca_sha256 *check_sha256(lua_State *L)
 {
   return (yaca_sha256 *)luaL_checkudata(L, 1, YACA_SHA256_METATABLE);
 }
 
-/* Implements the Lua sha256 gc native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Wipe and close a collected or explicitly finalized SHA-256 owner.
+ * @param L lua_State* Argument one is the exact native SHA-256 userdata.
+ * @return int Zero Lua results after idempotent zeroization.
+ * @effect Clears all state/buffer/padding bytes, then sets closed.
+ * @error Raises for an incorrect finalizer argument type.
  */
 static int l_sha256_gc(lua_State *L)
 {
@@ -12891,9 +12988,10 @@ static int l_sha256_gc(lua_State *L)
   return 0;
 }
 
-/* Implements the Lua sha256 start native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Allocate a fresh Lua-owned incremental hash with the registered native finalizer.
+ * @param L lua_State* State receiving the new userdata; no arguments are inspected.
+ * @return int One initialized open SHA-256 owner.
+ * @error Lua allocation/metatable lookup may raise before any native OS resource is acquired.
  */
 static int l_sha256_start(lua_State *L)
 {
@@ -12907,9 +13005,11 @@ static int l_sha256_start(lua_State *L)
   return 1;
 }
 
-/* Implements the Lua sha256 update native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Update one open hash with the exact supplied byte string.
+ * @param L lua_State* Argument one is the hash owner; argument two is the input byte string.
+ * @return int One true acknowledgment after admitted input is absorbed.
+ * @error Raises for bad arguments, a closed context or algorithm-length overflow; rejected overflow leaves hash state unchanged.
+ * @effect Mutates only the owned incremental hash on valid input.
  */
 static int l_sha256_update(lua_State *L)
 {
@@ -12931,34 +13031,44 @@ static int l_sha256_update(lua_State *L)
   return 1;
 }
 
-/* Implements the Lua sha256 finish native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Publish a digest before consuming the original hash, retaining retryability through Lua allocation failure.
+ * @param L lua_State* Argument one is an open native SHA-256 owner.
+ * @return int One exact 32-byte digest; the owner is wiped/closed only after its Lua string exists.
+ * @error Raises for wrong/closed arguments or Lua allocation; failed result allocation keeps the original state open.
+ * @effect Wipes the temporary digest/copy on both protected-call outcomes and wipes the owner after successful publication.
  */
 static int l_sha256_finish(lua_State *L)
 {
   yaca_sha256 *context;
   yaca_sha256 copy;
   unsigned char digest[32];
+  int status;
 
   context = check_sha256(L);
   if (context->closed)
   {
     return luaL_error(L, "SHA-256 context is closed");
   }
+  luaL_checkstack(L, 3, "SHA-256 result");
+  lua_pushcfunction(L, push_native_bytes);
+  lua_pushlightuserdata(L, digest);
+  lua_pushinteger(L, sizeof(digest));
   copy = *context;
   sha256_finalize(&copy, digest);
-  secure_zero(context, sizeof(*context));
-  context->closed = 1;
-  lua_pushlstring(L, (const char *)digest, sizeof(digest));
+  status = lua_pcall(L, 2, 1, 0);
   secure_zero(digest, sizeof(digest));
   secure_zero(&copy, sizeof(copy));
+  if (status != LUA_OK) return lua_error(L);
+  secure_zero(context, sizeof(*context));
+  context->closed = 1;
   return 1;
 }
 
-/* Implements the Lua sha256 close native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Idempotently discard an incremental hash without publishing a digest.
+ * @param L lua_State* Argument one is a typed open or already-closed hash owner.
+ * @return int One true acknowledgment after the owner is closed.
+ * @error Raises only for a wrong userdata argument type.
+ * @effect Wipes all open state before setting closed; an already-closed owner is left unchanged.
  */
 static int l_sha256_close(lua_State *L)
 {
@@ -12976,9 +13086,10 @@ static int l_sha256_close(lua_State *L)
 
 #include "yaca_text.h"
 
-/* Implements the Lua abi version native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Publish the fixed native interface identifier used by runtime admission.
+ * @param L lua_State* State receiving one literal; no caller arguments are inspected.
+ * @return int One exact YACA_ABI_VERSION string.
+ * @error Lua string/stack allocation may raise; no native resource is acquired.
  */
 static int l_abi_version(lua_State *L)
 {
@@ -12986,9 +13097,10 @@ static int l_abi_version(lua_State *L)
   return 1;
 }
 
-/* Implements the Lua platform identity native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Project the compiled OS/architecture without claiming an actual minimum-system qualification.
+ * @param L lua_State* State receiving a fresh identity table; no arguments are inspected.
+ * @return int One table containing only os and arch; unsupported compile-time architectures report unknown.
+ * @error Lua allocation may raise before any native resource acquisition.
  */
 static int l_platform_identity(lua_State *L)
 {
@@ -13015,9 +13127,10 @@ static int l_platform_identity(lua_State *L)
   return 1;
 }
 
-/* Implements the Lua monotonic now native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Read the native monotonic millisecond source used by bounded coordinators.
+ * @param L lua_State* State receiving one timestamp; no caller arguments are inspected.
+ * @return int One nonnegative Lua integer after a valid source observation.
+ * @error Raises when the source fails or cannot be represented; no wall-clock fallback is used.
  */
 static int l_monotonic_now(lua_State *L)
 {
@@ -13040,9 +13153,11 @@ static int l_monotonic_now(lua_State *L)
 ** XP-compatible Sleep API; POSIX retries nanosleep only after EINTR.
 ** No domain state or deadline decision is owned by this primitive.
 */
-/* Implements the Lua sleep ms native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Request a bounded OS idle interval without taking ownership of a domain deadline.
+ * @param L lua_State* Argument one is an integer interval from zero through 60000 milliseconds.
+ * @return int One true acknowledgment after the OS wait completes.
+ * @error Raises for invalid arguments or non-EINTR POSIX sleep failure.
+ * @effect Sleeps the calling thread; POSIX EINTR retries only the reported remaining interval.
  */
 static int l_sleep_ms(lua_State *L)
 {
@@ -13076,9 +13191,10 @@ static int l_sleep_ms(lua_State *L)
   return 1;
 }
 
-/* Implements the Lua current process id native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Publish this process's positive native identity without creating a process handle.
+ * @param L lua_State* State receiving one identity; no caller arguments are inspected.
+ * @return int One positive Lua integer from GetCurrentProcessId/getpid.
+ * @error Raises when the native source yields an invalid identity.
  */
 static int l_current_process_id(lua_State *L)
 {
@@ -13104,9 +13220,11 @@ static int l_current_process_id(lua_State *L)
   return 1;
 }
 
-/* Implements the Lua utc now native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Format the observed system UTC time as the project's second-resolution timestamp.
+ * @param L lua_State* State receiving one formatted value; no arguments are inspected.
+ * @return int One UTC text value in YYYY-MM-DDTHH:MM:SSZ format.
+ * @error Raises for POSIX clock/conversion/format failure or Lua result allocation.
+ * @effect Reads only system time; does not set clocks or affect domain deadlines.
  */
 static int l_utc_now(lua_State *L)
 {
@@ -13196,11 +13314,13 @@ static const luaL_Reg yaca_native_functions[] = {
   { NULL, NULL },
 };
 
-/* Registers a locked Lua userdata metatable and garbage collector.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @param name const_char* Selected file, module, or resource name.
- * @param garbage_collector lua_CFunction The garbage collector bound to create handle metatable.
- * @return void result Registers a locked userdata metatable and its garbage collector in Lua.
+/* Complete a private native metatable even after an earlier allocation error left it partially initialized.
+ * @param L lua_State* State receiving temporary metatable/field values while its stack is restored on success.
+ * @param name const_char* Fixed native owner metatable name in the registry.
+ * @param garbage_collector lua_CFunction Exact finalizer for this owner type.
+ * @return void No value; preserves the caller's stack height after installing both fields.
+ * @error Lua allocation may raise; a later initialization retry repairs the partially retained table.
+ * @effect Installs/reinstalls the expected __gc and locked __metatable marker without changing existing owner data.
  */
 static void create_handle_metatable(
   lua_State *L,
@@ -13209,13 +13329,11 @@ static void create_handle_metatable(
 {
   /* @metatable native_userdata Lua userdata binding installed for the exact native owner type.
    */
-  if (luaL_newmetatable(L, name))
-  {
-    lua_pushcfunction(L, garbage_collector);
-    lua_setfield(L, -2, "__gc");
-    lua_pushstring(L, "locked native handle");
-    lua_setfield(L, -2, "__metatable");
-  }
+  luaL_newmetatable(L, name);
+  lua_pushcfunction(L, garbage_collector);
+  lua_setfield(L, -2, "__gc");
+  lua_pushstring(L, "locked native handle");
+  lua_setfield(L, -2, "__metatable");
   lua_pop(L, 1);
 }
 
@@ -13223,7 +13341,8 @@ LUAMOD_API
 /* Opens the native module after the release loader admits its absolute path.
  * @param L lua_State* Lua state receiving the bound native functions.
  * @return int result One Lua module table pushed onto the stack.
- * @effect Installs four private userdata metatables in this Lua state.
+ * @effect Completes/repairs four private userdata metatables and returns the fixed function allowlist.
+ * @error Lua allocation may raise during initialization; a later call repairs partially retained metatable fields.
  */
 int luaopen_yaca_native(lua_State *L)
 {
