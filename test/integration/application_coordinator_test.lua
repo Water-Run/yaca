@@ -1160,9 +1160,9 @@ return {
         },
         {
             name = "Prompt edit publication failure retains its draft for explicit retry",
-            --Verifies finish summaries and refusal reasons remain visible assistant content.
-            --@param none No arguments; this closure uses its captured fixture state.
-            --@return nil No value; assertions verify finish summaries and refusal reasons remain visible assistant content.
+            -- Refuse the first Prompt publication, preserve the unsaved draft and commit it only after an explicit retry.
+            --@param none No arguments; the case owns a coordinator, transient Prompt publication refusal and scripted user input.
+            --@return nil No value; assertions require the old Prompt before retry, visible error/unsaved state and the exact new Prompt after success.
             run = function()
                 local f
                 local settings = { initial_agent = true, freeze_driver = true,
@@ -1172,9 +1172,10 @@ return {
                         ".save prompt-edit-1", ".quit",
                     }),
                 }
-                --Records the event callback behavior exercised by the 'Prompt edit publication failure retains its draft for explicit retry' case.
-                --@param count integer Number of items or calls expected by the fixture.
-                --@return nil No value; assertions verify finish summaries and refusal reasons remain visible assistant content.
+                -- Clear the transient publication refusal before the scripted retry without changing the currently published Prompt.
+                --@param count integer One-based terminal poll count used to select the fourth input batch.
+                --@return nil No value; the fixture observes the updated error setting.
+                --@effect Verifies the old Prompt is still active, then permits the next explicit save.
                 settings.on_poll = function(count)
                     if count == 4 then
                         A.equal(f.current_prompt(), "")

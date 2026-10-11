@@ -111,3 +111,22 @@ Git 对应依赖继续待完成：按实际 etc/package-versions.txt 获取来�
 记录已找到，132 条暂未找到，Win32 的历史镜像缺项另列。已克隆官方 MSYS2/MINGW
 配方历史，下一步按精确版本和发行 revision 回溯补来源；不能只提供 Git 主仓库代填全部
 MSYS/Perl/SSL 依赖。最终三核心、九包及其旅程尚未重新验收，Gate R 关闭。
+
+## 主交互协调器第一批语义核对
+
+逐项通读 main.lua 的协调器局部 clock、publish/error/details、main/Ask 文本缓存与
+事件投影、driver 事件排序、单次 approval card、自动压缩 preflight/终态投影、status
+失效关闭、cautious 设置和 Prompt 编辑路由。核对实际参数、返回、失败优先级、缓冲
+限额、回执前后及 owner 归属；本子面未建立新的行为缺陷。
+
+补齐 route_prompt_editor 的第三返回值 chat_text 注释，说明未在编辑器消费时的聊天
+路由文本；纠正 Prompt 保存失败回归及其第四次 poll callback 误抄其他用例说明的问题。
+修改只影响注释，产品行为不变。协调器专项 **43/43**，结构 **255/5586/0**；
+实际日志为 `coordinator-semantic-subset-tests.log` 与 `coordinator-semantic-subset-coverage.log`。
+更后面的模型/Context 切换、提交/取消、管理 REPL 内部与剩余原生/辅助代码仍待核对。
+
+历史来源回溯已验证 APR 1.5.2-1：官方 MSYS2 配方 commit
+63a1162b3cf0bc64fbcc0051ae0971164335f2d5 的原始 Apache 档案及七个发行补丁
+逐 SHA-256 一致，记录在 `out/review-20261011/recovered-apr-source.json`。
+历史 log -G 命中可能是版本移除提交，实际选择须检查该提交及父提交的 pkgver/pkgrel。
+此单件通过不扩展为整个 Git 依赖闭包完成。

@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-10-08
+Date: 2026-10-11
 File: main.lua
 Description: Routes the offline bootstrap lifecycle from the unique composition root.
 ]]
@@ -8885,6 +8885,7 @@ function M.new_application_coordinator(ports, options)
     --@param source string Raw Prompt editor input line.
     --@return boolean|nil handled Whether the edit command was handled.
     --@return table|nil err Structured draft or renderer failure.
+    --@return string|nil chat_text Parsed chat command text when handled is false; nil for editor actions or failures.
     local function route_prompt_editor(source)
         local command, command_error = coordinator_function(
             admitted_ports.cli.parse_prompt_editor, "PromptEditorInput", "Prompt editor parsing",
