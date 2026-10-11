@@ -1,6 +1,6 @@
 /*
 Author: WaterRun
-Date: 2026-10-08
+Date: 2026-10-11
 File: native_basics_faults.c
 Description: Injects persistent Lua growth failures into production native
 module initialization and SHA-256 finish, verifies same-state metatable repair,
@@ -42,7 +42,12 @@ static size_t basics_entropy_error_wipes;
  */
 BOOLEAN WINAPI basics_entropy(PVOID buffer, ULONG length)
 {
-  extern BOOLEAN WINAPI SystemFunction036(PVOID, ULONG);
+  /* Name the real Advapi32 entropy entry before this file renames that symbol.
+   * @param buffer PVOID Borrowed destination supplied by the caller.
+   * @param length ULONG Requested byte count.
+   * @return BOOLEAN The platform entropy result; this declaration does not call it.
+   */
+  extern BOOLEAN WINAPI SystemFunction036(PVOID buffer, ULONG length);
   if (basics_observe_entropy) { basics_entropy_bytes = buffer; basics_entropy_length = length; }
   return SystemFunction036(buffer, length);
 }
