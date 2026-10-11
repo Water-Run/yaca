@@ -45,7 +45,7 @@ XP SP3，64 位 Windows 兼容到 Windows 7 SP1，Linux 兼容到 CentOS 7。
 
 ## 开始使用
 
-从[候选预发布](https://github.com/Water-Run/yaca/releases/tag/v1.0.0-preview.20261006)
+从[候选预发布](https://github.com/Water-Run/yaca/releases/tag/v1.0.0-preview.20261011)
 下载压缩包，解压到任意有写权限的位置，然后运行：
 
 ```bat

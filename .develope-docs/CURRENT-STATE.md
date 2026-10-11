@@ -1,8 +1,9 @@
 # 当前状态
 
-更新日期：2026-10-09。核心已实现，R81 候选已发布；开发已按
-[D-083](DECISIONS.md#d-083-同步项目并恢复开发2026-10-08) 恢复。
-`origin/main` 已同步至 `df38087`。剩余顺序见 [TRACKING](TRACKING.md)。
+更新日期：2026-10-11。核心已实现，`v1.0.0-preview.20261011` 候选已发布。
+开发按 [D-083](DECISIONS.md#d-083-同步项目并恢复开发2026-10-08) 继续，这次发布不暂停。
+构建源码为 `dc6ce1486158f8e76f6cb90490dd9d9242115c33`。剩余顺序见
+[TRACKING](TRACKING.md)。
 
 阶段为 `implemented-unqualified`，目标资格验证待完成；Release Gate R 为 `closed`，
 `release_authorized=false`。依据见 [readiness](contracts/readiness.lua)、
@@ -11,28 +12,26 @@
 发行构建器现为 luainstaller 1.5.0，提交 `a289a1bed6c6dcf8ad4f11a1d9e28f2f2989adbf`，
 标签 `v1.5.0`。资源覆盖补丁已重放到该版本。1.5.0 用 XP 兼容的原生 Windows
 宿主代替 PowerShell，构建不再硬性要求 Lua 头文件，MinGW 启动器去掉 PE 时间戳。
-已发布的 R81 九包仍由 1.3.0 构建，不能当作这次钉扎的产物。
+当前预发布九包由 1.5.0 构建。更早的 `v1.0.0-preview.20261006` 仍是 1.3.0 产物。
 
 ## 当前候选
 
-产品版本为 `1.0.0`，本节点为
-[`v1.0.0-preview.20261006`](https://github.com/Water-Run/yaca/releases/tag/v1.0.0-preview.20261006)
-候选预发布。源码已包含 R77--R81：Windows reparse 解码、原生文件系统资源生命周期、
-发布身份验证资源保留、进程启动请求捕获，以及终端输入投影和 mode 字符串保留。
-具体缺陷、反例和逐项语义核对在 [10 月 6 日 Review](CODE-REVIEW-2026-10-06.md)，
-R77 原始证据在 [10 月 5 日 Review](CODE-REVIEW-2026-10-05.md)。
+产品版本为 `1.0.0`，当前下载入口为
+[`v1.0.0-preview.20261011`](https://github.com/Water-Run/yaca/releases/tag/v1.0.0-preview.20261011)
+候选预发布。源码包含 R77--R88：此前的文件系统、进程和终端修复，以及原生熵与
+SHA-256 在 Lua 分配失败时的保留。R82--R87 的核对见
+[10 月 8 日 Review](CODE-REVIEW-2026-10-08.md)。
 
 本节点三目标从同一份完整维护源码快照构建：冻结提交为
-`d215a8d9d14683fb6acd2ee51e8f7879d9976f6d`，源码归档 SHA-256 为
-`a6c160a9ff28a11118da7dc4606e217d763c3049f496f5bb5d5597966fbd07bf`，
-406 个成员。三份归档及逐成员字节一致，冻结时工作树干净。构建后的候选清单、
-交付记录和暂停文档单独提交，产品源码保持与冻结输入一致。
+`dc6ce1486158f8e76f6cb90490dd9d9242115c33`，源码归档 SHA-256 为
+`510fd3d073f8dd0d7528d20a2ce2b54c377abe2ef2de999e5f03efb9ea4612fa`，
+426 个成员。三份归档及逐成员字节一致，冻结时工作树干净。发行 tag 指向这份冻结提交。
 
 | 当前核心 | SHA-256 | 完整测试及环境 |
 | --- | --- | --- |
-| Linux x86_64 | `1bc7e3bd37b2b42765b437f4a7dd84b827b8c823e752d76cd9e983fc52be40b6` | 706/706；CentOS 7.9 用户态、GCC 4.8.5、glibc 2.17 |
-| Win32 x86 | `82053d9fedf7fc406140b6493671969bd20fbacaae2e9d088712d96c1a1771e0` | 706/706；Server 2008 non-R2 x64 / WOW64 |
-| Win64 x86_64 | `b732ebea7d014435d6c78166241995bb762183f636ad2a97c18414814ff42c73` | 706/706；Windows 11 x64 |
+| Linux x86_64 | `4bdf39fc072e54a4d41f27091f23fd851887b6dfeb5ab90f396fe4580c6cae56` | 720/720；CentOS 7.9 用户态、GCC 4.8.5、glibc 2.17 |
+| Win32 x86 | `7e65a0e7dee5b7d8da00865b828f081f0f969ec27d0535648c5decdac5c97ea5` | 720/720；Server 2008 non-R2 x64 / WOW64 |
+| Win64 x86_64 | `4d6d2606694bc9c416a73a3d730bb84725ce260be90786b841b260300ae85210` | 720/720；Windows 11 x64 |
 
 Windows 两目标的完整 suite 使用实际单文件的内嵌 Lua 执行冻结源码测试，核心摘要在
 目标端重算一致；回执、原始日志、源码归档及核心逐字节绑定。Linux 在 C7 用户态
@@ -47,10 +46,10 @@ C7 容器共享 Fedora 宿主内核；Windows 兼容底线仍按 XP SP3 x86、Wi
 工具、整体移动、卸载和自有临时目录无残留。首次配置、模型、升级与完整交互不在
 这一离线结论中。
 
-字节清单及证据边界见 [本节点清单](candidates/1.0.0-preview.20261006.json)，
-原始记录位于 `out/node-r81-publish-20261006/`。配套证据、三目标来源包和
-`SHA256SUMS.txt` 随候选附件交付。 GitHub 的 24 个附件大小与 SHA-256
-均与本地一致，远端回执见 [发布核对](candidates/1.0.0-preview.20261006-publication.json)。
+字节清单及证据边界见 [本节点清单](candidates/1.0.0-preview.20261011.json)，
+原始记录位于 `out/node-r88-publish-20261011/`。配套证据、三目标来源包和
+`SHA256SUMS.txt` 随候选附件交付。GitHub 的 24 个附件大小与 SHA-256
+均与本地一致，远端回执见 [发布核对](candidates/1.0.0-preview.20261011-publication.json)。
 
 ## 已有能力
 
@@ -71,8 +70,8 @@ Linux full 的 Git HTTPS、Perl、静态库和默认 SDK 闭包此前已构建�
 
 ## 注释与语义 Review
 
-当前 R87 开发宿主完整 Lua suite **720/720**、coding readiness **PASS**，全仓注释结构为
-**256 文件 / 5628 声明 / 0 缺项**。检查器反例、发行/旅程回归、四校验器和
+当前开发宿主完整 Lua suite **720/720**、coding readiness **PASS**，全仓注释结构为
+**257 文件 / 5658 声明 / 0 缺项**。检查器反例、发行/旅程回归、四校验器和
 全部 TP/RP 通过；构建、完整测试和容器均经资源守卫串行运行。
 
 R78--R81 对相应生产函数及维护探针完成人工语义核对和三平台故障取证，冻结输入与
@@ -106,7 +105,7 @@ R87 为 host stty 建立 suspended/job admission，避免 timeout 返回后留�
 修改模式的 child。两 Windows 各六项生命周期/fault matrix 零失败，原生回归通过；
 指定 Cygwin PTY 的四组实际 mode/rollback/retry 恢复一致，唯一目标 receipt 和
 独立 carrier 已核对，TTY carrier 的 255 保留为传输边界。
-已发布 R81 候选未包含 R82--R87，新单文件及九包待统一重建。
+R82--R88 已进入 `v1.0.0-preview.20261011`。三平台完整 suite 均为 720/720，九包完整性核对通过，CentOS 7 三档离线核心旅程通过。目标资格验证仍待完成。
 
 全仓人工语义 Review 仍为 **partial**。R82 所有权及 R83 原生键盘投影/模式错误
 子面、R84 worker DLL 生命周期、R85/R86 adapter/main 及 R87 Cygwin PTY 子面

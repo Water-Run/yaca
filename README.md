@@ -54,7 +54,7 @@ itself, in every edition.
 
 ## Getting started
 
-Download a package from the [preview release](https://github.com/Water-Run/yaca/releases/tag/v1.0.0-preview.20261006),
+Download a package from the [preview release](https://github.com/Water-Run/yaca/releases/tag/v1.0.0-preview.20261011),
 unzip anywhere you can write to, then run it:
 
 ```bat
