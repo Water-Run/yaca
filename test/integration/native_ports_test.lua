@@ -622,7 +622,6 @@ return {
                     A.equal(restore_calls, mode == "restore-failed" and 2 or 1)
                     A.truthy(port:close())
                     A.equal(close_calls, 2)
-                    A.equal(close_calls, 2)
                 end
             end,
         },

@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-10-05
+Date: 2026-10-11
 File: compact.lua
 Description: Builds and publishes lossless-facts structured ModelView compactions.
 ]]
@@ -1546,25 +1546,21 @@ function M.new(ports, options)
     --@param wrapper any Completion envelope for the active request.
     --@return table|nil Frozen completed, retry, waiting, or cancellation outcome.
     --@return table|nil State, clock, stale-response, or journal error.
-    --@effect Can commit response, rejection, publication, or cancellation records.
+    --@effect Rejects unbound responses before clock, Model or journal work; bound responses can commit response, rejection, publication or cancellation records.
     function service:accept_response(wrapper)
         if state ~= "Compacting" or not active then
             return nil, failure("NoCompactionRequest", "no compaction response is pending")
+        end
+        if type(wrapper) ~= "table" or wrapper.request_id ~= active.request_id then
+            return nil, failure(
+                "StaleCompactionResponse",
+                "response does not belong to the active compaction request"
+            )
         end
         local now, clock_error = clock_now()
         if not now then return nil, clock_error end
         if now - active.started_at >= limits.manifest.active_time_ms then
             return self:cancel("compaction-active-time")
-        end
-        if type(wrapper) == "table"
-            and valid_text(wrapper.request_id, limits.maximum_identifier_bytes, false)
-            and wrapper.request_id ~= active.request_id
-            and active.request_ids[wrapper.request_id]
-        then
-            return nil, failure(
-                "StaleCompactionResponse",
-                "response belongs to an earlier compaction attempt"
-            )
         end
         local summary, response_error = validate_response(wrapper)
         if not summary then

@@ -1,4 +1,4 @@
-# 恢复开发与终端收尾 R87
+# 恢复开发与关闭、压缩边界 R87--R88
 
 日期：2026-10-11。负责人按 [D-085](DECISIONS.md#d-085-同步仓库并推进至可发布就绪2026-10-11)
 要求同步并推进到可发布就绪。本轮已拉取 `origin/main`，远端无新增提交；本地保留
@@ -38,3 +38,44 @@ DeepSeek 为 deepseek-flash / deepseek-v4-pro，DGX Spark 为 qwen3.8-27b。
 
 R81 预发布 std/full 输入按已提交 publication 的大小和 SHA-256 续传核对，
 尚未完成的文件保持 partial，不接纳为装配输入。旧输入恢复不继承旧核心资格。
+
+## R88 压缩响应身份先于时钟与重试
+
+完整通读 compact.lua 的参数/返回/副作用注释与实现：canonical event/summary/manifest
+编码、输入限额、union-find 原子分组、完整前缀切点、ModelView 容量、意图和精确回执、
+两次尝试、响应/发布绑定、取消、自动断路器及恢复冷却。发现 accept_response 在身份
+核对前读取时钟并处理超时。第一尝试的晚到响应可取消正在运行的第二尝试；未知或缺少
+ID 的对象还可能消耗当前重试与回执。
+
+现在只接纳当前 request_id 的 envelope；旧、外来、缺少身份或非 table 的 envelope
+先返回 StaleCompactionResponse，未读取时钟、启动/取消 Model 或写入 journal。
+已绑定响应的时钟、超时、schema、摘要、容量与发布顺序不变。
+
+新回归包含晚到/时钟失败/外来 ID/缺少 ID/非 table 五个边界，核对当前 ID、attempt、
+Model 启动与取消次数、journal 数量及 generation 不变，随后当前真实响应仍能完成。
+基线专项 **12/13**，失败为晚到响应触发当前取消；修复 **13/13**，完整 suite **715/715**。
+完整 readiness **PASS**，结构为 **252 文件 / 5572 声明 / 0 缺项**，包含新的输入恢复工具。
+源码、当前维护回归、精确基线及原始日志见 [R88](lua-review/R88.json)。
+该结论覆盖 compact.lua 全册；生产 main 组合层、其他剩余原生/辅助代码与正式资格
+继续保留待完成，全仓语义 Review 仍为 partial。
+
+## 工具输入恢复与来源缺项
+
+24 个原 R81 附件已恢复并逐件核对 publication 的大小和 SHA-256。
+维护工具 restore_edition_inputs.py 验证 runtime/notices 的真实成员、CRC、摘要、版本、
+SPDX 和路径，只恢复 tools、对应附件及索引；旧核心和其资格不作为新核心证据。
+三目标各十工具恢复通过，三项独立回归通过，支持替换核心后重新装配，并拒绝错目标
+与修改过的归档。恢复工具、测试的每个参数、返回、所有权和写盘边界已人工核对。
+
+Linux SDK 存在 xt_CONNMARK.h / xt_connmark.h 等大小写不同的真实成员；NTFS 暂存
+在新文件排他创建时正确拒绝。维护工具补齐 Linux 区分大小写的文件系统预检，本轮
+Linux 输入移至 `/home/linzh/.cache/yaca-release-readiness-20261011/tool-inputs/linux-x86_64`，
+两个 Windows 输入在 `out/review-20261011/recovered-tool-inputs/`。保留失败日志，
+未重命名头文件或改变归档字节。缓存恢复不是新的运行或发布资格。
+
+来源附件实查发现两 Windows 各三个缺项：Git、w64devkit 的 source_archive 是 MZ
+二进制分发，Python 3 的 closure 仅包一份 portable ZIP。摘要与二进制版本通过不能
+代替对应源码及依赖来源。检查记录为 `out/review-20261011/tool-source-inspection.json`；
+当前正在按官方标签、版本和摘要取得真实对应源码与构建输入，Source 审计未完成。
+上游 w64devkit v2.9.0 的 Dockerfile 已经由 HTTPS 取得并解析其版本/摘要资料；
+未执行上游构建命令，也未沿用其中的 TLS 跳过选项。

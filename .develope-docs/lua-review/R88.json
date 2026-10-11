@@ -1,0 +1,105 @@
+{
+  "schema": "yaca-lua-review-evidence-v1",
+  "review_id": "R88",
+  "date": "2026-10-11",
+  "status": "verified-compaction-response-identity-boundary",
+  "release_authorized": false,
+  "base_revision": "c99445afc139e332e0a60aadce19dc1dbae305c1",
+  "working_tree_changes": true,
+  "source_inputs": [
+    {
+      "path": "src/compact.lua",
+      "size": 91654,
+      "sha256": "3ac6bd180cf555693350e5e4fe0ea4cee0566a12eb9dcedbdb7834a62ccbcf1b"
+    },
+    {
+      "path": "test/unit/compact_test.lua",
+      "size": 57982,
+      "sha256": "b12aeb9048f51d5bd93b1abe5c68be5fef106ec758e5d2248fdcce1b03248f7d"
+    }
+  ],
+  "frozen_source_inputs": [
+    {
+      "path": "out/review-20261011/r88/after-source/src/compact.lua",
+      "size": 91654,
+      "sha256": "3ac6bd180cf555693350e5e4fe0ea4cee0566a12eb9dcedbdb7834a62ccbcf1b"
+    },
+    {
+      "path": "out/review-20261011/r88/after-source/test/unit/compact_test.lua",
+      "size": 57982,
+      "sha256": "b12aeb9048f51d5bd93b1abe5c68be5fef106ec758e5d2248fdcce1b03248f7d"
+    }
+  ],
+  "baseline_inputs": [
+    {
+      "path": "out/review-20261011/r88/before-source/src/compact.lua",
+      "size": 91731,
+      "sha256": "86ff4e6aab6360052eac7a6fa53f8b1afae67db895634d1d7037678e3a86b8f3"
+    },
+    {
+      "path": "out/review-20261011/r88/before-source/test/unit/compact_test.lua",
+      "size": 57982,
+      "sha256": "b12aeb9048f51d5bd93b1abe5c68be5fef106ec758e5d2248fdcce1b03248f7d"
+    }
+  ],
+  "observations": {
+    "baseline_cases": 13,
+    "baseline_failed": 1,
+    "fixed_cases": 13,
+    "fixed_failed": 0,
+    "fixed_boundary_scenarios": [
+      "late previous attempt",
+      "previous attempt with invalid clock",
+      "foreign ID",
+      "missing ID",
+      "unbound scalar"
+    ],
+    "complete_lua_suite": {
+      "total": 715,
+      "passed": 715,
+      "failed": 0
+    },
+    "comment_coverage": {
+      "files": 252,
+      "declarations": 5572,
+      "violations": 0
+    },
+    "coding_readiness": "PASS"
+  },
+  "manual_semantic_review": {
+    "scope": "compact.lua complete source and response-boundary regression",
+    "whole_repository": "partial"
+  },
+  "logs": [
+    {
+      "path": "out/review-20261011/r88-before-final.log",
+      "size": 1938,
+      "sha256": "6dcaecb3403339c937d3b608dc4854d26873af97eed36941a4bab26b4d2b141c"
+    },
+    {
+      "path": "out/review-20261011/r88-after.log",
+      "size": 1298,
+      "sha256": "c440bb97f90c4ff8cd1153853c0ff61af7de3e73032cf6a7f7dc1b30d31a37bf"
+    },
+    {
+      "path": "out/review-20261011/r88-full-suite.log",
+      "size": 71427,
+      "sha256": "93cad1170d2eb6bb4f981b326e476b020e47d4c18eaadf9bd7e3b970648a4190"
+    },
+    {
+      "path": "out/review-20261011/r88-coding-readiness.log",
+      "size": 4459,
+      "sha256": "98116d3626d9994130b7b636b408febd7aa3b9ffcd98fb4ae69f3aa063d4ad8b"
+    },
+    {
+      "path": "out/review-20261011/r88-comment-coverage.log",
+      "size": 64,
+      "sha256": "1f901703eeffa4438747601ff8125f8f9f8bd0986c7d822424c7623743550ba1"
+    },
+    {
+      "path": "out/review-20261011/r88-comment-inventory.txt",
+      "size": 1244032,
+      "sha256": "23446dae076605d36ac6912c793dde82d6d1764027a98165de31f1db3bc3816a"
+    }
+  ]
+}

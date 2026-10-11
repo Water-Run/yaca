@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-10-05
+Date: 2026-10-11
 File: compact_test.lua
 Description: Verifies lossless-facts structured ModelView compaction.
 ]]
@@ -710,6 +710,53 @@ return {
                 A.equal(waiting.error_code, "OversizedAtomicGroup")
                 A.equal(waiting.recommendation_required, true)
                 A.equal(#oversized.starts, 0)
+            end,
+        },
+        {
+            name = "stale and unbound compaction responses cannot mutate the current retry",
+            -- Deliver an earlier, foreign or unbound completion at an expired or invalid clock boundary and preserve the actual current request.
+            --@param none No arguments; each scenario owns an independent compaction lifecycle with one admitted correction retry.
+            --@return nil No value; assertions require unchanged owner, attempt, journal and cancellation state before accepting the real current response.
+            --@effect Runs only deterministic Model, clock and journal doubles; no filesystem or network effects occur.
+            run = function()
+                for _, scenario in ipairs({ "deadline", "clock-failure", "foreign", "missing-id", "malformed" }) do
+                    local instance = fixture()
+                    assert(instance.service:begin(input_for(instance, { active_estimated_tokens = 450 })))
+                    local first = response_for(instance, 1, { schema_version = "structured-summary-v0" })
+                    local retried = assert(instance.service:accept_response(first))
+                    A.equal(retried.attempt, 2)
+                    local current_id = instance.service:status().active_request_id
+                    local records = #instance.journal_records
+                    local generation = instance.generation()
+                    local incoming = first
+                    local delta = 0
+                    if scenario == "deadline" then
+                        delta = 1000
+                    elseif scenario == "clock-failure" then
+                        delta = -1
+                    elseif scenario == "foreign" then
+                        incoming = { request_id = "foreign-request", canonical_body = false }
+                    elseif scenario == "missing-id" then
+                        incoming = {}
+                    elseif scenario == "malformed" then
+                        incoming = false
+                    end
+                    instance.advance(delta)
+                    local accepted, err = instance.service:accept_response(incoming)
+                    A.falsy(accepted)
+                    A.equal(err.code, "StaleCompactionResponse", scenario)
+                    local state = instance.service:status()
+                    A.equal(state.state, "Compacting", scenario)
+                    A.equal(state.active_request_id, current_id, scenario)
+                    A.equal(state.attempt, 2, scenario)
+                    A.equal(#instance.starts, 2, scenario)
+                    A.equal(#instance.cancel_calls, 0, scenario)
+                    A.equal(#instance.journal_records, records, scenario)
+                    A.equal(instance.generation(), generation, scenario)
+                    instance.advance(-delta)
+                    local completed = assert(instance.service:accept_response(response_for(instance, 2)))
+                    A.equal(completed.outcome, "completed", scenario)
+                end
             end,
         },
         {
