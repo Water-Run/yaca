@@ -16,9 +16,11 @@ import argparse
 import binascii
 import ctypes as C
 from ctypes import wintypes as W
+import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import threading
 import time
@@ -124,7 +126,9 @@ def main():
     parser.add_argument('directory')
     parser.add_argument('evidence')
     parser.add_argument('--online', action='store_true', help='use the existing authorized real model configuration')
+    parser.add_argument('--upgrade-core', help='replace the closed first-session core before reopening the same Context')
     args = parser.parse_args()
+    assert not args.upgrade_core or args.online, 'upgrade verification requires an online persisted Context'
     root = os.path.abspath(args.directory)
     if not isinstance(root, text_type): root = root.decode('mbcs')
     evidence = os.path.abspath(args.evidence)
@@ -146,6 +150,7 @@ def main():
     kernel.CloseHandle.argtypes = [W.HANDLE]
     kernel.GetConsoleMode.argtypes = [W.HANDLE, C.POINTER(W.DWORD)]
     kernel.GetConsoleScreenBufferInfo.argtypes = [W.HANDLE, C.POINTER(SCREEN)]
+    kernel.SetConsoleScreenBufferSize.argtypes = [W.HANDLE, COORD]
     kernel.ReadConsoleOutputCharacterW.argtypes = [W.HANDLE, W.LPWSTR, W.DWORD, COORD, C.POINTER(W.DWORD)]
     kernel.WriteConsoleInputW.argtypes = [W.HANDLE, C.POINTER(INPUT), W.DWORD, C.POINTER(W.DWORD)]
     kernel.WaitForSingleObject.argtypes = [W.HANDLE, W.DWORD]
@@ -215,7 +220,7 @@ def main():
         #@param name str Evidence label identifying this child session.
         #@return None No value after process, console handles and observed mode baseline are acquired.
         #@error Raises on process creation, initial-thread resume, attachment or console API failure.
-        #@effect Starts the child suspended in a new console, resumes it, then detaches the probe's prior console.
+        #@effect Starts a hidden console child, resumes/attaches it, and fixes only its own screen buffer width before submitting input.
         #@ownership Owns returned process/thread and CONIN$/CONOUT$ handles; any post-creation failure closes acquired resources.
         def __init__(self, arguments, name):
             self.name, self.input, self.output = name, None, None
@@ -236,6 +241,10 @@ def main():
                 assert kernel.AttachConsole(self.process.pid), C.GetLastError()
                 self.input = kernel.CreateFileW('CONIN$', 0xc0000000, 3, None, 3, 0, None)
                 self.output = kernel.CreateFileW('CONOUT$', 0xc0000000, 3, None, 3, 0, None)
+                assert kernel.SetConsoleScreenBufferSize(self.output, COORD(240, 4000)), C.GetLastError()
+                dimensions = SCREEN()
+                assert kernel.GetConsoleScreenBufferInfo(self.output, C.byref(dimensions))
+                assert dimensions.size.x >= 240, 'console cannot retain an unwrapped approval card'
                 self.before = self.modes()
             except Exception:
                 self.close()
@@ -355,6 +364,88 @@ def main():
         with open(path, 'wb') as stream:
             stream.write(screen.encode('utf-8'))
 
+    # Wait for the admitted print-only turn while refusing every additional genuine approval card.
+    #@param console Console Actual child that has received exactly one verified allow command.
+    #@return str|unicode Screen text containing the completed turn after at most three additional denials.
+    #@error Raises on child exit, a 180-second timeout or excessive repeated proposals.
+    #@effect Sends only explicit deny commands for new complete Runtime cards; never grants another tool execution.
+    def await_single_execution(console):
+        deadline = time.time() + 180
+        seen = {'approval-1'}
+        denials = []
+        while time.time() < deadline:
+            screen = console.screen()
+            if re.search(r'(?:^|\n)\[STATUS\]\nTurn outcome: completed(?:\n|$)', screen):
+                with open(os.path.join(evidence, 'additional-denials.json'), 'w') as stream:
+                    json.dump(denials, stream)
+                return screen
+            cards = list(re.finditer(r'(?:^|\n)\[ACTION (approval-[0-9]+)\]\n', screen))
+            for card in cards:
+                identity = card.group(1)
+                if identity in seen:
+                    continue
+                tail = screen[card.end():]
+                footer = 'allow ' + identity + ' once | deny ' + identity + ' | details ' + identity
+                if footer not in tail or 'default: deny' not in tail:
+                    continue
+                assert len(denials) < 3, 'provider repeatedly requested extra approvals'
+                console.send('deny ' + identity)
+                seen.add(identity)
+                denials.append(identity)
+            assert kernel.WaitForSingleObject(console.process.process, 0) == 258, 'child exited during tool turn'
+            time.sleep(.05)
+        raise AssertionError('console timed out waiting for the single admitted tool turn')
+
+    # Fingerprint the complete owned configuration/Context and workspace trees without exposing their contents.
+    #@param none Uses only this isolated application's __yaca__ and workspace directories.
+    #@return list[tuple] Sorted directory identities and regular-file sizes/digests.
+    #@error Rejects symlink entries so no external tree can silently enter the preservation proof.
+    #@effect Reads existing data files in bounded chunks; never writes their bytes or contents to logs.
+    def data_inventory():
+        records = []
+        for leaf in ('__yaca__', 'workspace'):
+            base = os.path.join(root, leaf)
+            assert os.path.isdir(base) and not os.path.islink(base)
+            for directory, directories, filenames in os.walk(base):
+                records.append(('directory', os.path.relpath(directory, root)))
+                for name in directories + filenames:
+                    assert not os.path.islink(os.path.join(directory, name)), 'upgrade data contains a link'
+                for name in filenames:
+                    path = os.path.join(directory, name)
+                    digest = hashlib.sha256()
+                    size = 0
+                    with open(path, 'rb') as stream:
+                        while True:
+                            block = stream.read(1048576)
+                            if not block: break
+                            size += len(block)
+                            digest.update(block)
+                    records.append(('file', os.path.relpath(path, root), size, digest.hexdigest()))
+        return sorted(records)
+
+    # Replace only the stopped executable and prove the entire owned data set is unchanged before reopening.
+    #@param none Uses the explicit --upgrade-core path and the closed first-session executable.
+    #@return None No value after different old/new core bytes and unchanged data are confirmed.
+    #@error Raises on unchanged core input, failed copying, digest mismatch or any data alteration.
+    #@effect Replaces yaca.exe in this isolated test directory and writes only public core digests and a preservation count.
+    def replace_closed_core():
+        destination = os.path.join(root, 'yaca.exe')
+        replacement = os.path.abspath(args.upgrade_core)
+        assert os.path.isfile(replacement) and not os.path.islink(replacement)
+        with open(destination, 'rb') as stream:
+            before_core = hashlib.sha256(stream.read()).hexdigest()
+        with open(replacement, 'rb') as stream:
+            after_core = hashlib.sha256(stream.read()).hexdigest()
+        assert before_core != after_core, 'upgrade must change the core bytes'
+        before_data = data_inventory()
+        shutil.copyfile(replacement, destination)
+        with open(destination, 'rb') as stream:
+            assert hashlib.sha256(stream.read()).hexdigest() == after_core
+        assert data_inventory() == before_data, 'core replacement altered preserved data'
+        with open(os.path.join(evidence, 'upgrade.json'), 'w') as stream:
+            json.dump({'old_core_sha256': before_core, 'new_core_sha256': after_core,
+                       'data_entries': len(before_data), 'all_data_bytes_preserved': True}, stream, indent=2)
+
     child = None
     try:
         if args.online:
@@ -376,7 +467,7 @@ def main():
             verify_lua_approval(screen.encode('utf-8'))
             save_phase('verified-approval', screen)
             child.send('allow approval-1 once')
-            child.expect('Turn outcome: completed', 180)
+            await_single_execution(child)
             child.send('.ask What was the numeric result? Answer with the number only.')
             screen = child.expect('Ask ask-2 outcome: completed', 180)
             assert re.search(r'\[ASK ask-2\]\s+42\s', screen)
@@ -391,6 +482,8 @@ def main():
             selector = match.group(1)
             save_phase('durable-token-turn', screen)
             child.finish(); child.close(); child = None
+            if args.upgrade_core:
+                replace_closed_core()
             child = Console(['--continue', selector], 'online-reopened')
             child.expect('>>')
             child.send('.ask What verification token did I ask you to remember? Reply with the exact token only.')

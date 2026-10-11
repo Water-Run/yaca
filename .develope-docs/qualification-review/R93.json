@@ -1,0 +1,536 @@
+{
+  "schema": "yaca-qualification-review-v1",
+  "review": "R93",
+  "date": "2026-10-11",
+  "core_source_commit": "b9de9730cb457a9e32acb4989533f661a49f846c",
+  "core_source_archive_sha256": "0c138e27a89b577d45d62599be4038ecc26887a22889efff59d4881886355a97",
+  "status": "partial-target-qualification",
+  "release_authorized": false,
+  "whole_repository_semantic_review": "partial",
+  "development_paused": false,
+  "three_core_full_suites": "733/733 per target",
+  "native_real_models": {
+    "win32-x86": {
+      "deepseek": "PASS",
+      "qwen": "PASS"
+    },
+    "win64-x86_64": {
+      "deepseek": "PASS",
+      "qwen": "pending: extra proposal denied; subsequent recall reached Ask time cap"
+    }
+  },
+  "retained_data_upgrades": {
+    "win32-x86": {
+      "old_core_sha256": "7e65a0e7dee5b7d8da00865b828f081f0f969ec27d0535648c5decdac5c97ea5",
+      "new_core_sha256": "0a4c74ae345fbfb08edadfd381a9b3ab680e2fbbaff0ca1e248343d564344963",
+      "data_entries": 23,
+      "all_data_bytes_preserved": true
+    },
+    "win64-x86_64": {
+      "old_core_sha256": "4d6d2606694bc9c416a73a3d730bb84725ce260be90786b841b260300ae85210",
+      "new_core_sha256": "0170c7609cb307ed7bd62a5807989de94a7611c5997330268c422da80fdef62f",
+      "data_entries": 12,
+      "all_data_bytes_preserved": true
+    }
+  },
+  "driver_changes": [
+    "Fix actual native console buffer width before any approval input.",
+    "Deny at most three additional Runtime proposals and retain exactly one admitted Lua execution.",
+    "Verify complete configuration/Context/workspace inventory is unchanged when replacing the closed core.",
+    "Accept bounded Markdown and repeated citations of the same exact nonce; reject any different nonce."
+  ],
+  "recall_format_regression": {
+    "before": "8/9",
+    "after": "9/9"
+  },
+  "readiness": {
+    "status": "PASS",
+    "files": 267,
+    "declarations": 5749,
+    "violations": 0
+  },
+  "semantic_review_scope": [
+    "owned console sizing",
+    "explicit additional denials",
+    "closed-core replacement and full data byte comparison",
+    "unique-value recall matching"
+  ],
+  "selected_evidence_secret_scan": {
+    "matches": 0
+  },
+  "pending": [
+    "Win64 Qwen stable successful recall within the declared Ask time limit",
+    "Linux retained-data upgrade",
+    "final nine editions and remaining target journeys",
+    "full corresponding-source closure",
+    "remaining whole-repository semantic review"
+  ],
+  "evidence_root": "out/review-20261011/r93",
+  "files": [
+    {
+      "path": ".tools/qualification/windows_console_agent_smoke.py",
+      "bytes": 32006,
+      "sha256": "b0160b50a01a76b1b9c6d2edf1ae597f9324b4b43486fdafb7adb1714fc851ef"
+    },
+    {
+      "path": ".tools/qualification/terminal_evidence.py",
+      "bytes": 5582,
+      "sha256": "e2d3c908c5bf1da489e0fbeae712a46219e60c4fbc5b6703f3b69631b8214da8"
+    },
+    {
+      "path": "test/qualification/terminal_approval_test.py",
+      "bytes": 7812,
+      "sha256": "cb3fd80f78410300c82c8f891b8ab006c760ebb3ceb404fc0666f9baba1bc099"
+    },
+    {
+      "path": ".develope-docs/candidates/core-node-r92-20261011.json",
+      "bytes": 11393,
+      "sha256": "bc350f497af096585662ab758f6306fd5c1474b3897ef42c1f33ef3d87e8ded3"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-coding-readiness.log",
+      "bytes": 4566,
+      "sha256": "efb89790de01e97ab4fe1d43a14f0675c5d7a597c6c4a6debfa06b8771ee6510"
+    },
+    {
+      "path": "out/review-20261011/r92/recall-format-before.log",
+      "bytes": 1115,
+      "sha256": "f37b3df01e346484a79725efd225d38687964d85b857e56a0620cdddd76d013e"
+    },
+    {
+      "path": "out/review-20261011/r92/recall-format-after.log",
+      "bytes": 112,
+      "sha256": "f18d65baf99ae215e614d0870c74c1ec4e56546756f73058af668f717d84da3c"
+    },
+    {
+      "path": "out/review-20261011/r92/qwen-public-settings.json",
+      "bytes": 285,
+      "sha256": "a96c2583960ddd755699af68fe32193d20ea63a4e834fc03553d9a0555fea09c"
+    },
+    {
+      "path": "out/review-20261011/r92/windows-corrected-online-run.log",
+      "bytes": 267,
+      "sha256": "130c8df3c53c08c4acde7758e11c48ede5bd7b0f9080244171ee5c883c5facb2"
+    },
+    {
+      "path": "out/review-20261011/r92/windows-win64-online-run.log",
+      "bytes": 229,
+      "sha256": "dfacafd813d1b8646ab496394bd09d84503a0f54bdfdc9eeac6196c5e58ee561"
+    },
+    {
+      "path": "out/review-20261011/r92/windows-win64-qwen-run.log",
+      "bytes": 185,
+      "sha256": "ad05c5eb112c268470f225e42e25254ff968f45c45b3e474a56398454eb3c9eb"
+    },
+    {
+      "path": "out/review-20261011/r92/windows-upgrade-run.log",
+      "bytes": 228,
+      "sha256": "b459b91a9f4002870adbf16cd52d5aac77fdc0e3b4986eb05cb5f62e028fad90"
+    },
+    {
+      "path": "out/review-20261011/r92/windows-upgrade-format-run.log",
+      "bytes": 188,
+      "sha256": "d69969101ea54f1faaa23fe1fb962005cdf68d267102ef7469896ea39af44aff"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/upgrade-results-format-retry/win64-x86_64-upgrade/additional-denials.json",
+      "bytes": 2,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/upgrade-results-format-retry/win64-x86_64-upgrade/durable-token-turn.txt",
+      "bytes": 3585,
+      "sha256": "eea7458fb79c98adf569acd1f7ef77ef9946b242d505171d1639e91d8471afcd"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/upgrade-results-format-retry/win64-x86_64-upgrade/first-ask.txt",
+      "bytes": 1188,
+      "sha256": "8c0ced4532423cfa5c994f522fa13a34bae1369844bed8354e816d91c7d0add6"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/upgrade-results-format-retry/win64-x86_64-upgrade/online-reopened-screen-state.txt",
+      "bytes": 335,
+      "sha256": "8fcd9a8fae4e8c78c8c5b9e48d8928ccf0d69b6a4d128ce07a6b522e40192e3d"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/upgrade-results-format-retry/win64-x86_64-upgrade/online-reopened-screen.txt",
+      "bytes": 750,
+      "sha256": "23b7a4f21679b962cae3632bcb88c054362d4b396efbfb4899dfb43a584ee48f"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/upgrade-results-format-retry/win64-x86_64-upgrade/online-screen-state.txt",
+      "bytes": 337,
+      "sha256": "c39d5b21036434e34f92617a10037b9dcbb6254b5f5ab720402d6ef70573ae6d"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/upgrade-results-format-retry/win64-x86_64-upgrade/online-screen.txt",
+      "bytes": 3629,
+      "sha256": "a9776fb66405c9747f9fbe6b17855fda25a020027c6e3a9c007aa4c72ec682ce"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/upgrade-results-format-retry/win64-x86_64-upgrade/result.txt",
+      "bytes": 120,
+      "sha256": "b92f5697ed4bf6ad2a3550517a964c4ad0ac0dd36f803f4dc028189a094c8937"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/upgrade-results-format-retry/win64-x86_64-upgrade/upgrade.json",
+      "bytes": 243,
+      "sha256": "73901ba4b79533ccb16e1d608e2ea62e14f58c77df46e8daaddf9978f7fe8898"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/upgrade-results-format-retry/win64-x86_64-upgrade/verified-approval.txt",
+      "bytes": 2134,
+      "sha256": "7852cab709ce629a1711ab5e7c768d236c73ec5dba0c0961d548d11e6073a1a2"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/upgrade-results-format-retry/win64-x86_64-upgrade/verified-lua-execution.txt",
+      "bytes": 3113,
+      "sha256": "8c73192db5358d2993a314b8f70df0e9443c3f3dc496484e39dc0a07f89acbe0"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/upgrade-results-format-retry/win64-x86_64-upgrade/verified-recall.txt",
+      "bytes": 706,
+      "sha256": "70e85d088d4f2814eb4de7ecd99b72df7a657745527ca9e1b287932f28a1ea16"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/upgrade-results/win32-x86-upgrade/additional-denials.json",
+      "bytes": 14,
+      "sha256": "e6e3e8ae26f7a09060b0b653f226ed09e1af88cd0f7611b57f7ec8042fe1cfce"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/upgrade-results/win32-x86-upgrade/durable-token-turn.txt",
+      "bytes": 4496,
+      "sha256": "5ed3e5065d7afebcb68737d27e001d0c69c886376a0d88426a0a41442f4a2cfa"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/upgrade-results/win32-x86-upgrade/first-ask.txt",
+      "bytes": 1149,
+      "sha256": "6e5b6d681500700bb1789c2724448e0dc02dc0ad4c803f5055df742038edb1aa"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/upgrade-results/win32-x86-upgrade/online-reopened-screen-state.txt",
+      "bytes": 337,
+      "sha256": "362a372227bde1ae68e3e3b04713a31b082abab2334d89e15d5a247aa6d27ee4"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/upgrade-results/win32-x86-upgrade/online-reopened-screen.txt",
+      "bytes": 967,
+      "sha256": "9d0bc04e686d2db540c3a3dd7513192bc8e85bc606b31c69b8dcd79bf92cf78c"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/upgrade-results/win32-x86-upgrade/online-screen-state.txt",
+      "bytes": 339,
+      "sha256": "583aef266b1be78f63fcd5dec963a20451c966f5510190a2cea2e95f4c726be7"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/upgrade-results/win32-x86-upgrade/online-screen.txt",
+      "bytes": 4540,
+      "sha256": "af8da44ed76a8fa919bd68d1917b0d3e25c517cd05e3c313f16f32ab5a5cda79"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/upgrade-results/win32-x86-upgrade/result.txt",
+      "bytes": 120,
+      "sha256": "b92f5697ed4bf6ad2a3550517a964c4ad0ac0dd36f803f4dc028189a094c8937"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/upgrade-results/win32-x86-upgrade/upgrade.json",
+      "bytes": 246,
+      "sha256": "4e55531002851e3ec2807cbf16757faa5134974af9f7da34d9a4ed4fb674c386"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/upgrade-results/win32-x86-upgrade/verified-approval.txt",
+      "bytes": 2016,
+      "sha256": "5eb2f894724c693c46c523ecaee68f98035045d96a879405c3c40911353a05e3"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/upgrade-results/win32-x86-upgrade/verified-lua-execution.txt",
+      "bytes": 3976,
+      "sha256": "9c437ecc8aa56270c443d2005bc500c83243b68fc5bf8b4c9ce0fec96b4d71c1"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/upgrade-results/win32-x86-upgrade/verified-recall.txt",
+      "bytes": 923,
+      "sha256": "e2eed7de1fd4f5b373903e564b7b2b63e9643922eeed1f1a7ab7cbd6b08d0858"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/upgrade-results/win64-x86_64-upgrade/additional-denials.json",
+      "bytes": 2,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/upgrade-results/win64-x86_64-upgrade/durable-token-turn.txt",
+      "bytes": 3591,
+      "sha256": "081a47c2d4952560ae5992ec448cb064b34d8eece7f6cab18830ef5fe3973172"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/upgrade-results/win64-x86_64-upgrade/first-ask.txt",
+      "bytes": 1149,
+      "sha256": "219d8697ce7a2421c3f73c55c3fa9340e560d4b0b3245eab06a86f4ac160f3e6"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/upgrade-results/win64-x86_64-upgrade/online-reopened-screen-state.txt",
+      "bytes": 336,
+      "sha256": "7c7f2b55d42d26377651136e4ee2ee9c72f0990c6d55249a244ede10b7e9c529"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/upgrade-results/win64-x86_64-upgrade/online-reopened-screen.txt",
+      "bytes": 1147,
+      "sha256": "5dc7217b12efeb5e3ce91583add6493326ad7652cfd9f02c31b04aee7129ba87"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/upgrade-results/win64-x86_64-upgrade/online-screen-state.txt",
+      "bytes": 338,
+      "sha256": "74eae3f2130977b0f90f8e2e52375c1b111a9d6c8d06e921b85d88984968ea67"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/upgrade-results/win64-x86_64-upgrade/online-screen.txt",
+      "bytes": 3635,
+      "sha256": "5dbd254957518632dbfbb8fa8bafa81569e8c61e46978ff04af3c081e25b268d"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/upgrade-results/win64-x86_64-upgrade/upgrade.json",
+      "bytes": 243,
+      "sha256": "73901ba4b79533ccb16e1d608e2ea62e14f58c77df46e8daaddf9978f7fe8898"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/upgrade-results/win64-x86_64-upgrade/verified-approval.txt",
+      "bytes": 2016,
+      "sha256": "cb7d710db42f9786b3021c4d855e9ea588cb9a80bcc0c4f14588ce791a822120"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/upgrade-results/win64-x86_64-upgrade/verified-lua-execution.txt",
+      "bytes": 2995,
+      "sha256": "dd7609b73eb6640059ccb3ee74de76a5b2efa0b2efa4f334c6387704bbea682e"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-win64-qwen/win64-x86_64-qwen/additional-denials.json",
+      "bytes": 2,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-win64-qwen/win64-x86_64-qwen/durable-token-turn.txt",
+      "bytes": 3309,
+      "sha256": "a36918e623729edda1ed1dcf072a47732c2ac0463e1af9c8f5e4eb8eae851604"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-win64-qwen/win64-x86_64-qwen/first-ask.txt",
+      "bytes": 1155,
+      "sha256": "60cd1a91b5ed245112a013707e4304a3bb17ac99cfd0a31d96574defb5b914fe"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-win64-qwen/win64-x86_64-qwen/online-reopened-screen-state.txt",
+      "bytes": 336,
+      "sha256": "a976d1f4d32431cdba2f0c9e74d054494c50e8328af54189c863af43bd68087e"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-win64-qwen/win64-x86_64-qwen/online-reopened-screen.txt",
+      "bytes": 756,
+      "sha256": "0815a4c507c8d0b2ec2aa73eeae459d1a28298072c84d6a2880756fd4c693c80"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-win64-qwen/win64-x86_64-qwen/online-screen-state.txt",
+      "bytes": 338,
+      "sha256": "8b519852d42bd16e05789f7df40df732c8a2b937f6b8fa4debfb830a4b25957b"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-win64-qwen/win64-x86_64-qwen/online-screen.txt",
+      "bytes": 3353,
+      "sha256": "042439cfd03a3341a652598153af7477aef8c808acbdead24087bb50c3cf5417"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-win64-qwen/win64-x86_64-qwen/verified-approval.txt",
+      "bytes": 2049,
+      "sha256": "bcf80de91256e18f472329e27c0f7670c9545e90bc70475ee7671e3cccd094a3"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-win64-qwen/win64-x86_64-qwen/verified-lua-execution.txt",
+      "bytes": 2783,
+      "sha256": "162777b9105915192de69ee270f8ae4d9728c92e2115d059c1b7b3bddfcac27d"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-win64/win64-x86_64-deepseek/durable-token-turn.txt",
+      "bytes": 3656,
+      "sha256": "00d711e87c1136195f0a7a7019bbedcb3605bf31d1b4346d5dcb7cfc4818546f"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-win64/win64-x86_64-deepseek/first-ask.txt",
+      "bytes": 1173,
+      "sha256": "a24b268cf794756217eb080a36b49a503592d3026ffe9a87402d9fd7ce0373b5"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-win64/win64-x86_64-deepseek/online-reopened-screen-state.txt",
+      "bytes": 336,
+      "sha256": "65e1ccbdacda254139ecbfa16c260cc0bfdc90bc83d7992b927e6c9c7e184efc"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-win64/win64-x86_64-deepseek/online-reopened-screen.txt",
+      "bytes": 989,
+      "sha256": "040701f3b1423594b13811013243fac9e5e4dcb1ae452ac9eb75238ffdae9d19"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-win64/win64-x86_64-deepseek/online-screen-state.txt",
+      "bytes": 338,
+      "sha256": "bd5a24d1d61742519280238e5ad82831b10ad5bb2d9981e4fbc661bc74338eb3"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-win64/win64-x86_64-deepseek/online-screen.txt",
+      "bytes": 3700,
+      "sha256": "2e4d3094b07e390d0e179e4d890671dba7315f664bb6455670b8454f976444ca"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-win64/win64-x86_64-deepseek/result.txt",
+      "bytes": 120,
+      "sha256": "b92f5697ed4bf6ad2a3550517a964c4ad0ac0dd36f803f4dc028189a094c8937"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-win64/win64-x86_64-deepseek/verified-approval.txt",
+      "bytes": 2064,
+      "sha256": "666dbb88734782367465782c350e6a186f9300c2730ddfd453190e448212f278"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-win64/win64-x86_64-deepseek/verified-lua-execution.txt",
+      "bytes": 3126,
+      "sha256": "82c56077814f54cdbe397365055304e3db88fb8c8648aadbf1a88ce585f03cfb"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-win64/win64-x86_64-deepseek/verified-recall.txt",
+      "bytes": 945,
+      "sha256": "39ddae8fa9c01ea65e17d25f39a323078e6b46a2229c4af48242445983f9f6db"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-win64/win64-x86_64-qwen/first-ask.txt",
+      "bytes": 1155,
+      "sha256": "7c2080288b7847b5496dfe8814919ed06ae2597c895498c99b1b4bd3e44cadd6"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-win64/win64-x86_64-qwen/online-screen-state.txt",
+      "bytes": 338,
+      "sha256": "177e4e655e111a86607aa50ae5f7d2990a43b6b0dd7604a957e9995a1e6da219"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-win64/win64-x86_64-qwen/online-screen.txt",
+      "bytes": 2875,
+      "sha256": "112f9d43b25416c29e5e59cb2bfea589605883c3a8fdd39a6537be8336a29bb6"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-win64/win64-x86_64-qwen/verified-approval.txt",
+      "bytes": 2049,
+      "sha256": "cf7ae9aff50e07fc54589ed598483a6a671bdfe6350a5ccb82288c312bf9d7fc"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-online/win32-x86-deepseek/durable-token-turn.txt",
+      "bytes": 3413,
+      "sha256": "f1f9aa02d0dd1a075a652ceaef7f1866676535d29037ef7d5fea0f0af9cc77a6"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-online/win32-x86-deepseek/first-ask.txt",
+      "bytes": 1173,
+      "sha256": "67e9d643ed348b1a4a260837415136faf6cb58f5384e693866626ceb0ca6a32b"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-online/win32-x86-deepseek/online-reopened-screen-state.txt",
+      "bytes": 337,
+      "sha256": "0d3a25057af290a4b38d8b5b2dc7539eb6ffda249415bb5978cb4ada45c86451"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-online/win32-x86-deepseek/online-reopened-screen.txt",
+      "bytes": 1012,
+      "sha256": "93c640aec077e40646bafce80784c0ba7c067831759f6ba79ac9a5bf7f8f497f"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-online/win32-x86-deepseek/online-screen-state.txt",
+      "bytes": 339,
+      "sha256": "477116ae61b2f6b50dcf494b8bc5d51b081e7cc8bcee375794f57a2c02dc4df1"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-online/win32-x86-deepseek/online-screen.txt",
+      "bytes": 3457,
+      "sha256": "f0080dae1a54a2490e612234e425c052bc75cf422daf793ff53cef1706de27af"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-online/win32-x86-deepseek/result.txt",
+      "bytes": 120,
+      "sha256": "b92f5697ed4bf6ad2a3550517a964c4ad0ac0dd36f803f4dc028189a094c8937"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-online/win32-x86-deepseek/verified-approval.txt",
+      "bytes": 2064,
+      "sha256": "c6e52e2e761466ed8575cbadeeb2abba653f344e8d7defc81970553adc274d33"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-online/win32-x86-deepseek/verified-lua-execution.txt",
+      "bytes": 2880,
+      "sha256": "fedb003fc708c84cb58bbeae8e3b437f56f2c4e5f63fa2b68501047928924324"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-online/win32-x86-deepseek/verified-recall.txt",
+      "bytes": 968,
+      "sha256": "feb479e0f60c2fcd725336b402a36e3810f840524b8f3d220f22112c28db20aa"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-online/win32-x86-qwen/durable-token-turn.txt",
+      "bytes": 3355,
+      "sha256": "4f6f6c53795683ffbf58cfed984c74928853887ba123de72720965092f5313ec"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-online/win32-x86-qwen/first-ask.txt",
+      "bytes": 1155,
+      "sha256": "c026ecb452dd3cf227adf6f5c1eb3eb587d0477896f976b52a8a0c052e339b54"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-online/win32-x86-qwen/online-reopened-screen-state.txt",
+      "bytes": 337,
+      "sha256": "bfda4036e7f67a305f05bafac675c9deb8784b49b835ef98d48caf66617b3679"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-online/win32-x86-qwen/online-reopened-screen.txt",
+      "bytes": 730,
+      "sha256": "1a7642864140644ba4aa314859209373584ff4c4c202c9284d92664d2b6cb75b"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-online/win32-x86-qwen/online-screen-state.txt",
+      "bytes": 339,
+      "sha256": "e943d3578c0e55a4012ad2935c1c09f96686ab9e4baef5d7d560e48d4b8e9807"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-online/win32-x86-qwen/online-screen.txt",
+      "bytes": 3399,
+      "sha256": "eda7bf36087e0abed5327174fc1f5844a0d60817c3d1fb73bad77514a29b6962"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-online/win32-x86-qwen/result.txt",
+      "bytes": 120,
+      "sha256": "b92f5697ed4bf6ad2a3550517a964c4ad0ac0dd36f803f4dc028189a094c8937"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-online/win32-x86-qwen/verified-approval.txt",
+      "bytes": 2049,
+      "sha256": "373d5e61a85d1759c4b133576468ee225e538396b84d829cf7e97ecc02ed2f83"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-online/win32-x86-qwen/verified-lua-execution.txt",
+      "bytes": 2819,
+      "sha256": "706dd434fbd28792a71d66abf7807f6d8395bd8830ceff85c1a3f6507286c088"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-online/win32-x86-qwen/verified-recall.txt",
+      "bytes": 686,
+      "sha256": "96a7d77ae87ddcccacb203f5361954744224859c093f008448a9bef244d6d5e9"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-online/win64-x86_64-deepseek/first-ask.txt",
+      "bytes": 1173,
+      "sha256": "3e4e0465db7d03024738d2f91d11f0c2235dba783fc07f36031aa6ff471e9ba1"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-online/win64-x86_64-deepseek/online-screen-state.txt",
+      "bytes": 336,
+      "sha256": "12bf3250098f65bf76a4693e43c6b741f92cd15974081f08ab130190adc0e7de"
+    },
+    {
+      "path": "out/review-20261011/r92/r93-received/corrected-online/win64-x86_64-deepseek/online-screen.txt",
+      "bytes": 2067,
+      "sha256": "a7f19d5dbbd49923190604dec5553e2e9899b78061fcb8b46d857da8beb3639f"
+    }
+  ]
+}

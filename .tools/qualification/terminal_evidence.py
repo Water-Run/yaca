@@ -74,8 +74,8 @@ def verify_lua_execution(transcript):
 # Verify the restored Ask uses its durable sequence and recalls only the hidden expected token.
 #@param transcript bytes One restored Ask transcript; the submitted question contains no answer token.
 #@param token str Random token committed by a main turn in the earlier process.
-#@return str Accepted Ask ID whose completed response starts with the sole exact nonce; advisory uncertainty may follow.
-#@error Raises for conflicting identities, a different or duplicated nonce, an incomplete response or tool activity.
+#@return str Accepted Ask ID whose answer starts with the exact nonce, optionally in bold/inline code; citations may repeat that same value.
+#@error Raises for conflicting identities, any different nonce, an incomplete response, a prefixed answer or tool activity.
 def verify_recalled_token(transcript,token):
     plain=re.sub(br'\x1b\[[0-?]*[ -/]*[@-~]',b'',transcript).replace(b'\r',b'')
     identities=re.findall(br'^Ask request accepted: (ask-[0-9]+)$',plain,re.M)
@@ -86,7 +86,8 @@ def verify_recalled_token(transcript,token):
     body=answer.group(1).strip() if answer else b''
     expected=token.encode('utf-8')
     occurrences=re.findall(br'yaca-memory-[A-Za-z0-9_-]+',body)
-    assert body.splitlines() and body.splitlines()[0]==expected and occurrences==[expected], \
+    accepted_lines=(expected, b'**'+expected+b'**', b'`'+expected+b'`')
+    assert body.splitlines() and body.splitlines()[0] in accepted_lines and set(occurrences)=={expected}, \
         "reopened Context did not recall the earlier main turn's verification token"
     assert not re.search(br'^\[TOOL ',plain,re.M), 'restored pure Ask invoked a tool'
     return identity.decode('ascii')

@@ -3,7 +3,8 @@
 更新日期：2026-10-11。核心已实现，远端 `v1.0.0-preview.20261011` 候选已发布。
 已合并远端 `db9c5d5` 的 11 个提交与本地 11 个提交；最近再次拉取远端无新增。
 R90 三目标完整 suite 各 730/730，R91 完整 coding readiness PASS。
-后续 R92 已修复 Ask 输出额度与终态传播，开发宿主完整 suite 733/733；现有 R90 核心尚不包含这两项产品修复。
+R92 已修复 Ask 输出额度与终态传播，三平台新核心已重建并在实际目标各过 733/733。
+新核心绑定 `b9de973` 的 459 文件快照，见 [R92 核心节点](candidates/core-node-r92-20261011.json)；R90 核心保留其历史范围。
 开发按 [D-085](DECISIONS.md#d-085-同步仓库并推进至可发布就绪2026-10-11) 继续至可发布就绪。
 已发布预览版的构建源码为 `dc6ce1486158f8e76f6cb90490dd9d9242115c33`。剩余顺序见
 [TRACKING](TRACKING.md)。
@@ -51,6 +52,15 @@ R92 核对发现 Ask 实际仍被硬编码为 1024 token，故先前配置调整
 全仓结构 266 文件 / 5741 声明 / 0 缺项；人工语义 Review 仍为 partial。
 源文件、实际日志、预算与范围在 [R91](qualification-review/R91.json) 的 41 个字节绑定中保存，
 所选公开证据的凭据扫描零命中。最终九包、保留数据升级、对应源码闭包和剩余语义 Review 继续执行。
+
+R93 在 R92 核心上完成 Win32 DeepSeek/Qwen、Win64 DeepSeek 原生真实模型控制台旅程。
+Win64 Qwen 的追加执行提议未获批准，随后召回触及 Ask 时间上限，正确报告预算耗尽；
+该成功旅程仍待完成。实际持久化工具结果已核对为 stdout `42`、退出码 0。
+两 Windows 从已发布 `dc6ce14` 核心替换到 R92 时，完整配置/Context/工作目录字节清单
+保持一致；新核心重开同一 Context、召回随机 token 并恢复控制台模式。
+驱动明确拒绝追加审批，校验唯一 token 值，同时接受粗体/行内代码及相同值的引用。
+反例 8/9 到 9/9；完整 readiness PASS，267 文件 / 5749 声明 / 0 缺项。
+成功、失败及范围见 [R93](qualification-review/R93.json)，93 个证据绑定的凭据扫描零命中。
 
 阶段为 `implemented-unqualified`，目标资格验证待完成；Release Gate R 为 `closed`，
 `release_authorized=false`。依据见 [readiness](contracts/readiness.lua)、

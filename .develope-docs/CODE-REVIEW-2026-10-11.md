@@ -91,6 +91,25 @@ completed；实际 adapter 的 cancelled 响应（incomplete=false）也被记�
 记录 cancelled，部分 body 按 interrupted 持久化；主轮次和请求身份不受影响。
 完整 Lua suite 733/733，产品源码变动需要新核心重建，R90 的 730/730 不代替该修复验收。
 
+## R93 新核心、原生控制台与保留数据升级
+
+R92 三平台从干净 `b9de973` 同一 459 文件快照重建，实际目标各 733/733；48 个核心/日志
+绑定见 [核心节点](candidates/core-node-r92-20261011.json)。
+Win32 DeepSeek/Qwen、Win64 DeepSeek 的真实原生控制台旅程通过。Win64 控制台初始宽度
+曾忽略启动参数，使审批 JSON 换行；校验器拒绝后未发允许，现显式设置并回读独立缓冲区宽度。
+Qwen 另提出重复调用，驱动只对第一张核对后的 print(6*7) 卡允许一次，对后续完整卡明确拒绝。
+其随后召回触及 120 秒 Ask 时间边界，程序按 R92 正确记录 budget_exhausted；未改记为成功。
+
+两 Windows 升级使用已发布 `dc6ce14` 的原始核心，先完成真实模型工具回合和随机 token 持久化，
+关闭后仅复制新核心，再重开相同 Context。替换前后整个 __yaca__/workspace 清单的目录、文件大小
+和 SHA-256 一致，随后随机 token 召回与观察模式恢复通过。Win64 首次回应含粗体和相同 token
+引用，旧检查误拒绝；新增反例 8/9，修复后 9/9，仍拒绝不同 token、混淆 Ask ID 或工具活动。
+
+完整 readiness PASS，267 文件 / 5749 声明 / 0 缺项。控制台尺寸、追加拒绝、核心替换及数据
+清单比较、唯一 token 值匹配完成人工语义核对；全仓核对仍 partial。93 个绑定和范围见
+[R93](qualification-review/R93.json)，所选证据凭据扫描零命中。
+Win64 Qwen 成功召回、Linux 升级、完整来源闭包和最终九包等仍在 TRACKING 中。
+
 ## R87 已释放终端的收尾确认
 
 R84 保留了首次 restore 错误的优先级，即使随后 native close 已完成实际恢复和关闭。
