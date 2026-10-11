@@ -8891,7 +8891,8 @@ cleanup:
 
 /* Reads the host monotonic clock in milliseconds.
  * @param none No arguments.
- * @return lua_Integer result Byte count, offset, or numeric value for native monotonic milliseconds.
+ * @return lua_Integer Nonnegative representable milliseconds from QPC/CLOCK_MONOTONIC; minus one for unavailable/invalid/overflowing observations.
+ * @effect Reads only the native monotonic source; does not substitute wall-clock time or change domain state.
  */
 static lua_Integer native_monotonic_milliseconds(void)
 {
@@ -12655,20 +12656,21 @@ static const uint32_t yaca_sha256_constants[64] = {
   UINT32_C(0xc67178f2),
 };
 
-/* Rotates one SHA-256 word by the requested bit count.
- * @param value uint32_t Candidate value being converted or checked.
- * @param count unsigned_int Number of values to inspect or emit.
- * @return uint32_t result Input word rotated right by the requested bit count.
+/* Rotate one SHA-256 word using a fixed algorithm rotation strictly between zero and 32.
+ * @param value uint32_t Word supplied by the compression schedule or round state.
+ * @param count unsigned_int Valid fixed rotation count from one through 31; callers enforce this precondition.
+ * @return uint32_t The rotated 32-bit word.
  */
 static uint32_t sha256_rotate_right(uint32_t value, unsigned int count)
 {
   return (value >> count) | (value << (32U - count));
 }
 
-/* Overwrites secret-bearing memory before release.
- * @param memory void* The memory bound to secure zero.
- * @param length size_t Byte or wide-character length of the supplied buffer.
- * @return void result Overwrites the supplied secret-bearing memory before it is released.
+/* Overwrite a borrowed byte range through volatile stores without releasing its ownership.
+ * @param memory void* Writable range; NULL is allowed only when length is zero.
+ * @param length size_t Exact byte count to overwrite, including structure padding when supplied by a caller.
+ * @return void No value; does not allocate or call Lua.
+ * @effect Writes zeros to every selected byte before the caller reuses/releases that range.
  */
 static void secure_zero(void *memory, size_t length)
 {
@@ -12682,15 +12684,32 @@ static void secure_zero(void *memory, size_t length)
   }
 }
 
-/* Implements the Lua secure random native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Copy a caller-retained native byte range into one Lua string inside a protected call.
+ * @param L lua_State* Arguments are a private lightuserdata byte pointer and a caller-validated positive byte count.
+ * @return int One exact byte string; no normal return on Lua allocation failure.
+ * @error Lua string allocation may raise to the protected caller, which owns and wipes the borrowed source.
+ * @ownership Borrows the byte range only during this synchronous call; the returned string owns its independent copy.
+ */
+static int push_native_bytes(lua_State *L)
+{
+  const char *bytes = (const char *)lua_touserdata(L, 1);
+  size_t length = (size_t)lua_tointeger(L, 2);
+  lua_pushlstring(L, bytes, length);
+  return 1;
+}
+
+/* Read bounded OS entropy and wipe native temporary storage even when Lua result allocation fails.
+ * @param L lua_State* Argument one is an integer byte count from one through 64.
+ * @return int One exact random byte string after successful acquisition and result allocation.
+ * @error Raises for invalid count, unavailable/read/close failure or Lua allocation; native bytes are wiped after any completed entropy attempt.
+ * @effect Reads Advapi32 entropy or an owned /dev/urandom descriptor; no deterministic fallback is used.
  */
 static int l_secure_random(lua_State *L)
 {
   lua_Integer requested;
   unsigned char bytes[64];
   size_t length;
+  int status;
 
   requested = luaL_checkinteger(L, 1);
   if (requested < 1 || requested > (lua_Integer)sizeof(bytes))
@@ -12698,6 +12717,10 @@ static int l_secure_random(lua_State *L)
     return luaL_error(L, "secure random byte count must be from 1 through 64");
   }
   length = (size_t)requested;
+  luaL_checkstack(L, 3, "secure random result");
+  lua_pushcfunction(L, push_native_bytes);
+  lua_pushlightuserdata(L, bytes);
+  lua_pushinteger(L, (lua_Integer)length);
 #if defined(_WIN32)
   if (!SystemFunction036(bytes, (ULONG)length))
   {
@@ -12745,15 +12768,17 @@ static int l_secure_random(lua_State *L)
     }
   }
 #endif
-  lua_pushlstring(L, (const char *)bytes, length);
+  status = lua_pcall(L, 2, 1, 0);
   secure_zero(bytes, sizeof(bytes));
+  if (status != LUA_OK) return lua_error(L);
   return 1;
 }
 
-/* Compresses one complete SHA-256 block into the hash state.
- * @param context yaca_sha256* Incremental hash or process context being updated.
- * @param block const_unsigned_char_[64] The block bound to sha256 transform.
- * @return void result Compresses one complete 64-byte block into the SHA-256 chaining state.
+/* Compress one complete block into the caller's SHA-256 chaining words.
+ * @param context yaca_sha256* Initialized hash state receiving the compression result.
+ * @param block const_unsigned_char[64] Borrowed complete block read without modifying it.
+ * @return void No value; clears its temporary message schedule before returning.
+ * @effect Adds the completed round state into context->state; no byte-count or closed flag is changed here.
  */
 static void sha256_transform(yaca_sha256 *context, const unsigned char block[64])
 {
@@ -12839,9 +12864,9 @@ static void sha256_transform(yaca_sha256 *context, const unsigned char block[64]
   secure_zero(words, sizeof(words));
 }
 
-/* Initializes a new SHA-256 hash state.
- * @param context yaca_sha256* Incremental hash or process context being updated.
- * @return void result Initializes SHA-256 chaining words and clears the partial-block count.
+/* Initialize a fresh hash state using the fixed SHA-256 initial chaining words.
+ * @param context yaca_sha256* Caller-owned storage overwritten in full, including counts/buffer/closed state.
+ * @return void No value; the initialized context is open with an empty partial block.
  */
 static void sha256_initialize(yaca_sha256 *context)
 {
@@ -12856,11 +12881,12 @@ static void sha256_initialize(yaca_sha256 *context)
   context->state[7] = UINT32_C(0x5be0cd19);
 }
 
-/* Absorbs bounded bytes into an open SHA-256 state.
- * @param context yaca_sha256* Incremental hash or process context being updated.
- * @param bytes const_unsigned_char* Raw byte buffer supplied to the native operation.
- * @param length size_t Byte or wide-character length of the supplied buffer.
- * @return int result 1 after absorbing all bytes; 0 if the hash is closed or length overflows.
+/* Absorb an admitted byte range without overflowing SHA-256's 64-bit bit-length encoding.
+ * @param context yaca_sha256* Initialized open context; the caller checks its lifecycle before invoking this helper.
+ * @param bytes const_unsigned_char* Borrowed input range, allowed to be empty when length is zero.
+ * @param length size_t Exact input byte count.
+ * @return int One after all bytes are absorbed; zero for algorithm-length overflow before any mutation.
+ * @effect Advances byte_count, chaining words and bounded partial-block storage only on admitted length.
  */
 static int sha256_append(
   yaca_sha256 *context,
@@ -12899,10 +12925,11 @@ static int sha256_append(
   return 1;
 }
 
-/* Pads the last block and writes a complete SHA-256 digest.
- * @param context yaca_sha256* Incremental hash or process context being updated.
- * @param digest unsigned_char_[32] SHA-256 digest bytes used for comparison or formatting.
- * @return void result Writes the final 32-byte digest and marks the hash state closed.
+/* Finalize a caller-owned hash copy without deciding the original owner's lifecycle.
+ * @param context yaca_sha256* Initialized copy mutated by padding and final compression.
+ * @param digest unsigned_char[32] Caller-owned output receiving the exact big-endian digest.
+ * @return void No value; does not set closed or wipe the supplied context.
+ * @effect Mutates only this copy and writes the digest; the caller owns subsequent zeroization.
  */
 static void sha256_finalize(yaca_sha256 *context, unsigned char digest[32])
 {
@@ -12935,18 +12962,21 @@ static void sha256_finalize(yaca_sha256 *context, unsigned char digest[32])
   }
 }
 
-/* Validates and borrows an open Lua SHA-256 userdata.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return yaca_sha256* result Borrowed live SHA-256 userdata; raises a Lua error for wrong or closed handles.
+/* Validate the SHA-256 userdata type without assuming whether it is open or closed.
+ * @param L lua_State* Argument one is the candidate hash owner.
+ * @return yaca_sha256* Borrowed typed userdata; operation-specific callers separately check closed.
+ * @error Raises for a wrong userdata type.
  */
 static yaca_sha256 *check_sha256(lua_State *L)
 {
   return (yaca_sha256 *)luaL_checkudata(L, 1, YACA_SHA256_METATABLE);
 }
 
-/* Implements the Lua sha256 gc native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Wipe and close a collected or explicitly finalized SHA-256 owner.
+ * @param L lua_State* Argument one is the exact native SHA-256 userdata.
+ * @return int Zero Lua results after idempotent zeroization.
+ * @effect Clears all state/buffer/padding bytes, then sets closed.
+ * @error Raises for an incorrect finalizer argument type.
  */
 static int l_sha256_gc(lua_State *L)
 {
@@ -12958,9 +12988,10 @@ static int l_sha256_gc(lua_State *L)
   return 0;
 }
 
-/* Implements the Lua sha256 start native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Allocate a fresh Lua-owned incremental hash with the registered native finalizer.
+ * @param L lua_State* State receiving the new userdata; no arguments are inspected.
+ * @return int One initialized open SHA-256 owner.
+ * @error Lua allocation/metatable lookup may raise before any native OS resource is acquired.
  */
 static int l_sha256_start(lua_State *L)
 {
@@ -12974,9 +13005,11 @@ static int l_sha256_start(lua_State *L)
   return 1;
 }
 
-/* Implements the Lua sha256 update native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Update one open hash with the exact supplied byte string.
+ * @param L lua_State* Argument one is the hash owner; argument two is the input byte string.
+ * @return int One true acknowledgment after admitted input is absorbed.
+ * @error Raises for bad arguments, a closed context or algorithm-length overflow; rejected overflow leaves hash state unchanged.
+ * @effect Mutates only the owned incremental hash on valid input.
  */
 static int l_sha256_update(lua_State *L)
 {
@@ -12998,34 +13031,44 @@ static int l_sha256_update(lua_State *L)
   return 1;
 }
 
-/* Implements the Lua sha256 finish native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Publish a digest before consuming the original hash, retaining retryability through Lua allocation failure.
+ * @param L lua_State* Argument one is an open native SHA-256 owner.
+ * @return int One exact 32-byte digest; the owner is wiped/closed only after its Lua string exists.
+ * @error Raises for wrong/closed arguments or Lua allocation; failed result allocation keeps the original state open.
+ * @effect Wipes the temporary digest/copy on both protected-call outcomes and wipes the owner after successful publication.
  */
 static int l_sha256_finish(lua_State *L)
 {
   yaca_sha256 *context;
   yaca_sha256 copy;
   unsigned char digest[32];
+  int status;
 
   context = check_sha256(L);
   if (context->closed)
   {
     return luaL_error(L, "SHA-256 context is closed");
   }
+  luaL_checkstack(L, 3, "SHA-256 result");
+  lua_pushcfunction(L, push_native_bytes);
+  lua_pushlightuserdata(L, digest);
+  lua_pushinteger(L, sizeof(digest));
   copy = *context;
   sha256_finalize(&copy, digest);
-  secure_zero(context, sizeof(*context));
-  context->closed = 1;
-  lua_pushlstring(L, (const char *)digest, sizeof(digest));
+  status = lua_pcall(L, 2, 1, 0);
   secure_zero(digest, sizeof(digest));
   secure_zero(&copy, sizeof(copy));
+  if (status != LUA_OK) return lua_error(L);
+  secure_zero(context, sizeof(*context));
+  context->closed = 1;
   return 1;
 }
 
-/* Implements the Lua sha256 close native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Idempotently discard an incremental hash without publishing a digest.
+ * @param L lua_State* Argument one is a typed open or already-closed hash owner.
+ * @return int One true acknowledgment after the owner is closed.
+ * @error Raises only for a wrong userdata argument type.
+ * @effect Wipes all open state before setting closed; an already-closed owner is left unchanged.
  */
 static int l_sha256_close(lua_State *L)
 {
@@ -13043,9 +13086,10 @@ static int l_sha256_close(lua_State *L)
 
 #include "yaca_text.h"
 
-/* Implements the Lua abi version native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Publish the fixed native interface identifier used by runtime admission.
+ * @param L lua_State* State receiving one literal; no caller arguments are inspected.
+ * @return int One exact YACA_ABI_VERSION string.
+ * @error Lua string/stack allocation may raise; no native resource is acquired.
  */
 static int l_abi_version(lua_State *L)
 {
@@ -13053,9 +13097,10 @@ static int l_abi_version(lua_State *L)
   return 1;
 }
 
-/* Implements the Lua platform identity native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Project the compiled OS/architecture without claiming an actual minimum-system qualification.
+ * @param L lua_State* State receiving a fresh identity table; no arguments are inspected.
+ * @return int One table containing only os and arch; unsupported compile-time architectures report unknown.
+ * @error Lua allocation may raise before any native resource acquisition.
  */
 static int l_platform_identity(lua_State *L)
 {
@@ -13082,9 +13127,10 @@ static int l_platform_identity(lua_State *L)
   return 1;
 }
 
-/* Implements the Lua monotonic now native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Read the native monotonic millisecond source used by bounded coordinators.
+ * @param L lua_State* State receiving one timestamp; no caller arguments are inspected.
+ * @return int One nonnegative Lua integer after a valid source observation.
+ * @error Raises when the source fails or cannot be represented; no wall-clock fallback is used.
  */
 static int l_monotonic_now(lua_State *L)
 {
@@ -13107,9 +13153,11 @@ static int l_monotonic_now(lua_State *L)
 ** XP-compatible Sleep API; POSIX retries nanosleep only after EINTR.
 ** No domain state or deadline decision is owned by this primitive.
 */
-/* Implements the Lua sleep ms native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Request a bounded OS idle interval without taking ownership of a domain deadline.
+ * @param L lua_State* Argument one is an integer interval from zero through 60000 milliseconds.
+ * @return int One true acknowledgment after the OS wait completes.
+ * @error Raises for invalid arguments or non-EINTR POSIX sleep failure.
+ * @effect Sleeps the calling thread; POSIX EINTR retries only the reported remaining interval.
  */
 static int l_sleep_ms(lua_State *L)
 {
@@ -13143,9 +13191,10 @@ static int l_sleep_ms(lua_State *L)
   return 1;
 }
 
-/* Implements the Lua current process id native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Publish this process's positive native identity without creating a process handle.
+ * @param L lua_State* State receiving one identity; no caller arguments are inspected.
+ * @return int One positive Lua integer from GetCurrentProcessId/getpid.
+ * @error Raises when the native source yields an invalid identity.
  */
 static int l_current_process_id(lua_State *L)
 {
@@ -13171,9 +13220,11 @@ static int l_current_process_id(lua_State *L)
   return 1;
 }
 
-/* Implements the Lua utc now native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Format the observed system UTC time as the project's second-resolution timestamp.
+ * @param L lua_State* State receiving one formatted value; no arguments are inspected.
+ * @return int One UTC text value in YYYY-MM-DDTHH:MM:SSZ format.
+ * @error Raises for POSIX clock/conversion/format failure or Lua result allocation.
+ * @effect Reads only system time; does not set clocks or affect domain deadlines.
  */
 static int l_utc_now(lua_State *L)
 {
@@ -13263,11 +13314,13 @@ static const luaL_Reg yaca_native_functions[] = {
   { NULL, NULL },
 };
 
-/* Registers a locked Lua userdata metatable and garbage collector.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @param name const_char* Selected file, module, or resource name.
- * @param garbage_collector lua_CFunction The garbage collector bound to create handle metatable.
- * @return void result Registers a locked userdata metatable and its garbage collector in Lua.
+/* Complete a private native metatable even after an earlier allocation error left it partially initialized.
+ * @param L lua_State* State receiving temporary metatable/field values while its stack is restored on success.
+ * @param name const_char* Fixed native owner metatable name in the registry.
+ * @param garbage_collector lua_CFunction Exact finalizer for this owner type.
+ * @return void No value; preserves the caller's stack height after installing both fields.
+ * @error Lua allocation may raise; a later initialization retry repairs the partially retained table.
+ * @effect Installs/reinstalls the expected __gc and locked __metatable marker without changing existing owner data.
  */
 static void create_handle_metatable(
   lua_State *L,
@@ -13276,13 +13329,11 @@ static void create_handle_metatable(
 {
   /* @metatable native_userdata Lua userdata binding installed for the exact native owner type.
    */
-  if (luaL_newmetatable(L, name))
-  {
-    lua_pushcfunction(L, garbage_collector);
-    lua_setfield(L, -2, "__gc");
-    lua_pushstring(L, "locked native handle");
-    lua_setfield(L, -2, "__metatable");
-  }
+  luaL_newmetatable(L, name);
+  lua_pushcfunction(L, garbage_collector);
+  lua_setfield(L, -2, "__gc");
+  lua_pushstring(L, "locked native handle");
+  lua_setfield(L, -2, "__metatable");
   lua_pop(L, 1);
 }
 
@@ -13290,7 +13341,8 @@ LUAMOD_API
 /* Opens the native module after the release loader admits its absolute path.
  * @param L lua_State* Lua state receiving the bound native functions.
  * @return int result One Lua module table pushed onto the stack.
- * @effect Installs four private userdata metatables in this Lua state.
+ * @effect Completes/repairs four private userdata metatables and returns the fixed function allowlist.
+ * @error Lua allocation may raise during initialization; a later call repairs partially retained metatable fields.
  */
 int luaopen_yaca_native(lua_State *L)
 {
