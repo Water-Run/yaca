@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-10-08
+Date: 2026-10-11
 File: native_ports_test.lua
 Description: Verifies narrow filesystem, process, terminal, and backend ports.
 ]]
@@ -620,7 +620,8 @@ return {
                     A.truthy(port:close())
                     A.equal(close_calls, 2)
                     A.equal(restore_calls, mode == "restore-failed" and 2 or 1)
-                    A.falsy(pcall(port.close, port))
+                    A.truthy(port:close())
+                    A.equal(close_calls, 2)
                     A.equal(close_calls, 2)
                 end
             end,
@@ -629,7 +630,7 @@ return {
             name = "successful native terminal close settles ownership despite an earlier restore error",
             -- Keep the port closed when its native close succeeds after the explicit restore attempt failed.
             --@param none No arguments; the case owns one isolated terminal and its transient restore closure.
-            --@return nil No value; assertions reject a second native close after the first actual release.
+            --@return nil No value; assertions confirm released ownership without a second native close.
             run = function()
                 local terminal = load_module("terminal")
                 local native = success_native()
@@ -656,7 +657,7 @@ return {
                 local closed, close_error = pcall(port.close, port)
                 A.falsy(closed)
                 A.truthy(tostring(close_error):find("RestoreTransient", 1, true))
-                A.falsy(pcall(port.close, port))
+                A.truthy(port:close())
                 A.equal(close_calls, 1)
             end,
         },

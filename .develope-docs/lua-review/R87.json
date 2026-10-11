@@ -1,0 +1,113 @@
+{
+  "schema": "yaca-lua-review-evidence-v1",
+  "review_id": "R87",
+  "date": "2026-10-11",
+  "status": "verified-terminal-release-confirmation-subset",
+  "release_authorized": false,
+  "base_revision": "a1f47d8c8bd7a25e72becb8968f36ca85dd140c5",
+  "working_tree_changes": true,
+  "source_inputs": [
+    {
+      "path": "src/terminal.lua",
+      "size": 58592,
+      "sha256": "60267db450397da930d9110c6980a7ce84a35482aef5dda86afd3f08b40730c9"
+    },
+    {
+      "path": "test/integration/native_ports_test.lua",
+      "size": 41030,
+      "sha256": "323672328b793e8088d3aa9b52ce3d8334ccea3d4b2553c5b61495850284f283"
+    },
+    {
+      "path": "test/integration/application_coordinator_test.lua",
+      "size": 123172,
+      "sha256": "7866faddee641e096001ac2951bb1f0d51da2f9b9b12926ca4933ebc6f76a4b2"
+    }
+  ],
+  "frozen_source_inputs": [
+    {
+      "path": "out/review-20261011/r87/after-source/src/terminal.lua",
+      "size": 58592,
+      "sha256": "60267db450397da930d9110c6980a7ce84a35482aef5dda86afd3f08b40730c9"
+    },
+    {
+      "path": "out/review-20261011/r87/after-source/test/integration/native_ports_test.lua",
+      "size": 41030,
+      "sha256": "323672328b793e8088d3aa9b52ce3d8334ccea3d4b2553c5b61495850284f283"
+    },
+    {
+      "path": "out/review-20261011/r87/after-source/test/integration/application_coordinator_test.lua",
+      "size": 123172,
+      "sha256": "7866faddee641e096001ac2951bb1f0d51da2f9b9b12926ca4933ebc6f76a4b2"
+    }
+  ],
+  "baseline_inputs": [
+    {
+      "path": "out/review-20261011/r87/before-source/src/terminal.lua",
+      "size": 58390,
+      "sha256": "7bb447df98bbaf43bd3284f58a50f619026300fb100e57bd6f32aa43af7a7499"
+    },
+    {
+      "path": "out/review-20261011/r87/before-source/test/integration/native_ports_test.lua",
+      "size": 41030,
+      "sha256": "323672328b793e8088d3aa9b52ce3d8334ccea3d4b2553c5b61495850284f283"
+    },
+    {
+      "path": "out/review-20261011/r87/before-source/test/integration/application_coordinator_test.lua",
+      "size": 123172,
+      "sha256": "7866faddee641e096001ac2951bb1f0d51da2f9b9b12926ca4933ebc6f76a4b2"
+    }
+  ],
+  "observations": {
+    "baseline_cases": 53,
+    "baseline_failed": 3,
+    "fixed_related_cases": 80,
+    "fixed_failed": 0,
+    "complete_lua_suite": {
+      "total": 714,
+      "passed": 714,
+      "failed": 0
+    },
+    "comment_coverage": {
+      "files": 250,
+      "declarations": 5563,
+      "violations": 0
+    },
+    "coding_readiness": "PASS"
+  },
+  "manual_semantic_review": {
+    "scope": "terminal close and actual-adapter coordinator cleanup regression",
+    "whole_repository": "partial"
+  },
+  "logs": [
+    {
+      "path": "out/review-20261011/r87-before.log",
+      "size": 7609,
+      "sha256": "83d48f481b35bee2d6493b1ba1953a3be068324d35512759df0034158068ee79"
+    },
+    {
+      "path": "out/review-20261011/r87-after.log",
+      "size": 9374,
+      "sha256": "7db01b7d4a40b4bf300054d3fd72cc09f32e01789fcb82c6d6bac6459cb37ffc"
+    },
+    {
+      "path": "out/review-20261011/r87-full-suite.log",
+      "size": 71335,
+      "sha256": "f574dc969f3744f67125b4ec55f7434189c7c5051d36d5374859da690f2d7cd5"
+    },
+    {
+      "path": "out/review-20261011/r87-coding-readiness-final.log",
+      "size": 4358,
+      "sha256": "38c03b031e6d2e681da2f7505bad5c7fb89db336d6b15b105afdb3c8445081ad"
+    },
+    {
+      "path": "out/review-20261011/comment-coverage.log",
+      "size": 64,
+      "sha256": "c6384097e18241b9e3cb7e9ec6ea7777f8d95b14a6bf0533559ab461964e8128"
+    },
+    {
+      "path": "out/review-20261011/comment-inventory.txt",
+      "size": 1241708,
+      "sha256": "4fb98219cc990f3da83dd0901f1abfcc2be3dc5b5efb0e5f9f27b17df105bd6e"
+    }
+  ]
+}

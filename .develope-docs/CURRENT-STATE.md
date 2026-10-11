@@ -1,23 +1,25 @@
 # 当前状态
 
-更新日期：2026-10-08。已从 `origin/main` 快进 15 个提交到 `df38087`，
-完成 D-083 的同步和续推，并按
-[D-084](DECISIONS.md#d-084-三目标核心重建节点收尾后暂停2026-10-08)
-在 R82--R86 三目标核心重建节点收尾后暂停。负责人恢复前不继续推进。
-本轮发现并修复 R82/R83：cooked reader 的 GC detach 遗留资源，以及 Lua 关闭
+更新日期：2026-10-11。本轮已重新拉取 `origin/main`，远端没有新增提交；本地
+`main` 保留 R82--R86 节点的 7 个提交，基线为 `a1f47d8`。负责人按
+[D-085](DECISIONS.md#d-085-同步仓库并推进至可发布就绪2026-10-11)
+恢复开发，目标为满足发布条件的就绪版本。剩余语义 Review、九包和资格继续推进。
+此前修复 R82/R83：cooked reader 的 GC detach 遗留资源，以及 Lua 关闭
 后 DLL 先于存活 reader/stdin writer 被卸载。两架构的 R82 探针各从 30 个泄漏资源
 降为 0；R83 共 52 个 DLL/worker 场景通过，最后一个线程退出后才释放 DLL。
 R84 另修复 terminal native close 失败后无法重试同一 owner。
 R85 补齐管理输入面的同一 owner 保留、join 状态及失败模式切换后的清理。
 R86 让主协调器在 owner 未释放时保持 closing，并幂等重试未完成的清理。
-三目标新核心完整 suite 各 713/713、完整 readiness PASS。证据见
-[10 月 8 日 Review](CODE-REVIEW-2026-10-08.md)。剩余工作见 [TRACKING](TRACKING.md)。
+R87 让终端适配器幂等确认已完成的原生释放，避免先前恢复错误令协调器持续 closing。
+当前完整 Lua suite 714/714、完整 readiness PASS，结构检查 250/5563/0；
+R86 已构建核心各 713/713，尚未包含 R87。证据见
+[10 月 11 日 Review](CODE-REVIEW-2026-10-11.md)。剩余工作见 [TRACKING](TRACKING.md)。
 
 阶段为 `implemented-unqualified`，目标资格验证待完成；Release Gate R 为 `closed`，
 `release_authorized=false`。依据见 [readiness](contracts/readiness.lua)、
 [发行清单](../release/manifest.lua)及[依赖锁](../release/dependencies.lock)。
 
-## 当前开发核心
+## 最近开发核心（R86）
 
 产品版本为 `1.0.0`。包含 R82--R86 的三目标核心已从同一份干净维护源码重建：
 冻结提交为 `163728ea7e6f58efeb01155038da0a68a8cc9e6a`，源码归档 SHA-256 为
@@ -98,7 +100,7 @@ Linux full 的 Git HTTPS、Perl、静态库和默认 SDK 闭包此前已构建�
 ## 注释与语义 Review
 
 本轮完整 coding readiness **PASS**；全仓注释结构为
-**250 文件 / 5556 声明 / 0 缺项**。检查器反例、装配/审计/旅程回归、四校验器和
+**250 文件 / 5563 声明 / 0 缺项**。检查器反例、装配/审计/旅程回归、四校验器和
 全部 TP/RP 通过，本轮构建与完整检查经资源守卫串行运行。
 
 R78--R81 对相应生产函数及维护探针完成人工语义核对和三平台故障取证，冻结输入与
@@ -121,6 +123,8 @@ R85 对实际 Model manager 的收尾/Key 模式切换通过 27/27，保留失�
 active owner 与成功 join，避免新输入覆盖，见 [R85](lua-review/R85.json)。
 R86 协调器专项 42/42，terminal 或 writer 未释放前不报告 closed，重试只处理
 未完成 owner；生产运行失败后再尝试清理，见 [R86](lua-review/R86.json)。
+R87 关闭确认专项相关三套 80/80，实际 adapter 与 coordinator 组合确保此前释放
+能够被收尾确认且不重复 native release，见 [R87](lua-review/R87.json)。
 
 全仓人工语义 Review 仍为 **partial**。后续原生/main 交互内部和部分测试辅助代码
 尚未完成，真实控制台 emergency cancellation 仍需对应运行证据，不用结构覆盖或
@@ -131,9 +135,9 @@ R86 协调器专项 42/42，terminal 或 writer 未释放前不报告 closed，�
 本地和 GitHub 仅保留 `main`，默认分支为 `main`；候选 tag 属于发行标记。
 README.md、README-zh.md 和两份 quickstart 均描述 `1.0.0` 候选及资格待完成，
 中英文 README 的章节、命令参考和下载入口已对齐。开发入口、实施计划和资格手册
-以 D-084 的节点暂停指示为准；本轮提交只保存在本地 main。
+以 D-085 的恢复指示为准；本轮提交只保存在本地 main。
 
-当前按 D-084 暂停；恢复后从 [剩余事项](TRACKING.md) 接续 Review 与资格收尾；历史过程见
+当前从 [剩余事项](TRACKING.md) 接续 Review 与资格收尾；历史过程见
 [开发历程](DEVELOPMENT-HISTORY.md)。
 此前已授权的模型凭据属于原构建机的忽略目录，当前工作区未恢复，未进入源码包、
 候选包或公开证据。后续产物与在线旅程的依赖恢复见 TRACKING。

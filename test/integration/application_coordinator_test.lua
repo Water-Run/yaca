@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-10-08
+Date: 2026-10-11
 File: application_coordinator_test.lua
 Description: Verifies the interactive ApplicationCoordinator input, Agent, approval, and close paths.
 ]]
@@ -1412,6 +1412,99 @@ return {
                 A.falsy(table.concat(f.log, "|"):find("must not run", 1, true))
                 A.equal(f.log[#f.log - 1], "terminal-restore")
                 A.equal(f.log[#f.log], "terminal-close")
+            end,
+        },
+        {
+            name = "coordinator confirms a released terminal after an earlier adapter restore failure",
+            -- Use the actual terminal adapter so a restore error and successful native release cannot strand the coordinator in closing.
+            --@param none No arguments; the case owns a real coordinator/terminal pair and bounded native terminal doubles.
+            --@return nil No value; assertions require the original run error, successful cleanup retry and exactly one native release.
+            --@effect Runs an offline fixture without filesystem, network or real console effects.
+            run = function()
+                local f = fixture()
+                local restores, closes, joins = 0, 0, 0
+                local handle = { terminal = 1 }
+                local native = {}
+                -- Admit the fixture's cooked terminal request and return its sole owner.
+                --@param request table Validated terminal mode, input byte bound and start time.
+                --@return boolean accepted True for the admitted cooked mode.
+                --@return table owner Case-owned handle used by every later native call.
+                native.terminal_start = function(request)
+                    A.equal(request.mode, "cooked")
+                    return true, handle
+                end
+                -- Report real terminal truth immediately so coordinator cleanup can join before release.
+                --@param owner table The sole handle returned by terminal_start.
+                --@param now integer Validated monotonic observation time.
+                --@param budget integer Positive remaining observation limit.
+                --@return boolean accepted True for the requested poll.
+                --@return table events One completed terminal observation.
+                native.terminal_poll = function(owner, now, budget)
+                    A.equal(owner, handle)
+                    A.truthy(now >= 0 and budget > 0)
+                    return true, { { kind = "terminal", outcome = "completed" } }
+                end
+                -- Reject an unexpected cancellation of an already completed input owner.
+                --@param owner table Case-owned terminal handle.
+                --@param now integer Monotonic cancellation time.
+                --@return nil Does not return normally.
+                --@error Raises if coordinator cleanup tries to cancel after completed truth.
+                native.terminal_cancel = function(owner, now)
+                    A.equal(owner, handle)
+                    A.truthy(now >= 0)
+                    error("completed terminal must not be cancelled")
+                end
+                -- Confirm the already observed completed outcome exactly once.
+                --@param owner table Case-owned terminal handle.
+                --@param deadline integer|nil Absolute deadline supplied by coordinator cleanup.
+                --@return boolean accepted True for the terminal join.
+                --@return table outcome Completed terminal result.
+                --@effect Counts joins and rejects a second join of the same owner.
+                native.terminal_join = function(owner, deadline)
+                    A.equal(owner, handle)
+                    A.truthy(deadline == nil or deadline >= 0)
+                    joins = joins + 1
+                    A.equal(joins, 1)
+                    return true, { outcome = "completed" }
+                end
+                -- Fail explicit restoration while allowing the later native close primitive to restore and release.
+                --@param owner table Case-owned terminal handle.
+                --@return boolean accepted False for the two explicit restore attempts.
+                --@return table err Transient restoration failure retained by the first close.
+                --@effect Counts explicit restoration attempts.
+                native.terminal_restore = function(owner)
+                    A.equal(owner, handle)
+                    restores = restores + 1
+                    return false, { code = "RestoreTransient", message = "explicit restoration failed" }
+                end
+                -- Complete native restoration and release without touching the owner a second time.
+                --@param owner table Case-owned terminal handle.
+                --@return boolean accepted True after the native release.
+                --@return boolean closed True acknowledgement of released ownership.
+                --@effect Counts native releases and rejects duplicate release.
+                native.terminal_close = function(owner)
+                    A.equal(owner, handle)
+                    closes = closes + 1
+                    A.equal(closes, 1)
+                    return true, true
+                end
+                local port = assert(load_module("terminal").new(native, {
+                    mode = "cooked", maximum_input_bytes = 65536,
+                }))
+                for _, method in ipairs({ "start", "poll", "cancel", "join", "restore", "close" }) do
+                    f.terminal[method] = port[method]
+                end
+                local result, err = f.coordinator:run()
+                A.falsy(result)
+                A.equal(err.code, "TerminalRestoreFailure")
+                A.equal(f.coordinator:status().lifecycle, "closing")
+                A.truthy(f.coordinator:close())
+                A.equal(f.coordinator:status().lifecycle, "closed")
+                A.falsy(f.coordinator:status().terminal_started)
+                A.truthy(f.coordinator:close())
+                A.equal(joins, 1)
+                A.equal(restores, 2)
+                A.equal(closes, 1)
             end,
         },
         {

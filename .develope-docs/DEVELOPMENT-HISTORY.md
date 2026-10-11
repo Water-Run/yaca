@@ -1,12 +1,13 @@
 # 开发历程与历史资料
 
-整理日期：2026-10-08。当前实现看 [CURRENT-STATE.md](CURRENT-STATE.md)，
+整理日期：2026-10-11。当前实现看 [CURRENT-STATE.md](CURRENT-STATE.md)，
 剩余工作看 [TRACKING.md](TRACKING.md)。本页只导航已有工作和证据。
 
 ## 已完成工作的脉络
 
 | 时间 / 节点 | 主要成果 | 证据与适用范围 |
 | --- | --- | --- |
+| 2026-10-11，恢复至可发布就绪与 R87 | 拉取远端并保留本地节点；幂等确认已完成的原生 terminal release，避免首次 restore 错误阻止协调器收尾；恢复模型与工具输入 | [本日 Review](CODE-REVIEW-2026-10-11.md)、[R87](lua-review/R87.json)；基线 50/53、专项 80/80、完整 714/714、250/5563/0、readiness PASS；最终资格继续执行 |
 | 2026-10-08，三目标核心重建与暂停 | R82--R86 从同一干净源码重建三核心，逐件绑定真实目标测试及构建证据；按 D-084 收尾后暂停，停止输入恢复下载并保存断点 | [本日 Review](CODE-REVIEW-2026-10-08.md)、[核心节点](candidates/core-node-r86-20261008.json)；三目标各 713/713，Gate R 关闭，新核心九包与正式资格待完成 |
 | 2026-10-08，R86 协调器清理 | 未释放 owner 保持 closing，幂等 close 只重试未完成 owner；缓存成功 writer close 与 terminal join，生产失败后再尝试清理 | [本日 Review](CODE-REVIEW-2026-10-08.md)、[R86](lua-review/R86.json)；精确基线 39/42，修复 42/42；713/713、250/5556/0、readiness PASS |
 | 2026-10-08，R85 管理输入 owner | close 失败保留 active/join 状态，最终清理重试同一终端，模式切换不覆盖旧 owner；时钟退化仍收尾 | [本日 Review](CODE-REVIEW-2026-10-08.md)、[R85](lua-review/R85.json)；精确 R84 反例 25/27，修复后 27/27；710/710、250/5552/0、readiness PASS |
