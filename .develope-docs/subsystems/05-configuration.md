@@ -273,6 +273,10 @@ Model/config INI 可以在 chat 持有 Context writer 时由独立 REPL 或外�
 | ToolsEnabled | bool | true | no | false 不可 main coding |
 | AdapterOptions | typed map | 空 | 视键 | 未知键 error |
 
+当前 `openai-chat` 注册 `reasoning_effort` 字符串枚举：`none`、`minimal`、`low`、
+`medium`、`high`、`xhigh`、`max`。仅显式设置时传给服务端；具体模型支持的子集由该服务决定。
+该键不包含凭据，配置编辑仍沿用 AdapterOptions 的隐藏输入方式。未注册键或枚举外值使配置无效。
+
 失败不自动换 Model。
 
 ### Context XML 白名单

@@ -62,6 +62,13 @@ Win64 Qwen 的追加执行提议未获批准，随后召回触及 Ask 时间上�
 反例 8/9 到 9/9；完整 readiness PASS，267 文件 / 5749 声明 / 0 缺项。
 成功、失败及范围见 [R93](qualification-review/R93.json)，93 个证据绑定的凭据扫描零命中。
 
+R94 已完成 Linux 从同一已发布核心到 R92 的保留数据升级：11 个数据条目字节一致，
+同一 Context 重开召回与终端模式恢复通过；范围为授权现代 Linux 宿主的真实 SSH PTY。
+同时补齐既有 AdapterOptions 的 `reasoning_effort` 注册与枚举校验，只在显式配置时发送。
+专项 25/27 到 27/27，完整 suite 735/735，readiness PASS，269 文件 / 5762 声明 / 0 缺项。
+原始证据见 [R94](lua-review/R94.json)。该产品变更仍需新核心和实际低档位 Qwen 验收；
+已准备私有 low 配置，未改变共享模型服务。
+
 阶段为 `implemented-unqualified`，目标资格验证待完成；Release Gate R 为 `closed`，
 `release_authorized=false`。依据见 [readiness](contracts/readiness.lua)、
 [发行清单](../release/manifest.lua)及[依赖锁](../release/dependencies.lock)。

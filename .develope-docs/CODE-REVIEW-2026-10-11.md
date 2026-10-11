@@ -110,6 +110,26 @@ Qwen 另提出重复调用，驱动只对第一张核对后的 print(6*7) 卡允
 [R93](qualification-review/R93.json)，所选证据凭据扫描零命中。
 Win64 Qwen 成功召回、Linux 升级、完整来源闭包和最终九包等仍在 TRACKING 中。
 
+## R94 Linux 升级与可选推理档位
+
+Linux 升级使用已发布 `dc6ce14` 核心和 R92 核心，退出旧进程后仅替换可执行文件。
+__yaca__/workspace 的 11 个目录/文件条目及所有字节一致，新核心随后重开 Context、
+召回随机 token、正常退出并恢复模式。首次驱动重复消费 shell 提示符而超时，核心替换
+已完成但未启动重开；保留该记录后，修正提示符交接并在新隔离目录复跑通过。
+升级辅助的真实文件反例覆盖数据保持、已有回执/no-op 拒绝、链接拒绝及复制中数据被改动。
+
+已核对 [OpenAI Chat Completions 参数](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)
+的 reasoning_effort 值表；[Qwen 模型说明](https://huggingface.co/Qwen/Qwen3.8-27B)说明该模型
+默认深推理，并支持按请求选择 low/medium/xhigh。现有 AdapterOptions 槽位新增一个已注册
+字符串枚举，未知值在配置阶段拒绝；编码器再校验并仅在显式配置时发送，无配置时保持省略。
+未新增另一套配置通道或放宽 Ask 的时间/响应字节边界。
+
+反例基线 25/27，修复后 27/27，覆盖枚举复制、非法/重复/稀疏声明拒绝、实际 wire 字段及
+默认省略。完整 suite 735/735，readiness PASS，269 文件 / 5762 声明 / 0 缺项。
+相关校验、字段传播、失败返回和升级函数已人工核对；全仓语义 Review 继续 partial。
+17 个源码/日志绑定及边界见 [R94](lua-review/R94.json)，凭据扫描零命中。
+该产品源码尚待重建核心和 Qwen low 档位实际验收，不能沿用此前核心的结果代填。
+
 ## R87 已释放终端的收尾确认
 
 R84 保留了首次 restore 错误的优先级，即使随后 native close 已完成实际恢复和关闭。

@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-10-05
+Date: 2026-10-11
 File: model.lua
 Description: Maps bounded OpenAI Chat and Anthropic Messages wire data to canonical model events.
 ]]
@@ -942,7 +942,7 @@ end
 --@param request_data table Admitted normalized request.
 --@param streaming boolean Whether the provider request asks for streaming events.
 --@return string|nil Canonical provider request body.
---@return table|nil Prompt, Tool, limit, or wire encoding error.
+--@return table|nil Prompt, Tool, adapter-option, limit, or wire encoding error.
 local function encode_request(codec, request_data, streaming)
     local model_ref = request_data.model_ref
     local protocol = model_ref.protocol
@@ -969,6 +969,17 @@ local function encode_request(codec, request_data, streaming)
                 return nil, failure("InvalidRequestLimit", "max_output_tokens must be positive")
             end
             fields[#fields + 1] = "\"max_tokens\":" .. tostring(request_data.limits.max_output_tokens)
+        end
+        local effort = (model_ref.adapter_options or {}).reasoning_effort
+        if effort ~= nil then
+            local allowed_efforts = { none = true, minimal = true, low = true,
+                medium = true, high = true, xhigh = true, max = true }
+            if type(effort) ~= "string" or not allowed_efforts[effort] then
+                return nil, failure("InvalidAdapterOption", "reasoning_effort is not a supported value")
+            end
+            local encoded_effort, effort_error = encode_value(codec, effort)
+            if not encoded_effort then return nil, effort_error end
+            fields[#fields + 1] = "\"reasoning_effort\":" .. encoded_effort
         end
         fields[#fields + 1] = "\"stream\":" .. stream
         if tools then fields[#fields + 1] = "\"tools\":" .. tools end

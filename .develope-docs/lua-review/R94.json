@@ -1,0 +1,153 @@
+{
+  "schema": "yaca-source-review-v1",
+  "review": "R94",
+  "date": "2026-10-11",
+  "status": "regression-pass",
+  "qualification": "pending",
+  "release_authorized": false,
+  "whole_repository_semantic_review": "partial",
+  "development_paused": false,
+  "reasoning_effort": {
+    "explicit_only": true,
+    "values": [
+      "none",
+      "minimal",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ],
+    "baseline": "25/27",
+    "corrected": "27/27",
+    "target_validation": "pending rebuilt cores"
+  },
+  "full_suite": {
+    "total": 735,
+    "passed": 735,
+    "failed": 0
+  },
+  "readiness": {
+    "status": "PASS",
+    "files": 269,
+    "declarations": 5762,
+    "violations": 0
+  },
+  "linux_upgrade": {
+    "status": "PASS",
+    "scope": "published core to R92 core on authorized modern Linux through real SSH PTY",
+    "receipt": {
+      "old_core_sha256": "4bdf39fc072e54a4d41f27091f23fd851887b6dfeb5ab90f396fe4580c6cae56",
+      "new_core_sha256": "7a085fc8f49fb3778d75b15233817b4e6146b572679efff591846cd63e791c95",
+      "data_entries": 11,
+      "all_data_bytes_preserved": true
+    },
+    "source_of_new_core": "b9de9730cb457a9e32acb4989533f661a49f846c"
+  },
+  "manual_review": [
+    "detached release-owned adapter string enums and early invalid-value rejection",
+    "explicit OpenAI reasoning_effort wire field and unchanged omission default",
+    "Linux stopped-core replacement, data inventory and one-prompt handoff"
+  ],
+  "sources": [
+    "https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create",
+    "https://huggingface.co/Qwen/Qwen3.8-27B"
+  ],
+  "selected_evidence_secret_scan": {
+    "matches": 0
+  },
+  "pending": [
+    "rebuilt cores and actual low-effort Qwen verification",
+    "complete source closure",
+    "final nine editions and remaining qualification",
+    "whole semantic review"
+  ],
+  "evidence_root": "out/review-20261011/r94/frozen",
+  "files": [
+    {
+      "path": "src/config.lua",
+      "bytes": 123647,
+      "sha256": "21a8ae604a349222a668fae5b629acf8d304d11eba097212fda737ae21b4a871"
+    },
+    {
+      "path": "src/model.lua",
+      "bytes": 248015,
+      "sha256": "4cafe22e59acaea889ad17ff9b328f200d628c87fc3c0eda7e77e9f991400bf6"
+    },
+    {
+      "path": "src/main.lua",
+      "bytes": 629130,
+      "sha256": "41331a3db15c4522828b5cd34e11da0e2dc07bd2f44a647d1da27e2780c57711"
+    },
+    {
+      "path": ".tools/qualification/portable_upgrade.py",
+      "bytes": 5163,
+      "sha256": "1d08e305be5b39ad975cbe8c0a4d5945aba3b0f53135c31c735d74305f891f69"
+    },
+    {
+      "path": ".tools/qualification/agent_terminal_smoke.py",
+      "bytes": 12367,
+      "sha256": "bda3e485a5d221a3aaaef53a97c3f46e3de44c3eeba239eef0be3b3005dac340"
+    },
+    {
+      "path": "test/qualification/portable_upgrade_test.py",
+      "bytes": 5683,
+      "sha256": "82dcea016f6a0cbe8ccaa5b7584ed861fa924058394815fb232dca8876daa127"
+    },
+    {
+      "path": "test/unit/config_test.lua",
+      "bytes": 32301,
+      "sha256": "39a712b924ab93c1192ceffe6697a3aa099e418f47fb1b0646c389275eb42b44"
+    },
+    {
+      "path": "test/integration/model_adapter_test.lua",
+      "bytes": 42383,
+      "sha256": "082085b3a33a22fd3b42ee7290aa3d6345fa97abcd0e5685d4aa636694c25ce0"
+    },
+    {
+      "path": ".tools/run_coding_readiness.sh",
+      "bytes": 1581,
+      "sha256": "3eb0f5abdb3c4e7825167fbe306157128b23965116485a3f76ea413095c914b2"
+    },
+    {
+      "path": ".develope-docs/subsystems/05-configuration.md",
+      "bytes": 29986,
+      "sha256": "b15eee473201648469f3c2fc549c378a7f569fdbe6e904fd3896c86d674090e1"
+    },
+    {
+      "path": "out/review-20261011/r94/effort-before.log",
+      "bytes": 3807,
+      "sha256": "93ebb8a992ca44f6d542ca2e130e4daac6b4d3bad2ee903e80927a970dbe89d9"
+    },
+    {
+      "path": "out/review-20261011/r94/effort-after-final.log",
+      "bytes": 2713,
+      "sha256": "b98ba36de4519c0e5e5d00f80da180cbe213f6b422f4081cc5b4bf9b9abcdda3"
+    },
+    {
+      "path": "out/review-20261011/r94/full-suite.log",
+      "bytes": 73467,
+      "sha256": "8515c48c3302a5b39350fa8a72b951c44160e87dc2706898b74bd77aae959007"
+    },
+    {
+      "path": "out/review-20261011/r94/coding-readiness.log",
+      "bytes": 4668,
+      "sha256": "01c520af253236cd82d169e0402037c0dcb2e0c296c02bf8849a890c872289a9"
+    },
+    {
+      "path": "out/review-20261011/r94/linux-upgrade-run.log",
+      "bytes": 325,
+      "sha256": "01f57c12ef737b839d76d07fd3b0143c1540ed494b17d594654e2b1dc7b30d7d"
+    },
+    {
+      "path": "out/review-20261011/r94/linux-upgrade-transcript.log",
+      "bytes": 7154,
+      "sha256": "23189dd2a8fb275244b8b4d47b5548dc9974d8bdc3e3004387038dda3cd73d64"
+    },
+    {
+      "path": "out/review-20261011/r94/linux-upgrade-receipt.json",
+      "bytes": 239,
+      "sha256": "09948ba0e6331e6b7494d8710f6935c6525b6c50b680a724ffee277e58bfde75"
+    }
+  ]
+}

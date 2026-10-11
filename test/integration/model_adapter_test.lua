@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-10-05
+Date: 2026-10-11
 File: model_adapter_test.lua
 Description: Verifies canonical dual-provider request and event adapters.
 ]]
@@ -66,8 +66,9 @@ end
 --@param surface any The surface supplied to the fake service for this scenario.
 --@param schema table Schema validator exercised by the case.
 --@param view table|string Selected catalog or transcript view.
+--@param adapter_options table|nil Explicit provider options; absent by default.
 --@return any observed request value observed by the scenario assertion.
-local function request(service, protocol, streaming, suffix, surface, schema, view)
+local function request(service, protocol, streaming, suffix, surface, schema, view, adapter_options)
     local remote_model = protocol == "openai-chat" and "gpt-test" or "claude-test"
     local tools = {}
     if surface then
@@ -89,6 +90,7 @@ local function request(service, protocol, streaming, suffix, surface, schema, vi
                 or "https://api.example/v1/messages",
             remote_model = remote_model,
             capabilities_digest = "capabilities-1",
+            adapter_options = adapter_options or {},
         },
         config_generation = "generation-1",
         prompt_bundle = { messages = { { role = "user", content = "hi" } } },
@@ -162,6 +164,31 @@ end
 return {
     name = "integration/model-adapter",
     cases = {
+        {
+            name = "OpenAI reasoning effort is explicit bounded and absent by default",
+            -- Verify the registered effort is serialized once while unsupported values fail before transport.
+            --@param none No arguments; the case owns a real adapter and synthetic normalized requests.
+            --@return nil No value; assertions inspect wire bytes and typed invalid-option errors.
+            --@effect Encodes local request data without issuing network requests.
+            run = function()
+                local service = assert(load_module("model").new(limits()))
+                local ordinary = assert(service:encode(request(service, "openai-chat", false, "default-effort")))
+                A.falsy(ordinary.body:find("reasoning_effort", 1, true))
+                for _, effort in ipairs({ "none", "minimal", "low", "medium", "high", "xhigh", "max" }) do
+                    local normalized = request(service, "openai-chat", false, "effort-" .. effort,
+                        false, nil, nil, { reasoning_effort = effort })
+                    local wire = assert(service:encode(normalized))
+                    A.contains(wire.body, '"reasoning_effort":"' .. effort .. '"')
+                end
+                for _, invalid in ipairs({ "unbounded", true, 10 }) do
+                    local normalized = request(service, "openai-chat", false, "bad-effort",
+                        false, nil, nil, { reasoning_effort = invalid })
+                    local wire, err = service:encode(normalized)
+                    A.falsy(wire)
+                    A.equal(err.code, "InvalidAdapterOption")
+                end
+            end,
+        },
         {
             name = "explicit JSON null content and tool calls stay canonical",
             --Verifies providers may spell absent content, reasoning and tool

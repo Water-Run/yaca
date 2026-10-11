@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-10-11
 File: config.lua
 Description: Validates typed configuration generations and publishes safe INI edits.
 ]]
@@ -444,7 +444,7 @@ end
 
 -- Validate provider-specific adapter option declarations.
 --@param input any Optional protocol-to-field schema map.
---@return table|nil Copied schema with normalized secret flags.
+--@return table|nil Copied schema with normalized secret flags and detached optional string-enum lookups.
 --@return table|nil InvalidConfigOptions error on failure.
 local function validate_adapter_schemas(input)
     if input == nil then return {} end
@@ -466,7 +466,7 @@ local function validate_adapter_schemas(input)
                 return nil, failure("InvalidConfigOptions", "adapter option field is invalid")
             end
             for name in pairs(declaration) do
-                if name ~= "type" and name ~= "secret" then
+                if name ~= "type" and name ~= "secret" and name ~= "values" then
                     return nil, failure(
                         "InvalidConfigOptions",
                         "adapter option declaration has an unknown field"
@@ -483,6 +483,22 @@ local function validate_adapter_schemas(input)
                 return nil, failure("InvalidConfigOptions", "adapter secret flag is invalid")
             end
             admitted[key] = { type = declaration.type, secret = declaration.secret == true }
+            if declaration.values ~= nil then
+                local count = dense_count(declaration.values)
+                if declaration.type ~= "string" or declaration.secret == true
+                    or not count or count < 1 or count > 32
+                then
+                    return nil, failure("InvalidConfigOptions", "adapter option enum is invalid")
+                end
+                local allowed = {}
+                for _, value in ipairs(declaration.values) do
+                    if not valid_text(value, 128) or value == "" or allowed[value] then
+                        return nil, failure("InvalidConfigOptions", "adapter option enum value is invalid")
+                    end
+                    allowed[value] = true
+                end
+                admitted[key].values = allowed
+            end
         end
         result[protocol] = admitted
     end
@@ -831,6 +847,9 @@ local function decode_adapter_map(source, protocol, options, json_codec)
             if decoded == nil then return nil, config_failure("adapter-option-type") end
         elseif kind ~= declaration.type then
             return nil, config_failure("adapter-option-type")
+        end
+        if declaration.values and not declaration.values[decoded] then
+            return nil, config_failure("adapter-option-value")
         end
         if declaration.secret then
             if type(decoded) ~= "string" or decoded == "" then

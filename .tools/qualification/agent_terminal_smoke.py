@@ -45,7 +45,11 @@ def main():
     parser.add_argument("--executable", choices=("yaca.exe", "yaca"), default="yaca.exe")
     parser.add_argument("--port", type=int, default=22)
     parser.add_argument("--identity", type=pathlib.Path)
+    parser.add_argument("--upgrade-core", help="new Linux core path on the selected host, applied only after the first process exits")
+    parser.add_argument("--upgrade-script", help="portable_upgrade.py path on the selected host")
     args = parser.parse_args()
+    if bool(args.upgrade_core) != bool(args.upgrade_script) or (args.upgrade_core and (not args.online or args.executable != 'yaca')):
+        parser.error('Linux upgrade requires --online, --executable yaca and both upgrade paths')
     if not 1 <= args.port <= 65535:
         parser.error("SSH port must be between 1 and 65535")
     if args.host.startswith("-") or any(c in args.host for c in "\r\n\0"):
@@ -202,6 +206,12 @@ def main():
         send("after=$(/usr/bin/stty -g); [ \"$before\" = \"$after\" ] "
              "&& printf '\\nSMOKE_TERMINAL_%s\\n' RESTORED")
         expect("SMOKE_TERMINAL_RESTORED")
+        if args.upgrade_core:
+            expect("SMOKE> ",30)
+            send('python3 ' + shlex.quote(args.upgrade_script) + ' ' + root + ' '
+                 + shlex.quote(args.upgrade_core) + ' ' + shlex.quote(args.directory + '/upgrade-receipt.json'))
+            expect('portable-upgrade=PASS',60)
+            print(platform + '-retained-data-upgrade=PASS',flush=True)
         if args.online:
             expect("SMOKE> ",30)
             plain=re.sub(rb'\x1b\[[0-?]*[ -/]*[@-~]',b'',bytes(received)).replace(b'\r',b'')

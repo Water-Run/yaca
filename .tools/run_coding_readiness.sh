@@ -22,6 +22,7 @@ python3.13 test/release/audit_editions_test.py
 python3.13 test/qualification/edition_journey_test.py
 python3.13 test/qualification/source_snapshot_test.py
 python3.13 test/qualification/terminal_approval_test.py
+python3.13 test/qualification/portable_upgrade_test.py
 python3.13 test/qualification/linux_full_staging_test.py
 python3.13 test/qualification/windows_test_evidence_test.py
 python3.13 test/qualification/restore_edition_inputs_test.py

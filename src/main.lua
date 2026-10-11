@@ -3978,7 +3978,7 @@ local CONFIG_REPAIR_TEMPLATE = table.concat({
     "",
 }, "\n")
 
----Builds the strict INI and runtime bounds for ConfigGeneration parsing.
+---Builds strict INI/runtime bounds and the registered OpenAI reasoning-effort enum for ConfigGeneration parsing.
 --@param ca_bundle_path string Bundled trust store path.
 --@return table options Config schema, limits, and defaults.
 local function config_options(ca_bundle_path)
@@ -4013,7 +4013,14 @@ local function config_options(ca_bundle_path)
         maximum_adapter_options_bytes = 4096,
         maximum_hash_chunk_bytes = 65536,
         minimum_scannable_secret_bytes = 8,
-        adapter_option_schemas = {},
+        adapter_option_schemas = {
+            ["openai-chat"] = {
+                reasoning_effort = {
+                    type = "string",
+                    values = { "none", "minimal", "low", "medium", "high", "xhigh", "max" },
+                },
+            },
+        },
     }
 end
 

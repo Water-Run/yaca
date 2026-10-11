@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-10-11
 File: config_test.lua
 Description: Verifies the complete typed catalog, limits, secrets, and generations.
 ]]
@@ -229,6 +229,42 @@ return {
                 local ambiguous, err = config.resolve_resource({ models = { Name = {}, NAME = {} } }, "Model", "name")
                 A.falsy(ambiguous)
                 A.equal(err.reason, "resource-selector-conflict")
+            end,
+        },
+        {
+            name = "registered adapter enums reject unknown values before network use",
+            -- Validate and detach a release-declared reasoning effort enumeration in the existing AdapterOptions field.
+            --@param none No arguments; the case owns its schema and parses private in-memory INI text.
+            --@return nil No value; assertions require known values, unknown-value rejection and schema detachment.
+            --@effect Performs no network or filesystem operation.
+            run = function()
+                local values = { "low", "medium", "high" }
+                local service = codec({ adapter_option_schemas = { ["openai-chat"] = {
+                    reasoning_effort = { type = "string", values = values },
+                } } })
+                values[1] = "changed"
+                local configured = assert(service.parse(source({
+                    model_extra = 'AdapterOptions = "{\\"reasoning_effort\\":\\"low\\"}"',
+                })))
+                A.equal(configured.models.Primary.adapter_options.reasoning_effort, "low")
+                local invalid, err = service.parse(source({
+                    model_extra = 'AdapterOptions = "{\\"reasoning_effort\\":\\"unbounded\\"}"',
+                }))
+                A.falsy(invalid)
+                A.equal(err.reason, "adapter-option-value")
+                for _, declaration in ipairs({
+                    { type = "string", values = {} },
+                    { type = "string", values = { "low", "low" } },
+                    { type = "integer", values = { "low" } },
+                    { type = "string", secret = true, values = { "low" } },
+                    { type = "string", values = { [2] = "low" } },
+                }) do
+                    local rejected, schema_error = config.new({ sha256 = hash_port() }, options({
+                        adapter_option_schemas = { ["openai-chat"] = { reasoning_effort = declaration } },
+                    }))
+                    A.falsy(rejected)
+                    A.equal(schema_error.code, "InvalidConfigOptions")
+                end
             end,
         },
         {
