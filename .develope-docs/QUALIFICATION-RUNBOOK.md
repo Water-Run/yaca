@@ -1,11 +1,10 @@
 # 发行验收执行手册
 
-更新日期：2026-10-11。适用于现有 clean/std/full 布局，三目标共九包。
+更新日期：2026-10-13。适用于现有 clean/std/full 布局，三目标共九包。
 当前任务与证据边界见[TRACKING](TRACKING.md)和
 [CURRENT-STATE](CURRENT-STATE.md)。旧 9 月候选命令保留在 Git 历史，不再作为执行入口。
-已发布 10 月 11 日预览源码三核心各通过 720/720；合并后 R90 三核心已重建并各通过 730/730。
-R91 资格驱动续修后，最终维护源码与九包仍须重新冻结、构建和绑定。
-按 D-085 继续到可发布就绪；最终资格须绑定新核心和 ZIP。
+本轮候选核心绑定 `e06d9f9`，三目标各通过 735/735。R94 已通过 Win64 Qwen low
+真实控制台旅程。按 D-087 在本次打包推送后继续开发；最终资格须绑定新核心和 ZIP。
 
 本手册使用实际 ZIP 字节，所有结果保持 `qualification=pending`。
 按 D-077 使用已有指定环境，不要求重新准备整套旧系统实机/VM 矩阵。
@@ -13,12 +12,39 @@ R91 资格驱动续修后，最终维护源码与九包仍须重新冻结、构�
 
 ## 1. 开发检查
 
-使用 Python 3.13 及 `.tools/comment_check_requirements.txt` 的固定解析器，执行：
+新机器先拉取 `main`。源码、契约、测试、依赖锁和当前待办均在 Git 中；
+`out/`、`build/`、本地解释器和模型密钥按环境重新准备。它们不参与源码检出。
+
+开发命令使用 Linux 或 WSL。准备 Bash、Git、C 编译器、Make、CMake、curl、tar、
+patch、xmllint，以及带 venv/pip 的 Python 3.13。Lua 的 Linux 构建还需 readline
+开发头文件。`xmllint` 通常来自系统的 libxml2 工具包。
+
+```sh
+git clone https://github.com/Water-Run/yaca.git
+cd yaca
+bash .tools/bootstrap_development.sh
+source out/development/activate.sh
+```
+
+初始化脚本从公开源准备固定 Lua 5.5.1、Expat 2.8.2、LuaExpat 1.5.2 和
+luainstaller 1.5.0，核对摘要或提交，创建本仓库的 Python 3.13 隔离环境并安装
+`.tools/comment_check_requirements.txt` 的固定解析器。缓存和激活脚本均放在
+`out/development/`，路径由当前 checkout 计算；首次运行需要联网。
+已有输入摘要不匹配时脚本拒绝，不覆盖现有解释器。每次新 shell 重新 source 激活脚本。
+在 WSL 中若可用，下载与依赖仓库获取使用 Windows 的 curl/Git 网络链路；源码摘要、
+提交校验及构建仍在 Linux 端完成。
+
+随后执行：
 
 ```sh
 bash .tools/run_with_resource_guard.sh bin/lua55 test/run.lua
 bash .tools/run_coding_readiness.sh
 ```
+
+更换电脑不需要复制旧机器的 `out/`。要核对本轮候选的历史日志，从
+`v1.0.0-preview.20261013` 下载 qualification-evidence ZIP 和 SHA256SUMS，
+按候选清单验证；这些历史结果不能替代新源码的检查。
+在线验收另在隔离部署目录配置模型，本仓库和公开附件不含密钥。
 
 若使用隔离环境，把其 `bin/` 放在当前命令的 PATH 前端。完整 readiness 包含全仓注释
 检查与反例、装配/发行校验/PTY 回归、四个校验器和 TP-003/006/008/010、RP-001。
@@ -30,8 +56,8 @@ runtime ZIP 与同名 `-notices.zip` 配对。检查器不解包、不执行工�
 
 ```sh
 bash .tools/run_with_resource_guard.sh python3.13 .tools/qualification/audit_editions.py \
-  --pair out/node-r81-publish-20261006/upload/yaca-1.0.0-linux-x86_64-clean.zip \
-         out/node-r81-publish-20261006/upload/yaca-1.0.0-linux-x86_64-clean-notices.zip \
+  --pair out/node-r95-publish-20261013/upload/yaca-1.0.0-linux-x86_64-clean.zip \
+         out/node-r95-publish-20261013/upload/yaca-1.0.0-linux-x86_64-clean-notices.zip \
   --output out/single-edition-audit.json
 ```
 
@@ -46,7 +72,7 @@ bash .tools/run_with_resource_guard.sh python3.13 .tools/qualification/audit_edi
 audit_pairs=()
 for target in win32-x86 win64-x86_64 linux-x86_64; do
   for edition in clean std full; do
-    stem="out/node-r81-publish-20261006/upload/yaca-1.0.0-$target-$edition"
+    stem="out/node-r95-publish-20261013/upload/yaca-1.0.0-$target-$edition"
     audit_pairs+=(--pair "$stem.zip" "$stem-notices.zip")
   done
 done
@@ -64,7 +90,7 @@ bash .tools/run_with_resource_guard.sh python3.13 .tools/qualification/audit_edi
 
 ```sh
 bin/lua55 test/release/journeys.lua "$PWD" \
-  "$PWD/out/node-r81-publish-20261006/upload/yaca-1.0.0-linux-x86_64-full.zip" \
+  "$PWD/out/node-r95-publish-20261013/upload/yaca-1.0.0-linux-x86_64-full.zip" \
   linux-x86_64 "$PWD/out/journey-scratch" \
   --report "$PWD/out/linux-full-offline-journey.json"
 ```

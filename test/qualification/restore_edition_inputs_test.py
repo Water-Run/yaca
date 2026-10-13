@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Author: WaterRun
-# Date: 2026-10-11
+# Date: 2026-10-13
 # File: restore_edition_inputs_test.py
 # Description: Exercise byte-bound toolbox recovery, old-core exclusion, new-core reassembly and rejection of incorrect or damaged edition pairs.
 
@@ -33,6 +33,7 @@ class RecoveryTest(unittest.TestCase):
         self.addCleanup(self.fixture.doCleanups)
         for tool in self.fixture.inputs['tools']:
             if tool['id'] == 'git':
+                tool['source_closure'] = 'partial'
                 for helper in ('git-remote-http', 'git-remote-https'):
                     tool['files'].append(self.fixture.file(
                         helper + '.exe', 'tools/git/' + helper + '.exe', b'fixture HTTP helper'))
@@ -42,7 +43,7 @@ class RecoveryTest(unittest.TestCase):
         self.runtime = Path(str(stem) + '.zip')
         self.notices = Path(str(stem) + '-notices.zip')
 
-    # Prove recovered tools can assemble a different core while preserving corresponding source identities.
+    # Prove recovered tools can assemble a different core while preserving source identities and declared partial closure.
     #@param self RecoveryTest Fixture owner.
     #@return None No value; assertions require unchanged source hashes, an excluded old core and an accepted replacement core.
     #@effect Recovers and reassembles disposable inputs; no recovered programs execute.
@@ -57,6 +58,8 @@ class RecoveryTest(unittest.TestCase):
         for expected, actual in zip(self.fixture.inputs['tools'], inputs['tools']):
             self.assertEqual(actual['id'], expected['id'])
             self.assertEqual(actual['source_archive']['sha256'], expected['source_archive']['sha256'])
+            if expected['id'] == 'git':
+                self.assertEqual(actual['source_closure'], 'partial')
         replacement = self.fixture.root / 'replacement.exe'
         replacement.write_bytes(self.fixture.args.core.read_bytes() + b'replacement-core')
         self.fixture.args.core = replacement
@@ -65,6 +68,9 @@ class RecoveryTest(unittest.TestCase):
         self.fixture.args.output = self.fixture.root / 'reassembled'
         results = FIXTURES.editions.assemble(self.fixture.args)
         self.assertTrue(all(item['core_sha256'] == self.fixture.args.core_sha256 for item in results))
+        full = next(item for item in results if item['edition'] == 'full')
+        recovered_git = next(tool for tool in full['tools'] if tool['id'] == 'git')
+        self.assertEqual(recovered_git['source_closure'], 'partial')
 
     # Reject a mismatched target before creating any recovery output.
     #@param self RecoveryTest Fixture owner.

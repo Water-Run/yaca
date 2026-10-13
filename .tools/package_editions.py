@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Author: WaterRun
-# Date: 2026-10-05
+# Date: 2026-10-13
 # File: package_editions.py
 # Description: Assemble portable candidate editions from explicit, hashed target inputs.
 
@@ -183,8 +183,10 @@ def edition_sbom(summary):
                          "downloadLocation": tool["source_url"], "filesAnalyzed": False,
                          "licenseConcluded": "NOASSERTION", "licenseDeclared": declared,
                          "copyrightText": "NOASSERTION",
-                         "sourceInfo": "Corresponding source: " + tool["source_archive"]["destination"]
+                         "sourceInfo": ("Source attachment: " if "source_closure" in tool else "Corresponding source: ")
+                            + tool["source_archive"]["destination"]
                             + "; SHA256=" + tool["source_archive"]["sha256"]
+                            + ("; source closure=" + tool["source_closure"] if "source_closure" in tool else "")
                             + ". Target qualification pending. Licenses: " + ", ".join(tool["license_files"])})
         relationships.append({"spdxElementId": "SPDXRef-DOCUMENT", "relationshipType": "DESCRIBES",
                               "relatedSpdxElement": identifier})
@@ -253,6 +255,8 @@ def assemble(args):
                     and all(name in destinations for name in item["license_files"]),
                     "tool license files are missing: " + tool_id)
             require(item["source_url"].startswith("https://"), "tool source URL is required")
+            require(item.get("source_closure", "pending-review") in ("pending-review", "partial", "complete"),
+                    "unknown source closure status: " + tool_id)
             source = file_record(input_path.parent, item["source_archive"],
                                  "sources/" + tool_id + "/" + pathlib.Path(item["source_archive"]["source"]).name)
             admitted[tool_id] = {"metadata": item, "files": files, "source": source}
@@ -282,6 +286,7 @@ def assemble(args):
                 metadata = {key: item[key] for key in
                             ("id", "version", "entry_points", "license_id", "license_files", "source_url")}
                 metadata["source_archive"] = {key: tool["source"][key] for key in ("destination", "sha256")}
+                metadata["source_closure"] = item.get("source_closure", "pending-review")
                 tool_metadata.append(metadata)
             descriptions.extend(target["notes"])
             generated = {} if edition == "clean" else {"tools/README.txt": "\n".join(descriptions) + "\n"}

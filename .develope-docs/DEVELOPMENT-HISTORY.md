@@ -1,12 +1,13 @@
 # 开发历程与历史资料
 
-整理日期：2026-10-11。当前实现看 [CURRENT-STATE.md](CURRENT-STATE.md)，
+整理日期：2026-10-13。当前实现看 [CURRENT-STATE.md](CURRENT-STATE.md)，
 剩余工作看 [TRACKING.md](TRACKING.md)。本页只导航已有工作和证据。
 
 ## 已完成工作的脉络
 
 | 时间 / 节点 | 主要成果 | 证据与适用范围 |
 | --- | --- | --- |
+| 2026-10-13，R95 候选交付与接续入口 | R94 三目标核心各 735/735、Win64 Qwen low 真实控制台通过；九包字节与文件证据、Linux 三档离线核心旅程、独立干净检出初始化及完整 readiness 通过；来源状态在装配/恢复时保留 | [本日 Review](CODE-REVIEW-2026-10-13.md)、[候选清单](candidates/1.0.0-preview.20261013.json)；270/5765/0，来源闭包和全仓语义 Review 保留；按 D-087 推送后继续开发 |
 | 2026-10-11，R94 Linux 升级与推理选项 | Linux 实际保留数据升级/重开通过；既有 AdapterOptions 注册 reasoning_effort，复制枚举并在配置及编码边界校验 | [R94](lua-review/R94.json)；25/27 到 27/27、完整 735/735、269/5762/0、readiness PASS；新核心与低档位 Qwen 待实际验收 |
 | 2026-10-11，R92 新核心与 R93 升级 | 修复 Ask 的实际额度和 length/cancelled 终态，三目标各 733/733；三组 Windows 原生真实模型旅程及双目标保留数据升级通过 | [R92 核心](candidates/core-node-r92-20261011.json)、[R93](qualification-review/R93.json)；Win64 Qwen 时间预算耗尽仍待成功重验，来源闭包和最终九包保留 |
 | 2026-10-11，R90 三核心与 R91 目标旅程 | 同一干净合并源码重建三核心并绑定实际目标各 730/730；六组 provider 各 7/7、Linux 双模型 PTY 和 Windows 双目标原生首次配置通过；修复驱动提示符/召回与恢复线程失败清理 | [核心节点](candidates/core-node-r90-20261011.json)、[R91](qualification-review/R91.json)；50 个核心件与 41 个资格件绑定，266/5741/0、readiness PASS；最终九包、升级、来源闭包和剩余语义 Review 待完成 |

@@ -45,7 +45,7 @@ XP SP3，64 位 Windows 兼容到 Windows 7 SP1，Linux 兼容到 CentOS 7。
 
 ## 开始使用
 
-从[候选预发布](https://github.com/Water-Run/yaca/releases/tag/v1.0.0-preview.20261011)
+从[候选预发布](https://github.com/Water-Run/yaca/releases/tag/v1.0.0-preview.20261013)
 下载压缩包，解压到任意有写权限的位置，然后运行：
 
 ```bat
@@ -141,10 +141,13 @@ yaca 是一个终端程序，保持小巧。
 
 ## 开发
 
-开发文档（中文）在 [.develope-docs/](.develope-docs/)，从
-[当前状态](.develope-docs/CURRENT-STATE.md) 开始看。在仓库根目录运行测试：
+开发文档（中文）在 [.develope-docs/](.develope-docs/)。新拉取的仓库先看
+[开发环境准备](.develope-docs/QUALIFICATION-RUNBOOK.md#1-开发检查)。在 Linux 或 WSL
+的仓库根目录准备环境并运行测试：
 
 ```sh
+bash .tools/bootstrap_development.sh
+source out/development/activate.sh
 bash .tools/run_with_resource_guard.sh bin/lua55 test/run.lua
 ```
 

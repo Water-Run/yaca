@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # Author: WaterRun
-# Date: 2026-10-11
+# Date: 2026-10-13
 # File: restore_edition_inputs.py
-# Description: Recover verified toolbox payloads and exact corresponding sources from a complete candidate edition pair without carrying over its old core or qualification.
+# Description: Recover verified toolbox payloads, source attachments and their declared closure status without carrying over the old core or qualification.
 
 import argparse
 import hashlib
@@ -50,7 +50,7 @@ def copy_member(archive, name, destination, expected, executable):
 #@return dict Recovery receipt binding original pair bytes, target, tool IDs and retained source digests.
 #@error Raises for damaged archives, target mismatch, existing output, case-insensitive Linux staging or changed inputs during recovery.
 #@effect Reads/audits the pair and creates a new local staging directory; no programs run or network requests occur.
-#@ownership Recovery retains only toolbox files and their source archives; old core tests and qualification are not adopted.
+#@ownership Recovery retains toolbox files, source archives and declared closure status; old core tests and qualification are not adopted.
 def restore(runtime, notices, target, output, catalog=ROOT / 'release/tool-bundles.json'):
     output = output.absolute()
     if output.exists():
@@ -90,6 +90,8 @@ def restore(runtime, notices, target, output, catalog=ROOT / 'release/tool-bundl
                              ('id', 'version', 'entry_points', 'license_id', 'license_files', 'source_url')}
                 recovered['files'] = files
                 recovered['source_archive'] = {'source': name, 'sha256': source['sha256']}
+                if 'source_closure' in tool:
+                    recovered['source_closure'] = tool['source_closure']
                 inputs['tools'].append(recovered)
                 source_receipts.append({'tool': tool['id'], 'path': name, 'sha256': source['sha256']})
             index = next((item for item in summary['files'] if item['destination'] == 'tools/INDEX.txt'), None)

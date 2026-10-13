@@ -1,0 +1,571 @@
+{
+  "schema": "yaca-candidate-node-v1",
+  "date": "2026-10-13",
+  "version": "1.0.0",
+  "tag": "v1.0.0-preview.20261013",
+  "status": "candidate-unqualified",
+  "publication": {
+    "kind": "github-prerelease",
+    "owner_authorized": true,
+    "phase": "prepared",
+    "url": "https://github.com/Water-Run/yaca/releases/tag/v1.0.0-preview.20261013"
+  },
+  "release_authorized": false,
+  "target_qualification_complete": false,
+  "development_paused_after_delivery": false,
+  "next_action": "continue development under D-087",
+  "branch_policy": {
+    "local": [
+      "main"
+    ],
+    "remote": [
+      "main"
+    ],
+    "default": "main"
+  },
+  "source_equivalence": {
+    "source_revision": "e06d9f93d542892a28970a06f3f1bce9ff161f73",
+    "source_archive_sha256": "e01becc04f0676fe8612916282f9faad6874924e95a79465fd26cbc7c24ec97f",
+    "source_members": 464,
+    "source_dirty": false,
+    "scope": "R94 frozen core source; delivery-only scripts and documents are separately bound"
+  },
+  "artifacts": [
+    {
+      "target": "win32-x86",
+      "edition": "clean",
+      "version": "1.0.0",
+      "archive": "yaca-1.0.0-win32-x86-clean.zip",
+      "archive_sha256": "d297784b18881e89f0f27e94c1167a990b90f65490bf2551fe8e8176cddafb9d",
+      "notices": "yaca-1.0.0-win32-x86-clean-notices.zip",
+      "notices_sha256": "72af2da048d823fd4847f5b186af363c8477a40f9c46383b26cd509333319fec",
+      "core_sha256": "2a5adf75823deb52861080b5f5540028dc39820baa8593d7e5210987781d65c7",
+      "files": 1,
+      "tools": 0,
+      "core_evidence": {
+        "source_revision": "e06d9f93d542892a28970a06f3f1bce9ff161f73",
+        "source_snapshot_sha256": "e01becc04f0676fe8612916282f9faad6874924e95a79465fd26cbc7c24ec97f",
+        "full_tests": "735/735",
+        "missing": []
+      },
+      "tool_payload_gaps": [],
+      "integrity": "passed",
+      "qualification": "pending"
+    },
+    {
+      "target": "win32-x86",
+      "edition": "std",
+      "version": "1.0.0",
+      "archive": "yaca-1.0.0-win32-x86-std.zip",
+      "archive_sha256": "8ac118505ac445a865d873118cd02e67e89c3b2c4fe57a2d00c6601b2b9b93d2",
+      "notices": "yaca-1.0.0-win32-x86-std-notices.zip",
+      "notices_sha256": "bc7d89a0f0dd2e6303bfd6ee5cb6697f085bf0709c83fd5182a40204e99e6adf",
+      "core_sha256": "2a5adf75823deb52861080b5f5540028dc39820baa8593d7e5210987781d65c7",
+      "files": 3016,
+      "tools": 4,
+      "core_evidence": {
+        "source_revision": "e06d9f93d542892a28970a06f3f1bce9ff161f73",
+        "source_snapshot_sha256": "e01becc04f0676fe8612916282f9faad6874924e95a79465fd26cbc7c24ec97f",
+        "full_tests": "735/735",
+        "missing": []
+      },
+      "tool_payload_gaps": [],
+      "integrity": "passed",
+      "qualification": "pending"
+    },
+    {
+      "target": "win32-x86",
+      "edition": "full",
+      "version": "1.0.0",
+      "archive": "yaca-1.0.0-win32-x86-full.zip",
+      "archive_sha256": "96095cf9aef837f054f08b42e2e352e7083b92a1e4b2709350d7187993bb2012",
+      "notices": "yaca-1.0.0-win32-x86-full-notices.zip",
+      "notices_sha256": "6504b62b92eff778fb00850cebe1ea7fbdf38147a5cdc4d58e3877df937017b5",
+      "core_sha256": "2a5adf75823deb52861080b5f5540028dc39820baa8593d7e5210987781d65c7",
+      "files": 12965,
+      "tools": 10,
+      "core_evidence": {
+        "source_revision": "e06d9f93d542892a28970a06f3f1bce9ff161f73",
+        "source_snapshot_sha256": "e01becc04f0676fe8612916282f9faad6874924e95a79465fd26cbc7c24ec97f",
+        "full_tests": "735/735",
+        "missing": []
+      },
+      "tool_payload_gaps": [],
+      "integrity": "passed",
+      "qualification": "pending"
+    },
+    {
+      "target": "win64-x86_64",
+      "edition": "clean",
+      "version": "1.0.0",
+      "archive": "yaca-1.0.0-win64-x86_64-clean.zip",
+      "archive_sha256": "4db194cbfeb3848b8a69959511703bdb05e73ca319596806527d593f77252bdf",
+      "notices": "yaca-1.0.0-win64-x86_64-clean-notices.zip",
+      "notices_sha256": "33f2a66364992c35fb53f6768e2dfc9d008334fcff152f4e117a47b6e101a368",
+      "core_sha256": "be2574f45b8253f76c77150337a960460b9e361334635ee8c0ddd3e3b09e8f4e",
+      "files": 1,
+      "tools": 0,
+      "core_evidence": {
+        "source_revision": "e06d9f93d542892a28970a06f3f1bce9ff161f73",
+        "source_snapshot_sha256": "e01becc04f0676fe8612916282f9faad6874924e95a79465fd26cbc7c24ec97f",
+        "full_tests": "735/735",
+        "missing": []
+      },
+      "tool_payload_gaps": [],
+      "integrity": "passed",
+      "qualification": "pending"
+    },
+    {
+      "target": "win64-x86_64",
+      "edition": "std",
+      "version": "1.0.0",
+      "archive": "yaca-1.0.0-win64-x86_64-std.zip",
+      "archive_sha256": "5733eab2a8ddc5a7a3406cd899545a73a99ec2faf9309c79c72b8c0156d29ded",
+      "notices": "yaca-1.0.0-win64-x86_64-std-notices.zip",
+      "notices_sha256": "da81158c52a921138e5b6eb0738a22381e0d3c6e6d1b622c431487934f32fc80",
+      "core_sha256": "be2574f45b8253f76c77150337a960460b9e361334635ee8c0ddd3e3b09e8f4e",
+      "files": 3015,
+      "tools": 4,
+      "core_evidence": {
+        "source_revision": "e06d9f93d542892a28970a06f3f1bce9ff161f73",
+        "source_snapshot_sha256": "e01becc04f0676fe8612916282f9faad6874924e95a79465fd26cbc7c24ec97f",
+        "full_tests": "735/735",
+        "missing": []
+      },
+      "tool_payload_gaps": [],
+      "integrity": "passed",
+      "qualification": "pending"
+    },
+    {
+      "target": "win64-x86_64",
+      "edition": "full",
+      "version": "1.0.0",
+      "archive": "yaca-1.0.0-win64-x86_64-full.zip",
+      "archive_sha256": "6a7c8363f6ce3d5f876b0f9edc18b59e47b220de33b46cdebbcfe4a8acc34018",
+      "notices": "yaca-1.0.0-win64-x86_64-full-notices.zip",
+      "notices_sha256": "642847a76d35f78f8ff254f6f7421a3340f350820646d99d9562079718dee5a3",
+      "core_sha256": "be2574f45b8253f76c77150337a960460b9e361334635ee8c0ddd3e3b09e8f4e",
+      "files": 14648,
+      "tools": 10,
+      "core_evidence": {
+        "source_revision": "e06d9f93d542892a28970a06f3f1bce9ff161f73",
+        "source_snapshot_sha256": "e01becc04f0676fe8612916282f9faad6874924e95a79465fd26cbc7c24ec97f",
+        "full_tests": "735/735",
+        "missing": []
+      },
+      "tool_payload_gaps": [],
+      "integrity": "passed",
+      "qualification": "pending"
+    },
+    {
+      "target": "linux-x86_64",
+      "edition": "clean",
+      "version": "1.0.0",
+      "archive": "yaca-1.0.0-linux-x86_64-clean.zip",
+      "archive_sha256": "e984c7cbfa68a3512860ca6f563809da9fed01b15bb44d4868746ca0def96538",
+      "notices": "yaca-1.0.0-linux-x86_64-clean-notices.zip",
+      "notices_sha256": "eefef7b1d3c7386a7d73a57e6f53a248ce8db61d77f3a98ae95969062b822211",
+      "core_sha256": "ab05517ff0314d59a90999111ac44f086ebda071e52567c9f239763a9abc29dc",
+      "files": 1,
+      "tools": 0,
+      "core_evidence": {
+        "source_revision": "e06d9f93d542892a28970a06f3f1bce9ff161f73",
+        "source_snapshot_sha256": "e01becc04f0676fe8612916282f9faad6874924e95a79465fd26cbc7c24ec97f",
+        "full_tests": "735/735",
+        "missing": []
+      },
+      "tool_payload_gaps": [],
+      "integrity": "passed",
+      "qualification": "pending"
+    },
+    {
+      "target": "linux-x86_64",
+      "edition": "std",
+      "version": "1.0.0",
+      "archive": "yaca-1.0.0-linux-x86_64-std.zip",
+      "archive_sha256": "9d2249fde0d34c728d53105cb524b0a3ab614e6465862ea5e4ac2c264320151a",
+      "notices": "yaca-1.0.0-linux-x86_64-std-notices.zip",
+      "notices_sha256": "cdb79b9da6b51501cd9bb0fd919ba491c33ec3709665894513ccdb1243b45f01",
+      "core_sha256": "ab05517ff0314d59a90999111ac44f086ebda071e52567c9f239763a9abc29dc",
+      "files": 4508,
+      "tools": 4,
+      "core_evidence": {
+        "source_revision": "e06d9f93d542892a28970a06f3f1bce9ff161f73",
+        "source_snapshot_sha256": "e01becc04f0676fe8612916282f9faad6874924e95a79465fd26cbc7c24ec97f",
+        "full_tests": "735/735",
+        "missing": []
+      },
+      "tool_payload_gaps": [],
+      "integrity": "passed",
+      "qualification": "pending"
+    },
+    {
+      "target": "linux-x86_64",
+      "edition": "full",
+      "version": "1.0.0",
+      "archive": "yaca-1.0.0-linux-x86_64-full.zip",
+      "archive_sha256": "25712c92ee7c9b5c121d3172193dc6883ebea3cadb6b60af2b2170fcdf17f14a",
+      "notices": "yaca-1.0.0-linux-x86_64-full-notices.zip",
+      "notices_sha256": "7c133a92530abca2ed0ac242e90bb8d866b16e3a8a1d57672263159a4bd4bb3d",
+      "core_sha256": "ab05517ff0314d59a90999111ac44f086ebda071e52567c9f239763a9abc29dc",
+      "files": 14773,
+      "tools": 10,
+      "core_evidence": {
+        "source_revision": "e06d9f93d542892a28970a06f3f1bce9ff161f73",
+        "source_snapshot_sha256": "e01becc04f0676fe8612916282f9faad6874924e95a79465fd26cbc7c24ec97f",
+        "full_tests": "735/735",
+        "missing": []
+      },
+      "tool_payload_gaps": [],
+      "integrity": "passed",
+      "qualification": "pending"
+    }
+  ],
+  "development_checks": {
+    "fresh_checkout_bootstrap": "PASS",
+    "full_lua_tests": "735/735",
+    "coding_readiness": "PASS",
+    "comment_structure": {
+      "files": 270,
+      "declarations": 5765,
+      "violations": 0
+    },
+    "whole_repository_semantic_review": "partial"
+  },
+  "source_closure": {
+    "windows_git": "partial",
+    "whole_toolbox_semantic_review": "pending"
+  },
+  "journeys": {
+    "win64_qwen_low": {
+      "status": "PASS",
+      "scope": "R94 actual native console; exactly one approved Lua execution, Ask, nonce recall and observed mode restoration"
+    },
+    "linux_candidate_editions": {
+      "status": "PASS",
+      "scope": "three exact ZIPs; modern WSL Linux; offline-core ten-step journeys only"
+    },
+    "retained_data_upgrade": {
+      "status": "PASS",
+      "scope": "previously published core to R92; current R94 final-package upgrade still pending"
+    }
+  },
+  "credential_scan": {
+    "status": "PASS",
+    "scope": "exact known provider values in selected public evidence, maintained source-snapshot members and direct ZIP member bytes",
+    "bytes_scanned": 7419077200,
+    "matches": 0
+  },
+  "files": [
+    {
+      "path": "checks/fresh-checkout-run.log",
+      "bytes": 251,
+      "sha256": "f3462505f2461e03391dcdb82c533da5da032ee2893f3cbc63effaff3de30262"
+    },
+    {
+      "path": "checks/fresh-bootstrap.log",
+      "bytes": 328,
+      "sha256": "225d7a1d2d7e7d0f9f48391daeff40cb0ecb1455bf0ada004508521a70ec7672"
+    },
+    {
+      "path": "checks/fresh-full-suite.log",
+      "bytes": 73467,
+      "sha256": "e83779c158c6ff4f6738e0bd24a366b6e320ec0ec545d7b3db042137fcef4aa7"
+    },
+    {
+      "path": "checks/fresh-coding-readiness.log",
+      "bytes": 4525,
+      "sha256": "8795e1ee1649dd2689f121a62d1faf62b3230f9612472768cc479f5413f7f193"
+    },
+    {
+      "path": "checks/fresh-bootstrap-first-network-failure.log",
+      "bytes": 53,
+      "sha256": "4bc19f988b8b82ef8cc95be31af93f76a3ebeda95b8a987fc522bdf9ecda5775"
+    },
+    {
+      "path": "checks/fresh-checkout-first-network-failure.log",
+      "bytes": 145,
+      "sha256": "14d05f472c5bcde07c235ba946b3e1cd639b7626d852a0fb85d06a4ea6c0c7b8"
+    },
+    {
+      "path": "checks/fresh-bootstrap-second-network-failure.log",
+      "bytes": 106,
+      "sha256": "f2f3cd529d76c8ee1601955fc4ab2d06ca434e1bf71fd8b921947c216bf66b85"
+    },
+    {
+      "path": "checks/fresh-checkout-second-network-failure.log",
+      "bytes": 145,
+      "sha256": "3abb38a70f0c577b7a75eca2793b0dca7514d0ecdd79e759ee3a5b1d90a23fb5"
+    },
+    {
+      "path": "checks/prepare-inputs.log",
+      "bytes": 496,
+      "sha256": "84b261fec285a98b889030f9c7424340590805ebc30345e59578f3c5ce7c4285"
+    },
+    {
+      "path": "checks/assembly-cross-disk-aborted.log",
+      "bytes": 210,
+      "sha256": "40fda466945ac7d861653be3f553cb2dba59c932cbf1049881224ef6255fb623"
+    },
+    {
+      "path": "checks/assembly-fast.log",
+      "bytes": 3623,
+      "sha256": "df03bafbd56371ecdd847880d8ff0c57bc44eda9d86806db21bd1e0bb47c3daa"
+    },
+    {
+      "path": "checks/complete-notices.log",
+      "bytes": 343,
+      "sha256": "d0d65fe0f649aac616517ad9d99a7701baa524a1d17153114b2e7ae0b145740a"
+    },
+    {
+      "path": "checks/final-journeys.log",
+      "bytes": 1029,
+      "sha256": "6c37ee277d05f8a82c3de39f091f539cc3b403a9340606c762508a83415499d7"
+    },
+    {
+      "path": "checks/legacy-companion-compatibility.json",
+      "bytes": 1491,
+      "sha256": "b5ee6db577e87783700bcf05b300fe562451ba38055d50e501343705152aefc6"
+    },
+    {
+      "path": "checks/linux-clean-offline-journey.json",
+      "bytes": 3327,
+      "sha256": "e99f936b72c923ae51bddd8af1d2d39245f5b04c1a0294499037dc4016fb6799"
+    },
+    {
+      "path": "checks/linux-std-offline-journey.json",
+      "bytes": 3324,
+      "sha256": "98aa995f8371e13559a367839e62a7fa22b6c0401a0285675dd324b2b509f9c2"
+    },
+    {
+      "path": "checks/linux-full-offline-journey.json",
+      "bytes": 3329,
+      "sha256": "8f24b25b4c2ead441057159123c6307641ba2d9a7e6d18495b9ec26a418f77e2"
+    },
+    {
+      "path": "source/snapshot.json",
+      "bytes": 79683,
+      "sha256": "71dcd0dde411956029e4237632525ca2bec9609d682160c189bd18f8f67239e5"
+    },
+    {
+      "path": "source/yaca-source.tar.gz",
+      "bytes": 2924555,
+      "sha256": "e01becc04f0676fe8612916282f9faad6874924e95a79465fd26cbc7c24ec97f"
+    },
+    {
+      "path": "targets/win32-x86/full-test-summary.json",
+      "bytes": 644,
+      "sha256": "da33d30967505ca1f48f7330d4468a6b9099317a28c0a09425a745261dc31f42"
+    },
+    {
+      "path": "targets/win32-x86/full-test-target.log",
+      "bytes": 74058,
+      "sha256": "57d8c85502a58cad83c578a33fe77c1f24405250df3e583b62967603dff1773a"
+    },
+    {
+      "path": "targets/win64-x86_64/full-test-summary.json",
+      "bytes": 591,
+      "sha256": "f4b54601b16654cf5ec2d9b5bc034cc419af0c3f630696ac75afe21b2e6336a1"
+    },
+    {
+      "path": "targets/win64-x86_64/full-test-target.log",
+      "bytes": 74058,
+      "sha256": "57d8c85502a58cad83c578a33fe77c1f24405250df3e583b62967603dff1773a"
+    },
+    {
+      "path": "targets/linux-x86_64/build-summary.txt",
+      "bytes": 777,
+      "sha256": "d0614a754aced6cd89e050a873d93b532224c9c3b6c778f668e1de0f1c3c437c"
+    },
+    {
+      "path": "targets/linux-x86_64/artifact-file.txt",
+      "bytes": 660,
+      "sha256": "827a65d2d7d07f925454416330508af9d776247a8d2160ffab9adbd6f13d1bb9"
+    },
+    {
+      "path": "targets/linux-x86_64/artifact-ldd.txt",
+      "bytes": 784,
+      "sha256": "2f7dc5a8f63670035da277f90d2279aa7e3dd46271d0e67cff517221514ce9ee"
+    },
+    {
+      "path": "targets/linux-x86_64/artifact-sha256.txt",
+      "bytes": 296,
+      "sha256": "792f4d77c7680ac4a64e14465a884eb6376a72d40f1a79cfb6e92742c8c36d9d"
+    },
+    {
+      "path": "targets/linux-x86_64/full-test-target.log",
+      "bytes": 73322,
+      "sha256": "88294a733d1338c34ae9dc8f78b66636a0bc6e4838cf020dcdbb9e4dbaf2f5b5"
+    },
+    {
+      "path": "journeys/qwen-low-result.json",
+      "bytes": 723,
+      "sha256": "82bd57e6b7e974132581f82b3a01f8c718d7aecf0e36f363760e53d8d124fefb"
+    },
+    {
+      "path": "journeys/qwen-low-native.log",
+      "bytes": 42,
+      "sha256": "8650c992439d4d3e73a3a47ef850c98dd28d619263e718431f9dc065820cc6ad"
+    },
+    {
+      "path": "journeys/qwen-low-run.log",
+      "bytes": 183,
+      "sha256": "ff0769ad5a63e6e2842db57840797b5e5756bc3b96ffa89ce467c8ca6b7f249f"
+    },
+    {
+      "path": "journeys/linux-upgrade-receipt.json",
+      "bytes": 239,
+      "sha256": "09948ba0e6331e6b7494d8710f6935c6525b6c50b680a724ffee277e58bfde75"
+    },
+    {
+      "path": "journeys/linux-upgrade-run.log",
+      "bytes": 325,
+      "sha256": "01f57c12ef737b839d76d07fd3b0143c1540ed494b17d594654e2b1dc7b30d7d"
+    },
+    {
+      "path": "journeys/linux-upgrade-transcript.log",
+      "bytes": 7154,
+      "sha256": "23189dd2a8fb275244b8b4d47b5548dc9974d8bdc3e3004387038dda3cd73d64"
+    },
+    {
+      "path": "journeys/qwen-low/additional-denials.json",
+      "bytes": 2,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "path": "journeys/qwen-low/durable-token-turn.txt",
+      "bytes": 3215,
+      "sha256": "e469d7752835daec58da6ce678900bd5d7284830cda6274484abbeb9f61f80e3"
+    },
+    {
+      "path": "journeys/qwen-low/first-ask.txt",
+      "bytes": 1146,
+      "sha256": "63361cc27aab73e093dc1703a2aa785a5399f8cdbeaa0ac64c0c71783a51a700"
+    },
+    {
+      "path": "journeys/qwen-low/online-reopened-screen-state.txt",
+      "bytes": 336,
+      "sha256": "c31ec752988901c44103cb6f247dafa01005c9bea2ebd948264171a33752f02b"
+    },
+    {
+      "path": "journeys/qwen-low/online-reopened-screen.txt",
+      "bytes": 724,
+      "sha256": "f41100f8823320e8a6fab52381617738dc3e5024012e8ae6af3cb7886b29cd99"
+    },
+    {
+      "path": "journeys/qwen-low/online-screen-state.txt",
+      "bytes": 338,
+      "sha256": "29ff15544dfbf48deb09f9a5c6b67c357d97eeb08b0245150bc6ab2782ac5913"
+    },
+    {
+      "path": "journeys/qwen-low/online-screen.txt",
+      "bytes": 3259,
+      "sha256": "37c30563eae472add8e82d030d89ad606a6b93179939be26cdc8a44fa125eab2"
+    },
+    {
+      "path": "journeys/qwen-low/result.txt",
+      "bytes": 120,
+      "sha256": "b92f5697ed4bf6ad2a3550517a964c4ad0ac0dd36f803f4dc028189a094c8937"
+    },
+    {
+      "path": "journeys/qwen-low/verified-approval.txt",
+      "bytes": 2031,
+      "sha256": "5942ae6fd6b4f2207d270d283b86db5727339ef588f78c3d153b299bc0145b2d"
+    },
+    {
+      "path": "journeys/qwen-low/verified-lua-execution.txt",
+      "bytes": 2700,
+      "sha256": "686bb4dbbdb6513b7bd86e3078433b09423f0445becd029db12fea1325f80fd4"
+    },
+    {
+      "path": "journeys/qwen-low/verified-recall.txt",
+      "bytes": 680,
+      "sha256": "ec2c626b0ca52d99606d8820cd14826749ae8f8e9338953b67466886bc220cb6"
+    },
+    {
+      "path": "delivery-sources/.tools/bootstrap_development.sh",
+      "bytes": 5328,
+      "sha256": "e747cde07c438f9922fb3b1b5a51f7a4f8fff3b391b974e300e8278fe99ffe14"
+    },
+    {
+      "path": "delivery-sources/.tools/package_editions.py",
+      "bytes": 20421,
+      "sha256": "820db2f734a2f5c4c17d68ea388c65271b434ac97968d7b7cf108965beccd35b"
+    },
+    {
+      "path": "delivery-sources/.tools/qualification/restore_edition_inputs.py",
+      "bytes": 8185,
+      "sha256": "ff3b3451e795703e2a738fd4238fc942b8045b588fe3b3cd37e7381cace6e72b"
+    },
+    {
+      "path": "delivery-sources/test/release/editions_test.py",
+      "bytes": 12903,
+      "sha256": "7b171b38fd8f8b165e53af65e9ac14bfb6beb1ce4fe2fe3840580b4e747e3c13"
+    },
+    {
+      "path": "delivery-sources/test/qualification/restore_edition_inputs_test.py",
+      "bytes": 5595,
+      "sha256": "517ab7eb63621a7cc4d61cea5413a5a33a38da14ab4a6de76cda8a7dac019cfa"
+    },
+    {
+      "path": "reproduction/prepare_inputs.py",
+      "bytes": 14556,
+      "sha256": "0448b683d26d9f3f47fd5bc35be79023ea4dd470e4c4ef93185cc5c8d9dc9982"
+    },
+    {
+      "path": "reproduction/stage_fast_inputs.py",
+      "bytes": 1452,
+      "sha256": "3f3f6dada8214a6f1ccdb83eeebebc4dfd0790f4bc0278d5f3a047d29248e219"
+    },
+    {
+      "path": "reproduction/assemble.py",
+      "bytes": 1713,
+      "sha256": "bdcae2b4dfc3abf89894f13dd66e7483a668c068de7ac5f194dfa5c4028225ed"
+    },
+    {
+      "path": "reproduction/complete_linux_notices.py",
+      "bytes": 2179,
+      "sha256": "910df6948eb4491c9afbda786208210e8ef11560de57d665ddf69f919920f898"
+    },
+    {
+      "path": "reproduction/verify_fresh_checkout.sh",
+      "bytes": 1376,
+      "sha256": "dc74e520ff497f10ebb83149f7a12df6cb9fd14a8a775d2bb37dda789c6a1c67"
+    },
+    {
+      "path": "reproduction/check_final_journeys.sh",
+      "bytes": 895,
+      "sha256": "7a69756f18085f7259e3f118a9b80c0561999e97d9fcb160f364c115ca6cba22"
+    },
+    {
+      "path": "reproduction/record_delivery.py",
+      "bytes": 12146,
+      "sha256": "82b6c9a0f89292ac64d3087008335ec9be8069490d9b9529b9d2e2e120ebffd2"
+    },
+    {
+      "path": "source-audits/win32-x86.json",
+      "bytes": 2907,
+      "sha256": "6002ae8f266bebd8ec18f486e338f84024e31b02cc9752a51a099b338d54ecd4"
+    },
+    {
+      "path": "source-audits/win64-x86_64.json",
+      "bytes": 2937,
+      "sha256": "27abf18f0a13ca4b8dfcb48ec89ee0de5b84de9db7ef643431f56da874339ea4"
+    },
+    {
+      "path": "source-audits/linux-x86_64.json",
+      "bytes": 2231,
+      "sha256": "98fd4132dd7b977a28efa2fc53b45bd7049fe574a169eb829da592ddb48daf1d"
+    },
+    {
+      "path": "checks/nine-edition-audit-initial.json",
+      "bytes": 9660,
+      "sha256": "c8d4db766f0cdf1e0822e4b15d2c49374060dd7bdd8ad2a27d43482a53ea6771"
+    },
+    {
+      "path": "checks/nine-edition-audit.json",
+      "bytes": 9500,
+      "sha256": "43bf24df5bf7bb1f617016ed0c78da827cf11d6d16b90b56934ffb7676f3a7a4"
+    }
+  ]
+}

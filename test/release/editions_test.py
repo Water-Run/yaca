@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Author: WaterRun
-# Date: 2026-10-05
+# Date: 2026-10-13
 # File: editions_test.py
 # Description: Build-host integration tests for edition payloads, provenance and failures.
 
@@ -154,6 +154,37 @@ class EditionTest(unittest.TestCase):
             editions.assemble(self.args)
         self.args.core_sha256 = editions.digest(self.args.core)
         self.assertEqual(len(editions.assemble(self.args)), 1)
+
+    # Keep a known partial source closure visible in metadata and the companion SPDX document.
+    #@param self EditionTest Disposable source and package fixture owner.
+    #@return None Assertions fail if a partial closure is dropped or described as complete.
+    #@effect Assembles temporary candidate archives and reads their public metadata.
+    def test_partial_source_closure_is_disclosed(self):
+        self.inputs["tools"][0]["source_closure"] = "partial"
+        self.save()
+        summaries = editions.assemble(self.args)
+        full = next(item for item in summaries if item["edition"] == "full")
+        self.assertEqual(full["tools"][0]["source_closure"], "partial")
+        self.assertEqual(full["tools"][1]["source_closure"], "pending-review")
+        companion = self.args.output / ("yaca-" + full["version"] + "-win32-x86-full-notices.zip")
+        with zipfile.ZipFile(companion) as archive:
+            sbom = json.loads(archive.read("SBOM.spdx.json"))
+        tool = next(item for item in sbom["packages"] if item["SPDXID"] == "SPDXRef-tool-python2")
+        self.assertIn("source closure=partial", tool["sourceInfo"])
+        self.assertNotIn("Corresponding source:", tool["sourceInfo"])
+
+    # Reject an unrecognized closure declaration before creating any candidate output.
+    #@param self EditionTest Disposable source and package fixture owner.
+    #@return None Assertions fail if arbitrary or nonstring status values are admitted.
+    #@effect Writes only the temporary input manifest; failed assembly creates no output.
+    def test_invalid_source_closure_is_rejected(self):
+        for value in ("qualified", True, None):
+            with self.subTest(value=value):
+                self.inputs["tools"][0]["source_closure"] = value
+                self.save()
+                with self.assertRaisesRegex(ValueError, "source closure status"):
+                    editions.assemble(self.args)
+                self.assertFalse(self.args.output.exists())
 
     # Check unsafe package paths, linked cores, and case-folded collisions.
     #@param self EditionTest Per-test fixture owner.

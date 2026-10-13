@@ -54,7 +54,7 @@ itself, in every edition.
 
 ## Getting started
 
-Download a package from the [preview release](https://github.com/Water-Run/yaca/releases/tag/v1.0.0-preview.20261011),
+Download a package from the [preview release](https://github.com/Water-Run/yaca/releases/tag/v1.0.0-preview.20261013),
 unzip anywhere you can write to, then run it:
 
 ```bat
@@ -154,11 +154,14 @@ automatic updates. yaca is a terminal program and stays small.
 
 ## Development
 
-Development notes (in Chinese) are in [.develope-docs/](.develope-docs/),
-starting with [the current state](.develope-docs/CURRENT-STATE.md). Run the
-tests from the repository root:
+Development notes (in Chinese) are in [.develope-docs/](.develope-docs/).
+See [development setup](.develope-docs/QUALIFICATION-RUNBOOK.md#1-开发检查)
+when starting from a fresh clone. In Linux or WSL, prepare the environment
+and run the tests from the repository root:
 
 ```sh
+bash .tools/bootstrap_development.sh
+source out/development/activate.sh
 bash .tools/run_with_resource_guard.sh bin/lua55 test/run.lua
 ```
 
