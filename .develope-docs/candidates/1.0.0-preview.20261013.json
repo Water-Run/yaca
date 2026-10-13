@@ -12,8 +12,8 @@
   },
   "release_authorized": false,
   "target_qualification_complete": false,
-  "development_paused_after_delivery": false,
-  "next_action": "continue development under D-087",
+  "development_paused_after_delivery": true,
+  "next_action": "pause after R95 delivery under D-088; await owner resume",
   "branch_policy": {
     "local": [
       "main"
@@ -566,6 +566,24 @@
       "path": "checks/nine-edition-audit.json",
       "bytes": 9500,
       "sha256": "43bf24df5bf7bb1f617016ed0c78da827cf11d6d16b90b56934ffb7676f3a7a4"
+    },
+    {
+      "path": "decisions/D-088.json",
+      "bytes": 314,
+      "sha256": "61d4539f1fa05a90f44cbd2d0a90bfe4f289b4b2bb7d504b8a3a78e0e02d9646"
+    },
+    {
+      "path": "reproduction/close_delivery.py",
+      "bytes": 2801,
+      "sha256": "d41d71f96f260c5c33fcdd3e6f476d3efb60dcbb3d2877dff0b12ad25b571523"
     }
-  ]
+  ],
+  "close_decision": {
+    "decision": "D-088",
+    "date": "2026-10-13",
+    "owner_instruction": "\u5728\u4e0b\u4e00\u4e2a\u5f00\u53d1\u8282\u70b9\u6536\u5c3e\u6682\u505c. \u8bb0\u5f97\u6574\u7406\u63a8\u9001",
+    "scope": "finish R95 candidate publication, verified receipt and final main push, then pause",
+    "formal_release_gate": "closed",
+    "whole_repository_semantic_review": "partial"
+  }
 }

@@ -1,8 +1,8 @@
 # 当前状态
 
 更新日期：2026-10-13。产品版本为 `1.0.0`，阶段为 `implemented-unqualified`。
-R95 候选正在交付；本轮已同步远端，原远端 `db9c5d5` 没有新增提交。
-按 [D-087](DECISIONS.md#d-087-推送后在当前工作区继续实现2026-10-13)，推送后在当前工作区继续开发。
+R95 候选已发布，24 个远端附件的 SHA-256 与大小均核对一致；源码及开发入口已推送 main。
+按 [D-088](DECISIONS.md#d-088-当前交付节点收尾并暂停2026-10-13)，本节点收口后开发暂停。
 
 ## 当前源码与核心
 
@@ -46,7 +46,13 @@ R94 Win64 Qwen `low` 的真实原生控制台旅程已通过：首次 Ask、一�
 交付入口为
 [`v1.0.0-preview.20261013`](https://github.com/Water-Run/yaca/releases/tag/v1.0.0-preview.20261013)。
 三平台各有 clean/std/full、配套 notices、核心对应源码、摘要和 qualification-evidence。
-R95 清单与实际发布回执在交付验证后保存到 `candidates/`；远端实际可见状态以回执为准。
+冻结资料见 [R95 清单](candidates/1.0.0-preview.20261013.json)，实际公开状态及全部远端摘要
+见 [发布回执](candidates/1.0.0-preview.20261013-publication.json)。清单保留装配时的 prepared
+记录，发布回执记录之后的实际公开步骤；暂停安排按最新 D-088。
+
+独立干净检出完成初始化、Lua 735/735 和完整 coding readiness；结构检查为
+270 文件 / 5765 声明 / 0 缺项。Linux 三个候选 ZIP 在现代 WSL 宿主完成十步
+offline-core 旅程，保留该宿主和离线范围。完整记录见 [10 月 13 日 Review](CODE-REVIEW-2026-10-13.md)。
 
 Windows 编译器、curl、Python 的附件已改用经核对的源码及维护配方。Git 附件包含
 真实主源码、已恢复 SDK 源码、精确配方/补丁和来源状态；闭包明确标记为 `partial`。
@@ -58,7 +64,7 @@ Release Gate R 为 `closed`，`release_authorized=false`，目标资格验证待
 
 ## 接续开发
 
-从 [TRACKING](TRACKING.md) 的剩余事项继续。新机器按
+恢复开发时从 [TRACKING](TRACKING.md) 的剩余事项接续。新机器按
 [开发环境准备](QUALIFICATION-RUNBOOK.md#1-开发检查) 拉取 main 并初始化。
 源码、测试、契约、依赖锁和初始化入口由 Git 维护；历史日志随候选发布。
 本地缓存和模型密钥按环境准备，公开仓库与候选附件不包含私有配置。
