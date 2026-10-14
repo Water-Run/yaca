@@ -2,13 +2,19 @@
 
 更新日期：2026-10-14。产品版本为 `1.0.0`，阶段为 `implemented-unqualified`。
 R95 候选已发布，24 个远端附件的 SHA-256 与大小均核对一致；源码及开发入口已推送 main。
-按 [D-089](DECISIONS.md#d-089-从-r95-接续实现2026-10-14) 已恢复开发；再次同步远端无新增变更。
+按 [D-090](DECISIONS.md#d-090-来源恢复节点收尾后暂停2026-10-14) 在 R97 收尾并推送 main 后暂停。
 
 R96 已修复维护装配器的二进制 Git 来源回退，并在写入输出前验证显式来源档案；
 伪装成来源的编译成员也会拒绝。两 Windows 收集器统一归档路径分隔符并保留来源
 状态。专项 7/11 到 12/12，真实两目标来源子集保持 partial；完整 Lua 735/735、
 coding readiness PASS、结构 270/5771/0。记录见 [10 月 14 日 Review](CODE-REVIEW-2026-10-14.md)
 与 [R96](tool-source-review/R96.json)。产品核心字节仍保留 R95 范围。
+
+R97 已恢复首轮 10 个整包来源输入缺项，两份原 VCS tar 摘要匹配。新 Win64 Git
+来源锁固定 565 个成员，实际来源档案装配与接纳通过；合计 38 个版本中 20 个静态
+摘要全部核对、18 个为静态子集。18 个分离签名及完整二进制对应关系仍待核对，
+`source_closure=partial`。记录见[来源恢复](SOURCE-RECOVERY-2026-10-14.md)和
+[R97](tool-source-review/R97.json)；本节点无产品运行代码变更。
 
 ## 当前源码与核心
 
@@ -54,7 +60,8 @@ R94 Win64 Qwen `low` 的真实原生控制台旅程已通过：首次 Ask、一�
 三平台各有 clean/std/full、配套 notices、核心对应源码、摘要和 qualification-evidence。
 冻结资料见 [R95 清单](candidates/1.0.0-preview.20261013.json)，实际公开状态及全部远端摘要
 见 [发布回执](candidates/1.0.0-preview.20261013-publication.json)。清单保留装配时的 prepared
-记录，发布回执记录之后的实际公开步骤；R95 交付后按 D-088 暂停，本轮按 D-089 恢复。
+记录，发布回执记录之后的实际公开步骤；R95 交付后按 D-088 暂停，本轮按 D-089 恢复，
+R97 来源恢复节点按 D-090 收尾后再次暂停。
 
 独立干净检出完成初始化、Lua 735/735 和完整 coding readiness；结构检查为
 270 文件 / 5765 声明 / 0 缺项。Linux 三个候选 ZIP 在现代 WSL 宿主完成十步
@@ -70,7 +77,7 @@ Release Gate R 为 `closed`，`release_authorized=false`，目标资格验证待
 
 ## 接续开发
 
-继续从 [TRACKING](TRACKING.md) 的剩余事项接续。新机器按
+当前暂停，负责人恢复后从 [TRACKING](TRACKING.md) 的剩余事项接续。新机器按
 [开发环境准备](QUALIFICATION-RUNBOOK.md#1-开发检查) 拉取 main 并初始化。
 源码、测试、契约、依赖锁和初始化入口由 Git 维护；历史日志随候选发布。
 本地缓存和模型密钥按环境准备，公开仓库与候选附件不包含私有配置。

@@ -1,0 +1,247 @@
+{
+  "schema": "yaca-tool-source-review-evidence-v1",
+  "review_id": "R97",
+  "date": "2026-10-14",
+  "status": "original-source-restoration-and-profile-verified",
+  "release_authorized": false,
+  "target_qualification_complete": false,
+  "development_paused": false,
+  "development_state_at_evidence_recording": "active",
+  "close_decision": "D-090",
+  "development_paused_after_delivery": true,
+  "next_action": "pause after R97 close and main push; await explicit resume",
+  "close_verification": {
+    "current_and_frozen_binding_files": 60,
+    "binding_status": "PASS",
+    "source_lock_inputs": 565,
+    "source_lock_pending_entries": 18,
+    "documentation_truth": "PASS",
+    "documentation_truth_checks": 5,
+    "documentation_truth_resource_guard": true,
+    "diff_check": "PASS",
+    "remote_sync_before_close": "origin/main unchanged"
+  },
+  "whole_repository_semantic_review": "partial",
+  "restored_pending_source_versions": 10,
+  "original_vcs_digests_verified": 2,
+  "source_profile": {
+    "schema": "yaca-git-recovered-profile-v1",
+    "status": "PASS",
+    "archive": "git-win64-recovered-sources-20261014.tar.gz",
+    "sha256": "145943b40573df54ff8ed8c679a50faba8e66231aea5e31934072103ccd686d2",
+    "bytes": 614486514,
+    "members": 565,
+    "source_versions_recovered": 38,
+    "pending_entries": 18,
+    "source_closure": "partial"
+  },
+  "source_admission": {
+    "status": "PASS",
+    "version": "2.46.2",
+    "archive": "git-win64-recovered-sources-20261014.tar.gz",
+    "sha256": "145943b40573df54ff8ed8c679a50faba8e66231aea5e31934072103ccd686d2",
+    "source_closure": "partial",
+    "target_qualification_complete": false
+  },
+  "scope": "data recovery and source-profile verification; no product runtime changes or new platform/model qualification",
+  "sources": {
+    "vcs_checksum_method": "https://gitlab.archlinux.org/pacman/pacman/-/blob/v6.1.0/scripts/libmakepkg/source/git.sh.in",
+    "git_export_semantics": "https://git-scm.com/docs/git-archive",
+    "ncurses_container": "https://repo.msys2.org/msys/sources/ncurses-6.5.20240831-2.src.tar.zst",
+    "ca_original_snapshot": "https://snapshot.debian.org/file/e05a7cc1cab263bc4836487f878b3056b7217101"
+  },
+  "source_bindings": [
+    {
+      "path": "release/windows-git64-sources.lock.json",
+      "frozen": "out/review-20261014/r97/frozen-git/release/windows-git64-sources.lock.json",
+      "sha256": "82d98bd616437f4f864347ab26fb6685a4250a8dbb46ecefcf743ef3a55a92c9",
+      "bytes": 181517
+    },
+    {
+      "path": "out/review-20261014/r97/retry_source_payloads.py",
+      "frozen": "out/review-20261014/r97/frozen/out/review-20261014/r97/retry_source_payloads.py",
+      "sha256": "4c4cb6b30e5a9b6ce8e520082c262c85f990e671af06a36a3196c0b2df62f91d",
+      "bytes": 11558
+    },
+    {
+      "path": "out/review-20261014/r97/recover_vcs_sources.py",
+      "frozen": "out/review-20261014/r97/frozen/out/review-20261014/r97/recover_vcs_sources.py",
+      "sha256": "6e8db58a26c1caa2d3c481ce00a26a84cf68e93fa9c59c7832f0dc9f24a7c6a7",
+      "bytes": 5097
+    },
+    {
+      "path": "out/review-20261014/r97/recover_checkout_inputs.py",
+      "frozen": "out/review-20261014/r97/frozen/out/review-20261014/r97/recover_checkout_inputs.py",
+      "sha256": "d9ea9d4b6154e1abf1b209c3d604e54628010aac241adfc2d96bdab1f1ad764a",
+      "bytes": 3883
+    },
+    {
+      "path": "out/review-20261014/r97/recover_ncurses_snapshot.py",
+      "frozen": "out/review-20261014/r97/frozen/out/review-20261014/r97/recover_ncurses_snapshot.py",
+      "sha256": "8cf6becc0f25020cbc91cab52581578d63cf34004831be1439f86cb2dc3d9648",
+      "bytes": 1977
+    },
+    {
+      "path": "out/review-20261014/r97/build_source_profile.py",
+      "frozen": "out/review-20261014/r97/frozen/out/review-20261014/r97/build_source_profile.py",
+      "sha256": "aa6534e8eaab9c7dcd307f093ab3c042a34bb18312ccc36070467182064deaa0",
+      "bytes": 7109
+    },
+    {
+      "path": "out/review-20261014/r97/validate_profile.py",
+      "frozen": "out/review-20261014/r97/frozen/out/review-20261014/r97/validate_profile.py",
+      "sha256": "0aff523de4dea746fb2e8303709fc4faa1dda0139884896c402683474767c69d",
+      "bytes": 1451
+    },
+    {
+      "path": "out/review-20261014/r97/inspect_local_pins.py",
+      "frozen": "out/review-20261014/r97/frozen/out/review-20261014/r97/inspect_local_pins.py",
+      "sha256": "bc22ad419948c3da85225eb1463208fbe6cd8937bdc81573be56051062fc52fd",
+      "bytes": 1741
+    },
+    {
+      "path": "out/review-20261014/r97/retry-source-payloads.json",
+      "frozen": "out/review-20261014/r97/frozen/out/review-20261014/r97/retry-source-payloads.json",
+      "sha256": "7024a1ad7a0c4a7f9e0309072520050f26442139e0703ffa505b11f1a14a4ff0",
+      "bytes": 76405
+    },
+    {
+      "path": "out/review-20261014/r97/retry-source-payloads.log",
+      "frozen": "out/review-20261014/r97/frozen/out/review-20261014/r97/retry-source-payloads.log",
+      "sha256": "2ab5bc1b2ead2f7dc2de22934e43efef143f92ea1f3a941f3d6d9831070c87b1",
+      "bytes": 710
+    },
+    {
+      "path": "out/review-20261014/r97/retry-source-payloads-first.json",
+      "frozen": "out/review-20261014/r97/frozen/out/review-20261014/r97/retry-source-payloads-first.json",
+      "sha256": "075fa1040861c4005445f78e9b5b5b1f2d313e89efe5c97640b1c45bb3d187e8",
+      "bytes": 12957
+    },
+    {
+      "path": "out/review-20261014/r97/retry-source-payloads-second.json",
+      "frozen": "out/review-20261014/r97/frozen/out/review-20261014/r97/retry-source-payloads-second.json",
+      "sha256": "68522728c0b4121c8977c454fc0ceac8a06f9ac3116c4693164c916e75124ff4",
+      "bytes": 74713
+    },
+    {
+      "path": "out/review-20261014/r97/vcs-source-recovery.json",
+      "frozen": "out/review-20261014/r97/frozen/out/review-20261014/r97/vcs-source-recovery.json",
+      "sha256": "d1e61e302b9ec17c4a8db342e0d62b486c0b737878a1c783bcbe21bd4068d3ad",
+      "bytes": 1782
+    },
+    {
+      "path": "out/review-20261014/r97/vcs-source-recovery.log",
+      "frozen": "out/review-20261014/r97/frozen/out/review-20261014/r97/vcs-source-recovery.log",
+      "sha256": "433ca53f400a431e07960410fdaa5ca63d451819ad4856401b8e539d6fed868e",
+      "bytes": 261
+    },
+    {
+      "path": "out/review-20261014/r97/vcs-source-first-attempt.json",
+      "frozen": "out/review-20261014/r97/frozen/out/review-20261014/r97/vcs-source-first-attempt.json",
+      "sha256": "694c06a74c6568d8fce79cf08ef1bc80a137804071e921550defcb64a63a3d37",
+      "bytes": 1399
+    },
+    {
+      "path": "out/review-20261014/r97/vcs-source-first-attempt.log",
+      "frozen": "out/review-20261014/r97/frozen/out/review-20261014/r97/vcs-source-first-attempt.log",
+      "sha256": "34386b4c658b5861ae02bc240fa692c40fd448e4dd7bf3cfc70c6c500d6e1df5",
+      "bytes": 98
+    },
+    {
+      "path": "out/review-20261014/r97/filesystem-local-pins.json",
+      "frozen": "out/review-20261014/r97/frozen/out/review-20261014/r97/filesystem-local-pins.json",
+      "sha256": "53588ba29184e1d3ef98d7e67402b3065dde25b9d76dbf05a378b4199cbd5110",
+      "bytes": 8765
+    },
+    {
+      "path": "out/review-20261014/r97/filesystem-original.gitattributes",
+      "frozen": "out/review-20261014/r97/frozen/out/review-20261014/r97/filesystem-original.gitattributes",
+      "sha256": "0f018a1e989358b6515894970bead2aad623cd03bd700625c38471329dbc9eab",
+      "bytes": 395
+    },
+    {
+      "path": "out/review-20261014/r97/checkout-input-recovery.json",
+      "frozen": "out/review-20261014/r97/frozen/out/review-20261014/r97/checkout-input-recovery.json",
+      "sha256": "96cf538d5ff5213b88c25ea833a011dd7cc3a5bea468f410ce2afb8155a4f02f",
+      "bytes": 1747
+    },
+    {
+      "path": "out/review-20261014/r97/debian-source-index.json",
+      "frozen": "out/review-20261014/r97/frozen/out/review-20261014/r97/debian-source-index.json",
+      "sha256": "77e666025d9881398460da1abb937900ebf5106d0f6c166a7d1eacb57c4d5a55",
+      "bytes": 183
+    },
+    {
+      "path": "out/review-20261014/r97/debian-source-file1.json",
+      "frozen": "out/review-20261014/r97/frozen/out/review-20261014/r97/debian-source-file1.json",
+      "sha256": "e673da34a75bb085fd6cf85c2d06cd32d69cfc8759143dbae671845e9ddb4488",
+      "bytes": 226
+    },
+    {
+      "path": "out/review-20261014/r97/debian-source-file2.json",
+      "frozen": "out/review-20261014/r97/frozen/out/review-20261014/r97/debian-source-file2.json",
+      "sha256": "268621595a1f3496576125d909280b223f8b0a8986a8c25893722c06be5ea6ea",
+      "bytes": 231
+    },
+    {
+      "path": "out/review-20261014/r97/ncurses-snapshot-recovery.json",
+      "frozen": "out/review-20261014/r97/frozen/out/review-20261014/r97/ncurses-snapshot-recovery.json",
+      "sha256": "22e95d55f15a25d2ad14586f2b3e8ad49d7e4efb3f9a993d520d3f0b22cfc8c4",
+      "bytes": 530
+    },
+    {
+      "path": "out/review-20261014/r97/ncurses-archive-index.html",
+      "frozen": "out/review-20261014/r97/frozen/out/review-20261014/r97/ncurses-archive-index.html",
+      "sha256": "31eb292d195a92b4fe7e42560574f17bb4ca3e46cf9ba0c57ac18ecdb423d1c1",
+      "bytes": 13583
+    },
+    {
+      "path": "out/review-20261014/r97/ncurses-65-index.html",
+      "frozen": "out/review-20261014/r97/frozen/out/review-20261014/r97/ncurses-65-index.html",
+      "sha256": "32ac8830d141bbba7658a29badb178ffe56e6087bfc82327f378f856dc72f086",
+      "bytes": 41137
+    },
+    {
+      "path": "out/review-20261014/r97/recovered-source-profile.json",
+      "frozen": "out/review-20261014/r97/frozen/out/review-20261014/r97/recovered-source-profile.json",
+      "sha256": "e6ee0e7adf1de418a21a8fb51b03e7131f8c755c0d72b2c92c67cad49cd8afae",
+      "bytes": 350
+    },
+    {
+      "path": "out/review-20261014/r97/build-source-profile.log",
+      "frozen": "out/review-20261014/r97/frozen/out/review-20261014/r97/build-source-profile.log",
+      "sha256": "2ea63e1b6c1eb33e6ebf4e904c0cd0abf21ad60c50383f38244c784445642b0f",
+      "bytes": 387
+    },
+    {
+      "path": "out/review-20261014/r97/validate-profile.log",
+      "frozen": "out/review-20261014/r97/frozen/out/review-20261014/r97/validate-profile.log",
+      "sha256": "58fcf4225aa4d2c3b97b2fb1912288554b5dbc416463f0ac9462351575030604",
+      "bytes": 391
+    },
+    {
+      "path": "out/review-20261014/r97/recovered-source-admission.json",
+      "frozen": "out/review-20261014/r97/frozen/out/review-20261014/r97/recovered-source-admission.json",
+      "sha256": "5a87b4524671437e2da3982ebc34aae4ee30b1439b9d37070671507fdce13990",
+      "bytes": 267
+    },
+    {
+      "path": "out/review-20261014/r97/pacman-git-source.sh",
+      "frozen": "out/review-20261014/r97/frozen/out/review-20261014/r97/pacman-git-source.sh",
+      "sha256": "0c10a97bd377efd95e215c7acbac95b721e8cb7590ba612c83a0457d41964325",
+      "bytes": 4644
+    }
+  ],
+  "pending": [
+    "18 detached signature entries and manual binary/source correspondence",
+    "remaining Win32 source closure",
+    "final nine-package qualification and remaining whole-repository semantic review"
+  ],
+  "original_source_lock_before_git_normalization": {
+    "path": "out/review-20261014/r97/frozen/release/windows-git64-sources.lock.json",
+    "sha256": "0f84253edaf8eb4eb5367eb81a4acfb751dac5d8683b2ba4cb9c9cc249ef3636",
+    "bytes": 184357,
+    "scope": "Raw CRLF source lock used during archive build; preserved original frozen bytes"
+  },
+  "source_lock_git_encoding": "UTF-8 LF; JSON values and source input digests unchanged"
+}

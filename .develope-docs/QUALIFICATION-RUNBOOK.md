@@ -4,7 +4,7 @@
 当前任务与证据边界见[TRACKING](TRACKING.md)和
 [CURRENT-STATE](CURRENT-STATE.md)。旧 9 月候选命令保留在 Git 历史，不再作为执行入口。
 本轮候选核心绑定 `e06d9f9`，三目标各通过 735/735。R94 已通过 Win64 Qwen low
-真实控制台旅程。按 D-089 已恢复开发；最终资格须绑定新核心和 ZIP。
+真实控制台旅程。按 D-090 在 R97 整理推送后暂停；最终资格须绑定新核心和 ZIP。
 
 本手册使用实际 ZIP 字节，所有结果保持 `qualification=pending`。
 按 D-077 使用已有指定环境，不要求重新准备整套旧系统实机/VM 矩阵。
@@ -67,6 +67,10 @@ python3.13 .tools/qualification/prepare_win32_full.py \
 输入必须匹配 Git 身份和版本，逐成员摘要与档案摘要都须一致；编译文件不能冒充来源。
 未完成闭包的输入保留 partial；只通过结构检查的输入保留 pending-review。恢复 R95
 工具输入可取得当时的真实来源子集，其状态不自动提升为 complete。
+
+R97 新 Win64 来源锁为 `release/windows-git64-sources.lock.json`，实际装配与接纳
+已验证，仍为 partial。档案摘要、缓存位置和剩余项见
+[来源恢复记录](SOURCE-RECOVERY-2026-10-14.md)；该档案尚未上传为新的公开附件。
 
 ## 2. 显式包对完整性检查
 
