@@ -1,10 +1,10 @@
 # 发行验收执行手册
 
-更新日期：2026-10-13。适用于现有 clean/std/full 布局，三目标共九包。
+更新日期：2026-10-14。适用于现有 clean/std/full 布局，三目标共九包。
 当前任务与证据边界见[TRACKING](TRACKING.md)和
 [CURRENT-STATE](CURRENT-STATE.md)。旧 9 月候选命令保留在 Git 历史，不再作为执行入口。
 本轮候选核心绑定 `e06d9f9`，三目标各通过 735/735。R94 已通过 Win64 Qwen low
-真实控制台旅程。按 D-088 在本次整理推送后暂停；恢复后的最终资格须绑定新核心和 ZIP。
+真实控制台旅程。按 D-089 已恢复开发；最终资格须绑定新核心和 ZIP。
 
 本手册使用实际 ZIP 字节，所有结果保持 `qualification=pending`。
 按 D-077 使用已有指定环境，不要求重新准备整套旧系统实机/VM 矩阵。
@@ -49,6 +49,24 @@ bash .tools/run_coding_readiness.sh
 若使用隔离环境，把其 `bin/` 放在当前命令的 PATH 前端。完整 readiness 包含全仓注释
 检查与反例、装配/发行校验/PTY 回归、四个校验器和 TP-003/006/008/010、RP-001。
 人工语义 Review 单独记录，不由结构检查替代。
+
+### Windows full 来源输入
+
+维护装配器不再把 PortableGit 安装包复制成源码。先准备对应目标的 Git source-profile
+档案，核对完整档案 SHA-256，再显式传入：
+
+```sh
+python3.13 .tools/qualification/prepare_win64_full.py \
+  <std-staged> <full-build-root> <python38-zip> <source-cache> <new-output> \
+  --git-source <git-2.46.2-source-profile.tar.gz> --git-source-sha256 <sha256>
+python3.13 .tools/qualification/prepare_win32_full.py \
+  <std-staged> <full-build-root> <python34-zip> <source-cache> <new-output> \
+  --git-source <git-2.10.0-source-profile.tar.gz> --git-source-sha256 <sha256>
+```
+
+输入必须匹配 Git 身份和版本，逐成员摘要与档案摘要都须一致；编译文件不能冒充来源。
+未完成闭包的输入保留 partial；只通过结构检查的输入保留 pending-review。恢复 R95
+工具输入可取得当时的真实来源子集，其状态不自动提升为 complete。
 
 ## 2. 显式包对完整性检查
 

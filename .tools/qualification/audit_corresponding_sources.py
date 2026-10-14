@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Author: WaterRun
-# Date: 2026-10-11
+# Date: 2026-10-14
 # File: audit_corresponding_sources.py
 # Description: Reject binary distributions masquerading as toolbox corresponding sources and verify explicit source-profile members against their byte digests.
 
@@ -8,6 +8,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path, PurePosixPath
+import re
 import tarfile
 
 
@@ -67,13 +68,56 @@ def inspect(path):
                 continue
             expected.add(record['path'])
             with archive.extractfile(files[record['path']]) as stream:
-                value = hashlib.file_digest(stream, 'sha256').hexdigest()
+                prefix = stream.read(4)
+                value_hash = hashlib.sha256(prefix)
+                while chunk := stream.read(1048576):
+                    value_hash.update(chunk)
+                value = value_hash.hexdigest()
+            if prefix.startswith(b'MZ') or prefix == b'\x7fELF':
+                report['findings'].append('compiled distribution in source profile: ' + record['path'])
             if value != record['sha256']:
                 report['findings'].append('source-profile digest differs: ' + record['path'])
         if set(files) != expected | {'source-profile.json'}:
             report['findings'].append('source archive membership differs from its profile')
         report['profile_verified'] = not report['findings']
     return report
+
+
+# Admit an explicit Git source attachment before a full stager creates any output.
+#@param path Path|str Existing regular source archive selected by the caller.
+#@param expected_sha256 str Required lowercase SHA-256 of the complete archive.
+#@param version str Exact Git version required by this Windows target.
+#@return dict Archive path, verified digest and declared closure status; structural validation alone remains pending-review.
+#@error Raises for malformed digests, changed bytes, binary/non-profile inputs or mismatched tool/version identity.
+#@effect Reads the archive and bounded profile metadata; does not extract, execute or authorize release.
+def admit_git_source(path, expected_sha256, version):
+    path = Path(path)
+    if not isinstance(expected_sha256, str) or not re.fullmatch(r'[0-9a-f]{64}', expected_sha256):
+        raise ValueError('Git source requires a lowercase SHA-256 digest')
+    if path.is_symlink() or not path.is_file():
+        raise ValueError('Git source must be an existing regular archive')
+    with path.open('rb') as stream:
+        actual = hashlib.file_digest(stream, 'sha256').hexdigest()
+    if actual != expected_sha256:
+        raise ValueError('Git source SHA-256 differs from its explicit input')
+    report = inspect(path)
+    if not report['profile_verified'] or report['findings']:
+        raise ValueError('Git source requires a verified source profile; binary distributions are refused')
+    with tarfile.open(path) as archive:
+        with archive.extractfile('source-profile.json') as stream:
+            profile = json.load(stream)
+    if profile.get('tool') != 'git' or profile.get('version') != version:
+        raise ValueError('Git source profile identity differs from the target version')
+    provenance = profile.get('provenance', {})
+    if not isinstance(provenance, dict):
+        raise ValueError('Git source provenance must be an object')
+    closure = 'pending-review'
+    if provenance.get('status') == 'partial' or provenance.get('complete_source_closure') is False:
+        closure = 'partial'
+    elif provenance.get('complete_source_closure') is True \
+            and provenance.get('manual_source_closure_review') == 'passed':
+        closure = 'complete'
+    return {'path': path, 'sha256': actual, 'source_closure': closure}
 
 
 # Inspect all source attachments of one explicit toolbox input manifest without authorizing release.

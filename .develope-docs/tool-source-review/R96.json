@@ -1,0 +1,191 @@
+{
+  "schema": "yaca-tool-source-review-evidence-v1",
+  "review_id": "R96",
+  "date": "2026-10-14",
+  "status": "verified-source-admission-fix-and-recipe-recovery",
+  "release_authorized": false,
+  "target_qualification_complete": false,
+  "development_paused": false,
+  "whole_repository_semantic_review": "partial",
+  "semantic_review_scope": "changed source inspector/admission, both full-stager functions/contracts and five regression cases; source recipes are verified data, not executed",
+  "calibrated_tests": {
+    "before": {
+      "total": 11,
+      "passed": 7,
+      "failed_or_error": 4
+    },
+    "after": {
+      "total": 12,
+      "passed": 12,
+      "failed_or_error": 0
+    }
+  },
+  "full_lua_suite": {
+    "total": 735,
+    "passed": 735,
+    "failed": 0
+  },
+  "coding_readiness": "PASS",
+  "comment_structure": {
+    "files": 270,
+    "declarations": 5771,
+    "violations": 0
+  },
+  "recipe_recovery": {
+    "unique_exact_versions": 38,
+    "source_payload_statuses": {
+      "source-payload-pending": 10,
+      "verified-static-subset": 15,
+      "static-source-digests-verified": 13
+    },
+    "binary_correspondence_review": "pending",
+    "complete_source_closure": false
+  },
+  "source_bindings": [
+    {
+      "path": ".tools/qualification/audit_corresponding_sources.py",
+      "frozen": "out/review-20261014/r96/frozen/.tools/qualification/audit_corresponding_sources.py",
+      "bytes": 9400,
+      "sha256": "fffc8ce9af17d8f5ecad7941fce0ba587f7fe81ab916ed6a2546cdbe24779f41"
+    },
+    {
+      "path": ".tools/qualification/prepare_win32_full.py",
+      "frozen": "out/review-20261014/r96/frozen/.tools/qualification/prepare_win32_full.py",
+      "bytes": 11323,
+      "sha256": "1413d35368da54cddb5a585d65c13befbd3c427ea103b646c77a006b0bf9ca07"
+    },
+    {
+      "path": ".tools/qualification/prepare_win64_full.py",
+      "frozen": "out/review-20261014/r96/frozen/.tools/qualification/prepare_win64_full.py",
+      "bytes": 11098,
+      "sha256": "cbab48920aed56a317b68e5bc95e9d3c8e6e5ab0ee4fa9d3263a9d15fb2c1577"
+    },
+    {
+      "path": "test/qualification/corresponding_sources_test.py",
+      "frozen": "out/review-20261014/r96/frozen/test/qualification/corresponding_sources_test.py",
+      "bytes": 14880,
+      "sha256": "5dc9c5c766613b8e57ff46ff939f90acea0d1baf1ad039ddc5d9e5a731432f8d"
+    },
+    {
+      "path": "out/review-20261014/r96/source-admission-before.log",
+      "frozen": "out/review-20261014/r96/frozen/out/review-20261014/r96/source-admission-before.log",
+      "bytes": 3502,
+      "sha256": "2f479990740ab66252c31ab3afb81a485bc902fc244b1e2d5606aae7734602a6"
+    },
+    {
+      "path": "out/review-20261014/r96/source-admission-after.log",
+      "frozen": "out/review-20261014/r96/frozen/out/review-20261014/r96/source-admission-after.log",
+      "bytes": 255,
+      "sha256": "fbc1a45b8cac966b726890df902c455bbbc0ba14d9a4a18dea0e0a978b50070c"
+    },
+    {
+      "path": "out/review-20261014/r96/source-admission-after-2.log",
+      "frozen": "out/review-20261014/r96/frozen/out/review-20261014/r96/source-admission-after-2.log",
+      "bytes": 255,
+      "sha256": "3f0d836a7af9f84758d2c0b49ef3989a3d0536b1752ad92fda9676f12e992497"
+    },
+    {
+      "path": "out/review-20261014/r96/real-source-admission.log",
+      "frozen": "out/review-20261014/r96/frozen/out/review-20261014/r96/real-source-admission.log",
+      "bytes": 117,
+      "sha256": "6f6fca4aa641bb9933f1d4bc7660cf24deda8939d63a12c147ba599c9e161076"
+    },
+    {
+      "path": "out/review-20261014/r96/real-source-admission.json",
+      "frozen": "out/review-20261014/r96/frozen/out/review-20261014/r96/real-source-admission.json",
+      "bytes": 738,
+      "sha256": "e457a10f140ae6241bf0257bbdb6f3b1060c185920b11608e3da75877f9d362a"
+    },
+    {
+      "path": "out/review-20261014/r96/full-suite.log",
+      "frozen": "out/review-20261014/r96/frozen/out/review-20261014/r96/full-suite.log",
+      "bytes": 73322,
+      "sha256": "88294a733d1338c34ae9dc8f78b66636a0bc6e4838cf020dcdbb9e4dbaf2f5b5"
+    },
+    {
+      "path": "out/review-20261014/r96/coding-readiness.log",
+      "frozen": "out/review-20261014/r96/frozen/out/review-20261014/r96/coding-readiness.log",
+      "bytes": 4531,
+      "sha256": "c7695ca8e2f42b112a4d0e8e2ab717d44b05e5ae676c8ab0926be20d31bd3a39"
+    },
+    {
+      "path": "out/review-20261014/r96/checks-run-final.log",
+      "frozen": "out/review-20261014/r96/frozen/out/review-20261014/r96/checks-run-final.log",
+      "bytes": 166,
+      "sha256": "5ca3ffa9b583ce76609d102ebe63095d2cf2bfbd85299d5cdd48d69518e42803"
+    },
+    {
+      "path": "out/review-20261014/r96/modern-recipe-recovery.json",
+      "frozen": "out/review-20261014/r96/frozen/out/review-20261014/r96/modern-recipe-recovery.json",
+      "bytes": 40974,
+      "sha256": "564452c7bda50528cd79c376cc0a96643f5f1065ed5c83f14128737b8f0bbaf2"
+    },
+    {
+      "path": "out/review-20261014/r96/modern-recipe-recovery.log",
+      "frozen": "out/review-20261014/r96/frozen/out/review-20261014/r96/modern-recipe-recovery.log",
+      "bytes": 2290,
+      "sha256": "668c7d9cb3f0166e0f617716e9f105ddc64f08756d2bd281e35e8962791bd690"
+    },
+    {
+      "path": "out/review-20261014/r96/upstream-recipe-recovery.json",
+      "frozen": "out/review-20261014/r96/frozen/out/review-20261014/r96/upstream-recipe-recovery.json",
+      "bytes": 48968,
+      "sha256": "a49653383cbb2363353c66467687a0f9d147c537cfc0046dbd63e343686af478"
+    },
+    {
+      "path": "out/review-20261014/r96/upstream-recipe-recovery.log",
+      "frozen": "out/review-20261014/r96/frozen/out/review-20261014/r96/upstream-recipe-recovery.log",
+      "bytes": 1993,
+      "sha256": "473c9ecfe2f6ad8c1f760893dadb690c163622688a6af4c807b4d9bcba37398e"
+    },
+    {
+      "path": "out/review-20261014/r96/upstream-libxcrypt-recovery.json",
+      "frozen": "out/review-20261014/r96/frozen/out/review-20261014/r96/upstream-libxcrypt-recovery.json",
+      "bytes": 997,
+      "sha256": "da9cea7149c8b6025d2fe52a685e448c6684db928f8915e5d5e1e2fa26407075"
+    },
+    {
+      "path": "out/review-20261014/r96/upstream-libxcrypt-recovery.log",
+      "frozen": "out/review-20261014/r96/frozen/out/review-20261014/r96/upstream-libxcrypt-recovery.log",
+      "bytes": 53,
+      "sha256": "5fc4c4f51122fd7a6e2cb24c3f4bab20160f7bed45f83c79961b57194450e4e8"
+    },
+    {
+      "path": "out/review-20261014/r96/modern-source-payloads.json",
+      "frozen": "out/review-20261014/r96/frozen/out/review-20261014/r96/modern-source-payloads.json",
+      "bytes": 40100,
+      "sha256": "8f2566c4ac7217ff14c10f170f3dc7be4aec56eb2e72e5c86b1b54429fe9a754"
+    },
+    {
+      "path": "out/review-20261014/r96/modern-source-payloads.log",
+      "frozen": "out/review-20261014/r96/frozen/out/review-20261014/r96/modern-source-payloads.log",
+      "bytes": 2444,
+      "sha256": "bffa78e61738969c6a4f78d94a888f9ac8063ea2593d7dfde950a99a8fd7b1b7"
+    },
+    {
+      "path": "out/review-20261014/r96/recover_modern_recipes.py",
+      "frozen": "out/review-20261014/r96/frozen/out/review-20261014/r96/recover_modern_recipes.py",
+      "bytes": 8738,
+      "sha256": "f1b7ad329e6909333e0cb50b09d0c49d17e12a9d7c1049ef1050005bab210893"
+    },
+    {
+      "path": "out/review-20261014/r96/recover_upstream_recipes.py",
+      "frozen": "out/review-20261014/r96/frozen/out/review-20261014/r96/recover_upstream_recipes.py",
+      "bytes": 6679,
+      "sha256": "a7e0029b956b16e92f65970367f6be191bc092a41174e7a6e5f7b2bc8c560ec4"
+    },
+    {
+      "path": "out/review-20261014/r96/fetch_modern_payloads.py",
+      "frozen": "out/review-20261014/r96/frozen/out/review-20261014/r96/fetch_modern_payloads.py",
+      "bytes": 9963,
+      "sha256": "d25de866d68fe566cbf5443c6786da1713af22a64ba0f7e98a8f25372ae74dbd"
+    }
+  ],
+  "pending": [
+    "verify remaining literal/VCS/signature inputs and binary correspondence",
+    "Win32 remaining source closure",
+    "final nine-package qualification",
+    "remaining whole-repository semantic review",
+    "release-gate assessment"
+  ]
+}

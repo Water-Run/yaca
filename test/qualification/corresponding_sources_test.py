@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Author: WaterRun
-# Date: 2026-10-11
+# Date: 2026-10-14
 # File: corresponding_sources_test.py
 # Description: Reject binary-only toolbox provenance and verify corresponding-source profile membership, digests and safe archive paths.
 
@@ -8,6 +8,8 @@ import hashlib
 import importlib.util
 import io
 import json
+import subprocess
+import sys
 from pathlib import Path
 import tarfile
 import tempfile
@@ -73,6 +75,92 @@ class SourceAuditTest(unittest.TestCase):
             path.write_bytes(magic + b'fixture')
             self.assertEqual(AUDIT.inspect(path)['kind'], 'binary-distribution')
             self.assertTrue(AUDIT.inspect(path)['findings'])
+
+    # Reject a compiled distribution even when a forged profile correctly binds its bytes.
+    #@param self SourceAuditTest Disposable source archive owner.
+    #@return None Assertions require binary-member rejection rather than mere hash consistency.
+    #@effect Creates a tiny forged Git source profile without executing its binary member.
+    def test_profile_cannot_conceal_compiled_distribution(self):
+        compiled = b'MZnot source'
+        profile = {'schema': 'yaca-corresponding-source-v1', 'tool': 'git', 'version': '2.46.2',
+                   'files': [{'path': 'upstream/PortableGit.exe', 'sha256': hashlib.sha256(compiled).hexdigest()}]}
+        path = self.archive({'source-profile.json': json.dumps(profile).encode(), 'upstream/PortableGit.exe': compiled})
+        report = AUDIT.inspect(path)
+        self.assertFalse(report['profile_verified'])
+        self.assertTrue(any('compiled distribution' in item for item in report['findings']))
+
+    # Bind an explicit Git source profile to its exact bytes and version while preserving partial closure.
+    #@param self SourceAuditTest Disposable source fixture owner.
+    #@return None Assertions require correct identity, declared partial state and refusal of changed bytes or another tool/version.
+    #@effect Creates source-data fixtures and reads them through production admission; no programs run.
+    def test_git_source_admission_binds_identity_and_partial_status(self):
+        source = b'original upstream source'
+        profile = {'schema': 'yaca-corresponding-source-v1', 'tool': 'git', 'version': '2.46.2',
+                   'provenance': {'status': 'partial', 'complete_source_closure': False},
+                   'files': [{'path': 'upstream/source.tar.xz', 'sha256': hashlib.sha256(source).hexdigest()}]}
+        path = self.archive({'source-profile.json': json.dumps(profile).encode(), 'upstream/source.tar.xz': source})
+        expected = hashlib.sha256(path.read_bytes()).hexdigest()
+        record = AUDIT.admit_git_source(path, expected, '2.46.2')
+        self.assertEqual(record['source_closure'], 'partial')
+        self.assertEqual(record['sha256'], expected)
+        with self.assertRaisesRegex(ValueError, 'SHA-256'):
+            AUDIT.admit_git_source(path, '0' * 64, '2.46.2')
+        with self.assertRaisesRegex(ValueError, 'identity'):
+            AUDIT.admit_git_source(path, expected, '2.10.0')
+        profile['tool'] = 'compiler'
+        path = self.archive({'source-profile.json': json.dumps(profile).encode(), 'upstream/source.tar.xz': source})
+        with self.assertRaisesRegex(ValueError, 'identity'):
+            AUDIT.admit_git_source(path, hashlib.sha256(path.read_bytes()).hexdigest(), '2.46.2')
+
+    # Do not convert structural verification into an unreviewed claim of complete Git source closure.
+    #@param self SourceAuditTest Disposable source fixture owner.
+    #@return None Assertions require pending review unless the byte-bound profile explicitly records full closure and passed manual review.
+    #@effect Creates source profiles and checks admission metadata without granting release qualification.
+    def test_complete_git_source_claim_requires_explicit_review(self):
+        source = b'upstream source'
+        profile = {'schema': 'yaca-corresponding-source-v1', 'tool': 'git', 'version': '2.10.0',
+                   'provenance': {'status': 'complete', 'complete_source_closure': True},
+                   'files': [{'path': 'source.tar.xz', 'sha256': hashlib.sha256(source).hexdigest()}]}
+        path = self.archive({'source-profile.json': json.dumps(profile).encode(), 'source.tar.xz': source})
+        record = AUDIT.admit_git_source(path, hashlib.sha256(path.read_bytes()).hexdigest(), '2.10.0')
+        self.assertEqual(record['source_closure'], 'pending-review')
+        profile['provenance']['manual_source_closure_review'] = 'passed'
+        path = self.archive({'source-profile.json': json.dumps(profile).encode(), 'source.tar.xz': source})
+        record = AUDIT.admit_git_source(path, hashlib.sha256(path.read_bytes()).hexdigest(), '2.10.0')
+        self.assertEqual(record['source_closure'], 'complete')
+
+    # Reject the former Git binary-source fallback in both full stagers before any output tree is created.
+    #@param self SourceAuditTest Disposable binary fixture and output owner.
+    #@return None Assertions require explicit source rejection and an absent staging output for both targets.
+    #@effect Launches only the maintained Python stagers with rejected fixture bytes; no toolbox program runs.
+    def test_windows_full_stagers_reject_binary_git_source_before_output(self):
+        source = self.root / 'PortableGit.exe'
+        source.write_bytes(b'MZfixture installer')
+        for target in ('win32', 'win64'):
+            output = self.root / target
+            command = [sys.executable, str(ROOT / '.tools/qualification' / ('prepare_' + target + '_full.py')),
+                       *[str(self.root / name) for name in ('std', 'build', 'python.zip', 'cache')], str(output),
+                       '--git-source', str(source), '--git-source-sha256', hashlib.sha256(source.read_bytes()).hexdigest()]
+            result = subprocess.run(command, capture_output=True, timeout=20)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(b'Git source', result.stderr)
+            self.assertFalse(output.exists())
+
+    # Produce portable metadata paths even when the staging host uses Windows path separators.
+    #@param self SourceAuditTest Disposable tiny toolbox tree owner.
+    #@return None Assertions require forward-slash destinations from both maintained full collectors.
+    #@effect Imports maintained stagers and reads fixture files without running a toolbox program.
+    def test_full_collectors_emit_portable_archive_paths(self):
+        directory = self.root / 'tools/git/cmd'
+        directory.mkdir(parents=True)
+        (directory / 'git.exe').write_bytes(b'MZfixture')
+        for target in ('win32', 'win64'):
+            spec = importlib.util.spec_from_file_location('collector_' + target, ROOT / '.tools/qualification' / ('prepare_' + target + '_full.py'))
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            records = module.collect(self.root, 'git')
+            self.assertEqual([item['destination'] for item in records], ['tools/git/cmd/git.exe'])
+            self.assertNotIn('\\', records[0]['source'])
 
     # Reject the old Python closure's lone portable ZIP instead of treating packaging as dependency source.
     #@param self SourceAuditTest Fixture owner.

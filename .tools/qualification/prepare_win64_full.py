@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
 # Author: WaterRun
-# Date: 2026-10-11
+# Date: 2026-10-14
 # File: prepare_win64_full.py
-# Description: Stage the win64 full toolbox from std staging, cross builds, and official portable packages.
+# Description: Stage the win64 full toolbox with explicit byte-bound Git source profiles and preserved closure status.
 
 """Stage the win64 full toolbox from std staging, cross builds, and official portable packages.
 
-Arguments: STD_STAGED BUILD_ROOT PYTHON38_ZIP SOURCE_CACHE PAYLOADS OUTPUT
+Arguments: STD_STAGED BUILD_ROOT PYTHON38_ZIP SOURCE_CACHE OUTPUT
+           --git-source ARCHIVE --git-source-sha256 SHA256
 STD_STAGED is a completed prepare_win64_std.py output. BUILD_ROOT contains
 out/jq, out/sqlite, out/busybox, unpack/w64devkit, and the PortableGit tree at
-unpack/ itself. All extraction and compilation is done by the caller.
+unpack/ itself. Git sources must be a verified matching source profile;
+partial closure remains partial. Extraction and compilation are done by the caller.
 """
 
+import argparse
 import hashlib
+import importlib.util
 import json
 import pathlib
 import shutil
@@ -21,11 +25,16 @@ import sys
 import tarfile
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
+SOURCE_SPEC = importlib.util.spec_from_file_location('yaca_git_source_audit', REPO / '.tools/qualification/audit_corresponding_sources.py')
+SOURCE_AUDIT = importlib.util.module_from_spec(SOURCE_SPEC)
+SOURCE_SPEC.loader.exec_module(SOURCE_AUDIT)
 
 
 # Computes a SHA-256 digest for the staged payload.
 #@param path Path|str Input file or package path under inspection.
 #@return str digest Hexadecimal SHA-256 digest of the supplied data.
+#@error Propagates missing-file and read errors.
+#@effect Reads the selected input in bounded blocks without changing it.
 def sha256(path):
     value = hashlib.sha256()
     with pathlib.Path(path).open("rb") as source:
@@ -38,9 +47,11 @@ def sha256(path):
 
 
 # Copies a file granting execute permission to every derived program.
-#@param source Path|str File to copy.
-#@param destination Path|str Destination path inside the staged tree.
-#@return void No value; copies exactly one file with the portable mode.
+#@param source Path|str Existing program input selected by the staging caller.
+#@param destination Path Destination path whose parent already exists.
+#@return None No value; copies exactly one file with mode 0755.
+#@error Propagates copy and chmod failures.
+#@effect Writes destination and sets its portable execute mode.
 def copy_program(source, destination):
     shutil.copyfile(source, destination)
     destination.chmod(0o755)
@@ -50,13 +61,15 @@ def copy_program(source, destination):
 #@param source Path|str Source directory to copy.
 #@param destination Path|str Destination directory inside the staged tree.
 #@param prune set Basenames pruned from the copied tree.
-#@return void No value; copies the pruned portable tree.
+#@return None No value; copies the pruned portable tree.
+#@error Propagates copy and filesystem failures.
+#@effect Creates or updates destination; existing input files are unchanged.
 def copy_tree(source, destination, prune):
     shutil.copytree(source, destination, dirs_exist_ok=True,
                     # Prunes named development and cache payload per tree.
                     #@param directory str Candidate directory name under the copy root.
                     #@param entries list Directory entries within the visited directory.
-                    #@return list Entries retained by the portable copy.
+                    #@return set[str] Entry basenames excluded from the portable copy.
                     ignore=shutil.ignore_patterns(*prune))
 
 
@@ -64,11 +77,13 @@ def copy_tree(source, destination, prune):
 #@param output Path Staging root.
 #@param directory str Tool directory name below tools.
 #@return list Payload records with exact destination digests.
+#@error Propagates directory traversal and file read failures.
+#@effect Reads staged bytes and records archive paths with forward slashes on every build host.
 def collect(output, directory):
     payload = []
     for path in sorted((output / "tools" / directory).rglob("*")):
         if path.is_file():
-            relative = str(path.relative_to(output))
+            relative = path.relative_to(output).as_posix()
             payload.append({"source": relative, "destination": relative,
                             "sha256": sha256(path),
                             "executable": path.suffix in (".exe", ".bat", ".cmd")
@@ -76,13 +91,21 @@ def collect(output, directory):
     return payload
 
 
-# Stage the Win64 full toolbox with pinned compiler and Python corresponding-source profiles.
-#@param none Parses std staging, build root, Python ZIP, source cache, payload cache and absent output from argv.
+# Stage the Win64 full toolbox with explicitly admitted Git, compiler and Python source profiles.
+#@param none Parses five staging paths and required --git-source/--git-source-sha256 options from argv.
 #@return None result No value; writes the staged tree and tool-inputs.json.
 #@error Raises for rejected source bundles, invalid archives, missing inputs or failed filesystem operations.
 #@effect Copies payloads, extracts the selected Python ZIP and runs the maintained source bundler; staged programs do not run.
 def main():
-    std_staged, root, py38_zip, cache, payloads, output = map(pathlib.Path, sys.argv[1:7])
+    parser = argparse.ArgumentParser(description=__doc__)
+    for name in ('std_staged', 'build_root', 'python_zip', 'source_cache', 'output'):
+        parser.add_argument(name, type=pathlib.Path)
+    parser.add_argument('--git-source', type=pathlib.Path, required=True)
+    parser.add_argument('--git-source-sha256', required=True)
+    args = parser.parse_args()
+    std_staged, root, py38_zip, cache, output = (
+        args.std_staged, args.build_root, args.python_zip, args.source_cache, args.output)
+    git_source = SOURCE_AUDIT.admit_git_source(args.git_source, args.git_source_sha256, '2.46.2')
     root = root.resolve()
     if output.exists():
         raise SystemExit("staging output already exists")
@@ -129,8 +152,10 @@ def main():
     subprocess.run([sys.executable, str(REPO / ".tools/qualification/bundle_corresponding_sources.py"),
                     str(REPO / "release/windows-compiler-sources.lock.json"), str(cache),
                     str(sources / "compiler/w64devkit-2.9.0-corresponding-source.tar.gz")], check=True)
-    shutil.copyfile(payloads / "PortableGit-2.46.2-64-bit.7z.exe",
-                    sources / "git/PortableGit-2.46.2-64-bit.7z.exe")
+    git_archive = sources / "git/git-for-windows-2.46.2-sources.tar.gz"
+    shutil.copyfile(git_source['path'], git_archive)
+    if sha256(git_archive) != git_source['sha256']:
+        raise ValueError('Git source changed during staging')
     python_bundle = sources / "python3/python38-windows-corresponding-source.tar.gz"
     subprocess.run([sys.executable, str(REPO / ".tools/qualification/bundle_corresponding_sources.py"),
                     str(REPO / "release/windows-python38-sources.lock.json"), str(cache),
@@ -139,7 +164,7 @@ def main():
     specifications = (
         ("git", "git", "2.46.2", ["cmd/git.exe", "bin/git.exe"],
          "GPL-2.0-only", ["LICENSE.txt"],
-         "git/PortableGit-2.46.2-64-bit.7z.exe",
+         "git/git-for-windows-2.46.2-sources.tar.gz",
          "https://github.com/git-for-windows/git/releases/tag/v2.46.2.windows.1"),
         ("python3", "python3", "3.8.20", ["python.exe"], "Python-2.0.1",
          ["LICENSE.txt"], "python3/python38-windows-corresponding-source.tar.gz",
@@ -171,6 +196,8 @@ def main():
                         "source_archive": {"source": "sources/" + archive_name,
                                            "sha256": sha256(sources / archive_name)},
                         "files": collect(output, directory)})
+        if identifier == 'git':
+            records[-1]['source_closure'] = git_source['source_closure']
     document = {"schema": "yaca-tool-inputs-v1", "target": "win64-x86_64",
                 "tools": records}
     (output / "tool-inputs.json").write_text(json.dumps(document, indent=2) + "\n",

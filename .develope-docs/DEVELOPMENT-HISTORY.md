@@ -1,12 +1,13 @@
 # 开发历程与历史资料
 
-整理日期：2026-10-13。当前实现看 [CURRENT-STATE.md](CURRENT-STATE.md)，
+整理日期：2026-10-14。当前实现看 [CURRENT-STATE.md](CURRENT-STATE.md)，
 剩余工作看 [TRACKING.md](TRACKING.md)。本页只导航已有工作和证据。
 
 ## 已完成工作的脉络
 
 | 时间 / 节点 | 主要成果 | 证据与适用范围 |
 | --- | --- | --- |
+| 2026-10-14，R96 来源验证与恢复 | 两 Windows full 装配器取消二进制 Git 来源回退，显式验证身份/档案/成员摘要并保留状态；统一归档路径；恢复 38 个精确配方及补丁 | [本日 Review](CODE-REVIEW-2026-10-14.md)、[R96](tool-source-review/R96.json)；专项 7/11 到 12/12、Lua 735/735、readiness PASS、270/5771/0；载荷与完整对应关系仍待完成 |
 | 2026-10-13，R95 候选交付与接续入口 | R94 三目标核心各 735/735、Win64 Qwen low 真实控制台通过；九包字节与文件证据、Linux 三档离线核心旅程、独立干净检出初始化及完整 readiness 通过；来源状态在装配/恢复时保留 | [本日 Review](CODE-REVIEW-2026-10-13.md)、[候选清单](candidates/1.0.0-preview.20261013.json)；270/5765/0，来源闭包和全仓语义 Review 保留；按 D-088 整理推送后暂停 |
 | 2026-10-11，R94 Linux 升级与推理选项 | Linux 实际保留数据升级/重开通过；既有 AdapterOptions 注册 reasoning_effort，复制枚举并在配置及编码边界校验 | [R94](lua-review/R94.json)；25/27 到 27/27、完整 735/735、269/5762/0、readiness PASS；新核心与低档位 Qwen 待实际验收 |
 | 2026-10-11，R92 新核心与 R93 升级 | 修复 Ask 的实际额度和 length/cancelled 终态，三目标各 733/733；三组 Windows 原生真实模型旅程及双目标保留数据升级通过 | [R92 核心](candidates/core-node-r92-20261011.json)、[R93](qualification-review/R93.json)；Win64 Qwen 时间预算耗尽仍待成功重验，来源闭包和最终九包保留 |
