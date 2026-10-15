@@ -1,13 +1,21 @@
 --[[
 Author: WaterRun
-Date: 2026-09-30
+Date: 2026-10-15
 File: manifest.lua
 Description: Indexes modern-host feasibility evidence and its limits for target qualification.
 ]]
 
 return {
-  evidence_version = "modern-2026-08-29.4",
+  evidence_version = "modern-2026-08-29.5",
   observed_at = "2026-09-28",
+  tp010_guard_recheck = {
+    observed_at = "2026-10-15",
+    source_base = "8198f3a",
+    log = "out/review-20261015/r100/tp010-refresh.log",
+    assertions = 5564743,
+    status = "PASS",
+    target_qualification = false,
+  },
   latest_recheck = {
     observed_at = "2026-09-30",
     source_base = "344f864-with-kernel-working-tree-fixes",
@@ -79,7 +87,7 @@ return {
       command = "bash .tools/proofs/tp010_build.sh",
       assertions = 5564743,
       source_sha256 = {
-        build = "8199ac07ea85ee5c404d6b97515ea94252239301cc981d701cda9016546de5c3",
+        build = "a03efc58e7e38da174e8e33753df7b2078afe65e3eefe279640e5662d090b1ea",
         corpus = "75dedcd8f2cf58c4d65c3697cfe6754be6dcc0673623ca51c77d0796cefb5ecf",
       },
       target_pending = { "Win32 x86 build/load", "Win64 build/load", "CentOS 7 runtime", "target resource limits" },

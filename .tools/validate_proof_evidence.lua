@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-28
+Date: 2026-10-15
 File: validate_proof_evidence.lua
 Description: Checks proof manifests, declared artifacts and evidence admission requirements.
 ]]
@@ -68,11 +68,11 @@ local expected = {
   },
   ["TP-010"] = {
     files = {
-      [root .. "/.tools/proofs/tp010_build.sh"] = "8199ac07ea85ee5c404d6b97515ea94252239301cc981d701cda9016546de5c3",
+      [root .. "/.tools/proofs/tp010_build.sh"] = "a03efc58e7e38da174e8e33753df7b2078afe65e3eefe279640e5662d090b1ea",
       [root .. "/.tools/proofs/tp010_xml.lua"] = "75dedcd8f2cf58c4d65c3697cfe6754be6dcc0673623ca51c77d0796cefb5ecf",
     },
     recorded = {
-      build = "8199ac07ea85ee5c404d6b97515ea94252239301cc981d701cda9016546de5c3",
+      build = "a03efc58e7e38da174e8e33753df7b2078afe65e3eefe279640e5662d090b1ea",
       corpus = "75dedcd8f2cf58c4d65c3697cfe6754be6dcc0673623ca51c77d0796cefb5ecf",
     },
   },
