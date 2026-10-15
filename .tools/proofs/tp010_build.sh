@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Author: WaterRun
-# Date: 2026-09-23
+# Date: 2026-10-15
 # File: tp010_build.sh
 # Description: Builds pinned Lua and XML dependencies and runs the modern-host XML corpus.
 
@@ -10,7 +10,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
 
 if [[ ${YACA_TEST_RESOURCE_GUARD_HELD:-0} != 1 ]]; then
-  exec "$REPO_ROOT/.tools/run_with_resource_guard.sh" bash "$0" "$@"
+  exec bash "$REPO_ROOT/.tools/run_with_resource_guard.sh" bash "$0" "$@"
 fi
 
 WORK_DIR=$(mktemp -d -t yaca-tp010-XXXXXX)

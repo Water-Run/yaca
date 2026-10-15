@@ -21,6 +21,9 @@ bash .tools/run_coding_readiness.sh
 脚本。源码和常规开发检查不依赖旧机器的 out、模型配置或来源恢复缓存。
 在线模型旅程的私有配置按环境另行准备。
 
+检查与构建入口显式使用 Bash 启动资源守卫，兼容 Windows Git 检出未保留执行位
+的情况；不需要先手工 chmod 仓库脚本。
+
 也提供 main 的 Git bundle。离线检出时使用：
 
 ```sh

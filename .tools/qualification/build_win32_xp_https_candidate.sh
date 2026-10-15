@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Author: WaterRun
-# Date: 2026-09-23
+# Date: 2026-10-15
 # File: build_win32_xp_https_candidate.sh
 # Description: Builds the pinned curl TLS carrier against the Windows XP x86 compatibility floor.
 
@@ -11,7 +11,7 @@ REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd -P)
 
 if [[ ${YACA_TEST_RESOURCE_GUARD_HELD:-0} != 1 ]]; then
   export YACA_TEST_MIN_AVAILABLE_MIB=${YACA_TEST_MIN_AVAILABLE_MIB:-4096}
-  exec "$REPO_ROOT/.tools/run_with_resource_guard.sh" bash "$0" "$@"
+  exec bash "$REPO_ROOT/.tools/run_with_resource_guard.sh" bash "$0" "$@"
 fi
 
 # Report the required source cache and fresh output directory.

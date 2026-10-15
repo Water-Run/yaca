@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Author: WaterRun
-# Date: 2026-09-23
+# Date: 2026-10-15
 # File: prepare_python34.sh
 # Description: Prepares exact CPython 3.4.10 source and Windows dependency inputs.
 
@@ -9,7 +9,7 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd -P)
 if [[ ${YACA_PY34_GUARD_HELD:-0} != 1 ]]; then
-  exec "$REPO_ROOT/.tools/run_with_resource_guard.sh" env YACA_PY34_GUARD_HELD=1 bash "$0" "$@"
+  exec bash "$REPO_ROOT/.tools/run_with_resource_guard.sh" env YACA_PY34_GUARD_HELD=1 bash "$0" "$@"
 fi
 [[ $# == 2 ]] || { echo "usage: $0 SOURCE_CACHE NEW_OUTPUT" >&2; exit 64; }
 PY34_CACHE=$(realpath "$1")

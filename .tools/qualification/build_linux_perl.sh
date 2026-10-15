@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Author: WaterRun
-# Date: 2026-10-05
+# Date: 2026-10-15
 # File: build_linux_perl.sh
 # Description: Builds the relocatable Perl runtime used by Linux Git helpers on the glibc 2.17 baseline.
 
@@ -9,7 +9,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd -P)
 export YACA_TEST_MIN_AVAILABLE_MIB=5120
 if [[ ${YACA_LINUX_PERL_BUILD_GUARD_HELD:-0} != 1 ]]; then
-  exec "$REPO_ROOT/.tools/run_with_resource_guard.sh" \
+  exec bash "$REPO_ROOT/.tools/run_with_resource_guard.sh" \
     env YACA_LINUX_PERL_BUILD_GUARD_HELD=1 bash "$0" "$@"
 fi
 

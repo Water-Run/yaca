@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Author: WaterRun
-# Date: 2026-10-02
+# Date: 2026-10-15
 # File: build_win64_full_tools.sh
 # Description: Cross-builds the win64 full in-lock tools and unpacks the pinned portable externals.
 
@@ -16,7 +16,7 @@ YACA_TEST_MIN_AVAILABLE_MIB=${YACA_TEST_MIN_AVAILABLE_MIB:-$BUILD_MINIMUM_AVAILA
   || YACA_TEST_MIN_AVAILABLE_MIB=$BUILD_MINIMUM_AVAILABLE_MIB
 export YACA_TEST_MIN_AVAILABLE_MIB
 if [[ ${YACA_WINDOWS_BUILD_RESOURCE_GUARD_HELD:-0} != 1 ]]; then
-  exec "$REPO_ROOT/.tools/run_with_resource_guard.sh" \
+  exec bash "$REPO_ROOT/.tools/run_with_resource_guard.sh" \
     env YACA_WINDOWS_BUILD_RESOURCE_GUARD_HELD=1 bash "$0" "$@"
 fi
 

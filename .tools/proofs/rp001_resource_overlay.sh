@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Author: WaterRun
-# Date: 2026-10-09
+# Date: 2026-10-15
 # File: rp001_resource_overlay.sh
 # Description: Builds and checks the pinned luainstaller resource-overlay patch on the host.
 
@@ -10,7 +10,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
 
 if [[ ${YACA_TEST_RESOURCE_GUARD_HELD:-0} != 1 ]]; then
-  exec "$REPO_ROOT/.tools/run_with_resource_guard.sh" bash "$0" "$@"
+  exec bash "$REPO_ROOT/.tools/run_with_resource_guard.sh" bash "$0" "$@"
 fi
 
 WORK_DIR=$(mktemp -d -t yaca-rp001-XXXXXX)

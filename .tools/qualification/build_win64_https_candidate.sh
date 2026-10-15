@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Author: WaterRun
-# Date: 2026-09-23
+# Date: 2026-10-15
 # File: build_win64_https_candidate.sh
 # Description: Builds the pinned curl TLS carrier for Windows x64 compatibility checks.
 
@@ -9,7 +9,7 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd -P)
 if [[ ${YACA_TEST_RESOURCE_GUARD_HELD:-0} != 1 ]]; then
-  exec "$REPO_ROOT/.tools/run_with_resource_guard.sh" bash "$0" "$@"
+  exec bash "$REPO_ROOT/.tools/run_with_resource_guard.sh" bash "$0" "$@"
 fi
 [[ $# == 2 ]] || { echo "usage: $0 SOURCE_CACHE NEW_OUTPUT" >&2; exit 64; }
 CACHE=$(realpath "$1")

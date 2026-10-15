@@ -10,13 +10,14 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 
 if [[ ${YACA_TEST_RESOURCE_GUARD_HELD:-0} != 1 ]]; then
-  exec "$SCRIPT_DIR/run_with_resource_guard.sh" bash "$0" "$@"
+  exec bash "$SCRIPT_DIR/run_with_resource_guard.sh" bash "$0" "$@"
 fi
 
 cd "$REPO_ROOT"
 
 python3.13 test/self/code_comments_test.py
 python3.13 .tools/check_code_comments.py
+python3.13 test/self/resource_guard_entrypoints_test.py
 python3.13 test/release/editions_test.py
 python3.13 test/release/audit_editions_test.py
 python3.13 test/qualification/edition_journey_test.py

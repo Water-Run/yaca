@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Author: WaterRun
-# Date: 2026-09-29
+# Date: 2026-10-15
 # File: build_win64_std.sh
 # Description: Builds pinned portable Windows x64 std tools and stages their source provenance.
 
@@ -9,7 +9,7 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd -P)
 if [[ ${YACA_STD_BUILD_GUARD_HELD:-0} != 1 ]]; then
-  exec "$REPO_ROOT/.tools/run_with_resource_guard.sh" env YACA_STD_BUILD_GUARD_HELD=1 bash "$0" "$@"
+  exec bash "$REPO_ROOT/.tools/run_with_resource_guard.sh" env YACA_STD_BUILD_GUARD_HELD=1 bash "$0" "$@"
 fi
 [[ $# == 4 ]] || { echo "usage: $0 SOURCE_CACHE CORE_BUILD MSI_INVENTORY_TSV NEW_OUTPUT" >&2; exit 64; }
 TOOL_CACHE=$(realpath "$1")

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Author: WaterRun
-# Date: 2026-10-09
+# Date: 2026-10-15
 # File: build_linux_x86_64.sh
 # Description: Builds pinned Linux candidates and records dependency, ABI and test evidence.
 
@@ -25,7 +25,7 @@ export YACA_TEST_MIN_AVAILABLE_MIB
 # A caller may already hold the suite's smaller guard. Recheck this builder's
 # floor and current pressure under that same lock before any build work.
 if [[ ${YACA_LINUX_BUILD_RESOURCE_GUARD_HELD:-0} != 1 ]]; then
-  exec "$REPO_ROOT/.tools/run_with_resource_guard.sh" \
+  exec bash "$REPO_ROOT/.tools/run_with_resource_guard.sh" \
     env YACA_LINUX_BUILD_RESOURCE_GUARD_HELD=1 bash "$0" "$@"
 fi
 
