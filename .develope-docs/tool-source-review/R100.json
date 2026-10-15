@@ -1,0 +1,188 @@
+{
+  "schema": "yaca-tool-source-review-evidence-v1",
+  "review_id": "R100",
+  "date": "2026-10-15",
+  "status": "source-inputs-and-portable-cache-preserved",
+  "close_decision": "D-092",
+  "development_paused": false,
+  "development_paused_after_delivery": true,
+  "release_authorized": false,
+  "target_qualification_complete": false,
+  "whole_repository_semantic_review": "partial",
+  "legacy_source_profile": {
+    "schema": "yaca-legacy-source-node-v1",
+    "status": "PASS",
+    "source_closure": "partial",
+    "archive": "git-win32-recovered-sources-20261015.tar.gz",
+    "sha256": "e318288539ff8d58f4ffbca03db4830cfb874d4a074ac34b42b5afa6b019a254",
+    "bytes": 429584777,
+    "members": 1088,
+    "source_versions": 121,
+    "recipes_recovered": 115,
+    "recipes_pending": 6,
+    "payload_versions_not_attempted": 4,
+    "retry_complete_static": 4,
+    "retry_static_subsets": 13,
+    "release_authorized": false
+  },
+  "public_source_cache": {
+    "schema": "yaca-development-source-cache-v1",
+    "status": "PASS",
+    "archive": "yaca-source-cache-20261015.tar.gz",
+    "sha256": "84ce47581c381f27ed732e94ecf27b7f4fece05e4342c6d3073c71dc33b6f176",
+    "bytes": 1042834167,
+    "pinned_members": 1168,
+    "lock_bindings": [
+      {
+        "path": "release/windows-git32-sources.lock.json",
+        "sha256": "05ec44b3d0f2064e3692c75235151ebce2978a490f29bf9ef5855f3b9c6d3c4c",
+        "bytes": 331760
+      },
+      {
+        "path": "release/windows-git64-sources.lock.json",
+        "sha256": "23be4fd58149ec253b7edf4c6d53002dbd4253c6d3ca8cab42cb197d6ed9f348",
+        "bytes": 192542
+      }
+    ],
+    "profile_verified": true,
+    "source_closure": "partial",
+    "private_configuration_included": false,
+    "release_authorized": false
+  },
+  "runtime_release": "https://github.com/Water-Run/yaca/releases/tag/v1.0.0-preview.20261013",
+  "runtime_assets_verified": 24,
+  "unchanged_runtime_source_trees_from_R94": {
+    "src": "b11d186398d1cad1e422e876beca1984de30914d",
+    "native": "d177da7f60f5712c7f7b206cc9d3ac4f9245a104"
+  },
+  "review_scope": "literal recipe/source data, declared digest matches, per-member failures, package aliases, public cache membership and immutable R95 runtime asset identities",
+  "source_bindings": [
+    {
+      "path": "release/windows-git32-sources.lock.json",
+      "frozen": "out/review-20261015/r100/frozen/release/windows-git32-sources.lock.json",
+      "sha256": "05ec44b3d0f2064e3692c75235151ebce2978a490f29bf9ef5855f3b9c6d3c4c",
+      "bytes": 331760
+    },
+    {
+      "path": "release/windows-git64-sources.lock.json",
+      "frozen": "out/review-20261015/r100/frozen/release/windows-git64-sources.lock.json",
+      "sha256": "23be4fd58149ec253b7edf4c6d53002dbd4253c6d3ca8cab42cb197d6ed9f348",
+      "bytes": 192542
+    },
+    {
+      "path": ".tools/bootstrap_development.sh",
+      "frozen": "out/review-20261015/r100/frozen/.tools/bootstrap_development.sh",
+      "sha256": "e747cde07c438f9922fb3b1b5a51f7a4f8fff3b391b974e300e8278fe99ffe14",
+      "bytes": 5328
+    },
+    {
+      "path": "out/review-20261015/r100/package_source_cache.py",
+      "frozen": "out/review-20261015/r100/frozen/out/review-20261015/r100/package_source_cache.py",
+      "sha256": "1c8ac8596b061c7a8141827afa9f5f005d9ab01658101ca2bb276fbe51fa4d4b",
+      "bytes": 3644
+    },
+    {
+      "path": "out/review-20261015/r100/prepare_legacy_retry.py",
+      "frozen": "out/review-20261015/r100/frozen/out/review-20261015/r100/prepare_legacy_retry.py",
+      "sha256": "b646841f510104d6b288db2993940314babbaa0401441eb58fb4f2ac07fb15f4",
+      "bytes": 7583
+    },
+    {
+      "path": "out/review-20261015/r100/preserve_legacy_profile.py",
+      "frozen": "out/review-20261015/r100/frozen/out/review-20261015/r100/preserve_legacy_profile.py",
+      "sha256": "3ebfece1b89d67b90eb1b7a455ae12ea0a7bd44a3dc34c533067e1633ae20ed7",
+      "bytes": 7118
+    },
+    {
+      "path": "out/review-20261015/r100/record_node.py",
+      "frozen": "out/review-20261015/r100/frozen/out/review-20261015/r100/record_node.py",
+      "sha256": "49c93ae5ea5091d61a1808e84727953018344cbf3154922be6a73a3e47023c94",
+      "bytes": 4102
+    },
+    {
+      "path": "out/review-20261015/r100/retry_legacy_payloads.py",
+      "frozen": "out/review-20261015/r100/frozen/out/review-20261015/r100/retry_legacy_payloads.py",
+      "sha256": "771ac685bcb1c3a3ded44568584b707f58260b501cd6815e3bae0ecda4306c06",
+      "bytes": 14195
+    },
+    {
+      "path": "out/review-20261015/r100/debian-ca-file-info1.json",
+      "frozen": "out/review-20261015/r100/frozen/out/review-20261015/r100/debian-ca-file-info1.json",
+      "sha256": "f626a8e7c27d3100441d56f7c31d16e6504cd0713b52ccd01060bedbd1ab65ae",
+      "bytes": 226
+    },
+    {
+      "path": "out/review-20261015/r100/debian-ca-file-info2.json",
+      "frozen": "out/review-20261015/r100/frozen/out/review-20261015/r100/debian-ca-file-info2.json",
+      "sha256": "dc6ead5675303a6277f6fc2fa19a3fd47f4c914d85e50b4e7bb50489327a7cb3",
+      "bytes": 231
+    },
+    {
+      "path": "out/review-20261015/r100/debian-ca-source-index.json",
+      "frozen": "out/review-20261015/r100/frozen/out/review-20261015/r100/debian-ca-source-index.json",
+      "sha256": "b7bbb37effb6d28e2d1ae46e218564423f6059de78de6958b1d03822b9c96298",
+      "bytes": 183
+    },
+    {
+      "path": "out/review-20261015/r100/legacy-source-profile.json",
+      "frozen": "out/review-20261015/r100/frozen/out/review-20261015/r100/legacy-source-profile.json",
+      "sha256": "fce76644a9dd8d54756862a16c3ec2f4b9025d98d998aba92a495788857e7a91",
+      "bytes": 485
+    },
+    {
+      "path": "out/review-20261015/r100/legacy-source-retry.json",
+      "frozen": "out/review-20261015/r100/frozen/out/review-20261015/r100/legacy-source-retry.json",
+      "sha256": "570d7326fcf7a5fee06602024b3c0aee0374bb529de8884941aacfe1dc712051",
+      "bytes": 43393
+    },
+    {
+      "path": "out/review-20261015/r100/runtime-release.json",
+      "frozen": "out/review-20261015/r100/frozen/out/review-20261015/r100/runtime-release.json",
+      "sha256": "5ab7c828233b693a3ebf23d7088d4a1b14fe7144bf5973b9e98bbbe8b4d7283f",
+      "bytes": 6998
+    },
+    {
+      "path": "out/review-20261015/r100/source-cache-inputs.json",
+      "frozen": "out/review-20261015/r100/frozen/out/review-20261015/r100/source-cache-inputs.json",
+      "sha256": "acd8ab160659b0c8283da10d541fe7c98b11c2f27eac551d02b964c0897311e8",
+      "bytes": 370981
+    },
+    {
+      "path": "out/review-20261015/r100/source-cache-package.json",
+      "frozen": "out/review-20261015/r100/frozen/out/review-20261015/r100/source-cache-package.json",
+      "sha256": "28e9273e82d8c1b88b7dcbea4cb07cb846e62fa7d64917312e11cf62b8ed6b7d",
+      "bytes": 760
+    },
+    {
+      "path": "out/review-20261015/r100/legacy-source-profile.log",
+      "frozen": "out/review-20261015/r100/frozen/out/review-20261015/r100/legacy-source-profile.log",
+      "sha256": "362ad230ee09345c95f4f8abdfbe8c3f2dea214b45ed95d11d0e49542e9b188b",
+      "bytes": 225
+    },
+    {
+      "path": "out/review-20261015/r100/legacy-source-retry.log",
+      "frozen": "out/review-20261015/r100/frozen/out/review-20261015/r100/legacy-source-retry.log",
+      "sha256": "b73d650603f80a347b1e41ea63dfc05fd70bce517eb6530c725432ffe9f835ed",
+      "bytes": 1086
+    },
+    {
+      "path": "out/review-20261015/r100/prepare-legacy-retry.log",
+      "frozen": "out/review-20261015/r100/frozen/out/review-20261015/r100/prepare-legacy-retry.log",
+      "sha256": "cfe1a1dad55a50cdd86dfcbc0f53369b8ec03e8fc94d72c69b947226decfe57d",
+      "bytes": 89
+    },
+    {
+      "path": "out/review-20261015/r100/source-cache-package.log",
+      "frozen": "out/review-20261015/r100/frozen/out/review-20261015/r100/source-cache-package.log",
+      "sha256": "eae62f8a5073436b4df5be238e3df8f29315218879ffe2554f73e93cfd0647c5",
+      "bytes": 216
+    }
+  ],
+  "pending": [
+    "six legacy recipe problems and four unattempted source versions",
+    "remaining static/VCS/signature inputs and complete binary/source correspondence",
+    "final nine-package qualification and remaining whole-repository semantic review",
+    "clean-checkout initialization, public node publication and final pause close"
+  ],
+  "recording_note": "The recorder live stdout log is excluded from immutable input bindings."
+}
