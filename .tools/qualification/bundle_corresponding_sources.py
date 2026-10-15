@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Author: WaterRun
-# Date: 2026-10-11
+# Date: 2026-10-15
 # File: bundle_corresponding_sources.py
 # Description: Assemble exact toolbox corresponding-source profiles from pinned source archives and maintained recipes, with verified member digests and no binary-only fallback.
 
@@ -32,11 +32,11 @@ def digest(path):
 #@param input_root Path Cache root for inputs whose origin is absent or cache; repository inputs use the maintained repository root.
 #@param output Path Absent .tar.gz artifact receiving the verified corresponding-source closure.
 #@return dict Source profile with exact member hashes; it does not grant runtime or release qualification.
-#@error Raises on binary-only inputs, unsafe/duplicate paths, mismatched hashes or output conflicts.
-#@effect Reads pinned sources, creates a deterministic temporary tar.gz and publishes it only after verifying member bytes.
+#@error Raises on binary-only inputs, unsafe/duplicate paths, mismatched hashes, occupied outputs or unavailable hard-link publication.
+#@effect Reads pinned sources, creates a deterministic temporary tar.gz and atomically links verified bytes to an absent output; temporary files are cleaned on failure.
 def bundle(profile, input_root, output):
     output = Path(output)
-    if output.exists():
+    if os.path.lexists(output):
         raise ValueError('corresponding-source output already exists')
     if profile.get('schema') != 'yaca-corresponding-source-inputs-v1' \
             or not isinstance(profile.get('inputs'), list) or not profile['inputs']:
@@ -90,9 +90,9 @@ def bundle(profile, input_root, output):
                 with archive.extractfile(name) as stream:
                     if hashlib.file_digest(stream, 'sha256').hexdigest() != expected:
                         raise ValueError('bundled source bytes differ')
-        if output.exists():
-            raise ValueError('corresponding-source destination became occupied')
-        os.rename(staged, output)
+        # The same-directory hard link fails atomically if another writer occupies the output.
+        # A rename after an existence check could replace that writer's file on POSIX.
+        os.link(staged, output)
     return record
 
 

@@ -1,0 +1,90 @@
+{
+  "schema": "yaca-tool-source-review-evidence-v1",
+  "date": "2026-10-15",
+  "base_revision": "43c80388660fde08490cda339d67db860254fef3",
+  "release_authorized": false,
+  "target_qualification_complete": false,
+  "development_paused": false,
+  "whole_repository_semantic_review": "partial",
+  "full_coding_readiness": "PASS",
+  "comment_coverage": {
+    "files": 272,
+    "declarations": 5788,
+    "violations": 0
+  },
+  "review_id": "R98",
+  "status": "atomic-source-publication-verified",
+  "baseline": "12/14 on Linux with production code from 43c8038",
+  "linux_regressions": "14/14",
+  "windows_native_regressions": "14/14",
+  "manual_review_scope": "absent-output admission, dangling links, atomic hard-link publication, conflict cleanup and all changed test callbacks",
+  "scope": "source packaging only; product runtime unchanged",
+  "source_bindings": [
+    {
+      "path": ".tools/qualification/bundle_corresponding_sources.py",
+      "frozen": "out/review-20261015/r98/frozen/.tools/qualification/bundle_corresponding_sources.py",
+      "sha256": "b05912d5b56232795a99a7f46cd1b3b830af514f80f1c5073c75a27c2ad1cd43",
+      "bytes": 6488
+    },
+    {
+      "path": "test/qualification/corresponding_sources_test.py",
+      "frozen": "out/review-20261015/r98/frozen/test/qualification/corresponding_sources_test.py",
+      "sha256": "8cf9e780fd1ce657bacaff7c2b3c8e933653f43aeba239320161d72bb5adad20",
+      "bytes": 19323
+    },
+    {
+      "path": "out/review-20261015/r98/baseline/.tools/qualification/bundle_corresponding_sources.py",
+      "frozen": "out/review-20261015/r98/frozen/out/review-20261015/r98/baseline/.tools/qualification/bundle_corresponding_sources.py",
+      "sha256": "4ca83adbc8a670c90cd6fd118fab0c9e930c44c4a7d6afd0fb0c71be9d183b40",
+      "bytes": 6329
+    },
+    {
+      "path": "out/review-20261015/r98/baseline.log",
+      "frozen": "out/review-20261015/r98/frozen/out/review-20261015/r98/baseline.log",
+      "sha256": "f66b4d3122dd8dd11d04b90c5c51d09a1f899ffdede7cf1542fdcb86f99eb154",
+      "bytes": 1495
+    },
+    {
+      "path": "out/review-20261015/r98/fixed.log",
+      "frozen": "out/review-20261015/r98/frozen/out/review-20261015/r98/fixed.log",
+      "sha256": "e232a8b59a37ea42a6219f955d259c8a25286e58c7b0a78b8f66478e528927ed",
+      "bytes": 258
+    },
+    {
+      "path": "out/review-20261015/r98/linux-final.log",
+      "frozen": "out/review-20261015/r98/frozen/out/review-20261015/r98/linux-final.log",
+      "sha256": "0c9cd59b911c2342c8b2e8db72ace32f5d186e6ca668735ec89314dfa1a5f7b4",
+      "bytes": 258
+    },
+    {
+      "path": "out/review-20261015/r98/readiness.log",
+      "frozen": "out/review-20261015/r98/frozen/out/review-20261015/r98/readiness.log",
+      "sha256": "44c511c094e345eb42b889c7be9a902f35ff2d67803e72c44cfdbb46fabe60fd",
+      "bytes": 4327
+    },
+    {
+      "path": "out/review-20261015/r98/readiness-fixed-env.log",
+      "frozen": "out/review-20261015/r98/frozen/out/review-20261015/r98/readiness-fixed-env.log",
+      "sha256": "7a5336fe5c5f05464bf1c63d28bd5c7c79f5c4eb4e53be67b0e52cd38aea745c",
+      "bytes": 4654
+    },
+    {
+      "path": "out/review-20261015/r99/windows-regressions.log",
+      "frozen": "out/review-20261015/r98/frozen/out/review-20261015/r99/windows-regressions.log",
+      "sha256": "caf5c217cfda300726c6e4eebc1b93170a2bed0464bd2aeb04eb83dd44f349a3",
+      "bytes": 1760
+    },
+    {
+      "path": "out/review-20261015/r99/windows-final.log",
+      "frozen": "out/review-20261015/r98/frozen/out/review-20261015/r99/windows-final.log",
+      "sha256": "1178c6bfb4ad419522594eff89cbe77e115d22adb9e66c9b1351b6cbd385255b",
+      "bytes": 371
+    },
+    {
+      "path": "out/review-20261015/r99/readiness-final.log",
+      "frozen": "out/review-20261015/r98/frozen/out/review-20261015/r99/readiness-final.log",
+      "sha256": "c6661ea0d4f2efc42c78ed00ed4408670dd34830f468c4f9a0f2d61d9d985961",
+      "bytes": 4781
+    }
+  ]
+}

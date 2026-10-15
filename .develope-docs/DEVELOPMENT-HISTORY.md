@@ -1,12 +1,13 @@
 # 开发历程与历史资料
 
-整理日期：2026-10-14。当前实现看 [CURRENT-STATE.md](CURRENT-STATE.md)，
+整理日期：2026-10-15。当前实现看 [CURRENT-STATE.md](CURRENT-STATE.md)，
 剩余工作看 [TRACKING.md](TRACKING.md)。本页只导航已有工作和证据。
 
 ## 已完成工作的脉络
 
 | 时间 / 节点 | 主要成果 | 证据与适用范围 |
 | --- | --- | --- |
+| 2026-10-15，R98/R99 发布与验签 | 修复来源档案原子发布、占用链接和 MSYS GnuPG 路径；18 项实际验签，605 成员来源档案；跨平台公开夹具与维护校验工具 | [本日 Review](CODE-REVIEW-2026-10-15.md)、[R98](tool-source-review/R98.json)、[R99](tool-source-review/R99.json)；来源发布两宿主各 14/14、验签各 5/5；来源状态 partial，继续按 D-091 推进 |
 | 2026-10-14，R97 原始输入恢复与收尾 | 恢复首轮 10 个整包来源输入缺项，两份原 VCS tar 摘要匹配；新 Win64 来源锁含 565 个成员，来源档案装配与接纳 PASS | [来源恢复](SOURCE-RECOVERY-2026-10-14.md)、[R97](tool-source-review/R97.json)；38 个版本仍余 18 个分离签名及完整对应关系，来源状态 partial；按 D-090 整理推送后暂停 |
 | 2026-10-14，R96 来源验证与恢复 | 两 Windows full 装配器取消二进制 Git 来源回退，显式验证身份/档案/成员摘要并保留状态；统一归档路径；恢复 38 个精确配方及补丁 | [本日 Review](CODE-REVIEW-2026-10-14.md)、[R96](tool-source-review/R96.json)；专项 7/11 到 12/12、Lua 735/735、readiness PASS、270/5771/0；载荷与完整对应关系仍待完成 |
 | 2026-10-13，R95 候选交付与接续入口 | R94 三目标核心各 735/735、Win64 Qwen low 真实控制台通过；九包字节与文件证据、Linux 三档离线核心旅程、独立干净检出初始化及完整 readiness 通过；来源状态在装配/恢复时保留 | [本日 Review](CODE-REVIEW-2026-10-13.md)、[候选清单](candidates/1.0.0-preview.20261013.json)；270/5765/0，来源闭包和全仓语义 Review 保留；按 D-088 整理推送后暂停 |

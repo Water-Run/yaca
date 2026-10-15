@@ -7,8 +7,12 @@
     "complete_source_closure": false,
     "manual_source_closure_review": "pending",
     "source_versions_recovered": 38,
-    "pending_entries": 18,
-    "scope": "Exact Git main sources, official source packages, original recipes and pinned recovered inputs; detached signature/manual correspondence pending"
+    "pending_entries": 0,
+    "scope": "38 exact recipe versions and pinned source inputs with 18 detached signatures verified; manual key validity and binary/source correspondence remain pending",
+    "signature_entries_verified": 18,
+    "manual_key_expiration_revocation_review": "pending",
+    "coverage_member": "SOURCE-COVERAGE.json",
+    "historical_status_member": "history/R95-SOURCE-STATUS.json"
   },
   "inputs": [
     {
@@ -570,11 +574,6 @@
       "path": "gfw-package-sources/mingw-w64-xpdf-tools-4.00-1.src.tar.gz",
       "destination": "packages/mingw-w64-xpdf-tools-4.00-1.src.tar.gz",
       "sha256": "4f30c181bbde5bd21102c6374f332dcd0c707de2b7bbc743381aa4cc9b34b864"
-    },
-    {
-      "path": "sources/git-win64-x86_64-source-status-20261013.json",
-      "destination": "SOURCE-STATUS.json",
-      "sha256": "8104cee12e978a8c909d35fa36683a8a111662343ec62fae00804dab1c001137"
     },
     {
       "path": "gfw-modern-recipes/0219e7d687d1dfc184cdc13a4ec94760ecf19e04/gnutls/PKGBUILD",
@@ -2832,9 +2831,214 @@
       "sha256": "85ad8bd0478710f4035ae2d655370cbeef4eb5999a624a21f6786a52a9cdea5b"
     },
     {
-      "path": "sources/git-win64-source-coverage-20261014.json",
+      "path": "gfw-source-signatures-20261015/gnutls-gnutls-3.8.4.tar.xz.sig",
+      "destination": "signature-inputs/gnutls-gnutls-3.8.4.tar.xz.sig",
+      "sha256": "221494db78414ea6b508ce51f2ea487052ff0ad1606e5d9431b7e4fca60629b3"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/0424D4EE81A0E3D119C6F835EDA21E94B565716F.ubuntu.asc",
+      "destination": "signature-inputs/0424D4EE81A0E3D119C6F835EDA21E94B565716F.ubuntu.asc",
+      "sha256": "19bbe8cb64e87b9cee2e74ad8e58698a347b52f497567ce372b591ca595dc440"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/1F42418905D8206AA754CCDC29EE58B996865171.ubuntu.asc",
+      "destination": "signature-inputs/1F42418905D8206AA754CCDC29EE58B996865171.ubuntu.asc",
+      "sha256": "26b5ee204c8fc69ace578d8e176f8c42eafc2e01e5a83b1d5fe641445b1f1a65"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/462225C3B46F34879FC8496CD605848ED7E69871.ubuntu.asc",
+      "destination": "signature-inputs/462225C3B46F34879FC8496CD605848ED7E69871.ubuntu.asc",
+      "sha256": "916367bb234f72a8c026ab8ee58513bc79f9228ad415b5d2d35be78c85b14861"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/5D46CB0F763405A7053556F47A75A648B3F9220C.ubuntu.asc",
+      "destination": "signature-inputs/5D46CB0F763405A7053556F47A75A648B3F9220C.ubuntu.asc",
+      "sha256": "410289e440a5996fdb12743bbc9b3c553132bc3be60485c946d1592250520b92"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/mingw-w64-curl-curl-8.10.1.tar.bz2.asc",
+      "destination": "signature-inputs/mingw-w64-curl-curl-8.10.1.tar.bz2.asc",
+      "sha256": "90e56a65556ef54ae266460de48c5433f80dd862351939acde9dedfab48d54a4"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/27EDEAF22F3ABCEB50DB9A125CC908FDB71E12C2.ubuntu.asc",
+      "destination": "signature-inputs/27EDEAF22F3ABCEB50DB9A125CC908FDB71E12C2.ubuntu.asc",
+      "sha256": "455e3414d175f0c6efb425c4cd149ba767dedc49ec2e7385eb6f291e45f427b9"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/expat-expat-2.6.3.tar.xz.asc",
+      "destination": "signature-inputs/expat-expat-2.6.3.tar.xz.asc",
+      "sha256": "96bc5f146eb81a4d1a12b841788a88456b6a287c1143eb29ac7cf5c8f0c6a5b5"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/3176EF7DB2367F1FCA4F306B1F9B0E909AF37285.ubuntu.asc",
+      "destination": "signature-inputs/3176EF7DB2367F1FCA4F306B1F9B0E909AF37285.ubuntu.asc",
+      "sha256": "48a06f7b782958ecbab278a54581a92102a8b003bcf85fea4df2d9154699c2ba"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/file-file-5.45.tar.gz.asc",
+      "destination": "signature-inputs/file-file-5.45.tar.gz.asc",
+      "sha256": "34af47be1584ed99529c21a916444bbce4caf1ca289b241d8e649f7fdd9e3ec6"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/BE04995BA8F90ED0C0C176C471112AB16CB33B3A.ubuntu.asc",
+      "destination": "signature-inputs/BE04995BA8F90ED0C0C176C471112AB16CB33B3A.ubuntu.asc",
+      "sha256": "ee6e4fb57743bb07d360824652d3aa3d681d0bffe7488035238711ad34c4e45d"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/nettle-nettle-3.10.tar.gz.sig",
+      "destination": "signature-inputs/nettle-nettle-3.10.tar.gz.sig",
+      "sha256": "5ea7223a71d3e1f56f5c7a2f6e1d1c5068c4e8992acba8b257b2a6c6c36e0619"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/343C2FF0FBEE5EC2EDBEF399F3599FF828C67298.ubuntu.asc",
+      "destination": "signature-inputs/343C2FF0FBEE5EC2EDBEF399F3599FF828C67298.ubuntu.asc",
+      "sha256": "50561c50f40cd9746af214c995fb219bbe7f3b9c5f038b918f5df543bb3f846f"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/npth-npth-1.7.tar.bz2.sig",
+      "destination": "signature-inputs/npth-npth-1.7.tar.bz2.sig",
+      "sha256": "56403ae7662b342859c544c324cc1d4b268eff158b2e5ae59f7438a0fb0c5861"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/gnupg-release-signing-keys.asc",
+      "destination": "signature-inputs/gnupg-release-signing-keys.asc",
+      "sha256": "6f57d0e17fefd2238bd037aebf03efa960641629dd61dd9d47f122a829f6e375"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/mingw-w64-c-ares-c-ares-1.33.1.tar.gz.asc",
+      "destination": "signature-inputs/mingw-w64-c-ares-c-ares-1.33.1.tar.gz.asc",
+      "sha256": "b8703d94bb0fedcb2bd040ac08c1ae311c85459c1404883ec5005ccdb7a284fb"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/DA7D64E4C82C6294CB73A20E22E3D13B5411B7CA.ubuntu.asc",
+      "destination": "signature-inputs/DA7D64E4C82C6294CB73A20E22E3D13B5411B7CA.ubuntu.asc",
+      "sha256": "6a00472ce05c5a6f45053adfa0a61ad8d627b4491558571c27b1eb3d51a687b6"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/mingw-w64-expat-expat-2.6.3.tar.xz.asc",
+      "destination": "signature-inputs/mingw-w64-expat-expat-2.6.3.tar.xz.asc",
+      "sha256": "96bc5f146eb81a4d1a12b841788a88456b6a287c1143eb29ac7cf5c8f0c6a5b5"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/mingw-w64-gcc-gcc-14.2.0.tar.xz.sig",
+      "destination": "signature-inputs/mingw-w64-gcc-gcc-14.2.0.tar.xz.sig",
+      "sha256": "8669e23023a3ab28327816ef0fb6468af54935b5d204214f0c3f4f904c130970"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/F3691687D867B81B51CE07D9BBE43771487328A9.ubuntu.asc",
+      "destination": "signature-inputs/F3691687D867B81B51CE07D9BBE43771487328A9.ubuntu.asc",
+      "sha256": "9900a534558de8fd0a8af670423924e7c63a726e97b2bb850b4061624335e7e0"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/86CFFCA918CF3AF47147588051E8B148A9999C34.ubuntu.asc",
+      "destination": "signature-inputs/86CFFCA918CF3AF47147588051E8B148A9999C34.ubuntu.asc",
+      "sha256": "1512416c44599d4d480ccf7fd6fd11b80f8c05696a6c05068c7f5320d48555de"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/13975A70E63C361C73AE69EF6EEB81F8981C74C7.ubuntu.asc",
+      "destination": "signature-inputs/13975A70E63C361C73AE69EF6EEB81F8981C74C7.ubuntu.asc",
+      "sha256": "4862f6aac833d841e2af4eb875919940133965888a00e18fbd175e752fb71b6b"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/D3A93CAD751C2AF4F8C7AD516C35B99309B5FA62.ubuntu.asc",
+      "destination": "signature-inputs/D3A93CAD751C2AF4F8C7AD516C35B99309B5FA62.ubuntu.asc",
+      "sha256": "94ea921442ff03837be9fd9975ae097425e57edc01b9645e4db3d128639f79df"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/mingw-w64-gettext-gettext-0.22.5.tar.gz.sig",
+      "destination": "signature-inputs/mingw-w64-gettext-gettext-0.22.5.tar.gz.sig",
+      "sha256": "5829b36cdf582df81ca2ec0919b9a671f5cab7bb09adb23c96ada32e9b20168f"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/9001B85AF9E1B83DF1BDA942F5BE8B267C6A406D.ubuntu.asc",
+      "destination": "signature-inputs/9001B85AF9E1B83DF1BDA942F5BE8B267C6A406D.ubuntu.asc",
+      "sha256": "c9846c2416ab06fc2a163d4b84e2baed6fd61c04399a14e1eb1dab5eb880f501"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/mingw-w64-libiconv-libiconv-1.17.tar.gz.sig",
+      "destination": "signature-inputs/mingw-w64-libiconv-libiconv-1.17.tar.gz.sig",
+      "sha256": "06d1357471c445eb6c0b6a568b79dac3f46003b9efcb5fee2208aad33fc54cab"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/mingw-w64-libssh2-libssh2-1.11.0.tar.gz.asc",
+      "destination": "signature-inputs/mingw-w64-libssh2-libssh2-1.11.0.tar.gz.asc",
+      "sha256": "b6a32c85a3f9b6f30f2b3595ba034b48a8508ee9c94708ef811f58fd7adfcdee"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/914C533DF9B2ADA2204F586D78E11C6B279D5C91.ubuntu.asc",
+      "destination": "signature-inputs/914C533DF9B2ADA2204F586D78E11C6B279D5C91.ubuntu.asc",
+      "sha256": "45162f525dd24830703c9cf2a501b79d29bb7786a49d2d71c2aedbc7d654bc52"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/mingw-w64-libunistring-libunistring-1.2.tar.gz.sig",
+      "destination": "signature-inputs/mingw-w64-libunistring-libunistring-1.2.tar.gz.sig",
+      "sha256": "5d00c549d39c897beca7abb589b5426cb9569e71b79496e861404e85a6dd4323"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/mingw-w64-nettle-nettle-3.10.tar.gz.sig",
+      "destination": "signature-inputs/mingw-w64-nettle-nettle-3.10.tar.gz.sig",
+      "sha256": "5ea7223a71d3e1f56f5c7a2f6e1d1c5068c4e8992acba8b257b2a6c6c36e0619"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/mingw-w64-xz-xz-5.6.2.tar.xz.sig",
+      "destination": "signature-inputs/mingw-w64-xz-xz-5.6.2.tar.xz.sig",
+      "sha256": "f0e619bdcab936b90f1106ac0d18e234c31c239c86c7cf492e4d46b0b81ed0bb"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/3690C240CE51B4670D30AD1C38EE757D69184620.ubuntu.asc",
+      "destination": "signature-inputs/3690C240CE51B4670D30AD1C38EE757D69184620.ubuntu.asc",
+      "sha256": "21f39c58c447fbca1d15225d9bb6713236b72ed4d4e409b520169d93bbf31a8b"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/ncurses-ncurses-6.5-20240831.tgz.asc",
+      "destination": "signature-inputs/ncurses-ncurses-6.5-20240831.tgz.asc",
+      "sha256": "b3116bf83421d6f81478721da1d002487eb5ac1bfcb71dc421f447ef633eaa2e"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/19882D92DDA4C400C22C0D56CC2AF4472167BE03.ubuntu.asc",
+      "destination": "signature-inputs/19882D92DDA4C400C22C0D56CC2AF4472167BE03.ubuntu.asc",
+      "sha256": "d3319cfd8f8c34bfe77268a078cd590ebdd350e75c7df465a31d6f05fe2023e5"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/libxcrypt-libxcrypt-4.4.36.tar.xz.asc",
+      "destination": "signature-inputs/libxcrypt-libxcrypt-4.4.36.tar.xz.asc",
+      "sha256": "04f2985349a027dd544806b2b6888402fbfd71322c210a94271e1e02f46fbf74"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/678CE3FEE430311596DB8C16F52E98007594C21D.ubuntu.asc",
+      "destination": "signature-inputs/678CE3FEE430311596DB8C16F52E98007594C21D.ubuntu.asc",
+      "sha256": "d52010dc79210e9b00c114b25afdf57823343952c3a334266d8681cf18de3da2"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/libunistring-libunistring-1.2.tar.xz.sig",
+      "destination": "signature-inputs/libunistring-libunistring-1.2.tar.xz.sig",
+      "sha256": "91da3f033231a635dae9e0161c834b74e890e1eba19d4e5972b26c5c312ac2cb"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/gnupg-release-signers.html",
+      "destination": "signature-inputs/gnupg-release-signers.html",
+      "sha256": "9d6cd8bfdf70c3d80d35edf7de03b4a897b18e31b5673a1007e761f5d1c31353"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/SIGNATURE-INPUTS.json",
+      "destination": "SIGNATURE-INPUTS.json",
+      "sha256": "8aabc10bcb152597587871b1eb37ab7a5ef24d5b8400f20ac126dd16e13197c4"
+    },
+    {
+      "path": "gfw-source-signatures-20261015/SIGNATURE-VERIFICATION.json",
+      "destination": "SIGNATURE-VERIFICATION.json",
+      "sha256": "9dd381c162b3fe39bbd0a8c36a2c99bc1a15206cc5f8bc90505a520b98f0a5e5"
+    },
+    {
+      "path": "sources/git-win64-source-coverage-20261015.json",
       "destination": "SOURCE-COVERAGE.json",
-      "sha256": "6e65537c6493022c317daa8570e08473fdd651d44f799e132db4ee73047ffe42"
+      "sha256": "1ee7d1fa8a6ac9af23ffbf792ed5a0b386dee7b900bfd938bde18dd09a86d3b7"
+    },
+    {
+      "path": "sources/git-win64-x86_64-source-status-20261013.json",
+      "destination": "history/R95-SOURCE-STATUS.json",
+      "sha256": "8104cee12e978a8c909d35fa36683a8a111662343ec62fae00804dab1c001137"
     }
   ]
 }

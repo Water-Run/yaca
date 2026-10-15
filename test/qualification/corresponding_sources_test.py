@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Author: WaterRun
-# Date: 2026-10-14
+# Date: 2026-10-15
 # File: corresponding_sources_test.py
 # Description: Reject binary-only toolbox provenance and verify corresponding-source profile membership, digests and safe archive paths.
 
@@ -14,6 +14,7 @@ from pathlib import Path
 import tarfile
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location('corresponding_sources', ROOT / '.tools/qualification/audit_corresponding_sources.py')
@@ -195,6 +196,71 @@ class SourceAuditTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'already exists'):
             BUNDLE.bundle(profile, self.root, output)
         self.assertEqual(output.read_bytes(), before)
+
+    # Preserve a competing writer's artifact even when it appears immediately before publication.
+    #@param self SourceAuditTest Owns the source fixture, competing file and patched publication calls.
+    #@return None Assertions require atomic refusal, unchanged competing bytes and temporary-file cleanup.
+    #@effect Creates disposable files and intercepts rename/link only while production bundling runs.
+    def test_bundle_publication_cannot_replace_a_concurrent_artifact(self):
+        source = self.root / 'upstream.txt'
+        source.write_bytes(b'original source')
+        profile = {'schema': 'yaca-corresponding-source-inputs-v1', 'tool': 'fixture', 'version': '1',
+                   'inputs': [{'path': source.name, 'destination': 'upstream/source.txt',
+                               'sha256': hashlib.sha256(source.read_bytes()).hexdigest()}]}
+        output = self.root / 'competing.tar.gz'
+        competing_bytes = b'published by another writer'
+        original_rename, original_link = BUNDLE.os.rename, BUNDLE.os.link
+
+        # Insert a competing file at the legacy rename boundary and delegate to the real filesystem.
+        #@param staged Path Completed temporary source archive offered for publication.
+        #@param destination Path Output path that another writer occupies before the rename syscall.
+        #@return None Returns the original rename result if the platform permits replacement.
+        #@error Propagates filesystem errors, including platforms that already refuse rename replacement.
+        #@effect Creates the competing fixture before calling the original rename implementation.
+        def competing_rename(staged, destination):
+            Path(destination).write_bytes(competing_bytes)
+            return original_rename(staged, destination)
+
+        # Insert a competing file at the hard-link boundary and require atomic create-only behavior.
+        #@param staged Path Completed temporary source archive offered for publication.
+        #@param destination Path Output path occupied immediately before the link syscall.
+        #@return None Does not return when the occupied output is correctly rejected.
+        #@error Propagates FileExistsError from the real hard-link publication syscall.
+        #@effect Creates only the disposable competing fixture; leaves its bytes intact.
+        def competing_link(staged, destination):
+            Path(destination).write_bytes(competing_bytes)
+            return original_link(staged, destination)
+
+        with mock.patch.object(BUNDLE.os, 'rename', competing_rename), \
+                mock.patch.object(BUNDLE.os, 'link', competing_link):
+            with self.assertRaises(FileExistsError):
+                BUNDLE.bundle(profile, self.root, output)
+        self.assertEqual(output.read_bytes(), competing_bytes)
+        self.assertEqual(set(self.root.iterdir()), {source, output})
+
+    # Treat a dangling output symlink as occupied rather than replacing a caller-owned directory entry.
+    #@param self SourceAuditTest Owns the source fixture and deliberately dangling link.
+    #@return None Assertions require an existing-output error and preservation of the link target text.
+    #@error Skips only when the current host cannot create symlinks for this fixture.
+    #@effect Creates a disposable dangling link without creating or modifying its missing target.
+    def test_bundle_preserves_dangling_output_symlink(self):
+        source = self.root / 'upstream.txt'
+        source.write_bytes(b'original source')
+        profile = {'schema': 'yaca-corresponding-source-inputs-v1', 'tool': 'fixture', 'version': '1',
+                   'inputs': [{'path': source.name, 'destination': 'source.txt',
+                               'sha256': hashlib.sha256(source.read_bytes()).hexdigest()}]}
+        output = self.root / 'dangling.tar.gz'
+        missing_target = self.root / 'missing-target'
+        try:
+            output.symlink_to(missing_target)
+        except OSError as error:
+            self.skipTest('host cannot create the dangling symlink fixture: ' + str(error))
+        original_link_target = output.readlink()
+        with self.assertRaisesRegex(ValueError, 'already exists'):
+            BUNDLE.bundle(profile, self.root, output)
+        self.assertTrue(output.is_symlink())
+        self.assertEqual(output.readlink(), original_link_target)
+        self.assertFalse(missing_target.exists())
 
     # Reject changed input bytes and executable distributions before publishing a source bundle.
     #@param self SourceAuditTest Fixture owner.

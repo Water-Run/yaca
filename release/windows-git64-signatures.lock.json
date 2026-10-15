@@ -1,0 +1,600 @@
+{
+  "schema": "yaca-detached-source-signatures-v1",
+  "entries": [
+    {
+      "id": "gnutls-3.8.4-1",
+      "package": "gnutls",
+      "version": "3.8.4-1",
+      "status": "recovered",
+      "source": {
+        "path": "gfw-modern-payloads/gnutls-3.8.4-1/gnutls-3.8.4.tar.xz",
+        "sha256": "2bea4e154794f3f00180fa2a5c51fe8b005ac7a31cd58bd44cdfa7f36ebc3a9b"
+      },
+      "signature": {
+        "path": "gfw-source-signatures-20261015/gnutls-gnutls-3.8.4.tar.xz.sig",
+        "sha256": "221494db78414ea6b508ce51f2ea487052ff0ad1606e5d9431b7e4fca60629b3",
+        "url": "https://gnupg.org/ftp/gcrypt/gnutls/v3.8/gnutls-3.8.4.tar.xz.sig"
+      },
+      "keys": [
+        {
+          "path": "gfw-source-signatures-20261015/0424D4EE81A0E3D119C6F835EDA21E94B565716F.ubuntu.asc",
+          "sha256": "19bbe8cb64e87b9cee2e74ad8e58698a347b52f497567ce372b591ca595dc440",
+          "url": "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x0424D4EE81A0E3D119C6F835EDA21E94B565716F"
+        },
+        {
+          "path": "gfw-source-signatures-20261015/1F42418905D8206AA754CCDC29EE58B996865171.ubuntu.asc",
+          "sha256": "26b5ee204c8fc69ace578d8e176f8c42eafc2e01e5a83b1d5fe641445b1f1a65",
+          "url": "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x1F42418905D8206AA754CCDC29EE58B996865171"
+        },
+        {
+          "path": "gfw-source-signatures-20261015/462225C3B46F34879FC8496CD605848ED7E69871.ubuntu.asc",
+          "sha256": "916367bb234f72a8c026ab8ee58513bc79f9228ad415b5d2d35be78c85b14861",
+          "url": "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x462225C3B46F34879FC8496CD605848ED7E69871"
+        },
+        {
+          "path": "gfw-source-signatures-20261015/5D46CB0F763405A7053556F47A75A648B3F9220C.ubuntu.asc",
+          "sha256": "410289e440a5996fdb12743bbc9b3c553132bc3be60485c946d1592250520b92",
+          "url": "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x5D46CB0F763405A7053556F47A75A648B3F9220C"
+        }
+      ],
+      "primary_fingerprints": [
+        "0424D4EE81A0E3D119C6F835EDA21E94B565716F",
+        "1F42418905D8206AA754CCDC29EE58B996865171",
+        "462225C3B46F34879FC8496CD605848ED7E69871",
+        "5D46CB0F763405A7053556F47A75A648B3F9220C"
+      ],
+      "recipe": {
+        "path": "gfw-modern-recipes/0219e7d687d1dfc184cdc13a4ec94760ecf19e04/gnutls/PKGBUILD",
+        "sha256": "415d25885d776db023c799c53394515481d41b29c20ab2ba64941ccd901d332e"
+      }
+    },
+    {
+      "id": "mingw-w64-curl-8.10.1-1",
+      "package": "mingw-w64-curl",
+      "version": "8.10.1-1",
+      "status": "recovered",
+      "source": {
+        "path": "gfw-modern-payloads/mingw-w64-curl-8.10.1-1/curl-8.10.1.tar.bz2",
+        "sha256": "3763cd97aae41dcf41950d23e87ae23b2edb2ce3a5b0cf678af058c391b6ae31"
+      },
+      "signature": {
+        "path": "gfw-source-signatures-20261015/mingw-w64-curl-curl-8.10.1.tar.bz2.asc",
+        "sha256": "90e56a65556ef54ae266460de48c5433f80dd862351939acde9dedfab48d54a4",
+        "url": "https://github.com/curl/curl/releases/download/curl-8_10_1/curl-8.10.1.tar.bz2.asc"
+      },
+      "keys": [
+        {
+          "path": "gfw-source-signatures-20261015/27EDEAF22F3ABCEB50DB9A125CC908FDB71E12C2.ubuntu.asc",
+          "sha256": "455e3414d175f0c6efb425c4cd149ba767dedc49ec2e7385eb6f291e45f427b9",
+          "url": "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x27EDEAF22F3ABCEB50DB9A125CC908FDB71E12C2"
+        }
+      ],
+      "primary_fingerprints": [
+        "27EDEAF22F3ABCEB50DB9A125CC908FDB71E12C2"
+      ],
+      "recipe": {
+        "path": "gfw-modern-recipes/7396d87cb1edc7b1de1d1185469e786b2f6b137b/mingw-w64-curl/PKGBUILD",
+        "sha256": "7777776ad0ed578b179afa7067f966b9e06c05bd36d4e5fef5a98eda21c26574"
+      }
+    },
+    {
+      "id": "expat-2.6.3-1",
+      "package": "expat",
+      "version": "2.6.3-1",
+      "status": "recovered",
+      "source": {
+        "path": "gfw-modern-payloads/expat-2.6.3-1/expat-2.6.3.tar.xz",
+        "sha256": "274db254a6979bde5aad404763a704956940e465843f2a9bd9ed7af22e2c0efc"
+      },
+      "signature": {
+        "path": "gfw-source-signatures-20261015/expat-expat-2.6.3.tar.xz.asc",
+        "sha256": "96bc5f146eb81a4d1a12b841788a88456b6a287c1143eb29ac7cf5c8f0c6a5b5",
+        "url": "https://github.com/libexpat/libexpat/releases/download/R_2_6_3/expat-2.6.3.tar.xz.asc"
+      },
+      "keys": [
+        {
+          "path": "gfw-source-signatures-20261015/3176EF7DB2367F1FCA4F306B1F9B0E909AF37285.ubuntu.asc",
+          "sha256": "48a06f7b782958ecbab278a54581a92102a8b003bcf85fea4df2d9154699c2ba",
+          "url": "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x3176EF7DB2367F1FCA4F306B1F9B0E909AF37285"
+        }
+      ],
+      "primary_fingerprints": [
+        "3176EF7DB2367F1FCA4F306B1F9B0E909AF37285"
+      ],
+      "recipe": {
+        "path": "msys2-upstream-recipes/MSYS2-packages/75a06d9608c1aa6340e3e500246c63c9af266188/expat/PKGBUILD",
+        "sha256": "aa0b0d651e24fed86d123943b0ef55ed3a36a804e6dbf6ce0da431ec4972f91d"
+      }
+    },
+    {
+      "id": "file-5.45-3",
+      "package": "file",
+      "version": "5.45-3",
+      "status": "recovered",
+      "source": {
+        "path": "gfw-modern-payloads/file-5.45-3/file-5.45.tar.gz",
+        "sha256": "fc97f51029bb0e2c9f4e3bffefdaf678f0e039ee872b9de5c002a6d09c784d82"
+      },
+      "signature": {
+        "path": "gfw-source-signatures-20261015/file-file-5.45.tar.gz.asc",
+        "sha256": "34af47be1584ed99529c21a916444bbce4caf1ca289b241d8e649f7fdd9e3ec6",
+        "url": "https://astron.com/pub/file/file-5.45.tar.gz.asc"
+      },
+      "keys": [
+        {
+          "path": "gfw-source-signatures-20261015/BE04995BA8F90ED0C0C176C471112AB16CB33B3A.ubuntu.asc",
+          "sha256": "ee6e4fb57743bb07d360824652d3aa3d681d0bffe7488035238711ad34c4e45d",
+          "url": "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xBE04995BA8F90ED0C0C176C471112AB16CB33B3A"
+        }
+      ],
+      "primary_fingerprints": [
+        "BE04995BA8F90ED0C0C176C471112AB16CB33B3A"
+      ],
+      "recipe": {
+        "path": "msys2-upstream-recipes/MSYS2-packages/45833321d17bc09c6a3f871c4a9b7a88b5e9a66e/file/PKGBUILD",
+        "sha256": "ecffa3068ec26ddfbaaa84fbe8a79c9761ef5028b3f61ff2046d48fb87e92b3a"
+      }
+    },
+    {
+      "id": "nettle-3.10-1",
+      "package": "nettle",
+      "version": "3.10-1",
+      "status": "recovered",
+      "source": {
+        "path": "gfw-modern-payloads/nettle-3.10-1/nettle-3.10.tar.gz",
+        "sha256": "b4c518adb174e484cb4acea54118f02380c7133771e7e9beb98a0787194ee47c"
+      },
+      "signature": {
+        "path": "gfw-source-signatures-20261015/nettle-nettle-3.10.tar.gz.sig",
+        "sha256": "5ea7223a71d3e1f56f5c7a2f6e1d1c5068c4e8992acba8b257b2a6c6c36e0619",
+        "url": "https://ftp.gnu.org/gnu/nettle/nettle-3.10.tar.gz.sig"
+      },
+      "keys": [
+        {
+          "path": "gfw-source-signatures-20261015/343C2FF0FBEE5EC2EDBEF399F3599FF828C67298.ubuntu.asc",
+          "sha256": "50561c50f40cd9746af214c995fb219bbe7f3b9c5f038b918f5df543bb3f846f",
+          "url": "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x343C2FF0FBEE5EC2EDBEF399F3599FF828C67298"
+        }
+      ],
+      "primary_fingerprints": [
+        "343C2FF0FBEE5EC2EDBEF399F3599FF828C67298"
+      ],
+      "recipe": {
+        "path": "msys2-upstream-recipes/MSYS2-packages/69da175cebac93e91e51094bb93a2cc1720a0f09/nettle/PKGBUILD",
+        "sha256": "20b195b3e628fd5df7bea37123715e64155a941519b179e7b3218ab6c2078739"
+      }
+    },
+    {
+      "id": "npth-1.7-1",
+      "package": "npth",
+      "version": "1.7-1",
+      "status": "recovered",
+      "source": {
+        "path": "gfw-modern-payloads/npth-1.7-1/npth-1.7.tar.bz2",
+        "sha256": "8589f56937b75ce33b28d312fccbf302b3b71ec3f3945fde6aaa74027914ad05"
+      },
+      "signature": {
+        "path": "gfw-source-signatures-20261015/npth-npth-1.7.tar.bz2.sig",
+        "sha256": "56403ae7662b342859c544c324cc1d4b268eff158b2e5ae59f7438a0fb0c5861",
+        "url": "https://gnupg.org/ftp/gcrypt/npth/npth-1.7.tar.bz2.sig"
+      },
+      "keys": [
+        {
+          "path": "gfw-source-signatures-20261015/gnupg-release-signing-keys.asc",
+          "sha256": "6f57d0e17fefd2238bd037aebf03efa960641629dd61dd9d47f122a829f6e375",
+          "url": "https://gnupg.org/signature_key.asc"
+        }
+      ],
+      "primary_fingerprints": [
+        "6DAA6E64A76D2840571B4902528897B826403ADA",
+        "AC8E115BF73E2D8D47FA9908E98E9B2D19C6C8BD"
+      ],
+      "recipe": {
+        "path": "msys2-upstream-recipes/MSYS2-packages/56ccfe8955a8284e91755a141daa1d9bb7611b41/npth/PKGBUILD",
+        "sha256": "9ae7b0464299ab4ad9f562bddee87cbb4fede3d720b60689369c8dff4c1a73f8"
+      },
+      "recipe_primary_fingerprints": [
+        "5B80C5754298F0CB55D8ED6ABCEF7E294B092E28"
+      ],
+      "signer_authority": {
+        "url": "https://gnupg.org/signature_key.html",
+        "snapshot": "out/review-20261015/r99/gnupg-release-signers.html",
+        "sha256": "9d6cd8bfdf70c3d80d35edf7de03b4a897b18e31b5673a1007e761f5d1c31353",
+        "review": "Actual dual signature identities match the published GnuPG release keys; original stale recipe and key identity retained separately"
+      }
+    },
+    {
+      "id": "mingw-w64-c-ares-1.33.1-1",
+      "package": "mingw-w64-c-ares",
+      "version": "1.33.1-1",
+      "status": "recovered",
+      "source": {
+        "path": "gfw-modern-payloads/mingw-w64-c-ares-1.33.1-1/c-ares-1.33.1.tar.gz",
+        "sha256": "06869824094745872fa26efd4c48e622b9bd82a89ef0ce693dc682a23604f415"
+      },
+      "signature": {
+        "path": "gfw-source-signatures-20261015/mingw-w64-c-ares-c-ares-1.33.1.tar.gz.asc",
+        "sha256": "b8703d94bb0fedcb2bd040ac08c1ae311c85459c1404883ec5005ccdb7a284fb",
+        "url": "https://github.com/c-ares/c-ares/releases/download/v1.33.1/c-ares-1.33.1.tar.gz.asc"
+      },
+      "keys": [
+        {
+          "path": "gfw-source-signatures-20261015/27EDEAF22F3ABCEB50DB9A125CC908FDB71E12C2.ubuntu.asc",
+          "sha256": "455e3414d175f0c6efb425c4cd149ba767dedc49ec2e7385eb6f291e45f427b9",
+          "url": "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x27EDEAF22F3ABCEB50DB9A125CC908FDB71E12C2"
+        },
+        {
+          "path": "gfw-source-signatures-20261015/DA7D64E4C82C6294CB73A20E22E3D13B5411B7CA.ubuntu.asc",
+          "sha256": "6a00472ce05c5a6f45053adfa0a61ad8d627b4491558571c27b1eb3d51a687b6",
+          "url": "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xDA7D64E4C82C6294CB73A20E22E3D13B5411B7CA"
+        }
+      ],
+      "primary_fingerprints": [
+        "27EDEAF22F3ABCEB50DB9A125CC908FDB71E12C2",
+        "DA7D64E4C82C6294CB73A20E22E3D13B5411B7CA"
+      ],
+      "recipe": {
+        "path": "msys2-upstream-recipes/MINGW-packages/3242e4f9469beea966f271d674d25b46a98a43d4/mingw-w64-c-ares/PKGBUILD",
+        "sha256": "faf046ac134877e94cb54dcbabbe48043630014f8c9579aa389d410c7040ffc5"
+      }
+    },
+    {
+      "id": "mingw-w64-expat-2.6.3-1",
+      "package": "mingw-w64-expat",
+      "version": "2.6.3-1",
+      "status": "recovered",
+      "source": {
+        "path": "gfw-modern-payloads/mingw-w64-expat-2.6.3-1/expat-2.6.3.tar.xz",
+        "sha256": "274db254a6979bde5aad404763a704956940e465843f2a9bd9ed7af22e2c0efc"
+      },
+      "signature": {
+        "path": "gfw-source-signatures-20261015/mingw-w64-expat-expat-2.6.3.tar.xz.asc",
+        "sha256": "96bc5f146eb81a4d1a12b841788a88456b6a287c1143eb29ac7cf5c8f0c6a5b5",
+        "url": "https://github.com/libexpat/libexpat/releases/download/R_2_6_3/expat-2.6.3.tar.xz.asc"
+      },
+      "keys": [
+        {
+          "path": "gfw-source-signatures-20261015/3176EF7DB2367F1FCA4F306B1F9B0E909AF37285.ubuntu.asc",
+          "sha256": "48a06f7b782958ecbab278a54581a92102a8b003bcf85fea4df2d9154699c2ba",
+          "url": "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x3176EF7DB2367F1FCA4F306B1F9B0E909AF37285"
+        }
+      ],
+      "primary_fingerprints": [
+        "3176EF7DB2367F1FCA4F306B1F9B0E909AF37285"
+      ],
+      "recipe": {
+        "path": "msys2-upstream-recipes/MINGW-packages/a5a397c3147f2b6fd5ffbbe117f3eee47b8a68e4/mingw-w64-expat/PKGBUILD",
+        "sha256": "3b1ad6b097da2951a56606dae0bc68c325b3b0672d4f7e89ac6db2370fd86d78"
+      }
+    },
+    {
+      "id": "mingw-w64-gcc-14.2.0-1",
+      "package": "mingw-w64-gcc",
+      "version": "14.2.0-1",
+      "status": "recovered",
+      "source": {
+        "path": "gfw-modern-payloads/mingw-w64-gcc-14.2.0-1/gcc-14.2.0.tar.xz",
+        "sha256": "a7b39bc69cbf9e25826c5a60ab26477001f7c08d85cec04bc0e29cabed6f3cc9"
+      },
+      "signature": {
+        "path": "gfw-source-signatures-20261015/mingw-w64-gcc-gcc-14.2.0.tar.xz.sig",
+        "sha256": "8669e23023a3ab28327816ef0fb6468af54935b5d204214f0c3f4f904c130970",
+        "url": "https://ftp.gnu.org/gnu/gcc/gcc-14.2.0/gcc-14.2.0.tar.xz.sig"
+      },
+      "keys": [
+        {
+          "path": "gfw-source-signatures-20261015/F3691687D867B81B51CE07D9BBE43771487328A9.ubuntu.asc",
+          "sha256": "9900a534558de8fd0a8af670423924e7c63a726e97b2bb850b4061624335e7e0",
+          "url": "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xF3691687D867B81B51CE07D9BBE43771487328A9"
+        },
+        {
+          "path": "gfw-source-signatures-20261015/86CFFCA918CF3AF47147588051E8B148A9999C34.ubuntu.asc",
+          "sha256": "1512416c44599d4d480ccf7fd6fd11b80f8c05696a6c05068c7f5320d48555de",
+          "url": "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x86CFFCA918CF3AF47147588051E8B148A9999C34"
+        },
+        {
+          "path": "gfw-source-signatures-20261015/13975A70E63C361C73AE69EF6EEB81F8981C74C7.ubuntu.asc",
+          "sha256": "4862f6aac833d841e2af4eb875919940133965888a00e18fbd175e752fb71b6b",
+          "url": "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x13975A70E63C361C73AE69EF6EEB81F8981C74C7"
+        },
+        {
+          "path": "gfw-source-signatures-20261015/D3A93CAD751C2AF4F8C7AD516C35B99309B5FA62.ubuntu.asc",
+          "sha256": "94ea921442ff03837be9fd9975ae097425e57edc01b9645e4db3d128639f79df",
+          "url": "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xD3A93CAD751C2AF4F8C7AD516C35B99309B5FA62"
+        }
+      ],
+      "primary_fingerprints": [
+        "F3691687D867B81B51CE07D9BBE43771487328A9",
+        "86CFFCA918CF3AF47147588051E8B148A9999C34",
+        "13975A70E63C361C73AE69EF6EEB81F8981C74C7",
+        "D3A93CAD751C2AF4F8C7AD516C35B99309B5FA62"
+      ],
+      "recipe": {
+        "path": "msys2-upstream-recipes/MINGW-packages/f2010a2af323b9fcddb238a62dd19d36eb547aa8/mingw-w64-gcc/PKGBUILD",
+        "sha256": "f7e041f8d90ed8c438e8aa4b65a75d89da4268e4f35de66aa313ab5b62c4ae60"
+      }
+    },
+    {
+      "id": "mingw-w64-gettext-0.22.5-2",
+      "package": "mingw-w64-gettext",
+      "version": "0.22.5-2",
+      "status": "recovered",
+      "source": {
+        "path": "gfw-modern-payloads/mingw-w64-gettext-0.22.5-2/gettext-0.22.5.tar.gz",
+        "sha256": "ec1705b1e969b83a9f073144ec806151db88127f5e40fe5a94cb6c8fa48996a0"
+      },
+      "signature": {
+        "path": "gfw-source-signatures-20261015/mingw-w64-gettext-gettext-0.22.5.tar.gz.sig",
+        "sha256": "5829b36cdf582df81ca2ec0919b9a671f5cab7bb09adb23c96ada32e9b20168f",
+        "url": "https://ftp.gnu.org/pub/gnu/gettext/gettext-0.22.5.tar.gz.sig"
+      },
+      "keys": [
+        {
+          "path": "gfw-source-signatures-20261015/462225C3B46F34879FC8496CD605848ED7E69871.ubuntu.asc",
+          "sha256": "916367bb234f72a8c026ab8ee58513bc79f9228ad415b5d2d35be78c85b14861",
+          "url": "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x462225C3B46F34879FC8496CD605848ED7E69871"
+        },
+        {
+          "path": "gfw-source-signatures-20261015/9001B85AF9E1B83DF1BDA942F5BE8B267C6A406D.ubuntu.asc",
+          "sha256": "c9846c2416ab06fc2a163d4b84e2baed6fd61c04399a14e1eb1dab5eb880f501",
+          "url": "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x9001B85AF9E1B83DF1BDA942F5BE8B267C6A406D"
+        }
+      ],
+      "primary_fingerprints": [
+        "462225C3B46F34879FC8496CD605848ED7E69871",
+        "9001B85AF9E1B83DF1BDA942F5BE8B267C6A406D"
+      ],
+      "recipe": {
+        "path": "msys2-upstream-recipes/MINGW-packages/619a8198e55722d2b0fcd95292d3ccdc98148665/mingw-w64-gettext/PKGBUILD",
+        "sha256": "a2dd98c2ef3bd5eb728562c64577fbfdbcc6f6d647ec23e2c432f67da16e7af3"
+      }
+    },
+    {
+      "id": "mingw-w64-libiconv-1.17-4",
+      "package": "mingw-w64-libiconv",
+      "version": "1.17-4",
+      "status": "recovered",
+      "source": {
+        "path": "gfw-modern-payloads/mingw-w64-libiconv-1.17-4/libiconv-1.17.tar.gz",
+        "sha256": "8f74213b56238c85a50a5329f77e06198771e70dd9a739779f4c02f65d971313"
+      },
+      "signature": {
+        "path": "gfw-source-signatures-20261015/mingw-w64-libiconv-libiconv-1.17.tar.gz.sig",
+        "sha256": "06d1357471c445eb6c0b6a568b79dac3f46003b9efcb5fee2208aad33fc54cab",
+        "url": "https://ftp.gnu.org/pub/gnu/libiconv/libiconv-1.17.tar.gz.sig"
+      },
+      "keys": [
+        {
+          "path": "gfw-source-signatures-20261015/9001B85AF9E1B83DF1BDA942F5BE8B267C6A406D.ubuntu.asc",
+          "sha256": "c9846c2416ab06fc2a163d4b84e2baed6fd61c04399a14e1eb1dab5eb880f501",
+          "url": "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x9001B85AF9E1B83DF1BDA942F5BE8B267C6A406D"
+        }
+      ],
+      "primary_fingerprints": [
+        "9001B85AF9E1B83DF1BDA942F5BE8B267C6A406D"
+      ],
+      "recipe": {
+        "path": "msys2-upstream-recipes/MINGW-packages/093ab192533820af5b5d8a333db35e550ec89829/mingw-w64-libiconv/PKGBUILD",
+        "sha256": "5a6abee1e5a1fbf1f80bca19625bac990c94e0aee92cf03a856e86e1b486facf"
+      }
+    },
+    {
+      "id": "mingw-w64-libssh2-1.11.0-2",
+      "package": "mingw-w64-libssh2",
+      "version": "1.11.0-2",
+      "status": "recovered",
+      "source": {
+        "path": "gfw-modern-payloads/mingw-w64-libssh2-1.11.0-2/libssh2-1.11.0.tar.gz",
+        "sha256": "3736161e41e2693324deb38c26cfdc3efe6209d634ba4258db1cecff6a5ad461"
+      },
+      "signature": {
+        "path": "gfw-source-signatures-20261015/mingw-w64-libssh2-libssh2-1.11.0.tar.gz.asc",
+        "sha256": "b6a32c85a3f9b6f30f2b3595ba034b48a8508ee9c94708ef811f58fd7adfcdee",
+        "url": "https://libssh2.org/download/libssh2-1.11.0.tar.gz.asc"
+      },
+      "keys": [
+        {
+          "path": "gfw-source-signatures-20261015/27EDEAF22F3ABCEB50DB9A125CC908FDB71E12C2.ubuntu.asc",
+          "sha256": "455e3414d175f0c6efb425c4cd149ba767dedc49ec2e7385eb6f291e45f427b9",
+          "url": "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x27EDEAF22F3ABCEB50DB9A125CC908FDB71E12C2"
+        },
+        {
+          "path": "gfw-source-signatures-20261015/914C533DF9B2ADA2204F586D78E11C6B279D5C91.ubuntu.asc",
+          "sha256": "45162f525dd24830703c9cf2a501b79d29bb7786a49d2d71c2aedbc7d654bc52",
+          "url": "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x914C533DF9B2ADA2204F586D78E11C6B279D5C91"
+        }
+      ],
+      "primary_fingerprints": [
+        "27EDEAF22F3ABCEB50DB9A125CC908FDB71E12C2",
+        "914C533DF9B2ADA2204F586D78E11C6B279D5C91"
+      ],
+      "recipe": {
+        "path": "msys2-upstream-recipes/MINGW-packages/ec20b8b21ab71b738cb341a0a268ce1372014ee4/mingw-w64-libssh2/PKGBUILD",
+        "sha256": "e9d555f8626f27af0921df58d1e7c0afb0149c72d1752d55567f23a62e1ece98"
+      }
+    },
+    {
+      "id": "mingw-w64-libunistring-1.2-1",
+      "package": "mingw-w64-libunistring",
+      "version": "1.2-1",
+      "status": "recovered",
+      "source": {
+        "path": "gfw-modern-payloads/mingw-w64-libunistring-1.2-1/libunistring-1.2.tar.gz",
+        "sha256": "fd6d5662fa706487c48349a758b57bc149ce94ec6c30624ec9fdc473ceabbc8e"
+      },
+      "signature": {
+        "path": "gfw-source-signatures-20261015/mingw-w64-libunistring-libunistring-1.2.tar.gz.sig",
+        "sha256": "5d00c549d39c897beca7abb589b5426cb9569e71b79496e861404e85a6dd4323",
+        "url": "https://ftp.gnu.org/gnu/libunistring/libunistring-1.2.tar.gz.sig"
+      },
+      "keys": [
+        {
+          "path": "gfw-source-signatures-20261015/9001B85AF9E1B83DF1BDA942F5BE8B267C6A406D.ubuntu.asc",
+          "sha256": "c9846c2416ab06fc2a163d4b84e2baed6fd61c04399a14e1eb1dab5eb880f501",
+          "url": "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x9001B85AF9E1B83DF1BDA942F5BE8B267C6A406D"
+        }
+      ],
+      "primary_fingerprints": [
+        "9001B85AF9E1B83DF1BDA942F5BE8B267C6A406D"
+      ],
+      "recipe": {
+        "path": "msys2-upstream-recipes/MINGW-packages/b9196983505608dbfa3e7a7630f2670b2dbd6746/mingw-w64-libunistring/PKGBUILD",
+        "sha256": "b231307d342e59122de2c8c331c6564b544a52ae39738d4d292ceabf0b3ff401"
+      }
+    },
+    {
+      "id": "mingw-w64-nettle-3.10-1",
+      "package": "mingw-w64-nettle",
+      "version": "3.10-1",
+      "status": "recovered",
+      "source": {
+        "path": "gfw-modern-payloads/mingw-w64-nettle-3.10-1/nettle-3.10.tar.gz",
+        "sha256": "b4c518adb174e484cb4acea54118f02380c7133771e7e9beb98a0787194ee47c"
+      },
+      "signature": {
+        "path": "gfw-source-signatures-20261015/mingw-w64-nettle-nettle-3.10.tar.gz.sig",
+        "sha256": "5ea7223a71d3e1f56f5c7a2f6e1d1c5068c4e8992acba8b257b2a6c6c36e0619",
+        "url": "https://ftp.gnu.org/gnu/nettle/nettle-3.10.tar.gz.sig"
+      },
+      "keys": [
+        {
+          "path": "gfw-source-signatures-20261015/343C2FF0FBEE5EC2EDBEF399F3599FF828C67298.ubuntu.asc",
+          "sha256": "50561c50f40cd9746af214c995fb219bbe7f3b9c5f038b918f5df543bb3f846f",
+          "url": "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x343C2FF0FBEE5EC2EDBEF399F3599FF828C67298"
+        }
+      ],
+      "primary_fingerprints": [
+        "343C2FF0FBEE5EC2EDBEF399F3599FF828C67298"
+      ],
+      "recipe": {
+        "path": "msys2-upstream-recipes/MINGW-packages/d796cbe8f3b1da7731445856ff9eab5a52f060a6/mingw-w64-nettle/PKGBUILD",
+        "sha256": "b101e988948e96a7cea8e1cf4270c38b591d0b05f02a04ef63d9abf150c6576c"
+      }
+    },
+    {
+      "id": "mingw-w64-xz-5.6.2-2",
+      "package": "mingw-w64-xz",
+      "version": "5.6.2-2",
+      "status": "recovered",
+      "source": {
+        "path": "gfw-modern-payloads/mingw-w64-xz-5.6.2-2/xz-5.6.2.tar.xz",
+        "sha256": "a9db3bb3d64e248a0fae963f8fb6ba851a26ba1822e504dc0efd18a80c626caf"
+      },
+      "signature": {
+        "path": "gfw-source-signatures-20261015/mingw-w64-xz-xz-5.6.2.tar.xz.sig",
+        "sha256": "f0e619bdcab936b90f1106ac0d18e234c31c239c86c7cf492e4d46b0b81ed0bb",
+        "url": "https://github.com/tukaani-project/xz/releases/download/v5.6.2/xz-5.6.2.tar.xz.sig"
+      },
+      "keys": [
+        {
+          "path": "gfw-source-signatures-20261015/3690C240CE51B4670D30AD1C38EE757D69184620.ubuntu.asc",
+          "sha256": "21f39c58c447fbca1d15225d9bb6713236b72ed4d4e409b520169d93bbf31a8b",
+          "url": "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x3690C240CE51B4670D30AD1C38EE757D69184620"
+        }
+      ],
+      "primary_fingerprints": [
+        "3690C240CE51B4670D30AD1C38EE757D69184620"
+      ],
+      "recipe": {
+        "path": "msys2-upstream-recipes/MINGW-packages/9011bda67607b97a8d126d2331572e69f583f861/mingw-w64-xz/PKGBUILD",
+        "sha256": "32a3128d04b593dd52748e72f36710baba688ebe228abbd872fe77e7c1ae272d"
+      }
+    },
+    {
+      "id": "ncurses-6.5.20240831-1",
+      "package": "ncurses",
+      "version": "6.5.20240831-1",
+      "status": "recovered",
+      "source": {
+        "path": "gfw-modern-payloads/ncurses-6.5.20240831-1/ncurses-6.5-20240831.tgz",
+        "sha256": "685161fec9c20c0896f6d7569f8d1cba9124a1884d3d8be527253a773b787577"
+      },
+      "signature": {
+        "path": "gfw-source-signatures-20261015/ncurses-ncurses-6.5-20240831.tgz.asc",
+        "sha256": "b3116bf83421d6f81478721da1d002487eb5ac1bfcb71dc421f447ef633eaa2e",
+        "url": "https://repo.msys2.org/msys/sources/ncurses-6.5.20240831-2.src.tar.zst",
+        "container_member": "ncurses/ncurses-6.5-20240831.tgz.asc"
+      },
+      "keys": [
+        {
+          "path": "gfw-source-signatures-20261015/19882D92DDA4C400C22C0D56CC2AF4472167BE03.ubuntu.asc",
+          "sha256": "d3319cfd8f8c34bfe77268a078cd590ebdd350e75c7df465a31d6f05fe2023e5",
+          "url": "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x19882D92DDA4C400C22C0D56CC2AF4472167BE03"
+        }
+      ],
+      "primary_fingerprints": [
+        "19882D92DDA4C400C22C0D56CC2AF4472167BE03"
+      ],
+      "recipe": {
+        "path": "msys2-upstream-recipes/MSYS2-packages/9a08de350c4b2bd6d48ae7171ea3402eb95f7ba2/ncurses/PKGBUILD",
+        "sha256": "186dca5b77577b33aeaa1677f09c7d633abb4dc824798d373ab2a22a9370de5b"
+      }
+    },
+    {
+      "id": "libxcrypt-4.4.36-1",
+      "package": "libxcrypt",
+      "version": "4.4.36-1",
+      "status": "recovered",
+      "source": {
+        "path": "gfw-modern-payloads/libxcrypt-4.4.36-1/libxcrypt-4.4.36.tar.xz",
+        "sha256": "e5e1f4caee0a01de2aee26e3138807d6d3ca2b8e67287966d1fefd65e1fd8943"
+      },
+      "signature": {
+        "path": "gfw-source-signatures-20261015/libxcrypt-libxcrypt-4.4.36.tar.xz.asc",
+        "sha256": "04f2985349a027dd544806b2b6888402fbfd71322c210a94271e1e02f46fbf74",
+        "url": "https://github.com/besser82/libxcrypt//releases/download/v4.4.36/libxcrypt-4.4.36.tar.xz.asc"
+      },
+      "keys": [
+        {
+          "path": "gfw-source-signatures-20261015/678CE3FEE430311596DB8C16F52E98007594C21D.ubuntu.asc",
+          "sha256": "d52010dc79210e9b00c114b25afdf57823343952c3a334266d8681cf18de3da2",
+          "url": "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x678CE3FEE430311596DB8C16F52E98007594C21D"
+        }
+      ],
+      "primary_fingerprints": [
+        "678CE3FEE430311596DB8C16F52E98007594C21D"
+      ],
+      "recipe": {
+        "path": "msys2-upstream-recipes/MSYS2-packages/833a0e70a4cc874a103a942fe40cd2a66683cec5/libxcrypt/PKGBUILD",
+        "sha256": "dc213ab3d489fe94a95d060fa6e7a76edd4a433f1adaf3069f3f2248d560df9e"
+      }
+    },
+    {
+      "id": "libunistring-1.2-1",
+      "package": "libunistring",
+      "version": "1.2-1",
+      "status": "recovered",
+      "source": {
+        "path": "gfw-modern-payloads/libunistring-1.2-1/libunistring-1.2.tar.xz",
+        "sha256": "632bd65ed74a881ca8a0309a1001c428bd1cbd5cd7ddbf8cedcd2e65f4dcdc44"
+      },
+      "signature": {
+        "path": "gfw-source-signatures-20261015/libunistring-libunistring-1.2.tar.xz.sig",
+        "sha256": "91da3f033231a635dae9e0161c834b74e890e1eba19d4e5972b26c5c312ac2cb",
+        "url": "https://ftp.gnu.org/gnu/libunistring/libunistring-1.2.tar.xz.sig"
+      },
+      "keys": [
+        {
+          "path": "gfw-source-signatures-20261015/462225C3B46F34879FC8496CD605848ED7E69871.ubuntu.asc",
+          "sha256": "916367bb234f72a8c026ab8ee58513bc79f9228ad415b5d2d35be78c85b14861",
+          "url": "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x462225C3B46F34879FC8496CD605848ED7E69871"
+        },
+        {
+          "path": "gfw-source-signatures-20261015/9001B85AF9E1B83DF1BDA942F5BE8B267C6A406D.ubuntu.asc",
+          "sha256": "c9846c2416ab06fc2a163d4b84e2baed6fd61c04399a14e1eb1dab5eb880f501",
+          "url": "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x9001B85AF9E1B83DF1BDA942F5BE8B267C6A406D"
+        }
+      ],
+      "primary_fingerprints": [
+        "462225C3B46F34879FC8496CD605848ED7E69871",
+        "9001B85AF9E1B83DF1BDA942F5BE8B267C6A406D"
+      ],
+      "recipe": {
+        "path": "msys2-upstream-recipes/MSYS2-packages/fbdb8728debce4b21caaed52b1b1569be1f349d9/libunistring/PKGBUILD",
+        "sha256": "ab112f38d222842dc5f8d83d15e01824621c10d6fdc4bd9bea6bbd7c4f0027f8"
+      }
+    }
+  ],
+  "release_authorized": false,
+  "key_identity_basis": "Original recipe primary fingerprints; npth uses explicitly reviewed published GnuPG release identities with its stale recipe identity preserved"
+}

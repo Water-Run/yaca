@@ -1,0 +1,302 @@
+{
+  "schema": "yaca-tool-source-review-evidence-v1",
+  "date": "2026-10-15",
+  "base_revision": "43c80388660fde08490cda339d67db860254fef3",
+  "release_authorized": false,
+  "target_qualification_complete": false,
+  "development_paused": false,
+  "whole_repository_semantic_review": "partial",
+  "full_coding_readiness": "PASS",
+  "comment_coverage": {
+    "files": 272,
+    "declarations": 5788,
+    "violations": 0
+  },
+  "review_id": "R99",
+  "status": "source-signatures-verified-partial-closure",
+  "signature_verification": "18/18",
+  "linux_signature_regressions": "5/5",
+  "windows_native_signature_regressions": "5/5",
+  "native_msys_path_baseline": "3/5 with the public fixture before relative-path correction",
+  "source_profile": {
+    "schema": "yaca-git-signed-source-profile-v1",
+    "status": "PASS",
+    "archive": "git-win64-signed-sources-20261015.tar.gz",
+    "sha256": "a934e775567660e5c3582bef08d8b33c964dcb4e54242418487d5d9316d16001",
+    "bytes": 614826994,
+    "members": 605,
+    "source_versions": 38,
+    "signatures_verified": 18,
+    "source_closure": "partial",
+    "release_authorized": false
+  },
+  "source_admission": {
+    "status": "PASS",
+    "archive": "git-win64-signed-sources-20261015.tar.gz",
+    "sha256": "a934e775567660e5c3582bef08d8b33c964dcb4e54242418487d5d9316d16001",
+    "source_closure": "partial",
+    "release_authorized": false
+  },
+  "archive_published": false,
+  "key_expiration_and_revocation": "manual-review-pending",
+  "npth_signer_exception": "Original recipe key retained; actual dual signers bound to GnuPG authoritative release-key publication",
+  "manual_review_scope": "staged byte pins, permitted full primary identities, GnuPG subprocess isolation and MSYS path behavior, public fixture semantics and changed annotation contracts",
+  "sources": {
+    "gpgv_semantics": "https://www.gnupg.org/documentation/manuals/gnupg/gpgv.html",
+    "npth_actual_signers": "https://gnupg.org/signature_key.html"
+  },
+  "source_bindings": [
+    {
+      "path": ".tools/qualification/verify_source_signatures.py",
+      "frozen": "out/review-20261015/r99/frozen/.tools/qualification/verify_source_signatures.py",
+      "sha256": "d4ea62946921d4929ae29511a8c9499c0470b624eb00ad7f5775965c2830bee3",
+      "bytes": 9220
+    },
+    {
+      "path": "test/qualification/source_signatures_test.py",
+      "frozen": "out/review-20261015/r99/frozen/test/qualification/source_signatures_test.py",
+      "sha256": "8590b0c599c1f72f3ca548bef0e68adbbdd4c8c72fadba89076ccf0696c3d1ca",
+      "bytes": 7112
+    },
+    {
+      "path": "test/fixtures/source-signature.json",
+      "frozen": "out/review-20261015/r99/frozen/test/fixtures/source-signature.json",
+      "sha256": "d25dc014ec3ed0c4a7e18636ea8340185259564fd3b23ad8ba11b5c2f18a3720",
+      "bytes": 970
+    },
+    {
+      "path": ".tools/run_coding_readiness.sh",
+      "frozen": "out/review-20261015/r99/frozen/.tools/run_coding_readiness.sh",
+      "sha256": "dcc6bb61bd3a5bbf42541e8cec53a65f11db0b94d3ee9f76e9e7dca33bfb9c88",
+      "bytes": 1637
+    },
+    {
+      "path": "release/windows-git64-sources.lock.json",
+      "frozen": "out/review-20261015/r99/frozen/release/windows-git64-sources.lock.json",
+      "sha256": "23be4fd58149ec253b7edf4c6d53002dbd4253c6d3ca8cab42cb197d6ed9f348",
+      "bytes": 192542
+    },
+    {
+      "path": "release/windows-git64-signatures.lock.json",
+      "frozen": "out/review-20261015/r99/frozen/release/windows-git64-signatures.lock.json",
+      "sha256": "8aabc10bcb152597587871b1eb37ab7a5ef24d5b8400f20ac126dd16e13197c4",
+      "bytes": 27914
+    },
+    {
+      "path": "out/review-20261015/r99/recover_signatures.py",
+      "frozen": "out/review-20261015/r99/frozen/out/review-20261015/r99/recover_signatures.py",
+      "sha256": "c947160a4d30fcf85a4aad7dbed169847f0f86ea44765dd8fa6a65a187f8cff9",
+      "bytes": 7607
+    },
+    {
+      "path": "out/review-20261015/r99/complete_npth_signer.py",
+      "frozen": "out/review-20261015/r99/frozen/out/review-20261015/r99/complete_npth_signer.py",
+      "sha256": "0dedd65ab4f246753fde29f78429301b84c8fb8fb03771080bd744ea2df20c76",
+      "bytes": 2649
+    },
+    {
+      "path": "out/review-20261015/r99/extend_source_profile.py",
+      "frozen": "out/review-20261015/r99/frozen/out/review-20261015/r99/extend_source_profile.py",
+      "sha256": "0a77486f563a2e7acd95b5d35d1083b2266bd0fbf4c82a64754a8d1c3f8baada",
+      "bytes": 6285
+    },
+    {
+      "path": "out/review-20261015/r99/admit_signed_profile.py",
+      "frozen": "out/review-20261015/r99/frozen/out/review-20261015/r99/admit_signed_profile.py",
+      "sha256": "e63a62954bc47af54557cdda9188c030ca93201bac465baae129c9258c7a2645",
+      "bytes": 1236
+    },
+    {
+      "path": "out/review-20261015/r99/native_checks.py",
+      "frozen": "out/review-20261015/r99/frozen/out/review-20261015/r99/native_checks.py",
+      "sha256": "fd64c9d222e108480598ac9541605532c3574327099077e2e73414aa9e058332",
+      "bytes": 752
+    },
+    {
+      "path": "out/review-20261015/r99/create_public_fixture.py",
+      "frozen": "out/review-20261015/r99/frozen/out/review-20261015/r99/create_public_fixture.py",
+      "sha256": "5b51aab31c2e396ba86bf41fa8909ad065dff8e9d1c2f344f5c607430638471f",
+      "bytes": 2426
+    },
+    {
+      "path": "out/review-20261015/r99/restore_proof_cache.py",
+      "frozen": "out/review-20261015/r99/frozen/out/review-20261015/r99/restore_proof_cache.py",
+      "sha256": "154b15c29739083844eaf66c3a9c6a0c5fcfa8041dcee388242b3cd55ce6f0a2",
+      "bytes": 1700
+    },
+    {
+      "path": "out/review-20261015/r99/run_final_checks.sh",
+      "frozen": "out/review-20261015/r99/frozen/out/review-20261015/r99/run_final_checks.sh",
+      "sha256": "24b4b32635da998b02a28c0435f7c18cdd4fb07e0f5f14aaa47393bcde3c8541",
+      "bytes": 1309
+    },
+    {
+      "path": "out/review-20261015/r99/recover-signatures.log",
+      "frozen": "out/review-20261015/r99/frozen/out/review-20261015/r99/recover-signatures.log",
+      "sha256": "5fb6d98c068a0305b9caa926eb5a7307adc6e172abaa11b84f8b46b184795286",
+      "bytes": 581
+    },
+    {
+      "path": "out/review-20261015/r99/recover-signatures-second.log",
+      "frozen": "out/review-20261015/r99/frozen/out/review-20261015/r99/recover-signatures-second.log",
+      "sha256": "ea203116142fff58883d0afcd35af8d441fe4b3e0cb7f91fd09e2c2e1ffbe96f",
+      "bytes": 591
+    },
+    {
+      "path": "out/review-20261015/r99/recover-signatures-third.log",
+      "frozen": "out/review-20261015/r99/frozen/out/review-20261015/r99/recover-signatures-third.log",
+      "sha256": "5a26c1f4eda3ee53bf803695ebda5002e98a2c192c08eba5a6334f1e7284fb93",
+      "bytes": 47
+    },
+    {
+      "path": "out/review-20261015/r99/recovered-signatures.json",
+      "frozen": "out/review-20261015/r99/frozen/out/review-20261015/r99/recovered-signatures.json",
+      "sha256": "0e104c415640e3849c5db0001bf3cd220277532a7e860f4b4083afcdc6b8ace4",
+      "bytes": 18648
+    },
+    {
+      "path": "out/review-20261015/r99/recovered-signatures-second.json",
+      "frozen": "out/review-20261015/r99/frozen/out/review-20261015/r99/recovered-signatures-second.json",
+      "sha256": "e958bc53a8e294e312e02122a17a9de1875fee21b887e627a019470dff9d41c1",
+      "bytes": 25886
+    },
+    {
+      "path": "out/review-20261015/r99/recovered-signatures-third.json",
+      "frozen": "out/review-20261015/r99/frozen/out/review-20261015/r99/recovered-signatures-third.json",
+      "sha256": "dbd7e57e34b87bd5979e0e555d092936c55a0d15641b53749fd6fa96eb0613f7",
+      "bytes": 27394
+    },
+    {
+      "path": "out/review-20261015/r99/recovered-signatures-reviewed.json",
+      "frozen": "out/review-20261015/r99/frozen/out/review-20261015/r99/recovered-signatures-reviewed.json",
+      "sha256": "8aabc10bcb152597587871b1eb37ab7a5ef24d5b8400f20ac126dd16e13197c4",
+      "bytes": 27914
+    },
+    {
+      "path": "out/review-20261015/r99/signatures-first.json",
+      "frozen": "out/review-20261015/r99/frozen/out/review-20261015/r99/signatures-first.json",
+      "sha256": "5f44543c13c80d59f3f64c60517a5aa3523294c5043c2f73f243cffe65684b92",
+      "bytes": 19211
+    },
+    {
+      "path": "out/review-20261015/r99/signatures-final.json",
+      "frozen": "out/review-20261015/r99/frozen/out/review-20261015/r99/signatures-final.json",
+      "sha256": "cd444efa9e00bc42d79abbe3d01427b629a187f4b9f79ca7263cf274273e7f8f",
+      "bytes": 36163
+    },
+    {
+      "path": "out/review-20261015/r99/signatures-reviewed.json",
+      "frozen": "out/review-20261015/r99/frozen/out/review-20261015/r99/signatures-reviewed.json",
+      "sha256": "9dd381c162b3fe39bbd0a8c36a2c99bc1a15206cc5f8bc90505a520b98f0a5e5",
+      "bytes": 37846
+    },
+    {
+      "path": "out/review-20261015/r99/signatures-portable.json",
+      "frozen": "out/review-20261015/r99/frozen/out/review-20261015/r99/signatures-portable.json",
+      "sha256": "9dd381c162b3fe39bbd0a8c36a2c99bc1a15206cc5f8bc90505a520b98f0a5e5",
+      "bytes": 37846
+    },
+    {
+      "path": "out/review-20261015/r99/signatures-portable.log",
+      "frozen": "out/review-20261015/r99/frozen/out/review-20261015/r99/signatures-portable.log",
+      "sha256": "63747fa4db4277a583c0f9d7da5679819df60cc6626aa8f28e51503d88323746",
+      "bytes": 181
+    },
+    {
+      "path": "out/review-20261015/r99/gnupg-release-signers.html",
+      "frozen": "out/review-20261015/r99/frozen/out/review-20261015/r99/gnupg-release-signers.html",
+      "sha256": "9d6cd8bfdf70c3d80d35edf7de03b4a897b18e31b5673a1007e761f5d1c31353",
+      "bytes": 15484
+    },
+    {
+      "path": "out/review-20261015/r99/npth-signer-review.log",
+      "frozen": "out/review-20261015/r99/frozen/out/review-20261015/r99/npth-signer-review.log",
+      "sha256": "00bb5ee7fa9fbc77291b7f47d13dd3d18c589ece2a3af685fb0cbc9a806978ea",
+      "bytes": 100
+    },
+    {
+      "path": "out/review-20261015/r99/signed-source-profile.json",
+      "frozen": "out/review-20261015/r99/frozen/out/review-20261015/r99/signed-source-profile.json",
+      "sha256": "117e6b2e623efd137d5f1e94568b7c4fcca9ad45a673411d666174b194c5b04f",
+      "bytes": 365
+    },
+    {
+      "path": "out/review-20261015/r99/signed-source-profile.log",
+      "frozen": "out/review-20261015/r99/frozen/out/review-20261015/r99/signed-source-profile.log",
+      "sha256": "0e8bc5ba024a8fb2695a89579277243d6707e2c5c821455b8878a99621c59c1a",
+      "bytes": 224
+    },
+    {
+      "path": "out/review-20261015/r99/signed-source-admission.json",
+      "frozen": "out/review-20261015/r99/frozen/out/review-20261015/r99/signed-source-admission.json",
+      "sha256": "217927fa8f153ec034e535ea830bee67b6101b78339430c360bf2a991a330908",
+      "bytes": 222
+    },
+    {
+      "path": "out/review-20261015/r99/signed-source-admission.log",
+      "frozen": "out/review-20261015/r99/frozen/out/review-20261015/r99/signed-source-admission.log",
+      "sha256": "a09d38ebb34010ffe70e47cfbd8e494436591f82d7471ef75d3280cfe6c94e15",
+      "bytes": 195
+    },
+    {
+      "path": "out/review-20261015/r99/windows-regressions-fixed.log",
+      "frozen": "out/review-20261015/r99/frozen/out/review-20261015/r99/windows-regressions-fixed.log",
+      "sha256": "199eeb25852a96ea930a27d61f04291c85b8446f46cf6a4d1f53ef724066afe9",
+      "bytes": 7657
+    },
+    {
+      "path": "out/review-20261015/r99/windows-signatures-public-fixture.log",
+      "frozen": "out/review-20261015/r99/frozen/out/review-20261015/r99/windows-signatures-public-fixture.log",
+      "sha256": "73ec72a4fa83778cf441ccaa409ffba126a26797df4b0d37ed8fa7141f55fbf2",
+      "bytes": 3929
+    },
+    {
+      "path": "out/review-20261015/r99/windows-signatures-final.log",
+      "frozen": "out/review-20261015/r99/frozen/out/review-20261015/r99/windows-signatures-final.log",
+      "sha256": "03d8d9560a1750b626c6944cb47ff74a84d789d2ec200f0d9e13851f14c6b8d0",
+      "bytes": 253
+    },
+    {
+      "path": "out/review-20261015/r99/windows-final.log",
+      "frozen": "out/review-20261015/r99/frozen/out/review-20261015/r99/windows-final.log",
+      "sha256": "1178c6bfb4ad419522594eff89cbe77e115d22adb9e66c9b1351b6cbd385255b",
+      "bytes": 371
+    },
+    {
+      "path": "out/review-20261015/r99/readiness-final-cache-missing.log",
+      "frozen": "out/review-20261015/r99/frozen/out/review-20261015/r99/readiness-final-cache-missing.log",
+      "sha256": "ccbc8c48b644e036b2f2b16c1979b47a45efa2ed972717333875f4afba64b18b",
+      "bytes": 3607
+    },
+    {
+      "path": "out/review-20261015/r99/proof-cache-recovery-complete.log",
+      "frozen": "out/review-20261015/r99/frozen/out/review-20261015/r99/proof-cache-recovery-complete.log",
+      "sha256": "f6e3bfec7b8bfef246f07b9937173dd709584bdaa07d93aa5050c0701b0fe33b",
+      "bytes": 69
+    },
+    {
+      "path": "out/review-20261015/r99/readiness-final.log",
+      "frozen": "out/review-20261015/r99/frozen/out/review-20261015/r99/readiness-final.log",
+      "sha256": "c6661ea0d4f2efc42c78ed00ed4408670dd34830f468c4f9a0f2d61d9d985961",
+      "bytes": 4781
+    },
+    {
+      "path": "out/review-20261015/r99/final-checks-complete.log",
+      "frozen": "out/review-20261015/r99/frozen/out/review-20261015/r99/final-checks-complete.log",
+      "sha256": "d8eac55c1a93f7f965107ed314311a5c6d3200f8f5d158e3fc095eea1d24d499",
+      "bytes": 57
+    },
+    {
+      "path": "out/review-20261015/r99/before-native-fix/.tools/qualification/verify_source_signatures.py",
+      "frozen": "out/review-20261015/r99/frozen/out/review-20261015/r99/before-native-fix/.tools/qualification/verify_source_signatures.py",
+      "sha256": "20720800a328b92c78f8c97ebab923ee3ecef48a33d168e3e05ed35b42a610f7",
+      "bytes": 9100
+    }
+  ],
+  "pending": [
+    "manual key validity and complete binary/source correspondence",
+    "remaining Win32 source closure",
+    "final nine-package qualification",
+    "remaining whole-repository semantic review"
+  ]
+}

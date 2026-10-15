@@ -1,0 +1,9 @@
+{
+  "schema": "yaca-public-signature-fixture-v1",
+  "date": "2026-10-15",
+  "purpose": "Public verification-only test data; private key discarded after generation",
+  "primary_fingerprint": "DB4E9EAE8FB5EE578432B6CE4C4087DC29F9E4AF",
+  "source": "original upstream source bytes\n",
+  "signature": "-----BEGIN PGP SIGNATURE-----\n\niHUEABYKAB0WIQTbTp6uj7XuV4Qyts5MQIfcKfnkrwUCatBl/QAKCRBMQIfcKfnk\nr5IDAP9JVOnBEHKbkGhHUnEgm2lkixLtRakeMygAv08ArpwBXQEA/lgBDMA12ucX\nXNer8NFJx+RMh2Vry1wCz49rdp3/eQw=\n=FaW/\n-----END PGP SIGNATURE-----\n",
+  "public_key": "-----BEGIN PGP PUBLIC KEY BLOCK-----\n\nmDMEatBl/RYJKwYBBAHaRw8BAQdAB4RqepnG5ZqyVreMu4zSLzLMvr1vxeRfL0mi\nGL2cxQ20I3lhY2EgdGVzdCBmaXh0dXJlIDxmaXh0dXJlQGludmFsaWQ+iJMEExYK\nADsWIQTbTp6uj7XuV4Qyts5MQIfcKfnkrwUCatBl/QIbAwULCQgHAgIiAgYVCgkI\nCwIEFgIDAQIeBwIXgAAKCRBMQIfcKfnkr40KAQDpS8YoASVOzLvdZNlft6lkZnw5\nrJA5BdM+6kEN2bFlfAEAm1GnM8Z0jk8t+XlJe2aX18TEEMDP53OHtizqlm59KgM=\n=ZF14\n-----END PGP PUBLIC KEY BLOCK-----\n"
+}
