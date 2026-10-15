@@ -4,7 +4,9 @@
 
 yaca 已有通用 Agent 实现。R94 三目标核心各 735/735，Win64 Qwen low 真实控制台
 旅程通过；R95 九包候选及配套 24 个附件已公开，远端摘要与大小核对一致。负责人按
-[D-092](DECISIONS.md#d-092-当前节点打包推送后暂停2026-10-15) 要求在本节点打包推送后暂停。
+[D-092](DECISIONS.md#d-092-当前节点打包推送后暂停2026-10-15) 在本节点收尾后暂停。
+R100 开发附件已公开，远端 8/8 摘要一致；独立 pull 后初始化、735/735 和完整
+readiness 均通过，离线 main bundle 检出通过。
 阶段为 `implemented-unqualified`，Release Gate R 关闭。
 源码基线和验证结果统一见[当前状态](CURRENT-STATE.md)。
 

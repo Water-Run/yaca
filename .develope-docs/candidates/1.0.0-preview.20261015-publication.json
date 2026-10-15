@@ -1,0 +1,81 @@
+{
+  "schema": "yaca-development-node-publication-v1",
+  "status": "PASS",
+  "date": "2026-10-15",
+  "phase": "published",
+  "tag": "v1.0.0-preview.20261015",
+  "source_commit": "e33bcc7470537bd6b536d9c25746533d33807b73",
+  "release_id": 413493310,
+  "url": "https://github.com/Water-Run/yaca/releases/tag/v1.0.0-preview.20261015",
+  "prerelease": true,
+  "release_authorized": false,
+  "target_qualification_complete": false,
+  "close_decision": "D-092",
+  "development_paused_after_delivery": true,
+  "verification_method": "Every GitHub server SHA-256 and byte count matched its complete local attachment",
+  "asset_count": 8,
+  "asset_bytes": 1052315863,
+  "assets": [
+    {
+      "name": "DEVELOPMENT-START.md",
+      "bytes": 4234,
+      "sha256": "83e6dbf956a7ead41b732b177a05be323f5531a25c8856b4b278cde103c9b123",
+      "url": "https://github.com/Water-Run/yaca/releases/download/v1.0.0-preview.20261015/DEVELOPMENT-START.md"
+    },
+    {
+      "name": "NODE-MANIFEST.json",
+      "bytes": 2811,
+      "sha256": "14753a000e6928f1b16b72b5d87d8228d08645cec6cd2934a0ff8e7a4e6f9309",
+      "url": "https://github.com/Water-Run/yaca/releases/download/v1.0.0-preview.20261015/NODE-MANIFEST.json"
+    },
+    {
+      "name": "RUNTIME-ASSETS.json",
+      "bytes": 7590,
+      "sha256": "ca7be6ba8a56437e52b26b2edcd6203b90eacae1e058f1e1fbe026ce578ab026",
+      "url": "https://github.com/Water-Run/yaca/releases/download/v1.0.0-preview.20261015/RUNTIME-ASSETS.json"
+    },
+    {
+      "name": "SHA256SUMS.txt",
+      "bytes": 665,
+      "sha256": "3d1dfa6f292fbe9e8eebc049b799d3ada0e2b0ecc0216f183036d939221f5260",
+      "url": "https://github.com/Water-Run/yaca/releases/download/v1.0.0-preview.20261015/SHA256SUMS.txt"
+    },
+    {
+      "name": "yaca-development-evidence-20261015.zip",
+      "bytes": 1155850,
+      "sha256": "5f8c68ad5d459abd2b6f6c401b5a579af074c27bcbeacca6494f56c1df07b5de",
+      "url": "https://github.com/Water-Run/yaca/releases/download/v1.0.0-preview.20261015/yaca-development-evidence-20261015.zip"
+    },
+    {
+      "name": "yaca-development-source-20261015.tar.gz",
+      "bytes": 3102721,
+      "sha256": "b01a15d948ca2976a885b9c4fcd274da4efe8049b455ceef19b6f80af080891f",
+      "url": "https://github.com/Water-Run/yaca/releases/download/v1.0.0-preview.20261015/yaca-development-source-20261015.tar.gz"
+    },
+    {
+      "name": "yaca-main-through-r100.bundle",
+      "bytes": 5207825,
+      "sha256": "da3976456444d71b97c805339d960bb5cbfa9dc4a99b38cd6d7fa8cb7ba0a9f9",
+      "url": "https://github.com/Water-Run/yaca/releases/download/v1.0.0-preview.20261015/yaca-main-through-r100.bundle"
+    },
+    {
+      "name": "yaca-source-cache-20261015.tar.gz",
+      "bytes": 1042834167,
+      "sha256": "84ce47581c381f27ed732e94ecf27b7f4fece05e4342c6d3073c71dc33b6f176",
+      "url": "https://github.com/Water-Run/yaca/releases/download/v1.0.0-preview.20261015/yaca-source-cache-20261015.tar.gz"
+    }
+  ],
+  "fresh_checkout": {
+    "bootstrap": "PASS",
+    "pull": "PASS",
+    "full_lua": "735/735",
+    "coding_readiness": "PASS",
+    "guard_execute_bit": "absent-and-kept-absent",
+    "maintained_tree": "clean"
+  },
+  "offline_clone": "PASS",
+  "runtime_release": "https://github.com/Water-Run/yaca/releases/tag/v1.0.0-preview.20261013",
+  "whole_repository_semantic_review": "partial",
+  "source_closure": "partial",
+  "published_at": "2026-10-15T06:47:03Z"
+}

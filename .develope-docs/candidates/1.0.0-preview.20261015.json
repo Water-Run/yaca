@@ -1,0 +1,88 @@
+{
+  "schema": "yaca-development-node-v1",
+  "date": "2026-10-15",
+  "status": "published",
+  "tag": "v1.0.0-preview.20261015",
+  "source_commit": "e33bcc7470537bd6b536d9c25746533d33807b73",
+  "close_decision": "D-092",
+  "development_paused_after_delivery": true,
+  "phase": "implemented-unqualified",
+  "release_authorized": false,
+  "target_qualification_complete": false,
+  "runtime_release": "https://github.com/Water-Run/yaca/releases/tag/v1.0.0-preview.20261013",
+  "runtime_unchanged": true,
+  "source_closure": "partial",
+  "fresh_checkout": {
+    "bootstrap": "PASS",
+    "pull": "PASS",
+    "full_lua": "735/735",
+    "coding_readiness": "PASS",
+    "guard_execute_bit": "absent-and-kept-absent",
+    "maintained_tree": "clean"
+  },
+  "comment_coverage": {
+    "files": 273,
+    "declarations": 5791,
+    "violations": 0
+  },
+  "offline_clone": "PASS",
+  "public_source_cache": {
+    "schema": "yaca-development-source-cache-v1",
+    "status": "PASS",
+    "archive": "yaca-source-cache-20261015.tar.gz",
+    "sha256": "84ce47581c381f27ed732e94ecf27b7f4fece05e4342c6d3073c71dc33b6f176",
+    "bytes": 1042834167,
+    "pinned_members": 1168,
+    "lock_bindings": [
+      {
+        "path": "release/windows-git32-sources.lock.json",
+        "sha256": "05ec44b3d0f2064e3692c75235151ebce2978a490f29bf9ef5855f3b9c6d3c4c",
+        "bytes": 331760
+      },
+      {
+        "path": "release/windows-git64-sources.lock.json",
+        "sha256": "23be4fd58149ec253b7edf4c6d53002dbd4253c6d3ca8cab42cb197d6ed9f348",
+        "bytes": 192542
+      }
+    ],
+    "profile_verified": true,
+    "source_closure": "partial",
+    "private_configuration_included": false,
+    "release_authorized": false
+  },
+  "assets": [
+    {
+      "name": "DEVELOPMENT-START.md",
+      "bytes": 4234,
+      "sha256": "83e6dbf956a7ead41b732b177a05be323f5531a25c8856b4b278cde103c9b123"
+    },
+    {
+      "name": "RUNTIME-ASSETS.json",
+      "bytes": 7590,
+      "sha256": "ca7be6ba8a56437e52b26b2edcd6203b90eacae1e058f1e1fbe026ce578ab026"
+    },
+    {
+      "name": "yaca-development-evidence-20261015.zip",
+      "bytes": 1155850,
+      "sha256": "5f8c68ad5d459abd2b6f6c401b5a579af074c27bcbeacca6494f56c1df07b5de"
+    },
+    {
+      "name": "yaca-development-source-20261015.tar.gz",
+      "bytes": 3102721,
+      "sha256": "b01a15d948ca2976a885b9c4fcd274da4efe8049b455ceef19b6f80af080891f"
+    },
+    {
+      "name": "yaca-main-through-r100.bundle",
+      "bytes": 5207825,
+      "sha256": "da3976456444d71b97c805339d960bb5cbfa9dc4a99b38cd6d7fa8cb7ba0a9f9"
+    },
+    {
+      "name": "yaca-source-cache-20261015.tar.gz",
+      "bytes": 1042834167,
+      "sha256": "84ce47581c381f27ed732e94ecf27b7f4fece05e4342c6d3073c71dc33b6f176"
+    }
+  ],
+  "publication_url": "https://github.com/Water-Run/yaca/releases/tag/v1.0.0-preview.20261015",
+  "publication_receipt": "1.0.0-preview.20261015-publication.json",
+  "uploaded_manifest_sha256": "14753a000e6928f1b16b72b5d87d8228d08645cec6cd2934a0ff8e7a4e6f9309"
+}

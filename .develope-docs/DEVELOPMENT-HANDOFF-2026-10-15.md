@@ -1,6 +1,6 @@
 # 开发接续：2026-10-15 节点
 
-按 [D-092](DECISIONS.md#d-092-当前节点打包推送后暂停2026-10-15) 完成打包推送后暂停。
+本节点已完成打包交付，按 [D-092](DECISIONS.md#d-092-当前节点打包推送后暂停2026-10-15) 暂停开发。
 维护源码以 main 为准；正式 Gate R 关闭，目标资格验证待完成。
 
 ## 换一个目录或电脑继续
@@ -38,7 +38,9 @@ git remote set-url origin https://github.com/Water-Run/yaca.git
 
 开发接续节点为
 [`v1.0.0-preview.20261015`](https://github.com/Water-Run/yaca/releases/tag/v1.0.0-preview.20261015)。
-附件在发布完成后可取得；实际公开回执另记录在 candidates。
+8 个附件已公开，远端 SHA-256 与大小均核对一致，见
+[实际发布回执](candidates/1.0.0-preview.20261015-publication.json)。源码和 bundle
+绑定 `e33bcc7470537bd6b536d9c25746533d33807b73`；之后的 main 只补充本节点交付回执和文档。
 
 | 附件 | 用途 |
 | --- | --- |
@@ -78,3 +80,9 @@ Win64 已实际核对 18 项签名，余密钥有效性与完整二进制对应�
 
 恢复开发后从 [TRACKING](TRACKING.md) 接续。最终九包资格和全仓人工语义 Review
 仍待完成；本节点的开发检查与来源附件保留各自范围。
+
+独立 Windows Git 检出到 WSL 的目录已实际完成公开依赖初始化，再 pull 最新实现，
+完整 Lua 735/735、完整 readiness 和维护树干净检查均通过。守卫未执行位的条件保持，
+修复后的 16 个入口回归通过；全仓结构为 273/5791/0。Git bundle 已在另一个目录
+离线 clone 并通过连通性检查。这些结果限于已有主机开发依赖下的新检出，不扩大
+为全部发行目标资格。
