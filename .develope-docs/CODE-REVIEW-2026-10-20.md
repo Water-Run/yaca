@@ -101,8 +101,72 @@
 14 项实现、测试、生成器和结果的当前/冻结字节绑定见
 [R101 证据](tool-source-review/R101.json)。文档真实性校验与 `git diff --check` 通过。
 
-## 下一步
+## R101 后接续
 
 先冻结 R101 的实现、测试及实际结果，在提交边界干净后继续 P0。下一项接续 Win32
 来源缓存中的 6 个配方问题和 Bash/readline/ncurses/vim 四个尚未尝试的载荷版本；
 同时保留本轮发现的密钥有效性待办。总目标“实现 yaca”仍未完成。
+
+## R102 Win32 四个未尝试载荷版本
+
+R101 已提交为 `7c20297`，提交后工作区干净。从原 SOURCE-COVERAGE 中提取 Bash
+4.3.046-1、readline 6.3.008-7、ncurses 6.0.20160220-1、vim 7.4.1721-1 的固定配方，
+仅作为数据展开来源列表，不执行 PKGBUILD。
+
+Bash、readline 和 vim 原始归档已取得，SHA-256 均匹配原配方；前两者的分离签名
+也已取得，但不把下载与记录摘要当作验签通过。初始下载 session `3210`、`45486`、
+`11812` 均已确认退出零；ncurses 原镜像下载 `4940` 已确认返回 22，两次均为 404。
+原始下载位于 `out/review-20261020/r102/downloads/`。ncurses 另外两次检查 session
+`38386`、`56086` 也均已确认返回 22/404；本轮所有下载句柄已结束。三个实际检查的
+地址与工具回执保存在 `r102/recovery-report.json`、`r102/download-receipts.json`。
+
+### 来源与静态摘要
+
+| 原始来源 | 原配方 SHA-256 | 本轮结果 |
+| --- | --- | --- |
+| [Bash 4.3](https://ftp.gnu.org/gnu/bash/bash-4.3.tar.gz) | `afc687a28e0e24dc21b988fa159ff9dbcf6b7caa92ade8645cc6d5605cd024d4` | 原归档、8 项维护补丁、46 项上游补丁摘要全部匹配；47 项分离签名保留待验证 |
+| [readline 6.3](https://ftp.gnu.org/gnu/readline/readline-6.3.tar.gz) | `56ba6071b9462f980c5a72ab0023893b65ba6debb4eeb475d7a563dc65cafd43` | 原归档、3 项维护补丁、8 项上游补丁摘要全部匹配；9 项分离签名保留待验证 |
+| [vim 7.4.1721](https://github.com/vim/vim/archive/v7.4.1721.tar.gz) | `fb0cbb2eb2523a2f13347da85523ac1734944c08b30124002b23ff6f7b0b0015` | 原归档及 7 项维护输入摘要全部匹配 |
+| ncurses 6.0-20160220 | `34387d968a37cbc2362f62d44d44bb9c27cd288261262bd06f3b053994c90401` | 原归档仍缺；维护补丁摘要匹配，保留静态子集 |
+
+检查了 [ncurses 官方归档](https://invisible-island.net/archives/ncurses/6.0/) 与
+[MSYS2 官方来源目录](https://repo.msys2.org/msys/sources/)，本轮没有取得原快照。
+未用普通 6.0 发布包、不同快照或重新打包的数据替代该原摘要。
+
+恢复程序 `out/review-20261020/r102/recover_four_payloads.py` 对四份已固定配方作
+人工核对后的字面展开。Bash/readline 的 10# 补丁计数及顺序分别为 46/8；文件数
+与原 sha256sums 逐项对齐。原配方、缓存补丁、原归档均先验证摘要，再以排他创建
+保存到新缓存路径；SKIP 的签名只记录实际摘要，状态保持 signature-pending。
+
+新锁新增 132 个来源成员，固定成员共 1221。原 1087 个非覆盖报告输入保持
+path/destination/hash 完全一致；旧 R100 的覆盖报告按原字节移入
+`history/R100-SOURCE-COVERAGE.json`，新逐成员结果作为当前 SOURCE-COVERAGE。
+来源状态、手工 Review 和发布授权不提升。
+
+### 档案与验收
+
+| 项目 | 实际结果 |
+| --- | --- |
+| 当前来源归档 | `out/review-20261020/r102/git-win32-recovered-sources-20261020.tar.gz` |
+| 字节数 | 452667221 |
+| SHA-256 | `b072ff907cb46a5f375094deb47fa2c371226bed5464cd4c4f8c4c45ebf4fda1` |
+| 固定成员 | 1221，另有归档自己的 source-profile.json |
+| 生产打包器 | PASS，session `43421` 已退出零；每个归档成员摘要已核对 |
+| 维护来源接纳 | PASS，session `22715` 已退出零；Git 2.10.0，source_closure=partial |
+| 115 个已恢复配方版本 | 98 个静态摘要全部匹配、14 个静态子集、3 个无已核对静态载荷 |
+| 配方问题 | 原 6 项保留；四个原未尝试载荷版本均已有本轮实际结果 |
+
+人工 Review 核对了恢复程序的全部函数及参数/返回注释、四份原 source/checksum
+数组的顺序、SKIP 与来源闭包边界、排他写入和历史覆盖报告保留；也核对当前锁
+全部新增成员与实际缓存的一致性。源码、签名和配方没有执行或改署。
+本轮未修改产品 src/native 或验签工具，R101 的完整 Lua 735/735 与结构覆盖保留
+原范围。R102 完整 readiness PASS，session `82609` 已确认退出零；结构仍为
+273/5798/0，全部装配/来源回归与现代证明均通过。12 项当前/冻结输入与结果绑定
+见 [R102 证据](tool-source-review/R102.json)；原档案和大缓存保存在本机，未公开。
+
+## 接续状态
+
+总目标仍为实现 yaca。R102 来源数据装配接纳、完整 readiness 与证据冻结已完成，
+下一步形成干净提交边界；没有活下载、构建或测试句柄。之后继续来源缺项、完整
+人工语义 Review 和最终目标资格。本机初始化中发现的 uv 符号链接解释器建 venv
+问题也需修复维护入口，不能把本轮环境 workaround 当作该入口已兼容。

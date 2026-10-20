@@ -8,10 +8,13 @@
     "manual_source_closure_review": "pending",
     "recipe_versions_recovered": 115,
     "recipe_versions_pending": 6,
-    "unattempted_payload_versions": 4,
+    "unattempted_payload_versions": 0,
     "coverage_member": "SOURCE-COVERAGE.json",
     "historical_status_member": "history/R95-SOURCE-STATUS.json",
-    "scope": "Original pinned legacy recipe and source inputs with current per-member recovery; unresolved source, signature and binary correspondence remain pending"
+    "scope": "Original pinned legacy recipe and source inputs with current per-member recovery; unresolved source, signature and binary correspondence remain pending",
+    "last_recovery_review": "R102",
+    "static_digest_verified_versions": 98,
+    "verified_static_subset_versions": 14
   },
   "inputs": [
     {
@@ -5445,14 +5448,679 @@
       "sha256": "11390c74733abcb262aaca4db68710f13ffffd42bfe2a0861a5dfc912b2977e5"
     },
     {
-      "path": "sources/git-win32-source-coverage-20261015.json",
+      "path": "sources/git-win32-source-coverage-20261020.json",
       "destination": "SOURCE-COVERAGE.json",
-      "sha256": "51ccd0866c7103dcc2ef7df935c37e52e624bd343aeb83614a21cebfaa6fee1d"
+      "sha256": "daa07b35213478db9ea8e9ad79f85d09d99b4e90cb3a1552283008b2f1f6b456"
     },
     {
       "path": "sources/git-win32-x86-source-status-20261013.json",
       "destination": "history/R95-SOURCE-STATUS.json",
       "sha256": "75a8792936c9f3fb1d87e8d3a5dbf53cc7bab5ebabf8e53e4625df68715a41bf"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash-4.3.tar.gz",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash-4.3.tar.gz",
+      "sha256": "afc687a28e0e24dc21b988fa159ff9dbcf6b7caa92ade8645cc6d5605cd024d4"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash-4.3.tar.gz.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash-4.3.tar.gz.sig",
+      "sha256": "a3ebcd8ccfe5492f7eb0fc6ee762f57a35b0a82dc0deae200f04b5a9db807c0f"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/0001-bash-4.3-cygwin.patch",
+      "destination": "legacy-payloads/bash-4.3.046-1/0001-bash-4.3-cygwin.patch",
+      "sha256": "4266bbb4c406e1b42b160e46897b9745621ac7cf2aad059ff270ba8312113edc"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/0002-bash-4.3-msysize.patch",
+      "destination": "legacy-payloads/bash-4.3.046-1/0002-bash-4.3-msysize.patch",
+      "sha256": "da08e4661fdcb179f7749dd1c8ce728d0ed8d4ca07e50da757046c06c6464dee"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/0003-bash-4.3-readline.patch",
+      "destination": "legacy-payloads/bash-4.3.046-1/0003-bash-4.3-readline.patch",
+      "sha256": "d833f89569b3d4ea4c78d998db087e60a426b8360a34707e80d71f3ce6ecc415"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/0004-bash-4.3-deprecations.patch",
+      "destination": "legacy-payloads/bash-4.3.046-1/0004-bash-4.3-deprecations.patch",
+      "sha256": "9829166ecd5d48651fb4a139f7e05053c775aa1a760ff4cf9561bbe6bae3d308"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/0005-bash-4.3-msys2-fix-lineendings.patch",
+      "destination": "legacy-payloads/bash-4.3.046-1/0005-bash-4.3-msys2-fix-lineendings.patch",
+      "sha256": "e881a3948447cc8a99ab5a76c7eaf61907a12ee430df96a30357fc82872dd6f8"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/0006-bash-4.3-add-pwd-W-option.patch",
+      "destination": "legacy-payloads/bash-4.3.046-1/0006-bash-4.3-add-pwd-W-option.patch",
+      "sha256": "e18af674d1890326c8e272b668a0de52b8eb9cd48e604cffa3cbf17ee79d1ba6"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/0007-fix-static-build.patch",
+      "destination": "legacy-payloads/bash-4.3.046-1/0007-fix-static-build.patch",
+      "sha256": "82578a38798bfcfd85707c08e4f7b22c3fa7acc7a01d083faf86eb923511d60e"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/privmode-setuid-fail.patch",
+      "destination": "legacy-payloads/bash-4.3.046-1/privmode-setuid-fail.patch",
+      "sha256": "6bc2d4e48ad05fb3c8aac120a012baf1911f6522464ed18c8232b111a40b7901"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-001",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-001",
+      "sha256": "ecb3dff2648667513e31554b3ad054ccd89fce38e33367c9459ac3a285153742"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-001.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-001.sig",
+      "sha256": "38536ab524f823fbe0d56e1a0814e87c0476d713c9ef4155b6db92b7993d9153"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-002",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-002",
+      "sha256": "eee7cd7062ab29a9e4f02924d9c367264dcb8b162703f74ff6eb8f175a91502b"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-002.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-002.sig",
+      "sha256": "563986d587f7ea3ead0a13848bb2ce410d3be0ee6277c34a92c1efe7a95a5788"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-003",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-003",
+      "sha256": "000e6eac50cd9053ce0630db01239dcdead04a2c2c351c47e2b51dac1ac1087d"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-003.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-003.sig",
+      "sha256": "e8c0e62a0e2368b6576109f2f0d459d96fb97e8343071ee318d7fbd6cd4e8862"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-004",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-004",
+      "sha256": "5ea0a42c6506720d26e6d3c5c358e9a0d49f6f189d69a8ed34d5935964821338"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-004.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-004.sig",
+      "sha256": "46150ad6a784305f8023aed7b9902ebee5ba307b2236afbb208a8055292f0c25"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-005",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-005",
+      "sha256": "1ac83044032b9f5f11aeca8a344ae3c524ec2156185d3adbb8ad3e7a165aa3fa"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-005.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-005.sig",
+      "sha256": "15ff2e35904da6da7bd2166d77e3e6d8c7fde4aa469c2d24a2fe243b1eda5977"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-006",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-006",
+      "sha256": "a0648ee72d15e4a90c8b77a5c6b19f8d89e28c1bc881657d22fe26825f040213"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-006.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-006.sig",
+      "sha256": "76c461e80080bf14f8adb2eff04c4a9c30d476fb39157dfff26fa6678aa5342b"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-007",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-007",
+      "sha256": "1113e321c59cf6a8648a36245bbe4217cf8acf948d71e67886dad7d486f8f3a3"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-007.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-007.sig",
+      "sha256": "39b762b8f12a8ff8047efb688c443f995d60dfcd420e1721ccdfb4d6ab56c8d1"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-008",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-008",
+      "sha256": "9941a98a4987192cc5ce3d45afe879983cad2f0bec96d441a4edd9033767f95e"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-008.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-008.sig",
+      "sha256": "692c43a8fdd73149ea0feb4712ce535be661cf8be2829b09a93e7dcec38357de"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-009",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-009",
+      "sha256": "c0226d6728946b2f53cdebf090bcd1c01627f01fee03295768605caa80bb40a5"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-009.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-009.sig",
+      "sha256": "df626e2624aeaa201dc917a4a2d09a8f0a01f0770eed981b9d83e534a220db17"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-010",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-010",
+      "sha256": "ce05799c0137314c70c7b6ea0477c90e1ac1d52e113344be8e32fa5a55c9f0b7"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-010.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-010.sig",
+      "sha256": "33eaa0616424882c270d32dbc9c9289149b0fcc780d3b68123e19241abf9265c"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-011",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-011",
+      "sha256": "7c63402cdbc004a210f6c1c527b63b13d8bb9ec9c5a43d5c464a9010ff6f7f3b"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-011.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-011.sig",
+      "sha256": "0dad888c63d038ae2a4ebb753bf6a31322be7c834cd6749f7da3717dfbe3788c"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-012",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-012",
+      "sha256": "3e1379030b35fbcf314e9e7954538cf4b43be1507142b29efae39eef997b8c12"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-012.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-012.sig",
+      "sha256": "cebcf64899d92aea5fbab10d9213cf1d133bd5c2a6e235361e04f4d85af5cbc4"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-013",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-013",
+      "sha256": "bfa8ca5336ab1f5ef988434a4bdedf71604aa8a3659636afa2ce7c7446c42c79"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-013.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-013.sig",
+      "sha256": "7f7b39c0d860453cf552e0ef6ee027f184b9dbb592e175e42ee4eeb281e02ff5"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-014",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-014",
+      "sha256": "5a4d6fa2365b6eb725a9d4966248b5edf7630a4aeb3fa8d526b877972658ac13"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-014.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-014.sig",
+      "sha256": "35e0a1d8b3693e05d9252a0e8e8f56fa54e73ac396959ba338f3d7733ad5d29b"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-015",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-015",
+      "sha256": "13293e8a24e003a44d7fe928c6b1e07b444511bed2d9406407e006df28355e8d"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-015.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-015.sig",
+      "sha256": "c037fa7d26be6b3d7d0c4e7274c4bcbf547b501a90cfd9734438a034d29a257a"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-016",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-016",
+      "sha256": "92d60bcf49f61bd7f1ccb9602bead6f2c9946d79dea0e5ec0589bb3bfa5e0773"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-016.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-016.sig",
+      "sha256": "54aef39fa1a5c324ae1ac32f4c72b8d41b5b37059d5496ced37d95477b3a6197"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-017",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-017",
+      "sha256": "1267c25c6b5ba57042a7bb6c569a6de02ffd0d29530489a16666c3b8a23e7780"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-017.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-017.sig",
+      "sha256": "f03b280a3599996f57d78e97fa8a71b17ecf7647f4f1a27f41b2866adae47acd"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-018",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-018",
+      "sha256": "7aa8b40a9e973931719d8cc72284a8fb3292b71b522db57a5a79052f021a3d58"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-018.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-018.sig",
+      "sha256": "642d88eb7e1e18c1564f69b548754c3d39847095aa4d72b51866ec154110500a"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-019",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-019",
+      "sha256": "a7a91475228015d676cafa86d2d7aa9c5d2139aa51485b6bbdebfdfbcf0d2d23"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-019.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-019.sig",
+      "sha256": "48be09069f0f52ad158083db1633c0c551804d39d0f69b2501213c71cd51e3fd"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-020",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-020",
+      "sha256": "ca5e86d87f178128641fe91f2f094875b8c1eb2de9e0d2e9154f5d5cc0336c98"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-020.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-020.sig",
+      "sha256": "d09f563e1dd1b3d794b85ffd902bbe0dfc41ae57de252d64ae31257074a147b3"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-021",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-021",
+      "sha256": "41439f06883e6bd11c591d9d5e9ae08afbc2abd4b935e1d244b08100076520a9"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-021.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-021.sig",
+      "sha256": "e2786a547e4337a7c07cbc3bd1d08401c8ef508b8db83aa4c67dedfa0fe9c32f"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-022",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-022",
+      "sha256": "fd4d47bb95c65863f634c4706c65e1e3bae4ee8460c72045c0a0618689061a88"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-022.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-022.sig",
+      "sha256": "546a86b8cafb942eca52de58c7d2c25edab008d13b704b9194a0857fa3029fdc"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-023",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-023",
+      "sha256": "9ac250c7397a8f53dbc84dfe790d2a418fbf1fe090bcece39b4a5c84a2d300d4"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-023.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-023.sig",
+      "sha256": "61de63a44ca90c667d2c50a364d3790840fd305ed8abcba2cf413532cf1da5de"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-024",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-024",
+      "sha256": "3b505882a0a6090667d75824fc919524cd44cc3bd89dd08b7c4e622d3f960f6c"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-024.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-024.sig",
+      "sha256": "61e11f9a283562813ea877ffaf9f676a8fb1b346da2da5e3cd1e79d15ca566fa"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-025",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-025",
+      "sha256": "1e5186f5c4a619bb134a1177d9e9de879f3bb85d9c5726832b03a762a2499251"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-025.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-025.sig",
+      "sha256": "da7020feffb4829e225ca58922d43d0b8ac544b9109c22d3908c8bf8a9aa45c9"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-026",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-026",
+      "sha256": "2ecc12201b3ba4273b63af4e9aad2305168cf9babf6d11152796db08724c214d"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-026.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-026.sig",
+      "sha256": "a1adf002539f995ba6e93e182a4536e052e664e67d7b63c8f0c75fcc8c843e87"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-027",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-027",
+      "sha256": "1eb76ad28561d27f7403ff3c76a36e932928a4b58a01b868d663c165f076dabe"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-027.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-027.sig",
+      "sha256": "767efc3b8f6996daf57f6e7317bb99dabae1f89d60c66e3883a80a5d8e8dc5fb"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-028",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-028",
+      "sha256": "e8b0dbed4724fa7b9bd8ff77d12c7f03da0fbfc5f8251ef5cb8511eb082b469d"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-028.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-028.sig",
+      "sha256": "454266fd90f4f9b1f541ef6698ac8a1358dc735e4edebdddfa00b5b9b21e444e"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-029",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-029",
+      "sha256": "4cc4a397fe6bc63ecb97d030a4e44258ef2d4e076d0e90c77782968cc43d6292"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-029.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-029.sig",
+      "sha256": "ee6c5a6dbe7130b10b152e9d04021f3e01fc25d375da2ffeb8f35962ab0b1805"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-030",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-030",
+      "sha256": "85434f8a2f379d0c49a3ff6d9ffa12c8b157188dd739e556d638217d2a58385b"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-030.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-030.sig",
+      "sha256": "ec08886dc1ac6b517ec4950c5b7c982947f1d79ff521c8b8b2ed0e40932cfa4e"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-031",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-031",
+      "sha256": "cd529f59dd0f2fdd49d619fe34691da6f0affedf87cc37cd460a9f3fe812a61d"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-031.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-031.sig",
+      "sha256": "0db468069fd10692c06343163c52625af29bbdab128433ab7a02574896f9ab47"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-032",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-032",
+      "sha256": "889357d29a6005b2c3308ca5b6286cb223b5e9c083219e5db3156282dd554f4a"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-032.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-032.sig",
+      "sha256": "3d33cd5102aebc39a4b8f18a6c53ad4d5441ccfe2cf873dd0fc028fb96dc4725"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-033",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-033",
+      "sha256": "fb2a7787a13fbe027a7335aca6eb3c21cdbd813e9edc221274b6a9d8692eaa16"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-033.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-033.sig",
+      "sha256": "3514873b3a987f19f0aa88521449b7342f3d98262610a0dd2841df16f9edead3"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-034",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-034",
+      "sha256": "f1694f04f110defe1330a851cc2768e7e57ddd2dfdb0e3e350ca0e3c214ff889"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-034.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-034.sig",
+      "sha256": "3492f961699eb11d5602e6e8bbfc744bfd123ab62b1bc8af6947e6b01a8dd5b3"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-035",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-035",
+      "sha256": "370d85e51780036f2386dc18c5efe996eba8e652fc1973f0f4f2ab55a993c1e3"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-035.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-035.sig",
+      "sha256": "adb1c20c170f2bccab63c4b6bf4adfe20cd5ae21a924debd9d57b8da2d20cb7c"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-036",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-036",
+      "sha256": "ac5f82445b36efdb543dbfae64afed63f586d7574b833e9aa9cd5170bc5fd27c"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-036.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-036.sig",
+      "sha256": "740a298a7880bd7b00af873e41936132ae3437b52debf3693a0679fd8dcb603f"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-037",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-037",
+      "sha256": "33f170dd7400ab3418d749c55c6391b1d161ef2de7aced1873451b3a3fca5813"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-037.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-037.sig",
+      "sha256": "d12ed12ecf1731634e7e3e8ea7d469a864cffa011621eb3fb5c517d4ff8adee8"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-038",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-038",
+      "sha256": "adbeaa500ca7a82535f0e88d673661963f8a5fcdc7ad63445e68bf5b49786367"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-038.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-038.sig",
+      "sha256": "54e6e055b1f887050b0e86cb6a45dc3e4134d5c4932e07cf237dc48b2821d660"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-039",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-039",
+      "sha256": "ab94dced2215541097691f60c3eb323cc28ef2549463e6a5334bbcc1e61e74ec"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-039.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-039.sig",
+      "sha256": "0d8b16ea734d0cf03724e165681ec4f3cf4890ef595deea47d10af808fd5f094"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-040",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-040",
+      "sha256": "84bb396b9262992ca5424feab6ed3ec39f193ef5c76dfe4a62b551bd8dd9d76b"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-040.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-040.sig",
+      "sha256": "7bb7bde45110ba0bc188b274c9f3f58695d0ef2a17c927ed37ef85c1767014eb"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-041",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-041",
+      "sha256": "4ec432966e4198524a7e0cd685fe222e96043769c9613e66742ac475db132c1a"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-041.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-041.sig",
+      "sha256": "9fba4c9547966cf262b7795d651665dfcf2a4fe23d1df6601adf3c51c1cf8490"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-042",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-042",
+      "sha256": "b75a53141ab3d8fff3fa74b5f3dc76468b01eae299f50bbc2bc71ae395d690af"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-042.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-042.sig",
+      "sha256": "4cad09d1eb06a7a87e993333953f67d76011052be9462b9d219849875750a879"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-043",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-043",
+      "sha256": "47a8a3c005b46e25821f4d8f5ccb04c1d653b1c829cb40568d553dc44f7a6180"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-043.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-043.sig",
+      "sha256": "169c2864a796728bb8e6d57251bb2479c872af36826b2619cc57133b94b9a5b7"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-044",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-044",
+      "sha256": "9338820630bf67373b44d8ea68409f65162ea7a47b9b29ace06a0aed12567f99"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-044.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-044.sig",
+      "sha256": "dac7d52c8ad3268807c342942a935eac68f35939a633ae19d5faa5aecac333cc"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-045",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-045",
+      "sha256": "ba6ec3978e9eaa1eb3fabdaf3cc6fdf8c4606ac1c599faaeb4e2d69864150023"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-045.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-045.sig",
+      "sha256": "de6cd0898a23e675e351222647c4ae13ca92b6d3c6b152587bcab05657690289"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-046",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-046",
+      "sha256": "b3b456a6b690cd293353f17e22d92a202b3c8bce587ae5f2667c20c9ab6f688f"
+    },
+    {
+      "path": "gfw-legacy-payloads/bash-4.3.046-1/bash43-046.sig",
+      "destination": "legacy-payloads/bash-4.3.046-1/bash43-046.sig",
+      "sha256": "962e768748c4452c1044a437ba7a637b0cb3cde1a1d897eb75464432e3aeb4ba"
+    },
+    {
+      "path": "gfw-legacy-payloads/readline-6.3.008-7/readline-6.3.tar.gz",
+      "destination": "legacy-payloads/readline-6.3.008-7/readline-6.3.tar.gz",
+      "sha256": "56ba6071b9462f980c5a72ab0023893b65ba6debb4eeb475d7a563dc65cafd43"
+    },
+    {
+      "path": "gfw-legacy-payloads/readline-6.3.008-7/readline-6.3.tar.gz.sig",
+      "destination": "legacy-payloads/readline-6.3.008-7/readline-6.3.tar.gz.sig",
+      "sha256": "a504b0f99324f4d802f08553ef08cc65bfae3c6d4d3bf892b34cd12cfa34fddb"
+    },
+    {
+      "path": "gfw-legacy-payloads/readline-6.3.008-7/readline-6.3-cygwin.patch",
+      "destination": "legacy-payloads/readline-6.3.008-7/readline-6.3-cygwin.patch",
+      "sha256": "cf8523e276c65f59d91e46577c8ca564015c451c907b1e20f96f1c3126cec2e3"
+    },
+    {
+      "path": "gfw-legacy-payloads/readline-6.3.008-7/readline-6.3-msys2.patch",
+      "destination": "legacy-payloads/readline-6.3.008-7/readline-6.3-msys2.patch",
+      "sha256": "4f2f97334d2e7fe362c9ef4e1fd06018d34115a8370c0323d0da67ca2b3d0761"
+    },
+    {
+      "path": "gfw-legacy-payloads/readline-6.3.008-7/readline-6.3-paste-utf8.patch",
+      "destination": "legacy-payloads/readline-6.3.008-7/readline-6.3-paste-utf8.patch",
+      "sha256": "2142f1417536e2670829d3cf6f4f4f2560687a92955ccf11a121bde5dbbccbc9"
+    },
+    {
+      "path": "gfw-legacy-payloads/readline-6.3.008-7/readline63-001",
+      "destination": "legacy-payloads/readline-6.3.008-7/readline63-001",
+      "sha256": "1a79bbb6eaee750e0d6f7f3d059b30a45fc54e8e388a8e05e9c3ae598590146f"
+    },
+    {
+      "path": "gfw-legacy-payloads/readline-6.3.008-7/readline63-001.sig",
+      "destination": "legacy-payloads/readline-6.3.008-7/readline63-001.sig",
+      "sha256": "91112c59ef1e6a50dca1a74b351d1190223b4c6cbcdd573fd3188f01e299cca9"
+    },
+    {
+      "path": "gfw-legacy-payloads/readline-6.3.008-7/readline63-002",
+      "destination": "legacy-payloads/readline-6.3.008-7/readline63-002",
+      "sha256": "39e304c7a526888f9e112e733848215736fb7b9d540729b9e31f3347b7a1e0a5"
+    },
+    {
+      "path": "gfw-legacy-payloads/readline-6.3.008-7/readline63-002.sig",
+      "destination": "legacy-payloads/readline-6.3.008-7/readline63-002.sig",
+      "sha256": "c2a147881ec82f1a6fcb98495dcb94a00ce807235e1715230d42d7c39aba3924"
+    },
+    {
+      "path": "gfw-legacy-payloads/readline-6.3.008-7/readline63-003",
+      "destination": "legacy-payloads/readline-6.3.008-7/readline63-003",
+      "sha256": "ec41bdd8b00fd884e847708513df41d51b1243cecb680189e31b7173d01ca52f"
+    },
+    {
+      "path": "gfw-legacy-payloads/readline-6.3.008-7/readline63-003.sig",
+      "destination": "legacy-payloads/readline-6.3.008-7/readline63-003.sig",
+      "sha256": "644aea107a002afa744b63d8dc7f3cb1b092e94163f7ddd86845d5569da833b8"
+    },
+    {
+      "path": "gfw-legacy-payloads/readline-6.3.008-7/readline63-004",
+      "destination": "legacy-payloads/readline-6.3.008-7/readline63-004",
+      "sha256": "4547b906fb2570866c21887807de5dee19838a60a1afb66385b272155e4355cc"
+    },
+    {
+      "path": "gfw-legacy-payloads/readline-6.3.008-7/readline63-004.sig",
+      "destination": "legacy-payloads/readline-6.3.008-7/readline63-004.sig",
+      "sha256": "deeb4dab3aa1b88f24801c60c569a1adc3699a211ada27290b54042b16411d71"
+    },
+    {
+      "path": "gfw-legacy-payloads/readline-6.3.008-7/readline63-005",
+      "destination": "legacy-payloads/readline-6.3.008-7/readline63-005",
+      "sha256": "877788f9228d1a9907a4bcfe3d6dd0439c08d728949458b41208d9bf9060274b"
+    },
+    {
+      "path": "gfw-legacy-payloads/readline-6.3.008-7/readline63-005.sig",
+      "destination": "legacy-payloads/readline-6.3.008-7/readline63-005.sig",
+      "sha256": "57656f0ee8e97d2a4c0d49f98ab1b6d7273b5b0106cc3301325b42a499fdec8d"
+    },
+    {
+      "path": "gfw-legacy-payloads/readline-6.3.008-7/readline63-006",
+      "destination": "legacy-payloads/readline-6.3.008-7/readline63-006",
+      "sha256": "5c237ab3c6c97c23cf52b2a118adc265b7fb411b57c93a5f7c221d50fafbe556"
+    },
+    {
+      "path": "gfw-legacy-payloads/readline-6.3.008-7/readline63-006.sig",
+      "destination": "legacy-payloads/readline-6.3.008-7/readline63-006.sig",
+      "sha256": "4f50f36fd97a26656447aada47a2360b9904f676f9d767b412a28c60637bf0b1"
+    },
+    {
+      "path": "gfw-legacy-payloads/readline-6.3.008-7/readline63-007",
+      "destination": "legacy-payloads/readline-6.3.008-7/readline63-007",
+      "sha256": "4d79b5a2adec3c2e8114cbd3d63c1771f7c6cf64035368624903d257014f5bea"
+    },
+    {
+      "path": "gfw-legacy-payloads/readline-6.3.008-7/readline63-007.sig",
+      "destination": "legacy-payloads/readline-6.3.008-7/readline63-007.sig",
+      "sha256": "d3d9ced742273ecf013b8627de8beddb86e9d0e59eb545ef3198568fa82a28e0"
+    },
+    {
+      "path": "gfw-legacy-payloads/readline-6.3.008-7/readline63-008",
+      "destination": "legacy-payloads/readline-6.3.008-7/readline63-008",
+      "sha256": "3bc093cf526ceac23eb80256b0ec87fa1735540d659742107b6284d635c43787"
+    },
+    {
+      "path": "gfw-legacy-payloads/readline-6.3.008-7/readline63-008.sig",
+      "destination": "legacy-payloads/readline-6.3.008-7/readline63-008.sig",
+      "sha256": "ba752f69d3111e6007fc2d6450a48c70c8b6fb64cdaa892c672864399b799c1b"
+    },
+    {
+      "path": "gfw-legacy-payloads/ncurses-6.0.20160220-1/0001-CRITICAL-fix-return-value-of-drv_CanHandle-on-unknow.patch",
+      "destination": "legacy-payloads/ncurses-6.0.20160220-1/0001-CRITICAL-fix-return-value-of-drv_CanHandle-on-unknow.patch",
+      "sha256": "2cebf10a5187b88ecd36f3052768057618e8e252dfdcfa13585c5c0136046b46"
+    },
+    {
+      "path": "gfw-legacy-payloads/vim-7.4.1721-1/vim-7.4.1721.tar.gz",
+      "destination": "legacy-payloads/vim-7.4.1721-1/vim-7.4.1721.tar.gz",
+      "sha256": "fb0cbb2eb2523a2f13347da85523ac1734944c08b30124002b23ff6f7b0b0015"
+    },
+    {
+      "path": "gfw-legacy-payloads/vim-7.4.1721-1/dot.vimrc",
+      "destination": "legacy-payloads/vim-7.4.1721-1/dot.vimrc",
+      "sha256": "edd18e0756406ee7b659e4552e444c50c3a0c1e9fb4fce2ddd770c933ea6c7f5"
+    },
+    {
+      "path": "gfw-legacy-payloads/vim-7.4.1721-1/7.3-cygwin-mouse.patch",
+      "destination": "legacy-payloads/vim-7.4.1721-1/7.3-cygwin-mouse.patch",
+      "sha256": "bca6e030d50c0d2468ab5c78aa0b359eb18a88a197de8406c593458ffedde922"
+    },
+    {
+      "path": "gfw-legacy-payloads/vim-7.4.1721-1/7.3-virc.patch",
+      "destination": "legacy-payloads/vim-7.4.1721-1/7.3-virc.patch",
+      "sha256": "44d7738a8f801195898eeef766ff77506c717dd5d19145ade3c1c2349d4bc4fd"
+    },
+    {
+      "path": "gfw-legacy-payloads/vim-7.4.1721-1/7.3-cygwin-python-dyn.patch",
+      "destination": "legacy-payloads/vim-7.4.1721-1/7.3-cygwin-python-dyn.patch",
+      "sha256": "0698234a2436f2d37f43775c9db5a2fc67d182f8baa46a8a0e2b7dd37da6fcbd"
+    },
+    {
+      "path": "gfw-legacy-payloads/vim-7.4.1721-1/pretend-cygwin-msys.patch",
+      "destination": "legacy-payloads/vim-7.4.1721-1/pretend-cygwin-msys.patch",
+      "sha256": "cf6fd75b54cfb92e7e3e90274467ba82de1fd1c7f02e2e293005cccbcda35429"
+    },
+    {
+      "path": "gfw-legacy-payloads/vim-7.4.1721-1/accept-crlf.patch",
+      "destination": "legacy-payloads/vim-7.4.1721-1/accept-crlf.patch",
+      "sha256": "66b167a73485e6fe3a4d29c90a60df70bd05ec79d4a3c420c57b94e51bdc3283"
+    },
+    {
+      "path": "gfw-legacy-payloads/vim-7.4.1721-1/vim-completion",
+      "destination": "legacy-payloads/vim-7.4.1721-1/vim-completion",
+      "sha256": "bdca6069ef0fa995718f4b59fea85e58629259bb5a385d53e52d162d1463d4ff"
+    },
+    {
+      "path": "sources/git-win32-source-coverage-20261015.json",
+      "destination": "history/R100-SOURCE-COVERAGE.json",
+      "sha256": "51ccd0866c7103dcc2ef7df935c37e52e624bd343aeb83614a21cebfaa6fee1d"
     }
   ]
 }

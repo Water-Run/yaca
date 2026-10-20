@@ -1,0 +1,146 @@
+{
+  "schema": "yaca-tool-source-review-evidence-v1",
+  "review_id": "R102",
+  "date": "2026-10-20",
+  "status": "verified-static-inputs-expanded-source-closure-partial",
+  "resume_decision": "D-093",
+  "development_paused": false,
+  "release_authorized": false,
+  "target_qualification_complete": false,
+  "whole_repository_semantic_review": "partial",
+  "source_closure": "partial",
+  "complete_source_closure": false,
+  "source_archive": {
+    "path": "out/review-20261020/r102/git-win32-recovered-sources-20261020.tar.gz",
+    "sha256": "b072ff907cb46a5f375094deb47fa2c371226bed5464cd4c4f8c4c45ebf4fda1",
+    "source_closure": "partial",
+    "status": "PASS",
+    "bytes": 452667221,
+    "members": 1221
+  },
+  "new_fixed_members": 132,
+  "old_noncoverage_inputs_preserved": 1087,
+  "package_states": [
+    {
+      "package": "bash",
+      "version": "4.3.046-1",
+      "status": "static-source-digests-verified"
+    },
+    {
+      "package": "readline",
+      "version": "6.3.008-7",
+      "status": "static-source-digests-verified"
+    },
+    {
+      "package": "ncurses",
+      "version": "6.0.20160220-1",
+      "status": "verified-static-subset"
+    },
+    {
+      "package": "vim",
+      "version": "7.4.1721-1",
+      "status": "static-source-digests-verified"
+    }
+  ],
+  "static_payload_version_states": {
+    "static-source-digests-verified": 98,
+    "verified-static-subset": 14,
+    "source-payload-pending": 3
+  },
+  "recipe_versions_recovered": 115,
+  "recipe_versions_pending": 6,
+  "unattempted_payload_versions": 0,
+  "newly_indexed_signatures_pending": 56,
+  "checks": {
+    "bundle": "PASS",
+    "source_admission": "PASS",
+    "coding_readiness": "PASS",
+    "product_source_changes": false
+  },
+  "review_scope": [
+    "literal source/checksum arrays and patch-loop ordering of four frozen recipes",
+    "SHA-256 of all new original archives and static local patch inputs",
+    "all recovery/recorder functions, annotations and filesystem effects",
+    "preserved original source-lock inputs, old coverage bytes and partial provenance"
+  ],
+  "source_bindings": [
+    {
+      "path": "release/windows-git32-sources.lock.json",
+      "frozen": "out/review-20261020/r102/frozen/release/windows-git32-sources.lock.json",
+      "sha256": "2a0a594e4f42437888775b42c59769dac8d07975d2fcfb32706eb57b24826b1b",
+      "bytes": 363279
+    },
+    {
+      "path": "out/source-cache/sources/git-win32-source-coverage-20261020.json",
+      "frozen": "out/review-20261020/r102/frozen/out/source-cache/sources/git-win32-source-coverage-20261020.json",
+      "sha256": "daa07b35213478db9ea8e9ad79f85d09d99b4e90cb3a1552283008b2f1f6b456",
+      "bytes": 293639
+    },
+    {
+      "path": "out/review-20261020/r102/recover_four_payloads.py",
+      "frozen": "out/review-20261020/r102/frozen/out/review-20261020/r102/recover_four_payloads.py",
+      "sha256": "151098fb5ad9c78411dc58b4783ff696b8d5eb9d39b4309ef95149807bdaf6af",
+      "bytes": 12233
+    },
+    {
+      "path": "out/review-20261020/r102/record_r102.py",
+      "frozen": "out/review-20261020/r102/frozen/out/review-20261020/r102/record_r102.py",
+      "sha256": "33f5fd653ac59b975572de6bd65857b9747adbc5e3232920bbe0bb8177988a03",
+      "bytes": 5784
+    },
+    {
+      "path": "out/review-20261020/r102/windows-git32-sources.before.json",
+      "frozen": "out/review-20261020/r102/frozen/out/review-20261020/r102/windows-git32-sources.before.json",
+      "sha256": "05ec44b3d0f2064e3692c75235151ebce2978a490f29bf9ef5855f3b9c6d3c4c",
+      "bytes": 331760
+    },
+    {
+      "path": "out/review-20261020/r102/download-receipts.json",
+      "frozen": "out/review-20261020/r102/frozen/out/review-20261020/r102/download-receipts.json",
+      "sha256": "e5a6fe74d7af5449ee9afa4cf9d8c3bd456a0970175705f2c42b69106e2369fe",
+      "bytes": 3770
+    },
+    {
+      "path": "out/review-20261020/r102/recovery-report.json",
+      "frozen": "out/review-20261020/r102/frozen/out/review-20261020/r102/recovery-report.json",
+      "sha256": "aad440c7a7f713e7c887e64e279358f3c14e425415afbe988ff249dfc62412c6",
+      "bytes": 65636
+    },
+    {
+      "path": "out/review-20261020/r102/recover.log",
+      "frozen": "out/review-20261020/r102/frozen/out/review-20261020/r102/recover.log",
+      "sha256": "150738cbc580f4cd0950871955ff07a3dd8d65074468af9a41245927b09e176d",
+      "bytes": 288
+    },
+    {
+      "path": "out/review-20261020/r102/bundle.log",
+      "frozen": "out/review-20261020/r102/frozen/out/review-20261020/r102/bundle.log",
+      "sha256": "48b9a3ef884cc0c581a53bd92b01ff1eb08ab7a1be5bb54cf0fee1540f631e5d",
+      "bytes": 202
+    },
+    {
+      "path": "out/review-20261020/r102/admission.json",
+      "frozen": "out/review-20261020/r102/frozen/out/review-20261020/r102/admission.json",
+      "sha256": "3968bff6417cab584e1a59a204491589700bc3848f865c9f20b07d865820349d",
+      "bytes": 257
+    },
+    {
+      "path": "out/review-20261020/r102/admission.log",
+      "frozen": "out/review-20261020/r102/frozen/out/review-20261020/r102/admission.log",
+      "sha256": "755ca0b8eb9d70e518759fbfee5bc44c9ed25e9f935b2c71fb362869f2d8585c",
+      "bytes": 273
+    },
+    {
+      "path": "out/review-20261020/r102/readiness.log",
+      "frozen": "out/review-20261020/r102/frozen/out/review-20261020/r102/readiness.log",
+      "sha256": "9f82e8d18dbf2cdad7b7e3b428f47349a6b95fa7adf392cca2ecf75630807ce7",
+      "bytes": 4884
+    }
+  ],
+  "remaining": [
+    "six original recipe problems and ncurses original snapshot",
+    "remaining static subsets, VCS inputs and legacy detached-signature review",
+    "R101 key validity findings, revocation freshness and binary/source correspondence",
+    "final nine-package qualification and whole-repository semantic review"
+  ]
+}
