@@ -421,7 +421,7 @@ TP-006 的 319 断言与其余全部检查通过；完整日志为
 readiness 结果的当前/冻结绑定见 [R105 证据](tool-source-review/R105.json)，162 份
 字节核对一致。新档案尚未公开，不修改原 R95/R100 公开附件或提升来源状态。
 
-## 最新接续记录
+## R105 接续记录（历史）
 
 目标仍为“实现 yaca”，按 D-093 保持 active，未完成。R105 已完成来源恢复、
 来源装配与接纳、注释检查器修复、反例/全仓/本地辅助结构检查、TP-006 刷新、
@@ -441,3 +441,89 @@ R104 及更早档案保留历史身份。当前没有活构建、下载或测试
 找到的 1.01-2 配方或其他版本替代。后续继续其来源核对、其余 15 个静态子集、
 runtime VCS、分离签名与密钥有效性/撤销新鲜度、GCM 依赖及全部二进制对应关系。
 全仓人工语义 Review、最终 C32/C33/C34 与独立 Gate R 评审仍未完成。
+
+## R106 来源输入恢复与节点收尾（D-094）
+
+上一轮属于实际进展，R105 已提交为 `554bb39`，起始工作区干净，1319 成员来源
+档案与所有 R105 句柄均已核对终态。本轮从剩余 Net-SMTP-SSL 配方及 15 个来源
+子集接续，不重复运行 R105 已完成的装配和测试。
+
+负责人随后要求“在下一开发节点收尾暂停, 提交”，按 D-094 将本轮已有恢复
+收束为可复核节点，不再扩展到下一批来源或目标资格。
+
+### 本轮固定的原输入
+
+已从历史来源容器恢复 dos2unix 补丁、Heimdal、Cyrus SASL、antiword、c-ares、
+两个 p11-kit 包的上游归档、Perl 和 winpty 的 path_conv.cpp；内层字节均匹配
+原 Git 配方摘要。Debian 20150426 原档案从官方 Snapshot 恢复，两个 CA 配方
+的原声明均匹配，档案 SHA-256 为
+`37dbaa93ed64cc4ae93ac295f9248fbc741bd51376438cfb1257f17efab5494f`。
+
+CAcert 的两个公有证书从 R88 原包按原字节恢复；StartSSL 公有证书由原包证书
+DER 按标准 PEM、LF 和每行 64 字符重新编码，最终原 SHA-256 完全匹配。原 DER、
+包内路径、表示方法与原摘要均保留；没有安装根证书或修改 TLS 信任。
+合计 15 项原摘要输入、4 项只取得字节的分离签名。后四项仍为 signature-pending，
+SKIP 不作为验签通过。
+
+MetaCPAN 精确版本记录指向 RJBS 的
+[Net-SMTP-SSL 1.02 原归档](https://cpan.metacpan.org/authors/id/R/RJ/RJBS/Net-SMTP-SSL-1.02.tar.gz)，
+档案 SHA-256 为 `4e9f67f47da74de3dad36fb5b68e2154a81251c8e187218dedbf073395cf5ce9`，
+含原 Makefile.PL。源模块与 R88 冻结 Win32 full 包及其逐文件清单完全一致，均为
+`3575e2a97c39de32a70f33394582c440fcd7cb89e92e53e705cca9cdc4b1c8e1`。
+R88 整包 SHA-256 实际复算为
+`58d9765098acc69d14d787387e580d01b2feba754dc86716af799a09349f5a01`，
+匹配其冻结清单。原 1.02-1 MSYS 包装配方仍未恢复，配方计数仍为 120/121；
+没有用 1.01-2 替代。此模块对应证据限于 R88，R95/最终包须另核对。
+
+### runtime 配方校正
+
+新恢复的 [3 月 31 日原配方](https://github.com/git-for-windows/MSYS2-packages/blob/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/PKGBUILD)
+明确声明目标 2.4.1.34115.1ca92fa-1、五项 source 补丁和五次 git am；六个
+原 Git 文件均验证 blob、长度和 SHA-256，五项补丁匹配该配方的原摘要。
+原先选用的 8 月配方保留旧 pkgver，但 source 与 prepare 已不一致；R104
+收集的后续六补丁也不等于这五项原字节。旧配方、辅助文件和六补丁共 34 项
+按原字节转入 history/R105-rejected-runtime，不再作为当前活动载荷。
+
+上游短版本解析为 `1ca92fa2ef89bf9d61d3911a499d8187db18427a`；历史计数与五补丁
+存在吻合线索，但本轮没有执行配方、检出全历史、实际应用补丁或重建 DLL。
+runtime VCS 及其二进制对应关系继续 pending，不以版本标签推导完成资格。
+
+### 实际验证与语义 Review
+
+Win32 锁现为 1361 成员，新增 42 项，117 个版本静态摘要全部匹配、3 个子集。
+剩余子集为 wineditline、runtime 和 GCM。原锁全部字节保留：1284 项非覆盖输入
+保持原绑定，34 项 runtime 输入按原字节移入 history，R105 覆盖报告单独保留。
+静态分类不包含签名、依赖或完整二进制对应关系的通过结论。
+
+首次整理在读取 R88 清单的字段时明确退出 1，来源锁未写入。确认字段实际为
+destination 后修正；失败辅助程序、已收集字节与 preserve.log 保留，后续
+preserve-final.log 确认退出零。没有覆盖旧缓存或失败日志。
+
+逐项核对了候选成员安全、字面 checksum 顺序、原摘要比较、证书表示、CPAN
+源模块与 R88 范围、runtime 旧输入迁移，以及所有新辅助函数的参数、返回、异常
+和副作用。未执行下载的配方或程序。全仓人工语义 Review 继续为 partial。
+
+| R106 档案 | 实际值 |
+| --- | --- |
+| 本机路径 | `out/review-20261020/r106/git-win32-recovered-sources-r106-20261020.tar.gz` |
+| SHA-256 | `6f468e3985760dc59adc46d81eb3689d8049b4c9ba36141ebf9138da29efbb4d` |
+| 字节数 | 536594581 |
+| 固定成员 | 1361，另有档案自己的 source-profile.json |
+| 来源装配与接纳 | PASS；source_closure=partial，活动 runtime 补丁为五项，编译 GCM ZIP 排除 |
+
+完整 coding readiness session `8665` 已确认退出零；全仓注释结构为
+273 文件 / 5801 声明 / 0 缺项，本地辅助补查为 19 文件 / 64 声明 / 0 缺项。
+49 项当前/冻结证据的 98 份字节核对一致，见 [R106 证据](tool-source-review/R106.json)。
+产品 src/native 未变，Lua 735/735
+保留 R103 实际独立检出范围，没有宣称本轮重跑三目标或完成最终九包资格。
+
+### 当前暂停检查点
+
+目标“实现 yaca”尚未完成。按 D-094 在本节点提交后暂停；待负责人恢复，再从
+TRACKING 接续原 MSYS 配方、wineditline 原档案、runtime VCS、GCM 依赖、验签与
+密钥有效性/撤销新鲜度、全仓语义 Review 和 C32/C33/C34。正式 Gate R 仍关闭。
+
+原 D-077 的 win104-lan 与 wintaf 本轮仅做只读 SSH 版本探测，均退出零，分别为
+Windows 10.0.26100.33650 和 Windows 6.0.6003。没有目标构建或部署。已完成的
+下载、收集、装配和接纳不应在接续时重复启动；进程终态及证据路径保存在本节点
+FINAL-STATE.json。当前来源与证据档案留在本机，未改写 R95/R100 公开附件。

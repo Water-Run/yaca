@@ -1,0 +1,505 @@
+{
+  "schema": "yaca-tool-source-review-evidence-v1",
+  "review_id": "R106",
+  "date": "2026-10-20",
+  "status": "source-recovery-node-completed-development-paused",
+  "pause_decision": "D-094",
+  "development_paused": true,
+  "release_authorized": false,
+  "target_qualification_complete": false,
+  "whole_repository_semantic_review": "partial",
+  "complete_source_closure": false,
+  "source_closure": "partial",
+  "source_archive": {
+    "path": "out/review-20261020/r106/git-win32-recovered-sources-r106-20261020.tar.gz",
+    "sha256": "6f468e3985760dc59adc46d81eb3689d8049b4c9ba36141ebf9138da29efbb4d",
+    "source_closure": "partial",
+    "bytes": 536594581,
+    "members": 1361,
+    "status": "PASS",
+    "runtime_current_patch_count": 5,
+    "compiled_gcm_zip_included_as_source": false
+  },
+  "fixed_members": 1361,
+  "recipe_versions_recovered": 120,
+  "recipe_versions_pending": 1,
+  "payload_states": {
+    "static-source-digests-verified": 117,
+    "verified-static-subset": 3
+  },
+  "updated_packages": [
+    {
+      "package": "ca-certificates",
+      "version": "20150426-1",
+      "status": "static-source-digests-verified"
+    },
+    {
+      "package": "dos2unix",
+      "version": "7.3.4-1",
+      "status": "static-source-digests-verified"
+    },
+    {
+      "package": "heimdal",
+      "version": "1.5.3-9",
+      "status": "static-source-digests-verified"
+    },
+    {
+      "package": "cyrus-sasl",
+      "version": "2.1.26-8",
+      "status": "static-source-digests-verified"
+    },
+    {
+      "package": "mingw-w64-i686-antiword",
+      "version": "0.37-2",
+      "status": "static-source-digests-verified"
+    },
+    {
+      "package": "mingw-w64-i686-ca-certificates",
+      "version": "20150426-2",
+      "status": "static-source-digests-verified"
+    },
+    {
+      "package": "mingw-w64-i686-c-ares",
+      "version": "1.11.0-1",
+      "status": "static-source-digests-verified"
+    },
+    {
+      "package": "mingw-w64-i686-gnutls",
+      "version": "3.5.2-1",
+      "status": "static-source-digests-verified"
+    },
+    {
+      "package": "mingw-w64-i686-p11-kit",
+      "version": "0.23.2-2",
+      "status": "static-source-digests-verified"
+    },
+    {
+      "package": "p11-kit",
+      "version": "0.23.2-1",
+      "status": "static-source-digests-verified"
+    },
+    {
+      "package": "perl",
+      "version": "5.22.1-1",
+      "status": "static-source-digests-verified"
+    },
+    {
+      "package": "winpty",
+      "version": "0.2.2-2",
+      "status": "static-source-digests-verified"
+    },
+    {
+      "package": "msys2-runtime",
+      "version": "2.4.1.34115.1ca92fa-1",
+      "status": "verified-static-subset"
+    }
+  ],
+  "new_primary_checksum_matches": 15,
+  "new_unverified_signature_candidates": 4,
+  "old_unchanged_noncoverage_inputs": 1284,
+  "old_runtime_inputs_relocated_to_history": 34,
+  "net_smtp_ssl_assessment": {
+    "upstream_url": "https://cpan.metacpan.org/authors/id/R/RJ/RJBS/Net-SMTP-SSL-1.02.tar.gz",
+    "source_sha256": "4e9f67f47da74de3dad36fb5b68e2154a81251c8e187218dedbf073395cf5ce9",
+    "original_upstream_build_script": "Net-SMTP-SSL-1.02/Makefile.PL",
+    "original_msys_1_02_1_recipe": "pending",
+    "binary_carrier": "out/node-r88-publish-20261011/upload/yaca-1.0.0-win32-x86-full.zip",
+    "binary_carrier_sha256": "58d9765098acc69d14d787387e580d01b2feba754dc86716af799a09349f5a01",
+    "module": "tools/git/usr/share/perl5/vendor_perl/Net/SMTP/SSL.pm",
+    "module_sha256": "3575e2a97c39de32a70f33394582c440fcd7cb89e92e53e705cca9cdc4b1c8e1",
+    "module_bytes_equal_to_upstream": true,
+    "binary_scope": "R88-only; R95 and final packages require separate checks"
+  },
+  "runtime_original_recipe": {
+    "schema": "yaca-original-runtime-recipe-v1",
+    "review_id": "R106",
+    "package": "msys2-runtime",
+    "version": "2.4.1.34115.1ca92fa-1",
+    "commit": "9e70fa03fa6286105269be0c226a31c90c315a80",
+    "files": [
+      {
+        "path": "msys2-runtime/PKGBUILD",
+        "cache_path": "gfw-legacy-recipes/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/PKGBUILD",
+        "git_blob": "6f40d82add811cd9499481f751833a94856089a9",
+        "sha256": "0409155f4a0a31c46f14c812a2c573b3c9849c3ae5d08df7ab4018e69f3916bf",
+        "bytes": 4569,
+        "origin": "https://github.com/git-for-windows/MSYS2-packages/blob/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/PKGBUILD",
+        "api_response": "out/review-20261020/r106/github/git-for-windows/MSYS2-packages/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/PKGBUILD.json"
+      },
+      {
+        "path": "msys2-runtime/0001-dcrt0.cc-Untangle-allow_glob-from-winshell.patch",
+        "cache_path": "gfw-legacy-recipes/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/0001-dcrt0.cc-Untangle-allow_glob-from-winshell.patch",
+        "git_blob": "d3266aaa86b622f3226a898276665a0302f5a019",
+        "sha256": "c8223b65d2eb744c865f6bfbbe4ad0f41ecc7ebbb0ef69a253649cf22291322a",
+        "bytes": 2972,
+        "origin": "https://github.com/git-for-windows/MSYS2-packages/blob/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/0001-dcrt0.cc-Untangle-allow_glob-from-winshell.patch",
+        "api_response": "out/review-20261020/r106/github/git-for-windows/MSYS2-packages/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/0001-dcrt0.cc-Untangle-allow_glob-from-winshell.patch.json"
+      },
+      {
+        "path": "msys2-runtime/0002-dcrt0.cc-globify-Don-t-quote-literal-strings-differe.patch",
+        "cache_path": "gfw-legacy-recipes/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/0002-dcrt0.cc-globify-Don-t-quote-literal-strings-differe.patch",
+        "git_blob": "134df2288c1c61f2c559534067104dc66ba85260",
+        "sha256": "2c38b9e013f6775acba0f5da3b67f8c7a9154bbc98bc82fb4ddc0ccd77b0405b",
+        "bytes": 2209,
+        "origin": "https://github.com/git-for-windows/MSYS2-packages/blob/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/0002-dcrt0.cc-globify-Don-t-quote-literal-strings-differe.patch",
+        "api_response": "out/review-20261020/r106/github/git-for-windows/MSYS2-packages/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/0002-dcrt0.cc-globify-Don-t-quote-literal-strings-differe.patch.json"
+      },
+      {
+        "path": "msys2-runtime/0003-strace.cc-Don-t-set-MSYS-noglob.patch",
+        "cache_path": "gfw-legacy-recipes/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/0003-strace.cc-Don-t-set-MSYS-noglob.patch",
+        "git_blob": "4e2377a16e949098397713696f2f001507e0311b",
+        "sha256": "6e2d12c91cb418ceb65ade65d5319f7cfb3662a36b0843a6e07b0fb7d0a7ea9c",
+        "bytes": 2552,
+        "origin": "https://github.com/git-for-windows/MSYS2-packages/blob/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/0003-strace.cc-Don-t-set-MSYS-noglob.patch",
+        "api_response": "out/review-20261020/r106/github/git-for-windows/MSYS2-packages/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/0003-strace.cc-Don-t-set-MSYS-noglob.patch.json"
+      },
+      {
+        "path": "msys2-runtime/0004-Add-debugging-for-build_argv.patch",
+        "cache_path": "gfw-legacy-recipes/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/0004-Add-debugging-for-build_argv.patch",
+        "git_blob": "efc3f9e6df043305b6d1ca919c3a2f3845662f42",
+        "sha256": "d15fa1ddf4d2f5d9d28c9f27df4c6465e4373dbe1c659387e603bfafeefcf059",
+        "bytes": 720,
+        "origin": "https://github.com/git-for-windows/MSYS2-packages/blob/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/0004-Add-debugging-for-build_argv.patch",
+        "api_response": "out/review-20261020/r106/github/git-for-windows/MSYS2-packages/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/0004-Add-debugging-for-build_argv.patch.json"
+      },
+      {
+        "path": "msys2-runtime/0005-Add-debugging-for-strace-make_command_line.patch",
+        "cache_path": "gfw-legacy-recipes/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/0005-Add-debugging-for-strace-make_command_line.patch",
+        "git_blob": "efb0c07f4afeb3e65aa759ca2b323eb52468e49b",
+        "sha256": "c99d91abcbbb291e7f62729cb04743cc0b23ddd640e746d247faa1cc8bf84682",
+        "bytes": 719,
+        "origin": "https://github.com/git-for-windows/MSYS2-packages/blob/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/0005-Add-debugging-for-strace-make_command_line.patch",
+        "api_response": "out/review-20261020/r106/github/git-for-windows/MSYS2-packages/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/0005-Add-debugging-for-strace-make_command_line.patch.json"
+      }
+    ],
+    "vcs_source_and_binary_correspondence": "pending"
+  },
+  "checks": {
+    "bundle": "PASS",
+    "source_admission": "PASS",
+    "coding_readiness": "PASS",
+    "product_source_changes": false,
+    "comment_inventory": {
+      "files": 273,
+      "declarations": 5801,
+      "violations": 0
+    },
+    "auxiliary_comment_inventory": {
+      "files": 19,
+      "declarations": 64,
+      "violations": 0
+    }
+  },
+  "semantic_review_scope": [
+    "candidate/member safety, primary checksum ordering and stronger immutable evidence",
+    "three public certificate exact-byte/canonical-PEM recoveries without trust changes",
+    "genuine CPAN source, original Makefile.PL and exact R88 module bytes; missing MSYS wrapper remains pending",
+    "correct five-patch runtime recipe and explicit historical relocation of stale inputs",
+    "all new helper parameters, results, failures, writes and preserved failed attempt"
+  ],
+  "source_bindings": [
+    {
+      "path": "release/windows-git32-sources.lock.json",
+      "frozen": "out/review-20261020/r106/frozen/release/windows-git32-sources.lock.json",
+      "sha256": "7e820c9276e7b7743d1d3309fe7001e52fb2efe63800ffb003b57d54a6dd8dcd",
+      "bytes": 403991
+    },
+    {
+      "path": "out/review-20261020/r102/recover_four_payloads.py",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r102/recover_four_payloads.py",
+      "sha256": "151098fb5ad9c78411dc58b4783ff696b8d5eb9d39b4309ef95149807bdaf6af",
+      "bytes": 12233
+    },
+    {
+      "path": "out/review-20261020/r104/collect_historical_inputs.py",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r104/collect_historical_inputs.py",
+      "sha256": "edc012fc64194ff7891c15af5634c8373e1c942171fe1b5c646ae94bc6e77d55",
+      "bytes": 7646
+    },
+    {
+      "path": "out/review-20261020/r105/preserve_sources.py",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r105/preserve_sources.py",
+      "sha256": "2c0cba38735b5ab7cafe6bfbf6d76611765a7f6bfa20021556ad2faee75afc65",
+      "bytes": 19511
+    },
+    {
+      "path": "out/node-r88-publish-20261011/candidates/win32-x86/editions.json",
+      "frozen": "out/review-20261020/r106/frozen/out/node-r88-publish-20261011/candidates/win32-x86/editions.json",
+      "sha256": "ef6bd797b72bee8fdfd564c752906683ca6c87206595822d446f09f785344a57",
+      "bytes": 3256520
+    },
+    {
+      "path": "out/source-cache/sources/git-win32-source-coverage-20261020-r106.json",
+      "frozen": "out/review-20261020/r106/frozen/out/source-cache/sources/git-win32-source-coverage-20261020-r106.json",
+      "sha256": "20f94d4cbf8f7c59773faaf989ed6f7c2610d6536a785272a629ba5df46eeea9",
+      "bytes": 411072
+    },
+    {
+      "path": "out/source-cache/sources/git-win32-source-recovery-20261020-r106.json",
+      "frozen": "out/review-20261020/r106/frozen/out/source-cache/sources/git-win32-source-recovery-20261020-r106.json",
+      "sha256": "6f83c8c15ce477cb57973c9069ea1f873ebf6418f87afed1b75d3cd42b14468e",
+      "bytes": 48657
+    },
+    {
+      "path": "out/review-20261020/r106/collect_runtime_recipe.py",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/collect_runtime_recipe.py",
+      "sha256": "9ba9706150da7273eb443adb75ffbdc9ec195d4c89a45eba8c4aa5ca92b3a1a7",
+      "bytes": 2990
+    },
+    {
+      "path": "out/review-20261020/r106/finish_node_sources.py",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/finish_node_sources.py",
+      "sha256": "9ee4fef8db8b0506a8e673f27c432e4660eb385d3a5edfe63bcb8d5a5361fab7",
+      "bytes": 19597
+    },
+    {
+      "path": "out/review-20261020/r106/verify_node.py",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/verify_node.py",
+      "sha256": "e9d6f9db6f65df38d281c78a25936edcc1e489906d2789c6eebb4250a3fd3566",
+      "bytes": 13524
+    },
+    {
+      "path": "out/review-20261020/r106/scan_candidates.py",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/scan_candidates.py",
+      "sha256": "32adfdcf2ca8fc2de41f90fd0f41e37f52c29be7f75abc4361bd256d67ca4645",
+      "bytes": 8606
+    },
+    {
+      "path": "out/review-20261020/r106/first-attempt/finish_node_sources.py",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/first-attempt/finish_node_sources.py",
+      "sha256": "f71205a4a5bc07da6b98cb1d2942725887c566f621ef26ee26347fbbbd71402b",
+      "bytes": 19590
+    },
+    {
+      "path": "out/review-20261020/r106/collect-runtime.log",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/collect-runtime.log",
+      "sha256": "57bd76d4569a6c9315f8559021bbce86c5b7d5036aacf25217ece7eab8eeeb91",
+      "bytes": 181
+    },
+    {
+      "path": "out/review-20261020/r106/preserve.log",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/preserve.log",
+      "sha256": "3e60ce4d28a7fa46c042c351969966077ffdadbcd1fbc6d912288c5e66565e78",
+      "bytes": 951
+    },
+    {
+      "path": "out/review-20261020/r106/preserve-final.log",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/preserve-final.log",
+      "sha256": "d24101a51f2b1aa4af3a466dec3116f9790815a5836bee593f6edfd53b22c7a2",
+      "bytes": 266
+    },
+    {
+      "path": "out/review-20261020/r106/candidate-downloads.json",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/candidate-downloads.json",
+      "sha256": "e2466258a46b4cd8a830b74384c8330ad784dae99050d465ef5ff2caba7826d1",
+      "bytes": 5632
+    },
+    {
+      "path": "out/review-20261020/r106/candidate-downloads-final.json",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/candidate-downloads-final.json",
+      "sha256": "028f8717070dfeb261ca3c93d5e44822cc47c4cb3c88b5e7d3d3a42d5fa3a1a0",
+      "bytes": 7050
+    },
+    {
+      "path": "out/review-20261020/r106/download-terminal-receipts.json",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/download-terminal-receipts.json",
+      "sha256": "0c4395cee213d88228abb139c061ae82a53faa276bc917b273888b6962a2d4e7",
+      "bytes": 14908
+    },
+    {
+      "path": "out/review-20261020/r106/candidate-scan.json",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/candidate-scan.json",
+      "sha256": "9f82e08b918d5c801cf968f6abfef9ec1646441ea8434bffdafcbb4cfc0bd2f4",
+      "bytes": 93198
+    },
+    {
+      "path": "out/review-20261020/r106/candidate-scan.log",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/candidate-scan.log",
+      "sha256": "63ed34e2a09e3b5036f11b419f7c3c417a608c8c44c36a626507b4e993af48a4",
+      "bytes": 1256
+    },
+    {
+      "path": "out/review-20261020/r106/progress-checkpoint-1.json",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/progress-checkpoint-1.json",
+      "sha256": "d66fd7ba0e672ade8194ac9e794b5b172f54178bb96e643f03b3bdd6148da6ea",
+      "bytes": 11206
+    },
+    {
+      "path": "out/review-20261020/r106/metacpan-1.02.json",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/metacpan-1.02.json",
+      "sha256": "6e570e17b1db86b60d056c20ff4bb76ca7c96db049524f34114b67d28e9189ba",
+      "bytes": 5090
+    },
+    {
+      "path": "out/review-20261020/r106/ca-snapshot-file-6a7a.json",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/ca-snapshot-file-6a7a.json",
+      "sha256": "f626a8e7c27d3100441d56f7c31d16e6504cd0713b52ccd01060bedbd1ab65ae",
+      "bytes": 226
+    },
+    {
+      "path": "out/review-20261020/r106/ca-snapshot-file-c2d7.json",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/ca-snapshot-file-c2d7.json",
+      "sha256": "dc6ead5675303a6277f6fc2fa19a3fd47f4c914d85e50b4e7bb50489327a7cb3",
+      "bytes": 231
+    },
+    {
+      "path": "out/review-20261020/r106/primary-certificate-matches.json",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/primary-certificate-matches.json",
+      "sha256": "65c68f29b39b5c16bc3868d9e2943533b80bc56606ac01f1949e933bb3c3c503",
+      "bytes": 7436
+    },
+    {
+      "path": "out/review-20261020/r106/runtime-original-recipe.json",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/runtime-original-recipe.json",
+      "sha256": "7077bd09c8aa10243f0ff4b1f47da351d34e403614d4e3ce5feffe580ea6ddcb",
+      "bytes": 4825
+    },
+    {
+      "path": "out/review-20261020/r106/runtime-recipe-history.json",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/runtime-recipe-history.json",
+      "sha256": "795b9aac311b1d7e711cb023314fdd9eb7bae1785505b8e11929f70b9acb6af9",
+      "bytes": 102780
+    },
+    {
+      "path": "out/review-20261020/r106/recovery-report.json",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/recovery-report.json",
+      "sha256": "13eae4ef418ccec0cd239750afd3ec07155c7b2b46234856c21b4737382b85e9",
+      "bytes": 48703
+    },
+    {
+      "path": "out/review-20261020/r106/windows-git32-sources.before.json",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/windows-git32-sources.before.json",
+      "sha256": "ffddbeea81e69b6fc65b12af5e62b6721e28cedfa9f78b05da305684bf87fd94",
+      "bytes": 390986
+    },
+    {
+      "path": "out/review-20261020/r106/win32-readonly-probe.log",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/win32-readonly-probe.log",
+      "sha256": "1a63828694e2033ac14476e9145b93bbacb3ba7628f5bb77fb31acca90de45c5",
+      "bytes": 39
+    },
+    {
+      "path": "out/review-20261020/r106/win64-readonly-probe.log",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/win64-readonly-probe.log",
+      "sha256": "b9922c83123b1050f0d35412fc2a84c9c225ceaf098832301a4df72037beebfe",
+      "bytes": 48
+    },
+    {
+      "path": "out/review-20261020/r106/bundle.log",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/bundle.log",
+      "sha256": "07caa1846e4a2656723f2f366d3cdf1c04c36bae3767c91a4a1b6b5e7604f66a",
+      "bytes": 202
+    },
+    {
+      "path": "out/review-20261020/r106/admission.json",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/admission.json",
+      "sha256": "8edf481bcef2619e61a75336b2a8ad1f3e842076bc661dba0f20b34e0fb6fbf2",
+      "bytes": 346
+    },
+    {
+      "path": "out/review-20261020/r106/admission.log",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/admission.log",
+      "sha256": "7079d70e219a12027d337c146aa20719dec3102a47471568632582c30096cf90",
+      "bytes": 203
+    },
+    {
+      "path": "out/review-20261020/r106/auxiliary-comment-inventory.json",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/auxiliary-comment-inventory.json",
+      "sha256": "0f0f6e5a6c2cbfdb21920841487af3f3dc53ff462a4db65ddcfaafd08b4dda45",
+      "bytes": 16460
+    },
+    {
+      "path": "out/review-20261020/r106/auxiliary-comments.log",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/auxiliary-comments.log",
+      "sha256": "fafbe5ffa55221bfb1c6eeb2a2f218d68b7b618cb97c77ea66799e4ef9eb391d",
+      "bytes": 209
+    },
+    {
+      "path": "out/review-20261020/r106/comment-inventory.json",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/comment-inventory.json",
+      "sha256": "4c75601863cd5b7cf4dc3cb93332f94faf73390660b04e8146a497cce845e681",
+      "bytes": 1297918
+    },
+    {
+      "path": "out/review-20261020/r106/comments.log",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/comments.log",
+      "sha256": "29a71d8d31d91d436f00da665e0ce2ada4540c25adee992197c85eb86a9b9d72",
+      "bytes": 211
+    },
+    {
+      "path": "out/review-20261020/r106/readiness.log",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/readiness.log",
+      "sha256": "1744c61bfb17e46aeba303ec03f71397f8e5669cb5a838fde20d759e0880c3fc",
+      "bytes": 4887
+    },
+    {
+      "path": "out/review-20261020/r106/readiness-exit.json",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/readiness-exit.json",
+      "sha256": "a65f63df3213c2a495a2751424d4444ac9a8d4fca0488b2e10241dc91c6eec42",
+      "bytes": 207
+    },
+    {
+      "path": "out/review-20261020/r106/github/git-for-windows/MSYS2-packages/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/0001-dcrt0.cc-Untangle-allow_glob-from-winshell.patch.json",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/github/git-for-windows/MSYS2-packages/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/0001-dcrt0.cc-Untangle-allow_glob-from-winshell.patch.json",
+      "sha256": "b8f5280a43e08249672ecd7c3afba4681a88956134f84a85d1002b83e47e318e",
+      "bytes": 5522
+    },
+    {
+      "path": "out/review-20261020/r106/github/git-for-windows/MSYS2-packages/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/0002-dcrt0.cc-globify-Don-t-quote-literal-strings-differe.patch.json",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/github/git-for-windows/MSYS2-packages/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/0002-dcrt0.cc-globify-Don-t-quote-literal-strings-differe.patch.json",
+      "sha256": "7c44bfb9c9a59822b62076318aa0abc3553487a86c271e1a4d887a85d2d8a31a",
+      "bytes": 4542
+    },
+    {
+      "path": "out/review-20261020/r106/github/git-for-windows/MSYS2-packages/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/0003-strace.cc-Don-t-set-MSYS-noglob.patch.json",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/github/git-for-windows/MSYS2-packages/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/0003-strace.cc-Don-t-set-MSYS-noglob.patch.json",
+      "sha256": "0c30f5c826bbbff3615f45a631500336da13185452f065da4fbde58da9d8907c",
+      "bytes": 4865
+    },
+    {
+      "path": "out/review-20261020/r106/github/git-for-windows/MSYS2-packages/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/0004-Add-debugging-for-build_argv.patch.json",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/github/git-for-windows/MSYS2-packages/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/0004-Add-debugging-for-build_argv.patch.json",
+      "sha256": "fb99e7dfe8d1d15c0cb46c7d7c023d3e33c01a580a22da1989905720aaac9e2f",
+      "bytes": 2317
+    },
+    {
+      "path": "out/review-20261020/r106/github/git-for-windows/MSYS2-packages/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/0005-Add-debugging-for-strace-make_command_line.patch.json",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/github/git-for-windows/MSYS2-packages/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/0005-Add-debugging-for-strace-make_command_line.patch.json",
+      "sha256": "f49746b9553bb02b83b7b88c7ca752a7b341c9fe2da5d81718d0df89fd145e67",
+      "bytes": 2415
+    },
+    {
+      "path": "out/review-20261020/r106/github/git-for-windows/MSYS2-packages/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/PKGBUILD.json",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/github/git-for-windows/MSYS2-packages/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/PKGBUILD.json",
+      "sha256": "68b508caf3638f1d680a58ef2349f3a69ec846f4c394cb1692428572cabc4590",
+      "bytes": 7405
+    },
+    {
+      "path": "out/review-20261020/r106/recovered-certificates/class3.crt",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/recovered-certificates/class3.crt",
+      "sha256": "f5badaa5da1cc05b110a9492455a2c2790d00c7175dcf3a7bcb5441af71bf84f",
+      "bytes": 2610
+    },
+    {
+      "path": "out/review-20261020/r106/recovered-certificates/root.crt",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/recovered-certificates/root.crt",
+      "sha256": "c0e0773a79dceb622ef6410577c19c1e177fb2eb9c623a49340de3c9f1de2560",
+      "bytes": 2569
+    },
+    {
+      "path": "out/review-20261020/r106/recovered-certificates/sub.class1.server.ca.pem",
+      "frozen": "out/review-20261020/r106/frozen/out/review-20261020/r106/recovered-certificates/sub.class1.server.ca.pem",
+      "sha256": "4eed32f02c1321685e08a06e104d69aa69bb5f1e2e9c251dc8d7e0b4c6e24a5e",
+      "bytes": 2090
+    }
+  ],
+  "remaining": [
+    "Net-SMTP-SSL 1.02-1 original MSYS recipe",
+    "wineditline original archive",
+    "runtime VCS/patch/base-to-binary correspondence",
+    "GCM dependencies and binary/source correspondence",
+    "detached signatures, key expiry and revocation freshness",
+    "whole-repository semantic review",
+    "C32/C33/C34 final nine-package qualification and independent Gate R review"
+  ]
+}

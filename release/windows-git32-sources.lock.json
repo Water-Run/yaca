@@ -12,9 +12,9 @@
     "coverage_member": "SOURCE-COVERAGE.json",
     "historical_status_member": "history/R95-SOURCE-STATUS.json",
     "scope": "Original pinned legacy recipe and source inputs with current per-member recovery; unresolved source, signature and binary correspondence remain pending",
-    "last_recovery_review": "R105",
-    "static_digest_verified_versions": 105,
-    "verified_static_subset_versions": 15
+    "last_recovery_review": "R106",
+    "static_digest_verified_versions": 117,
+    "verified_static_subset_versions": 3
   },
   "inputs": [
     {
@@ -1704,142 +1704,142 @@
     },
     {
       "path": "gfw-legacy-recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0001-Add-MSYS-triplets.patch",
-      "destination": "recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0001-Add-MSYS-triplets.patch",
+      "destination": "history/R105-rejected-runtime/recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0001-Add-MSYS-triplets.patch",
       "sha256": "7b24f901bddfb4b92ed2982d8608e8a9fdd1d2e523ae028115b5f5e8d710fea4"
     },
     {
       "path": "gfw-legacy-recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0002-Rename-DLL-from-cygwin-to-msys.patch",
-      "destination": "recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0002-Rename-DLL-from-cygwin-to-msys.patch",
+      "destination": "history/R105-rejected-runtime/recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0002-Rename-DLL-from-cygwin-to-msys.patch",
       "sha256": "2683c45d3d964c55738dc65c9897fe6b8344ba20ead4102c432c46e382923625"
     },
     {
       "path": "gfw-legacy-recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0003-Add-functionality-for-converting-UNIX-paths-in-argum.patch",
-      "destination": "recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0003-Add-functionality-for-converting-UNIX-paths-in-argum.patch",
+      "destination": "history/R105-rejected-runtime/recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0003-Add-functionality-for-converting-UNIX-paths-in-argum.patch",
       "sha256": "c335d965acc3d632f95ebabd68b1ccd29f09bc4de0be7b9eb5e8f51092a7512c"
     },
     {
       "path": "gfw-legacy-recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0004-Add-functionality-for-changing-OS-name-via-MSYSTEM-e.patch",
-      "destination": "recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0004-Add-functionality-for-changing-OS-name-via-MSYSTEM-e.patch",
+      "destination": "history/R105-rejected-runtime/recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0004-Add-functionality-for-changing-OS-name-via-MSYSTEM-e.patch",
       "sha256": "aee9c77565bb076d8641f2bbf83020ead6dc5a5407489592718ea1bff9c17dba"
     },
     {
       "path": "gfw-legacy-recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0005-Move-root-to-usr.-Change-sorting-mount-points.-Do-no.patch",
-      "destination": "recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0005-Move-root-to-usr.-Change-sorting-mount-points.-Do-no.patch",
+      "destination": "history/R105-rejected-runtime/recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0005-Move-root-to-usr.-Change-sorting-mount-points.-Do-no.patch",
       "sha256": "58ca67dc53b65075679f518915854590b5c14572b7b27824251d06675fd434fe"
     },
     {
       "path": "gfw-legacy-recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0006-Do-not-create-cygwin-symlinks.-Instead-use-deep-copy.patch",
-      "destination": "recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0006-Do-not-create-cygwin-symlinks.-Instead-use-deep-copy.patch",
+      "destination": "history/R105-rejected-runtime/recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0006-Do-not-create-cygwin-symlinks.-Instead-use-deep-copy.patch",
       "sha256": "0fc81a9ebb06f1b445d1feaab5cad47f8d2dc9194cc4e8a089a995b00cfdc24b"
     },
     {
       "path": "gfw-legacy-recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0007-Automatically-rewrite-TERM-msys-to-TERM-cygwin.patch",
-      "destination": "recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0007-Automatically-rewrite-TERM-msys-to-TERM-cygwin.patch",
+      "destination": "history/R105-rejected-runtime/recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0007-Automatically-rewrite-TERM-msys-to-TERM-cygwin.patch",
       "sha256": "7b4f1f59a1c872b453234320d1d4e4d9f232530c2c97e41016fdcd294f5cc1ae"
     },
     {
       "path": "gfw-legacy-recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0008-Do-not-convert-environment-for-strace.patch",
-      "destination": "recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0008-Do-not-convert-environment-for-strace.patch",
+      "destination": "history/R105-rejected-runtime/recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0008-Do-not-convert-environment-for-strace.patch",
       "sha256": "d874063ea8aa51fb63f3329daa101f16b388f9efa64495375aa353bbd6a51106"
     },
     {
       "path": "gfw-legacy-recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0009-convert-be-more-careful-to-stay-within-the-buffer.patch",
-      "destination": "recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0009-convert-be-more-careful-to-stay-within-the-buffer.patch",
+      "destination": "history/R105-rejected-runtime/recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0009-convert-be-more-careful-to-stay-within-the-buffer.patch",
       "sha256": "769399c63146d0d49ffbf8e6fbd6b79cea9e82f9268cf134ce6599819821f424"
     },
     {
       "path": "gfw-legacy-recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0010-convert-check-safely-whether-we-could-allocate-the-b.patch",
-      "destination": "recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0010-convert-check-safely-whether-we-could-allocate-the-b.patch",
+      "destination": "history/R105-rejected-runtime/recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0010-convert-check-safely-whether-we-could-allocate-the-b.patch",
       "sha256": "2ca7d7269f07722a631ddea0f60146fb93c1003449f0287f73ecaa34572f3c81"
     },
     {
       "path": "gfw-legacy-recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0011-convert-use-the-elegant-realloc-call.patch",
-      "destination": "recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0011-convert-use-the-elegant-realloc-call.patch",
+      "destination": "history/R105-rejected-runtime/recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0011-convert-use-the-elegant-realloc-call.patch",
       "sha256": "c441aaac174f5f1511381aac687cc70d5923ad5e78f98951c010d1afef1cc630"
     },
     {
       "path": "gfw-legacy-recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0012-convert-plug-potential-memory-leak.patch",
-      "destination": "recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0012-convert-plug-potential-memory-leak.patch",
+      "destination": "history/R105-rejected-runtime/recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0012-convert-plug-potential-memory-leak.patch",
       "sha256": "f8d7975f56d1c1ca25492ba2c3283c225d7df4508d508f776463080f0d4a084d"
     },
     {
       "path": "gfw-legacy-recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0013-convert-warn-when-we-cut-off-a-path.patch",
-      "destination": "recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0013-convert-warn-when-we-cut-off-a-path.patch",
+      "destination": "history/R105-rejected-runtime/recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0013-convert-warn-when-we-cut-off-a-path.patch",
       "sha256": "d3ab995ac5141f38fc228800b0ef867428775df789cd6ea242ef790ccabe6f0e"
     },
     {
       "path": "gfw-legacy-recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0014-arg_heuristic-be-better-prepared-to-handle-path-list.patch",
-      "destination": "recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0014-arg_heuristic-be-better-prepared-to-handle-path-list.patch",
+      "destination": "history/R105-rejected-runtime/recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0014-arg_heuristic-be-better-prepared-to-handle-path-list.patch",
       "sha256": "05e5305a4562ade558efa572176fa2632ac8a0b8c1680c904f3fcc4e900f6604"
     },
     {
       "path": "gfw-legacy-recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0015-Fix-converting-argument-looks-like-DVAR-str1-c-path1.patch",
-      "destination": "recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0015-Fix-converting-argument-looks-like-DVAR-str1-c-path1.patch",
+      "destination": "history/R105-rejected-runtime/recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0015-Fix-converting-argument-looks-like-DVAR-str1-c-path1.patch",
       "sha256": "0995138d7311f5515fcb33524747960624cadb2f22f8059b99f3ad5b95e0917c"
     },
     {
       "path": "gfw-legacy-recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0016-Special-case-for-converting-root-directory-to-have-t.patch",
-      "destination": "recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0016-Special-case-for-converting-root-directory-to-have-t.patch",
+      "destination": "history/R105-rejected-runtime/recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0016-Special-case-for-converting-root-directory-to-have-t.patch",
       "sha256": "4ed24fcd8a4d0ac4961da8707a357ec7021d8c0c0638c83fa2734b764c897d28"
     },
     {
       "path": "gfw-legacy-recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0017-dcrt0.cc-Untangle-allow_glob-from-winshell.patch",
-      "destination": "recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0017-dcrt0.cc-Untangle-allow_glob-from-winshell.patch",
+      "destination": "history/R105-rejected-runtime/recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0017-dcrt0.cc-Untangle-allow_glob-from-winshell.patch",
       "sha256": "43a02d7c85c55e4b9abbfb0e3ffe7512eefacd4420e42686efa5ba6705a53d7b"
     },
     {
       "path": "gfw-legacy-recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0018-dcrt0.cc-globify-Don-t-quote-literal-strings-differe.patch",
-      "destination": "recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0018-dcrt0.cc-globify-Don-t-quote-literal-strings-differe.patch",
+      "destination": "history/R105-rejected-runtime/recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0018-dcrt0.cc-globify-Don-t-quote-literal-strings-differe.patch",
       "sha256": "acb7bb895dc93eb4cbec81d9026b63f35dbf954093f9507629a5a8e0274aae63"
     },
     {
       "path": "gfw-legacy-recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0019-strace.cc-Don-t-set-MSYS-noglob.patch",
-      "destination": "recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0019-strace.cc-Don-t-set-MSYS-noglob.patch",
+      "destination": "history/R105-rejected-runtime/recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0019-strace.cc-Don-t-set-MSYS-noglob.patch",
       "sha256": "90d9f051cd13d1ec9c6d23adda9eed28f3219da59378d98fc9e2f0cb8de7ad48"
     },
     {
       "path": "gfw-legacy-recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0020-Add-debugging-for-build_argv.patch",
-      "destination": "recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0020-Add-debugging-for-build_argv.patch",
+      "destination": "history/R105-rejected-runtime/recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0020-Add-debugging-for-build_argv.patch",
       "sha256": "fc067fe6bb2d7d15909e41c1982fed7ebb1d2e3622acd277dbdadfc64beaa4ad"
     },
     {
       "path": "gfw-legacy-recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0021-Add-debugging-for-strace-make_command_line.patch",
-      "destination": "recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0021-Add-debugging-for-strace-make_command_line.patch",
+      "destination": "history/R105-rejected-runtime/recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0021-Add-debugging-for-strace-make_command_line.patch",
       "sha256": "fd2731afc3b6ff3d9e870e5b0a582280eeb1a1ed7bbfe944c15299112bd2eb21"
     },
     {
       "path": "gfw-legacy-recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0022-environ.cc-New-facility-environment-variable-MSYS2_E.patch",
-      "destination": "recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0022-environ.cc-New-facility-environment-variable-MSYS2_E.patch",
+      "destination": "history/R105-rejected-runtime/recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0022-environ.cc-New-facility-environment-variable-MSYS2_E.patch",
       "sha256": "673680ee81c15a5750c3c56bf8803cfa4f4bd698d0b875d8e1a5d9362e4ce865"
     },
     {
       "path": "gfw-legacy-recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0023-path.cc-Ignore-zero-length-exclusions.patch",
-      "destination": "recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0023-path.cc-Ignore-zero-length-exclusions.patch",
+      "destination": "history/R105-rejected-runtime/recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0023-path.cc-Ignore-zero-length-exclusions.patch",
       "sha256": "8e3fdcd9c6914e5edbe415b164321ff588ec2f1259772e633629314c30eac6b7"
     },
     {
       "path": "gfw-legacy-recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0024-machine-_types.h-__blkcnt_t-should-be-signed.patch",
-      "destination": "recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0024-machine-_types.h-__blkcnt_t-should-be-signed.patch",
+      "destination": "history/R105-rejected-runtime/recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/0024-machine-_types.h-__blkcnt_t-should-be-signed.patch",
       "sha256": "671401f0a26c53edc2b72dc9e87cf72780f64bffe3a3465f8c7c4b6760dab192"
     },
     {
       "path": "gfw-legacy-recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/PKGBUILD",
-      "destination": "recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/PKGBUILD",
+      "destination": "history/R105-rejected-runtime/recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/PKGBUILD",
       "sha256": "ea111b71d21520c2cc367097a482cce65f0c1a31be658e42f159a902b2813a76"
     },
     {
       "path": "gfw-legacy-recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/tests/do_new.bat",
-      "destination": "recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/tests/do_new.bat",
+      "destination": "history/R105-rejected-runtime/recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/tests/do_new.bat",
       "sha256": "32d2f27e32e081c5923123c3288e80576f6ad5b25704495cab1b742e4fd6e167"
     },
     {
       "path": "gfw-legacy-recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/tests/do_new2.bat",
-      "destination": "recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/tests/do_new2.bat",
+      "destination": "history/R105-rejected-runtime/recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/tests/do_new2.bat",
       "sha256": "c816ded79271ff915f91a21b097dcdedb0f3538836046a9779edd576386e64dc"
     },
     {
       "path": "gfw-legacy-recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/tests/do_old.bat",
-      "destination": "recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/tests/do_old.bat",
+      "destination": "history/R105-rejected-runtime/recipes/95bd0912869f471920270560b867abb82226e8b3/msys2-runtime/tests/do_old.bat",
       "sha256": "37aa8e540b12414872710f6cc5d83537b3712fd0c50ece4c079dd88addc019c2"
     },
     {
@@ -5448,9 +5448,9 @@
       "sha256": "11390c74733abcb262aaca4db68710f13ffffd42bfe2a0861a5dfc912b2977e5"
     },
     {
-      "path": "sources/git-win32-source-coverage-20261020-r105.json",
+      "path": "sources/git-win32-source-coverage-20261020-r106.json",
       "destination": "SOURCE-COVERAGE.json",
-      "sha256": "b6dd5a621f2be906292232f803adba24f58d3b8cc8f8431b78266b2dd1063637"
+      "sha256": "20f94d4cbf8f7c59773faaf989ed6f7c2610d6536a785272a629ba5df46eeea9"
     },
     {
       "path": "sources/git-win32-x86-source-status-20261013.json",
@@ -6124,32 +6124,32 @@
     },
     {
       "path": "gfw-legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/0001-dcrt0.cc-Untangle-allow_glob-from-winshell.patch",
-      "destination": "legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/0001-dcrt0.cc-Untangle-allow_glob-from-winshell.patch",
+      "destination": "history/R105-rejected-runtime/legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/0001-dcrt0.cc-Untangle-allow_glob-from-winshell.patch",
       "sha256": "c251eb8d21ed8e58e10694054c93386d274457f9b7d4b23d38cdd220f2f6c6f1"
     },
     {
       "path": "gfw-legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/0002-dcrt0.cc-globify-Don-t-quote-literal-strings-differe.patch",
-      "destination": "legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/0002-dcrt0.cc-globify-Don-t-quote-literal-strings-differe.patch",
+      "destination": "history/R105-rejected-runtime/legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/0002-dcrt0.cc-globify-Don-t-quote-literal-strings-differe.patch",
       "sha256": "912e4ce0093d7c7f0004f15268c580023099586e592d761b0f5a0dcb21cb738a"
     },
     {
       "path": "gfw-legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/0003-strace.cc-Don-t-set-MSYS-noglob.patch",
-      "destination": "legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/0003-strace.cc-Don-t-set-MSYS-noglob.patch",
+      "destination": "history/R105-rejected-runtime/legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/0003-strace.cc-Don-t-set-MSYS-noglob.patch",
       "sha256": "4a863a45930318f4652ddc0fc912acdaa63c3a6385ed94020e8b20f4cf60f50f"
     },
     {
       "path": "gfw-legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/0004-Add-debugging-for-build_argv.patch",
-      "destination": "legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/0004-Add-debugging-for-build_argv.patch",
+      "destination": "history/R105-rejected-runtime/legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/0004-Add-debugging-for-build_argv.patch",
       "sha256": "62f9c63bde5f5212f99827c6e4d9392d98a82b3654cd7328590b575f799fa72b"
     },
     {
       "path": "gfw-legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/0005-Add-debugging-for-strace-make_command_line.patch",
-      "destination": "legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/0005-Add-debugging-for-strace-make_command_line.patch",
+      "destination": "history/R105-rejected-runtime/legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/0005-Add-debugging-for-strace-make_command_line.patch",
       "sha256": "8d5b30d417deacadd2130fc4a9ed172e3e04b111d2159bef4b42f32073e0cc27"
     },
     {
       "path": "gfw-legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/0006-environ.cc-New-facility-environment-variable-MSYS2_E.patch",
-      "destination": "legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/0006-environ.cc-New-facility-environment-variable-MSYS2_E.patch",
+      "destination": "history/R105-rejected-runtime/legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/0006-environ.cc-New-facility-environment-variable-MSYS2_E.patch",
       "sha256": "500757c316e51e5d71c9e4aef959ed222c9225bf59b9eb4a606ca2b73aa3df5b"
     },
     {
@@ -6611,6 +6611,216 @@
       "path": "sources/git-win32-source-coverage-20261020-r104.json",
       "destination": "history/R104-SOURCE-COVERAGE.json",
       "sha256": "aefd9a13255a0e8ee0f4125f826c02bd00dc1718ae06c7db0883f747d24ef470"
+    },
+    {
+      "path": "gfw-legacy-payloads/ca-certificates-20150426-1/ca-certificates_20150426.tar.xz",
+      "destination": "legacy-payloads/ca-certificates-20150426-1/ca-certificates_20150426.tar.xz",
+      "sha256": "37dbaa93ed64cc4ae93ac295f9248fbc741bd51376438cfb1257f17efab5494f"
+    },
+    {
+      "path": "gfw-legacy-payloads/ca-certificates-20150426-1/root.crt",
+      "destination": "legacy-payloads/ca-certificates-20150426-1/root.crt",
+      "sha256": "c0e0773a79dceb622ef6410577c19c1e177fb2eb9c623a49340de3c9f1de2560"
+    },
+    {
+      "path": "gfw-legacy-payloads/ca-certificates-20150426-1/class3.crt",
+      "destination": "legacy-payloads/ca-certificates-20150426-1/class3.crt",
+      "sha256": "f5badaa5da1cc05b110a9492455a2c2790d00c7175dcf3a7bcb5441af71bf84f"
+    },
+    {
+      "path": "gfw-legacy-payloads/ca-certificates-20150426-1/sub.class1.server.ca.pem",
+      "destination": "legacy-payloads/ca-certificates-20150426-1/sub.class1.server.ca.pem",
+      "sha256": "4eed32f02c1321685e08a06e104d69aa69bb5f1e2e9c251dc8d7e0b4c6e24a5e"
+    },
+    {
+      "path": "gfw-legacy-payloads/dos2unix-7.3.4-1/dos2unix-7.3.4-msys2.patch",
+      "destination": "legacy-payloads/dos2unix-7.3.4-1/dos2unix-7.3.4-msys2.patch",
+      "sha256": "103d99896fd87d00871097b36ed80ba4e0fc9bf0f158e1d53a63c9f05a339bcb"
+    },
+    {
+      "path": "gfw-legacy-payloads/heimdal-1.5.3-9/heimdal-1.5.3.tar.gz",
+      "destination": "legacy-payloads/heimdal-1.5.3-9/heimdal-1.5.3.tar.gz",
+      "sha256": "aac27bedb33c341b6aed202af07ccc816146a893148721f8123abbbf93bbfea5"
+    },
+    {
+      "path": "gfw-legacy-payloads/cyrus-sasl-2.1.26-8/cyrus-sasl-2.1.26.tar.gz",
+      "destination": "legacy-payloads/cyrus-sasl-2.1.26-8/cyrus-sasl-2.1.26.tar.gz",
+      "sha256": "8fbc5136512b59bb793657f36fadda6359cae3b08f01fd16b3d406f1345b7bc3"
+    },
+    {
+      "path": "gfw-legacy-payloads/mingw-w64-i686-antiword-0.37-2/antiword-0.37.tar.gz",
+      "destination": "legacy-payloads/mingw-w64-i686-antiword-0.37-2/antiword-0.37.tar.gz",
+      "sha256": "8e2c000fcbc6d641b0e6ff95e13c846da3ff31097801e86702124a206888f5ac"
+    },
+    {
+      "path": "gfw-legacy-payloads/mingw-w64-i686-ca-certificates-20150426-2/ca-certificates_20150426.tar.xz",
+      "destination": "legacy-payloads/mingw-w64-i686-ca-certificates-20150426-2/ca-certificates_20150426.tar.xz",
+      "sha256": "37dbaa93ed64cc4ae93ac295f9248fbc741bd51376438cfb1257f17efab5494f"
+    },
+    {
+      "path": "gfw-legacy-payloads/mingw-w64-i686-ca-certificates-20150426-2/sub.class1.server.ca.pem",
+      "destination": "legacy-payloads/mingw-w64-i686-ca-certificates-20150426-2/sub.class1.server.ca.pem",
+      "sha256": "4eed32f02c1321685e08a06e104d69aa69bb5f1e2e9c251dc8d7e0b4c6e24a5e"
+    },
+    {
+      "path": "gfw-legacy-payloads/mingw-w64-i686-c-ares-1.11.0-1/c-ares-1.11.0.tar.gz",
+      "destination": "legacy-payloads/mingw-w64-i686-c-ares-1.11.0-1/c-ares-1.11.0.tar.gz",
+      "sha256": "b3612e6617d9682928a1d50c1040de4db6519f977f0b25d40cf1b632900b3efd"
+    },
+    {
+      "path": "gfw-legacy-payloads/mingw-w64-i686-c-ares-1.11.0-1/c-ares-1.11.0.tar.gz.asc",
+      "destination": "legacy-payloads/mingw-w64-i686-c-ares-1.11.0-1/c-ares-1.11.0.tar.gz.asc",
+      "sha256": "2a9f33aecf98427c671e30e724228ef29061607f95a2949791b65566ce393af4"
+    },
+    {
+      "path": "gfw-legacy-payloads/mingw-w64-i686-gnutls-3.5.2-1/gnutls-3.5.2.tar.xz.sig",
+      "destination": "legacy-payloads/mingw-w64-i686-gnutls-3.5.2-1/gnutls-3.5.2.tar.xz.sig",
+      "sha256": "165f2ad2a1d01093c8ff2dc26a8a564bf26bbef3665474a463a44500a4b44a4f"
+    },
+    {
+      "path": "gfw-legacy-payloads/mingw-w64-i686-p11-kit-0.23.2-2/p11-kit-0.23.2.tar.gz",
+      "destination": "legacy-payloads/mingw-w64-i686-p11-kit-0.23.2-2/p11-kit-0.23.2.tar.gz",
+      "sha256": "ba726ea8303c97467a33fca50ee79b7b35212964be808ecf9b145e9042fdfaf0"
+    },
+    {
+      "path": "gfw-legacy-payloads/mingw-w64-i686-p11-kit-0.23.2-2/p11-kit-0.23.2.tar.gz.sig",
+      "destination": "legacy-payloads/mingw-w64-i686-p11-kit-0.23.2-2/p11-kit-0.23.2.tar.gz.sig",
+      "sha256": "dd99933c7edf465dae437a45316fa50e0fd5ab006de11a893e735aeb8d136e52"
+    },
+    {
+      "path": "gfw-legacy-payloads/p11-kit-0.23.2-1/p11-kit-0.23.2.tar.gz",
+      "destination": "legacy-payloads/p11-kit-0.23.2-1/p11-kit-0.23.2.tar.gz",
+      "sha256": "ba726ea8303c97467a33fca50ee79b7b35212964be808ecf9b145e9042fdfaf0"
+    },
+    {
+      "path": "gfw-legacy-payloads/p11-kit-0.23.2-1/p11-kit-0.23.2.tar.gz.sig",
+      "destination": "legacy-payloads/p11-kit-0.23.2-1/p11-kit-0.23.2.tar.gz.sig",
+      "sha256": "dd99933c7edf465dae437a45316fa50e0fd5ab006de11a893e735aeb8d136e52"
+    },
+    {
+      "path": "gfw-legacy-payloads/perl-5.22.1-1/perl-5.22.1.tar.bz2",
+      "destination": "legacy-payloads/perl-5.22.1-1/perl-5.22.1.tar.bz2",
+      "sha256": "e98e4075a3167fa40524abe447c30bcca10c60e02a54ee1361eff278947a1221"
+    },
+    {
+      "path": "gfw-legacy-payloads/winpty-0.2.2-2/path_conv.cpp",
+      "destination": "legacy-payloads/winpty-0.2.2-2/path_conv.cpp",
+      "sha256": "7181d260592dc193f235965f202a5509b113d8b478efae3f06176b8625b683cc"
+    },
+    {
+      "path": "gfw-legacy-recipes/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/PKGBUILD",
+      "destination": "recipes/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/PKGBUILD",
+      "sha256": "0409155f4a0a31c46f14c812a2c573b3c9849c3ae5d08df7ab4018e69f3916bf"
+    },
+    {
+      "path": "gfw-legacy-recipes/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/0001-dcrt0.cc-Untangle-allow_glob-from-winshell.patch",
+      "destination": "recipes/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/0001-dcrt0.cc-Untangle-allow_glob-from-winshell.patch",
+      "sha256": "c8223b65d2eb744c865f6bfbbe4ad0f41ecc7ebbb0ef69a253649cf22291322a"
+    },
+    {
+      "path": "gfw-legacy-recipes/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/0002-dcrt0.cc-globify-Don-t-quote-literal-strings-differe.patch",
+      "destination": "recipes/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/0002-dcrt0.cc-globify-Don-t-quote-literal-strings-differe.patch",
+      "sha256": "2c38b9e013f6775acba0f5da3b67f8c7a9154bbc98bc82fb4ddc0ccd77b0405b"
+    },
+    {
+      "path": "gfw-legacy-recipes/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/0003-strace.cc-Don-t-set-MSYS-noglob.patch",
+      "destination": "recipes/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/0003-strace.cc-Don-t-set-MSYS-noglob.patch",
+      "sha256": "6e2d12c91cb418ceb65ade65d5319f7cfb3662a36b0843a6e07b0fb7d0a7ea9c"
+    },
+    {
+      "path": "gfw-legacy-recipes/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/0004-Add-debugging-for-build_argv.patch",
+      "destination": "recipes/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/0004-Add-debugging-for-build_argv.patch",
+      "sha256": "d15fa1ddf4d2f5d9d28c9f27df4c6465e4373dbe1c659387e603bfafeefcf059"
+    },
+    {
+      "path": "gfw-legacy-recipes/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/0005-Add-debugging-for-strace-make_command_line.patch",
+      "destination": "recipes/9e70fa03fa6286105269be0c226a31c90c315a80/msys2-runtime/0005-Add-debugging-for-strace-make_command_line.patch",
+      "sha256": "c99d91abcbbb291e7f62729cb04743cc0b23ddd640e746d247faa1cc8bf84682"
+    },
+    {
+      "path": "gfw-legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/r106-original/0001-dcrt0.cc-Untangle-allow_glob-from-winshell.patch",
+      "destination": "legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/0001-dcrt0.cc-Untangle-allow_glob-from-winshell.patch",
+      "sha256": "c8223b65d2eb744c865f6bfbbe4ad0f41ecc7ebbb0ef69a253649cf22291322a"
+    },
+    {
+      "path": "gfw-legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/r106-original/0002-dcrt0.cc-globify-Don-t-quote-literal-strings-differe.patch",
+      "destination": "legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/0002-dcrt0.cc-globify-Don-t-quote-literal-strings-differe.patch",
+      "sha256": "2c38b9e013f6775acba0f5da3b67f8c7a9154bbc98bc82fb4ddc0ccd77b0405b"
+    },
+    {
+      "path": "gfw-legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/r106-original/0003-strace.cc-Don-t-set-MSYS-noglob.patch",
+      "destination": "legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/0003-strace.cc-Don-t-set-MSYS-noglob.patch",
+      "sha256": "6e2d12c91cb418ceb65ade65d5319f7cfb3662a36b0843a6e07b0fb7d0a7ea9c"
+    },
+    {
+      "path": "gfw-legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/r106-original/0004-Add-debugging-for-build_argv.patch",
+      "destination": "legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/0004-Add-debugging-for-build_argv.patch",
+      "sha256": "d15fa1ddf4d2f5d9d28c9f27df4c6465e4373dbe1c659387e603bfafeefcf059"
+    },
+    {
+      "path": "gfw-legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/r106-original/0005-Add-debugging-for-strace-make_command_line.patch",
+      "destination": "legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/0005-Add-debugging-for-strace-make_command_line.patch",
+      "sha256": "c99d91abcbbb291e7f62729cb04743cc0b23ddd640e746d247faa1cc8bf84682"
+    },
+    {
+      "path": "gfw-legacy-upstream/Net-SMTP-SSL-1.02/source.tar.gz",
+      "destination": "upstream/Net-SMTP-SSL-1.02/source.tar.gz",
+      "sha256": "4e9f67f47da74de3dad36fb5b68e2154a81251c8e187218dedbf073395cf5ce9"
+    },
+    {
+      "path": "gfw-legacy-source-containers/cyrus-sasl-2.1.26-8.src.tar.gz",
+      "destination": "source-containers/cyrus-sasl-2.1.26-8.src.tar.gz",
+      "sha256": "bd10e42006d6bd10ee675776871641280f05b58f7cc96afd345b01c73ba7eb89"
+    },
+    {
+      "path": "gfw-legacy-source-containers/dos2unix-7.3.4-1.src.tar.gz",
+      "destination": "source-containers/dos2unix-7.3.4-1.src.tar.gz",
+      "sha256": "1736d985f9ffdaf0bce9748b8b958c135cef6303e43031d606c3ae6a3d83b2e2"
+    },
+    {
+      "path": "gfw-legacy-source-containers/heimdal-1.5.3-9.src.tar.gz",
+      "destination": "source-containers/heimdal-1.5.3-9.src.tar.gz",
+      "sha256": "2f43243aa793ae32219f59d92956c7496f10c4780aabedaf97efb2f359df53b4"
+    },
+    {
+      "path": "gfw-legacy-source-containers/mingw-w64-antiword-0.37-2.src.tar.gz",
+      "destination": "source-containers/mingw-w64-antiword-0.37-2.src.tar.gz",
+      "sha256": "86a5e95f918ae6cabfe9ed27a89bc3f62d215cf06b1ec1b36c9b0c3cbb0601dc"
+    },
+    {
+      "path": "gfw-legacy-source-containers/mingw-w64-c-ares-1.11.0-1.src.tar.gz",
+      "destination": "source-containers/mingw-w64-c-ares-1.11.0-1.src.tar.gz",
+      "sha256": "2d9a5ab90db6ef8a01ca959afa1dd90524548fed1c41c97e51ce06d6ab0a40f7"
+    },
+    {
+      "path": "gfw-legacy-source-containers/mingw-w64-gnutls-3.5.2-1.src.tar.gz",
+      "destination": "source-containers/mingw-w64-gnutls-3.5.2-1.src.tar.gz",
+      "sha256": "940905e6221d45136c09f1ea493b02c5a6f4124c3875bbdc2c422253a9761bd7"
+    },
+    {
+      "path": "gfw-legacy-source-containers/p11-kit-0.23.2-1.src.tar.gz",
+      "destination": "source-containers/p11-kit-0.23.2-1.src.tar.gz",
+      "sha256": "8189ee2f30bcb8c907825747f33924a649d5fd2576d9237bba7167556197e2bf"
+    },
+    {
+      "path": "gfw-legacy-source-containers/perl-5.22.1-1.src.tar.gz",
+      "destination": "source-containers/perl-5.22.1-1.src.tar.gz",
+      "sha256": "b6ffed0627571b6fa67068b1b419f0ffa19c0069f9cda992a062759471506ee4"
+    },
+    {
+      "path": "gfw-legacy-source-containers/winpty-0.2.2-2.src.tar.gz",
+      "destination": "source-containers/winpty-0.2.2-2.src.tar.gz",
+      "sha256": "014908321d3e96f9102f028d77052d206d859850f06af692dc30e07decef548a"
+    },
+    {
+      "path": "sources/git-win32-source-coverage-20261020-r105.json",
+      "destination": "history/R105-SOURCE-COVERAGE.json",
+      "sha256": "b6dd5a621f2be906292232f803adba24f58d3b8cc8f8431b78266b2dd1063637"
+    },
+    {
+      "path": "sources/git-win32-source-recovery-20261020-r106.json",
+      "destination": "SOURCE-RECOVERY-R106.json",
+      "sha256": "6f83c8c15ce477cb57973c9069ea1f873ebf6418f87afed1b75d3cd42b14468e"
     }
   ]
 }
