@@ -1,12 +1,13 @@
 # 开发历程与历史资料
 
-整理日期：2026-10-15。当前实现看 [CURRENT-STATE.md](CURRENT-STATE.md)，
+整理日期：2026-10-20。当前实现看 [CURRENT-STATE.md](CURRENT-STATE.md)，
 剩余工作看 [TRACKING.md](TRACKING.md)。本页只导航已有工作和证据。
 
 ## 已完成工作的脉络
 
 | 时间 / 节点 | 主要成果 | 证据与适用范围 |
 | --- | --- | --- |
+| 2026-10-20，R101 密钥状态核对 | 从 R100 恢复，补真实过期主密钥/子密钥、撤销证书回归；来源验签增加隔离离线 gpg 状态检查，专项 9/9、完整 readiness、结构 273/5798/0 通过 | [本日 Review](CODE-REVIEW-2026-10-20.md)；实际 18 项密码学签名通过，10 项固定公钥状态通过、8 项过期；来源与资格保留，按 D-093 继续 |
 | 2026-10-15，R100 恢复资料与开发交付 | 保存 Win32 1088 成员来源锁与 1168 份公开缓存；修复无执行位的守卫调用，独立 clone/pull 初始化、735/735、完整 readiness 及离线 bundle 检出通过；8 附件已公开且远端摘要一致 | [开发交接](DEVELOPMENT-HANDOFF-2026-10-15.md)、[R100](tool-source-review/R100.json)、[发布回执](candidates/1.0.0-preview.20261015-publication.json)；273/5791/0，来源状态 partial，正式资格保留；按 D-092 收尾后暂停 |
 | 2026-10-15，R98/R99 发布与验签 | 修复来源档案原子发布、占用链接和 MSYS GnuPG 路径；18 项实际验签，605 成员来源档案；跨平台公开夹具与维护校验工具 | [本日 Review](CODE-REVIEW-2026-10-15.md)、[R98](tool-source-review/R98.json)、[R99](tool-source-review/R99.json)；来源发布两宿主各 14/14、验签各 5/5；来源状态 partial，继续按 D-091 推进 |
 | 2026-10-14，R97 原始输入恢复与收尾 | 恢复首轮 10 个整包来源输入缺项，两份原 VCS tar 摘要匹配；新 Win64 来源锁含 565 个成员，来源档案装配与接纳 PASS | [来源恢复](SOURCE-RECOVERY-2026-10-14.md)、[R97](tool-source-review/R97.json)；38 个版本仍余 18 个分离签名及完整对应关系，来源状态 partial；按 D-090 整理推送后暂停 |

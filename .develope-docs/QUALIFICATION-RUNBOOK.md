@@ -1,10 +1,10 @@
 # 发行验收执行手册
 
-更新日期：2026-10-15。适用于现有 clean/std/full 布局，三目标共九包。
+更新日期：2026-10-20。适用于现有 clean/std/full 布局，三目标共九包。
 当前任务与证据边界见[TRACKING](TRACKING.md)和
 [CURRENT-STATE](CURRENT-STATE.md)。旧 9 月候选命令保留在 Git 历史，不再作为执行入口。
 本轮候选核心绑定 `e06d9f9`，三目标各通过 735/735。R94 已通过 Win64 Qwen low
-真实控制台旅程。按 D-092 在本节点打包推送后暂停；最终资格须绑定新核心和 ZIP。
+真实控制台旅程。按 D-093 从 R100 恢复开发；最终资格须绑定新核心和 ZIP。
 
 本手册使用实际 ZIP 字节，所有结果保持 `qualification=pending`。
 按 D-077 使用已有指定环境，不要求重新准备整套旧系统实机/VM 矩阵。
@@ -80,7 +80,13 @@ bash .tools/run_with_resource_guard.sh python3.13 .tools/qualification/verify_so
 ```
 
 清单同时固定来源、签名、公钥摘要与完整主密钥身份。工具在临时目录核对已固定
-字节，输出逐项结果；密钥过期、撤销和实际二进制对应关系单独 Review。
+字节，再用同一临时密钥环执行离线 gpg 检查。报告分别保留 `signature_status`
+与 `key_validity`；过期主密钥、过期签名子密钥、撤销及过期签名不能仅凭 VALIDSIG
+或进程退出零通过。任一检查失败时总状态和命令退出码均失败。
+
+密钥状态仅针对固定的公钥快照，`key_revocation_freshness=not-checked`，工具不自动
+联网刷新。R101 复核现有 18 项签名全部匹配，但 8 项快照中的密钥已过期；需取得
+可核对的更新或形成历史签名接纳依据。实际二进制对应关系仍单独 Review。
 
 ## 2. 显式包对完整性检查
 

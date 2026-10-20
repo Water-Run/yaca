@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # Author: WaterRun
-# Date: 2026-10-15
+# Date: 2026-10-20
 # File: source_signatures_test.py
-# Description: Exercise real detached source verification using a frozen public OpenPGP fixture, altered sources, wrong pins and unpermitted primary fingerprints without requiring a signing agent.
+# Description: Exercise offline detached source verification, byte pins, permitted primary identities and actual expired/revoked primary or signing-subkey fixtures without requiring a signing agent.
 
 import hashlib
 import importlib.util
@@ -58,6 +58,22 @@ class SourceSignatureTest(unittest.TestCase):
     def verify(self):
         return VERIFY.verify_manifest({'schema': 'yaca-detached-source-signatures-v1', 'entries': [self.entry]}, self.root)
 
+    # Select a frozen public key state while keeping the production source/signature/key pin format.
+    #@param self SourceSignatureTest Owns the disposable cache and current verification entry.
+    #@param state str Maintained valid-subkey, expired-primary, expired-subkey or revoked-primary fixture name.
+    #@return dict Public fixture with exact primary/signing fingerprints for assertions.
+    #@error Raises for missing fixture data or a failed disposable file write.
+    #@effect Replaces only this test's public fixture files and in-memory pins; does not import private keys or start an agent.
+    def use_key_state(self, state):
+        fixture = json.loads((ROOT / 'test/fixtures/source-signature-key-states.json').read_text(encoding='utf-8'))['fixtures'][state]
+        for name, field in (('source.txt', 'source'), ('source.txt.sig', 'signature'), ('key.asc', 'public_key')):
+            (self.root / name).write_bytes(fixture[field].encode('utf-8'))
+        self.entry = {'id': state, 'source': self.pin(self.root / 'source.txt'),
+                      'signature': self.pin(self.root / 'source.txt.sig'),
+                      'keys': [self.pin(self.root / 'key.asc')],
+                      'primary_fingerprints': [fixture['primary_fingerprint']]}
+        return fixture
+
     # Accept the real signature while keeping source closure and release authorization unresolved.
     #@param self SourceSignatureTest Owns the valid cryptographic fixture.
     #@return None Assertions require the actual primary fingerprint and explicit review boundaries.
@@ -68,7 +84,64 @@ class SourceSignatureTest(unittest.TestCase):
         self.assertEqual(result['results'][0]['signatures'][0]['primary_fingerprint'], self.entry['primary_fingerprints'][0])
         self.assertFalse(result['complete_source_closure'])
         self.assertFalse(result['release_authorized'])
-        self.assertEqual(result['key_expiration_and_revocation'], 'not-evaluated-by-gpgv')
+        self.assertEqual(result['key_expiration_and_revocation'], 'checked-against-pinned-keys')
+        self.assertEqual(result['key_revocation_freshness'], 'not-checked')
+
+    # Accept a valid signing subkey while retaining its permitted primary identity and snapshot boundary.
+    #@param self SourceSignatureTest Owns public nonexpiring primary/signing-subkey fixtures.
+    #@return None Assertions require both real verifiers to agree and forbid current online revocation claims.
+    #@effect Runs only installed offline verification tools against public fixture bytes.
+    def test_valid_subkey_is_checked_against_pinned_public_keys(self):
+        fixture = self.use_key_state('valid-subkey')
+        result = self.verify()
+        self.assertEqual(result['status'], 'PASS', result)
+        row = result['results'][0]
+        self.assertEqual(row['signature_status'], 'PASS')
+        self.assertEqual(row['signatures'][0]['signing_fingerprint'], fixture['signing_fingerprint'])
+        self.assertEqual(row['signatures'][0]['primary_fingerprint'], fixture['primary_fingerprint'])
+        self.assertEqual(row['key_validity']['status'], 'PASS')
+        self.assertEqual(row['key_validity']['scope'], 'pinned-public-key-snapshot')
+        self.assertEqual(row['key_validity']['rejected_statuses'], [])
+        self.assertIsInstance(row['key_validity']['checked_at_epoch'], int)
+
+    # Keep a mathematically valid historical signature separate from its currently expired primary key.
+    #@param self SourceSignatureTest Owns a source signed in 2024 before the primary expired.
+    #@return None Assertions require failed aggregate admission with retained successful cryptographic verification.
+    #@effect Runs real gpgv and gpg against an already expired public fixture.
+    def test_expired_primary_does_not_pass_on_validsig(self):
+        self.use_key_state('expired-primary')
+        result = self.verify()
+        self.assertEqual(result['status'], 'FAIL', result)
+        row = result['results'][0]
+        self.assertEqual(row['signature_status'], 'PASS')
+        self.assertEqual(row['key_validity']['status'], 'FAIL')
+        self.assertIn('EXPKEYSIG', row['key_validity']['rejected_statuses'])
+
+    # Check the actual signing subkey even when its nonexpiring primary fingerprint is permitted.
+    #@param self SourceSignatureTest Owns a source signed before only the signing subkey expired.
+    #@return None Assertions require expired-subkey rejection without discarding the correct primary identity.
+    #@effect Runs real offline verifiers against the frozen public subkey-expiration fixture.
+    def test_expired_signing_subkey_does_not_pass_on_primary_pin(self):
+        fixture = self.use_key_state('expired-subkey')
+        result = self.verify()
+        self.assertEqual(result['status'], 'FAIL', result)
+        row = result['results'][0]
+        self.assertEqual(row['signature_status'], 'PASS')
+        self.assertEqual(row['signatures'][0]['primary_fingerprint'], fixture['primary_fingerprint'])
+        self.assertIn('EXPKEYSIG', row['key_validity']['rejected_statuses'])
+
+    # Honor a real revocation certificate present in the pinned public-key snapshot.
+    #@param self SourceSignatureTest Owns a valid source signature and its revoked primary public key.
+    #@return None Assertions require REVKEYSIG rejection despite the successful mathematical signature check.
+    #@effect Runs real offline verification without contacting a keyserver or starting a signing agent.
+    def test_revoked_primary_does_not_pass_on_validsig(self):
+        self.use_key_state('revoked-primary')
+        result = self.verify()
+        self.assertEqual(result['status'], 'FAIL', result)
+        row = result['results'][0]
+        self.assertEqual(row['signature_status'], 'PASS')
+        self.assertEqual(row['key_validity']['status'], 'FAIL')
+        self.assertIn('REVKEYSIG', row['key_validity']['rejected_statuses'])
 
     # Reject changed source bytes before a stale source pin can be treated as verified.
     #@param self SourceSignatureTest Owns the source fixture and original byte pin.

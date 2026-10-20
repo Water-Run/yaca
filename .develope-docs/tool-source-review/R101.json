@@ -1,0 +1,296 @@
+{
+  "schema": "yaca-tool-source-review-evidence-v1",
+  "review_id": "R101",
+  "date": "2026-10-20",
+  "status": "key-state-check-implemented-findings-open",
+  "resume_decision": "D-093",
+  "development_paused": false,
+  "release_authorized": false,
+  "target_qualification_complete": false,
+  "complete_source_closure": false,
+  "whole_repository_semantic_review": "partial",
+  "host": "Linux 7.2.10-200.fc44.x86_64 x86_64",
+  "recorded_at_utc": "2026-10-20T06:51:59.810304+00:00",
+  "tests": {
+    "signature_regressions_before": {
+      "passed": 4,
+      "total": 9
+    },
+    "signature_regressions_after": {
+      "passed": 9,
+      "total": 9
+    },
+    "complete_lua": {
+      "passed": 735,
+      "total": 735
+    },
+    "coding_readiness": "PASS",
+    "comment_inventory": {
+      "files": 273,
+      "declarations": 5798,
+      "violations": 0
+    }
+  },
+  "actual_source_signatures": {
+    "cryptographic_passed": 18,
+    "total": 18,
+    "key_snapshot_passed": 10,
+    "key_snapshot_failed": 8,
+    "revocation_freshness": "not-checked"
+  },
+  "key_state_findings": [
+    {
+      "id": "file-5.45-3",
+      "signature_status": "PASS",
+      "signers": [
+        {
+          "signing_fingerprint": "BE04995BA8F90ED0C0C176C471112AB16CB33B3A",
+          "primary_fingerprint": "BE04995BA8F90ED0C0C176C471112AB16CB33B3A",
+          "created": "2023-07-27",
+          "hash_algorithm": "2"
+        }
+      ],
+      "key_validity": "FAIL",
+      "rejected_statuses": [
+        "EXPKEYSIG",
+        "KEYEXPIRED"
+      ],
+      "gpg_returncode": 0,
+      "checked_at_epoch": 1792478861
+    },
+    {
+      "id": "nettle-3.10-1",
+      "signature_status": "PASS",
+      "signers": [
+        {
+          "signing_fingerprint": "343C2FF0FBEE5EC2EDBEF399F3599FF828C67298",
+          "primary_fingerprint": "343C2FF0FBEE5EC2EDBEF399F3599FF828C67298",
+          "created": "2024-06-16",
+          "hash_algorithm": "10"
+        }
+      ],
+      "key_validity": "FAIL",
+      "rejected_statuses": [
+        "EXPKEYSIG",
+        "KEYEXPIRED"
+      ],
+      "gpg_returncode": 0,
+      "checked_at_epoch": 1792478861
+    },
+    {
+      "id": "mingw-w64-gettext-0.22.5-2",
+      "signature_status": "PASS",
+      "signers": [
+        {
+          "signing_fingerprint": "9001B85AF9E1B83DF1BDA942F5BE8B267C6A406D",
+          "primary_fingerprint": "9001B85AF9E1B83DF1BDA942F5BE8B267C6A406D",
+          "created": "2024-02-22",
+          "hash_algorithm": "10"
+        }
+      ],
+      "key_validity": "FAIL",
+      "rejected_statuses": [
+        "EXPKEYSIG",
+        "KEYEXPIRED"
+      ],
+      "gpg_returncode": 0,
+      "checked_at_epoch": 1792478862
+    },
+    {
+      "id": "mingw-w64-libiconv-1.17-4",
+      "signature_status": "PASS",
+      "signers": [
+        {
+          "signing_fingerprint": "9001B85AF9E1B83DF1BDA942F5BE8B267C6A406D",
+          "primary_fingerprint": "9001B85AF9E1B83DF1BDA942F5BE8B267C6A406D",
+          "created": "2022-05-15",
+          "hash_algorithm": "10"
+        }
+      ],
+      "key_validity": "FAIL",
+      "rejected_statuses": [
+        "EXPKEYSIG",
+        "KEYEXPIRED"
+      ],
+      "gpg_returncode": 0,
+      "checked_at_epoch": 1792478862
+    },
+    {
+      "id": "mingw-w64-libunistring-1.2-1",
+      "signature_status": "PASS",
+      "signers": [
+        {
+          "signing_fingerprint": "9001B85AF9E1B83DF1BDA942F5BE8B267C6A406D",
+          "primary_fingerprint": "9001B85AF9E1B83DF1BDA942F5BE8B267C6A406D",
+          "created": "2024-02-24",
+          "hash_algorithm": "10"
+        }
+      ],
+      "key_validity": "FAIL",
+      "rejected_statuses": [
+        "EXPKEYSIG",
+        "KEYEXPIRED"
+      ],
+      "gpg_returncode": 0,
+      "checked_at_epoch": 1792478862
+    },
+    {
+      "id": "mingw-w64-nettle-3.10-1",
+      "signature_status": "PASS",
+      "signers": [
+        {
+          "signing_fingerprint": "343C2FF0FBEE5EC2EDBEF399F3599FF828C67298",
+          "primary_fingerprint": "343C2FF0FBEE5EC2EDBEF399F3599FF828C67298",
+          "created": "2024-06-16",
+          "hash_algorithm": "10"
+        }
+      ],
+      "key_validity": "FAIL",
+      "rejected_statuses": [
+        "EXPKEYSIG",
+        "KEYEXPIRED"
+      ],
+      "gpg_returncode": 0,
+      "checked_at_epoch": 1792478862
+    },
+    {
+      "id": "libxcrypt-4.4.36-1",
+      "signature_status": "PASS",
+      "signers": [
+        {
+          "signing_fingerprint": "678CE3FEE430311596DB8C16F52E98007594C21D",
+          "primary_fingerprint": "678CE3FEE430311596DB8C16F52E98007594C21D",
+          "created": "2023-07-05",
+          "hash_algorithm": "8"
+        }
+      ],
+      "key_validity": "FAIL",
+      "rejected_statuses": [
+        "EXPKEYSIG",
+        "KEYEXPIRED"
+      ],
+      "gpg_returncode": 0,
+      "checked_at_epoch": 1792478862
+    },
+    {
+      "id": "libunistring-1.2-1",
+      "signature_status": "PASS",
+      "signers": [
+        {
+          "signing_fingerprint": "9001B85AF9E1B83DF1BDA942F5BE8B267C6A406D",
+          "primary_fingerprint": "9001B85AF9E1B83DF1BDA942F5BE8B267C6A406D",
+          "created": "2024-02-24",
+          "hash_algorithm": "10"
+        }
+      ],
+      "key_validity": "FAIL",
+      "rejected_statuses": [
+        "EXPKEYSIG",
+        "KEYEXPIRED"
+      ],
+      "gpg_returncode": 0,
+      "checked_at_epoch": 1792478862
+    }
+  ],
+  "review_scope": [
+    "all changed signing-key verification functions and their annotations",
+    "public key-state fixture helper and four real OpenPGP regressions",
+    "temporary fixture-key generation, public export and agent/key cleanup",
+    "completed result binding recorder and original source-lock preservation"
+  ],
+  "unchanged_product_source_trees": {
+    "src": "b11d186398d1cad1e422e876beca1984de30914d",
+    "native": "d177da7f60f5712c7f7b206cc9d3ac4f9245a104"
+  },
+  "source_bindings": [
+    {
+      "path": ".tools/qualification/verify_source_signatures.py",
+      "frozen": "out/review-20261020/r101/frozen/.tools/qualification/verify_source_signatures.py",
+      "sha256": "0ca26177dd3effd1f8bdbf9ab943e43b18916b7f80ef5de0f14bb0d4411d4a34",
+      "bytes": 13349
+    },
+    {
+      "path": "test/qualification/source_signatures_test.py",
+      "frozen": "out/review-20261020/r101/frozen/test/qualification/source_signatures_test.py",
+      "sha256": "4905a9f4eaecc93051ddd140499a08010d880dcd3fac8781b73e8ba493e032eb",
+      "bytes": 12248
+    },
+    {
+      "path": "test/fixtures/source-signature-key-states.json",
+      "frozen": "out/review-20261020/r101/frozen/test/fixtures/source-signature-key-states.json",
+      "sha256": "98bde4ae90da3d17bdf968c24b382ce8a99e23ed830bc84c421a047460714bd4",
+      "bytes": 5942
+    },
+    {
+      "path": "release/windows-git64-signatures.lock.json",
+      "frozen": "out/review-20261020/r101/frozen/release/windows-git64-signatures.lock.json",
+      "sha256": "8aabc10bcb152597587871b1eb37ab7a5ef24d5b8400f20ac126dd16e13197c4",
+      "bytes": 27914
+    },
+    {
+      "path": "out/review-20261020/generate_key_state_fixtures.py",
+      "frozen": "out/review-20261020/r101/frozen/out/review-20261020/generate_key_state_fixtures.py",
+      "sha256": "4548bf41e43d56a8b699d0869b8c5bdfb312e4445a2369fb4edf0465048b25e8",
+      "bytes": 5465
+    },
+    {
+      "path": "out/review-20261020/record_r101.py",
+      "frozen": "out/review-20261020/r101/frozen/out/review-20261020/record_r101.py",
+      "sha256": "f7f61bcff671baf60aacc845237fdde00a145730e0819e3e3e350ab3e1c85eb2",
+      "bytes": 6096
+    },
+    {
+      "path": "out/review-20261020/key-states-before.log",
+      "frozen": "out/review-20261020/r101/frozen/out/review-20261020/key-states-before.log",
+      "sha256": "5d5e87671743fbdeb17861b6c63fdb3582c79610156593c47ccad3cfa6766b20",
+      "bytes": 8093
+    },
+    {
+      "path": "out/review-20261020/key-states-after.log",
+      "frozen": "out/review-20261020/r101/frozen/out/review-20261020/key-states-after.log",
+      "sha256": "377ea04877c18aacf758f35ba0c20b5333d2431d93111bd0f482ef309c7ca27d",
+      "bytes": 254
+    },
+    {
+      "path": "out/review-20261020/baseline-lua.log",
+      "frozen": "out/review-20261020/r101/frozen/out/review-20261020/baseline-lua.log",
+      "sha256": "ae36f06aeda193a808917fa479a7b195caca4af87ad9ab8cfea98cc86bd15aed",
+      "bytes": 73469
+    },
+    {
+      "path": "out/review-20261020/lua-r101.log",
+      "frozen": "out/review-20261020/r101/frozen/out/review-20261020/lua-r101.log",
+      "sha256": "85d27a91f2f65902a980d9984f2dd95f64780b91ea6331960be2cb96a46d0111",
+      "bytes": 73469
+    },
+    {
+      "path": "out/review-20261020/readiness-r101.log",
+      "frozen": "out/review-20261020/r101/frozen/out/review-20261020/readiness-r101.log",
+      "sha256": "ed4e9adf0c04ed8446e27866406f31824635e50c3eb7301239737c7453db85b8",
+      "bytes": 4884
+    },
+    {
+      "path": "out/review-20261020/comment-inventory-r101.json",
+      "frozen": "out/review-20261020/r101/frozen/out/review-20261020/comment-inventory-r101.json",
+      "sha256": "93a9416ca1086f0249b3ceac608dc99604af3c877a8ecd79ffb1ecf73280e7d5",
+      "bytes": 1297134
+    },
+    {
+      "path": "out/review-20261020/cache-restore.json",
+      "frozen": "out/review-20261020/r101/frozen/out/review-20261020/cache-restore.json",
+      "sha256": "eea302881716b42cf23b626b39d4d8355450a2e134f5efc692b4fc4586b854cc",
+      "bytes": 233
+    },
+    {
+      "path": "out/review-20261020/source-key-validity.json",
+      "frozen": "out/review-20261020/r101/frozen/out/review-20261020/source-key-validity.json",
+      "sha256": "2cbff977161c43c6eaf66098c6020fa27a91e0e96736177f33909c1d01f9a4c8",
+      "bytes": 56399
+    }
+  ],
+  "remaining": [
+    "updated-key or historical-signature admission evidence and revocation freshness",
+    "Win32 recipe and payload source gaps and complete binary/source correspondence",
+    "final nine-package qualification and whole-repository semantic review"
+  ]
+}
