@@ -1,0 +1,117 @@
+{
+  "schema": "yaca-tool-source-review-evidence-v1",
+  "review_id": "R103",
+  "date": "2026-10-20",
+  "status": "standalone-python-bootstrap-fixed",
+  "resume_decision": "D-093",
+  "development_paused": false,
+  "release_authorized": false,
+  "target_qualification_complete": false,
+  "whole_repository_semantic_review": "partial",
+  "base_commit": "21d927f",
+  "independent_checkouts": "local Git clones plus verified public source cache only",
+  "bootstrap_before_exit": 1,
+  "python_stdlib_import_before_exit": 1,
+  "bootstrap_after_exit": 0,
+  "validated_checkout_path_contains_spaces": true,
+  "python": "3.13.8",
+  "comment_parsers_imported": 6,
+  "checks": {
+    "complete_lua": {
+      "passed": 735,
+      "total": 735
+    },
+    "coding_readiness": "PASS",
+    "comment_inventory": {
+      "files": 273,
+      "declarations": 5798,
+      "violations": 0
+    },
+    "bash_syntax": "PASS",
+    "product_source_changes": false
+  },
+  "review_scope": [
+    "resolve the working interpreter executable before creating the isolated environment",
+    "preserve fixed Python version, resource admission and quoted destination paths",
+    "actual pyvenv home, stdlib, pip and six parser imports in a fresh path containing spaces",
+    "recorder annotations and immutable before/after input/result bindings"
+  ],
+  "source_bindings": [
+    {
+      "path": ".tools/bootstrap_development.sh",
+      "frozen": "out/review-20261020/r103/frozen/.tools/bootstrap_development.sh",
+      "sha256": "942b28a538e14cac29d8decd866647a0468e717a9448018f492b240dc5521ffd",
+      "bytes": 5531
+    },
+    {
+      "path": "out/review-20261020/r103/before/.tools/bootstrap_development.sh",
+      "frozen": "out/review-20261020/r103/frozen/out/review-20261020/r103/before/.tools/bootstrap_development.sh",
+      "sha256": "e747cde07c438f9922fb3b1b5a51f7a4f8fff3b391b974e300e8278fe99ffe14",
+      "bytes": 5328
+    },
+    {
+      "path": "out/review-20261020/r103/before/out/development/python/pyvenv.cfg",
+      "frozen": "out/review-20261020/r103/frozen/out/review-20261020/r103/before/out/development/python/pyvenv.cfg",
+      "sha256": "0df75cd5f4ac5dbf3231afe3aa6c0ec12a0a97a7ceb6ea42fdbc9020b33ad5c5",
+      "bytes": 323
+    },
+    {
+      "path": "out/review-20261020/r103/after checkout/.tools/bootstrap_development.sh",
+      "frozen": "out/review-20261020/r103/frozen/out/review-20261020/r103/after checkout/.tools/bootstrap_development.sh",
+      "sha256": "942b28a538e14cac29d8decd866647a0468e717a9448018f492b240dc5521ffd",
+      "bytes": 5531
+    },
+    {
+      "path": "out/review-20261020/r103/after checkout/out/development/python/pyvenv.cfg",
+      "frozen": "out/review-20261020/r103/frozen/out/review-20261020/r103/after checkout/out/development/python/pyvenv.cfg",
+      "sha256": "e806f0f75a93b444c616c90863417615c089e8399f36e77466da9dbc5c0d744c",
+      "bytes": 427
+    },
+    {
+      "path": "out/review-20261020/r103/environment-after.json",
+      "frozen": "out/review-20261020/r103/frozen/out/review-20261020/r103/environment-after.json",
+      "sha256": "ecad3e104d370488813e76da3ee809b8ee72d09cfd13bacae7b3298106e98149",
+      "bytes": 503
+    },
+    {
+      "path": "out/review-20261020/r103/bootstrap-before.log",
+      "frozen": "out/review-20261020/r103/frozen/out/review-20261020/r103/bootstrap-before.log",
+      "sha256": "2e8e711a7e427d20c237940449a35258072a7d6c4ff4f388dc6a41d858db7a89",
+      "bytes": 348
+    },
+    {
+      "path": "out/review-20261020/r103/python-before.log",
+      "frozen": "out/review-20261020/r103/frozen/out/review-20261020/r103/python-before.log",
+      "sha256": "8d37a0140cb32586c18b4116991d2734c3db507a385dbc131f906553ca9d7c66",
+      "bytes": 336
+    },
+    {
+      "path": "out/review-20261020/r103/bootstrap-after.log",
+      "frozen": "out/review-20261020/r103/frozen/out/review-20261020/r103/bootstrap-after.log",
+      "sha256": "ec92f620b35733417d4ac4d2627ad8cd65d57e6971e836aef997d0b439fbe267",
+      "bytes": 276
+    },
+    {
+      "path": "out/review-20261020/r103/lua-after.log",
+      "frozen": "out/review-20261020/r103/frozen/out/review-20261020/r103/lua-after.log",
+      "sha256": "6527ee1d64e074738e14f6fc6ac6abe55fa4fb8e4cc95337e51dcbca01b2a2ad",
+      "bytes": 73469
+    },
+    {
+      "path": "out/review-20261020/r103/readiness-after.log",
+      "frozen": "out/review-20261020/r103/frozen/out/review-20261020/r103/readiness-after.log",
+      "sha256": "e0173d3ca37e0c7373b639f91bcbb14e1f0067bf55fcc93aa5d8d69321730ecf",
+      "bytes": 4884
+    },
+    {
+      "path": "out/review-20261020/r103/record_r103.py",
+      "frozen": "out/review-20261020/r103/frozen/out/review-20261020/r103/record_r103.py",
+      "sha256": "58067228262d5338c2be58f8d7ecc01846bb5cc9178332d1a0330e9c19f22976",
+      "bytes": 5057
+    }
+  ],
+  "remaining": [
+    "Windows Git source/recipe gaps, key state findings and binary/source correspondence",
+    "final nine-package qualification and whole-repository semantic review"
+  ]
+}

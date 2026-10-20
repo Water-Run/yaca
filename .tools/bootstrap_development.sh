@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Author: WaterRun
-# Date: 2026-10-13
+# Date: 2026-10-20
 # File: bootstrap_development.sh
 # Description: Prepare a relocatable Linux or WSL development environment from pinned public sources and parser requirements under the shared resource guard.
 
@@ -75,7 +75,9 @@ fi
   || { echo "bin/lua55 is not the required Lua 5.5.1 interpreter" >&2; exit 65; }
 
 if [[ ! -e "$WORK_ROOT/python/bin/python3.13" ]]; then
-  python3.13 -m venv "$WORK_ROOT/python"
+  # Resolve launchers such as uv-managed symlinks before venv records its base library directory.
+  PYTHON_EXECUTABLE=$(python3.13 -c 'import os, sys; print(os.path.realpath(sys.executable))')
+  "$PYTHON_EXECUTABLE" -m venv "$WORK_ROOT/python"
 fi
 "$WORK_ROOT/python/bin/python3.13" -m pip install --disable-pip-version-check \
   -r "$REPO_ROOT/.tools/comment_check_requirements.txt" > "$WORK_ROOT/parser-install.log" 2>&1 \
