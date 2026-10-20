@@ -6,15 +6,15 @@
     "status": "partial",
     "complete_source_closure": false,
     "manual_source_closure_review": "pending",
-    "recipe_versions_recovered": 115,
-    "recipe_versions_pending": 6,
+    "recipe_versions_recovered": 117,
+    "recipe_versions_pending": 4,
     "unattempted_payload_versions": 0,
     "coverage_member": "SOURCE-COVERAGE.json",
     "historical_status_member": "history/R95-SOURCE-STATUS.json",
     "scope": "Original pinned legacy recipe and source inputs with current per-member recovery; unresolved source, signature and binary correspondence remain pending",
-    "last_recovery_review": "R102",
-    "static_digest_verified_versions": 98,
-    "verified_static_subset_versions": 14
+    "last_recovery_review": "R104",
+    "static_digest_verified_versions": 101,
+    "verified_static_subset_versions": 15
   },
   "inputs": [
     {
@@ -5448,9 +5448,9 @@
       "sha256": "11390c74733abcb262aaca4db68710f13ffffd42bfe2a0861a5dfc912b2977e5"
     },
     {
-      "path": "sources/git-win32-source-coverage-20261020.json",
+      "path": "sources/git-win32-source-coverage-20261020-r104.json",
       "destination": "SOURCE-COVERAGE.json",
-      "sha256": "daa07b35213478db9ea8e9ad79f85d09d99b4e90cb3a1552283008b2f1f6b456"
+      "sha256": "aefd9a13255a0e8ee0f4125f826c02bd00dc1718ae06c7db0883f747d24ef470"
     },
     {
       "path": "sources/git-win32-x86-source-status-20261013.json",
@@ -6121,6 +6121,196 @@
       "path": "sources/git-win32-source-coverage-20261015.json",
       "destination": "history/R100-SOURCE-COVERAGE.json",
       "sha256": "51ccd0866c7103dcc2ef7df935c37e52e624bd343aeb83614a21cebfaa6fee1d"
+    },
+    {
+      "path": "gfw-legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/0001-dcrt0.cc-Untangle-allow_glob-from-winshell.patch",
+      "destination": "legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/0001-dcrt0.cc-Untangle-allow_glob-from-winshell.patch",
+      "sha256": "c251eb8d21ed8e58e10694054c93386d274457f9b7d4b23d38cdd220f2f6c6f1"
+    },
+    {
+      "path": "gfw-legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/0002-dcrt0.cc-globify-Don-t-quote-literal-strings-differe.patch",
+      "destination": "legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/0002-dcrt0.cc-globify-Don-t-quote-literal-strings-differe.patch",
+      "sha256": "912e4ce0093d7c7f0004f15268c580023099586e592d761b0f5a0dcb21cb738a"
+    },
+    {
+      "path": "gfw-legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/0003-strace.cc-Don-t-set-MSYS-noglob.patch",
+      "destination": "legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/0003-strace.cc-Don-t-set-MSYS-noglob.patch",
+      "sha256": "4a863a45930318f4652ddc0fc912acdaa63c3a6385ed94020e8b20f4cf60f50f"
+    },
+    {
+      "path": "gfw-legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/0004-Add-debugging-for-build_argv.patch",
+      "destination": "legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/0004-Add-debugging-for-build_argv.patch",
+      "sha256": "62f9c63bde5f5212f99827c6e4d9392d98a82b3654cd7328590b575f799fa72b"
+    },
+    {
+      "path": "gfw-legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/0005-Add-debugging-for-strace-make_command_line.patch",
+      "destination": "legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/0005-Add-debugging-for-strace-make_command_line.patch",
+      "sha256": "8d5b30d417deacadd2130fc4a9ed172e3e04b111d2159bef4b42f32073e0cc27"
+    },
+    {
+      "path": "gfw-legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/0006-environ.cc-New-facility-environment-variable-MSYS2_E.patch",
+      "destination": "legacy-payloads/msys2-runtime-2.4.1.34115.1ca92fa-1/0006-environ.cc-New-facility-environment-variable-MSYS2_E.patch",
+      "sha256": "500757c316e51e5d71c9e4aef959ed222c9225bf59b9eb4a606ca2b73aa3df5b"
+    },
+    {
+      "path": "gfw-legacy-payloads/dash-0.5.8-2/dash-0.5.8.tar.gz",
+      "destination": "legacy-payloads/dash-0.5.8-2/dash-0.5.8.tar.gz",
+      "sha256": "c6db3a237747b02d20382a761397563d813b306c020ae28ce25a1c3915fac60f"
+    },
+    {
+      "path": "gfw-legacy-recipes/a8db1609f29a3777eb28f030b007f939f7ffc169/openssl/PKGBUILD",
+      "destination": "recipes/a8db1609f29a3777eb28f030b007f939f7ffc169/openssl/PKGBUILD",
+      "sha256": "c603afa5bdbfc59d07a707502bd73925c89838f214ae9ff709dbf64d9a936018"
+    },
+    {
+      "path": "gfw-legacy-recipes/a8db1609f29a3777eb28f030b007f939f7ffc169/openssl/ca-dir.patch",
+      "destination": "recipes/a8db1609f29a3777eb28f030b007f939f7ffc169/openssl/ca-dir.patch",
+      "sha256": "01b7d475d1aeeecdae1ca8ff90483c11f34991348418d9e98c655e1579764bb1"
+    },
+    {
+      "path": "gfw-legacy-recipes/a8db1609f29a3777eb28f030b007f939f7ffc169/openssl/no-rpath.patch",
+      "destination": "recipes/a8db1609f29a3777eb28f030b007f939f7ffc169/openssl/no-rpath.patch",
+      "sha256": "754d6107a306311e15a1db6a1cc031b81691c8b9865e8809ac60ca6f184c957c"
+    },
+    {
+      "path": "gfw-legacy-recipes/a8db1609f29a3777eb28f030b007f939f7ffc169/openssl/openssl-1.0.0-beta5-enginesdir.patch",
+      "destination": "recipes/a8db1609f29a3777eb28f030b007f939f7ffc169/openssl/openssl-1.0.0-beta5-enginesdir.patch",
+      "sha256": "1ce6d3d795124f4a0206790f21d178049fb6d56945820582779a0d0e14dbf230"
+    },
+    {
+      "path": "gfw-legacy-recipes/a8db1609f29a3777eb28f030b007f939f7ffc169/openssl/openssl-1.0.1e-cygwin64.patch",
+      "destination": "recipes/a8db1609f29a3777eb28f030b007f939f7ffc169/openssl/openssl-1.0.1e-cygwin64.patch",
+      "sha256": "e82f015bd01f73bb3840eaf6ad5e00b62399ea38f924372471d00a9782d56b1a"
+    },
+    {
+      "path": "gfw-legacy-recipes/a8db1609f29a3777eb28f030b007f939f7ffc169/openssl/openssl-1.0.1e-msys2.patch",
+      "destination": "recipes/a8db1609f29a3777eb28f030b007f939f7ffc169/openssl/openssl-1.0.1e-msys2.patch",
+      "sha256": "7ddfe47d4b582cf5085ae20f2a2db0f2b87e0cd1a91885cf1f76ff1a2219bf40"
+    },
+    {
+      "path": "gfw-legacy-payloads/openssl-1.0.2.h-1/openssl-1.0.2h.tar.gz",
+      "destination": "legacy-payloads/openssl-1.0.2.h-1/openssl-1.0.2h.tar.gz",
+      "sha256": "1d4007e53aad94a5b2002fe045ee7bb0b3d98f1a47f8b2bc851dcd1c74332919"
+    },
+    {
+      "path": "gfw-legacy-payloads/openssl-1.0.2.h-1/openssl-1.0.2h.tar.gz.asc",
+      "destination": "legacy-payloads/openssl-1.0.2.h-1/openssl-1.0.2h.tar.gz.asc",
+      "sha256": "270be749e5e271cb388d069d2caedfe2087d3f2d8a18e662abdfb193d24c2aae"
+    },
+    {
+      "path": "gfw-legacy-payloads/openssl-1.0.2.h-1/no-rpath.patch",
+      "destination": "legacy-payloads/openssl-1.0.2.h-1/no-rpath.patch",
+      "sha256": "754d6107a306311e15a1db6a1cc031b81691c8b9865e8809ac60ca6f184c957c"
+    },
+    {
+      "path": "gfw-legacy-payloads/openssl-1.0.2.h-1/ca-dir.patch",
+      "destination": "legacy-payloads/openssl-1.0.2.h-1/ca-dir.patch",
+      "sha256": "01b7d475d1aeeecdae1ca8ff90483c11f34991348418d9e98c655e1579764bb1"
+    },
+    {
+      "path": "gfw-legacy-payloads/openssl-1.0.2.h-1/openssl-1.0.1e-cygwin64.patch",
+      "destination": "legacy-payloads/openssl-1.0.2.h-1/openssl-1.0.1e-cygwin64.patch",
+      "sha256": "e82f015bd01f73bb3840eaf6ad5e00b62399ea38f924372471d00a9782d56b1a"
+    },
+    {
+      "path": "gfw-legacy-payloads/openssl-1.0.2.h-1/openssl-1.0.1e-msys2.patch",
+      "destination": "legacy-payloads/openssl-1.0.2.h-1/openssl-1.0.1e-msys2.patch",
+      "sha256": "7ddfe47d4b582cf5085ae20f2a2db0f2b87e0cd1a91885cf1f76ff1a2219bf40"
+    },
+    {
+      "path": "gfw-legacy-payloads/openssl-1.0.2.h-1/openssl-1.0.0-beta5-enginesdir.patch",
+      "destination": "legacy-payloads/openssl-1.0.2.h-1/openssl-1.0.0-beta5-enginesdir.patch",
+      "sha256": "1ce6d3d795124f4a0206790f21d178049fb6d56945820582779a0d0e14dbf230"
+    },
+    {
+      "path": "gfw-legacy-recipes/096064b1bff4ca8ff7bed3c23b7b8c40861f73a4/mingw-w64-openssl/PKGBUILD",
+      "destination": "recipes/096064b1bff4ca8ff7bed3c23b7b8c40861f73a4/mingw-w64-openssl/PKGBUILD",
+      "sha256": "10f2b09f0fe4c339bfbb9d82fab16b31c81618686537dc295e9d8fbaa01acbc3"
+    },
+    {
+      "path": "gfw-legacy-recipes/096064b1bff4ca8ff7bed3c23b7b8c40861f73a4/mingw-w64-openssl/openssl-0.9.6-x509.patch",
+      "destination": "recipes/096064b1bff4ca8ff7bed3c23b7b8c40861f73a4/mingw-w64-openssl/openssl-0.9.6-x509.patch",
+      "sha256": "e8ed15b50f749064e89f26d49b7fd85b3f95e5dde22e430c0f6181e5b07146c7"
+    },
+    {
+      "path": "gfw-legacy-recipes/096064b1bff4ca8ff7bed3c23b7b8c40861f73a4/mingw-w64-openssl/openssl-1.0.0a-ldflags.patch",
+      "destination": "recipes/096064b1bff4ca8ff7bed3c23b7b8c40861f73a4/mingw-w64-openssl/openssl-1.0.0a-ldflags.patch",
+      "sha256": "164aa4928b022cc716fac545b4fd69899cb274682aa487100e595abb652adbae"
+    },
+    {
+      "path": "gfw-legacy-recipes/096064b1bff4ca8ff7bed3c23b7b8c40861f73a4/mingw-w64-openssl/openssl-1.0.0d-windres.patch",
+      "destination": "recipes/096064b1bff4ca8ff7bed3c23b7b8c40861f73a4/mingw-w64-openssl/openssl-1.0.0d-windres.patch",
+      "sha256": "906aad130d43e61d47d6843adc9f4a4f2ba027e698f9a840be77b53a36ca80b6"
+    },
+    {
+      "path": "gfw-legacy-recipes/096064b1bff4ca8ff7bed3c23b7b8c40861f73a4/mingw-w64-openssl/openssl-1.0.1-x32.patch",
+      "destination": "recipes/096064b1bff4ca8ff7bed3c23b7b8c40861f73a4/mingw-w64-openssl/openssl-1.0.1-x32.patch",
+      "sha256": "f913185a36538315de3ff122ef96fc9a49e068078e65895cfc950bdb4ac4e4f0"
+    },
+    {
+      "path": "gfw-legacy-recipes/096064b1bff4ca8ff7bed3c23b7b8c40861f73a4/mingw-w64-openssl/openssl-1.0.1i-relocation.patch",
+      "destination": "recipes/096064b1bff4ca8ff7bed3c23b7b8c40861f73a4/mingw-w64-openssl/openssl-1.0.1i-relocation.patch",
+      "sha256": "f8e6233fa4c289fb125586bf3f30cd617923f6be0c6fe8a3289aa3fac7d7e814"
+    },
+    {
+      "path": "gfw-legacy-recipes/096064b1bff4ca8ff7bed3c23b7b8c40861f73a4/mingw-w64-openssl/openssl-1.0.2-ipv6.patch",
+      "destination": "recipes/096064b1bff4ca8ff7bed3c23b7b8c40861f73a4/mingw-w64-openssl/openssl-1.0.2-ipv6.patch",
+      "sha256": "9ff3150c75f3f3e6a9773ffe54d90994cbf68cc919134aea68e09e7ed921763d"
+    },
+    {
+      "path": "gfw-legacy-recipes/096064b1bff4ca8ff7bed3c23b7b8c40861f73a4/mingw-w64-openssl/openssl-1.0.2a-parallel-build.patch",
+      "destination": "recipes/096064b1bff4ca8ff7bed3c23b7b8c40861f73a4/mingw-w64-openssl/openssl-1.0.2a-parallel-build.patch",
+      "sha256": "609d7ca040f7ab26f5e9844e486b3bcc04f3da656ce2db7733fbd65c6d10457a"
+    },
+    {
+      "path": "gfw-legacy-payloads/mingw-w64-i686-openssl-1.0.2.h-1/openssl-1.0.2h.tar.gz",
+      "destination": "legacy-payloads/mingw-w64-i686-openssl-1.0.2.h-1/openssl-1.0.2h.tar.gz",
+      "sha256": "1d4007e53aad94a5b2002fe045ee7bb0b3d98f1a47f8b2bc851dcd1c74332919"
+    },
+    {
+      "path": "gfw-legacy-payloads/mingw-w64-i686-openssl-1.0.2.h-1/openssl-1.0.2h.tar.gz.asc",
+      "destination": "legacy-payloads/mingw-w64-i686-openssl-1.0.2.h-1/openssl-1.0.2h.tar.gz.asc",
+      "sha256": "270be749e5e271cb388d069d2caedfe2087d3f2d8a18e662abdfb193d24c2aae"
+    },
+    {
+      "path": "gfw-legacy-payloads/mingw-w64-i686-openssl-1.0.2.h-1/openssl-1.0.0a-ldflags.patch",
+      "destination": "legacy-payloads/mingw-w64-i686-openssl-1.0.2.h-1/openssl-1.0.0a-ldflags.patch",
+      "sha256": "164aa4928b022cc716fac545b4fd69899cb274682aa487100e595abb652adbae"
+    },
+    {
+      "path": "gfw-legacy-payloads/mingw-w64-i686-openssl-1.0.2.h-1/openssl-1.0.0d-windres.patch",
+      "destination": "legacy-payloads/mingw-w64-i686-openssl-1.0.2.h-1/openssl-1.0.0d-windres.patch",
+      "sha256": "906aad130d43e61d47d6843adc9f4a4f2ba027e698f9a840be77b53a36ca80b6"
+    },
+    {
+      "path": "gfw-legacy-payloads/mingw-w64-i686-openssl-1.0.2.h-1/openssl-1.0.2a-parallel-build.patch",
+      "destination": "legacy-payloads/mingw-w64-i686-openssl-1.0.2.h-1/openssl-1.0.2a-parallel-build.patch",
+      "sha256": "609d7ca040f7ab26f5e9844e486b3bcc04f3da656ce2db7733fbd65c6d10457a"
+    },
+    {
+      "path": "gfw-legacy-payloads/mingw-w64-i686-openssl-1.0.2.h-1/openssl-1.0.1-x32.patch",
+      "destination": "legacy-payloads/mingw-w64-i686-openssl-1.0.2.h-1/openssl-1.0.1-x32.patch",
+      "sha256": "f913185a36538315de3ff122ef96fc9a49e068078e65895cfc950bdb4ac4e4f0"
+    },
+    {
+      "path": "gfw-legacy-payloads/mingw-w64-i686-openssl-1.0.2.h-1/openssl-0.9.6-x509.patch",
+      "destination": "legacy-payloads/mingw-w64-i686-openssl-1.0.2.h-1/openssl-0.9.6-x509.patch",
+      "sha256": "e8ed15b50f749064e89f26d49b7fd85b3f95e5dde22e430c0f6181e5b07146c7"
+    },
+    {
+      "path": "gfw-legacy-payloads/mingw-w64-i686-openssl-1.0.2.h-1/openssl-1.0.1i-relocation.patch",
+      "destination": "legacy-payloads/mingw-w64-i686-openssl-1.0.2.h-1/openssl-1.0.1i-relocation.patch",
+      "sha256": "f8e6233fa4c289fb125586bf3f30cd617923f6be0c6fe8a3289aa3fac7d7e814"
+    },
+    {
+      "path": "sources/git-win32-historical-inputs-20261020-r104.json",
+      "destination": "SOURCE-RECOVERY-R104.json",
+      "sha256": "c5e2a7d310252f93d1dbe80b7a974733291a7f51cddf32706e301690fee142c0"
+    },
+    {
+      "path": "sources/git-win32-source-coverage-20261020.json",
+      "destination": "history/R102-SOURCE-COVERAGE.json",
+      "sha256": "daa07b35213478db9ea8e9ad79f85d09d99b4e90cb3a1552283008b2f1f6b456"
     }
   ]
 }

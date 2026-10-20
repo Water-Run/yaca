@@ -1,0 +1,367 @@
+{
+  "schema": "yaca-tool-source-review-evidence-v1",
+  "review_id": "R104",
+  "date": "2026-10-20",
+  "status": "original-recipes-and-static-inputs-expanded-source-closure-partial",
+  "resume_decision": "D-093",
+  "development_paused": false,
+  "release_authorized": false,
+  "target_qualification_complete": false,
+  "whole_repository_semantic_review": "partial",
+  "complete_source_closure": false,
+  "source_closure": "partial",
+  "source_archive": {
+    "path": "out/review-20261020/r104/git-win32-recovered-sources-r104-20261020.tar.gz",
+    "sha256": "1e8d3960b8ff5414f3a3cbfc32c14e2d650d144b441f3cfcd0b9724487b08146",
+    "source_closure": "partial",
+    "status": "PASS",
+    "bytes": 463514142,
+    "members": 1259
+  },
+  "recipe_versions_recovered": 117,
+  "recipe_versions_pending": 4,
+  "fixed_members": 1259,
+  "new_source_members": 37,
+  "old_noncoverage_inputs_preserved": 1220,
+  "payload_states": {
+    "static-source-digests-verified": 101,
+    "verified-static-subset": 15,
+    "source-payload-pending": 1
+  },
+  "updated_packages": [
+    {
+      "package": "msys2-runtime",
+      "version": "2.4.1.34115.1ca92fa-1",
+      "status": "verified-static-subset"
+    },
+    {
+      "package": "dash",
+      "version": "0.5.8-2",
+      "status": "static-source-digests-verified"
+    },
+    {
+      "package": "openssl",
+      "version": "1.0.2.h-1",
+      "status": "static-source-digests-verified"
+    },
+    {
+      "package": "mingw-w64-i686-openssl",
+      "version": "1.0.2.h-1",
+      "status": "static-source-digests-verified"
+    }
+  ],
+  "checks": {
+    "original_runtime_patch_digests": "6/6",
+    "github_original_blob_checks": "20/20",
+    "bundle": "PASS",
+    "source_admission": "PASS",
+    "coding_readiness": "PASS",
+    "comment_inventory": {
+      "files": 273,
+      "declarations": 5798,
+      "violations": 0
+    },
+    "complete_lua_retained_from_R103": {
+      "passed": 735,
+      "total": 735
+    },
+    "product_source_changes": false
+  },
+  "review_scope": [
+    "two literal OpenSSL version transformations and original source/checksum array order",
+    "all recovered public GitHub blobs, original hashes and rejected historical candidates",
+    "six exact runtime patches; old moving VCS branch and binary correspondence remain pending",
+    "all collector/preservation/recorder functions and annotations; reused R102 helper contracts",
+    "exclusive writes, original source-lock retention, historical coverage and partial provenance"
+  ],
+  "source_bindings": [
+    {
+      "path": "release/windows-git32-sources.lock.json",
+      "frozen": "out/review-20261020/r104/frozen/release/windows-git32-sources.lock.json",
+      "sha256": "4b95b2bf6985b1317121754ba88c1f52f2b5a45706ccf274d93d9bd949ec3d6f",
+      "bytes": 374734
+    },
+    {
+      "path": "out/review-20261020/r104/collect_historical_inputs.py",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/collect_historical_inputs.py",
+      "sha256": "edc012fc64194ff7891c15af5634c8373e1c942171fe1b5c646ae94bc6e77d55",
+      "bytes": 7646
+    },
+    {
+      "path": "out/review-20261020/r104/preserve_recovery.py",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/preserve_recovery.py",
+      "sha256": "d0b7abda18cab3ebd40645d44e4c7d0955b5577252358a07bbbcf8ed49b1e305",
+      "bytes": 11984
+    },
+    {
+      "path": "out/review-20261020/r104/record_r104.py",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/record_r104.py",
+      "sha256": "38cbb60f672650ebe1e5538e78a0be582fea95276d4e594d6e61a95cff92de4c",
+      "bytes": 7207
+    },
+    {
+      "path": "out/review-20261020/r102/recover_four_payloads.py",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r102/recover_four_payloads.py",
+      "sha256": "151098fb5ad9c78411dc58b4783ff696b8d5eb9d39b4309ef95149807bdaf6af",
+      "bytes": 12233
+    },
+    {
+      "path": "out/review-20261020/r104/historical-inputs.json",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/historical-inputs.json",
+      "sha256": "c5e2a7d310252f93d1dbe80b7a974733291a7f51cddf32706e301690fee142c0",
+      "bytes": 15736
+    },
+    {
+      "path": "out/review-20261020/r104/download-receipts.json",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/download-receipts.json",
+      "sha256": "c9698c633590d36b7edb3d52dfb5ec976f28cd39ed27c9766c387316764037f8",
+      "bytes": 1218
+    },
+    {
+      "path": "out/review-20261020/r104/windows-git32-sources.before.json",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/windows-git32-sources.before.json",
+      "sha256": "2a0a594e4f42437888775b42c59769dac8d07975d2fcfb32706eb57b24826b1b",
+      "bytes": 363279
+    },
+    {
+      "path": "out/review-20261020/r104/recovery-report.json",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/recovery-report.json",
+      "sha256": "f3f6ed33618865391ad36b298c07f2a1e1e943a5a78a68d7bd48d1300c851375",
+      "bytes": 1014
+    },
+    {
+      "path": "out/review-20261020/r104/historical-inputs.log",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/historical-inputs.log",
+      "sha256": "52f51e8a47165784f46a50a63814acb79f295f256ff0989b4168f734a7d21257",
+      "bytes": 23
+    },
+    {
+      "path": "out/review-20261020/r104/preserve.log",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/preserve.log",
+      "sha256": "d6d02a3933a0fda1cb33d5a129726c30b22c87111b62cc38bfafb8e31f3d3c6b",
+      "bytes": 284
+    },
+    {
+      "path": "out/review-20261020/r104/bundle.log",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/bundle.log",
+      "sha256": "a68211a8503866735f4daeec273b5a5536ac5ec95f589cc044d06381d159c813",
+      "bytes": 202
+    },
+    {
+      "path": "out/review-20261020/r104/admission.json",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/admission.json",
+      "sha256": "b52eb53975ac3a6282c125197ffc8f4ad76949b0d01fa5a45bcc05b71ec9391c",
+      "bytes": 262
+    },
+    {
+      "path": "out/review-20261020/r104/admission.log",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/admission.log",
+      "sha256": "a25cb03dc48aa8d36db24725514dba1835a5ce27337b8cde7e525fdb767902d0",
+      "bytes": 273
+    },
+    {
+      "path": "out/review-20261020/r104/readiness.log",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/readiness.log",
+      "sha256": "71e94a460f33492743d26d9e5a3b116fc3ee7cd35788debbe6163bc2126b00c0",
+      "bytes": 4884
+    },
+    {
+      "path": "out/source-cache/sources/git-win32-source-coverage-20261020-r104.json",
+      "frozen": "out/review-20261020/r104/frozen/out/source-cache/sources/git-win32-source-coverage-20261020-r104.json",
+      "sha256": "aefd9a13255a0e8ee0f4125f826c02bd00dc1718ae06c7db0883f747d24ef470",
+      "bytes": 317208
+    },
+    {
+      "path": "out/review-20261020/r104/github/git-for-windows/MSYS2-packages/a8db1609f29a3777eb28f030b007f939f7ffc169/openssl/PKGBUILD.json",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/github/git-for-windows/MSYS2-packages/a8db1609f29a3777eb28f030b007f939f7ffc169/openssl/PKGBUILD.json",
+      "sha256": "72434c81d25bce0831f510c8c99a3c6f5cd826818e9ba57af05ea56a9183fe80",
+      "bytes": 5839
+    },
+    {
+      "path": "out/review-20261020/r104/github/git-for-windows/MSYS2-packages/a8db1609f29a3777eb28f030b007f939f7ffc169/openssl/ca-dir.patch.json",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/github/git-for-windows/MSYS2-packages/a8db1609f29a3777eb28f030b007f939f7ffc169/openssl/ca-dir.patch.json",
+      "sha256": "a063f0a6ab603d0acb2f378dd701e0f62207ed55f5c95078c41d3be78499d8e3",
+      "bytes": 2585
+    },
+    {
+      "path": "out/review-20261020/r104/github/git-for-windows/MSYS2-packages/a8db1609f29a3777eb28f030b007f939f7ffc169/openssl/no-rpath.patch.json",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/github/git-for-windows/MSYS2-packages/a8db1609f29a3777eb28f030b007f939f7ffc169/openssl/no-rpath.patch.json",
+      "sha256": "6e75436b4866b7d8f80dfe689bcb2add7148aa8a615b1db8493beeb17767ad04",
+      "bytes": 1854
+    },
+    {
+      "path": "out/review-20261020/r104/github/git-for-windows/MSYS2-packages/a8db1609f29a3777eb28f030b007f939f7ffc169/openssl/openssl-1.0.0-beta5-enginesdir.patch.json",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/github/git-for-windows/MSYS2-packages/a8db1609f29a3777eb28f030b007f939f7ffc169/openssl/openssl-1.0.0-beta5-enginesdir.patch.json",
+      "sha256": "bd431e8eceb89b87331f350d7b9638eb1416ee825943c2ade3e475756adae947",
+      "bytes": 3895
+    },
+    {
+      "path": "out/review-20261020/r104/github/git-for-windows/MSYS2-packages/a8db1609f29a3777eb28f030b007f939f7ffc169/openssl/openssl-1.0.1e-cygwin64.patch.json",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/github/git-for-windows/MSYS2-packages/a8db1609f29a3777eb28f030b007f939f7ffc169/openssl/openssl-1.0.1e-cygwin64.patch.json",
+      "sha256": "11fe05591b35207c0a1a59496f91817188236a5e3fa636fe64e20b8366992254",
+      "bytes": 9914
+    },
+    {
+      "path": "out/review-20261020/r104/github/git-for-windows/MSYS2-packages/a8db1609f29a3777eb28f030b007f939f7ffc169/openssl/openssl-1.0.1e-msys2.patch.json",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/github/git-for-windows/MSYS2-packages/a8db1609f29a3777eb28f030b007f939f7ffc169/openssl/openssl-1.0.1e-msys2.patch.json",
+      "sha256": "35cef6650b5d910759d46e72d9911c42c3bda97ed04a22db3abd343099315280",
+      "bytes": 22578
+    },
+    {
+      "path": "out/review-20261020/r104/github/git-for-windows/MINGW-packages/096064b1bff4ca8ff7bed3c23b7b8c40861f73a4/mingw-w64-openssl/PKGBUILD.json",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/github/git-for-windows/MINGW-packages/096064b1bff4ca8ff7bed3c23b7b8c40861f73a4/mingw-w64-openssl/PKGBUILD.json",
+      "sha256": "6d8c9d149d7d2d44a90797818da4a6f5c0d95ecbc72123d30097f78edfea7371",
+      "bytes": 5995
+    },
+    {
+      "path": "out/review-20261020/r104/github/git-for-windows/MINGW-packages/096064b1bff4ca8ff7bed3c23b7b8c40861f73a4/mingw-w64-openssl/openssl-0.9.6-x509.patch.json",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/github/git-for-windows/MINGW-packages/096064b1bff4ca8ff7bed3c23b7b8c40861f73a4/mingw-w64-openssl/openssl-0.9.6-x509.patch.json",
+      "sha256": "c04a733d04d4216902155175cc23d3696fe98f748e8c12f40ac3179e61d519d3",
+      "bytes": 3747
+    },
+    {
+      "path": "out/review-20261020/r104/github/git-for-windows/MINGW-packages/096064b1bff4ca8ff7bed3c23b7b8c40861f73a4/mingw-w64-openssl/openssl-1.0.0a-ldflags.patch.json",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/github/git-for-windows/MINGW-packages/096064b1bff4ca8ff7bed3c23b7b8c40861f73a4/mingw-w64-openssl/openssl-1.0.0a-ldflags.patch.json",
+      "sha256": "c8ac6d4623f46caddf1094125d6dbcb642c8b2748d9ab723d0ec08334e0df41b",
+      "bytes": 2512
+    },
+    {
+      "path": "out/review-20261020/r104/github/git-for-windows/MINGW-packages/096064b1bff4ca8ff7bed3c23b7b8c40861f73a4/mingw-w64-openssl/openssl-1.0.0d-windres.patch.json",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/github/git-for-windows/MINGW-packages/096064b1bff4ca8ff7bed3c23b7b8c40861f73a4/mingw-w64-openssl/openssl-1.0.0d-windres.patch.json",
+      "sha256": "eeac6b0938ed60870874dddc45969e201620e39771e645de565646742cec7d44",
+      "bytes": 5275
+    },
+    {
+      "path": "out/review-20261020/r104/github/git-for-windows/MINGW-packages/096064b1bff4ca8ff7bed3c23b7b8c40861f73a4/mingw-w64-openssl/openssl-1.0.1-x32.patch.json",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/github/git-for-windows/MINGW-packages/096064b1bff4ca8ff7bed3c23b7b8c40861f73a4/mingw-w64-openssl/openssl-1.0.1-x32.patch.json",
+      "sha256": "70a11f6ea76dea45af533aae3e1b8cdb43dab0adefc0ff918173914b541b186f",
+      "bytes": 6670
+    },
+    {
+      "path": "out/review-20261020/r104/github/git-for-windows/MINGW-packages/096064b1bff4ca8ff7bed3c23b7b8c40861f73a4/mingw-w64-openssl/openssl-1.0.1i-relocation.patch.json",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/github/git-for-windows/MINGW-packages/096064b1bff4ca8ff7bed3c23b7b8c40861f73a4/mingw-w64-openssl/openssl-1.0.1i-relocation.patch.json",
+      "sha256": "ef7e7882487cad62e7d927eba0e755cae828757c624b643848205a99ab722479",
+      "bytes": 31957
+    },
+    {
+      "path": "out/review-20261020/r104/github/git-for-windows/MINGW-packages/096064b1bff4ca8ff7bed3c23b7b8c40861f73a4/mingw-w64-openssl/openssl-1.0.2-ipv6.patch.json",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/github/git-for-windows/MINGW-packages/096064b1bff4ca8ff7bed3c23b7b8c40861f73a4/mingw-w64-openssl/openssl-1.0.2-ipv6.patch.json",
+      "sha256": "d82d1e882671a9a20a22aef75274917f485291c71f88ab3e5f6d3adfeaa04cd8",
+      "bytes": 27168
+    },
+    {
+      "path": "out/review-20261020/r104/github/git-for-windows/MINGW-packages/096064b1bff4ca8ff7bed3c23b7b8c40861f73a4/mingw-w64-openssl/openssl-1.0.2a-parallel-build.patch.json",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/github/git-for-windows/MINGW-packages/096064b1bff4ca8ff7bed3c23b7b8c40861f73a4/mingw-w64-openssl/openssl-1.0.2a-parallel-build.patch.json",
+      "sha256": "d1afeb24f8d260a6f894cafaaddd32981d0b64c338c6e736f5f5d6e802dc4e6d",
+      "bytes": 16783
+    },
+    {
+      "path": "out/review-20261020/r104/github/git-for-windows/MSYS2-packages/69ed9dac86ecf03321f4a78494423ce1659ea280/msys2-runtime/0001-dcrt0.cc-Untangle-allow_glob-from-winshell.patch.json",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/github/git-for-windows/MSYS2-packages/69ed9dac86ecf03321f4a78494423ce1659ea280/msys2-runtime/0001-dcrt0.cc-Untangle-allow_glob-from-winshell.patch.json",
+      "sha256": "495a2a3858e4ada02813ddc851878253108b6a61aed664fcfa2c284c60db1eee",
+      "bytes": 5522
+    },
+    {
+      "path": "out/review-20261020/r104/github/git-for-windows/MSYS2-packages/69ed9dac86ecf03321f4a78494423ce1659ea280/msys2-runtime/0002-dcrt0.cc-globify-Don-t-quote-literal-strings-differe.patch.json",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/github/git-for-windows/MSYS2-packages/69ed9dac86ecf03321f4a78494423ce1659ea280/msys2-runtime/0002-dcrt0.cc-globify-Don-t-quote-literal-strings-differe.patch.json",
+      "sha256": "61e7e2011b51e36901a45be19fdef5d4d8fe4186089c3905ad4fc12d9f65c533",
+      "bytes": 4542
+    },
+    {
+      "path": "out/review-20261020/r104/github/git-for-windows/MSYS2-packages/69ed9dac86ecf03321f4a78494423ce1659ea280/msys2-runtime/0003-strace.cc-Don-t-set-MSYS-noglob.patch.json",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/github/git-for-windows/MSYS2-packages/69ed9dac86ecf03321f4a78494423ce1659ea280/msys2-runtime/0003-strace.cc-Don-t-set-MSYS-noglob.patch.json",
+      "sha256": "fbc4c552cdeaf76ca75b53862c50fcffc1c2ecd5e88d4777c4e7eeb8e6ea2a7b",
+      "bytes": 4865
+    },
+    {
+      "path": "out/review-20261020/r104/github/git-for-windows/MSYS2-packages/69ed9dac86ecf03321f4a78494423ce1659ea280/msys2-runtime/0004-Add-debugging-for-build_argv.patch.json",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/github/git-for-windows/MSYS2-packages/69ed9dac86ecf03321f4a78494423ce1659ea280/msys2-runtime/0004-Add-debugging-for-build_argv.patch.json",
+      "sha256": "9b83bbf65fcfaf864b9a0630a5ece3d454d3f0b567131ec6690aa112130e5bdc",
+      "bytes": 2317
+    },
+    {
+      "path": "out/review-20261020/r104/github/git-for-windows/MSYS2-packages/69ed9dac86ecf03321f4a78494423ce1659ea280/msys2-runtime/0005-Add-debugging-for-strace-make_command_line.patch.json",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/github/git-for-windows/MSYS2-packages/69ed9dac86ecf03321f4a78494423ce1659ea280/msys2-runtime/0005-Add-debugging-for-strace-make_command_line.patch.json",
+      "sha256": "cfe74de34d24e72ea03ad3c87a70991bcd90619201d30b76b743a09188953e91",
+      "bytes": 2415
+    },
+    {
+      "path": "out/review-20261020/r104/github/git-for-windows/MSYS2-packages/69ed9dac86ecf03321f4a78494423ce1659ea280/msys2-runtime/0006-environ.cc-New-facility-environment-variable-MSYS2_E.patch.json",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/github/git-for-windows/MSYS2-packages/69ed9dac86ecf03321f4a78494423ce1659ea280/msys2-runtime/0006-environ.cc-New-facility-environment-variable-MSYS2_E.patch.json",
+      "sha256": "2dd18d4de2b068ba28fc7f5dd6b0fb820dc4dfae4e38fe8d405cf25dbc07e872",
+      "bytes": 10274
+    },
+    {
+      "path": "out/review-20261020/r104/2e9655d8bea08a2ba4f59025614a38eb30d9b631-patch.json",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/2e9655d8bea08a2ba4f59025614a38eb30d9b631-patch.json",
+      "sha256": "cf67d19584073b42fe9e32c74df8da4fcd0fe62f9d98cb1e2e8e8dce2593ee9d",
+      "bytes": 5522
+    },
+    {
+      "path": "out/review-20261020/r104/2e9655d8bea08a2ba4f59025614a38eb30d9b631-patch.patch",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/2e9655d8bea08a2ba4f59025614a38eb30d9b631-patch.patch",
+      "sha256": "afd8454662eb6ea9baa816fc594c3af33f4204d364d148c243c45e556e08613e",
+      "bytes": 2972
+    },
+    {
+      "path": "out/review-20261020/r104/69ed9dac86ecf03321f4a78494423ce1659ea280-patch.json",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/69ed9dac86ecf03321f4a78494423ce1659ea280-patch.json",
+      "sha256": "495a2a3858e4ada02813ddc851878253108b6a61aed664fcfa2c284c60db1eee",
+      "bytes": 5522
+    },
+    {
+      "path": "out/review-20261020/r104/69ed9dac86ecf03321f4a78494423ce1659ea280-patch.patch",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/69ed9dac86ecf03321f4a78494423ce1659ea280-patch.patch",
+      "sha256": "c251eb8d21ed8e58e10694054c93386d274457f9b7d4b23d38cdd220f2f6c6f1",
+      "bytes": 2972
+    },
+    {
+      "path": "out/review-20261020/r104/7388276a41126fea95be7763d2d6b4d69e2de044-patch.json",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/7388276a41126fea95be7763d2d6b4d69e2de044-patch.json",
+      "sha256": "3ce4676e3bd40186b261c145fdc194bb17ef56c5261da71ec250fec4ab2161a4",
+      "bytes": 3798
+    },
+    {
+      "path": "out/review-20261020/r104/7388276a41126fea95be7763d2d6b4d69e2de044-patch.patch",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/7388276a41126fea95be7763d2d6b4d69e2de044-patch.patch",
+      "sha256": "2edbd3f301d1c9f1603e14597b72245aac7e411991db18f31bc56d63e830f639",
+      "bytes": 1720
+    },
+    {
+      "path": "out/review-20261020/r104/c1b58eb8c71b0e026bb82463183a51dce6ab8e8b-patch.json",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/c1b58eb8c71b0e026bb82463183a51dce6ab8e8b-patch.json",
+      "sha256": "91906376ac8c5d7013b00cd047815f778275c8ee17af7c22933d5305529e5ffb",
+      "bytes": 5522
+    },
+    {
+      "path": "out/review-20261020/r104/c1b58eb8c71b0e026bb82463183a51dce6ab8e8b-patch.patch",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/c1b58eb8c71b0e026bb82463183a51dce6ab8e8b-patch.patch",
+      "sha256": "c8223b65d2eb744c865f6bfbbe4ad0f41ecc7ebbb0ef69a253649cf22291322a",
+      "bytes": 2972
+    },
+    {
+      "path": "out/review-20261020/r104/downloads/dash-debian-0.5.8.orig.tar.gz.part",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/downloads/dash-debian-0.5.8.orig.tar.gz.part",
+      "sha256": "c6db3a237747b02d20382a761397563d813b306c020ae28ce25a1c3915fac60f",
+      "bytes": 223028
+    },
+    {
+      "path": "out/review-20261020/r104/downloads/openssl-1.0.2h.tar.gz.part",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/downloads/openssl-1.0.2h.tar.gz.part",
+      "sha256": "1d4007e53aad94a5b2002fe045ee7bb0b3d98f1a47f8b2bc851dcd1c74332919",
+      "bytes": 5274412
+    },
+    {
+      "path": "out/review-20261020/r104/downloads/openssl-1.0.2h.tar.gz.asc.part",
+      "frozen": "out/review-20261020/r104/frozen/out/review-20261020/r104/downloads/openssl-1.0.2h.tar.gz.asc.part",
+      "sha256": "270be749e5e271cb388d069d2caedfe2087d3f2d8a18e662abdfb193d24c2aae",
+      "bytes": 473
+    }
+  ],
+  "remaining": [
+    "git-extra, Git Credential Manager, MPFR and Net-SMTP-SSL exact recipes",
+    "Connect original archive, ncurses snapshot and other static subsets",
+    "runtime VCS identity, detached signatures, R101 key states and binary/source correspondence",
+    "final nine-package qualification and whole-repository semantic review"
+  ]
+}

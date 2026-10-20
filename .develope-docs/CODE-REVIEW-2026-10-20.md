@@ -198,7 +198,7 @@ R103 全部构建、初始化和测试句柄已结束，没有排队或后台验
 luainstaller Git 对象复用；没有复制已构建 Lua、venv、私有配置或其他运行缓存。
 验证是在已有宿主开发依赖下完成，不宣称另一台全新电脑已通过。
 
-## 最新接续记录
+## R103 后接续记录
 
 原目标仍为“实现 yaca”，按 D-093 保持活动。R101、R102 和 R103 的实现、实际验证
 与原始证据已保存；R101/R102 已提交，R103 的实现与验收已完成。目前没有活跃
@@ -208,3 +208,96 @@ luainstaller Git 对象复用；没有复制已构建 Lua、venv、私有配置�
 剩余事项以 TRACKING 为准：Windows Git 的六个配方问题、ncurses 原快照、其余
 静态子集/VCS/签名、R101 的过期快照与撤销新鲜度、完整二进制对应关系，以及
 全仓语义 Review 和最终 C32/C33/C34。正式 Gate R 保持关闭，总目标未完成。
+
+## R104 Win32 未恢复输入接续
+
+R103 已提交为 `2f093e0`，提交后工作区干净。当前检查原三个 source-payload-pending
+条目及其关联配方。Dash 0.5.8 已从 Debian 官方归档取得，SHA-256
+`c6db3a237747b02d20382a761397563d813b306c020ae28ce25a1c3915fac60f` 匹配原配方；
+原 HTTPS 上游握手失败，Kernel 候选路径返回 404。Connect 的 Bitbucket 原归档
+session `86456` 已确认返回 22/404。
+
+MSYS2 runtime 的当前配方列出旧 0001--0006 文件名，而目录只保留重编号后的
+0017--0022；新文件的完整摘要不匹配旧固定值，不能重命名后当成原输入。
+正在通过固定 Git 历史检查原始文件，同时按字面 `_ver` 和 pacman 版本变换核对
+两份 OpenSSL 1.0.2.h-1 配方，不执行 shell 配方。
+
+候选下载与 API 材料放 `out/review-20261020/r104/`。历史恢复 session `65485`、
+OpenSSL 归档/签名下载 session `8520`、`73214` 均已确认退出零；没有活下载任务。
+20 个 GitHub 原文件已核对 Git blob SHA-1 与实际 SHA-256，六项 runtime 原补丁
+全部匹配原配方，而不同版本的重编号补丁及错误候选历史记录保留原样。
+
+来源锁现有 1259 个固定成员：两份 OpenSSL 原配方与补丁、原归档/未验证签名、
+Dash 归档和六项 runtime 原补丁已加入。配方恢复 117/121，余 4 项；静态结果为
+101 个全部匹配、15 个子集、1 个仍无已核对静态载荷。Runtime 原 moving branch
+尚未绑定到分发二进制，保持子集；全部来源与发布状态仍为 partial/未授权。
+原 R102 覆盖报告按原字节保存在新 history 项，不删除原失败记录。
+
+新档案已完成生产打包与来源接纳，session `17499`、`28816` 均已确认退出零。
+日志为 `r104/bundle.log`、`r104/admission.log`；完整 readiness、证据冻结和干净
+提交边界仍待收尾。R101--R103 的产物和所有原始失败记录继续保留。
+
+### 精确输入与语义核对
+
+两份 OpenSSL 配方分别来自
+[MSYS2 原提交](https://github.com/git-for-windows/MSYS2-packages/tree/a8db1609f29a3777eb28f030b007f939f7ffc169/openssl)
+与 [MINGW 原提交](https://github.com/git-for-windows/MINGW-packages/tree/096064b1bff4ca8ff7bed3c23b7b8c40861f73a4/mingw-w64-openssl)。
+原 `_ver=1.0.2h` 的字面变换将字母后缀写成 `.h`，pkgrel=1，准确对应 1.0.2.h-1；
+没有修改第三方配方来符合目标。原归档来自
+[OpenSSL 官方旧版本归档](https://www.openssl.org/source/old/1.0.2/openssl-1.0.2h.tar.gz)，
+SHA-256 `1d4007e53aad94a5b2002fe045ee7bb0b3d98f1a47f8b2bc851dcd1c74332919`
+同时匹配两份配方。11 项本地补丁也全部匹配；分离签名只固定字节，保留待验证。
+
+[Dash 原归档的 Debian 副本](https://archive.debian.org/debian/pool/main/d/dash/dash_0.5.8.orig.tar.gz)
+SHA-256 匹配原声明，没有重新打包。六项 runtime 旧文件从
+[固定 Git 历史](https://github.com/git-for-windows/MSYS2-packages/tree/69ed9dac86ecf03321f4a78494423ce1659ea280/msys2-runtime)
+取得，全部匹配原声明。原配方的 source 与 prepare 名称存在不一致，其 moving
+branch 与实际分发二进制还未完成对应核对；保留 verified-static-subset，未使用
+今天的 master 充当旧源码。不同候选补丁的失败摘要与原始 API 返回均保留。
+
+人工 Review 核对了历史收集器的全部函数、完整提交和 Git blob 身份、base64 内容
+及字节数、递归目录与普通文件边界、排他保存；核对保存程序的原始 checksum
+字面解析、source 顺序、两份版本变换、SKIP、VCS 待办、覆盖报告历史及部分状态。
+使用的 R102 摘要/排他写入 helper 沿用其原实现与已核对契约。所有新辅助函数均有
+完整文件头和参数/返回/错误/副作用注释，第三方原文件作者和字节未修改。
+
+| 档案项目 | 实际值 |
+| --- | --- |
+| 本机档案 | `out/review-20261020/r104/git-win32-recovered-sources-r104-20261020.tar.gz` |
+| SHA-256 | `1e8d3960b8ff5414f3a3cbfc32c14e2d650d144b441f3cfcd0b9724487b08146` |
+| 字节数 | 463514142 |
+| 固定来源成员 | 1259，另有档案自己的 source-profile.json |
+| 来源装配/维护接纳 | 均 PASS，Git 2.10.0，source_closure=partial |
+| 历史输入保留 | 原 1220 个非覆盖报告输入逐项保持一致；R102 覆盖报告按原字节移入 history |
+
+档案尚未公开。源码与最终目标资格、全部语义 Review 的缺项继续保留。
+
+完整 coding readiness PASS，session `10048` 已确认退出零，结构保持 273/5798/0。
+密码学签名专项仍为 9/9。产品 src/native 无改动，完整 Lua 735/735 保留 R103
+独立检出的实际范围，本节点未把其写成一次新的目标或逐包测试。
+47 项当前/冻结来源、辅助程序、原始 GitHub 返回、失败候选和完成结果的字节绑定
+见 [R104 证据](tool-source-review/R104.json)。记录器也已逐项核对注释和实际行为。
+
+## 最新接续记录
+
+总目标为“实现 yaca”，按 D-093 保持 active，尚未完成。R101 `7c20297`、R102
+`21d927f`、R103 `2f093e0` 已提交；R104 来源装配、来源接纳、完整 readiness、
+本轮人工语义 Review 和证据冻结均已完成，可以从本节点继续。
+
+当前不存在需要等待或重启的后台操作：R104 历史收集 `65485`、OpenSSL 下载
+`8520`/`73214`、来源装配 `17499`、来源接纳 `28816`、readiness `10048` 和失败
+候选保留检查 `39919` 都已确认成功退出；Connect 原归档 `86456` 的 404 失败已
+保留。R101--R103 句柄也已结束。产物和原始日志位于 `out/review-20261020/`，
+来源缓存为 `out/source-cache/`；复用前按对应节点摘要核对，不重启生产操作。
+
+下一项仍按 TRACKING。Win32 剩余 4 个原配方问题为 git-extra、Git Credential
+Manager、MPFR 3.1.4.-1、Net-SMTP-SSL 1.02-1。只读查询已确认 git-extra 的候选
+仓库为 build-extra，版本中的短提交对应
+`6a8c8570cfa9578af798d7b03d33b81f9f414a97`；尚未恢复/接纳它的原配方。
+MPFR 候选 `2f187729af77224bb80064a68b1e58f16631973e` 声明 3.1.4-1，缺少目标
+中的尾点，不能直接写成精确匹配。查询到的 Net-SMTP-SSL 历史配方仍为 1.01-2，
+不冒充 1.02-1。上述只读线索未作为已完成来源计数。
+
+后续还需处理 Connect/ncurses 原归档、其他静态子集、runtime VCS、分离签名、
+R101 的密钥有效性/撤销新鲜度及全部二进制对应关系；全仓人工语义 Review、
+最终 C32/C33/C34 与独立 Gate R 评审仍待完成。没有扩大产品功能或历史资格范围。
