@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-10-15
+Date: 2026-10-20
 File: validate_proof_evidence.lua
 Description: Checks proof manifests, declared artifacts and evidence admission requirements.
 ]]
@@ -56,9 +56,9 @@ local expected = {
   },
   ["TP-006"] = {
     files = {
-      [root .. "/.tools/proofs/tp006_curl_carrier.py"] = "ca9d36a85f3f4cc8fde3e75a5f2572114da18e2251b9df6926769d87575dba78",
+      [root .. "/.tools/proofs/tp006_curl_carrier.py"] = "92c4b6c581832e03ff4e1a714d2329372024bec9e01490f6df1e1f1615857297",
     },
-    recorded = "ca9d36a85f3f4cc8fde3e75a5f2572114da18e2251b9df6926769d87575dba78",
+    recorded = "92c4b6c581832e03ff4e1a714d2329372024bec9e01490f6df1e1f1615857297",
   },
   ["TP-008"] = {
     files = {

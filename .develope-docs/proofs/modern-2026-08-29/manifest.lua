@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-10-15
+Date: 2026-10-20
 File: manifest.lua
 Description: Indexes modern-host feasibility evidence and its limits for target qualification.
 ]]
@@ -64,7 +64,7 @@ return {
       scope = "loopback-carrier-cancel-retry-scanner",
       command = "python3 .tools/proofs/tp006_curl_carrier.py",
       assertions = 319,
-      source_sha256 = "ca9d36a85f3f4cc8fde3e75a5f2572114da18e2251b9df6926769d87575dba78",
+      source_sha256 = "92c4b6c581832e03ff4e1a714d2329372024bec9e01490f6df1e1f1615857297",
       target_pending = { "bundled curl", "XP/CentOS TLS/proxy/CA", "target timer granularity", "integrated redirect controller" },
       candidates_not_release_frozen = {
         minimum_scannable_secret_bytes = 8,

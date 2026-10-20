@@ -6,14 +6,14 @@
     "status": "partial",
     "complete_source_closure": false,
     "manual_source_closure_review": "pending",
-    "recipe_versions_recovered": 117,
-    "recipe_versions_pending": 4,
+    "recipe_versions_recovered": 120,
+    "recipe_versions_pending": 1,
     "unattempted_payload_versions": 0,
     "coverage_member": "SOURCE-COVERAGE.json",
     "historical_status_member": "history/R95-SOURCE-STATUS.json",
     "scope": "Original pinned legacy recipe and source inputs with current per-member recovery; unresolved source, signature and binary correspondence remain pending",
-    "last_recovery_review": "R104",
-    "static_digest_verified_versions": 101,
+    "last_recovery_review": "R105",
+    "static_digest_verified_versions": 105,
     "verified_static_subset_versions": 15
   },
   "inputs": [
@@ -5448,9 +5448,9 @@
       "sha256": "11390c74733abcb262aaca4db68710f13ffffd42bfe2a0861a5dfc912b2977e5"
     },
     {
-      "path": "sources/git-win32-source-coverage-20261020-r104.json",
+      "path": "sources/git-win32-source-coverage-20261020-r105.json",
       "destination": "SOURCE-COVERAGE.json",
-      "sha256": "aefd9a13255a0e8ee0f4125f826c02bd00dc1718ae06c7db0883f747d24ef470"
+      "sha256": "b6dd5a621f2be906292232f803adba24f58d3b8cc8f8431b78266b2dd1063637"
     },
     {
       "path": "sources/git-win32-x86-source-status-20261013.json",
@@ -6311,6 +6311,306 @@
       "path": "sources/git-win32-source-coverage-20261020.json",
       "destination": "history/R102-SOURCE-COVERAGE.json",
       "sha256": "daa07b35213478db9ea8e9ad79f85d09d99b4e90cb3a1552283008b2f1f6b456"
+    },
+    {
+      "path": "gfw-legacy-recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/99-post-install-cleanup.post",
+      "destination": "recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/99-post-install-cleanup.post",
+      "sha256": "683ab066be19cb4defec470ebd53f165ca5dbf761fd40c13aee8abe31ba42803"
+    },
+    {
+      "path": "gfw-legacy-recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/Makefile",
+      "destination": "recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/Makefile",
+      "sha256": "aa388de88e87889efc9117d6799dc4787963c11e98da8b4e78e820e88552ec10"
+    },
+    {
+      "path": "gfw-legacy-recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/PKGBUILD",
+      "destination": "recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/PKGBUILD",
+      "sha256": "8ea5a8305ddaac8a38e26c22ca78a0c2270ef6a7f73dc5c08897543010c3cc28"
+    },
+    {
+      "path": "gfw-legacy-recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/SystemInfo.cpp",
+      "destination": "recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/SystemInfo.cpp",
+      "sha256": "3e4d4f7cfcbd78d6b6344fe6acea2fc0177f7360d57d1c55344bd25d48633d6c"
+    },
+    {
+      "path": "gfw-legacy-recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/SystemInfo.h",
+      "destination": "recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/SystemInfo.h",
+      "sha256": "402c51eba82453a76f5110f4754bb1005df507a6e4532574c2b9627ff4e1dc81"
+    },
+    {
+      "path": "gfw-legacy-recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/WhoUses.cpp",
+      "destination": "recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/WhoUses.cpp",
+      "sha256": "d9024bab283ebb67b5d39d49ee5d2592e170abf1f92d3db34edcdd7eeed0b6b9"
+    },
+    {
+      "path": "gfw-legacy-recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/aliases.sh",
+      "destination": "recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/aliases.sh",
+      "sha256": "4678d4939642b9a5b13e2f700a6968550f8e936738879a625479df5429a60e53"
+    },
+    {
+      "path": "gfw-legacy-recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/astextplain",
+      "destination": "recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/astextplain",
+      "sha256": "643d63f41e106c11023b891abc213d654f84e086e1241df7c2bd79d429aa27fe"
+    },
+    {
+      "path": "gfw-legacy-recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/bash_profile.sh",
+      "destination": "recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/bash_profile.sh",
+      "sha256": "02d38e480a1ec4227e94a5aa073945901680aa3387e3386f8b77f10426ebbc75"
+    },
+    {
+      "path": "gfw-legacy-recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/create-shortcut.c",
+      "destination": "recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/create-shortcut.c",
+      "sha256": "197791d75a7f7e18c19e3673266d4d8a9f2620e0d046f6478cb94ad422fb21c4"
+    },
+    {
+      "path": "gfw-legacy-recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/env.sh",
+      "destination": "recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/env.sh",
+      "sha256": "255c64eecf1dbd188ef3452e73b9e099f3bb0e56bc23ff1493e4cc57f724d52f"
+    },
+    {
+      "path": "gfw-legacy-recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/git-extra.install",
+      "destination": "recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/git-extra.install",
+      "sha256": "bf5854b16a85a7eec2464b592eb1c3abbcb156b8b94057b9de5178e8678c12f6"
+    },
+    {
+      "path": "gfw-legacy-recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/git-extra.install.in",
+      "destination": "recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/git-extra.install.in",
+      "sha256": "d5d5209920e47925700ddf38e664982d97fb8766ff8c196530d02b1b0f51a64f"
+    },
+    {
+      "path": "gfw-legacy-recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/git-prompt.sh",
+      "destination": "recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/git-prompt.sh",
+      "sha256": "57669acb15e2c6ae2aae4fc393aadb95fe0b15fff667043b2ed55e1c3d98cdcf"
+    },
+    {
+      "path": "gfw-legacy-recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/git-sdk.sh",
+      "destination": "recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/git-sdk.sh",
+      "sha256": "89b4d784e1c07d67c11a35abc7094709c216372e2099b2eb7abbc6eb7c34861f"
+    },
+    {
+      "path": "gfw-legacy-recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/gitattributes",
+      "destination": "recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/gitattributes",
+      "sha256": "d7f667dec0305aee3f862a62bfc81f450e7b841e81c0b62c31433861e8b34257"
+    },
+    {
+      "path": "gfw-legacy-recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/gitconfig",
+      "destination": "recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/gitconfig",
+      "sha256": "e070888bec55d95d3c9c62cb0a5e5e140bbb2ac65817b771b81ddc29ae391b31"
+    },
+    {
+      "path": "gfw-legacy-recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/inputrc",
+      "destination": "recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/inputrc",
+      "sha256": "e6a17a669fe8282792b3d98a2c47718425364a0ca9a456bdbad4a69c57ec6978"
+    },
+    {
+      "path": "gfw-legacy-recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/msys2-32.ico",
+      "destination": "recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/msys2-32.ico",
+      "sha256": "dcbd1b981d5b899afe30151a5f5a27ea52025ff1335f131af1b5891f62ddd55b"
+    },
+    {
+      "path": "gfw-legacy-recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/notepad",
+      "destination": "recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/notepad",
+      "sha256": "694b07404618d616aa316a632090ce64f2f89df3cc62b9d949efc0c2569b016e"
+    },
+    {
+      "path": "gfw-legacy-recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/vi",
+      "destination": "recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/vi",
+      "sha256": "640d04d2a2da709419188a986d5e5550ad30df23c7ea9be1a389c37a6b917994"
+    },
+    {
+      "path": "gfw-legacy-recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/vimrc",
+      "destination": "recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/vimrc",
+      "sha256": "9ff587400b654fe63b839a43eac07a7c086195956d99cf64dc448ac124cf855e"
+    },
+    {
+      "path": "gfw-legacy-recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/wordpad",
+      "destination": "recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/wordpad",
+      "sha256": "0ed43e89d5c9f295f82c71c6eac16ec20dd5ccdf01be7b0698e74fd85f5bfbaf"
+    },
+    {
+      "path": "gfw-legacy-recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/mingw-w64-git-credential-manager/PKGBUILD",
+      "destination": "recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/mingw-w64-git-credential-manager/PKGBUILD",
+      "sha256": "2afbdc94ed89c9a51a0d73bdc08a7bf23ec4827150a50b23f69f202bda2fb334"
+    },
+    {
+      "path": "gfw-legacy-recipes/b98235867c2366c62ac177bfad42ced92fb547f8/mpfr/PKGBUILD",
+      "destination": "recipes/b98235867c2366c62ac177bfad42ced92fb547f8/mpfr/PKGBUILD",
+      "sha256": "7f27055741880b1d6b440fbce5ee4b4ad319294c734a45b190e565e7466a24d2"
+    },
+    {
+      "path": "gfw-legacy-recipes/b98235867c2366c62ac177bfad42ced92fb547f8/mpfr/mpfr-3.1.2-msys2.patch",
+      "destination": "recipes/b98235867c2366c62ac177bfad42ced92fb547f8/mpfr/mpfr-3.1.2-msys2.patch",
+      "sha256": "c2203787c656ef82878d5fe839eb135232c3387668490ef59d84880f3573c308"
+    },
+    {
+      "path": "gfw-legacy-recipes/b98235867c2366c62ac177bfad42ced92fb547f8/mpfr/mpfr-3.1.4-1.src.patch",
+      "destination": "recipes/b98235867c2366c62ac177bfad42ced92fb547f8/mpfr/mpfr-3.1.4-1.src.patch",
+      "sha256": "976a88585adeb90ab15646ce6de724c01caa7a6f763cc0477a925896db77165c"
+    },
+    {
+      "path": "gfw-legacy-recipes/b98235867c2366c62ac177bfad42ced92fb547f8/mpfr/mpfr.install",
+      "destination": "recipes/b98235867c2366c62ac177bfad42ced92fb547f8/mpfr/mpfr.install",
+      "sha256": "5e90449dba7aabf39649d5231ab0480d15abfbf995505e6b85ecfaf3d37721f8"
+    },
+    {
+      "path": "gfw-legacy-recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/LICENSE.txt",
+      "destination": "recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/LICENSE.txt",
+      "sha256": "5b2198d1645f767585e8a88ac0499b04472164c0d2da22e75ecf97ef443ab32e"
+    },
+    {
+      "path": "gfw-legacy-recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/.gitattributes",
+      "destination": "recipes/6a8c8570cfa9578af798d7b03d33b81f9f414a97/.gitattributes",
+      "sha256": "cf764ae12f650bb4bc69468e2fd51ec0390589f7d031fc68bfeb2ca559d64c00"
+    },
+    {
+      "path": "gfw-legacy-payloads/git-extra-1.1.120.6a8c857-1/inputrc",
+      "destination": "legacy-payloads/git-extra-1.1.120.6a8c857-1/inputrc",
+      "sha256": "e6a17a669fe8282792b3d98a2c47718425364a0ca9a456bdbad4a69c57ec6978"
+    },
+    {
+      "path": "gfw-legacy-payloads/git-extra-1.1.120.6a8c857-1/vimrc",
+      "destination": "legacy-payloads/git-extra-1.1.120.6a8c857-1/vimrc",
+      "sha256": "9ff587400b654fe63b839a43eac07a7c086195956d99cf64dc448ac124cf855e"
+    },
+    {
+      "path": "gfw-legacy-payloads/git-extra-1.1.120.6a8c857-1/vi",
+      "destination": "legacy-payloads/git-extra-1.1.120.6a8c857-1/vi",
+      "sha256": "640d04d2a2da709419188a986d5e5550ad30df23c7ea9be1a389c37a6b917994"
+    },
+    {
+      "path": "gfw-legacy-payloads/git-extra-1.1.120.6a8c857-1/notepad",
+      "destination": "legacy-payloads/git-extra-1.1.120.6a8c857-1/notepad",
+      "sha256": "694b07404618d616aa316a632090ce64f2f89df3cc62b9d949efc0c2569b016e"
+    },
+    {
+      "path": "gfw-legacy-payloads/git-extra-1.1.120.6a8c857-1/wordpad",
+      "destination": "legacy-payloads/git-extra-1.1.120.6a8c857-1/wordpad",
+      "sha256": "0ed43e89d5c9f295f82c71c6eac16ec20dd5ccdf01be7b0698e74fd85f5bfbaf"
+    },
+    {
+      "path": "gfw-legacy-payloads/git-extra-1.1.120.6a8c857-1/create-shortcut.c",
+      "destination": "legacy-payloads/git-extra-1.1.120.6a8c857-1/create-shortcut.c",
+      "sha256": "197791d75a7f7e18c19e3673266d4d8a9f2620e0d046f6478cb94ad422fb21c4"
+    },
+    {
+      "path": "gfw-legacy-payloads/git-extra-1.1.120.6a8c857-1/Makefile",
+      "destination": "legacy-payloads/git-extra-1.1.120.6a8c857-1/Makefile",
+      "sha256": "aa388de88e87889efc9117d6799dc4787963c11e98da8b4e78e820e88552ec10"
+    },
+    {
+      "path": "gfw-legacy-payloads/git-extra-1.1.120.6a8c857-1/SystemInfo.cpp",
+      "destination": "legacy-payloads/git-extra-1.1.120.6a8c857-1/SystemInfo.cpp",
+      "sha256": "3e4d4f7cfcbd78d6b6344fe6acea2fc0177f7360d57d1c55344bd25d48633d6c"
+    },
+    {
+      "path": "gfw-legacy-payloads/git-extra-1.1.120.6a8c857-1/SystemInfo.h",
+      "destination": "legacy-payloads/git-extra-1.1.120.6a8c857-1/SystemInfo.h",
+      "sha256": "402c51eba82453a76f5110f4754bb1005df507a6e4532574c2b9627ff4e1dc81"
+    },
+    {
+      "path": "gfw-legacy-payloads/git-extra-1.1.120.6a8c857-1/WhoUses.cpp",
+      "destination": "legacy-payloads/git-extra-1.1.120.6a8c857-1/WhoUses.cpp",
+      "sha256": "d9024bab283ebb67b5d39d49ee5d2592e170abf1f92d3db34edcdd7eeed0b6b9"
+    },
+    {
+      "path": "gfw-legacy-payloads/git-extra-1.1.120.6a8c857-1/git-prompt.sh",
+      "destination": "legacy-payloads/git-extra-1.1.120.6a8c857-1/git-prompt.sh",
+      "sha256": "57669acb15e2c6ae2aae4fc393aadb95fe0b15fff667043b2ed55e1c3d98cdcf"
+    },
+    {
+      "path": "gfw-legacy-payloads/git-extra-1.1.120.6a8c857-1/aliases.sh",
+      "destination": "legacy-payloads/git-extra-1.1.120.6a8c857-1/aliases.sh",
+      "sha256": "4678d4939642b9a5b13e2f700a6968550f8e936738879a625479df5429a60e53"
+    },
+    {
+      "path": "gfw-legacy-payloads/git-extra-1.1.120.6a8c857-1/env.sh",
+      "destination": "legacy-payloads/git-extra-1.1.120.6a8c857-1/env.sh",
+      "sha256": "255c64eecf1dbd188ef3452e73b9e099f3bb0e56bc23ff1493e4cc57f724d52f"
+    },
+    {
+      "path": "gfw-legacy-payloads/git-extra-1.1.120.6a8c857-1/bash_profile.sh",
+      "destination": "legacy-payloads/git-extra-1.1.120.6a8c857-1/bash_profile.sh",
+      "sha256": "02d38e480a1ec4227e94a5aa073945901680aa3387e3386f8b77f10426ebbc75"
+    },
+    {
+      "path": "gfw-legacy-payloads/git-extra-1.1.120.6a8c857-1/msys2-32.ico",
+      "destination": "legacy-payloads/git-extra-1.1.120.6a8c857-1/msys2-32.ico",
+      "sha256": "dcbd1b981d5b899afe30151a5f5a27ea52025ff1335f131af1b5891f62ddd55b"
+    },
+    {
+      "path": "gfw-legacy-payloads/git-extra-1.1.120.6a8c857-1/99-post-install-cleanup.post",
+      "destination": "legacy-payloads/git-extra-1.1.120.6a8c857-1/99-post-install-cleanup.post",
+      "sha256": "683ab066be19cb4defec470ebd53f165ca5dbf761fd40c13aee8abe31ba42803"
+    },
+    {
+      "path": "gfw-legacy-payloads/git-extra-1.1.120.6a8c857-1/astextplain",
+      "destination": "legacy-payloads/git-extra-1.1.120.6a8c857-1/astextplain",
+      "sha256": "643d63f41e106c11023b891abc213d654f84e086e1241df7c2bd79d429aa27fe"
+    },
+    {
+      "path": "gfw-legacy-payloads/git-extra-1.1.120.6a8c857-1/git-sdk.sh",
+      "destination": "legacy-payloads/git-extra-1.1.120.6a8c857-1/git-sdk.sh",
+      "sha256": "89b4d784e1c07d67c11a35abc7094709c216372e2099b2eb7abbc6eb7c34861f"
+    },
+    {
+      "path": "gfw-legacy-upstream/git-credential-manager-1.6.1/source.tar.gz",
+      "destination": "upstream/git-credential-manager-1.6.1/source.tar.gz",
+      "sha256": "59bf8eb5823eb8abcf9ef342acac7c18de787cb44c2a2154e1e5db45c2197bdd"
+    },
+    {
+      "path": "gfw-legacy-upstream/git-credential-manager-1.6.1/LICENSE.TXT",
+      "destination": "licenses/git-credential-manager-1.6.1-LICENSE.TXT",
+      "sha256": "052a1982545cb9eda5aecec99dfe41d9f418ae0dea4d2deb78d975efd41e2446"
+    },
+    {
+      "path": "gfw-legacy-payloads/mpfr-3.1.4.-1/mpfr-3.1.4.tar.xz",
+      "destination": "legacy-payloads/mpfr-3.1.4.-1/mpfr-3.1.4.tar.xz",
+      "sha256": "761413b16d749c53e2bfd2b1dfaa3b027b0e793e404b90b5fbaeef60af6517f5"
+    },
+    {
+      "path": "gfw-legacy-payloads/mpfr-3.1.4.-1/mpfr-3.1.4.tar.xz.asc",
+      "destination": "legacy-payloads/mpfr-3.1.4.-1/mpfr-3.1.4.tar.xz.asc",
+      "sha256": "3caee6f5c56356caa5cc9f662d68b64680f96d1af153b70c29c0838de30596e6"
+    },
+    {
+      "path": "gfw-legacy-payloads/mpfr-3.1.4.-1/mpfr-3.1.4-1.src.patch",
+      "destination": "legacy-payloads/mpfr-3.1.4.-1/mpfr-3.1.4-1.src.patch",
+      "sha256": "976a88585adeb90ab15646ce6de724c01caa7a6f763cc0477a925896db77165c"
+    },
+    {
+      "path": "gfw-legacy-payloads/mpfr-3.1.4.-1/mpfr-3.1.2-msys2.patch",
+      "destination": "legacy-payloads/mpfr-3.1.4.-1/mpfr-3.1.2-msys2.patch",
+      "sha256": "c2203787c656ef82878d5fe839eb135232c3387668490ef59d84880f3573c308"
+    },
+    {
+      "path": "gfw-legacy-payloads/mingw-w64-i686-connect-1.104-1/connect-1.104.tar.bz2",
+      "destination": "legacy-payloads/mingw-w64-i686-connect-1.104-1/connect-1.104.tar.bz2",
+      "sha256": "e262cd3a6ee66e65187f3780ca808bc8dddee03dc5c5755b2b9c4db10274eb40"
+    },
+    {
+      "path": "gfw-legacy-source-containers/mingw-w64-connect-1.104-1.src.tar.gz",
+      "destination": "source-containers/mingw-w64-connect-1.104-1.src.tar.gz",
+      "sha256": "f4f88f471bf2983a50d2372e4bef060a361f6c94906a0505757f1186c0afa392"
+    },
+    {
+      "path": "gfw-legacy-payloads/ncurses-6.0.20160220-1/ncurses-6.0.20160220.tar.gz",
+      "destination": "legacy-payloads/ncurses-6.0.20160220-1/ncurses-6.0.20160220.tar.gz",
+      "sha256": "34387d968a37cbc2362f62d44d44bb9c27cd288261262bd06f3b053994c90401"
+    },
+    {
+      "path": "gfw-legacy-source-containers/ncurses-6.0.20160220-1.src.tar.gz",
+      "destination": "source-containers/ncurses-6.0.20160220-1.src.tar.gz",
+      "sha256": "da455f7ed0023cab270d319ae8f5ec87f7bb0cbd108b57558a4f40e194430315"
+    },
+    {
+      "path": "sources/git-win32-source-recovery-20261020-r105.json",
+      "destination": "SOURCE-RECOVERY-R105.json",
+      "sha256": "353044d87ba6d44452c32374e894dca284ad5a465ed63dc38470f437484acad6"
+    },
+    {
+      "path": "sources/git-win32-source-coverage-20261020-r104.json",
+      "destination": "history/R104-SOURCE-COVERAGE.json",
+      "sha256": "aefd9a13255a0e8ee0f4125f826c02bd00dc1718ae06c7db0883f747d24ef470"
     }
   ]
 }

@@ -278,7 +278,7 @@ branch 与实际分发二进制还未完成对应核对；保留 verified-static
 47 项当前/冻结来源、辅助程序、原始 GitHub 返回、失败候选和完成结果的字节绑定
 见 [R104 证据](tool-source-review/R104.json)。记录器也已逐项核对注释和实际行为。
 
-## 最新接续记录
+## R104 后接续记录
 
 总目标为“实现 yaca”，按 D-093 保持 active，尚未完成。R101 `7c20297`、R102
 `21d927f`、R103 `2f093e0` 已提交；R104 来源装配、来源接纳、完整 readiness、
@@ -301,3 +301,143 @@ MPFR 候选 `2f187729af77224bb80064a68b1e58f16631973e` 声明 3.1.4-1，缺少�
 后续还需处理 Connect/ncurses 原归档、其他静态子集、runtime VCS、分离签名、
 R101 的密钥有效性/撤销新鲜度及全部二进制对应关系；全仓人工语义 Review、
 最终 C32/C33/C34 与独立 Gate R 评审仍待完成。没有扩大产品功能或历史资格范围。
+
+## R105 精确旧配方接续
+
+上一轮属于实际进展：四个本地提交改变实现、恢复原来源并完成对应验证。当前
+HEAD 为 `8f64c77`，起始工作区干净。R101--R104 的生产、下载与测试句柄均已结束。
+
+在新目录 `out/review-20261020/r105/build-extra.git` 获取固定完整提交
+`6a8c8570cfa9578af798d7b03d33b81f9f414a97`，fetch session `41644` 已确认退出零。
+实际 `git rev-list --count <commit> -- git-extra` 为 120，短提交为 6a8c857，与原
+pkgver() 的作用范围一致，动态版本为 1.1.120.6a8c857-1。相同提交还有 Credential
+Manager 1.6.1-1 配方。MPFR 的更早提交
+`b98235867c2366c62ac177bfad42ced92fb547f8` 保留空补丁号后的尾点，匹配 3.1.4.-1。
+
+原 GCM 配方输入为编译后的 ZIP。它只能作为独立二进制对应核对输入；本轮另取
+上游 v1.6.1 对应源码提交 `96a2c6a2789ba3cf27e4e3edba0cb4db9e5457cb`，不会把
+二进制 ZIP 加入对应来源锁。配方收集器复用已核对并验证摘要的 R104 helper，
+收集与原始对象记录在 `r105/collect-recipes.log` 和 `r105/github/`。
+
+候选下载位于 `r105/downloads/`，MPFR/签名、GCM 源码/二进制及三个旧来源容器
+分别使用 session `94605`/`38293`、`15222`/`59727`、`72335`/`11922`/`88132`。
+初始下载已核对终态：MPFR、GCM 二进制、ncurses 容器成功；GCM 源码与 Connect
+容器首次 TLS 失败，明确退出后有界重试取得。SMTP 容器候选保留 404/TLS 失败。
+完整回执见 `r105/download-receipts.json`，没有活下载句柄。
+
+收集 session `23963` 在 GitHub 只读请求失败后明确退出 1，原代码、已取得对象和
+失败日志保留。验证相同不可变对象请求恢复后，使用另一个 receipt 目录继续，
+每次只读失败最多三次有界请求，中间实际等待 2 秒；session `98306` 已退出零。
+30 个原始文件及全部 Git blob/字节记录均已恢复，Git-extra 18 项原 MD5 同时匹配，
+并另以 Git blob 与 SHA-256 固定来源身份。
+
+两份历史来源容器分别含原 ncurses 和 Connect 归档；内层文件 SHA-256 全部匹配
+仓库先前从原 Git 配方取得的固定值。ncurses 容器配方也逐字匹配；Connect 容器
+配方仅 checksum 字段使用原 SHA-1，仓库原配方使用 SHA-256，差异保留，没有
+用容器配方替换原 Git 配方或降低实际接纳的 SHA-256。第一轮过严的容器配方
+逐字比较失败记录及原辅助程序保留，修正后只用独立 primary pin 接纳内层来源。
+
+R105 来源锁已更新，恢复 120/121 个精确配方，剩 Net-SMTP-SSL 1.02-1；已恢复
+配方的 120 个版本中，静态结果为 105 个全部匹配、15 个子集，没有完全未核对
+静态载荷的条目。GCM 原二进制 ZIP
+摘要匹配配方但排除于来源锁；另加入上游 v1.6.1 的真实源码提交、源码档案和
+MIT 原许可，依赖及二进制对应关系继续待核对。新档案已完成装配与接纳，session
+`36660`、`1276` 均确认退出零。完整 readiness session `77842` 也已确认退出零，
+结构仍为 273/5798/0。日志分别为 `r105/bundle.log`、`r105/admission.log` 和
+`r105/readiness.log`；最后还需完成本节证据冻结与干净提交边界。
+
+### 版本与来源身份
+
+git-extra 和 GCM 原配方来自
+[build-extra 固定提交](https://github.com/git-for-windows/build-extra/tree/6a8c8570cfa9578af798d7b03d33b81f9f414a97)。
+git-extra 的静态 pkgver 旧值没有直接当成当前版本：读取原 pkgver() 的目录和
+命令语义，实际 Git 路径历史计数为 120；18 项原 MD5 均匹配，所有原文件另绑定
+Git blob 与 SHA-256。没有运行第三方函数来取得版本。
+MPFR 来自 [保留尾点的原提交](https://github.com/git-for-windows/MSYS2-packages/tree/b98235867c2366c62ac177bfad42ced92fb547f8/mpfr)，
+原配方的空 `_patchlevel` 与明确的点一起生成 3.1.4.，pkgrel=1。原 tar.xz 的
+SHA-256 `761413b16d749c53e2bfd2b1dfaa3b027b0e793e404b90b5fbaeef60af6517f5`
+匹配，补丁匹配，分离签名保留待验证。
+
+历史 [ncurses 容器](https://downloads.sourceforge.net/project/sources.msys2-snapshot.p/msys2/msys/sources/ncurses-6.0.20160220-1.src.tar.gz)
+与 [Connect 容器](https://downloads.sourceforge.net/project/sources.msys2-snapshot.p/msys2/mingw/sources/mingw-w64-connect-1.104-1.src.tar.gz)
+仅作为字节载体。内层文件分别匹配原 SHA-256
+`34387d968a37cbc2362f62d44d44bb9c27cd288261262bd06f3b053994c90401` 与
+`e262cd3a6ee66e65187f3780ca808bc8dddee03dc5c5755b2b9c4db10274eb40`。
+容器自己的摘要、普通成员检查和配方差异均保留，原 Git 配方和前轮失败未覆盖。
+
+GCM [v1.6.1 上游提交](https://github.com/microsoft/Git-Credential-Manager-for-Windows/commit/96a2c6a2789ba3cf27e4e3edba0cb4db9e5457cb)
+与原来源档案的 Git pax comment 一致，档案含真实 C# 源码。原二进制 ZIP 的
+`0701e05077c3c56f79ca136c9897b1689455d580f87b201552d147e6dd7751b8`
+仅用于二进制对应核对，生产来源档案中实际没有该 ZIP。
+源码与已发布二进制的原许可字节不相同；检查确认差别为 CRLF 与末尾一个 DOS
+EOF 标记，解释这两个表示差异后 MIT 文本逐字相同。两份原字节都保留，没有改写
+上游文件来令摘要一致。原始比较和明确的 EOF 比较见 `r105/gcm-license-*.json`。
+NuGet/依赖、实际二进制重建对应关系仍待审核。
+
+### 人工 Review 与本批验证
+
+逐项核对了收集器、嵌套有界重试回调、源文件保存、字面数组解析、原摘要比较、
+镜像成员读取、GCM 源码/二进制分离及历史覆盖报告的参数、返回、异常和实际
+副作用。首次收集与容器过严检查的失败、对应源程序、已保存对象与后续成功日志
+分别保留。未执行 PKGBUILD、C#、安装器或任何下载的软件。
+
+| R105 档案 | 实际值 |
+| --- | --- |
+| 本机路径 | `out/review-20261020/r105/git-win32-recovered-sources-r105-20261020.tar.gz` |
+| SHA-256 | `6bbc38cff8a4e0a9ab6c32bb71a2a77a86bea508103b4bb36d3637b2f4d51663` |
+| 字节数 | 471355560 |
+| 固定成员 | 1319，另有档案自己的 source-profile.json |
+| 装配与来源接纳 | PASS；source_closure=partial，编译 GCM ZIP 实际排除 |
+| 原输入保留 | 原 1258 个非覆盖报告输入保持一致，R104 覆盖报告按原字节移入 history |
+| 完整 coding readiness | PASS；源码/打包/来源/验签回归、契约与现代证明均通过，结构 273/5798/0 |
+
+产品 src/native 未变，完整 Lua 735/735 保留 R103 的实际独立检出范围。
+本轮源文件与注释 Review 不扩大为全仓语义 Review 完成，正式 Gate R 保持关闭。
+
+### 辅助代码注释补查与 Python 变参
+
+额外使用同一个 AST 检查器审查本轮本地辅助程序，发现 R101 的正确 `@param ...`
+被 Python 分支误判为应写收集变量名。新增三项实际语法反例，旧实现为 15/18；
+修复后为 18/18。现在直接和带类型的 *args/**kwargs 都按签名位置标为 `...`，
+不把单独的 keyword-only `*` 或默认值中的嵌套 lambda 错当成外层变参。
+两处已有回调注释同步修正，函数行为未改；本地 14 个辅助程序 / 39 个声明的
+实际 AST 审查为 0 缺项。
+
+全仓结构增加三项回归声明，为 273/5801/0。最终 readiness session `24771`
+在 proof-evidence 的双重来源 pin 检查处明确退出 1：TP-006 的注释修正已改变
+文件摘要，manifest 已更新，而校验器的独立固定值仍旧。先单独执行新 TP-006，
+核对通过结果后再同步校验器 pin 并复跑；原失败日志为 `r105/readiness-final.log`，
+未覆盖或当作成功。
+
+新 TP-006 单独执行 319 断言通过后，manifest 与校验器的独立 pin 同步为
+`92c4b6c581832e03ff4e1a714d2329372024bec9e01490f6df1e1f1615857297`。
+最终完整 readiness session `47912` 已确认退出零，proof-evidence 56 断言、
+TP-006 的 319 断言与其余全部检查通过；完整日志为
+`r105/readiness-final-refresh.log`。辅助脚本补查仍是 14 文件 / 39 声明 / 0 缺项；
+全仓结构为 273/5801/0。两个已有 Python 回调只修改注释，原生 Windows 的旧
+旅程证据保留其原源字节范围，没有宣称重跑物理机。
+
+81 项来源、原始对象、辅助程序、真实失败、前后回归、全仓/辅助注释与最终
+readiness 结果的当前/冻结绑定见 [R105 证据](tool-source-review/R105.json)，162 份
+字节核对一致。新档案尚未公开，不修改原 R95/R100 公开附件或提升来源状态。
+
+## 最新接续记录
+
+目标仍为“实现 yaca”，按 D-093 保持 active，未完成。R105 已完成来源恢复、
+来源装配与接纳、注释检查器修复、反例/全仓/本地辅助结构检查、TP-006 刷新、
+最终 readiness 和本轮人工语义 Review；下一步在干净提交边界后继续 TRACKING。
+
+所有本轮已启动句柄均有终态，无后台生产任务要重启：Git 历史 fetch `41644`
+成功；首次收集 `23963` 已失败退出，后续收集 `98306` 成功；候选下载与失败
+终态完整记录在 `r105/download-receipts.json`；装配 `36660`、接纳 `1276`、首次
+readiness `77842` 成功。后续变参修复的 readiness `24771` 在双重 pin 校验处
+失败，修复并单独重跑 TP-006 后，最终 `47912` 已成功退出。所有失败原文保留。
+
+本机权威输入为 `out/source-cache/` 和 R105 的 1319 成员档案，摘要见本节；原
+R104 及更早档案保留历史身份。当前没有活构建、下载或测试句柄，不因旧 session
+过期重新开始恢复操作。代码与当前状态以 Git 和 TRACKING 为准。
+
+剩余精确配方为 Net-SMTP-SSL 1.02-1。原候选源容器 404/TLS 失败，不能用已
+找到的 1.01-2 配方或其他版本替代。后续继续其来源核对、其余 15 个静态子集、
+runtime VCS、分离签名与密钥有效性/撤销新鲜度、GCM 依赖及全部二进制对应关系。
+全仓人工语义 Review、最终 C32/C33/C34 与独立 Gate R 评审仍未完成。

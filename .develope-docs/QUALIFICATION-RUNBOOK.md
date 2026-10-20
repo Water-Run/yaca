@@ -91,10 +91,11 @@ bash .tools/run_with_resource_guard.sh python3.13 .tools/qualification/verify_so
 联网刷新。R101 复核现有 18 项签名全部匹配，但 8 项快照中的密钥已过期；需取得
 可核对的更新或形成历史签名接纳依据。实际二进制对应关系仍单独 Review。
 
-Win32 当前维护锁为 `release/windows-git32-sources.lock.json`，R104 含 1259 个固定
-成员。R100 公开缓存可恢复旧输入；R102 的 Bash/readline/vim 与 R104 的 OpenSSL、
-Dash 及原 runtime 补丁、逐文件记录和新档案摘要见
-[10 月 20 日 Review](CODE-REVIEW-2026-10-20.md#r104-win32-未恢复输入接续)。
+Win32 当前维护锁为 `release/windows-git32-sources.lock.json`，R105 含 1319 个固定
+成员。R100 公开缓存可恢复旧输入；本轮新增配方、原源码归档、Git 身份及当前
+档案摘要见 [10 月 20 日 Review](CODE-REVIEW-2026-10-20.md#r105-精确旧配方接续)。
+历史镜像仅作为字节载体，来源接纳仍使用原 Git 配方的固定摘要。GCM 的编译 ZIP
+单独用于二进制对应核对，不进入对应来源档案。
 新档案目前为本机产物，尚未公开。旧 R100 缓存不自动视作当前维护锁的完整缓存。
 
 ## 2. 显式包对完整性检查

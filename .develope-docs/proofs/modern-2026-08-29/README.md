@@ -1,4 +1,4 @@
-# Modern-host proof evidence — 2026-08-29 (refreshed 2026-10-15)
+# Modern-host proof evidence — 2026-08-29 (refreshed 2026-10-20)
 
 Status: TP-003, TP-006, TP-008, and TP-010 have reproducible
 `proven-modern` evidence for the scopes below. No result in this directory is
@@ -21,6 +21,7 @@ complete run is:
 - TP-010 was rerun on 2026-08-30 after its entrypoint gained the serialized resource preflight; the proof body and conclusions are unchanged.
 - The 2026-09-28 baseline check found stale source pins for TP-003 and TP-010. Both proofs were rerun before updating the manifest and validator pins. The full guarded readiness run then passed all four proofs and RP-001; assertion counts are unchanged. Earlier observations remain in Git history.
 - On 2026-10-15, an independent Windows Git checkout into WSL exposed missing script execute bits. Guard entrypoints now invoke Bash explicitly. TP-010 was rebuilt and rerun successfully before refreshing its source pin; 5,564,743 assertions passed, retaining the modern-host scope and pending target qualification. The new raw log is `out/review-20261015/r100/tp010-refresh.log`.
+- On 2026-10-20, the annotation checker was corrected to recognize Python variadic slots as `...`. TP-006's logging callback comments were aligned without changing its executable behavior; the proof was rerun with 319 assertions before retaining the updated source pin. The complete run is `out/review-20261020/r105/readiness-final-refresh.log`, still limited to the modern-host scope.
 
 The rerun used Python 3.13 with the versions in
 `.tools/comment_check_requirements.txt` and SHA-256-verified source archives via

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Author: WaterRun
-# Date: 2026-09-30
+# Date: 2026-10-20
 # File: code_comments_test.py
 # Description: Rejects annotation-audit blind spots using positive and deliberately incomplete source fixtures.
 
@@ -184,6 +184,76 @@ callbacks = (lambda: 1, lambda: 2)
 """)
         self.assertEqual(len(result["declarations"]), 2)
         self.assertTrue(any("multiple functions" in error["message"] for error in result["errors"]))
+
+    # Use the required variadic marker for plain, typed and anonymous Python signatures.
+    #@param self CommentAuditTests Owns independent syntactic fixtures and their annotation assertions.
+    #@return None Assertions require a distinct variadic slot for each positional or keyword expansion.
+    #@error Raises AssertionError if a collector variable is mistaken for the annotation's required variadic marker.
+    def test_python_variadic_markers_cover_typed_and_anonymous_forms(self):
+        for body, expected in (
+                ("""
+# Collect the original value and positional arguments in order.
+#@param first int Original leading value.
+#@param ... str Additional positional values in caller order.
+#@return tuple Leading value and collected positional values.
+def collect(first, *arguments): return first, arguments
+""", ["first", "..."]),
+                ("""
+# Collect typed positional values and additional named values independently.
+#@param first int Original leading value.
+#@param ... str Additional positional values in caller order.
+#@param ... int Additional keyword values, keyed by caller-provided names.
+#@return tuple Leading value, positional tuple and keyword mapping.
+def collect(first: int, *arguments: str, **named: int): return first, arguments, named
+""", ["first", "...", "..."]),
+                ("""
+# Keep every callback argument in its supplied order.
+#@param ... any Supplied callback values in their original order.
+#@return tuple Collected callback arguments.
+callback = lambda *values: values
+""", ["..."])):
+            result = audit("python", body)
+            self.assertEqual(result["declarations"][0]["parameters"], expected)
+            self.assertEqual(result["errors"], [])
+
+    # Refuse omitted, reordered or collector-name annotations for Python variadic slots.
+    #@param self CommentAuditTests Owns negative fixtures with an otherwise complete function contract.
+    #@return None Assertions require the same variadic annotation convention as Lua/C, including both expansion slots.
+    #@error Raises AssertionError if a variadic argument can disappear or use an ordinary scalar name.
+    def test_python_variadics_reject_missing_or_named_scalar_markers(self):
+        for annotations in (
+                '#@param first int Leading value.\n#@param arguments tuple Positional values.\n#@param named dict Keyword values.',
+                '#@param first int Leading value.\n#@param ... any Positional values.',
+                '#@param ... any Positional values.\n#@param first int Leading value.\n#@param ... any Keyword values.'):
+            body = ('# Collect the fixture arguments.\n' + annotations
+                    + '\n#@return tuple Leading value and both argument collections.\n'
+                    + 'def collect(first, *arguments, **named): return first, arguments, named\n')
+            result = audit("python", body)
+            self.assertTrue(any('order/names' in error['message'] for error in result['errors']))
+
+    # Keep a keyword-only separator and a default callback from changing ordinary parameter identities.
+    #@param self CommentAuditTests Owns fixed-parameter and nested-default-lambda fixtures.
+    #@return None Assertions require the outer scalar names and independently discovered nested variadic lambda.
+    #@error Raises AssertionError if nested/default syntax is confused with the containing signature's variadic parameters.
+    def test_python_keyword_separator_and_default_lambda_keep_scalar_names(self):
+        keyword = audit("python", """
+# Return the explicitly named mode.
+#@param mode str Selected keyword-only mode.
+#@return str Unchanged mode.
+def select(*, mode: str): return mode
+""")
+        self.assertEqual(keyword['declarations'][0]['parameters'], ['mode'])
+        self.assertEqual(keyword['errors'], [])
+        nested = audit("python", """
+# Return the supplied callback; its default is intentionally undocumented negative fixture data.
+#@param callback function Caller callback or the fixture's variadic default.
+#@return function Selected callback.
+def select(callback=lambda *values: values): return callback
+""")
+        self.assertEqual(nested['declarations'][0]['parameters'], ['callback'])
+        self.assertEqual(nested['declarations'][0]['errors'], [])
+        self.assertEqual(nested['declarations'][1]['parameters'], ['...'])
+        self.assertTrue(nested['declarations'][1]['errors'])
 
     # Preserve both conditional C branches and enumerate all members of a declaration.
     #@param self CommentAuditTests Test runner-owned assertion context.

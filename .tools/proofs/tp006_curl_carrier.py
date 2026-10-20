@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Author: WaterRun
-# Date: 2026-09-23
+# Date: 2026-10-20
 # File: tp006_curl_carrier.py
 # Description: TP-006 modern-host proof for curl carrier, cancellation, retry, and scanning.
 
@@ -91,8 +91,8 @@ class ProofHandler(http.server.BaseHTTPRequestHandler):
     # Suppresses default proof-server request logging.
     #@param self ProofHandler Owner of the proof fixture and its resources.
     #@param _format str Unused HTTP server log format.
-    #@param _args object Unused HTTP server log arguments.
-    #@return None No value; the operation updates proof state or raises on failure.
+    #@param ... object Ignored HTTP log formatting values in their original order.
+    #@return None Suppresses inherited stderr logging without changing proof state.
     def log_message(self, _format: str, *_args) -> None:
         return
 

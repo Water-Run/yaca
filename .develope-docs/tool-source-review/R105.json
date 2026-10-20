@@ -1,0 +1,640 @@
+{
+  "schema": "yaca-tool-source-review-evidence-v1",
+  "review_id": "R105",
+  "date": "2026-10-20",
+  "status": "exact-recipes-and-primary-pinned-source-members-restored-source-closure-partial",
+  "resume_decision": "D-093",
+  "development_paused": false,
+  "release_authorized": false,
+  "target_qualification_complete": false,
+  "whole_repository_semantic_review": "partial",
+  "complete_source_closure": false,
+  "source_closure": "partial",
+  "source_archive": {
+    "path": "out/review-20261020/r105/git-win32-recovered-sources-r105-20261020.tar.gz",
+    "sha256": "6bbc38cff8a4e0a9ab6c32bb71a2a77a86bea508103b4bb36d3637b2f4d51663",
+    "source_closure": "partial",
+    "status": "PASS",
+    "bytes": 471355560,
+    "members": 1319,
+    "compiled_gcm_zip_included_as_source": false
+  },
+  "fixed_members": 1319,
+  "recipe_versions_recovered": 120,
+  "recipe_versions_pending": 1,
+  "payload_states": {
+    "static-source-digests-verified": 105,
+    "verified-static-subset": 15
+  },
+  "updated_packages": [
+    {
+      "package": "git-extra",
+      "version": "1.1.120.6a8c857-1",
+      "status": "static-source-digests-verified"
+    },
+    {
+      "package": "mingw-w64-i686-git-credential-manager",
+      "version": "1.6.1-1",
+      "status": "verified-static-subset"
+    },
+    {
+      "package": "mpfr",
+      "version": "3.1.4.-1",
+      "status": "static-source-digests-verified"
+    },
+    {
+      "package": "mingw-w64-i686-connect",
+      "version": "1.104-1",
+      "status": "static-source-digests-verified"
+    },
+    {
+      "package": "ncurses",
+      "version": "6.0.20160220-1",
+      "status": "static-source-digests-verified"
+    }
+  ],
+  "old_noncoverage_inputs_preserved": 1258,
+  "gcm_source_assessment": {
+    "upstream_commit": "96a2c6a2789ba3cf27e4e3edba0cb4db9e5457cb",
+    "upstream_ref": "v1.6.1",
+    "source_sha256": "59bf8eb5823eb8abcf9ef342acac7c18de787cb44c2a2154e1e5db45c2197bdd",
+    "source_members": 210,
+    "source_cache_path": "gfw-legacy-upstream/git-credential-manager-1.6.1/source.tar.gz",
+    "binary_zip_sha256": "0701e05077c3c56f79ca136c9897b1689455d580f87b201552d147e6dd7751b8",
+    "binary_zip_original_digest_verified": true,
+    "binary_zip_included_as_source": false,
+    "compiled_distribution_members": [
+      "git-askpass.exe",
+      "git-credential-manager.exe",
+      "github.authentication.exe",
+      "Microsoft.Alm.Authentication.dll",
+      "Microsoft.Alm.Git.dll",
+      "Microsoft.IdentityModel.Clients.ActiveDirectory.dll",
+      "Microsoft.IdentityModel.Clients.ActiveDirectory.Platform.dll"
+    ],
+    "source_and_binary_license_bytes_equal": false,
+    "dependency_and_binary_correspondence_review": "pending"
+  },
+  "gcm_license_text_review": {
+    "status": "same-MIT-text-with-release-DOS-EOF-marker",
+    "source_and_binary_raw_bytes_equal": false,
+    "binary_has_terminal_dos_eof": true,
+    "equal_after_lineending_and_single_terminal_dos_eof_interpretation": true,
+    "original_files_modified": false
+  },
+  "source_carrier_checks": [
+    {
+      "container": "out/review-20261020/r105/downloads/mingw-w64-connect-1.104-1.src.tar.gz.part",
+      "container_sha256": "f4f88f471bf2983a50d2372e4bef060a361f6c94906a0505757f1186c0afa392",
+      "member": "mingw-w64-connect/connect-1.104.tar.bz2",
+      "member_sha256": "e262cd3a6ee66e65187f3780ca808bc8dddee03dc5c5755b2b9c4db10274eb40",
+      "primary_recipe_sha256": "8183c1d7daedb540fccaf6da3e5f0902a0f44fe80c2931b646d836ba81b75f3c",
+      "carrier_recipe_sha256": "76bcdf3314d6f8089236be2f52cf3b0ff512879e10e9fcb7be3c45090896d969",
+      "carrier_recipe_matches_primary": false,
+      "status": "original-payload-primary-pin-matched"
+    },
+    {
+      "container": "out/review-20261020/r105/downloads/ncurses-6.0.20160220-1.src.tar.gz.part",
+      "container_sha256": "da455f7ed0023cab270d319ae8f5ec87f7bb0cbd108b57558a4f40e194430315",
+      "member": "ncurses/ncurses-6.0.20160220.tar.gz",
+      "member_sha256": "34387d968a37cbc2362f62d44d44bb9c27cd288261262bd06f3b053994c90401",
+      "primary_recipe_sha256": "5ff16a18d7b8c504a08f59c9008d9c515665b6fc9703fb0f6c5f6bd39a161094",
+      "carrier_recipe_sha256": "5ff16a18d7b8c504a08f59c9008d9c515665b6fc9703fb0f6c5f6bd39a161094",
+      "carrier_recipe_matches_primary": true,
+      "status": "original-payload-primary-pin-matched"
+    }
+  ],
+  "checks": {
+    "original_git_extra_md5_comparisons": "18/18",
+    "bundle": "PASS",
+    "source_admission": "PASS",
+    "compiled_gcm_zip_excluded_from_sources": true,
+    "coding_readiness": "PASS",
+    "python_variadic_comment_tests_before": {
+      "passed": 15,
+      "total": 18
+    },
+    "python_variadic_comment_tests_after": {
+      "passed": 18,
+      "total": 18
+    },
+    "comment_inventory": {
+      "files": 273,
+      "declarations": 5801,
+      "violations": 0
+    },
+    "auxiliary_comment_inventory": {
+      "files": 14,
+      "declarations": 39,
+      "violations": 0
+    },
+    "complete_lua_retained_from_R103": {
+      "passed": 735,
+      "total": 735
+    },
+    "product_source_changes": false
+  },
+  "review_scope": [
+    "three original version derivations, immutable Git path-history count and original recipe inputs",
+    "original source byte carriers; wrapper differences do not replace primary recipe/SHA-256 authority",
+    "GCM genuine upstream source versus separately verified/excluded binary distribution",
+    "literal checksum order, bounded retries, preserved failed attempts and exclusive cache publication",
+    "all new collector/preservation/recorder/audit-helper functions, annotations and effects"
+  ],
+  "annotation_checker_fix": "Normalize Python positional/keyword variadic slots to ... without treating separators, annotations or nested default lambdas as outer variadic slots.",
+  "source_bindings": [
+    {
+      "path": "release/windows-git32-sources.lock.json",
+      "frozen": "out/review-20261020/r105/frozen/release/windows-git32-sources.lock.json",
+      "sha256": "ffddbeea81e69b6fc65b12af5e62b6721e28cedfa9f78b05da305684bf87fd94",
+      "bytes": 390986
+    },
+    {
+      "path": ".tools/check_code_comments.py",
+      "frozen": "out/review-20261020/r105/frozen/.tools/check_code_comments.py",
+      "sha256": "89e887e9d306ac1a80ceb286af933539c138a6c32c000928951bddaf7977b181",
+      "bytes": 24738
+    },
+    {
+      "path": "test/self/code_comments_test.py",
+      "frozen": "out/review-20261020/r105/frozen/test/self/code_comments_test.py",
+      "sha256": "221f6ce982d8f0e46319e4760ff2a68fd5703fed5c52aa66b810591ef4bef458",
+      "bytes": 18197
+    },
+    {
+      "path": ".tools/validate_proof_evidence.lua",
+      "frozen": "out/review-20261020/r105/frozen/.tools/validate_proof_evidence.lua",
+      "sha256": "6e0f2afa83d412161f1bd6b47b7e8ee5580fcecc0c3c109e23071c74a0bf8d06",
+      "bytes": 6550
+    },
+    {
+      "path": ".tools/proofs/tp006_curl_carrier.py",
+      "frozen": "out/review-20261020/r105/frozen/.tools/proofs/tp006_curl_carrier.py",
+      "sha256": "92c4b6c581832e03ff4e1a714d2329372024bec9e01490f6df1e1f1615857297",
+      "bytes": 32458
+    },
+    {
+      "path": ".tools/qualification/windows_console_agent_smoke.py",
+      "frozen": "out/review-20261020/r105/frozen/.tools/qualification/windows_console_agent_smoke.py",
+      "sha256": "61ca4fd27905e8c32748185d188170950dca71e7e57361e64676dba901c07586",
+      "bytes": 32025
+    },
+    {
+      "path": ".develope-docs/proofs/modern-2026-08-29/manifest.lua",
+      "frozen": "out/review-20261020/r105/frozen/.develope-docs/proofs/modern-2026-08-29/manifest.lua",
+      "sha256": "87c3c5961d254739791c2b61fbd39dfbbf7ef37af379e569b6538e3cef3ba261",
+      "bytes": 3835
+    },
+    {
+      "path": "out/review-20261020/r105/collect_recipes.py",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/collect_recipes.py",
+      "sha256": "b62f6190e09ea67caf766c8124ede6eef4d9e78abb408cb249214c6ab7a73145",
+      "bytes": 5224
+    },
+    {
+      "path": "out/review-20261020/r105/preserve_sources.py",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/preserve_sources.py",
+      "sha256": "2c0cba38735b5ab7cafe6bfbf6d76611765a7f6bfa20021556ad2faee75afc65",
+      "bytes": 19511
+    },
+    {
+      "path": "out/review-20261020/r105/record_r105.py",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/record_r105.py",
+      "sha256": "8398c46582243f0ad32f8b79f39a88a1b228309c3f017727813f99ee20fd093e",
+      "bytes": 10410
+    },
+    {
+      "path": "out/review-20261020/audit_auxiliary_comments.py",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/audit_auxiliary_comments.py",
+      "sha256": "ee7e371caba27606afa5c3e1c184f2024ee81b922d7e5228d4ea1d6cee068069",
+      "bytes": 2497
+    },
+    {
+      "path": "out/review-20261020/r105/first-attempt/collect_recipes.py",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/first-attempt/collect_recipes.py",
+      "sha256": "5fc26870e3c2756b9c129551dd2a609002b46c22d0e397f4dd53b81896948586",
+      "bytes": 4151
+    },
+    {
+      "path": "out/review-20261020/r105/first-attempt/preserve_sources.py",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/first-attempt/preserve_sources.py",
+      "sha256": "db8cc3dd23e1450c81b75969b34b8f58fd5876136f36e40b21e777d198af24fc",
+      "bytes": 18886
+    },
+    {
+      "path": "out/review-20261020/r104/collect_historical_inputs.py",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r104/collect_historical_inputs.py",
+      "sha256": "edc012fc64194ff7891c15af5634c8373e1c942171fe1b5c646ae94bc6e77d55",
+      "bytes": 7646
+    },
+    {
+      "path": "out/review-20261020/r102/recover_four_payloads.py",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r102/recover_four_payloads.py",
+      "sha256": "151098fb5ad9c78411dc58b4783ff696b8d5eb9d39b4309ef95149807bdaf6af",
+      "bytes": 12233
+    },
+    {
+      "path": "out/review-20261020/r105/recovered-recipes.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/recovered-recipes.json",
+      "sha256": "055b8b161a72496fff91d2b4530ba08f74023d96da5f6a01462c7de5b612f344",
+      "bytes": 21167
+    },
+    {
+      "path": "out/review-20261020/r105/download-receipts.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/download-receipts.json",
+      "sha256": "d7775a47a2ed61a0fbbba806226236ecfa4a4216029650b9ce7638cf26c485a1",
+      "bytes": 9588
+    },
+    {
+      "path": "out/review-20261020/r105/gcm-tag-identity.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/gcm-tag-identity.json",
+      "sha256": "dee8b9c57f26d737f2054b3b3c3c8186cb323884c20b5d15046027f89ead078f",
+      "bytes": 2700
+    },
+    {
+      "path": "out/review-20261020/r105/gcm-license-comparison.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/gcm-license-comparison.json",
+      "sha256": "c2e62e6d30ef60648388218b46071a433ee6532e63ccb690b885d96a6f65bf62",
+      "bytes": 300
+    },
+    {
+      "path": "out/review-20261020/r105/gcm-license-dos-eof-review.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/gcm-license-dos-eof-review.json",
+      "sha256": "7618674d8ba5092c7f7c8fd4d6a214e7b670cf17c6aff4a6c4e52c7111558bc3",
+      "bytes": 258
+    },
+    {
+      "path": "out/review-20261020/r105/windows-git32-sources.before.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/windows-git32-sources.before.json",
+      "sha256": "4b95b2bf6985b1317121754ba88c1f52f2b5a45706ccf274d93d9bd949ec3d6f",
+      "bytes": 374734
+    },
+    {
+      "path": "out/review-20261020/r105/recovery-report.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/recovery-report.json",
+      "sha256": "7e0d2198f4e99ec97a52413f86b2fd3dfec2fdb7ff325bfa401b30c46b5c5c0d",
+      "bytes": 25187
+    },
+    {
+      "path": "out/review-20261020/r105/collect-recipes.log",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/collect-recipes.log",
+      "sha256": "51fb82cb3f1bd33b5b3148217a68bbe7671d83226efcc640214c61cfb96e7a8e",
+      "bytes": 1538
+    },
+    {
+      "path": "out/review-20261020/r105/collect-recipes-retry.log",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/collect-recipes-retry.log",
+      "sha256": "9d9c45cb416d63219201b750f37add781deadcbdb487a961da63cdf3fe5b7b16",
+      "bytes": 31
+    },
+    {
+      "path": "out/review-20261020/r105/preserve.log",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/preserve.log",
+      "sha256": "425d5527328d42ac54c3c4b4f56e7bd8d200608bc61af12f9c02cd887f80ba21",
+      "bytes": 877
+    },
+    {
+      "path": "out/review-20261020/r105/preserve-retry.log",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/preserve-retry.log",
+      "sha256": "59ad57b05b3b94995bb4349140f7fe72059d0033083401c396b39cb67e44958c",
+      "bytes": 272
+    },
+    {
+      "path": "out/review-20261020/r105/bundle.log",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/bundle.log",
+      "sha256": "b15cd0400c7825fe8a324d18e8a735457068483de39cb74b3fbe4230d6611547",
+      "bytes": 202
+    },
+    {
+      "path": "out/review-20261020/r105/admission.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/admission.json",
+      "sha256": "e16e6f9632b681a3b72a660c12f186da1059edf6a0f15a1c9e65f4f8333c2d3b",
+      "bytes": 310
+    },
+    {
+      "path": "out/review-20261020/r105/admission.log",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/admission.log",
+      "sha256": "89dc4c84a3c39ea921548779c2dcd99347cbf797c83abaeef7262c312a9403b4",
+      "bytes": 273
+    },
+    {
+      "path": "out/review-20261020/r105/readiness.log",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/readiness.log",
+      "sha256": "25b035ce997c06041d7738644f3f6fbc89d842e91e6a3a351517b67a6333a94a",
+      "bytes": 4884
+    },
+    {
+      "path": "out/review-20261020/r105/readiness-final.log",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/readiness-final.log",
+      "sha256": "6419ddc8811c4f6a841fc46ca91845a7cfd5f3b640eeb32a201252b8754b2d25",
+      "bytes": 1858
+    },
+    {
+      "path": "out/review-20261020/r105/readiness-final-refresh.log",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/readiness-final-refresh.log",
+      "sha256": "c4a579d46c33ed0500a80e0d327cc7f21f8ff7e9e89a49bf7d7747343f7992c2",
+      "bytes": 4887
+    },
+    {
+      "path": "out/review-20261020/r105/tp006-annotation-refresh.log",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/tp006-annotation-refresh.log",
+      "sha256": "5c2ca8576082bed00e9188494853b292f1a58b73b32cb208d9f0f28994ebf81e",
+      "bytes": 991
+    },
+    {
+      "path": "out/review-20261020/r105/final-comment-inventory.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/final-comment-inventory.json",
+      "sha256": "4c75601863cd5b7cf4dc3cb93332f94faf73390660b04e8146a497cce845e681",
+      "bytes": 1297918
+    },
+    {
+      "path": "out/review-20261020/r105/auxiliary-comment-inventory-before.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/auxiliary-comment-inventory-before.json",
+      "sha256": "0a28546fa00679f45f3964751270ed0dd4254f0957bccf3001f06b904a81a5aa",
+      "bytes": 10769
+    },
+    {
+      "path": "out/review-20261020/r105/auxiliary-comments.log",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/auxiliary-comments.log",
+      "sha256": "2f66d7584a04986d1ac5e0070cbcaf5c99f0b2edd22258a282c605d800c448dd",
+      "bytes": 337
+    },
+    {
+      "path": "out/review-20261020/r105/auxiliary-comments-after.log",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/auxiliary-comments-after.log",
+      "sha256": "c0b022dcd51fd8a1d3cda8a6f30b0ffd4c72aa0c25b34544f77a352f3a8636e6",
+      "bytes": 210
+    },
+    {
+      "path": "out/review-20261020/r105/python-variadic-comments-before.log",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/python-variadic-comments-before.log",
+      "sha256": "18df2e3339db735fc4b951b58b151a268615f302574dfcd685e19e0f61844850",
+      "bytes": 2519
+    },
+    {
+      "path": "out/review-20261020/r105/python-variadic-comments-after.log",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/python-variadic-comments-after.log",
+      "sha256": "ceacceebf28f5e6bdd23f4c00b5c574f2e223c2bcb0985ec4850db9be218dac1",
+      "bytes": 264
+    },
+    {
+      "path": "out/review-20261020/r105/before-variadic/check_code_comments.py",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/before-variadic/check_code_comments.py",
+      "sha256": "437862c68a9349302f4b921cba9cfc5539e4a36db5a1c2db6f49beb14115f9d9",
+      "bytes": 24423
+    },
+    {
+      "path": "out/review-20261020/r105/auxiliary-comment-inventory.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/auxiliary-comment-inventory.json",
+      "sha256": "8e2e92767b4f7d39e8fbce3122b4b71d6dd9c5ceca230d015cd3a3dff0a4a7f9",
+      "bytes": 10532
+    },
+    {
+      "path": "out/source-cache/sources/git-win32-source-coverage-20261020-r105.json",
+      "frozen": "out/review-20261020/r105/frozen/out/source-cache/sources/git-win32-source-coverage-20261020-r105.json",
+      "sha256": "b6dd5a621f2be906292232f803adba24f58d3b8cc8f8431b78266b2dd1063637",
+      "bytes": 354470
+    },
+    {
+      "path": "out/review-20261020/r105/attempt2/github/git-for-windows/MSYS2-packages/b98235867c2366c62ac177bfad42ced92fb547f8/mpfr/.directory.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/attempt2/github/git-for-windows/MSYS2-packages/b98235867c2366c62ac177bfad42ced92fb547f8/mpfr/.directory.json",
+      "sha256": "9dc285b6f3ddd4b006c6cfa432fe5ac4257e59ac153a7699319f9fc692617068",
+      "bytes": 4315
+    },
+    {
+      "path": "out/review-20261020/r105/attempt2/github/git-for-windows/MSYS2-packages/b98235867c2366c62ac177bfad42ced92fb547f8/mpfr/PKGBUILD.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/attempt2/github/git-for-windows/MSYS2-packages/b98235867c2366c62ac177bfad42ced92fb547f8/mpfr/PKGBUILD.json",
+      "sha256": "52562e462bfd999d63ba9485b15e9c4d719209db519e7e67846aaf9ef77f673a",
+      "bytes": 3279
+    },
+    {
+      "path": "out/review-20261020/r105/attempt2/github/git-for-windows/MSYS2-packages/b98235867c2366c62ac177bfad42ced92fb547f8/mpfr/mpfr-3.1.2-msys2.patch.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/attempt2/github/git-for-windows/MSYS2-packages/b98235867c2366c62ac177bfad42ced92fb547f8/mpfr/mpfr-3.1.2-msys2.patch.json",
+      "sha256": "45b062e6c1e19278d8e114d56d360941d8bf42a06daf29607f30902c9b71857e",
+      "bytes": 3543
+    },
+    {
+      "path": "out/review-20261020/r105/attempt2/github/git-for-windows/MSYS2-packages/b98235867c2366c62ac177bfad42ced92fb547f8/mpfr/mpfr-3.1.4-1.src.patch.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/attempt2/github/git-for-windows/MSYS2-packages/b98235867c2366c62ac177bfad42ced92fb547f8/mpfr/mpfr-3.1.4-1.src.patch.json",
+      "sha256": "0cbaa54f0447c13acfbf37a1e2be16728c2b7458b723e167d95e11295ce610c3",
+      "bytes": 1740
+    },
+    {
+      "path": "out/review-20261020/r105/attempt2/github/git-for-windows/MSYS2-packages/b98235867c2366c62ac177bfad42ced92fb547f8/mpfr/mpfr.install.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/attempt2/github/git-for-windows/MSYS2-packages/b98235867c2366c62ac177bfad42ced92fb547f8/mpfr/mpfr.install.json",
+      "sha256": "810b041cc9735213f6e0672f47e4ddaf709c1ffd166a14601e2e8011ad0aba57",
+      "bytes": 1620
+    },
+    {
+      "path": "out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/.gitattributes.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/.gitattributes.json",
+      "sha256": "d0ab0c621f61e5ed3b61f87ddffc90971de020fb389506a9f93c1d69ce575b38",
+      "bytes": 1261
+    },
+    {
+      "path": "out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/LICENSE.txt.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/LICENSE.txt.json",
+      "sha256": "b3690ce67f72ebac16597d017cbfcf8a9dc25ec8fd58480a79886155a3f6fd52",
+      "bytes": 26880
+    },
+    {
+      "path": "out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/.directory.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/.directory.json",
+      "sha256": "6ec80f2eb153ec85bd5d95e011035f0a55f66c241df1a347bc843b6634c96f86",
+      "bytes": 24273
+    },
+    {
+      "path": "out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/99-post-install-cleanup.post.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/99-post-install-cleanup.post.json",
+      "sha256": "154fc3a7e2070497afb71bd25a9f2a0a203c15500665b71dbc76257da838824d",
+      "bytes": 1485
+    },
+    {
+      "path": "out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/Makefile.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/Makefile.json",
+      "sha256": "c899fa227dbe3de33ed44d26f95b8e55c9d1abab7353fadbb17d62fe0a784d88",
+      "bytes": 2055
+    },
+    {
+      "path": "out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/PKGBUILD.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/PKGBUILD.json",
+      "sha256": "4371374065e534134ba2905bf68428c99f1261e51007e15e0ea78e82a4f6758d",
+      "bytes": 5558
+    },
+    {
+      "path": "out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/SystemInfo.cpp.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/SystemInfo.cpp.json",
+      "sha256": "b5c8e5101bc38e7968ed4f12998cb20b60f0dddbbe2c9216bf9d1c498eb7883e",
+      "bytes": 35411
+    },
+    {
+      "path": "out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/SystemInfo.h.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/SystemInfo.h.json",
+      "sha256": "6856b46e5f412050ef04fc2b6b937a59c1b8646e8f2c0c6cdd2f64cc3d9b3c32",
+      "bytes": 15867
+    },
+    {
+      "path": "out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/WhoUses.cpp.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/WhoUses.cpp.json",
+      "sha256": "0bf359ab1eaea9d903c8c6a2e5548eb0ec00842f8e6ebee8f05a3cd4e5fa6650",
+      "bytes": 10261
+    },
+    {
+      "path": "out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/aliases.sh.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/aliases.sh.json",
+      "sha256": "414328a10f8728cce15e2ebb0e8fb21bb79c3a3c55b0d6300c319ea681692443",
+      "bytes": 1913
+    },
+    {
+      "path": "out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/astextplain.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/astextplain.json",
+      "sha256": "ac5a114e74b70a70e2a9eb5b0b2403ab3435287261cb45b2e0c5d7fe0a7fbf4d",
+      "bytes": 1850
+    },
+    {
+      "path": "out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/bash_profile.sh.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/bash_profile.sh.json",
+      "sha256": "f40307dfe06c50cbf3cdf7ea934808ff3e5f0dd3bf4600db172fe1ed7eb57a76",
+      "bytes": 1824
+    },
+    {
+      "path": "out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/create-shortcut.c.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/create-shortcut.c.json",
+      "sha256": "692f7e8e081eb108db82f962fd4ae2331fea58855a63dc595c96dc5d4354105b",
+      "bytes": 4215
+    },
+    {
+      "path": "out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/env.sh.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/env.sh.json",
+      "sha256": "613ee2c0b8b2a8c914c376c8f99fae50757f8252191834d992dfd4b61afa98e8",
+      "bytes": 1657
+    },
+    {
+      "path": "out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/git-extra.install.in.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/git-extra.install.in.json",
+      "sha256": "afb5dacbcc1d7eadad18c9a69e26a1db9d88b47dd41d5bd1d79956ef4869abf7",
+      "bytes": 5426
+    },
+    {
+      "path": "out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/git-extra.install.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/git-extra.install.json",
+      "sha256": "34a55b5790da0bd1a49042cddcbc505d81f49900a8b873bac90ebe3e30d41656",
+      "bytes": 6067
+    },
+    {
+      "path": "out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/git-prompt.sh.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/git-prompt.sh.json",
+      "sha256": "0f97384c1f072f5c75e6c42d93a32615e20c3787bb91f7520a175899528943cb",
+      "bytes": 2795
+    },
+    {
+      "path": "out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/git-sdk.sh.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/git-sdk.sh.json",
+      "sha256": "3845d0d984b4ca183231366a0cf2a77953ca607dbe7b10be486cef69f9c3c6d7",
+      "bytes": 1941
+    },
+    {
+      "path": "out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/gitattributes.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/gitattributes.json",
+      "sha256": "7ca0015616165ffb82fa4d71f055c0f747383025bf6a2a07dbe2091dda7c8764",
+      "bytes": 1422
+    },
+    {
+      "path": "out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/gitconfig.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/gitconfig.json",
+      "sha256": "3ad55563428300d66db517b9263103f557c28f1f6fcdf6a4920140ecabcf3688",
+      "bytes": 1460
+    },
+    {
+      "path": "out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/inputrc.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/inputrc.json",
+      "sha256": "fc5f552e2cab8777a2f869e1a2f45635a83ff5608dc7744786609812dda881c2",
+      "bytes": 4547
+    },
+    {
+      "path": "out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/msys2-32.ico.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/msys2-32.ico.json",
+      "sha256": "2a9c8d5d43660592b47a993d495cb0b79940147471cfe655302f8320518297f0",
+      "bytes": 35881
+    },
+    {
+      "path": "out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/notepad.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/notepad.json",
+      "sha256": "f995f7e37fc6fd0131423fefb43888adf79e9db7b337c2188d71733e170f9e0c",
+      "bytes": 1876
+    },
+    {
+      "path": "out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/vi.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/vi.json",
+      "sha256": "be3bf031192dc1ee99c05d03b9d17ca7ab175f14b5c5b760aebe27da745ddf72",
+      "bytes": 1058
+    },
+    {
+      "path": "out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/vimrc.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/vimrc.json",
+      "sha256": "25fb643bb31e2f4ada2a80be9a3f1c604bbf7c22adee93d345482826a44f289d",
+      "bytes": 4107
+    },
+    {
+      "path": "out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/wordpad.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/git-extra/wordpad.json",
+      "sha256": "a8a70948bf0f3e23f66d16afd57e37aa3c44ca9b4850c388b5cd9e6389447f78",
+      "bytes": 1450
+    },
+    {
+      "path": "out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/mingw-w64-git-credential-manager/.directory.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/mingw-w64-git-credential-manager/.directory.json",
+      "sha256": "3d1970bf978cc3034cf1cfebfdfafcea8fb12da6e3ae81b0cb04e82df9c74fb8",
+      "bytes": 1170
+    },
+    {
+      "path": "out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/mingw-w64-git-credential-manager/PKGBUILD.json",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/attempt2/github/git-for-windows/build-extra/6a8c8570cfa9578af798d7b03d33b81f9f414a97/mingw-w64-git-credential-manager/PKGBUILD.json",
+      "sha256": "ba9a2cba4d0b654ac640108594a6f94902edcfa75e037a49da3ab020f7cc5cd8",
+      "bytes": 2413
+    },
+    {
+      "path": "out/review-20261020/r105/downloads/mpfr-3.1.4.tar.xz.part",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/downloads/mpfr-3.1.4.tar.xz.part",
+      "sha256": "761413b16d749c53e2bfd2b1dfaa3b027b0e793e404b90b5fbaeef60af6517f5",
+      "bytes": 1122152
+    },
+    {
+      "path": "out/review-20261020/r105/downloads/mpfr-3.1.4.tar.xz.asc.part",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/downloads/mpfr-3.1.4.tar.xz.asc.part",
+      "sha256": "3caee6f5c56356caa5cc9f662d68b64680f96d1af153b70c29c0838de30596e6",
+      "bytes": 181
+    },
+    {
+      "path": "out/review-20261020/r105/downloads/gcm-v1.6.1-source.tar.gz.part",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/downloads/gcm-v1.6.1-source.tar.gz.part",
+      "sha256": "59bf8eb5823eb8abcf9ef342acac7c18de787cb44c2a2154e1e5db45c2197bdd",
+      "bytes": 235498
+    },
+    {
+      "path": "out/review-20261020/r105/downloads/gcmw-v1.6.1.zip.part",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/downloads/gcmw-v1.6.1.zip.part",
+      "sha256": "0701e05077c3c56f79ca136c9897b1689455d580f87b201552d147e6dd7751b8",
+      "bytes": 354241
+    },
+    {
+      "path": "out/review-20261020/r105/downloads/ncurses-6.0.20160220-1.src.tar.gz.part",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/downloads/ncurses-6.0.20160220-1.src.tar.gz.part",
+      "sha256": "da455f7ed0023cab270d319ae8f5ec87f7bb0cbd108b57558a4f40e194430315",
+      "bytes": 3145277
+    },
+    {
+      "path": "out/review-20261020/r105/downloads/mingw-w64-connect-1.104-1.src.tar.gz.part",
+      "frozen": "out/review-20261020/r105/frozen/out/review-20261020/r105/downloads/mingw-w64-connect-1.104-1.src.tar.gz.part",
+      "sha256": "f4f88f471bf2983a50d2372e4bef060a361f6c94906a0505757f1186c0afa392",
+      "bytes": 39395
+    }
+  ],
+  "remaining": [
+    "Net-SMTP-SSL 1.02-1 exact recipe",
+    "remaining static/VCS/signature input and source dependency review",
+    "GCM dependency closure and complete binary/source correspondence",
+    "R101 key validity findings and revocation freshness",
+    "final nine-package qualification and whole-repository semantic review"
+  ]
+}

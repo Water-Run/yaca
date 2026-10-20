@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # Author: WaterRun
-# Date: 2026-10-11
+# Date: 2026-10-20
 # File: windows_console_agent_smoke.py
 # Description: Native Windows console setup and authorized online Agent journeys with recorded approvals, persistence and console restoration.
 
@@ -166,7 +166,7 @@ def main():
     class Provider(BaseHTTPRequestHandler):
         # Suppresses default proof-server request logging.
         #@param self Provider Active loopback request handler.
-        #@param unused ... Ignored standard-library logging format and arguments.
+        #@param ... object Ignored standard-library format string followed by its formatting values.
         #@return None No value; suppresses inherited stderr request logging.
         def log_message(self, *unused): pass
         # Handles a proof HTTP POST and records its request evidence.

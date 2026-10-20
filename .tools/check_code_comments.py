@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Author: WaterRun
-# Date: 2026-09-30
+# Date: 2026-10-20
 # File: check_code_comments.py
 # Description: Inventories owned source declarations and rejects missing or mismatched contract comments.
 
@@ -191,7 +191,7 @@ def c_name(node, source):
 #@param node Node Function or callback declaration.
 #@param source bytes Original source bytes.
 #@param language str Parser grammar name.
-#@return list[str]|None Parameter names; None denotes shell positional semantics checked by Review.
+#@return list[str]|None Ordered parameter names with ... for each variadic slot; None denotes shell positional semantics checked by Review.
 def parameters(node, source, language):
     if language == "bash":
         return None
@@ -222,7 +222,11 @@ def parameters(node, source, language):
     for child in values.named_children if values else []:
         if child.type in {"comment", "keyword_separator", "positional_separator"}:
             continue
-        if child.type in {"vararg_expression", "variadic_parameter"}:
+        formal = child
+        if language == "python" and child.type == "typed_parameter" and child.named_children:
+            formal = child.named_children[0]
+        if child.type in {"vararg_expression", "variadic_parameter"} or (
+                language == "python" and formal.type in {"list_splat_pattern", "dictionary_splat_pattern"}):
             result.append("...")
         elif child.type == "identifier":
             result.append(spelling(source, child))
