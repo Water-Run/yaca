@@ -195,6 +195,21 @@ function M.new(native, identity, options)
         })
     end
 
+    ---Select the supported chat input path without requiring user configuration.
+    --@param writer function|table Standard output sink shared with the transcript view.
+    --@param complete function Registry command-prefix completion callback.
+    --@param completion_words string|nil Fixed ASCII catalog for native cooked Tab enhancement.
+    --@param maximum_draft_bytes integer|nil Coordinator draft cap; defaults to the native input cap.
+    --@return table|nil port Chat input AsyncPort.
+    --@return table|nil err Construction failure, nil on success.
+    --@return table|nil display Enhanced output facade, or nil for native cooked input.
+    --@ownership Caller closes the port to restore terminal modes.
+    local function new_chat_terminal(writer, complete, completion_words, maximum_draft_bytes)
+        return terminal.new_chat(native, { writer = writer, complete = complete,
+            completion_words = completion_words, maximum_input_bytes = terminal_options.maximum_input_bytes,
+            maximum_draft_bytes = maximum_draft_bytes })
+    end
+
     return readonly({
         target_id = identity.target,
         filesystem = filesystem,
@@ -202,6 +217,7 @@ function M.new(native, identity, options)
         clock_port = clock_port,
         system = system_port,
         new_terminal = new_terminal,
+        new_chat_terminal = new_chat_terminal,
         text = textcodec.new(native, "windows"),
         qualification = "pending-target-evidence",
     }, "Windows backend")

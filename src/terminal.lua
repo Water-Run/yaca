@@ -184,6 +184,11 @@ function M.new(native, options)
         return nil, failure("InvalidTerminalLimit", "maximum_input_bytes is required")
     end
     local requested_mode = options.mode or "auto"
+    local raw_events = options.raw_events == true
+    if options.raw_events ~= nil and type(options.raw_events) ~= "boolean"
+        or raw_events and requested_mode ~= "raw" then
+        return nil, failure("InvalidTerminalMode", "raw events require raw terminal mode")
+    end
     local completion_words = options.completion_words
     if completion_words ~= nil and (type(completion_words) ~= "string"
         or #completion_words > 4095 or completion_words:find("[^.a-z0-9_ \n-]")) then
@@ -321,7 +326,11 @@ function M.new(native, options)
                 end
                 pending_batch_index = pending_batch_index + 1
                 if observation.kind == "action" and observation.intent == "text" then
-                    begin_pending_text(observation.text)
+                    if raw_events then
+                        events[#events + 1] = { kind = "user_action", action = "text", text = observation.text }
+                    else
+                        begin_pending_text(observation.text)
+                    end
                 else
                     skip_leading_lf = false
                     if observation.kind == "terminal" then
@@ -356,6 +365,7 @@ function M.new(native, options)
             mode = requested_mode,
             maximum_input_bytes = maximum_input_bytes,
             completion_words = completion_words,
+            editor_mode = raw_events,
             started_at = now,
         })
         if not ok then raise_native(value, 1) end
@@ -1323,6 +1333,439 @@ function M.new_line_editor(display, options)
     end
 
     return readonly(editor, "line editor")
+end
+
+-- Escape draft controls for a one-row terminal viewport without changing stored input.
+--@param value string Strict UTF-8 draft or prefix.
+--@return table Ordered scalar records containing visible bytes, conservative cells and raw byte end.
+local function draft_cells(value)
+    local cells = {}
+    for offset, codepoint in utf8.codes(value) do
+        local scalar = utf8.char(codepoint)
+        local visible, width = scalar, codepoint < 128 and 1 or 2
+        if codepoint == 9 then visible, width = "\\t", 2
+        elseif codepoint == 10 then visible, width = "\\n", 2
+        elseif codepoint == 13 then visible, width = "\\r", 2
+        elseif codepoint < 32 or codepoint == 127 or (codepoint >= 128 and codepoint < 160) then
+            visible = string.format("\\x%02X", codepoint)
+            width = #visible
+        end
+        cells[#cells + 1] = { text = visible, width = width, finish = offset + #scalar - 1 }
+    end
+    return cells
+end
+
+---Create production chat input with automatic ANSI editing or the existing cooked fallback.
+--@param native table Native terminal ports and optional display capability probe.
+--@param options table Input byte cap, optional smaller draft cap, stdout writer, completion callback and catalog.
+--@return table|nil port Restorable terminal port delivering only submitted text and semantic gestures.
+--@return table|nil err Construction or capability error; nil on success.
+--@return table|nil display Draft-aware prompt/output facade, or nil for cooked fallback.
+--@ownership Caller closes the returned port; history and drafts live only in this session.
+function M.new_chat(native, options)
+    options = options or {}
+    if type(native) ~= "table" or type(options) ~= "table" then
+        return nil, failure("InvalidChatEditor", "native ports and chat options are required")
+    end
+    local info = type(native.terminal_display_info) == "function" and native.terminal_display_info() or {}
+    if type(info) ~= "table" or info.kind ~= "ansi" then
+        return M.new(native, { mode = "cooked", maximum_input_bytes = options.maximum_input_bytes,
+            completion_words = options.completion_words })
+    end
+    local writer = options.writer
+    if (type(writer) ~= "function" and (type(writer) ~= "table" or type(writer.write) ~= "function"))
+        or type(options.complete) ~= "function" or not valid_integer(info.columns, 16) then
+        return nil, failure("InvalidChatEditor", "writer, completion callback and terminal width are required")
+    end
+    local base, base_error = M.new(native, {
+        mode = "raw", raw_events = true, maximum_input_bytes = options.maximum_input_bytes,
+    })
+    if not base then return nil, base_error end
+    local draft_limit = options.maximum_draft_bytes or options.maximum_input_bytes
+    if not valid_integer(draft_limit, 1) or draft_limit > options.maximum_input_bytes then
+        return nil, failure("InvalidChatEditor", "draft limit must fit the input byte cap")
+    end
+    local prompt, visible, suppressed, enabled, closed = ">> ", false, false, false, false
+    local editor, port, display = nil, {}, {}
+    local pending, actions, escape_since = "", {}, nil
+    local paste, paste_suffix, discard_paste, skip_lf = false, "", false, false
+    local history, history_bytes, history_at, saved_draft = {}, 0, nil, ""
+
+    -- Require a successful internal editor operation while preserving a readable error code.
+    --@param result any Success value, or nil from an editor/display operation.
+    --@param err table|nil Structured failure returned alongside nil.
+    --@return any The original non-nil success value.
+    --@error Raises a named diagnostic when the operation failed.
+    local function checked(result, err)
+        if result == nil then error((err and err.code or "ChatEditorFailure") .. ": "
+            .. (err and err.message or "terminal edit failed"), 2) end
+        return result
+    end
+
+    -- Write one complete frame through the admitted stdout sink.
+    --@param bytes string Output bytes containing only owned controls and escaped draft data.
+    --@return boolean True after a complete write.
+    --@effect Writes to stdout through the supplied function or file-like writer.
+    --@error Raises when stdout rejects the frame or accepts fewer bytes than requested.
+    local function write(bytes)
+        local result
+        if type(writer) == "function" then result = writer(bytes)
+        else result = writer:write(bytes) end
+        if result == false or result == nil or (type(result) == "number" and result ~= #bytes) then
+            error("BrokenStdout: chat editor output failed", 2)
+        end
+        return true
+    end
+
+    -- Replace the one-row draft while preserving the exact cursor using VT100 save/restore.
+    --@param self table Display adapter; no independent state is read from self.
+    --@param frame table Owned draft, UTF-8 byte cursor and complete transcript block to append.
+    --@return boolean True after the frame was written, or while output is deliberately suppressed.
+    --@effect Erases only the current input row, appends output and redraws a bounded viewport.
+    --@error Raises on capability loss, invalid UTF-8 or failed stdout output.
+    function display:redraw(frame)
+        if closed then error("EditorClosed: chat input is closed") end
+        if suppressed then return true end
+        local observed = native.terminal_display_info()
+        if type(observed) ~= "table" or not valid_integer(observed.columns, 16) then
+            error("TerminalCapability: terminal width is unavailable", 2)
+        end
+        local cells, cursor_index = draft_cells(frame.draft_bytes), 0
+        for index, cell in ipairs(cells) do
+            if cell.finish <= frame.cursor_byte then cursor_index = index end
+        end
+        local room = math.max(1, observed.columns - #prompt - 3)
+        local first, used = cursor_index + 1, 0
+        while first > 1 and used + cells[first - 1].width <= room do
+            first = first - 1
+            used = used + cells[first].width
+        end
+        local prefix, suffix = {}, {}
+        if first > 1 then prefix[#prefix + 1] = "<" end
+        for index = first, cursor_index do prefix[#prefix + 1] = cells[index].text end
+        local last = cursor_index
+        while last < #cells and used + cells[last + 1].width <= room do
+            last = last + 1
+            used = used + cells[last].width
+            suffix[#suffix + 1] = cells[last].text
+        end
+        if last < #cells then suffix[#suffix + 1] = ">" end
+        local bytes = visible and "\r\27[2K" or ""
+        bytes = bytes .. frame.append_bytes .. prompt .. table.concat(prefix)
+            .. "\27" .. "7" .. table.concat(suffix) .. "\27" .. "8"
+        write(bytes)
+        visible = true
+        return true
+    end
+
+    editor = checked(M.new_line_editor(display, {
+        mode = "raw", maximum_draft_bytes = draft_limit,
+        maximum_pending_bytes = 524288, maximum_pending_blocks = 64,
+        -- Supply the current focus marker; display.redraw owns draft escaping and viewport layout.
+        --@param draft string Owned UTF-8 draft, passed separately in the redraw frame.
+        --@return string Current ASCII focus marker.
+        render_prompt = function(draft) return prompt end,
+        backlog_notice = "[STATUS] output waiting\n",
+    }))
+
+    -- Retain a submitted nonempty line in bounded in-memory history.
+    --@param value string Exact submitted UTF-8 line.
+    --@return nil No result; history and its navigation cursor are updated.
+    --@effect Evicts oldest entries above 64 items or 128 KiB; no history file is written.
+    local function remember(value)
+        if value ~= "" and value ~= history[#history] then
+            history[#history + 1] = value
+            history_bytes = history_bytes + #value
+            while #history > 64 or history_bytes > 131072 do
+                history_bytes = history_bytes - #table.remove(history, 1)
+            end
+        end
+        history_at, saved_draft = nil, ""
+    end
+
+    -- Echo and queue a whole submitted draft before allowing another input line.
+    --@param intent string Submission action delivered to the coordinator.
+    --@return nil No result; queues text and its submission in order.
+    --@effect Writes the submitted line, clears the editor and retains session history.
+    --@error Raises on incomplete input or a failed display operation before domain dispatch.
+    local function submit(intent)
+        local lease = checked(editor.prepare_submission(intent))
+        local rendered = {}
+        for _, cell in ipairs(draft_cells(lease.text)) do rendered[#rendered + 1] = cell.text end
+        write((visible and "\r\27[2K" or "") .. prompt .. table.concat(rendered) .. "\n")
+        visible, suppressed = false, true
+        checked(editor.resolve_submission(lease.generation, true))
+        suppressed = false
+        remember(lease.text)
+        if lease.text ~= "" then actions[#actions + 1] = { kind = "user_action", action = "text", text = lease.text } end
+        actions[#actions + 1] = { kind = "user_action", action = intent }
+    end
+
+    -- Recall history in either direction while preserving the draft present before navigation.
+    --@param direction integer Minus one for older history, one for newer history.
+    --@return nil No result; replaces the displayed draft only when history exists.
+    --@effect Changes the editor draft and cursor; no command is executed.
+    local function recall(direction)
+        if #history == 0 then return end
+        if not history_at then saved_draft = editor.snapshot().draft; history_at = #history + 1 end
+        history_at = math.max(1, math.min(#history + 1, history_at + direction))
+        checked(editor.set_draft(history_at > #history and saved_draft or history[history_at]))
+    end
+
+    -- Complete only the current command prefix; ambiguity displays the registry candidates.
+    --@param none Uses the current draft, cursor and admitted completion callback.
+    --@return nil No result; updates the draft or displays bounded candidates.
+    --@effect May redraw or append candidate text; does not perform domain actions.
+    --@error Raises if the supplied candidate list is malformed or output fails.
+    local function complete()
+        local snapshot = editor.snapshot()
+        if snapshot.cursor_byte ~= #snapshot.draft or snapshot.draft:sub(1, 1) ~= "." then return end
+        local candidates = checked(options.complete(snapshot.draft))
+        if type(candidates) ~= "table" or #candidates > 128 then error("InvalidCompletion: candidate list is invalid") end
+        local common = candidates[1]
+        if not common then return end
+        for _, candidate in ipairs(candidates) do
+            if type(candidate) ~= "string" or #candidate > 128 or candidate:find("[^.a-z0-9_ -]") then
+                error("InvalidCompletion: candidate is not a registry command")
+            end
+            while candidate:sub(1, #common) ~= common do common = common:sub(1, -2) end
+        end
+        if #common > #snapshot.draft then checked(editor.set_draft(common))
+        elseif #candidates > 1 then checked(editor.publish(table.concat(candidates, "  ") .. "\n")) end
+    end
+
+    -- Clear a draft before cancellation, matching the innermost-input-first command policy.
+    --@param none Uses the current owned draft and pending UTF-8 state.
+    --@return nil No result; clears input or queues cancellation of the active domain action.
+    --@effect Redraws cleared input; only an empty draft sends cancel to the coordinator.
+    local function cancel_input()
+        local snapshot = editor.snapshot()
+        checked(editor.consume({ kind = "user_action", action = "cancel" }))
+        if snapshot.draft ~= "" or snapshot.pending_input_bytes > 0 then checked(editor.set_draft(""))
+        else actions[#actions + 1] = { kind = "user_action", action = "cancel" } end
+        history_at = nil
+    end
+
+    -- Reject an invalid or oversized input draft without terminating the session or submitting a prefix.
+    --@param result table|nil Editor success snapshot.
+    --@param err table|nil Structured editor failure.
+    --@return boolean True after acceptance, false after a handled draft rejection.
+    --@effect Clears rejected input, displays a bounded notice and discards the rest of an oversized paste.
+    --@error Propagates non-input failures such as broken stdout or editor state corruption.
+    local function input_result(result, err)
+        if result ~= nil then return true end
+        if not err or (err.code ~= "DraftLimit" and err.code ~= "InvalidDraft") then checked(result, err) end
+        checked(editor.consume({ kind = "user_action", action = "cancel" }))
+        checked(editor.set_draft(""))
+        paste_suffix, discard_paste = "", paste
+        checked(editor.publish("[NOTICE] Input was rejected (" .. err.code .. "). Please enter it again.\n"))
+        return false
+    end
+
+    -- Decode one buffered key/paste fragment without treating escape bytes as ordinary commands.
+    --@param now integer Monotonic time used to disambiguate a lone Escape key.
+    --@return boolean True if bytes were consumed; false while waiting for an escape/paste boundary.
+    --@effect Mutates pending input, editor or queued semantic actions; no domain work is performed.
+    --@error Raises on invalid UTF-8, a draft limit or a failed editor/display operation.
+    local function consume(now)
+        if paste then
+            local boundary = pending:find("\27[201~", 1, true)
+            local count = boundary and boundary - 1 or math.max(0, #pending - 5)
+            if count > 0 and not discard_paste then
+                local complete, suffix = split_stream_utf8(paste_suffix .. pending:sub(1, count))
+                if complete == nil then input_result(nil, suffix)
+                else
+                    paste_suffix = suffix
+                    if complete ~= "" then input_result(editor.insert(complete)) end
+                end
+            end
+            pending = pending:sub(count + 1)
+            if boundary then
+                if paste_suffix ~= "" then input_result(nil, invalid_stream_utf8("truncated-paste", 1)) end
+                pending = pending:sub(7); paste, discard_paste = false, false; return true
+            end
+            return count > 0
+        end
+        local byte = pending:byte(1)
+        if not byte then return false end
+        if byte == 27 then
+            escape_since = escape_since or now
+            local sequence = pending:match("^\27%[[0-9;?]*[A-Za-z~]") or pending:match("^\27O[A-Za-z]")
+            if sequence then
+                pending, escape_since = pending:sub(#sequence + 1), nil
+                local gesture = ({ ["\27[A"] = "up", ["\27OA"] = "up", ["\27[B"] = "down", ["\27OB"] = "down",
+                    ["\27[C"] = "right", ["\27OC"] = "right", ["\27[D"] = "left", ["\27OD"] = "left",
+                    ["\27[H"] = "home", ["\27OH"] = "home", ["\27[1~"] = "home",
+                    ["\27[F"] = "end", ["\27OF"] = "end", ["\27[4~"] = "end" })[sequence]
+                if gesture == "up" then recall(-1)
+                elseif gesture == "down" then recall(1)
+                elseif gesture then checked(editor.move(gesture))
+                elseif sequence == "\27[3~" then checked(editor.delete_forward())
+                elseif sequence == "\27[200~" then paste = true end
+                return true
+            end
+            if #pending == 1 and now - escape_since < 50 then return false end
+            if #pending > 1 and (pending:sub(2, 2) == "[" or pending:sub(2, 2) == "O")
+                and #pending < 32 and now - escape_since < 50 then return false end
+            if pending:sub(2, 2) == "\r" or pending:sub(2, 2) == "\n" then
+                pending = pending:sub(3); submit("ask")
+            else
+                pending = pending:sub((pending:sub(2, 2) == "[" or pending:sub(2, 2) == "O") and #pending + 1 or 2)
+                cancel_input()
+            end
+            escape_since = nil
+            return true
+        end
+        pending = pending:sub(2)
+        if skip_lf and byte == 10 then skip_lf = false; return true end
+        skip_lf = false
+        if byte == 13 or byte == 10 then skip_lf = byte == 13; submit("submit-or-queue")
+        elseif byte == 9 then complete()
+        elseif byte == 3 then cancel_input()
+        elseif byte == 4 then
+            if editor.snapshot().draft == "" then actions[#actions + 1] = { kind = "user_action", action = "eof" }
+            else checked(editor.delete_forward()) end
+        elseif byte == 1 then checked(editor.move("home"))
+        elseif byte == 5 then checked(editor.move("end"))
+        elseif byte == 21 then
+            local snapshot = editor.snapshot(); checked(editor.set_draft(snapshot.draft:sub(snapshot.cursor_byte + 1), 0))
+        elseif byte == 11 then
+            local snapshot = editor.snapshot(); checked(editor.set_draft(snapshot.draft:sub(1, snapshot.cursor_byte)))
+        elseif byte == 8 or byte == 127 then checked(editor.backspace())
+        elseif byte >= 32 then
+            local last = pending:find("[\0-\31\127]")
+            local count = last and last - 1 or #pending
+            local bytes = string.char(byte) .. pending:sub(1, count)
+            pending = pending:sub(count + 1)
+            input_result(editor.consume({ kind = "user_action", action = "text", text = bytes }))
+        end
+        return true
+    end
+
+    -- Disable enhanced paste and erase the owned prompt before releasing terminal modes.
+    --@param none Uses visibility and mode activation flags.
+    --@return boolean True after any owned display state is released.
+    --@effect Writes bounded reset bytes once; leaves submitted transcript intact.
+    --@error Raises on failed output, keeping the reset retryable.
+    local function release_display()
+        if not enabled and not visible then return true end
+        write((visible and "\r\27[2K" or "") .. (enabled and "\27[?2004l" or ""))
+        visible, enabled = false, false
+        return true
+    end
+
+    -- Start raw input and enable bracketed paste only after native admission succeeds.
+    --@param self table Chat input port.
+    --@param now integer Current monotonic tick.
+    --@return boolean True after input and display setup.
+    --@effect Changes terminal modes and emits the paste-mode enable sequence.
+    --@error Propagates native/output failures; caller must close a started port after failure.
+    function port:start(now)
+        base:start(now)
+        enabled = true
+        write("\27[?2004h")
+        return true
+    end
+
+    -- Poll keys within an event budget, retaining unsent lines and split escape/UTF-8 bytes.
+    --@param self table Chat input port.
+    --@param now integer Current monotonic tick.
+    --@param budget integer Maximum returned semantic events.
+    --@return table Events in submission order, never more than budget.
+    --@effect Polls native input and updates local editor state; publishes no domain actions itself.
+    --@error Propagates native, invalid-budget, decoding or display failures.
+    function port:poll(now, budget)
+        if not valid_integer(now, 0) then error("InvalidClock: terminal time is invalid") end
+        if not valid_integer(budget, 0) then error("InvalidBudget: terminal poll budget is invalid") end
+        local events, fetched, edits = {}, false, 0
+        while #events < budget and edits < 64 do
+            if #actions > 0 then events[#events + 1] = table.remove(actions, 1)
+            elseif pending ~= "" and consume(now) then
+                -- Input edits produce no domain event; completed lines enter actions.
+                edits = edits + 1
+            elseif not fetched then
+                local observed = base:poll(now, 1)
+                fetched = true
+                for _, event in ipairs(observed) do
+                    if event.kind == "user_action" and event.action == "text" then pending = pending .. event.text
+                    else actions[#actions + 1] = event end
+                end
+                if #observed == 0 then break end
+            else break end
+        end
+        return events
+    end
+
+    -- Forward owner cancellation; user Ctrl-C is delivered separately as a semantic action.
+    --@param self table Chat input port.
+    --@param now integer Current monotonic tick.
+    --@return boolean Native cancellation acknowledgment.
+    --@effect Cancels the native input owner.
+    --@error Propagates native cancellation failures.
+    function port:cancel(now) return base:cancel(now) end
+
+    -- Join the settled input owner before close.
+    --@param self table Chat input port.
+    --@param deadline integer Monotonic join deadline.
+    --@return table Native terminal outcome.
+    --@effect Joins the native owner.
+    --@error Propagates native join failures.
+    function port:join(deadline) return base:join(deadline) end
+
+    -- Restore native terminal modes even if display reset fails.
+    --@param self table Chat input port.
+    --@return boolean True after native restoration and display reset.
+    --@effect Restores termios and disables paste mode; failures remain retryable.
+    --@error Propagates the native failure first, otherwise the display failure.
+    function port:restore()
+        local reset, reset_error = pcall(release_display)
+        base:restore()
+        if not reset then error(reset_error, 0) end
+        return true
+    end
+
+    -- Release the input owner and all session editing state.
+    --@param self table Chat input port.
+    --@return boolean True after native close and display reset.
+    --@effect Releases native ownership even when stdout fails; discards only unsubmitted input/history.
+    --@error Propagates native close failure first, otherwise display reset failure.
+    function port:close()
+        local reset, reset_error = pcall(release_display)
+        base:close()
+        pending, actions, history, saved_draft, paste_suffix = "", {}, {}, "", ""
+        editor, closed = nil, true
+        if not reset then error(reset_error, 0) end
+        return true
+    end
+
+    -- Publish a complete rendered block while preserving the owned draft and cursor.
+    --@param self table Chat display facade.
+    --@param bytes string Complete rendered transcript block.
+    --@return boolean True after display acceptance.
+    --@effect Erases/redraws the input row around the appended block.
+    --@error Propagates editor/output failures.
+    function display:output(bytes)
+        if closed then error("EditorClosed: chat input is closed") end
+        checked(editor.publish(bytes))
+        return true
+    end
+
+    -- Show or update the fixed prompt without altering the user's draft.
+    --@param self table Chat display facade.
+    --@param value string ASCII input marker with trailing space and no newline.
+    --@return boolean True after the prompt is visible.
+    --@effect Redraws the owned draft only when needed.
+    --@error Raises for malformed prompt text or failed output.
+    function display:prompt(value)
+        if closed then error("EditorClosed: chat input is closed") end
+        if type(value) ~= "string" or #value > 12 or value:find("[^ -~]") then error("InvalidPrompt: invalid input marker") end
+        if value == prompt and visible then return true end
+        prompt = value
+        local snapshot = editor.snapshot()
+        return self:redraw({ draft_bytes = snapshot.draft, cursor_byte = snapshot.cursor_byte, append_bytes = "" })
+    end
+
+    return readonly(port, "chat input"), nil, readonly(display, "chat display")
 end
 
 return M

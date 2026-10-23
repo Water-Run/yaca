@@ -1,0 +1,6 @@
+# Author: WaterRun
+# Date: 2026-10-23
+# File: terminal_test_requirements.txt
+# Description: Development-only independent ANSI screen oracle for real PTY input checks.
+pyte==0.8.2
+wcwidth==0.2.13

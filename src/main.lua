@@ -10333,6 +10333,18 @@ function M.new_application_coordinator(ports, options)
             if not chat_source then return handled, editor_error end
             source = chat_source
         end
+        -- Owned editors submit a pasted multiline draft as one action. Preserve it as
+        -- message text; embedded dot commands must not become separate actions.
+        if source:find("[\r\n]") then
+            if context_change or approval or model_change then
+                return nil, failure("UsageError", "confirmation must be submitted as one line")
+            end
+            if trim_coordinator_line(source) == "" then return true end
+            local ask_message = source:match("^%.ask[ \t]+(.+)$")
+            local message = ask_message or source
+            if agent then return stage_and_apply(ask_message and "ask" or "submit", message) end
+            return start_first_agent(message, ask_message and "ask" or "main")
+        end
         local normalized = trim_coordinator_line(source)
         if context_change and normalized:sub(1, 1) ~= "." then
             local preview = context_change
@@ -10835,12 +10847,13 @@ function M.new_application_coordinator(ports, options)
     return readonly(coordinator, "ApplicationCoordinator")
 end
 
----Creates the cooked-terminal transcript view for a production chat.
+---Creates the production transcript view with optional draft-preserving input output.
 --@param composed table Production runtime composition and data layout.
 --@param runtime table CLI output ports.
+--@param input_display table|nil Optional enhanced editor owning the prompt and draft.
 --@return table|nil view Read-only transcript view.
 --@return table|nil err Structured output or renderer failure.
-local function production_chat_view(composed, runtime)
+local function production_chat_view(composed, runtime, input_display)
     if type(runtime.stdout) ~= "function"
         and (type(runtime.stdout) ~= "table"
             or type(runtime.stdout.write) ~= "function")
@@ -10851,8 +10864,16 @@ local function production_chat_view(composed, runtime)
         )
     end
     local tui = require("tui")
-    -- Production chat uses the host's cooked line editor on every platform.
-    -- Advertise only keys that this actual input path delivers independently.
+    local output_writer = runtime.stdout
+    if input_display then
+        -- Append through the editor so asynchronous output preserves the current draft.
+        --@param bytes string Complete rendered transcript block.
+        --@return boolean True after editor output succeeds.
+        --@effect Writes the block and redraws the active input row.
+        --@error Propagates editor or stdout failure to the renderer.
+        output_writer = function(bytes) return input_display:output(bytes) end
+    end
+    -- Advertise only keys delivered by the selected production input path.
     local renderer, renderer_error = tui.new({
         width = 80,
         capabilities = {
@@ -10864,13 +10885,13 @@ local function production_chat_view(composed, runtime)
                 ["Ctrl+Enter"] = false,
                 ["Shift+Enter"] = false,
                 ["Alt+Enter"] = false,
-                Esc = false,
+                Esc = input_display ~= nil,
             },
         },
         maximum_block_bytes = 524288,
         maximum_line_bytes = 262144,
         maximum_id_bytes = 256,
-        writer = runtime.stdout,
+        writer = output_writer,
     })
     if not renderer then return nil, renderer_error end
     local view = {}
@@ -10881,7 +10902,7 @@ local function production_chat_view(composed, runtime)
     --@return boolean|nil written Whether all bytes were written.
     --@return table|nil err Structured broken-output failure.
     local function write_rendered(bytes)
-        if not write_direct(runtime.stdout, bytes) then
+        if not write_direct(output_writer, bytes) then
             return nil, failure(
                 "BrokenStdout",
                 "interactive transcript output could not be completed"
@@ -10934,7 +10955,7 @@ local function production_chat_view(composed, runtime)
     --@return table|nil err Structured renderer failure.
     --@effect Ends any visible input prompt and writes the complete block to stdout.
     function view:publish(block)
-        if prompt_visible then
+        if prompt_visible and not input_display then
             local written, write_error = write_rendered("\n")
             if not written then return nil, write_error end
             prompt_visible = false
@@ -10951,9 +10972,10 @@ local function production_chat_view(composed, runtime)
     --@return table|nil err Structured renderer or output failure.
     --@effect Writes one prompt to stdout and retains its visible state; repeated calls are idempotent.
     function view:prompt(focus)
-        if prompt_visible then return true end
+        if prompt_visible and not input_display then return true end
         local rendered, render_error = renderer.render_prompt(focus)
         if not rendered then return nil, render_error end
+        if input_display then return input_display:prompt(rendered:sub(1, -2) .. " ") end
         local written, write_error = write_rendered(rendered:sub(1, -2) .. " ")
         if not written then return nil, write_error end
         prompt_visible = true
@@ -11273,13 +11295,25 @@ function M.run_interactive_chat(composed, chat, runtime, initial_agent)
     end
     local terminal_error
     local completion_words
+    local maximum_draft_bytes = 16384
     if type(runtime.cli.complete) == "function" then
         local candidates = runtime.cli.complete("chat", "")
         if candidates then completion_words = table.concat(candidates, "\n") end
     end
-    terminal_port, terminal_error = composed.backend.new_terminal("cooked", completion_words)
+    local input_display
+    if type(composed.backend.new_chat_terminal) == "function" then
+        terminal_port, terminal_error, input_display = composed.backend.new_chat_terminal(runtime.stdout,
+            -- Resolve completions from the same command registry used to parse submitted input.
+            --@param prefix string Current command prefix before the cursor.
+            --@return table|nil Sorted registry candidates, or nil on invalid input.
+            --@return table|nil Structured completion error.
+            function(prefix) return runtime.cli.complete("chat", prefix) end,
+            completion_words, maximum_draft_bytes)
+    else
+        terminal_port, terminal_error = composed.backend.new_terminal("cooked", completion_words)
+    end
     if not terminal_port then return fail_before_coordinator(terminal_error) end
-    local view, view_error = production_chat_view(composed, runtime)
+    local view, view_error = production_chat_view(composed, runtime, input_display)
     if not view then return fail_before_coordinator(view_error) end
     local context_switch, switch_error = M.new_context_switcher(composed, runtime)
     if not context_switch then return fail_before_coordinator(switch_error) end
@@ -11315,7 +11349,7 @@ function M.run_interactive_chat(composed, chat, runtime, initial_agent)
         close_poll_steps = 1024,
         idle_wait_ms = 10,
         maximum_assistant_bytes = MODEL_ADAPTER_OPTIONS.maximum_text_bytes,
-        maximum_draft_bytes = 16384,
+        maximum_draft_bytes = maximum_draft_bytes,
         terminal_poll_events = 128,
     })
     if not coordinator then return fail_before_coordinator(coordinator_error) end

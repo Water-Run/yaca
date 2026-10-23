@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-10-11
+Date: 2026-10-23
 File: application_coordinator_test.lua
 Description: Verifies the interactive ApplicationCoordinator input, Agent, approval, and close paths.
 ]]
@@ -1021,6 +1021,35 @@ end
 return {
     name = "integration/application-coordinator",
     cases = {
+        {
+            name = "pasted multiline approval text cannot authorize a tool",
+            -- A confirmation is a single explicit selection, not the first line of a pasted block.
+            --@param none Delivers a multiline allow-shaped draft while an approval is pending.
+            --@return nil Assertions require a usage error and no approval acknowledgment.
+            run = function()
+                local lines = input_lines({ "allow approval-1 once\nextra", ".quit" })
+                local f = fixture({ initial_agent = true, approval = true, batches = { {}, lines[1], lines[2] } })
+                assert(f.coordinator:run())
+                A.contains(A.render(f.blocks), "confirmation must be submitted as one line")
+                A.falsy(table.concat(f.log, "|"):find(":approve", 1, true))
+            end,
+        },
+        {
+            name = "owned multiline input remains one message and supports the Ask prefix",
+            -- Embedded dot commands in a pasted draft must not execute as independent commands.
+            --@param none Submits multiline main and Ask drafts before an explicit one-line quit.
+            --@return nil Assertions require exact text, the selected lane and no usage error.
+            run = function()
+                for _, lane in ipairs({ "main", "ask" }) do
+                    local message = ".quit\n中文 second line"
+                    local source = lane == "ask" and ".ask " .. message or message
+                    local f = fixture({ expected_first_lane = lane, batches = input_lines({ source, ".quit" }) })
+                    assert(f.coordinator:run())
+                    A.contains(table.concat(f.log, "|"), "agent:terminal:" .. message)
+                    A.equal(#blocks_of_kind(f.blocks, "error"), 0)
+                end
+            end,
+        },
         {
             name = "cooked multiline collects literal lines and starts first Ask only on explicit submission",
             --Verifies cooked multiline collects literal lines and starts first Ask only on explicit submission.

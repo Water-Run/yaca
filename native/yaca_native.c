@@ -350,6 +350,7 @@ static void release_windows_cooked_read(yaca_terminal_read *read)
  * @field closed int Whether this owner has released its resources.
  * @field outcome char Final process or terminal outcome category.
  * @field completion_words char[4096] Owned bounded command catalog for capable cooked consoles; empty preserves plain editing.
+ * @field editor_mode int Whether the Lua chat editor requires unclassified POSIX bytes, including single Enter/Escape reads.
  */
 typedef struct yaca_terminal
 {
@@ -376,6 +377,7 @@ typedef struct yaca_terminal
   int closed;
   char outcome[16];
   char completion_words[4096];
+  int editor_mode;
 } yaca_terminal;
 
 /* @struct yaca_sha256 Incremental SHA-256 state and partial block buffer.
@@ -12176,25 +12178,53 @@ static int push_windows_cooked_line(lua_State *L, yaca_terminal *terminal)
 
 #endif
 
+/* Probe the live output width and conservative ANSI editing capability without changing modes.
+ * @param L lua_State* No arguments; receives one capability table.
+ * @return int One Lua table containing kind (ansi or cooked) and columns.
+ * @effect Reads standard descriptor TTY facts, TERM and window size; performs no output or input.
+ */
+static int l_terminal_display_info(lua_State *L)
+{
+  const char *kind = "cooked";
+  int columns = 80;
+#if !defined(_WIN32)
+  const char *term = getenv("TERM");
+  struct winsize size;
+  if (isatty(STDIN_FILENO) && isatty(STDOUT_FILENO) && term != NULL
+      && (strncmp(term, "xterm", 5) == 0 || strncmp(term, "screen", 6) == 0
+        || strncmp(term, "tmux", 4) == 0 || strncmp(term, "rxvt", 4) == 0
+        || strcmp(term, "linux") == 0 || strcmp(term, "vt100") == 0))
+  {
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) == 0 && size.ws_col >= 16)
+    { kind = "ansi"; columns = size.ws_col; }
+  }
+#endif
+  lua_createtable(L, 0, 2);
+  lua_pushstring(L, kind); lua_setfield(L, -2, "kind");
+  lua_pushinteger(L, columns); lua_setfield(L, -2, "columns");
+  return 1;
+}
+
 /* Retain admitted terminal request values before a later getter can collect temporary mode bytes.
  * @param L lua_State* Argument 1 is the caller request; any other argument indices remain unchanged.
- * @return void No value; replaces argument 1 with a private mode, input limit and optional completion catalog table.
+ * @return void No value; replaces argument 1 with private mode, input limit, optional completion catalog and editor-byte policy.
  * @error Caller getters and Lua allocation may raise before terminal settings or OS resources change.
  * @effect Reads known fields once and retains their returned values without modifying the caller table.
  */
 static void capture_terminal_request(lua_State *L)
 {
   int request;
-  lua_createtable(L, 0, 3);
+  lua_createtable(L, 0, 4);
   request = lua_gettop(L);
   capture_process_field(L, 1, request, "mode");
   capture_process_field(L, 1, request, "maximum_input_bytes");
   capture_process_field(L, 1, request, "completion_words");
+  capture_process_field(L, 1, request, "editor_mode");
   lua_replace(L, 1);
 }
 
 /* Start bounded terminal input using a retained mode and a Lua owner allocated before settings change.
- * @param L lua_State* Argument 1 contains auto/raw/cooked mode, positive maximum_input_bytes and optional bounded ASCII completion_words.
+ * @param L lua_State* Argument 1 contains mode, positive maximum_input_bytes, optional ASCII completion_words and optional boolean editor_mode requiring raw mode.
  * @return int Two Lua results: true and a terminal userdata, or false and a typed mode/limit/OS failure.
  * @error Wrong argument types, caller getters and Lua allocation may raise; the terminal owner finalizes acquired mode/reader state.
  * @effect Captures and changes stdin flags or console/PTY settings and, for Windows cooked consoles, starts an owned reader.
@@ -12205,10 +12235,16 @@ static int l_terminal_start(lua_State *L)
   const char *mode;
   size_t mode_length;
   lua_Integer maximum_input_bytes;
+  int editor_mode;
   yaca_terminal *terminal;
 
   luaL_checktype(L, 1, LUA_TTABLE);
   capture_terminal_request(L);
+  lua_getfield(L, 1, "editor_mode");
+  if (!lua_isnil(L, -1) && !lua_isboolean(L, -1))
+  { lua_pop(L, 1); return push_failure(L, "InvalidTerminalMode", "editor mode must be boolean"); }
+  editor_mode = lua_toboolean(L, -1);
+  lua_pop(L, 1);
   if (!request_string_field(L, 1, "mode", &mode, &mode_length, 0))
   {
     return push_failure(L, "InvalidTerminalMode", "terminal mode is invalid");
@@ -12233,7 +12269,10 @@ static int l_terminal_start(lua_State *L)
     return push_failure(L, "Limit", "terminal input limit is too large");
   }
   terminal = push_terminal(L);
+  if (editor_mode && strcmp(mode, "raw") != 0)
+  { lua_pop(L, 1); return push_failure(L, "InvalidTerminalMode", "editor mode requires raw input"); }
   terminal->maximum_input_bytes = (size_t)maximum_input_bytes;
+  terminal->editor_mode = editor_mode;
   lua_getfield(L, 1, "completion_words");
   if (!lua_isnil(L, -1))
   {
@@ -12347,6 +12386,12 @@ static int l_terminal_start(lua_State *L)
       {
         next_mode = terminal->original_mode;
         next_mode.c_lflag &= (tcflag_t)~(ICANON | ECHO);
+        if (editor_mode)
+        {
+          next_mode.c_lflag &= (tcflag_t)~(ISIG | IEXTEN);
+          next_mode.c_iflag &= (tcflag_t)~(IXON | ICRNL | INLCR | IGNCR);
+          next_mode.c_oflag |= OPOST | ONLCR;
+        }
         /* O_NONBLOCK provides asynchronous polling. Requiring one character
         ** keeps an empty Linux raw TTY at EAGAIN instead of polling-mode zero,
         ** which the input port correctly reserves for actual EOF. */
@@ -12622,7 +12667,7 @@ static int l_terminal_poll(lua_State *L)
     }
     else
     {
-      intent = received == 1 && buffer[0] == 27 ? "cancel"
+      intent = terminal->editor_mode ? "text" : received == 1 && buffer[0] == 27 ? "cancel"
         : received == 1 && (buffer[0] == '\r' || buffer[0] == '\n') ? "submit-or-queue" : "text";
       luaL_pushresultsize(&input, (size_t)received);
       push_terminal_action(L, intent,
@@ -13413,6 +13458,7 @@ static const luaL_Reg yaca_native_functions[] = {
   { "process_join", l_process_join },
   { "process_close", l_process_close },
   { "terminal_start", l_terminal_start },
+  { "terminal_display_info", l_terminal_display_info },
   { "terminal_poll", l_terminal_poll },
   { "terminal_cancel", l_terminal_cancel },
   { "terminal_join", l_terminal_join },

@@ -67,3 +67,51 @@ quoted data 进入请求。真实协议驱动检查从该内容读取并验证�
 
 本次可用性修复不是全部缺口闭合。全仓人工语义 Review 仍为 partial，三目标最终资格、
 九包来源闭包与 Gate R 均保持原未完成状态。本机候选复用 R94 固定依赖，只用于回归试用。
+
+## 接续：Linux 默认编辑与忙时草稿
+
+上一批已保存为本地提交 `00742fc`。本批继续 D-095，不再将已有但未接线的 editor
+当作产品输入能力。`terminal.new_chat` 依据原生 TTY/TERM/宽度事实选择 ANSI 自有编辑
+或 cooked 后备，已接到生产 composition；Windows 此批保留原来的 cooked 路径。
+
+实现覆盖命令公共前缀/候选、上下键历史、左右/Home/End/Delete、退格和 Ctrl-A/E/U/K、
+分片 UTF-8、Bracketed paste，以及 Ctrl-C 先清草稿再取消活动。历史只留内存，最多
+64 条/128 KiB。输入上限与 Coordinator 对齐，超限或非法输入清空并提示，避免提交截断
+后的命令；一个 poll 最多处理 64 次编辑，避免连续按键阻塞 AgentLoop。
+
+输出复用已有 line editor：只清当前输入行，追加完整消息后恢复同一草稿与字节光标。
+单行 viewport 在保守的字符宽度上裁切，未显示的正文仍保留。ASCII 控制字符转义后
+显示。普通多行草稿按一个消息提交，`.ask ` 前缀保留 Ask 语义；粘贴中出现 `.quit`
+等文本不拆成命令。审批和 Model/Context 确认仍要求单行。
+
+实际测试又发现并修复了两个接缝：原生层提前将单字节 Enter/Escape 分类，绕过新编辑器；
+以及聊天行解析器拒绝整个多行草稿。证据保留在 `out/review-20261023/input/`，失败
+日志未覆盖。首次本地构建因开发机缺少 readline 链接名而失败，改用已有 Lua 标准输入
+入口构建测试核心；首次 inner 直接启动被外/内 executable 身份校验正确拒绝，随后使用
+固定 luainstaller 的真实单文件封装继续测试，没有放宽产品校验。
+
+### 当前验证
+
+- `full-suite-final.log`、`windows-full-suite.log`：各 747/747。
+- `final-pty80/`、`final-pty40/`：真实 Linux PTY，独立 pyte 屏幕解释器检查光标位置。
+  两者均完成配置、补全、历史、中文插入、长行不覆盖历史、忙时草稿/光标保留、粘贴
+  不提前提交、真实 Ctrl-C 取消 loopback Ask、退出及原始 termios 恢复。
+- `final-dumb/`：普通输入与退出通过，确认没有发送 bracketed-paste 开启序列。
+- `windows-openai-evidence/`、`windows-anthropic-evidence/`：两协议原生控制台旅程通过。
+- `native-tests/`：Windows reader、worker 生命周期和输入故障回归通过；XP 宏编译通过。
+- `comments-final.log`：275 文件 / 5868 声明 / 0 缺项；`readiness-final.log` 完整通过。
+- 本机 Linux 回归核心 `input/linux/yaca` 的 SHA-256 为
+  `b5db69a56f954119bb6af56ec5f4cb3230741a6a99df6015e002910cb1c15323`；Win64 核心
+  `input/win64/package/yaca.exe` 为
+  `b926cb074dec6c4ecc1346ccf648b896d366b380ac4bb8eb9ea65b51fa0f592b`。
+  Linux 核心由当前 WSL 编译，用于本机回归，不能当作 glibc 2.17 发行包。
+
+语义 Review 核对了输入事件预算、原始字节与领域动作的边界、粘贴分片与超限清理、
+草稿/历史所有权、关闭后拒绝输出、stdout 失败时仍恢复原生状态，以及 ANSI 能力门禁。
+ANSI 行为依据 [xterm 控制序列](https://invisible-island.net/xterm/ctlseqs/ctlseqs.html)，
+屏幕验证使用 [pyte](https://pyte.readthedocs.io/en/latest/tutorial.html) 的独立解释器。
+pyte/wcwidth 仅为固定版本的开发测试依赖，不引入产品运行依赖。
+
+以上范围为本机 WSL 与 Windows；尚不证明 C7 实机/全部 SSH 终端/IME/动态缩放。
+Linux 默认补全和忙时草稿已不再是空缺；Windows 忙时草稿、XP/Cygwin 输入增强与
+后续 AgentLoop/目标资格继续留在 TRACKING。按 D-096，到今天 19:30 后的下一节点收尾暂停。

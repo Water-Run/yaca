@@ -1,6 +1,6 @@
 # 发行验收执行手册
 
-更新日期：2026-10-20。适用于现有 clean/std/full 布局，三目标共九包。
+更新日期：2026-10-23。适用于现有 clean/std/full 布局，三目标共九包。
 当前任务与证据边界见[TRACKING](TRACKING.md)和
 [CURRENT-STATE](CURRENT-STATE.md)。旧 9 月候选命令保留在 Git 历史，不再作为执行入口。
 本轮候选核心绑定 `e06d9f9`，三目标各通过 735/735。R94 已通过 Win64 Qwen low
@@ -52,6 +52,22 @@ bash .tools/run_coding_readiness.sh
 若使用隔离环境，把其 `bin/` 放在当前命令的 PATH 前端。完整 readiness 包含全仓注释
 检查与反例、装配/发行校验/PTY 回归、四个校验器和 TP-003/006/008/010、RP-001。
 人工语义 Review 单独记录，不由结构检查替代。
+
+### Linux 输入与忙时草稿检查
+
+以新构建的 Linux 单文件核心所在目录和不存在的证据目录为参数。测试驱动只在其
+新建目录配置 loopback 模型，不读取现有模型密钥。独立屏幕解释器是开发依赖，不打包进产品：
+
+```sh
+python3.13 -m pip install --target out/terminal-test-deps -r .tools/terminal_test_requirements.txt
+PYTHONPATH="$PWD/out/terminal-test-deps" bash .tools/run_with_resource_guard.sh \
+  python3.13 .tools/qualification/linux_chat_input_smoke.py <core-directory> <new-evidence> --width 40
+```
+
+另用 `--width 80` 和 `--term dumb` 各运行一次，使用不同的新证据目录。检查包括完整
+首次配置、Tab、历史、中文插入光标、长草稿 viewport、请求期间的未提交草稿、整段粘贴、
+真实 Ctrl-C 请求取消与 termios 恢复。它证明实际 PTY 交互及屏幕字节，不能替代目标系统
+资格、字体/IME 或不同终端缩放行为的验证。
 
 ### Windows full 来源输入
 

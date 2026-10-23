@@ -188,6 +188,21 @@ function M.new(native, identity, options)
         })
     end
 
+    ---Select enhanced chat input automatically when the terminal supports it.
+    --@param writer function|table Standard output sink shared with the transcript view.
+    --@param complete function Registry command-prefix completion callback.
+    --@param completion_words string|nil Fixed ASCII command catalog for native cooked enhancements.
+    --@param maximum_draft_bytes integer|nil Coordinator draft cap; defaults to the native input cap.
+    --@return table|nil port Chat input AsyncPort.
+    --@return table|nil err Construction failure, nil on success.
+    --@return table|nil display Draft-aware output facade, or nil for cooked input.
+    --@ownership Caller closes the port to restore terminal modes and release draft/history state.
+    local function new_chat_terminal(writer, complete, completion_words, maximum_draft_bytes)
+        return terminal.new_chat(native, { writer = writer, complete = complete,
+            completion_words = completion_words, maximum_input_bytes = terminal_options.maximum_input_bytes,
+            maximum_draft_bytes = maximum_draft_bytes })
+    end
+
     return readonly({
         target_id = "linux-x86_64",
         filesystem = filesystem,
@@ -195,6 +210,7 @@ function M.new(native, identity, options)
         clock_port = clock_port,
         system = system_port,
         new_terminal = new_terminal,
+        new_chat_terminal = new_chat_terminal,
         text = textcodec.new(native, "posix"),
         qualification = "pending-target-evidence",
     }, "Linux backend")

@@ -1,12 +1,13 @@
 # 开发历程与历史资料
 
-整理日期：2026-10-20。当前实现看 [CURRENT-STATE.md](CURRENT-STATE.md)，
+整理日期：2026-10-23。当前实现看 [CURRENT-STATE.md](CURRENT-STATE.md)，
 剩余工作看 [TRACKING.md](TRACKING.md)。本页只导航已有工作和证据。
 
 ## 已完成工作的脉络
 
 | 时间 / 节点 | 主要成果 | 证据与适用范围 |
 | --- | --- | --- |
+| 2026-10-23，实际使用与输入增强 | 修复提示符、工具错误反馈、普通回复收口、Anthropic 消息编码与大文件续读；接通 Windows 命令 Tab 和 Linux ANSI 默认编辑、忙时草稿与整段粘贴 | [本日 Review](CODE-REVIEW-2026-10-23.md)；两宿主 Lua 各 747/747，Linux 40/80 列 PTY、dumb 后备、Windows 两协议真实控制台及完整 readiness 通过；目标资格仍待完成 |
 | 2026-10-20，R106 来源恢复与暂停收尾 | 恢复 15 项原摘要输入、4 项待验签字节；固定 Net-SMTP-SSL 1.02 源码及 R88 模块对应；校正 runtime 五补丁原配方，旧输入留存 history；Win32 锁 1361 成员，117 个静态摘要分类、3 个子集 | [本日 Review](CODE-REVIEW-2026-10-20.md#r106-来源输入恢复与节点收尾d-094)、[R106](tool-source-review/R106.json)；装配接纳、完整 readiness 及注释检查通过，来源仍 partial；按 D-094 提交后暂停 |
 | 2026-10-20，R105 动态版本与历史载体 | 核对 git-extra 动态版本，恢复 GCM/MPFR 配方及 ncurses/Connect 原归档；GCM 绑定真实源码；Win32 锁 1319 成员、120/121 配方；修复 Python 变参注释识别，专项 18/18 | [本日 Review](CODE-REVIEW-2026-10-20.md#r105-精确旧配方接续)；来源装配接纳、TP-006 319 断言、最终 readiness、273/5801/0 及本地辅助 14/39/0 通过；来源仍 partial |
 | 2026-10-20，R104 精确旧配方与补丁 | 恢复两份 OpenSSL 1.0.2.h-1 配方和原静态输入、Dash 0.5.8 原归档、六项原 runtime 补丁；Win32 来源锁 1259 成员，配方恢复 117/121，新档案装配接纳通过 | [本日 Review](CODE-REVIEW-2026-10-20.md#r104-win32-未恢复输入接续)；101 个静态摘要分类通过、15 个子集、1 个待恢复；runtime VCS/签名和二进制对应关系保留 |
