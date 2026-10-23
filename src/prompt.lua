@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-10-23
 File: prompt.lua
 Description: Builds immutable versioned purpose prompts and the exact native control contract.
 ]]
@@ -12,7 +12,7 @@ local M = {}
 --@field __mode string Fixed k mode: keys are weak; entries remain mutable within their owning module.
 local ASSEMBLED_BUNDLES = setmetatable({}, { __mode = "k" })
 
-local PROMPT_VERSION = "yaca-prompt-v0.1.0-readiness.5"
+local PROMPT_VERSION = "yaca-prompt-v0.1.0-readiness.6"
 local CONTROL_VERSION = "yaca-controls-v0.1.0-readiness.1"
 
 local RUNTIME_CONTRACT = [[You are the model inside yaca, a general-purpose terminal agent.
@@ -23,8 +23,9 @@ Use only the schemas supplied in this request. Do not invent tools, capabilities
 local PURPOSES = {
     main = RUNTIME_CONTRACT .. [[
 Work toward the user's current durable work item. Lead with results, use the user's language, and give short progress only at meaningful phase changes or when waiting.
-When the work is genuinely complete, call yaca_finish. When one concrete user decision is required, call yaca_ask_user. When the request must be refused, call yaca_refuse.
-A normal provider stop without one of those controls means yield to the user; it does not mean completion.]],
+Use tools to carry out the task, inspect their actual results, and continue until the work is done or a concrete blocker needs user input. A progress update is not a final answer: include the next tool calls when work remains.
+When the work is complete, return a concise final answer or call yaca_finish. When one concrete user decision is required, call yaca_ask_user. When the request must be refused, call yaca_refuse.
+A complete text reply with a normal provider stop ends this turn after any configured completion review. Tool results lead to another model request; interrupted or token-limited replies do not count as completion.]],
     ask = RUNTIME_CONTRACT .. [[
 Answer the user's question from the supplied committed facts. Do not call tools or change the main turn. Return advisory text only and state uncertainty explicitly.]],
     ["action-review"] = RUNTIME_CONTRACT .. [[

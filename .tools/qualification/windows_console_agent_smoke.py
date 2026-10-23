@@ -1,13 +1,14 @@
 #!/usr/bin/env python
 # Author: WaterRun
-# Date: 2026-10-20
+# Date: 2026-10-23
 # File: windows_console_agent_smoke.py
-# Description: Native Windows console setup and authorized online Agent journeys with recorded approvals, persistence and console restoration.
+# Description: Native Windows console setup, default editing and both-provider tool-feedback journeys, plus authorized online approval and persistence checks.
 
 """Native Windows console setup and explicitly authorized online journeys.
 
 Supply a new candidate directory containing only yaca.exe. Tests first setup,
-pure Ask, persistence/reopen and console mode restoration. No real model is used.
+Tab/history editing, pure Ask, tool-error correction, normal completion, persisted
+reopen and console mode restoration against either loopback protocol.
 Run with Python 2.7 or 3 on the target Windows machine.
 With --online, use an already configured isolated directory and its real model.
 """
@@ -24,6 +25,7 @@ import shutil
 import subprocess
 import threading
 import time
+import xml.etree.ElementTree as ET
 from terminal_evidence import verify_lua_approval, verify_lua_execution, verify_recalled_token
 try:
     from BaseHTTPServer import HTTPServer, BaseHTTPRequestHandler
@@ -126,6 +128,8 @@ def main():
     parser.add_argument('directory')
     parser.add_argument('evidence')
     parser.add_argument('--online', action='store_true', help='use the existing authorized real model configuration')
+    parser.add_argument('--protocol', choices=('openai-chat', 'anthropic-messages'), default='openai-chat',
+        help='protocol exercised by the offline loopback fixture')
     parser.add_argument('--upgrade-core', help='replace the closed first-session core before reopening the same Context')
     args = parser.parse_args()
     assert not args.upgrade_core or args.online, 'upgrade verification requires an online persisted Context'
@@ -171,27 +175,90 @@ def main():
         def log_message(self, *unused): pass
         # Handles a proof HTTP POST and records its request evidence.
         #@param self Provider Active synthetic OpenAI-compatible request handler.
-        #@return None No value after one fixed 42 response is written.
-        #@error Raises for oversized/invalid bodies, credential headers or advertised tools.
-        #@effect Saves the request ledger and emits bounded streaming or JSON fixture bytes over loopback.
+        #@return None No value after a scripted Ask, tool, correction, final answer or review response.
+        #@error Raises for oversized/invalid bodies, credential headers or missing tool-result evidence.
+        #@effect Saves synthetic requests and emits bounded streaming or JSON fixture bytes over loopback.
         def do_POST(self):
             length = int(self.headers.get('Content-Length', '0'))
             assert 0 < length <= 4 * 1024 * 1024
             request = json.loads(self.rfile.read(length).decode('utf-8'))
             assert not self.headers.get('Authorization'), 'no test credentials are permitted'
-            assert not request.get('tools'), 'pure Ask advertised tools'
             requests.append(request)
             with open(os.path.join(evidence, 'request-%d.json' % len(requests)), 'wb') as stream:
                 stream.write(json.dumps(request, ensure_ascii=False).encode('utf-8'))
-            if request.get('stream'):
+            message = dict(role='assistant', content='42')
+            finish = 'stop'
+            contents = []
+            for item in request['messages']:
+                content = item.get('content', '')
+                if isinstance(content, list):
+                    contents.extend(block.get('text', '') for block in content if block.get('type') == 'text')
+                else:
+                    contents.append(content)
+            system = request.get('system', [])
+            if isinstance(system, list):
+                contents.extend(block.get('text', '') for block in system)
+            elif system:
+                contents.append(system)
+            if request.get('tools'):
+                results = []
+                for content in contents:
+                    if not content.startswith('YACA-MODEL-VIEW/1\n'):
+                        continue
+                    facts = ET.fromstring(content.split('\n\n', 1)[1])
+                    for event in facts.findall('Event'):
+                        if event.get('type') == 'tool_result':
+                            results.append({field.get('name'): field.text or '' for field in event.findall('Field')})
+                if len(results) < 2:
+                    path = 'missing.txt' if not results else 'fixture.txt'
+                    if results:
+                        assert results[-1]['errorId'] == 'NotFound', 'missing file failure was not returned to model'
+                    message = dict(role='assistant', content='Reading ' + path,
+                        tool_calls=[dict(id='read-' + str(len(results)), type='function',
+                            function=dict(name='read', arguments=json.dumps(dict(
+                                path=path, start_line=1, max_lines=10))))])
+                    finish = 'tool_calls'
+                else:
+                    assert len(results) == 2 and 'LOOP_OK_42' in results[-1]['body']
+                    message['content'] = 'Verified fixture.txt contains LOOP_OK_42.'
+            elif any('Review whether the bound completion claim' in content for content in contents):
+                message['content'] = json.dumps(dict(verdict='pass', gap='', reason='Tool evidence matches.'))
+            if args.protocol == 'anthropic-messages':
+                blocks = [dict(type='text', text=message['content'])]
+                for call in message.get('tool_calls', []):
+                    blocks.append(dict(type='tool_use', id=call['id'], name=call['function']['name'],
+                        input=json.loads(call['function']['arguments'])))
+                stop = 'tool_use' if finish == 'tool_calls' else 'end_turn'
+                if request.get('stream'):
+                    events = [('message_start', dict(type='message_start', message=dict(
+                        id='console-response', type='message', role='assistant', model='mock',
+                        content=[], usage=dict(input_tokens=100, output_tokens=0))))]
+                    for index, block in enumerate(blocks):
+                        events.append(('content_block_start', dict(type='content_block_start',
+                            index=index, content_block=block)))
+                        events.append(('content_block_stop', dict(type='content_block_stop', index=index)))
+                    events.extend([('message_delta', dict(type='message_delta', delta=dict(stop_reason=stop),
+                        usage=dict(output_tokens=30))), ('message_stop', dict(type='message_stop'))])
+                    body = ''.join('event: ' + name + '\ndata: ' + json.dumps(event) + '\n\n'
+                        for name, event in events)
+                    content_type = 'text/event-stream'
+                else:
+                    body = json.dumps(dict(id='console-response', type='message', role='assistant',
+                        model='mock', content=blocks, stop_reason=stop,
+                        usage=dict(input_tokens=100, output_tokens=30)))
+                    content_type = 'application/json'
+            elif request.get('stream'):
+                delta = dict(message)
+                if delta.get('tool_calls'):
+                    delta['tool_calls'][0]['index'] = 0
                 chunks = [dict(id='console-ask', choices=[dict(index=0,
-                    delta=dict(role='assistant', content='42'), finish_reason=None)]),
-                    dict(id='console-ask', choices=[dict(index=0, delta={}, finish_reason='stop')])]
+                    delta=delta, finish_reason=None)]),
+                    dict(id='console-ask', choices=[dict(index=0, delta={}, finish_reason=finish)])]
                 body = ''.join('data: ' + json.dumps(item) + '\n\n' for item in chunks) + 'data: [DONE]\n\n'
                 content_type = 'text/event-stream'
             else:
                 body = json.dumps(dict(id='console-ask', choices=[dict(index=0,
-                    message=dict(role='assistant', content='42'), finish_reason='stop')]))
+                    message=message, finish_reason=finish)]))
                 content_type = 'application/json'
             body = body.encode('utf-8')
             self.send_response(200)
@@ -323,6 +390,20 @@ def main():
                 event.event.key.key = 13 if character == '\r' else 0
                 event.event.key.character.unicode = character
                 assert kernel.WriteConsoleInputW(self.input, C.byref(event), 1, C.byref(written)) and written.value == 1
+
+        # Send one non-text editing key to the owned console without submitting a line.
+        #@param self Console Owner of the test child's input queue.
+        #@param key int Win32 virtual key code, such as VK_UP for native command history.
+        #@return None No value after Windows accepts exactly one key record.
+        #@effect Writes one key-down event to this child's console only.
+        #@error Raises if the console rejects the key record.
+        def send_key(self, key):
+            event, written = INPUT(), W.DWORD()
+            event.type = 1
+            event.event.key.down = True
+            event.event.key.repeat = 1
+            event.event.key.key = key
+            assert kernel.WriteConsoleInputW(self.input, C.byref(event), 1, C.byref(written)) and written.value == 1
 
         # Request normal application close, then verify exit and restoration to the observed baseline.
         #@param self Console Running child whose session is ready to quit.
@@ -496,7 +577,7 @@ def main():
             print('windows-console-agent=PASS provider=real')
             return
         child = Console([], 'first-run')
-        for prompt, answer in [('Model name', 'ConsoleTest'), ('Protocol (', ''),
+        for prompt, answer in [('Model name', 'ConsoleTest'), ('Protocol (', args.protocol),
                 ('Enable this Model?', ''), ('Endpoint:', 'http://127.0.0.1:%d/chat' % server.server_port),
                 ('Remote model:', 'mock'), ('Context length (tokens)', '32768'),
                 ('Maximum output tokens', '4096'), ('Key (hidden;', '')]:
@@ -505,7 +586,11 @@ def main():
         child.send('APPLY'); child.expect('>>')
         assert os.path.isfile(os.path.join(root, '__yaca__', 'config.ini'))
         child.send('.side obsolete'); child.expect('UsageError: unknown command line')
-        child.send('.status'); child.expect('state: draft-ready')
+        child.send('.staX\b\t'); screen = child.expect('state: draft-ready')
+        assert '\n>> .status\n' in screen, 'chat prompt and submitted command are not on the same line'
+        child.send_key(38); child.send('')
+        screen = child.expect('state: draft-ready', occurrence=2)
+        assert screen.count('\n>> .status\n') == 2, 'Up did not recall the completed command'
         child.send('.multiline'); child.expect('Multiline input:')
         child.send(u'\u4e2d\u6587 42'); child.send('Reply exactly 42.'); child.send('.ask')
         screen = child.expect('Ask ask-1 outcome: completed')
@@ -514,14 +599,23 @@ def main():
         match = re.search(r'Context saved:.*\[([A-F0-9]{16})\]', screen)
         assert match, 'saved Context hash was not displayed'
         selector = match.group(1)
+        with open(os.path.join(root, 'workspace', 'fixture.txt'), 'wb') as stream:
+            stream.write(b'LOOP_OK_42\n')
+        child.send('Read fixture.txt and report its contents.')
+        screen = child.expect('Turn outcome: completed')
+        assert 'Verified fixture.txt contains LOOP_OK_42.' in screen
+        assert 'result: error (NotFound)' in screen and 'result: ok' in screen
+        assert 'Model yielded without finish' not in screen
+        assert len(requests) == 5, 'main must run missing read, corrected read, final answer and review'
+        save_phase('verified-agent-loop', screen)
         child.finish(); child.close(); child = None
         child = Console(['--continue', selector], 'reopened')
         child.expect('>>'); child.send('.ask Reply exactly 42.')
         child.expect('Ask ask-2 outcome: completed')
-        assert len(requests) == 2
+        assert len(requests) == 6
         child.finish()
         with open(os.path.join(evidence, 'result.txt'), 'w') as stream:
-            stream.write('windows-console-agent=PASS setup=offline ask=no-tools Context=reopened modes=restored\n')
+            stream.write('windows-console-agent=PASS protocol=' + args.protocol + ' setup=offline prompt=inline tool-error=corrected tool-result=returned normal-stop=completed review=passed Context=reopened modes=restored\n')
         print('windows-console-agent=PASS')
     finally:
         if child is not None: child.close()

@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-28
+Date: 2026-10-23
 File: direct_tools_test.lua
 Description: Verifies the closed registry, direct tool contracts, legacy encodings and range reads.
 ]]
@@ -1187,9 +1187,45 @@ return {
                     path = "/work/big.log", start_line = 1, max_lines = 1,
                     continuation = limited.payload.continuation,
                 }, "resume")
-                local number = limited.payload.next_line
-                A.equal(resumed.payload.lines[1].number, number)
-                A.equal(resumed.payload.lines[1].text, string.format("line %04d", number))
+                A.equal(limited.payload.next_line, 3500)
+                A.equal(resumed.payload.lines[1].number, 3500)
+                A.equal(resumed.payload.lines[1].text, "line 3500")
+                A.equal(resumed.payload.lines[1].raw_start, 34990)
+            end,
+        },
+        {
+            name = "range skips survive multiple budgets and stop cleanly beyond EOF",
+            -- Resume the original requested range even when callers repeat start_line=1.
+            --@param none Exercises long skipped records and a requested line beyond EOF.
+            --@return nil Assertions require exact requested lines or an empty EOF page.
+            run = function()
+                for _, requested in ipairs({ 3, 5 }) do
+                    local service = fixture({
+                        initial = { ["/work/skip.log"] = string.rep("x", 70000) .. "\r\nshort\nwanted\n" },
+                        options = { maximum_scan_bytes = 32768 },
+                    })
+                    local token, finished, observed = nil, false, 0
+                    for page = 1, 6 do
+                        local result = run(service, "read", {
+                            path = "/work/skip.log", start_line = page == 1 and requested or 1,
+                            max_lines = 2, continuation = token,
+                        }, "skip-budget-" .. requested .. "-" .. page)
+                        A.equal(result.outcome, "success")
+                        for _, line in ipairs(result.payload.lines) do
+                            observed = observed + 1
+                            A.equal(requested, 3)
+                            A.equal(line.number, 3)
+                            A.equal(line.text, "wanted")
+                            A.equal(line.raw_start, 70008)
+                        end
+                        if result.payload.eof then finished = true; break end
+                        A.equal(result.payload.next_line, requested)
+                        token = result.payload.continuation
+                        A.type(token, "string")
+                    end
+                    A.equal(finished, true)
+                    A.equal(observed, requested == 3 and 1 or 0)
+                end
             end,
         },
         {

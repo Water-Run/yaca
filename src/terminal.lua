@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-10-11
+Date: 2026-10-23
 File: terminal.lua
 Description: Wraps terminal input and restoration as a bounded AsyncPort.
 ]]
@@ -184,6 +184,11 @@ function M.new(native, options)
         return nil, failure("InvalidTerminalLimit", "maximum_input_bytes is required")
     end
     local requested_mode = options.mode or "auto"
+    local completion_words = options.completion_words
+    if completion_words ~= nil and (type(completion_words) ~= "string"
+        or #completion_words > 4095 or completion_words:find("[^.a-z0-9_ \n-]")) then
+        return nil, failure("InvalidTerminalCompletion", "completion commands are invalid")
+    end
     if requested_mode ~= "auto" and requested_mode ~= "raw" and requested_mode ~= "cooked" then
         return nil, failure("InvalidTerminalMode", "terminal mode must be auto, raw, or cooked")
     end
@@ -350,6 +355,7 @@ function M.new(native, options)
         local ok, value = call_native(native, "terminal_start", {
             mode = requested_mode,
             maximum_input_bytes = maximum_input_bytes,
+            completion_words = completion_words,
             started_at = now,
         })
         if not ok then raise_native(value, 1) end

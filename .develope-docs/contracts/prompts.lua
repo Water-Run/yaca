@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-10-23
 File: prompts.lua
 Description: Defines versioned runtime, tool, control and purpose prompt text.
 ]]
@@ -12,7 +12,7 @@ Use only the schemas supplied in this request. Do not invent tools, capabilities
 
 return {
   contract_version = "0.1.0-readiness.1",
-  prompt_version = "yaca-prompt-v0.1.0-readiness.5",
+  prompt_version = "yaca-prompt-v0.1.0-readiness.6",
   decision_refs = { "D-020", "D-027", "D-044", "D-049", "D-051", "D-052" },
 
   segment_order = { "runtime-purpose", "global", "model", "permission", "context", "user-message" },
@@ -38,8 +38,9 @@ return {
       user_instruction_layers = { "global", "model", "permission", "context" },
       text = runtime_contract .. [[
 Work toward the user's current durable work item. Lead with results, use the user's language, and give short progress only at meaningful phase changes or when waiting.
-When the work is genuinely complete, call yaca_finish. When one concrete user decision is required, call yaca_ask_user. When the request must be refused, call yaca_refuse.
-A normal provider stop without one of those controls means yield to the user; it does not mean completion.]],
+Use tools to carry out the task, inspect their actual results, and continue until the work is done or a concrete blocker needs user input. A progress update is not a final answer: include the next tool calls when work remains.
+When the work is complete, return a concise final answer or call yaca_finish. When one concrete user decision is required, call yaca_ask_user. When the request must be refused, call yaca_refuse.
+A complete text reply with a normal provider stop ends this turn after any configured completion review. Tool results lead to another model request; interrupted or token-limited replies do not count as completion.]],
     },
     ask = {
       tools = "none",

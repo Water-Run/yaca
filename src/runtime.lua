@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-10-11
+Date: 2026-10-23
 File: runtime.lua
 Description: Owns the bounded single-threaded event pump and runtime primitives.
 ]]
@@ -63,6 +63,17 @@ local RUNTIME_ABORT_OUTCOMES = {
     unknown_side_effect = true,
 }
 local CONTROL_NAMES = { finish = true, ["ask-user"] = true, refuse = true }
+
+-- Expected caller/target failures happen before execution and can be returned to the model.
+-- Unknown adapter, permission-service and storage failures retain the fatal contract path.
+local RECOVERABLE_TOOL_ADMISSION_ERRORS = {
+    NotFound = true, InvalidTargetType = true, TargetChanged = true,
+    InvalidToolArguments = true, InvalidSearchPattern = true,
+    InvalidContinuation = true, ContinuationStale = true, ContinuationLimit = true,
+    EncodingUnavailable = true, InvalidEncoding = true,
+    LinkNotFollowed = true, SpecialFileDenied = true, HardlinkDenied = true,
+    ReservedTreeDenied = true, BinaryContentDenied = true,
+}
 local SESSION_OVERRIDE_NAMES = {
     CurrentModel = true,
     CurrentPermission = true,
@@ -1004,6 +1015,19 @@ local function validate_model_response(wrapper, limits)
         return nil, failure("InvalidModelResponse", "response completion facts contradict")
     end
     return wrapper
+end
+
+---Recognize a complete text reply using protocol facts, without matching completion phrases.
+--@param response table Validated canonical Model response with content blocks and terminal class.
+--@return boolean True for a normal stop with visible text and no tool calls or explicit control.
+local function normal_text_stop(response)
+    if response.incomplete or response.finish_class ~= "stop"
+        or #response.tool_calls > 0 or response.control ~= nil then return false end
+    for _, block in ipairs(response.content_blocks) do
+        if type(block) == "table" and block.kind == "text"
+            and type(block.text) == "string" and block.text:find("%S") then return true end
+    end
+    return false
 end
 
 ---Checks a canonical Tool outcome and its byte/effect evidence.
@@ -2099,6 +2123,8 @@ function M.new_agent_loop(ports, options)
         turn.trace.tool_results[#turn.trace.tool_results + 1] = {
             tool_call_id = call.id,
             kind = result.kind,
+            status = TOOL_RESULT_KINDS[result.kind],
+            error_id = result.error_id,
         }
         return true
     end
@@ -2354,6 +2380,7 @@ function M.new_agent_loop(ports, options)
     --@param none No arguments.
     --@return table|nil activity Tool, approval, review, or next Model admission.
     --@return table|nil err Structured policy or durability failure.
+    --@effect Commits admission/result facts and may start a tool, reviewer or follow-up request; expected target failures execute no tool.
     dispatch_next = function()
         if turn.cancel_pending then return finish_cancelled_turn() end
         local now, clock_error = clock_now()
@@ -2372,6 +2399,32 @@ function M.new_agent_loop(ports, options)
                     admitted_ports.tools.admit,
                     call.public
                 )
+                if called and admission == nil and type(admission_error) == "table"
+                    and RECOVERABLE_TOOL_ADMISSION_ERRORS[admission_error.code]
+                    and valid_runtime_text(admission_error.message, limits.hard_caps.message_bytes, false)
+                then
+                    local result = synthetic_result("synthetic-admission-error",
+                        admission_error.code .. ": " .. admission_error.message)
+                    result.error_id = admission_error.code
+                    local paired, pair_error = pair_result(call, result)
+                    if not paired then return nil, pair_error end
+                    turn.call_cursor = turn.call_cursor + 1
+                    local action, detector_error = record_detector(
+                        call.public.name .. ":" .. call.public.canonical_arguments,
+                        admission_error.code, turn.detector.last_progress or "no-canonical-progress"
+                    )
+                    if not action then return nil, detector_error end
+                    if action == "stuck" then
+                        local skipped, skip_error = skip_remaining("skipped-stuck-escape", detector_error)
+                        if not skipped then return nil, skip_error end
+                        return finalize("stuck", detector_error, "AgentStuck")
+                    elseif action == "escape" then
+                        local skipped, skip_error = skip_remaining("skipped-stuck-escape", detector_error)
+                        if not skipped then return nil, skip_error end
+                        return request_model("main", { stuck_escape = true, detector = detector_error })
+                    end
+                    return complete_batch(admission_error.code)
+                end
                 if not called or not exact_fields(admission, {
                     decision = true, capabilities = true,
                     permission_snapshot_digest = true, reason = true,
@@ -2527,13 +2580,38 @@ function M.new_agent_loop(ports, options)
                     payload = wrapper.canonical_body,
                 },
             }
-        elseif #calls == 0 and not normalized.incomplete then
+        elseif #calls == 0 and not normalized.incomplete
+            and not normal_text_stop(normalized) then
             events[#events + 1] = {
                 type = "model_yield",
                 fields = { requestId = active_request.id, messageId = message_id },
             }
         end
         return events
+    end
+
+    ---Complete a published response, retaining the configured termination review.
+    --@param request_id string Durable Model request identity.
+    --@param message_id string Durable assistant message identity.
+    --@param summary string Completion summary from the accepted response.
+    --@return table|nil outcome Completion or termination review admission.
+    --@return table|nil err Review, view or durability failure.
+    --@effect May start a reviewer or publish the final outcome; does not invent a Model control.
+    local function complete_response(request_id, message_id, summary)
+        if turn.finish_after_review_gap then
+            turn.finish_after_review_gap = false
+            return finalize("completed", summary)
+        end
+        if turn.snapshot.double_check then
+            transition("EvaluatingTermination")
+            pending = {
+                kind = "termination-review", request_id = request_id, message_id = message_id,
+            }
+            return begin_review("termination", {
+                request_id = request_id, message_id = message_id,
+            })
+        end
+        return finalize("completed", summary)
     end
 
     ---Applies a typed finish, ask-user, or refuse control after publication.
@@ -2545,23 +2623,7 @@ function M.new_agent_loop(ports, options)
     local function process_control(control, request_id, message_id)
         turn.trace.controls[#turn.trace.controls + 1] = control.control
         if control.control == "finish" then
-            if turn.finish_after_review_gap then
-                turn.finish_after_review_gap = false
-                return finalize("completed", control.payload.summary or "")
-            end
-            if turn.snapshot.double_check then
-                transition("EvaluatingTermination")
-                pending = {
-                    kind = "termination-review",
-                    request_id = request_id,
-                    message_id = message_id,
-                }
-                return begin_review("termination", {
-                    request_id = request_id,
-                    message_id = message_id,
-                })
-            end
-            return finalize("completed", control.payload.summary or "")
+            return complete_response(request_id, message_id, control.payload.summary or "")
         elseif control.control == "ask-user" then
             transition("WaitingUser")
             turn.reported_outcome = "waiting_user"
@@ -4600,15 +4662,20 @@ function M.new_agent_loop(ports, options)
         end
         if wrapper.normalized.incomplete then
             local outcome = wrapper.normalized.finish_class == "cancelled"
-                and "cancelled" or "error"
+                and "cancelled" or (wrapper.normalized.finish_class == "length"
+                    and "budget_exhausted" or "error")
             return finalize(outcome,
                 wrapper.normalized.incomplete_reason or "incomplete-model-response",
-                outcome == "cancelled" and "AgentCancelled" or "ModelResponseIncomplete")
+                outcome == "cancelled" and "AgentCancelled"
+                    or (outcome == "budget_exhausted" and "AgentBudgetExhausted" or "ModelResponseIncomplete"))
         end
         if wrapper.normalized.control ~= nil then
             return process_control(wrapper.normalized.control, request_id, message_id)
         end
         if #calls == 0 then
+            if normal_text_stop(wrapper.normalized) then
+                return complete_response(request_id, message_id, wrapper.canonical_body)
+            end
             transition("WaitingUser")
             turn.reported_outcome = "waiting_user"
             pending = { kind = "model-yield", message_id = message_id }

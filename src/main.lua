@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-10-11
+Date: 2026-10-23
 File: main.lua
 Description: Routes the offline bootstrap lifecycle from the unique composition root.
 ]]
@@ -2463,7 +2463,8 @@ local AGENT_RELEASE_OPTIONS = {
 local CONTINUATION_INSTRUCTION = table.concat({
     "Continue from the latest durable Context facts.",
     " Treat those facts as the canonical conversation and tool history.",
-    " Use a typed control when the current turn has a reportable outcome.",
+    " Continue using tools while work remains. Return a final answer when done;",
+    " use yaca_ask_user when a concrete user decision is required.",
 })
 
 ---Exposes the native monotonic clock to the production AgentLoop.
@@ -7784,6 +7785,7 @@ local function coordinator_ports(ports)
         or type(ports.view.startup) ~= "function"
         or type(ports.view.publish) ~= "function"
         or type(ports.view.prompt) ~= "function"
+        or (ports.view.input_submitted ~= nil and type(ports.view.input_submitted) ~= "function")
         or (ports.initial_agent ~= nil and (
             type(ports.initial_agent) ~= "table"
             or type(ports.initial_agent.loop) ~= "table"
@@ -7986,6 +7988,7 @@ function M.new_application_coordinator(ports, options)
     --@param block table User-visible semantic block.
     --@return boolean|nil published True when renderer accepts it.
     --@return table|nil err Structured renderer failure.
+    --@effect Publishes the block and schedules a prompt after the current output batch.
     local function publish(block)
         local published, publish_error = coordinator_call(
             admitted_ports.view,
@@ -7995,6 +7998,7 @@ function M.new_application_coordinator(ports, options)
             block
         )
         if not published then return nil, publish_error end
+        prompt_needed = lifecycle ~= "closing"
         return true
     end
 
@@ -8552,6 +8556,19 @@ function M.new_application_coordinator(ports, options)
         if not step then return nil, step_error end
         local projected, projection_error = project_driver_events(step, before)
         if not projected then return nil, projection_error end
+        local prior_results = before.trace and before.trace.tool_results or {}
+        local results = step.status.trace and step.status.trace.tool_results or {}
+        local first = before.turn_id == step.status.turn_id and #prior_results + 1 or 1
+        for index = first, #results do
+            local result = results[index]
+            local label = "result: " .. tostring(result.status or result.kind)
+            if result.error_id and result.error_id ~= false then
+                label = label .. " (" .. result.error_id .. ")"
+            end
+            local shown, show_error = publish({ kind = "tool",
+                id = tool_display_id(result.tool_call_id), text = label })
+            if not shown then return nil, show_error end
+        end
         local approval_ready, approval_error = ensure_approval(step.status)
         if not approval_ready then return nil, approval_error end
         local waiting, waiting_error = project_wait(step.status)
@@ -10380,7 +10397,15 @@ function M.new_application_coordinator(ports, options)
     --@param intent string Admitted submit-or-queue, steer or ask action selected by the terminal reducer.
     --@return boolean|nil handled Whether the submitted input was routed.
     --@return table|nil err Structured input or command failure.
+    --@effect Acknowledges the cooked input line, routes the command and updates draft/prompt state.
     local function handle_submission(intent)
+        if admitted_ports.view.input_submitted then
+            local accepted, input_error = coordinator_call(
+                admitted_ports.view, "input_submitted", "RendererFailure",
+                "submitted input line acknowledgment"
+            )
+            if not accepted then return nil, input_error end
+        end
         if context_change and intent ~= "submit-or-queue" then
             return nil, failure("InteractiveActionUnavailable", "confirm or cancel the pending workspace change first")
         end
@@ -10849,6 +10874,7 @@ local function production_chat_view(composed, runtime)
     })
     if not renderer then return nil, renderer_error end
     local view = {}
+    local prompt_visible = false
 
     ---Writes a fully rendered transcript block to standard output.
     --@param bytes string Rendered output bytes.
@@ -10869,6 +10895,7 @@ local function production_chat_view(composed, runtime)
     --@param status table Chat startup status.
     --@return boolean|nil written Whether startup output was written.
     --@return table|nil err Structured renderer or output failure.
+    --@effect Writes startup fields and the first inline prompt to stdout.
     function view:startup(status)
         local existing = status.durable == true
         local rendered, render_error = renderer.render_startup({
@@ -10893,9 +10920,11 @@ local function production_chat_view(composed, runtime)
             permission = true,
             double_check = true,
             status_hint = true,
-        }, "chat")
+        })
         if not rendered then return nil, render_error end
-        return write_rendered(rendered)
+        local written, write_error = write_rendered(rendered)
+        if not written then return nil, write_error end
+        return view:prompt("chat")
     end
 
     ---Appends one validated complete semantic transcript block.
@@ -10903,21 +10932,41 @@ local function production_chat_view(composed, runtime)
     --@param block table Semantic transcript block.
     --@return boolean|nil appended Whether the renderer accepted the block.
     --@return table|nil err Structured renderer failure.
+    --@effect Ends any visible input prompt and writes the complete block to stdout.
     function view:publish(block)
+        if prompt_visible then
+            local written, write_error = write_rendered("\n")
+            if not written then return nil, write_error end
+            prompt_visible = false
+        end
         local rendered, render_error = renderer.append(block)
         if not rendered then return nil, render_error end
         return true
     end
 
-    ---Writes one plain focus prompt without assuming ANSI or cursor movement.
+    ---Writes an inline input prompt at the start of a fresh input line.
     --@param self table Production chat view.
     --@param focus string Prompt focus lane.
     --@return boolean|nil written Whether the prompt was written.
     --@return table|nil err Structured renderer or output failure.
+    --@effect Writes one prompt to stdout and retains its visible state; repeated calls are idempotent.
     function view:prompt(focus)
+        if prompt_visible then return true end
         local rendered, render_error = renderer.render_prompt(focus)
         if not rendered then return nil, render_error end
-        return write_rendered(rendered)
+        local written, write_error = write_rendered(rendered:sub(1, -2) .. " ")
+        if not written then return nil, write_error end
+        prompt_visible = true
+        return true
+    end
+
+    ---Acknowledge the newline already echoed by the cooked terminal on submission.
+    --@param self table Production chat view owning the visible prompt state.
+    --@return boolean True after releasing the prompt without emitting a second newline.
+    --@effect Marks the submitted input line complete before command output is published.
+    function view:input_submitted()
+        prompt_visible = false
+        return true
     end
 
     return readonly(view, "production chat view")
@@ -11223,7 +11272,12 @@ function M.run_interactive_chat(composed, chat, runtime, initial_agent)
         end
     end
     local terminal_error
-    terminal_port, terminal_error = composed.backend.new_terminal("cooked")
+    local completion_words
+    if type(runtime.cli.complete) == "function" then
+        local candidates = runtime.cli.complete("chat", "")
+        if candidates then completion_words = table.concat(candidates, "\n") end
+    end
+    terminal_port, terminal_error = composed.backend.new_terminal("cooked", completion_words)
     if not terminal_port then return fail_before_coordinator(terminal_error) end
     local view, view_error = production_chat_view(composed, runtime)
     if not view then return fail_before_coordinator(view_error) end

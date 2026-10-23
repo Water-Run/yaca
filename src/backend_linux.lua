@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-26
+Date: 2026-10-23
 File: backend_linux.lua
 Description: Composes Linux x86_64 narrow native services.
 ]]
@@ -176,13 +176,15 @@ function M.new(native, identity, options)
 
     ---Creates a terminal port with the backend's fixed release input cap.
     --@param mode string|nil Requested auto, raw, or cooked mode.
+    --@param completion_words string|nil Newline-separated registry commands; passed to capable native input.
     --@return table|nil port Terminal AsyncPort.
     --@return table|nil err Structured construction failure.
     --@ownership The caller owns the returned terminal port and must close it to restore terminal state.
-    local function new_terminal(mode)
+    local function new_terminal(mode, completion_words)
         return terminal.new(native, {
             mode = mode or terminal_options.mode or "auto",
             maximum_input_bytes = terminal_options.maximum_input_bytes,
+            completion_words = completion_words,
         })
     end
 

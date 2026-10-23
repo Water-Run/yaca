@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-10-23
 File: model-events.lua
 Description: Supplies canonical provider-event sequences and expected model outcomes.
 ]]
@@ -9,9 +9,9 @@ return {
   contract_version = "0.1.0-readiness.1",
   cases = {
     {
-      id = "text-stop-is-model-yield-not-completed",
+      id = "complete-text-stop-proposes-completion",
       events = { "response_start", "text_delta", "response_finish" },
-      finish_class = "stop", control = false, execute_tools = false, runtime_result = "waiting_user",
+      finish_class = "stop", control = false, execute_tools = false, runtime_result = "completed-proposed",
     },
     {
       id = "stream-tool-arguments-execute-only-after-complete",
@@ -46,7 +46,7 @@ return {
     {
       id = "length-is-not-completed",
       events = { "response_start", "text_delta", "response_finish" },
-      finish_class = "length", control = false, execute_tools = false, runtime_result = "waiting_user",
+      finish_class = "length", control = false, execute_tools = false, runtime_result = "budget_exhausted",
     },
   },
 }

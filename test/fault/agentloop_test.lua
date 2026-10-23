@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-30
+Date: 2026-10-23
 File: agentloop_test.lua
 Description: Verifies typed AgentLoop traces, durable ordering, caps, and fail-stop behavior.
 ]]
@@ -210,6 +210,7 @@ local function fixture(settings, option_overrides)
     --@return any observed admit value observed by the scenario assertion.
     function tools.admit(call)
         log[#log + 1] = "admit:" .. call.tool_call_id
+        if settings.admission_error then return nil, settings.admission_error end
         local admission = settings.admit and settings.admit(call) or nil
         admission = admission or {
             decision = "allow",
@@ -391,6 +392,7 @@ local function response(loop, settings)
         execution_admitted = false,
     }
     if settings.control then normalized.control = settings.control end
+    if settings.text then normalized.content_blocks = { { kind = "text", text = settings.text } } end
     if settings.incomplete_reason then normalized.incomplete_reason = settings.incomplete_reason end
     return {
         request_id = loop:status().active_request_id,
@@ -1134,10 +1136,10 @@ return {
             end,
         },
         {
-            name = "typed finish is the only no-review completion path",
-            --Verifies typed finish is the only no-review completion path.
+            name = "typed finish completes while an empty provider stop remains unresolved",
+            -- Preserve explicit controls and reject empty replies as evidence of completion.
             --@param none No arguments; this closure uses its captured fixture state.
-            --@return nil No value; assertions verify typed finish is the only no-review completion path.
+            --@return nil Assertions require durable completion or an explicit unresolved empty yield.
             run = function()
                 local f = fixture()
                 assert(f.loop:begin_main(input(false)))
@@ -1158,6 +1160,80 @@ return {
                 local resumed, resume_error = yielded.loop:reply("continue", "user")
                 A.falsy(resumed)
                 A.equal(resume_error.code, "ExplicitContinuationRequired")
+            end,
+        },
+        {
+            name = "expected admission failures return evidence without executing and unknown failures halt",
+            -- Distinguish a bad model path or argument from a broken adapter contract.
+            --@param none Injects known target/schema failures and an unrecognized internal failure.
+            --@return nil Assertions require paired results, a follow-up request and no external tool start.
+            run = function()
+                for _, code in ipairs({ "NotFound", "InvalidToolArguments", "NativeContract" }) do
+                    local f = fixture({ admission_error = { code = code, message = "target rejected" } })
+                    assert(f.loop:begin_main(input(false)))
+                    assert(f.loop:accept_model_response(response(f.loop, { calls = { call("read", 1) } })))
+                    A.equal(#f.tool_starts, 0)
+                    A.equal(#trace(f.loop).tool_results, 1)
+                    if code == "NativeContract" then
+                        A.equal(f.loop:status().last_outcome, "error")
+                        A.equal(#f.model_starts, 1)
+                    else
+                        A.equal(f.loop:status().state, "RequestingModel")
+                        A.equal(#f.model_starts, 2)
+                        local found = false
+                        for _, event in ipairs(f.events) do
+                            if event.type == "tool_result" then
+                                A.contains(event.fields.body, code .. ": target rejected")
+                                found = true
+                            end
+                        end
+                        A.truthy(found)
+                    end
+                end
+            end,
+        },
+        {
+            name = "normal text completes after tool feedback and preserves configured review",
+            -- Follow the tool-result loop to a normal final answer without requiring a finish tool.
+            --@param none Exercises tool feedback, ordinary answers, review gaps and empty/limited responses.
+            --@return nil Assertions require durable paired tools, bounded review and correct terminal classes.
+            run = function()
+                for _, double_check in ipairs({ false, true }) do
+                    local f = fixture()
+                    assert(f.loop:begin_main(input(double_check)))
+                    assert(f.loop:accept_model_response(response(f.loop, {
+                        calls = { call("read", 1) }, text = "Inspecting the file.",
+                    })))
+                    A.equal(#f.tool_starts, 1)
+                    A.equal(#f.model_starts, 2)
+                    A.equal(f.loop:status().state, "RequestingModel")
+                    assert(f.loop:accept_model_response(response(f.loop, {
+                        text = "The file contains the expected value.", body = "The file contains the expected value.",
+                    })))
+                    if double_check then
+                        A.equal(f.loop:status().state, "EvaluatingTermination")
+                        assert(f.loop:resolve_termination_review(review_verdict("gap", 1)))
+                        A.equal(f.loop:status().state, "RequestingModel")
+                        assert(f.loop:accept_model_response(response(f.loop, {
+                            text = "Verified the remaining check.", body = "Verified the remaining check.",
+                        })))
+                    end
+                    A.equal(f.loop:status().last_outcome, "completed")
+                    A.truthy(f.loop:status().outcome_durable)
+                    A.equal(#trace(f.loop).controls, 0)
+                    A.equal(#trace(f.loop).tool_results, 1)
+                    for _, event in ipairs(f.events) do
+                        A.truthy(event.type ~= "model_control" and event.type ~= "model_yield")
+                    end
+                end
+                for _, class in ipairs({ "length", "cancelled" }) do
+                    local f = fixture()
+                    assert(f.loop:begin_main(input(false)))
+                    assert(f.loop:accept_model_response(response(f.loop, {
+                        text = "Incomplete answer", incomplete = true, finish_class = class,
+                    })))
+                    A.equal(f.loop:status().last_outcome, class == "length" and "budget_exhausted" or "cancelled")
+                end
             end,
         },
         {

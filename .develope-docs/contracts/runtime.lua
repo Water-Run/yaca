@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-30
+Date: 2026-10-23
 File: runtime.lua
 Description: Defines Agent states, event ordering, cancellation and durability transitions.
 ]]
@@ -89,8 +89,8 @@ return {
     { from = "RequestingModel", to = "Closing", on = "close" },
     { from = "Streaming", to = "DispatchingTools", on = "complete-valid-tool-batch" },
     { from = "Streaming", to = "WaitingUser", on = "ask-user-or-model-yield" },
-    { from = "Streaming", to = "EvaluatingTermination", on = "finish-doublecheck-on" },
-    { from = "Streaming", to = "Finalizing", on = "finish-doublecheck-off-or-refuse-or-terminal-error" },
+    { from = "Streaming", to = "EvaluatingTermination", on = "finish-or-normal-text-stop-doublecheck-on" },
+    { from = "Streaming", to = "Finalizing", on = "finish-or-normal-text-stop-doublecheck-off-or-refuse-or-terminal-error" },
     { from = "Streaming", to = "Closing", on = "close" },
     { from = "DispatchingTools", to = "EvaluatingAction", on = "high-risk-review" },
     { from = "DispatchingTools", to = "AwaitingApproval", on = "permission-confirm" },
@@ -133,6 +133,7 @@ return {
     concurrent_tools_max = 1,
     accepted_tool_call_results = "exactly-one-real-or-synthetic",
     provider_stop_means_completed = false,
+    complete_text_stop_without_tools = "completion-proposed-with-configured-review",
     natural_language_done_means_finish = false,
     queue_auto_start_outcome = "completed",
     queue_auto_start_requires_no_pending_or_unknown = true,

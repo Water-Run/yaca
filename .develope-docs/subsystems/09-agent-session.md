@@ -78,13 +78,13 @@ Idle
 
 ## typed finish、ask-user 与 refuse
 
-正常完成由主模型主导，但只能通过 06 号版本化 typed control 表达：
+正常完成由主模型主导。按 D-095，完整非空文本的正常 stop 与显式 `finish` 共用完成复核路线；仍保留以下控制：
 
 - `finish`：提出任务完成并进入 finish review/finalize 路线；
 - `ask-user`：保存明确问题并进入 waiting-user，用户回答继续同一 turn；
 - `refuse`：保存拒绝理由并以 refused 如实收口。
 
-一次完整普通回复若没有 control，保存为 `model-yield` 并进入 waiting-user；provider stop、无工具或出现“完成”等文字都不隐式等于 completed。一个 Context 同时最多一个可由普通 Enter 回答的 pending question，其他输入必须保持 queue/steer 的显式意图。
+完整非空文本、正常 stop、无工具和无显式 control 共同构成完成候选，不按“完成”等自然语言关键词判断。空回复保留 unresolved model-yield，截断和取消不视为完成。一个 Context 同时最多一个可由普通 Enter 回答的 pending question，其他输入保持 queue/steer 的显式意图。
 
 Runtime 只强制工具配对、durability、Permission、硬上限和真实副作用状态，不以自己的任务判断替代主模型的正常完成权。取消、budget exhausted、stuck、存储/协议错误和 outcome=unknown 仍按真实 Runtime 原因结束，不能投影成 completed。
 
@@ -92,7 +92,7 @@ Runtime 只强制工具配对、durability、Permission、硬上限和真实副�
 
 `DoubleCheck=false` 时不发 action 或 finish review。`DoubleCheck=true` 时：
 
-1. 每个 typed `finish` 必须经过独立 `termination-review`，finish review 不能由另一个 target/toggle 关闭；
+1. `finish` 和普通文本完成候选共用独立 `termination-review`，finish review 不能由另一个 target/toggle 关闭；
 2. 高风险动作是否经过 `action-review` 是独立可配置项；普通低风险动作不因此固定增加请求；
 3. 两类 reviewer 默认使用当前 turn Model，也可分别选择 Model，跨 endpoint 首次使用前取得同意；
 4. reviewer 没有工具，使用独立 request/purpose/usage/hard cap，并严格关联被审 finish 或 operation；

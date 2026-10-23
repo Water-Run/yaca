@@ -64,7 +64,7 @@ provider 的普通 `stop` 只表示一次生成结束，不能表示任务完成
 - `ask-user`：需要用户信息或决定，进入可恢复 waiting-user；
 - `refuse`：主模型明确拒绝该请求，并保存理由与 typed refused outcome。
 
-文本、工具和 control 可以按 canonical schema 合法组合；adapter 必须保持它们的原顺序和关联。一个完整回复没有任何 control 时保存为 `model-yield` 并进入 waiting-user，不能从自然语言或 provider stop 猜成 completed。`ask-user` 的回答继续同一 turn，一个 Context 同时最多一个普通 Enter 可回答的 pending question。
+文本、工具和 control 按 canonical schema 保持原顺序和关联。按 D-095，完整非空文本的正常 stop、无工具和无 control 时进入完成复核路线；空回复保留 unresolved model-yield，截断与取消不算完成。`ask-user` 的回答继续同一 turn，一个 Context 同时最多一个普通 Enter 可回答的 pending question。
 
 typed controls 通过 provider 原生结构化能力承载，再归一化为相同内部 envelope。无法无损提供该 envelope 或原生 structured tool calling 的 Model 不能作为完整 main Coding Model；self-test Stage 2 必须实际探测，而不是只相信配置名称。
 

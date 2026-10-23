@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-30
+Date: 2026-10-23
 File: tools.lua
 Description: Defines the closed tool registry and verified direct-file operations.
 ]]
@@ -3000,7 +3000,7 @@ function M.new(dependencies, options)
             .. "for example " .. examples .. "; lossy decodes are marked."
     end
 
-    -- Read a bounded range of a file too large for whole-file decoding, or continue a range read.
+    -- Read a bounded range, preserving unfinished skips and partial lines across continuations.
     --@param state table Admitted read call with snapshot, arguments and optional continuation.
     --@return table|nil Range page with line offsets, observed digest and continuation.
     --@return table|nil Filesystem, encoding, scan or changed-target error.
@@ -3030,7 +3030,7 @@ function M.new(dependencies, options)
         local result_budget, used = page_result_budget(state), 2
         local scan_limited, eof, next_offset, next_number = false, false, false, false
         local last_number = false
-        local partial_line
+        local partial_line, remaining_skip
         if arguments.from_end then
             local seek = ports.filesystem.stream_seek
             if type(seek) ~= "function" or not ports.filesystem.capabilities.seek_candidate then
@@ -3142,7 +3142,7 @@ function M.new(dependencies, options)
             local stream, open_error = open_stream(snapshot, offset, layout.encoding, budget)
             if not stream then return nil, range_failure(open_error) end
             stream.partial_line = continuation and continuation.partial_line or nil
-            local skip = continuation and 0 or (arguments.start_line - 1)
+            local skip = continuation and continuation.remaining_skip or (arguments.start_line - 1)
             while skip > 0 do
                 local line, line_error = next_stream_line(stream)
                 if line == nil then
@@ -3195,6 +3195,7 @@ function M.new(dependencies, options)
             local finished, finish_error = finish_stream(stream, snapshot)
             if not finished then return nil, finish_error end
             partial_line = stream.partial_line
+            remaining_skip = skip
             if eof then next_offset = false end
         end
         local observed_bytes = table.concat(observed)
@@ -3223,6 +3224,7 @@ function M.new(dependencies, options)
                 next_number = next_number,
                 layout = layout,
                 partial_line = partial_line,
+                remaining_skip = remaining_skip,
             })
             if not token then return nil, token_error end
         end
@@ -3236,7 +3238,8 @@ function M.new(dependencies, options)
             observed_digest = assert(ports.safety.digest(observed_bytes)),
             observed_bytes = #observed_bytes,
             lines = lines,
-            next_line = (not arguments.from_end and token ~= false) and next_number or false,
+            next_line = (not arguments.from_end and token ~= false)
+                and (next_number + remaining_skip) or false,
             continuation = token,
             eof = eof,
             scan_limited = scan_limited,

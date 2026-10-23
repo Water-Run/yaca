@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-30
+Date: 2026-10-23
 File: control_mapping_test.lua
 Description: Verifies versioned Prompt purpose assembly and exact native-control projection.
 ]]
@@ -229,6 +229,33 @@ end
 return {
     name = "unit/control-mapping",
     cases = {
+        {
+            name = "Anthropic separates authoritative system layers from quoted environment and history",
+            -- Exercise the actual main prompt shape, including environment before later system layers.
+            --@param none Builds a versioned main prompt with quoted environment and committed facts.
+            --@return nil Assertions require valid Anthropic wire with intact authority and data order.
+            run = function()
+                local cache = {}
+                local prompt = load_module("prompt", cache)
+                local service = assert(prompt.new({ digest = SHA.hex, environment = "terminal test environment" }, prompt_limits()))
+                local spec = request_spec(assemble(service, "main"), "anthropic-messages")
+                spec.model_view_manifest = { digest = "view-1", first_sequence = 1,
+                    last_sequence = 1, body = "<DurableFacts/>" }
+                local model = assert(load_module("model", cache).new(model_limits()))
+                local normalized, normalize_error = model:normalize_request(spec)
+                A.truthy(normalized, normalize_error and normalize_error.message)
+                local encoded, encode_error = model:encode(normalized)
+                A.truthy(encoded, encode_error and encode_error.message)
+                local wire = assert(json_codec(load_module("json")).parse(encoded.body))
+                A.equal(#wire.system, 5)
+                A.equal(#wire.messages, 1)
+                A.equal(#wire.messages[1].content, 3)
+                A.contains(wire.messages[1].content[1].text, "YACA-MODEL-VIEW/1")
+                A.contains(wire.messages[1].content[2].text, "authority=quoted-data")
+                A.contains(wire.messages[1].content[2].text, "terminal test environment")
+                A.contains(wire.messages[1].content[3].text, "kind=user-message")
+            end,
+        },
         {
             name = "optional environment is bounded quoted data and bound to the prompt digest",
             --Verifies optional environment is bounded quoted data and bound to the prompt digest.

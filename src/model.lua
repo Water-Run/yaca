@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-10-11
+Date: 2026-10-23
 File: model.lua
 Description: Maps bounded OpenAI Chat and Anthropic Messages wire data to canonical model events.
 ]]
@@ -409,7 +409,7 @@ local function model_view_message(manifest)
     }
 end
 
--- Project Prompt and durable view into OpenAI or Anthropic message fields.
+-- Project Prompt and durable view, preserving system and conversation order separately.
 --@param codec table Bounded JSON codec.
 --@param bundle table Assembled Prompt messages and optional system text.
 --@param manifest table Durable Model view manifest and body.
@@ -450,18 +450,13 @@ local function encode_messages(codec, bundle, manifest, protocol)
     end
 
     local system_blocks, provider_messages = {}, {}
-    local saw_provider_message = false
     for _, message in ipairs(projected) do
         if type(message) ~= "table" or type(message.content) ~= "string" then
             return nil, nil, failure("InvalidPromptBundle", "Anthropic Prompt message is invalid")
         end
         if message.role == "system" then
-            if saw_provider_message then
-                return nil, nil, failure("InvalidPromptBundle", "Anthropic system components must precede messages")
-            end
             system_blocks[#system_blocks + 1] = { type = "text", text = message.content }
         elseif message.role == "user" or message.role == "assistant" then
-            saw_provider_message = true
             if bundle.version ~= nil then
                 local previous = provider_messages[#provider_messages]
                 if not previous or previous.role ~= message.role then

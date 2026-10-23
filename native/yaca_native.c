@@ -1,6 +1,6 @@
 /*
 Author: WaterRun
-Date: 2026-10-08
+Date: 2026-10-23
 File: yaca_native.c
 Description: Portable narrow native ports for filesystem, process, terminal, system identity, clocks, text code pages, and SHA-256.
 */
@@ -301,6 +301,7 @@ static void reap_abandoned_supervisors(void)
  * @field error_value volatile_DWORD Console read error published before worker completion.
  * @field references volatile_LONG Terminal and worker references; initialized before thread creation and released atomically.
  * @field module HMODULE DLL reference owned only by the worker until atomic thread exit; NULL for executable-linked code.
+ * @field completion_words char[4096] Owned ASCII registry commands copied before the worker starts; empty disables Tab enhancement.
  */
 typedef struct yaca_terminal_read
 {
@@ -312,6 +313,7 @@ typedef struct yaca_terminal_read
   volatile DWORD error_value;
   volatile LONG references;
   HMODULE module;
+  char completion_words[4096];
 } yaca_terminal_read;
 
 /* Release one console-reader reference without accessing its terminal or Lua state.
@@ -347,6 +349,7 @@ static void release_windows_cooked_read(yaca_terminal_read *read)
  * @field terminal_emitted int Whether a terminal event was already published.
  * @field closed int Whether this owner has released its resources.
  * @field outcome char Final process or terminal outcome category.
+ * @field completion_words char[4096] Owned bounded command catalog for capable cooked consoles; empty preserves plain editing.
  */
 typedef struct yaca_terminal
 {
@@ -372,6 +375,7 @@ typedef struct yaca_terminal
   int terminal_emitted;
   int closed;
   char outcome[16];
+  char completion_words[4096];
 } yaca_terminal;
 
 /* @struct yaca_sha256 Incremental SHA-256 state and partial block buffer.
@@ -11793,10 +11797,57 @@ static int push_windows_key_action(
   return 1;
 }
 
+/* Complete a dot-command prefix with the common ASCII suffix of registry candidates.
+ * @param words const_char* Bounded newline-separated registry strings owned by the reader.
+ * @param line WCHAR* Mutable cooked input buffer with its trailing Tab already removed.
+ * @param length DWORD Number of existing wide characters; only ASCII dot-command prefixes are eligible.
+ * @param capacity DWORD Buffer capacity including space reserved for subsequent input.
+ * @return DWORD New character count; unchanged when no safe completion or output is possible.
+ * @effect Writes only the newly completed suffix to the console and appends it to line; performs no action or network request.
+ */
+static DWORD complete_windows_command(const char *words, WCHAR *line, DWORD length, DWORD capacity)
+{
+  const char *candidate, *match = NULL;
+  size_t common = 0, size, index;
+  WCHAR suffix[256];
+  DWORD count, written, mode;
+  HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
+  if (length == 0 || length >= 255U || line[0] != L'.'
+      || !GetConsoleMode(output, &mode)) return length;
+  for (index = 0; index < length; index++)
+    if (line[index] > 127U || line[index] < 32U) return length;
+  candidate = words;
+  while (*candidate != '\0')
+  {
+    const char *end = strchr(candidate, '\n');
+    size = end == NULL ? strlen(candidate) : (size_t)(end - candidate);
+    for (index = 0; index < length && index < size; index++)
+      if ((unsigned char)candidate[index] != line[index]) break;
+    if (index == length)
+    {
+      if (match == NULL) { match = candidate; common = size; }
+      else
+      {
+        if (size < common) common = size;
+        for (index = length; index < common; index++)
+          if (candidate[index] != match[index]) { common = index; break; }
+      }
+    }
+    if (end == NULL) break;
+    candidate = end + 1;
+  }
+  if (common <= length || common >= capacity || common >= 255U) return length;
+  count = (DWORD)common - length;
+  for (index = 0; index < count; index++) suffix[index] = (unsigned char)match[length + index];
+  if (!WriteConsoleW(output, suffix, count, &written, NULL) || written != count) return length;
+  memcpy(line + length, suffix, count * sizeof(WCHAR));
+  return (DWORD)common;
+}
+
 /* Reads one cooked Windows console line in a worker thread.
  * @param opaque LPVOID Shared heap reader retaining this worker's independent reference.
  * @return DWORD Zero for executable-linked code; a DLL worker exits atomically after publishing its character count and OS error.
- * @effect Blocks in bounded-size console reads until a line, EOF, read error or buffer limit.
+ * @effect Blocks in bounded-size console reads until a line, EOF, read error or buffer limit; optional Tab wakeups append registry completions to the console and retained draft.
  * @ownership Releases the worker record reference, then its saved module reference; never accesses Lua terminal/state or closes borrowed input.
  */
 static DWORD WINAPI windows_cooked_reader(LPVOID opaque)
@@ -11806,16 +11857,53 @@ static DWORD WINAPI windows_cooked_reader(LPVOID opaque)
   DWORD requested;
   DWORD received;
   HMODULE module;
+  int completion;
 
   read = (yaca_terminal_read *)opaque;
   module = read->module;
   offset = 0;
+  completion = read->completion_words[0] != '\0' && (GetVersion() & 0xffU) >= 6U;
   read->error_value = ERROR_SUCCESS;
   /* Legacy console servers reject large individual buffers even when the
   ** process allocation succeeded. Keep each OS read small; retain the full
   ** bounded application buffer and join fragments before UTF-8 conversion. */
   while (offset < read->capacity)
   {
+    if (completion && offset < 4094U && offset + 2U < read->capacity)
+    {
+      CONSOLE_READCONSOLE_CONTROL control;
+      DWORD index;
+      memset(&control, 0, sizeof(control));
+      control.nLength = sizeof(control);
+      control.nInitialChars = offset;
+      control.dwCtrlWakeupMask = 1UL << 9;
+      requested = read->capacity > 4096U ? 4096U : read->capacity;
+      received = 0;
+      if (!ReadConsoleW(read->input, read->wide, requested, &received, &control))
+      {
+        DWORD error_value = GetLastError();
+        if (error_value == ERROR_INVALID_PARAMETER || error_value == ERROR_NOT_SUPPORTED)
+        { completion = 0; continue; }
+        read->error_value = error_value;
+        break;
+      }
+      if (received > requested) { read->error_value = ERROR_INVALID_DATA; break; }
+      offset = received;
+      for (index = 0; index < offset; index++)
+        if (read->wide[index] == L'\t') break;
+      if (index < offset)
+      {
+        memmove(read->wide + index, read->wide + index + 1U,
+          (offset - index - 1U) * sizeof(WCHAR));
+        offset--;
+        if (index == offset)
+          offset = complete_windows_command(read->completion_words, read->wide, offset, requested);
+        continue;
+      }
+      if (received < requested || (offset > 0 && read->wide[offset - 1U] == L'\n')) break;
+      completion = 0;
+      continue;
+    }
     requested = read->capacity - offset;
     if (requested > 4096U)
     {
@@ -11891,6 +11979,7 @@ static int start_windows_cooked_read(yaca_terminal *terminal)
   read->input = terminal->input;
   read->capacity = (DWORD)capacity;
   read->references = 2;
+  memcpy(read->completion_words, terminal->completion_words, sizeof(read->completion_words));
   if (!retain_windows_thread_module(windows_cooked_reader, &read->module))
   {
     error_value = GetLastError();
@@ -12087,24 +12176,25 @@ static int push_windows_cooked_line(lua_State *L, yaca_terminal *terminal)
 
 #endif
 
-/* Retain both admitted terminal request values before a later getter can collect temporary mode bytes.
+/* Retain admitted terminal request values before a later getter can collect temporary mode bytes.
  * @param L lua_State* Argument 1 is the caller request; any other argument indices remain unchanged.
- * @return void No value; replaces argument 1 with a private plain mode/maximum_input_bytes table.
+ * @return void No value; replaces argument 1 with a private mode, input limit and optional completion catalog table.
  * @error Caller getters and Lua allocation may raise before terminal settings or OS resources change.
- * @effect Reads the two known fields once and retains their returned values without modifying the caller table.
+ * @effect Reads known fields once and retains their returned values without modifying the caller table.
  */
 static void capture_terminal_request(lua_State *L)
 {
   int request;
-  lua_createtable(L, 0, 2);
+  lua_createtable(L, 0, 3);
   request = lua_gettop(L);
   capture_process_field(L, 1, request, "mode");
   capture_process_field(L, 1, request, "maximum_input_bytes");
+  capture_process_field(L, 1, request, "completion_words");
   lua_replace(L, 1);
 }
 
 /* Start bounded terminal input using a retained mode and a Lua owner allocated before settings change.
- * @param L lua_State* Argument 1 is the request with auto/raw/cooked mode and positive integer maximum_input_bytes.
+ * @param L lua_State* Argument 1 contains auto/raw/cooked mode, positive maximum_input_bytes and optional bounded ASCII completion_words.
  * @return int Two Lua results: true and a terminal userdata, or false and a typed mode/limit/OS failure.
  * @error Wrong argument types, caller getters and Lua allocation may raise; the terminal owner finalizes acquired mode/reader state.
  * @effect Captures and changes stdin flags or console/PTY settings and, for Windows cooked consoles, starts an owned reader.
@@ -12144,6 +12234,23 @@ static int l_terminal_start(lua_State *L)
   }
   terminal = push_terminal(L);
   terminal->maximum_input_bytes = (size_t)maximum_input_bytes;
+  lua_getfield(L, 1, "completion_words");
+  if (!lua_isnil(L, -1))
+  {
+    size_t length, index;
+    const char *words;
+    if (lua_type(L, -1) != LUA_TSTRING)
+    { lua_pop(L, 2); return push_failure(L, "InvalidTerminalCompletion", "completion catalog must be text"); }
+    words = lua_tolstring(L, -1, &length);
+    if (length >= sizeof(terminal->completion_words))
+    { lua_pop(L, 2); return push_failure(L, "InvalidTerminalCompletion", "completion catalog is invalid"); }
+    for (index = 0; index < length; index++)
+      if (words[index] != '\n' && (words[index] < 32 || words[index] > 126))
+      { lua_pop(L, 2); return push_failure(L, "InvalidTerminalCompletion", "completion catalog must be ASCII"); }
+    memcpy(terminal->completion_words, words, length);
+    terminal->completion_words[length] = '\0';
+  }
+  lua_pop(L, 1);
 #if defined(_WIN32)
   {
     DWORD current_mode;

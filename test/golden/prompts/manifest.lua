@@ -1,54 +1,54 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-10-23
 File: manifest.lua
 Description: Indexes expected versioned purpose prompts and their exact rendered artifacts.
 ]]
 
 return {
     schema_version = "yaca-prompt-golden-v0.1.0",
-    prompt_version = "yaca-prompt-v0.1.0-readiness.5",
+    prompt_version = "yaca-prompt-v0.1.0-readiness.6",
     fixture_generation = "generation-7",
     cases = {
         {
             purpose = "main",
-            digest = "8b3749a9ad7244503338bf78d2352ffa23cfabe90da6fc467b2d7cb437ffe6aa",
-            total_bytes = 2184,
+            digest = "fe07b1e7a036a6bd34769d2ac3e81d4b5488f20f9aed55174387d1b24500f9e3",
+            total_bytes = 2542,
             kinds = { "runtime-purpose", "global", "model", "permission", "context", "user-message" },
         },
         {
             purpose = "ask",
-            digest = "2fb42eda32434ca2776ead2a868462d17726d25f84840b14b291b44c89a79247",
+            digest = "ff1dd6b891ca404bf6efc5fee4145800fe10596ce2721d4ce2e1cf13faf227db",
             total_bytes = 1900,
             kinds = { "runtime-purpose", "global", "model", "permission", "context", "user-message" },
         },
         {
             purpose = "action-review",
-            digest = "e9cb959de21038f9acb4c244b911d756dc6cc6d544a6461ac2ca4d522f5778da",
+            digest = "5e6478cdcee510b5479e1fe5b4207a71dc084685c64a5c7e882a8d88676ba32c",
             total_bytes = 2342,
             kinds = { "runtime-purpose", "global", "model", "permission-quoted", "context-quoted", "proposed-action-quoted", "evidence-quoted" },
         },
         {
             purpose = "termination-review",
-            digest = "84be47a98206faee20c9fe8d50027fba32dbfd8652435e5bfc0b31c5a73c06ae",
+            digest = "96ae14b9e2457a542fa407cff40ccdf80c4d2751acd8f94d5b8ca2a992ac2817",
             total_bytes = 2389,
             kinds = { "runtime-purpose", "global", "model", "double-check-goal-quoted", "context-quoted", "candidate-report-quoted", "evidence-quoted" },
         },
         {
             purpose = "compaction",
-            digest = "a4d48efaab6e06b36e859ffd56bfcc80f9a4bf8bb1f4f77d2b2d90a6f6a2fc39",
+            digest = "4ea7a254ed322b6b10ddfd23f3be5a3bfd5bbf9cf55221dab3939ee789ede449",
             total_bytes = 1584,
             kinds = { "runtime-purpose", "global", "model", "model-view-input" },
         },
         {
             purpose = "self-test",
-            digest = "686dbc0604baff663ae864032c6e9aadbe5a5b87c8b3f85e0ba0024c5eaf6064",
+            digest = "a0e6ddac6ebc5ab3540bab4871ea3922705fbe057071442a6af2ba67fdca1446",
             total_bytes = 1796,
             kinds = { "runtime-purpose", "global", "model", "synthetic-observation" },
         },
         {
             purpose = "context-name",
-            digest = "23879ec103df7faccafb3d8467bac5de74d5ef75661746f2d6a7398c92d9998f",
+            digest = "b92d94ee1fe2224819faf0fa7fd8cf4cd7cf49e69656855555155f403da4ba85",
             total_bytes = 1531,
             kinds = { "runtime-purpose", "global", "model", "committed-facts" },
         },
