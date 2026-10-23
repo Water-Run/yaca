@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Author: WaterRun
-# Date: 2026-10-09
+# Date: 2026-10-23
 # File: windows_package_win64.py
 # Description: Audit and assemble a win64 Windows preview without asserting target qualification.
 
@@ -62,6 +62,9 @@ def main():
             {"iphlpapi.dll"}
             if path == output / "onedir/.luai/components/curl.exe" else set()
         )
+        if path == output / "onedir/.luai/native/yaca_native.dll":
+            # Native text paste uses User32; other payloads retain their original import boundary.
+            artifact_dlls |= {"user32.dll"}
         assert {name.lower() for name in imports} <= artifact_dlls, (path, imports)
         # Inspect import tables only: export names and debug strings are not imports.
         import_report = report.split("The Export Tables")[0]

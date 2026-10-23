@@ -31,29 +31,44 @@ end
 --@return table Fixture containing port, display, writes, native inputs and lifecycle observations.
 --@error Raises on construction or initial native admission failure.
 local function fixture(kind)
-    local f = { inputs = {}, writes = {}, now = 0, restored = false, closed = false, columns = 40 }
+    local f = { inputs = {}, writes = {}, frames = {}, now = 0, restored = false, closed = false, columns = 40 }
     local native = {}
     -- Observe the current fixture width without changing input state.
     --@param none Uses the fixture's display profile and mutable width.
     --@return table Native-style display facts.
     function native.terminal_display_info() return { kind = kind or "ansi", columns = f.columns } end
+    -- Record native console frames without interpreting them as ANSI output.
+    --@param frame table Captured append/prefix/suffix text and erase flag.
+    --@return boolean True after acceptance, false for injected output failure.
+    --@return boolean|table Native acknowledgment or a typed sink error.
+    --@effect Retains a frame only on successful output.
+    function native.console_redraw(frame)
+        if f.fail_output then return false, { code = "BrokenStdout", message = "fixture output failed" } end
+        f.frames[#f.frames + 1] = frame
+        return true, true
+    end
     -- Retain the actual native request for automatic mode-selection assertions.
     --@param request table Mode, byte cap and editor flags from the production adapter.
     --@return boolean True for a successful fixture start.
     --@return table Stable fake handle.
     function native.terminal_start(request) f.request = request; return true, f end
-    -- Deliver one queued text chunk or the settled cancellation outcome.
+    -- Deliver queued native observations within the requested budget or a cancellation outcome.
     --@param handle table Stable fake handle.
     --@param now integer Monotonic test tick.
     --@param budget integer Native observation budget, always positive here.
     --@return boolean True after reading the fixture queue.
-    --@return table Zero or one observation.
-    --@effect Removes at most one queued input chunk.
+    --@return table At most budget ordered observations.
+    --@effect Removes only the queued input chunks returned in this batch.
     function native.terminal_poll(handle, now, budget)
         A.equal(handle, f)
         if f.cancelled then return true, { { kind = "terminal", outcome = "cancelled" } } end
-        local bytes = table.remove(f.inputs, 1)
-        return true, bytes and { { kind = "action", intent = "text", text = bytes } } or {}
+        local events = {}
+        while #events < budget and #f.inputs > 0 do
+            local bytes = table.remove(f.inputs, 1)
+            events[#events + 1] = type(bytes) == "table" and bytes
+                or { kind = "action", intent = "text", text = bytes }
+        end
+        return true, events
     end
     -- Mark this fixture's input owner cancelled.
     --@param handle table Stable fake handle.
@@ -146,6 +161,51 @@ end
 return {
     name = "integration/chat-input",
     cases = {
+        {
+            name = "batched native text Enter and paste preserve ordering under a one-event budget",
+            -- Native key batching must not submit an empty draft or merge the next line into the first.
+            --@param none Queues two submissions with text, paste and native Enter boundaries in one native batch.
+            --@return nil Assertions require exact ordered text/submission pairs with no extra event.
+            run = function()
+                local f = fixture("console")
+                f.inputs = { "a", "b", { kind = "action", intent = "submit-or-queue" },
+                    "c", { kind = "action", intent = "paste", text = "d\ne" },
+                    { kind = "action", intent = "submit-or-queue" } }
+                local events = feed(f, "", 1)
+                A.equal(#events, 4)
+                A.equal(events[1].text, "ab")
+                A.equal(events[2].action, "submit-or-queue")
+                A.equal(events[3].text, "cd\ne")
+                A.equal(events[4].action, "submit-or-queue")
+                close(f)
+            end,
+        },
+        {
+            name = "native console input uses shared drafts and semantic Enter without ANSI output",
+            -- A Windows native Enter event must submit the owned draft rather than an empty coordinator line.
+            --@param none Types, pastes, renders asynchronous output and submits through a console profile.
+            --@return nil Assertions require exact literal paste, preserved draft and native-only frames.
+            run = function()
+                local f = fixture("console")
+                A.equal(#feed(f, ".sta\t"), 0)
+                A.equal(f.frames[#f.frames].prefix, ">> .status")
+                f.display:output("answer\n")
+                A.equal(f.frames[#f.frames].append, "answer\n")
+                A.equal(f.frames[#f.frames].prefix, ">> .status")
+                f.inputs[#f.inputs + 1] = { kind = "action", intent = "submit-or-queue" }
+                local events = f.port:poll(20, 2)
+                A.equal(events[1].text, ".status")
+                A.equal(events[2].action, "submit-or-queue")
+                f.inputs[#f.inputs + 1] = { kind = "action", intent = "paste", text = ".ask one\n\27[201~two" }
+                A.equal(#f.port:poll(21, 2), 0)
+                f.inputs[#f.inputs + 1] = { kind = "action", intent = "submit-or-queue" }
+                events = f.port:poll(22, 2)
+                A.equal(events[1].text, ".ask one\n\27[201~two")
+                A.equal(#f.writes, 0)
+                close(f)
+                A.equal(#f.writes, 0)
+            end,
+        },
         {
             name = "automatic raw editing completes commands and recalls history without duplicate submissions",
             -- Exercise editing through native byte observations with a one-event dispatch budget.

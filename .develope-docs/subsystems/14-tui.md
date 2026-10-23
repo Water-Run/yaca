@@ -4,11 +4,12 @@
 
 状态：**计划已确认（C13/C14）**；[`contracts/tui.lua`](../contracts/tui.lua)、fd/machine contract 与 40-column transcripts 已冻结 renderer/draft/fallback；真实 XP/TTY/dumb/SSH transcript 仍是 M4 hard gate
 
-当前生产路径：Windows 原生控制台保留 cooked 编辑与 Vista+ 命令补全；Linux 对已知
-ANSI 终端和真实 TTY 自动启用自有草稿编辑。Tab 使用命令 registry 的公共前缀和候选，
+当前生产路径：Windows 原生控制台使用宽字符 API 管理与重绘草稿；Linux 对已知
+ANSI 终端和真实 TTY 自动启用同一草稿编辑。Tab 使用命令 registry 的公共前缀和候选，
 方向键编辑/浏览有界内存历史，模型输出前移走当前输入行，输出后恢复草稿与光标。
 Bracketed paste 保留为一个草稿，Enter 才提交；确认输入仍限单行。控制字符只在显示时转义，
-正文不改写。未知终端与 dumb 保留普通输入。详见 10 月 23 日 Review 的实际证据范围。
+正文不改写。Windows Ctrl-V/Shift-Insert 只读取 Unicode 文本，不读图片；其解析和锁
+释放用隔离夹具验证。未知终端与 dumb 保留普通输入。详见 10 月 23 日 Review 的实际证据范围。
 
 ## 职责
 

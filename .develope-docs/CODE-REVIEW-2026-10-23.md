@@ -115,3 +115,66 @@ pyte/wcwidth 仅为固定版本的开发测试依赖，不引入产品运行依�
 以上范围为本机 WSL 与 Windows；尚不证明 C7 实机/全部 SSH 终端/IME/动态缩放。
 Linux 默认补全和忙时草稿已不再是空缺；Windows 忙时草稿、XP/Cygwin 输入增强与
 后续 AgentLoop/目标资格继续留在 TRACKING。按 D-096，到今天 19:30 后的下一节点收尾暂停。
+
+## 接续：Windows 原生草稿与输入恢复
+
+Linux 输入节点提交为 `5c8a412` 后，真实 Windows 控制台复现了忙时草稿丢失：
+模型回复到来前是 `>> .sta`、光标列 6，回复之后只剩 `>>`、光标列 3。
+原始失败与屏幕保存在 `out/review-20261023/windows-input/before.log` 和 `before-evidence/`。
+
+Windows 现在自动使用共享草稿编辑器与原生宽字符重绘。`console_redraw` 在输出前
+完整捕获和校验帧，只清当前输入行，追加消息后恢复实际观察到的光标位置，不使用 ANSI。
+原生按键将方向键、Home/End/Delete、Enter modifiers 投影到共享编辑器；原始按键批量
+读取保持 text/Enter/paste 顺序，并受每 poll 编辑预算约束。
+
+Ctrl-V/Shift-Insert 只请求 Unicode 文本：在打开剪贴板之前准备 Lua-owned 缓冲区，
+严格转换 UTF-16、拒绝超限或不完整内容，解锁并关闭后才发布 Lua 事件。它不返回截断
+前缀，也不把粘贴内的控制序列解释为按键。User32 导入只放行给 yaca_native.dll，
+所用接口在 [Microsoft 文档](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getclipboarddata)
+中支持到 Windows 2000。实际系统剪贴板没有被测试驱动读取或覆盖；格式、失败和所有权
+由隔离夹具检验，真实延迟渲染与 IME 仍保留目标检查。
+
+### 同时发现并修复
+
+- 原控制台驱动启动后才记录模式，会把已进入的 raw 模式误当作恢复基线。改为独立隐藏
+  host 在启动 yaca 之前记录模式，结束后再记录并核对；恢复证据不再依赖附着时机。
+- 立即完成的工具结果分配了另一个显示 ID，Finalizing 清空 turn_id 后还会重复显示。
+  现按 adapter/canonical ID 关联，并以已提交结果身份比较前后 trace；实际旅程要求每个
+  结果只显示一次，沿用提议时的 tool-1/tool-2。
+- 主动 Ctrl-C 的 canonical transport cancellation 被显示为 AskModelResponseError。
+  现保留 cancelled 结果与已输出文本，不把已证实取消画成错误；协议错误和取消结果未知
+  仍显示错误。实际延迟 Ask 取消与两类模型 lane 的反例均覆盖。
+- 上一节点新增了 TUI 契约说明字段，却漏同步 `tui.registry()`。本轮完整测试以
+  748/749 明确失败，已补齐运行时投影后重跑；失败日志 `full-suite-failed-registry.log`
+  保留，没有将先前局部校验替代本轮全量结果。
+
+### 验证与限定
+
+最终证据均在 `out/review-20261023/windows-input/`：
+
+| 检查 | 实际结果 |
+| --- | --- |
+| `full-suite.log`、`full-suite-win64.log`、`full-suite-win32.log` | WSL Lua、Win64 单文件、Win32 单文件各 750/750；Windows 两架构均在当前 Windows 宿主运行 |
+| `win64-openai-final-evidence/`、`win64-anthropic-final-evidence/`、`win32-openai-final-evidence/` | 隐藏原生控制台；默认补全、历史、中文中间插入、Shift-Enter、忙时草稿/光标、工具纠错与结果 ID、Ctrl-C 取消、Context 重开和原始模式恢复通过 |
+| `pty80-final/`、`pty40-final/`、`dumb-final/` | Linux 实际 PTY 与独立屏幕检查重跑通过，包含未提交草稿、粘贴、请求取消和 termios 恢复 |
+| `native-tests/windows_editor_test.log` | 严格剪贴板文本、锁释放、快捷键、非法帧拒绝和 9 个 Lua 分配失败点通过；没有读取真实剪贴板 |
+| 其他 `native-tests/` | cooked reader、worker 生命周期、输入故障及 54 个键盘分配故障场景通过；native leak/ownership error 为零 |
+| `comments-final.log` | 276 文件 / 5891 声明 / 0 缺项；本批新增/改变契约已人工核对，整体语义 Review 仍 partial |
+| `readiness.log` | 完整 coding readiness 退出零；包括设计/证据/公开文档检查与 TP-003/006/008/010、RP-001 |
+
+最终本机候选及实际 PE 审计：`pe-audit.json` 核对 12 个 artifact 的导入与 subsystem，
+User32 只出现在原生适配器中。核心 SHA-256：
+
+| 核心 | SHA-256 |
+| --- | --- |
+| Win32 | `0964ce4bbdcdc2f4cec874055277fa05260d77046b465318806884e53bbaf1df` |
+| Win64 | `7d2f086421b2047dfeaa793457d5d58f356d2626385987d842e14d395c027713` |
+| Linux 本机回归 | `4e3755a20c74ef2314391835659bf5ffdce5b3a2b0999004279231134edbdfa2` |
+
+Windows API 对照采用 [SetConsoleCursorPosition](https://learn.microsoft.com/en-us/windows/console/setconsolecursorposition)
+与 [ReadConsoleInput](https://learn.microsoft.com/en-us/windows/console/readconsoleinput) 的原生边界。
+Win32 按 XP 宏构建并检查实际 PE/导入，不能当作 XP 实机通过。既有 Server 2008 与另一
+指定 Windows 远端的只读连接本次均超时，没有部署或改动远端；新核心的该目标证据保留待补。
+
+本批只更新本地源码与回归候选，未改写远端发布。Cygwin、动态缩放、真实字体/IME、
+剪贴板延迟渲染、长会话及正式三目标九包仍需继续，正式 Gate R 保持关闭。

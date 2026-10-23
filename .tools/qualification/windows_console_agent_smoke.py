@@ -23,6 +23,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import xml.etree.ElementTree as ET
@@ -117,6 +118,39 @@ class INPUT(C.Structure):
     _fields_ = [('type', W.WORD), ('event', EVENT)]
 
 
+# Launch the candidate from an already initialized hidden console and record actual pre/post modes.
+#@param receipt str Path for this host's final JSON receipt; a separate .started file identifies the child.
+#@param command list[str] Exact candidate executable and arguments, passed without a shell.
+#@return int Candidate process exit code after its actual modes are recorded.
+#@effect Starts and joins one child in the inherited private test console, reads modes and writes bounded JSON evidence.
+#@error Raises on invalid console handles or process/file failures; terminates its own live child on Python exceptions.
+def console_host(receipt, command):
+    kernel = C.windll.kernel32
+    kernel.GetStdHandle.restype = W.HANDLE
+    kernel.GetConsoleMode.argtypes = [W.HANDLE, C.POINTER(W.DWORD)]
+    input_handle, output_handle = kernel.GetStdHandle(-10), kernel.GetStdHandle(-11)
+    before_input, before_output = W.DWORD(), W.DWORD()
+    assert kernel.GetConsoleMode(input_handle, C.byref(before_input))
+    assert kernel.GetConsoleMode(output_handle, C.byref(before_output))
+    child = subprocess.Popen(command)
+    try:
+        with open(receipt + '.starting', 'w') as stream:
+            json.dump(dict(pid=child.pid, before=[before_input.value, before_output.value]), stream)
+        os.rename(receipt + '.starting', receipt + '.started')
+        result = child.wait()
+        after_input, after_output = W.DWORD(), W.DWORD()
+        assert kernel.GetConsoleMode(input_handle, C.byref(after_input))
+        assert kernel.GetConsoleMode(output_handle, C.byref(after_output))
+        with open(receipt, 'w') as stream:
+            json.dump(dict(exit_code=result, before=[before_input.value, before_output.value],
+                after=[after_input.value, after_output.value]), stream)
+        return result
+    finally:
+        if child.poll() is None:
+            child.terminate()
+            child.wait()
+
+
 # Run offline setup or an explicitly authorized online Agent journey in independent native consoles.
 #@param none No arguments.
 #@return None No value after the selected setup or real-model journey and both child mode checks pass.
@@ -130,9 +164,11 @@ def main():
     parser.add_argument('--online', action='store_true', help='use the existing authorized real model configuration')
     parser.add_argument('--protocol', choices=('openai-chat', 'anthropic-messages'), default='openai-chat',
         help='protocol exercised by the offline loopback fixture')
+    parser.add_argument('--busy-input', action='store_true', help='verify an unsubmitted draft during a delayed offline Ask')
     parser.add_argument('--upgrade-core', help='replace the closed first-session core before reopening the same Context')
     args = parser.parse_args()
     assert not args.upgrade_core or args.online, 'upgrade verification requires an online persisted Context'
+    assert not args.busy_input or not args.online, 'busy input probe requires the loopback fixture'
     root = os.path.abspath(args.directory)
     if not isinstance(root, text_type): root = root.decode('mbcs')
     evidence = os.path.abspath(args.evidence)
@@ -161,7 +197,10 @@ def main():
     kernel.GetExitCodeProcess.argtypes = [W.HANDLE, C.POINTER(W.DWORD)]
     kernel.ResumeThread.argtypes = [W.HANDLE]
     kernel.TerminateProcess.argtypes = [W.HANDLE, W.UINT]
+    kernel.OpenProcess.argtypes = [W.DWORD, W.BOOL, W.DWORD]
+    kernel.OpenProcess.restype = W.HANDLE
     requests = []
+    request_arrived, release_response = threading.Event(), threading.Event()
 
     #@class Provider One local synthetic request handler; main owns its HTTP server and mutable request ledger.
     #@field headers HTTPMessage Inherited request headers inspected to reject credentials.
@@ -184,6 +223,9 @@ def main():
             request = json.loads(self.rfile.read(length).decode('utf-8'))
             assert not self.headers.get('Authorization'), 'no test credentials are permitted'
             requests.append(request)
+            if args.busy_input and len(requests) in (1, 6):
+                request_arrived.set()
+                assert release_response.wait(20), 'busy input probe did not release its response'
             with open(os.path.join(evidence, 'request-%d.json' % len(requests)), 'wb') as stream:
                 stream.write(json.dumps(request, ensure_ascii=False).encode('utf-8'))
             message = dict(role='assistant', content='42')
@@ -261,11 +303,15 @@ def main():
                     message=message, finish_reason=finish)]))
                 content_type = 'application/json'
             body = body.encode('utf-8')
-            self.send_response(200)
-            self.send_header('Content-Type', content_type)
-            self.send_header('Content-Length', str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.send_response(200)
+                self.send_header('Content-Type', content_type)
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            except (IOError, OSError):
+                if not args.busy_input or len(requests) != 6:
+                    raise
 
     server, thread = None, None
     if not args.online:
@@ -274,12 +320,14 @@ def main():
         thread.daemon = True
         thread.start()
 
-    #@class Console Owns exactly one actual yaca child, its console input/output handles and captured mode baseline.
+    #@class Console Owns one hidden host and its yaca child, console handles and an independently captured mode baseline.
     #@field name str Safe probe label for the evidence filenames.
     #@field input HANDLE Owned CONIN$ reference released by close.
     #@field output HANDLE Owned original CONOUT$ reference used for mode checks.
-    #@field process PROCESS Owned child process/thread references and identifiers.
-    #@field before tuple[int,int] Console modes observed immediately after startup/attachment.
+    #@field process PROCESS Owned host process/thread references and identifiers.
+    #@field before tuple[int,int] Console modes captured by the host before starting yaca.
+    #@field receipt str Host-owned JSON path recording modes before the candidate starts and after it exits.
+    #@field app_handle HANDLE Optional terminate/synchronize reference to the candidate outer process, owned by this probe.
     class Console:
         # Start the actual child in a new hidden console, then attach only this probe to its handles.
         #@param self Console New owner with no previously acquired child.
@@ -291,12 +339,15 @@ def main():
         #@ownership Owns returned process/thread and CONIN$/CONOUT$ handles; any post-creation failure closes acquired resources.
         def __init__(self, arguments, name):
             self.name, self.input, self.output = name, None, None
+            self.app_handle = None
+            self.receipt = os.path.join(evidence, name + '-modes.json')
             self.process = PROCESS()
             startup = STARTUP(); startup.cb = C.sizeof(startup)
             startup.flags = 9; startup.show = 0
             startup.columns = 240; startup.rows = 4000
             command = C.create_unicode_buffer(subprocess.list2cmdline(
-                [os.path.join(root, 'yaca.exe')] + arguments))
+                [sys.executable, os.path.abspath(__file__), '--console-host', self.receipt,
+                    os.path.join(root, 'yaca.exe')] + arguments))
             assert kernel.CreateProcessW(None, command, None, None, False, 0x14,
                 None, os.path.join(root, 'workspace'), C.byref(startup), C.byref(self.process)), C.GetLastError()
             try:
@@ -312,7 +363,15 @@ def main():
                 dimensions = SCREEN()
                 assert kernel.GetConsoleScreenBufferInfo(self.output, C.byref(dimensions))
                 assert dimensions.size.x >= 240, 'console cannot retain an unwrapped approval card'
-                self.before = self.modes()
+                deadline = time.time() + 5
+                while not os.path.isfile(self.receipt + '.started'):
+                    assert time.time() < deadline, 'console host did not start the candidate'
+                    time.sleep(.05)
+                with open(self.receipt + '.started') as stream:
+                    started = json.load(stream)
+                self.before = tuple(started['before'])
+                self.app_handle = kernel.OpenProcess(0x00100001, False, started['pid'])
+                assert self.app_handle, 'candidate process is unavailable'
             except Exception:
                 self.close()
                 raise
@@ -375,14 +434,14 @@ def main():
                 time.sleep(.05)
             raise AssertionError('console timed out before ' + value)
 
-        # Sends one terminal input line to the running Agent.
-        #@param self Console Owner of the input queue receiving the test line.
-        #@param text str|unicode BMP text submitted with one final Enter; no command is interpreted by this helper.
-        #@return None No value after every key-down record is acknowledged.
-        #@error Raises if a character cannot fit WCHAR or an input record is not accepted.
-        #@effect Injects only this child's native console queue through WriteConsoleInputW.
-        def send(self, text):
-            for character in text + '\r':
+        # Type exact editable text into the owned console without submitting it.
+        #@param self Console Owner of the input queue receiving the test text.
+        #@param text str|unicode BMP text or editing control characters.
+        #@return None After every input record is accepted.
+        #@error Raises on an invalid WCHAR or rejected console event.
+        #@effect Injects only this child's native input queue; does not append Enter.
+        def type_text(self, text):
+            for character in text:
                 event, written = INPUT(), W.DWORD()
                 event.type = 1
                 event.event.key.down = True
@@ -391,18 +450,55 @@ def main():
                 event.event.key.character.unicode = character
                 assert kernel.WriteConsoleInputW(self.input, C.byref(event), 1, C.byref(written)) and written.value == 1
 
+        # Sends one terminal input line to the running Agent.
+        #@param self Console Owner of the input queue receiving the test line.
+        #@param text str|unicode BMP text submitted with one final Enter; no command is interpreted by this helper.
+        #@return None No value after every key-down record is acknowledged.
+        #@error Raises if a character cannot fit WCHAR or an input record is not accepted.
+        #@effect Injects only this child's native console queue through WriteConsoleInputW.
+        def send(self, text):
+            self.type_text(text + '\r')
+
+        # Require the actual active input row and cursor to match the retained draft.
+        #@param self Console Owner attached to the active child screen.
+        #@param label str Evidence basename for this verified screen phase.
+        #@param line str|unicode Expected row text after removing console padding.
+        #@param column int Expected zero-based cursor column.
+        #@return None After the row/cursor are observed within five seconds.
+        #@effect Reads only this console and writes the observed screen to the evidence directory.
+        #@error Raises on native read failure or mismatched final row/cursor.
+        def assert_input(self, label, line, column):
+            deadline = time.time() + 5
+            while True:
+                state, count = SCREEN(), W.DWORD()
+                assert kernel.GetConsoleScreenBufferInfo(self.output, C.byref(state))
+                row = C.create_unicode_buffer(state.size.x + 1)
+                assert kernel.ReadConsoleOutputCharacterW(self.output, row, state.size.x,
+                    COORD(0, state.cursor.y), C.byref(count))
+                actual = row[:count.value].rstrip()
+                if actual == line and state.cursor.x == column:
+                    break
+                if time.time() >= deadline:
+                    self.screen()
+                    raise AssertionError('input row/cursor mismatch: %r at %s, wanted %r at %s' % (
+                        actual, state.cursor.x, line, column))
+                time.sleep(.05)
+            save_phase(label, self.screen())
+
         # Send one non-text editing key to the owned console without submitting a line.
         #@param self Console Owner of the test child's input queue.
         #@param key int Win32 virtual key code, such as VK_UP for native command history.
+        #@param control int Optional native modifier mask; zero by default.
         #@return None No value after Windows accepts exactly one key record.
         #@effect Writes one key-down event to this child's console only.
         #@error Raises if the console rejects the key record.
-        def send_key(self, key):
+        def send_key(self, key, control=0):
             event, written = INPUT(), W.DWORD()
             event.type = 1
             event.event.key.down = True
             event.event.key.repeat = 1
             event.event.key.key = key
+            event.event.key.control = control
             assert kernel.WriteConsoleInputW(self.input, C.byref(event), 1, C.byref(written)) and written.value == 1
 
         # Request normal application close, then verify exit and restoration to the observed baseline.
@@ -415,7 +511,10 @@ def main():
             assert kernel.WaitForSingleObject(self.process.process, 10000) == 0
             result = W.DWORD()
             assert kernel.GetExitCodeProcess(self.process.process, C.byref(result)) and result.value == 0
-            assert self.modes() == self.before, 'console modes were not restored'
+            with open(self.receipt) as stream:
+                receipt = json.load(stream)
+            assert receipt['exit_code'] == 0 and tuple(receipt['after']) == self.before, 'console modes were not restored'
+            assert self.modes() == self.before, 'console mode changed after the candidate exited'
             self.screen()
 
         # Release this probe's child and handles after success or failed assertions.
@@ -424,6 +523,12 @@ def main():
         #@effect Terminates only a still-running owned child with status 124 and waits up to five seconds.
         #@ownership Consumes this owner's handle references; repeated close is not supported.
         def close(self):
+            if self.app_handle:
+                if kernel.WaitForSingleObject(self.app_handle, 0) == 258:
+                    kernel.TerminateProcess(self.app_handle, 124)
+                    kernel.WaitForSingleObject(self.app_handle, 5000)
+                kernel.CloseHandle(self.app_handle)
+                self.app_handle = None
             if self.process.process:
                 if kernel.WaitForSingleObject(self.process.process, 0) == 258:
                     kernel.TerminateProcess(self.process.process, 124)
@@ -591,9 +696,32 @@ def main():
         child.send_key(38); child.send('')
         screen = child.expect('state: draft-ready', occurrence=2)
         assert screen.count('\n>> .status\n') == 2, 'Up did not recall the completed command'
-        child.send('.multiline'); child.expect('Multiline input:')
-        child.send(u'\u4e2d\u6587 42'); child.send('Reply exactly 42.'); child.send('.ask')
+        if args.busy_input:
+            child.type_text(u'.ask \u4e2d\u6587 42')
+            child.send_key(13, 0x0010)
+            child.send('Reply exactly 42.')
+        else:
+            child.send('.multiline'); child.expect('Multiline input:')
+            child.send(u'\u4e2d\u6587 42'); child.send('Reply exactly 42.'); child.send('.ask')
+        if args.busy_input:
+            assert request_arrived.wait(10), 'Ask was not dispatched'
+            child.type_text(u'a\u4e2db')
+            child.send_key(37)
+            child.type_text('X')
+            child.assert_input('unicode-middle', u'>> a\u4e2dXb', 7)
+            child.type_text('\x03')
+            child.assert_input('draft-cleared', '>>', 3)
+            child.type_text('.sta')
+            child.send_key(37)
+            child.assert_input('busy-before', '>> .sta', 6)
+            release_response.set()
         screen = child.expect('Ask ask-1 outcome: completed')
+        if args.busy_input:
+            child.assert_input('busy-after', '>> .sta', 6)
+            child.send_key(35)
+            child.type_text('\t')
+            child.send('')
+            child.expect('state: Idle')
         assert '[TOOL ' not in screen and len(requests) == 1
         assert u'\u4e2d\u6587 42' in json.dumps(requests[0], ensure_ascii=False)
         match = re.search(r'Context saved:.*\[([A-F0-9]{16})\]', screen)
@@ -604,24 +732,38 @@ def main():
         child.send('Read fixture.txt and report its contents.')
         screen = child.expect('Turn outcome: completed')
         assert 'Verified fixture.txt contains LOOP_OK_42.' in screen
-        assert 'result: error (NotFound)' in screen and 'result: ok' in screen
+        assert screen.count('result: error (NotFound)') == 1 and screen.count('result: ok') == 1
+        assert '[TOOL tool-1]\nresult: error (NotFound)' in screen
+        assert '[TOOL tool-2]\nresult: ok' in screen
         assert 'Model yielded without finish' not in screen
         assert len(requests) == 5, 'main must run missing read, corrected read, final answer and review'
         save_phase('verified-agent-loop', screen)
+        if args.busy_input:
+            request_arrived.clear(); release_response.clear()
+            child.send('.ask cancel this delayed response')
+            assert request_arrived.wait(10), 'cancellable Ask was not dispatched'
+            child.type_text('\x03')
+            cancelled_screen = child.expect('cancelled')
+            assert 'AskModelResponseError' not in cancelled_screen, 'normal cancellation was displayed as an error'
+            release_response.set()
+            child.assert_input('request-cancelled', '>>', 3)
         child.finish(); child.close(); child = None
         child = Console(['--continue', selector], 'reopened')
         child.expect('>>'); child.send('.ask Reply exactly 42.')
-        child.expect('Ask ask-2 outcome: completed')
-        assert len(requests) == 6
+        child.expect('Ask ask-%d outcome: completed' % (3 if args.busy_input else 2))
+        assert len(requests) == (7 if args.busy_input else 6)
         child.finish()
         with open(os.path.join(evidence, 'result.txt'), 'w') as stream:
             stream.write('windows-console-agent=PASS protocol=' + args.protocol + ' setup=offline prompt=inline tool-error=corrected tool-result=returned normal-stop=completed review=passed Context=reopened modes=restored\n')
         print('windows-console-agent=PASS')
     finally:
+        release_response.set()
         if child is not None: child.close()
         if server is not None:
             server.shutdown(); server.server_close(); thread.join(5)
 
 
 if __name__ == '__main__':
+    if len(sys.argv) > 1 and sys.argv[1] == '--console-host':
+        raise SystemExit(console_host(sys.argv[2], sys.argv[3:]))
     main()

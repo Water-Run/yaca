@@ -32,6 +32,8 @@ local INPUT_INTENTS = {
     ask = true,
     cancel = true,
     text = true,
+    paste = true,
+    ["paste-rejected"] = true,
     eof = true,
 }
 
@@ -148,10 +150,10 @@ local function validate_observation(observation, maximum_input_bytes)
         then
             return nil, failure("NativeContract", "native terminal action text is invalid")
         end
-        if observation.intent == "text" and observation.text == nil then
+        if (observation.intent == "text" or observation.intent == "paste") and observation.text == nil then
             return nil, failure("NativeContract", "native terminal text action omits bytes")
         end
-        if observation.intent ~= "text" and observation.text ~= nil then
+        if observation.intent ~= "text" and observation.intent ~= "paste" and observation.text ~= nil then
             return nil, failure("NativeContract", "native terminal non-text action carries bytes")
         end
         return observation
@@ -1355,7 +1357,7 @@ local function draft_cells(value)
     return cells
 end
 
----Create production chat input with automatic ANSI editing or the existing cooked fallback.
+---Create production chat input with automatic native/ANSI editing or the cooked fallback.
 --@param native table Native terminal ports and optional display capability probe.
 --@param options table Input byte cap, optional smaller draft cap, stdout writer, completion callback and catalog.
 --@return table|nil port Restorable terminal port delivering only submitted text and semantic gestures.
@@ -1368,9 +1370,13 @@ function M.new_chat(native, options)
         return nil, failure("InvalidChatEditor", "native ports and chat options are required")
     end
     local info = type(native.terminal_display_info) == "function" and native.terminal_display_info() or {}
-    if type(info) ~= "table" or info.kind ~= "ansi" then
+    if type(info) ~= "table" or (info.kind ~= "ansi" and info.kind ~= "console") then
         return M.new(native, { mode = "cooked", maximum_input_bytes = options.maximum_input_bytes,
             completion_words = options.completion_words })
+    end
+    local console = info.kind == "console"
+    if console and type(native.console_redraw) ~= "function" then
+        return nil, failure("InvalidChatEditor", "native console redraw is required")
     end
     local writer = options.writer
     if (type(writer) ~= "function" and (type(writer) ~= "table" or type(writer.write) ~= "function"))
@@ -1388,6 +1394,7 @@ function M.new_chat(native, options)
     local prompt, visible, suppressed, enabled, closed = ">> ", false, false, false, false
     local editor, port, display = nil, {}, {}
     local pending, actions, escape_since = "", {}, nil
+    local observations, observation_index = {}, 1
     local paste, paste_suffix, discard_paste, skip_lf = false, "", false, false
     local history, history_bytes, history_at, saved_draft = {}, 0, nil, ""
 
@@ -1417,7 +1424,21 @@ function M.new_chat(native, options)
         return true
     end
 
-    -- Replace the one-row draft while preserving the exact cursor using VT100 save/restore.
+    -- Render one frame through native console positioning without emitting ANSI bytes.
+    --@param append string Complete transcript bytes to append after hiding the input row.
+    --@param prefix string Escaped prompt and draft text before the logical cursor.
+    --@param suffix string Escaped draft text after the logical cursor.
+    --@return boolean True after native output succeeds.
+    --@effect Updates only the current stdout console row and appended transcript.
+    --@error Raises the contained native frame failure; no domain action is executed.
+    local function console_frame(append, prefix, suffix)
+        local ok, result = native.console_redraw({ erase_line = visible,
+            append = append, prefix = prefix, suffix = suffix })
+        if not ok then checked(nil, result) end
+        return true
+    end
+
+    -- Replace the one-row draft with native positioning or VT100 save/restore.
     --@param self table Display adapter; no independent state is read from self.
     --@param frame table Owned draft, UTF-8 byte cursor and complete transcript block to append.
     --@return boolean True after the frame was written, or while output is deliberately suppressed.
@@ -1450,10 +1471,13 @@ function M.new_chat(native, options)
             suffix[#suffix + 1] = cells[last].text
         end
         if last < #cells then suffix[#suffix + 1] = ">" end
-        local bytes = visible and "\r\27[2K" or ""
-        bytes = bytes .. frame.append_bytes .. prompt .. table.concat(prefix)
-            .. "\27" .. "7" .. table.concat(suffix) .. "\27" .. "8"
-        write(bytes)
+        if console then console_frame(frame.append_bytes, prompt .. table.concat(prefix), table.concat(suffix))
+        else
+            local bytes = visible and "\r\27[2K" or ""
+            bytes = bytes .. frame.append_bytes .. prompt .. table.concat(prefix)
+                .. "\27" .. "7" .. table.concat(suffix) .. "\27" .. "8"
+            write(bytes)
+        end
         visible = true
         return true
     end
@@ -1492,7 +1516,8 @@ function M.new_chat(native, options)
         local lease = checked(editor.prepare_submission(intent))
         local rendered = {}
         for _, cell in ipairs(draft_cells(lease.text)) do rendered[#rendered + 1] = cell.text end
-        write((visible and "\r\27[2K" or "") .. prompt .. table.concat(rendered) .. "\n")
+        if console then console_frame(prompt .. table.concat(rendered) .. "\n", "", "")
+        else write((visible and "\r\27[2K" or "") .. prompt .. table.concat(rendered) .. "\n") end
         visible, suppressed = false, true
         checked(editor.resolve_submission(lease.generation, true))
         suppressed = false
@@ -1649,21 +1674,22 @@ function M.new_chat(native, options)
     --@error Raises on failed output, keeping the reset retryable.
     local function release_display()
         if not enabled and not visible then return true end
-        write((visible and "\r\27[2K" or "") .. (enabled and "\27[?2004l" or ""))
+        if console then console_frame("", "", "")
+        else write((visible and "\r\27[2K" or "") .. (enabled and "\27[?2004l" or "")) end
         visible, enabled = false, false
         return true
     end
 
-    -- Start raw input and enable bracketed paste only after native admission succeeds.
+    -- Start raw input and enable ANSI bracketed paste only when that transport is selected.
     --@param self table Chat input port.
     --@param now integer Current monotonic tick.
     --@return boolean True after input and display setup.
-    --@effect Changes terminal modes and emits the paste-mode enable sequence.
+    --@effect Changes native input modes; only ANSI terminals receive a paste-mode sequence.
     --@error Propagates native/output failures; caller must close a started port after failure.
     function port:start(now)
         base:start(now)
         enabled = true
-        write("\27[?2004h")
+        if not console then write("\27[?2004h") end
         return true
     end
 
@@ -1683,14 +1709,33 @@ function M.new_chat(native, options)
             elseif pending ~= "" and consume(now) then
                 -- Input edits produce no domain event; completed lines enter actions.
                 edits = edits + 1
+            elseif observation_index <= #observations then
+                local event = observations[observation_index]
+                observation_index = observation_index + 1
+                edits = edits + 1
+                if event.kind == "user_action" and event.action == "text" then
+                    local parts, size = { event.text }, #pending + #event.text
+                    while observation_index <= #observations do
+                        local following = observations[observation_index]
+                        if following.kind ~= "user_action" or following.action ~= "text"
+                            or size + #following.text > options.maximum_input_bytes then break end
+                        parts[#parts + 1] = following.text
+                        size = size + #following.text
+                        observation_index = observation_index + 1
+                    end
+                    pending = pending .. table.concat(parts)
+                elseif event.kind == "user_action" and event.action == "paste" then input_result(editor.insert(event.text))
+                elseif event.kind == "user_action" and event.action == "paste-rejected" then
+                    checked(editor.publish("[NOTICE] Clipboard text is unavailable or exceeds the input limit.\n"))
+                elseif event.kind == "user_action" and SUBMISSION_INTENTS[event.action] then submit(event.action)
+                elseif event.kind == "user_action" and event.action == "cancel" then cancel_input()
+                elseif event.kind == "user_action" and event.action == "newline" then input_result(editor.insert("\n"))
+                else actions[#actions + 1] = event end
             elseif not fetched then
-                local observed = base:poll(now, 1)
+                observations = base:poll(now, math.min(64, options.maximum_input_bytes))
+                observation_index = 1
                 fetched = true
-                for _, event in ipairs(observed) do
-                    if event.kind == "user_action" and event.action == "text" then pending = pending .. event.text
-                    else actions[#actions + 1] = event end
-                end
-                if #observed == 0 then break end
+                if #observations == 0 then break end
             else break end
         end
         return events
@@ -1715,7 +1760,7 @@ function M.new_chat(native, options)
     -- Restore native terminal modes even if display reset fails.
     --@param self table Chat input port.
     --@return boolean True after native restoration and display reset.
-    --@effect Restores termios and disables paste mode; failures remain retryable.
+    --@effect Restores native input modes and the selected display state; failures remain retryable.
     --@error Propagates the native failure first, otherwise the display failure.
     function port:restore()
         local reset, reset_error = pcall(release_display)
@@ -1732,7 +1777,7 @@ function M.new_chat(native, options)
     function port:close()
         local reset, reset_error = pcall(release_display)
         base:close()
-        pending, actions, history, saved_draft, paste_suffix = "", {}, {}, "", ""
+        pending, actions, observations, history, saved_draft, paste_suffix = "", {}, {}, {}, "", ""
         editor, closed = nil, true
         if not reset then error(reset_error, 0) end
         return true
@@ -1762,9 +1807,12 @@ function M.new_chat(native, options)
         if value == prompt and visible then return true end
         prompt = value
         local snapshot = editor.snapshot()
+        if not snapshot.input_active then return checked(editor.show()) end
         return self:redraw({ draft_bytes = snapshot.draft, cursor_byte = snapshot.cursor_byte, append_bytes = "" })
     end
 
+    -- Native console records carry Enter modifiers independently of textual escape conventions.
+    display.native_keys = console
     return readonly(port, "chat input"), nil, readonly(display, "chat display")
 end
 

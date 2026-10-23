@@ -69,6 +69,21 @@ PYTHONPATH="$PWD/out/terminal-test-deps" bash .tools/run_with_resource_guard.sh 
 真实 Ctrl-C 请求取消与 termios 恢复。它证明实际 PTY 交互及屏幕字节，不能替代目标系统
 资格、字体/IME 或不同终端缩放行为的验证。
 
+### Windows 原生输入与忙时草稿检查
+
+在 Windows 检出目录，通过 WSL 的资源守卫调用 Windows Python。候选目录只放待测
+`yaca.exe`，证据目录必须不存在；路径使用 Windows 可访问的相对路径：
+
+```sh
+bash .tools/run_with_resource_guard.sh python.exe \
+  .tools/qualification/windows_console_agent_smoke.py <candidate> <new-evidence> --busy-input
+```
+
+用另一个新目录加 `--protocol anthropic-messages` 验证另一协议；Win32 核心另测。
+驱动创建隐藏控制台和独立 host，先记录原始模式再启动 yaca，验证中文光标、补全、历史、
+Shift-Enter、忙时草稿、请求取消、工具纠错与 Context 重开。没有模型密钥或真实服务商请求。
+剪贴板格式与分配失败使用 `windows_editor_test.c` 的隔离夹具，不读写宿主剪贴板。
+
 ### Windows full 来源输入
 
 维护装配器不再把 PortableGit 安装包复制成源码。先准备对应目标的 Git source-profile

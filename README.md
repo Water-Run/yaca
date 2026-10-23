@@ -115,6 +115,9 @@ Type normally to give a task. Commands start with a dot:
 Every conversation is saved automatically. `.status` shows its short hash;
 `yaca --continue <hash>` picks it up again later.
 
+Windows consoles and ANSI Linux terminals enable Tab command completion and
+Up/Down history automatically. Replies preserve your unfinished input.
+
 <details>
 <summary><b>Command-line options</b></summary>
 

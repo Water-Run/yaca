@@ -11684,6 +11684,64 @@ static size_t encode_utf8_codepoint(unsigned long codepoint, char output[4])
   return 4;
 }
 
+/* Read Unicode clipboard text only in response to an explicit paste gesture.
+ * @param L lua_State* Receives one paste or paste-rejected action after clipboard ownership is released.
+ * @param terminal yaca_terminal* Supplies the admitted input byte cap; no terminal fields are mutated.
+ * @return int One after publishing an action; allocation may raise before any clipboard lock is acquired.
+ * @error Lua allocation may raise; clipboard handles are unlocked and closed before subsequent Lua operations.
+ * @effect Reads CF_UNICODETEXT without altering clipboard contents; rejects malformed, unterminated or oversized text without returning a prefix.
+ * @ownership Borrows the clipboard handle only while open/locked; copied UTF-8 bytes are owned by the Lua buffer.
+ */
+static int push_windows_paste(lua_State *L, yaca_terminal *terminal)
+{
+  luaL_Buffer buffer;
+  size_t limit = terminal->maximum_input_bytes > 1048576U ? 1048576U : terminal->maximum_input_bytes;
+  char *bytes = luaL_buffinitsize(L, &buffer, limit);
+  HANDLE data;
+  const WCHAR *wide = NULL;
+  size_t units, index = 0, used = 0;
+  int valid = 0;
+  if (OpenClipboard(NULL))
+  {
+    data = GetClipboardData(CF_UNICODETEXT);
+    if (data != NULL)
+    {
+      units = GlobalSize(data) / sizeof(WCHAR);
+      if (units > limit + 1U) units = limit + 1U;
+      wide = (const WCHAR *)GlobalLock(data);
+      if (wide != NULL)
+      {
+        while (index < units)
+        {
+          unsigned long scalar = wide[index++];
+          char encoded[4];
+          size_t length;
+          if (scalar == 0) { valid = 1; break; }
+          if (scalar >= 0xD800U && scalar <= 0xDBFFU)
+          {
+            unsigned long low;
+            if (index >= units) break;
+            low = wide[index++];
+            if (low < 0xDC00U || low > 0xDFFFU) break;
+            scalar = 0x10000UL + ((scalar - 0xD800UL) << 10) + low - 0xDC00UL;
+          }
+          else if (scalar >= 0xDC00U && scalar <= 0xDFFFU) break;
+          length = encode_utf8_codepoint(scalar, encoded);
+          if (length > limit - used) break;
+          memcpy(bytes + used, encoded, length);
+          used += length;
+        }
+        GlobalUnlock(data);
+      }
+    }
+    CloseClipboard();
+  }
+  luaL_pushresultsize(&buffer, valid ? used : 0U);
+  push_terminal_action(L, valid ? "paste" : "paste-rejected", valid ? lua_tostring(L, -1) : NULL, valid ? used : 0U);
+  lua_remove(L, -2);
+  return 1;
+}
+
 /* Project a console key record with exact bounded text repetition and strict UTF-16 pairing.
  * @param L lua_State* State receiving exactly one action when projection succeeds.
  * @param terminal yaca_terminal* Owner retaining a partial surrogate and its repetition count across polls.
@@ -11714,6 +11772,44 @@ static int push_windows_key_action(
     return 0;
   }
   modifiers = key->dwControlKeyState;
+  if (terminal->editor_mode)
+  {
+    const char *sequence = NULL;
+    if (key->wVirtualKeyCode == VK_ESCAPE || key->uChar.UnicodeChar == 3)
+    {
+      terminal->pending_high_surrogate = 0;
+      terminal->pending_high_repeat_count = 0;
+    }
+    if ((modifiers & (LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED)) == 0
+        && (((modifiers & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED)) != 0 && key->wVirtualKeyCode == 'V')
+          || ((modifiers & SHIFT_PRESSED) != 0 && key->wVirtualKeyCode == VK_INSERT)))
+    {
+      terminal->pending_high_surrogate = 0;
+      terminal->pending_high_repeat_count = 0;
+      return push_windows_paste(L, terminal);
+    }
+    switch (key->wVirtualKeyCode)
+    {
+      case VK_LEFT: sequence = "\033[D"; break;
+      case VK_RIGHT: sequence = "\033[C"; break;
+      case VK_UP: sequence = "\033[A"; break;
+      case VK_DOWN: sequence = "\033[B"; break;
+      case VK_HOME: sequence = "\033[H"; break;
+      case VK_END: sequence = "\033[F"; break;
+      case VK_DELETE: sequence = "\033[3~"; break;
+      case VK_BACK: sequence = "\b"; break;
+      case VK_TAB: sequence = "\t"; break;
+    }
+    if (sequence != NULL)
+    {
+      if (terminal->pending_high_surrogate != 0)
+      { terminal->pending_high_surrogate = 0; terminal->pending_high_repeat_count = 0; return -1; }
+      length = strlen(sequence);
+      repeats = key->wRepeatCount == 0U ? 1U : key->wRepeatCount;
+      memcpy(bytes, sequence, length);
+      goto repeat_key_text;
+    }
+  }
   if (key->wVirtualKeyCode == VK_RETURN)
   {
     if ((modifiers & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED)) != 0)
@@ -11783,6 +11879,7 @@ static int push_windows_key_action(
     codepoint = (unsigned long)character;
   }
   length = encode_utf8_codepoint(codepoint, bytes);
+repeat_key_text:
   if ((size_t)repeats > terminal->maximum_input_bytes / length)
   {
     return -2;
@@ -12178,16 +12275,117 @@ static int push_windows_cooked_line(lua_State *L, yaca_terminal *terminal)
 
 #endif
 
-/* Probe the live output width and conservative ANSI editing capability without changing modes.
+#if defined(_WIN32)
+/* Write one captured frame field through the existing strict Unicode console writer.
+ * @param L lua_State* Argument 1 is the retained plain frame table.
+ * @param field const_char* One of append, prefix or suffix, already validated as UTF-8.
+ * @return int One after success; zero leaves false and its typed error at the stack top.
+ * @error Lua allocation may raise; no additional OS handles or heap buffers are retained here.
+ * @effect Writes exactly this field to the borrowed stdout console.
+ */
+static int write_console_frame_part(lua_State *L, const char *field)
+{
+  lua_pushcfunction(L, l_console_write);
+  lua_pushliteral(L, "stdout");
+  lua_getfield(L, 1, field);
+  lua_call(L, 2, 2);
+  if (!lua_toboolean(L, -2)) return 0;
+  lua_pop(L, 2);
+  return 1;
+}
+#endif
+
+/* Render an owned one-row Windows draft around an optional complete transcript block.
+ * @param L lua_State* Argument 1 contains erase_line boolean and UTF-8 append/prefix/suffix strings; prefix ends at the logical cursor.
+ * @return int Two Lua values: true,true on success, or false with a typed console/frame failure.
+ * @error Caller getters and Lua allocation may raise; all frame values are captured before output changes and no OS handles are owned.
+ * @effect Clears only the current console row when requested, writes the append block and draft, then restores the observed prefix cursor.
+ */
+static int l_console_redraw(lua_State *L)
+{
+#if defined(_WIN32)
+  const char *fields[] = { "append", "prefix", "suffix" };
+  int request, index, erase;
+  size_t total = 0;
+  HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
+  CONSOLE_SCREEN_BUFFER_INFO info;
+  COORD cursor;
+  DWORD count;
+  luaL_checktype(L, 1, LUA_TTABLE);
+  lua_createtable(L, 0, 4);
+  request = lua_gettop(L);
+  capture_process_field(L, 1, request, "erase_line");
+  for (index = 0; index < 3; index++) capture_process_field(L, 1, request, fields[index]);
+  lua_replace(L, 1);
+  lua_getfield(L, 1, "erase_line");
+  if (!lua_isboolean(L, -1)) return push_failure(L, "InvalidConsoleFrame", "erase_line must be boolean");
+  erase = lua_toboolean(L, -1);
+  lua_pop(L, 1);
+  for (index = 0; index < 3; index++)
+  {
+    const char *bytes;
+    size_t length, offset;
+    lua_getfield(L, 1, fields[index]);
+    if (lua_type(L, -1) != LUA_TSTRING)
+      return push_failure(L, "InvalidConsoleFrame", "frame text must be strings");
+    bytes = lua_tolstring(L, -1, &length);
+    if (length > 1048576U - total || memchr(bytes, '\0', length) != NULL
+        || (length > 0 && MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+          bytes, (int)length, NULL, 0) <= 0))
+      return push_failure(L, "InvalidConsoleFrame", "frame text exceeds its bound or is not strict UTF-8");
+    if (index > 0)
+      for (offset = 0; offset < length; offset++)
+        if ((unsigned char)bytes[offset] < 32U || (unsigned char)bytes[offset] == 127U)
+          return push_failure(L, "InvalidConsoleFrame", "draft controls must be escaped");
+    total += length;
+    lua_pop(L, 1);
+  }
+  if (!GetConsoleScreenBufferInfo(output, &info))
+    return push_windows_failure(L, GetLastError(), "console frame position is unavailable");
+  if (erase)
+  {
+    cursor.X = 0;
+    cursor.Y = info.dwCursorPosition.Y;
+    if (!FillConsoleOutputCharacterW(output, L' ', (DWORD)info.dwSize.X, cursor, &count)
+        || count != (DWORD)info.dwSize.X
+        || !FillConsoleOutputAttribute(output, info.wAttributes, (DWORD)info.dwSize.X, cursor, &count)
+        || count != (DWORD)info.dwSize.X || !SetConsoleCursorPosition(output, cursor))
+      return push_windows_failure(L, GetLastError(), "console draft erase failed");
+  }
+  if (!write_console_frame_part(L, "append") || !write_console_frame_part(L, "prefix")) return 2;
+  if (!GetConsoleScreenBufferInfo(output, &info))
+    return push_windows_failure(L, GetLastError(), "console draft cursor is unavailable");
+  cursor = info.dwCursorPosition;
+  if (!write_console_frame_part(L, "suffix")) return 2;
+  if (!SetConsoleCursorPosition(output, cursor))
+    return push_windows_failure(L, GetLastError(), "console draft cursor restore failed");
+  return push_true_result(L);
+#else
+  return push_failure(L, "NotConsole", "native console redraw is unavailable");
+#endif
+}
+
+/* Probe the live output width and native/ANSI editing capability without changing modes.
  * @param L lua_State* No arguments; receives one capability table.
- * @return int One Lua table containing kind (ansi or cooked) and columns.
+ * @return int One Lua table containing kind (console, ansi or cooked) and columns.
  * @effect Reads standard descriptor TTY facts, TERM and window size; performs no output or input.
  */
 static int l_terminal_display_info(lua_State *L)
 {
   const char *kind = "cooked";
   int columns = 80;
-#if !defined(_WIN32)
+#if defined(_WIN32)
+  DWORD mode;
+  CONSOLE_SCREEN_BUFFER_INFO size;
+  if (GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &mode)
+      && GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &size)
+      && size.dwSize.X >= 16 && size.srWindow.Right - size.srWindow.Left + 1 >= 16)
+  {
+    kind = "console";
+    columns = size.srWindow.Right - size.srWindow.Left + 1;
+    if (columns > size.dwSize.X) columns = size.dwSize.X;
+  }
+#else
   const char *term = getenv("TERM");
   struct winsize size;
   if (isatty(STDIN_FILENO) && isatty(STDOUT_FILENO) && term != NULL
@@ -13422,6 +13620,7 @@ static const luaL_Reg yaca_native_functions[] = {
   { "executable_paths", l_executable_paths },
   { "stdio_facts", l_stdio_facts },
   { "console_write", l_console_write },
+  { "console_redraw", l_console_redraw },
   { "workspace_inspect", l_workspace_inspect },
   { "fs_make_directory", l_fs_make_directory },
   { "monotonic_now", l_monotonic_now },

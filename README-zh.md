@@ -104,6 +104,9 @@ C:\yaca\yaca.exe C:\work\broken-service
 每个对话都会自动保存。`.status` 会显示它的短 hash，之后用
 `yaca --continue <hash>` 接着聊。
 
+Windows 原生控制台和支持 ANSI 的 Linux 终端会自动启用 Tab 命令补全和上下键历史。
+收到回复时，未提交的输入和光标位置会保留。
+
 <details>
 <summary><b>命令行选项</b></summary>
 

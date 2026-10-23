@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Author: WaterRun
-# Date: 2026-10-09
+# Date: 2026-10-23
 # File: windows_package.py
 # Description: Audit and assemble a Windows preview without asserting real-target qualification.
 
@@ -76,6 +76,9 @@ def main():
         artifact_dlls = allowed_dlls | (
             {"shell32.dll"} if path == output / "onedir/inner.exe" else set()
         )
+        if path == output / "onedir/.luai/native/yaca_native.dll":
+            # Text paste uses the XP-era User32 clipboard API only from the native input adapter.
+            artifact_dlls |= {"user32.dll"}
         if target == "win64-x86_64" and path == output / "onedir/.luai/components/curl.exe":
             # if_nametoindex in Iphlpapi is available since Vista (IPv6).
             artifact_dlls |= {"bcrypt.dll", "iphlpapi.dll"}

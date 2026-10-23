@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-09-23
+Date: 2026-10-23
 File: tui.lua
 Description: Renders bounded append-only semantic transcript blocks.
 ]]
@@ -158,6 +158,12 @@ local TUI_REGISTRY = {
         transcript_fixture = "fixtures/tui-transcripts.lua",
     },
     line_editor = {
+        automatic_enhancement = "native-capability-probe",
+        ansi_viewport = "single-row-conservative-scalar-width-with-exact-byte-cursor",
+        command_completion = "registry-common-prefix-and-bounded-candidates",
+        history = "session-memory-64-items-128-KiB",
+        bracketed_paste = "one-draft-explicit-submit-no-embedded-actions",
+        rejected_input = "clear-draft-report-no-partial-submission",
         ownership = "yaca-native-or-raw-editor",
         draft_is_runtime_owned = true,
         async_output = "atomically-hide-draft-append-complete-block-redraw-identical-draft",

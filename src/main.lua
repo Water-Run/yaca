@@ -8373,9 +8373,26 @@ function M.new_application_coordinator(ports, options)
     --@return boolean|nil projected True after every event is handled.
     --@return table|nil err Structured projection failure.
     local function project_driver_events(step, before)
+        local cancellations = {}
+        for _, event in ipairs(step.events) do
+            if (event.kind == "model-event" or event.kind == "ask-model-event")
+                and type(event.event) == "table" and event.event.kind == "response_finish"
+                and event.event.finish_class == "cancelled" then
+                local key = event.kind .. ":" .. tostring(event.ask_id or event.event.request_id or "")
+                cancellations[key] = true
+            end
+        end
         for _, event in ipairs(step.events) do
             local projected, projection_error
-            if event.kind == "model-event" then
+            local model_event = type(event.event) == "table" and event.event or {}
+            local key = tostring(event.kind) .. ":" .. tostring(event.ask_id or model_event.request_id or "")
+            if (event.kind == "model-event" or event.kind == "ask-model-event")
+                and model_event.kind == "transport_error"
+                and (model_event.error_id == "user-cancel" or cancellations[key]) then
+                -- Proven cancellation remains visible through its terminal outcome.
+                -- Protocol errors and cancellation with an unknown outcome still render as errors.
+                projected = true
+            elseif event.kind == "model-event" then
                 projected, projection_error = project_model_event(event.event)
             elseif event.kind == "ask-model-event" then
                 projected, projection_error = project_ask_model_event(
@@ -8558,12 +8575,21 @@ function M.new_application_coordinator(ports, options)
         if not projected then return nil, projection_error end
         local prior_results = before.trace and before.trace.tool_results or {}
         local results = step.status.trace and step.status.trace.tool_results or {}
-        local first = before.turn_id == step.status.turn_id and #prior_results + 1 or 1
+        local first = 1
+        -- Finalization keeps the last trace while clearing turn_id. Compare the
+        -- immutable result identities so that completion does not print them again.
+        while first <= #results and prior_results[first]
+            and prior_results[first].tool_call_id == results[first].tool_call_id do
+            first = first + 1
+        end
         for index = first, #results do
             local result = results[index]
             local label = "result: " .. tostring(result.status or result.kind)
             if result.error_id and result.error_id ~= false then
                 label = label .. " (" .. result.error_id .. ")"
+            end
+            if result.adapter_call_id then
+                tool_ids[result.tool_call_id] = tool_display_id(result.adapter_call_id)
             end
             local shown, show_error = publish({ kind = "tool",
                 id = tool_display_id(result.tool_call_id), text = label })
@@ -10882,9 +10908,9 @@ local function production_chat_view(composed, runtime, input_display)
             unicode = true,
             keys = {
                 Enter = true,
-                ["Ctrl+Enter"] = false,
-                ["Shift+Enter"] = false,
-                ["Alt+Enter"] = false,
+                ["Ctrl+Enter"] = input_display ~= nil and input_display.native_keys == true,
+                ["Shift+Enter"] = input_display ~= nil and input_display.native_keys == true,
+                ["Alt+Enter"] = input_display ~= nil and input_display.native_keys == true,
                 Esc = input_display ~= nil,
             },
         },

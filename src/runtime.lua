@@ -2122,6 +2122,7 @@ function M.new_agent_loop(ports, options)
         call.result = result
         turn.trace.tool_results[#turn.trace.tool_results + 1] = {
             tool_call_id = call.id,
+            adapter_call_id = call.public.adapter_call_id,
             kind = result.kind,
             status = TOOL_RESULT_KINDS[result.kind],
             error_id = result.error_id,

@@ -1022,6 +1022,29 @@ return {
     name = "integration/application-coordinator",
     cases = {
         {
+            name = "proven model cancellation preserves partial text without a misleading error block",
+            -- Cancellation and unknown transport failure must remain distinct in both main and Ask displays.
+            --@param none Projects normal cancellation and uncertain transport outcomes for both model lanes.
+            --@return nil Assertions require retained partial text, no cancellation error and a visible unknown-outcome error.
+            run = function()
+                for _, kind in ipairs({ "model-event", "ask-model-event" }) do
+                    for _, cancelled in ipairs({ true, false }) do
+                        local lines = input_lines({ ".quit" })
+                        local f = fixture({ initial_agent = true, batches = { {}, lines[1] }, driver_events = {
+                            { kind = kind, ask_id = "ask-1", event = { kind = "text_delta", text = "partial answer" } },
+                            { kind = kind, ask_id = "ask-1", event = { kind = "transport_error",
+                                error_id = cancelled and "user-cancel" or "cancel-outcome-unknown" } },
+                            { kind = kind, ask_id = "ask-1", event = { kind = "response_finish",
+                                finish_class = cancelled and "cancelled" or "incomplete" } },
+                        } })
+                        assert(f.coordinator:run())
+                        A.contains(A.render(f.blocks), "partial answer")
+                        A.equal(#blocks_of_kind(f.blocks, "error"), cancelled and 0 or 1)
+                    end
+                end
+            end,
+        },
+        {
             name = "pasted multiline approval text cannot authorize a tool",
             -- A confirmation is a single explicit selection, not the first line of a pasted block.
             --@param none Delivers a multiline allow-shaped draft while an approval is pending.
