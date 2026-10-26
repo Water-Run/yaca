@@ -1,0 +1,92 @@
+{
+  "schema": "yaca-development-node-publication-v1",
+  "status": "PASS",
+  "date": "2026-10-26",
+  "phase": "published",
+  "tag": "v1.0.0-preview.20261026",
+  "source_commit": "5fe13de3c854309adf1441d609ebbf8b650df0f6",
+  "release_id": 423932192,
+  "url": "https://github.com/Water-Run/yaca/releases/tag/v1.0.0-preview.20261026",
+  "prerelease": true,
+  "release_authorized": false,
+  "target_qualification_complete": false,
+  "close_decision": "D-098",
+  "development_paused_after_delivery": true,
+  "verification_method": "Every GitHub server SHA-256 and byte count matched its complete local attachment; remote tag matched the source commit",
+  "asset_count": 12,
+  "asset_bytes": 74876771,
+  "assets": [
+    {
+      "name": "DEVELOPMENT-START.md",
+      "bytes": 940,
+      "sha256": "9ef76f01511986a3473242bec825ada7ad635f8108f270932e7a35803d7a2d37",
+      "url": "https://github.com/Water-Run/yaca/releases/download/v1.0.0-preview.20261026/DEVELOPMENT-START.md"
+    },
+    {
+      "name": "NODE-MANIFEST.json",
+      "bytes": 3401,
+      "sha256": "9dbcde87601e81c1605d6cbde8746b40bf9692c299520637b02b597df6322f0e",
+      "url": "https://github.com/Water-Run/yaca/releases/download/v1.0.0-preview.20261026/NODE-MANIFEST.json"
+    },
+    {
+      "name": "SHA256SUMS.txt",
+      "bytes": 1139,
+      "sha256": "d8c1b63e88e56f25e12cbc33323871fe849a0f29549df63c068196a87b15c47e",
+      "url": "https://github.com/Water-Run/yaca/releases/download/v1.0.0-preview.20261026/SHA256SUMS.txt"
+    },
+    {
+      "name": "yaca-1.0.0-preview.20261026-linux-x86_64-host.zip",
+      "bytes": 1894499,
+      "sha256": "022c09b329de11162fa006647b6a5016aff816403d3477d32d49e28548dd6bb9",
+      "url": "https://github.com/Water-Run/yaca/releases/download/v1.0.0-preview.20261026/yaca-1.0.0-preview.20261026-linux-x86_64-host.zip"
+    },
+    {
+      "name": "yaca-1.0.0-preview.20261026-win32-x86.zip",
+      "bytes": 2569183,
+      "sha256": "ad6e8ce2f0aa09371882c4354835313d70d9d7aee30b24da7417ec3e1ca0dfc4",
+      "url": "https://github.com/Water-Run/yaca/releases/download/v1.0.0-preview.20261026/yaca-1.0.0-preview.20261026-win32-x86.zip"
+    },
+    {
+      "name": "yaca-1.0.0-preview.20261026-win64-x86_64.zip",
+      "bytes": 2635741,
+      "sha256": "72e3d270e49f18bb1ea4212919c53a0e2136ebfab693d12cf901dcb061dcf5fd",
+      "url": "https://github.com/Water-Run/yaca/releases/download/v1.0.0-preview.20261026/yaca-1.0.0-preview.20261026-win64-x86_64.zip"
+    },
+    {
+      "name": "yaca-core-sources-20261026-linux-x86_64-host.tar.gz",
+      "bytes": 18922925,
+      "sha256": "6947ce5ec176687c667ccd75e3c1e88fd170cc727189d69e80968fc241b2c7aa",
+      "url": "https://github.com/Water-Run/yaca/releases/download/v1.0.0-preview.20261026/yaca-core-sources-20261026-linux-x86_64-host.tar.gz"
+    },
+    {
+      "name": "yaca-core-sources-20261026-win32-x86.tar.gz",
+      "bytes": 19943988,
+      "sha256": "0e2e31b2616226398da0c1b19fbc11555b90a03991637fc49822377587900a17",
+      "url": "https://github.com/Water-Run/yaca/releases/download/v1.0.0-preview.20261026/yaca-core-sources-20261026-win32-x86.tar.gz"
+    },
+    {
+      "name": "yaca-core-sources-20261026-win64-x86_64.tar.gz",
+      "bytes": 20060489,
+      "sha256": "5069664f940d03c239ef28ab6833e7fccfd15e6a064e36220d3edb496c5e8de9",
+      "url": "https://github.com/Water-Run/yaca/releases/download/v1.0.0-preview.20261026/yaca-core-sources-20261026-win64-x86_64.tar.gz"
+    },
+    {
+      "name": "yaca-development-evidence-20261026.zip",
+      "bytes": 280819,
+      "sha256": "ab1f1e0a6c32733bc94bdfb54add69390d723fa2fac51b2b2c94e6a441f950df",
+      "url": "https://github.com/Water-Run/yaca/releases/download/v1.0.0-preview.20261026/yaca-development-evidence-20261026.zip"
+    },
+    {
+      "name": "yaca-main-20261026.bundle",
+      "bytes": 5369894,
+      "sha256": "cb7f8a3bae3c7dd22f8ffe835fd26fc6c71952540aa99a1242848bfbb15fff46",
+      "url": "https://github.com/Water-Run/yaca/releases/download/v1.0.0-preview.20261026/yaca-main-20261026.bundle"
+    },
+    {
+      "name": "yaca-source-20261026.tar.gz",
+      "bytes": 3193753,
+      "sha256": "59f6dfa3c1df336fd5a5601b1ef679dc0bb8ca9452ed5f94c3068a0b4353b977",
+      "url": "https://github.com/Water-Run/yaca/releases/download/v1.0.0-preview.20261026/yaca-source-20261026.tar.gz"
+    }
+  ]
+}
