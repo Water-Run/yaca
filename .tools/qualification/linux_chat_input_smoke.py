@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Author: WaterRun
-# Date: 2026-10-23
+# Date: 2026-10-26
 # File: linux_chat_input_smoke.py
 # Description: Drive a real Linux chat PTY and verify default completion, editing, asynchronous draft preservation, paste and restoration with an independent screen emulator.
 
@@ -136,6 +136,18 @@ def main():
         while drain(0.1):
             pass
 
+    # Await a loopback request while continuing to consume the owned terminal output.
+    #@param none Uses the current request event, live PTY child and ten-second deadline.
+    #@return None After the request handler signals arrival.
+    #@effect Drains bounded output during the wait so terminal backpressure cannot block request dispatch.
+    #@error Raises on early child exit, output/encoding failure or the unchanged request deadline.
+    def expect_request():
+        deadline = time.monotonic() + 10
+        while not arrived.is_set():
+            assert child.poll() is None, "child exited before Ask dispatch"
+            assert time.monotonic() < deadline, "Ask was not dispatched"
+            drain(0.05)
+
     # Send literal bytes to the child's input without adding an implicit Enter.
     #@param data str|bytes UTF-8 text or raw key/paste bytes.
     #@return None After the PTY accepted all bytes and emitted immediate redraw output.
@@ -204,7 +216,7 @@ def main():
             send("\x03")
             check_screen("long-draft-cleared", ">>", 3)
             send(".ask delayed first response\r")
-            assert arrived.wait(10), "Ask was not dispatched"
+            expect_request()
             send(".sta\x1b[D")
             check_screen("busy-before", ">> .sta", 6)
             release.set()
@@ -222,7 +234,7 @@ def main():
             arrived.clear()
             release.clear()
             send(".ask cancel this delayed response\r")
-            assert arrived.wait(10), "cancellable Ask was not dispatched"
+            expect_request()
             cancel_start = len(transcript)
             send("\x03")
             expect("cancelled", cancel_start)

@@ -1,6 +1,6 @@
 /*
 Author: WaterRun
-Date: 2026-10-23
+Date: 2026-10-26
 File: yaca_native.c
 Description: Portable narrow native ports for filesystem, process, terminal, system identity, clocks, text code pages, and SHA-256.
 */
@@ -329,6 +329,63 @@ static void release_windows_cooked_read(yaca_terminal_read *read)
     free(read);
   }
 }
+
+/* @struct yaca_clipboard_read Independent bounded clipboard read shared by its terminal owner and worker.
+ * @field thread HANDLE Thread handle closed only by the terminal owner, including on detach.
+ * @field bytes char* Owned UTF-8 storage freed with the record after its final reference.
+ * @field limit size_t Maximum copied UTF-8 bytes, capped at one MiB before thread creation.
+ * @field used size_t Complete byte count published before worker termination; zero on rejection.
+ * @field valid int Whether the complete terminated UTF-16 input was admitted; read only after thread termination.
+ * @field references volatile_LONG Independent terminal and worker references released atomically.
+ * @field discarded volatile_LONG Owner's cancellation flag; the worker may stop copying after observing it.
+ * @field module HMODULE Worker-owned DLL reference released atomically at thread exit; NULL for executable-linked code.
+ * @field started DWORD GetTickCount value used by the owner for the bounded, wrap-safe wait policy.
+ * @field announced int Owner-only flag set after paste-start is inserted into a returned event array.
+ */
+typedef struct yaca_clipboard_read
+{
+  HANDLE thread;
+  char *bytes;
+  size_t limit;
+  size_t used;
+  int valid;
+  volatile LONG references;
+  volatile LONG discarded;
+  HMODULE module;
+  DWORD started;
+  int announced;
+} yaca_clipboard_read;
+
+/* Only one clipboard API reader per loaded native module may remain in flight,
+** including after its terminal owner times out or closes. */
+static volatile LONG windows_clipboard_busy;
+
+/* Release one independent clipboard-reader reference after its caller's final access.
+ * @param read yaca_clipboard_read* Record for which the caller owns exactly one reference.
+ * @return void No value; the final release frees the copied bytes and record.
+ * @ownership Consumes the caller reference; the owner closes the thread handle and the worker releases its module separately.
+ */
+static void release_windows_clipboard_read(yaca_clipboard_read *read)
+{
+  if (InterlockedDecrement(&read->references) == 0)
+  { free(read->bytes); free(read); }
+}
+
+/* Discard an outstanding clipboard result without waiting for another program to render it.
+ * @param read yaca_clipboard_read** Owner's slot; NULL content is an idempotent no-op.
+ * @return void No value; clears the slot before releasing its handle and reference.
+ * @effect Marks the copied text discarded and closes only the owner-held worker handle.
+ * @ownership A blocked worker keeps its own memory and module alive until it unlocks/closes the clipboard and exits.
+ */
+static void discard_windows_clipboard_read(yaca_clipboard_read **read)
+{
+  yaca_clipboard_read *owned = *read;
+  if (owned == NULL) return;
+  *read = NULL;
+  InterlockedExchange(&owned->discarded, 1);
+  CloseHandle(owned->thread);
+  release_windows_clipboard_read(owned);
+}
 #endif
 
 /* @struct yaca_terminal Lua-owned terminal mode, input, and restoration state.
@@ -339,6 +396,7 @@ static void release_windows_cooked_read(yaca_terminal_read *read)
  * @field pending_high_repeat_count WORD Repetition count retained with the high surrogate; a low surrogate must have the same count.
  * @field cooked_mode int Whether Windows console line editing is currently enabled.
  * @field cooked_read yaca_terminal_read* Active asynchronous Windows console read, if any.
+ * @field clipboard_read yaca_clipboard_read* Independent clipboard request awaiting announcement/result, or NULL.
  * @field pty yaca_pty_state Cygwin PTY mode and restoration state.
  * @field original_flags int POSIX descriptor flags captured for restoration.
  * @field maximum_input_bytes size_t Upper bound for one terminal input record.
@@ -362,6 +420,7 @@ typedef struct yaca_terminal
   WORD pending_high_repeat_count;
   int cooked_mode;
   yaca_terminal_read *cooked_read;
+  yaca_clipboard_read *clipboard_read;
   yaca_pty_state pty;
 #else
   int input;
@@ -11565,7 +11624,7 @@ static int restore_terminal(yaca_terminal *terminal)
 /* Finalize terminal ownership and attempt restoration without projecting Lua results.
  * @param L lua_State* Argument one may be a terminal userdata awaiting finalization.
  * @return int Zero Lua results, including when emergency cancellation or restoration fails.
- * @effect Attempts cooked-reader cancellation and restores the captured terminal settings.
+ * @effect Discards clipboard publication, attempts cooked-reader cancellation and restores the captured terminal settings.
  * @ownership Failed emergency cancellation releases the terminal reference; the active worker owns its remaining heap lifetime.
  */
 static int l_terminal_gc(lua_State *L)
@@ -11576,6 +11635,7 @@ static int l_terminal_gc(lua_State *L)
   if (terminal != NULL && !terminal->closed)
   {
 #if defined(_WIN32)
+    discard_windows_clipboard_read(&terminal->clipboard_read);
     if (!cancel_windows_cooked_read(terminal))
     {
       free_windows_cooked_read(terminal);
@@ -11684,34 +11744,29 @@ static size_t encode_utf8_codepoint(unsigned long codepoint, char output[4])
   return 4;
 }
 
-/* Read Unicode clipboard text only in response to an explicit paste gesture.
- * @param L lua_State* Receives one paste or paste-rejected action after clipboard ownership is released.
- * @param terminal yaca_terminal* Supplies the admitted input byte cap; no terminal fields are mutated.
- * @return int One after publishing an action; allocation may raise before any clipboard lock is acquired.
- * @error Lua allocation may raise; clipboard handles are unlocked and closed before subsequent Lua operations.
- * @effect Reads CF_UNICODETEXT without altering clipboard contents; rejects malformed, unterminated or oversized text without returning a prefix.
- * @ownership Borrows the clipboard handle only while open/locked; copied UTF-8 bytes are owned by the Lua buffer.
+/* Copy a complete Unicode clipboard value without accessing Lua or terminal state.
+ * @param read yaca_clipboard_read* Worker-owned record with allocated bytes and an admitted limit.
+ * @return void No result; publishes valid/used only for a complete, strictly decoded value.
+ * @effect Reads CF_UNICODETEXT; may block in another application's delayed rendering. Always unlocks and closes acquired clipboard ownership.
+ * @ownership Borrows clipboard storage only inside this call; no OS pointer escapes into the result buffer.
  */
-static int push_windows_paste(lua_State *L, yaca_terminal *terminal)
+static void read_windows_clipboard(yaca_clipboard_read *read)
 {
-  luaL_Buffer buffer;
-  size_t limit = terminal->maximum_input_bytes > 1048576U ? 1048576U : terminal->maximum_input_bytes;
-  char *bytes = luaL_buffinitsize(L, &buffer, limit);
   HANDLE data;
   const WCHAR *wide = NULL;
   size_t units, index = 0, used = 0;
   int valid = 0;
-  if (OpenClipboard(NULL))
+  if (InterlockedCompareExchange(&read->discarded, 0, 0) == 0 && OpenClipboard(NULL))
   {
     data = GetClipboardData(CF_UNICODETEXT);
     if (data != NULL)
     {
       units = GlobalSize(data) / sizeof(WCHAR);
-      if (units > limit + 1U) units = limit + 1U;
+      if (units > read->limit + 1U) units = read->limit + 1U;
       wide = (const WCHAR *)GlobalLock(data);
       if (wide != NULL)
       {
-        while (index < units)
+        while (index < units && InterlockedCompareExchange(&read->discarded, 0, 0) == 0)
         {
           unsigned long scalar = wide[index++];
           char encoded[4];
@@ -11727,8 +11782,8 @@ static int push_windows_paste(lua_State *L, yaca_terminal *terminal)
           }
           else if (scalar >= 0xDC00U && scalar <= 0xDFFFU) break;
           length = encode_utf8_codepoint(scalar, encoded);
-          if (length > limit - used) break;
-          memcpy(bytes + used, encoded, length);
+          if (length > read->limit - used) break;
+          memcpy(read->bytes + used, encoded, length);
           used += length;
         }
         GlobalUnlock(data);
@@ -11736,10 +11791,111 @@ static int push_windows_paste(lua_State *L, yaca_terminal *terminal)
     }
     CloseClipboard();
   }
-  luaL_pushresultsize(&buffer, valid ? used : 0U);
-  push_terminal_action(L, valid ? "paste" : "paste-rejected", valid ? lua_tostring(L, -1) : NULL, valid ? used : 0U);
-  lua_remove(L, -2);
+  read->used = valid ? used : 0U;
+  read->valid = valid;
+}
+
+/* Read the clipboard on an independently owned thread, then release its code and memory references.
+ * @param opaque LPVOID Shared clipboard record retaining this worker's independent reference.
+ * @return DWORD Zero for executable-linked code; a DLL worker exits atomically after releasing its record.
+ * @effect May wait for delayed clipboard rendering; releases the module-wide admission gate only after clipboard cleanup.
+ * @ownership Never accesses Lua, stdin or a terminal owner; a detached worker keeps its own storage/module until this exit.
+ */
+static DWORD WINAPI windows_clipboard_reader(LPVOID opaque)
+{
+  yaca_clipboard_read *read = (yaca_clipboard_read *)opaque;
+  HMODULE module = read->module;
+  read_windows_clipboard(read);
+  InterlockedExchange(&windows_clipboard_busy, 0);
+  release_windows_clipboard_read(read);
+  return finish_windows_thread_module(module, 0);
+}
+
+/* Start one bounded clipboard worker and project its input-order barrier without waiting for text.
+ * @param L lua_State* Receives paste-start, or paste-rejected when admission/allocation/thread creation fails.
+ * @param terminal yaca_terminal* Owner retaining the new request through publication errors and subsequent polls.
+ * @return int One for a new start/rejection action; zero ignores repeated paste gestures while this owner has a request.
+ * @error Lua allocation may raise; a started request remains owned and its start marker is retryable.
+ * @effect Allocates at most one MiB, retains worker code and starts one thread only when the module-wide gate is free.
+ * @ownership Terminal and worker each hold a reference; no borrowed terminal or Lua pointer is given to the worker.
+ */
+static int push_windows_paste(lua_State *L, yaca_terminal *terminal)
+{
+  yaca_clipboard_read *read;
+  size_t limit = terminal->maximum_input_bytes > 1048576U ? 1048576U : terminal->maximum_input_bytes;
+  if (terminal->clipboard_read != NULL) return 0;
+  if (InterlockedCompareExchange(&windows_clipboard_busy, 1, 0) != 0)
+  { push_terminal_action(L, "paste-rejected", NULL, 0U); return 1; }
+  read = (yaca_clipboard_read *)calloc(1, sizeof(*read));
+  if (read != NULL)
+  {
+    read->limit = limit;
+    read->bytes = (char *)malloc(limit == 0 ? 1U : limit);
+    if (read->bytes != NULL && retain_windows_thread_module(windows_clipboard_reader, &read->module))
+    {
+      read->references = 2;
+      read->started = GetTickCount();
+      read->thread = CreateThread(NULL, 0, windows_clipboard_reader, read, 0, NULL);
+      if (read->thread != NULL)
+      {
+        terminal->clipboard_read = read;
+        push_terminal_action(L, "paste-start", NULL, 0U);
+        return 1;
+      }
+      if (read->module != NULL) FreeLibrary(read->module);
+    }
+    free(read->bytes);
+    free(read);
+  }
+  InterlockedExchange(&windows_clipboard_busy, 0);
+  push_terminal_action(L, "paste-rejected", NULL, 0U);
   return 1;
+}
+
+/* Project an undelivered clipboard start or settled result while retaining ownership until array insertion.
+ * @param L lua_State* Receives one action table when a start/result is available.
+ * @param terminal yaca_terminal* Owner retaining the request across Lua allocation failures.
+ * @return int Zero while no request/result exists; one for paste-start; two for complete text or rejection.
+ * @error Lua allocation may raise; the caller acknowledges and releases only after successful event insertion.
+ * @effect Uses a zero-time wait and a wrap-safe two-second deadline; never waits for clipboard rendering.
+ */
+static int push_windows_paste_observation(lua_State *L, yaca_terminal *terminal)
+{
+  yaca_clipboard_read *read = terminal->clipboard_read;
+  DWORD waited;
+  int valid;
+  if (read == NULL) return 0;
+  if (!read->announced) { push_terminal_action(L, "paste-start", NULL, 0U); return 1; }
+  waited = WaitForSingleObject(read->thread, 0);
+  if (waited == WAIT_TIMEOUT && (DWORD)(GetTickCount() - read->started) < 2000U) return 0;
+  valid = waited == WAIT_OBJECT_0 && read->valid;
+  push_terminal_action(L, valid ? "paste" : "paste-rejected", valid ? read->bytes : NULL, valid ? read->used : 0U);
+  return 2;
+}
+
+/* Discard only the pending paste while leaving input, model work and terminal modes active.
+ * @param L lua_State* Argument one is an open terminal userdata.
+ * @return int Two Lua results: true and true, including an already discarded request.
+ * @effect Prevents any late clipboard text from being published by this owner; never waits for the worker.
+ * @ownership A detached Windows worker retains its independent storage/code references and holds the global admission gate until cleanup.
+ */
+static int l_terminal_discard_paste(lua_State *L)
+{
+  yaca_terminal *terminal = check_terminal(L, 1);
+  discard_windows_clipboard_read(&terminal->clipboard_read);
+  return push_true_result(L);
+}
+
+/* Acknowledge a clipboard action only after its event was inserted successfully.
+ * @param terminal yaca_terminal* Owner of the action just delivered to the Lua event array.
+ * @param result int One for the start barrier, two for text/rejection; zero is a no-op.
+ * @return void No value; start becomes announced or the settled request is released.
+ * @ownership Completion consumes the owner's reference; the worker independently finishes even after timeout.
+ */
+static void acknowledge_windows_paste(yaca_terminal *terminal, int result)
+{
+  if (result == 1) terminal->clipboard_read->announced = 1;
+  else if (result == 2) discard_windows_clipboard_read(&terminal->clipboard_read);
 }
 
 /* Project a console key record with exact bounded text repetition and strict UTF-16 pairing.
@@ -11748,8 +11904,8 @@ static int push_windows_paste(lua_State *L, yaca_terminal *terminal)
  * @param key const_KEY_EVENT_RECORD* Borrowed OS key record; zero repeat metadata keeps the single-key fallback.
  * @return int One for an action, zero for key-up/modifier/partial input, minus one for invalid UTF-16, minus two for a byte limit.
  * @error Lua allocation may raise; consumed key records are not replayed and temporary bytes remain Lua-owned.
- * @effect Updates partial-surrogate state; Enter/Esc remain one command per record with existing modifier precedence.
- * @ownership Repeated UTF-8 storage belongs to a Lua buffer/string until the action owns its copied text.
+ * @effect Updates partial-surrogate state; Enter/Esc remain one command per record. An explicit paste starts an independent bounded reader without waiting for clipboard data.
+ * @ownership Repeated UTF-8 storage belongs to Lua; an asynchronous clipboard request remains in the terminal owner until its start/result is acknowledged or discarded.
  */
 static int push_windows_key_action(
   lua_State *L,
@@ -12630,7 +12786,7 @@ static int l_terminal_start(lua_State *L)
  * @return int Two Lua results: true and an event array, or false and a typed limit/input failure.
  * @error Bad arguments or Lua allocation may raise; consumed stream bytes are not replayed, but owners and terminal truth remain recoverable.
  * @effect Reads borrowed stdin or completed console input; marks a terminal fact delivered only after inserting it in the returned array.
- * @ownership Read/conversion buffers are Lua-owned; the userdata keeps its mode and outstanding cooked reader resources.
+ * @ownership Stream/conversion buffers are Lua-owned; independent cooked/clipboard workers retain their own heap/module references. Clipboard results remain owned until successful event insertion.
  */
 static int l_terminal_poll(lua_State *L)
 {
@@ -12724,6 +12880,14 @@ static int l_terminal_poll(lua_State *L)
     else
     {
       DWORD available;
+      int clipboard_result = push_windows_paste_observation(L, terminal);
+
+      if (clipboard_result != 0)
+      {
+        lua_seti(L, -2, (lua_Integer)++count);
+        acknowledge_windows_paste(terminal, clipboard_result);
+        if (count >= budget) return return_success(L);
+      }
 
       available = 0;
       if (!GetNumberOfConsoleInputEvents(terminal->input, &available))
@@ -12761,6 +12925,8 @@ static int l_terminal_poll(lua_State *L)
         if (action_result > 0)
         {
           lua_seti(L, -2, (lua_Integer)++count);
+          if (terminal->clipboard_read != NULL && !terminal->clipboard_read->announced)
+            acknowledge_windows_paste(terminal, 1);
         }
       }
     }
@@ -12879,9 +13045,11 @@ static int l_terminal_poll(lua_State *L)
   return return_success(L);
 }
 
-/* Implements the Lua terminal cancel native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Request input-owner cancellation without waiting for an independent clipboard renderer.
+ * @param L lua_State* Arguments are an open terminal userdata and integer monotonic tick.
+ * @return int Two results: true and whether cancellation was admitted, or false and a typed cooked-reader failure.
+ * @error Invalid arguments or a closed owner raise a Lua error.
+ * @effect Discards clipboard publication and cancels/joins an active cooked reader before marking input cancelled; an already delivered terminal fact returns false acknowledgment.
  */
 static int l_terminal_cancel(lua_State *L)
 {
@@ -12889,6 +13057,9 @@ static int l_terminal_cancel(lua_State *L)
 
   terminal = check_terminal(L, 1);
   (void)luaL_checkinteger(L, 2);
+#if defined(_WIN32)
+  discard_windows_clipboard_read(&terminal->clipboard_read);
+#endif
   if (terminal->terminal_emitted)
   {
     lua_pushboolean(L, 0);
@@ -12928,9 +13099,11 @@ static int l_terminal_join(lua_State *L)
   return return_success(L);
 }
 
-/* Implements the Lua terminal restore native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Restore borrowed terminal settings after releasing this owner's clipboard publication.
+ * @param L lua_State* Argument one is an open terminal userdata retaining its original settings.
+ * @return int Two results: true/true after restoration, or false and a typed cancellation/restoration failure.
+ * @error Invalid arguments or a closed owner raise a Lua error.
+ * @effect Discards an independent paste without waiting, joins an active cooked reader and restores captured input modes; failed restoration remains retryable.
  */
 static int l_terminal_restore(lua_State *L)
 {
@@ -12938,6 +13111,7 @@ static int l_terminal_restore(lua_State *L)
 
   terminal = check_terminal(L, 1);
 #if defined(_WIN32)
+  discard_windows_clipboard_read(&terminal->clipboard_read);
   if (terminal->cooked_mode && !cancel_windows_cooked_read(terminal))
   {
     return push_windows_failure(L, GetLastError(), "cooked terminal restoration join failed");
@@ -12954,9 +13128,12 @@ static int l_terminal_restore(lua_State *L)
   return push_true_result(L);
 }
 
-/* Implements the Lua terminal close native port.
- * @param L lua_State* Lua state receiving arguments and result values.
- * @return int result Number of Lua results pushed for success or typed failure.
+/* Release terminal ownership after successful native restoration.
+ * @param L lua_State* Argument one is an open terminal userdata; already closed userdata is rejected.
+ * @return int Two results: true/true after close, or false and a typed cooked-reader/restoration failure.
+ * @error Invalid arguments or an already closed owner raise a Lua error.
+ * @effect Discards clipboard publication immediately; marks the owner closed only after cooked-reader cleanup and mode restoration succeed.
+ * @ownership A detached clipboard worker retains its own heap/module reference until its OS read ends; the terminal no longer owns its handle or result.
  */
 static int l_terminal_close(lua_State *L)
 {
@@ -12964,6 +13141,7 @@ static int l_terminal_close(lua_State *L)
 
   terminal = check_terminal(L, 1);
 #if defined(_WIN32)
+  discard_windows_clipboard_read(&terminal->clipboard_read);
   if (terminal->cooked_mode && !cancel_windows_cooked_read(terminal))
   {
     return push_windows_failure(L, GetLastError(), "cooked terminal close join failed");
@@ -13663,6 +13841,9 @@ static const luaL_Reg yaca_native_functions[] = {
   { "terminal_join", l_terminal_join },
   { "terminal_close", l_terminal_close },
   { "terminal_restore", l_terminal_restore },
+#if defined(_WIN32)
+  { "terminal_discard_paste", l_terminal_discard_paste },
+#endif
   { NULL, NULL },
 };
 

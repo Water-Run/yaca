@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-10-11
+Date: 2026-10-26
 File: native_ports_test.lua
 Description: Verifies narrow filesystem, process, terminal, and backend ports.
 ]]
@@ -552,7 +552,7 @@ return {
                 }))
                 A.deep_equal(
                     method_names(port),
-                    { "cancel", "close", "join", "poll", "restore", "start" }
+                    { "cancel", "close", "discard_paste", "join", "poll", "restore", "start" }
                 )
                 port:start(1)
                 local events = port:poll(2, 3)

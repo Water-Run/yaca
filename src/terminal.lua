@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-10-23
+Date: 2026-10-26
 File: terminal.lua
 Description: Wraps terminal input and restoration as a bounded AsyncPort.
 ]]
@@ -33,6 +33,7 @@ local INPUT_INTENTS = {
     cancel = true,
     text = true,
     paste = true,
+    ["paste-start"] = true,
     ["paste-rejected"] = true,
     eof = true,
 }
@@ -169,7 +170,7 @@ end
 -- or cooked input, while both modes emit the same semantic action vocabulary.
 --@param native table Native terminal implementation.
 --@param options table Terminal mode request and fixed input byte cap.
---@return table|nil port AsyncPort with an additional restore method.
+--@return table|nil port AsyncPort with restore and paste-discard methods.
 --@return table|nil err Structured construction failure.
 function M.new(native, options)
     if type(native) ~= "table" then
@@ -432,6 +433,24 @@ function M.new(native, options)
         end
         if value then cancel_requested = true end
         return value
+    end
+
+    -- Discard an asynchronous clipboard read without cancelling the terminal input owner.
+    --@param self table Started terminal AsyncPort with an admitted pending paste barrier.
+    --@return boolean True after native discard acknowledgment.
+    --@effect Prevents late paste publication; leaves model work and input polling active.
+    --@error Raises for a missing native capability, invalid lifecycle or malformed acknowledgment.
+    function port:discard_paste()
+        if state ~= "started" then error("terminal port is " .. state, 2) end
+        if type(native.terminal_discard_paste) ~= "function" then
+            raise_native(failure("NativeContract", "asynchronous paste has no discard operation"), 1)
+        end
+        local ok, value = call_native(native, "terminal_discard_paste", handle)
+        if not ok then raise_native(value, 1) end
+        if value ~= true then
+            raise_native(failure("NativeContract", "native paste discard acknowledgment is invalid"), 1)
+        end
+        return true
     end
 
     ---Joins terminal input and validates its typed terminal result.
@@ -1396,6 +1415,8 @@ function M.new_chat(native, options)
     local pending, actions, escape_since = "", {}, nil
     local observations, observation_index = {}, 1
     local paste, paste_suffix, discard_paste, skip_lf = false, "", false, false
+    local clipboard_waiting, clipboard_keys, clipboard_bytes = false, {}, 0
+    local replay, replay_index = {}, 1
     local history, history_bytes, history_at, saved_draft = {}, 0, nil, ""
 
     -- Require a successful internal editor operation while preserving a readable error code.
@@ -1587,6 +1608,68 @@ function M.new_chat(native, options)
         return false
     end
 
+    -- Drop already fetched keys after a rejected paste while retaining terminal outcome observations.
+    --@param none Uses the current observation array and next unread index.
+    --@return nil No result; preserves the order and delivery of non-key observations.
+    --@effect Removes only unread user actions, so EOF/cancellation truth cannot be lost during rejection.
+    local function discard_following_keys()
+        for index = #observations, observation_index, -1 do
+            if observations[index].kind == "user_action" then table.remove(observations, index) end
+        end
+    end
+
+    -- Resolve one native clipboard barrier while keeping following keys in their original order.
+    --@param event table Native semantic observation received while a paste is pending, or its start/result.
+    --@return boolean True when the observation was consumed by this barrier; false for ordinary input.
+    --@effect Buffers at most the input byte cap and 256 observations, replays keys after valid paste, or discards them after rejection/cancellation.
+    --@error Raises on nested barriers or queue overflow before any queued submission can be dispatched.
+    local function clipboard_event(event)
+        local action = event.kind == "user_action" and event.action or nil
+        if action == "paste-start" then
+            if clipboard_waiting then error("NativeContract: overlapping clipboard starts") end
+            clipboard_waiting, clipboard_keys, clipboard_bytes = true, {}, 0
+            return true
+        end
+        if action == "paste-rejected" then
+            clipboard_waiting, clipboard_keys, clipboard_bytes = false, {}, 0
+            discard_following_keys()
+            checked(editor.publish("[NOTICE] Clipboard text is unavailable or exceeds the input limit. Please enter it again.\n"))
+            return true
+        end
+        if not clipboard_waiting then return false end
+        if action == "paste" then
+            clipboard_waiting = false
+            if input_result(editor.insert(event.text)) then
+                replay, replay_index = clipboard_keys, 1
+            else
+                discard_following_keys()
+            end
+            clipboard_keys, clipboard_bytes = {}, 0
+            return true
+        end
+        local cancel_at = action == "text" and event.text:find("\3", 1, true) or nil
+        if action == "cancel" or cancel_at or event.kind == "io_terminal" then
+            base:discard_paste()
+            clipboard_waiting, clipboard_keys, clipboard_bytes = false, {}, 0
+            if event.kind == "io_terminal" then actions[#actions + 1] = event
+            else
+                checked(editor.consume({ kind = "user_action", action = "cancel" }))
+                checked(editor.set_draft(""))
+                history_at = nil
+                if cancel_at then pending = event.text:sub(cancel_at + 1) end
+            end
+            return true
+        end
+        clipboard_bytes = clipboard_bytes + #(event.text or "")
+        if clipboard_bytes > options.maximum_input_bytes or #clipboard_keys >= 256 then
+            base:discard_paste()
+            clipboard_waiting, clipboard_keys, clipboard_bytes = false, {}, 0
+            error("InputLimit: too many keys while clipboard text is pending")
+        end
+        clipboard_keys[#clipboard_keys + 1] = event
+        return true
+    end
+
     -- Decode one buffered key/paste fragment without treating escape bytes as ordinary commands.
     --@param now integer Monotonic time used to disambiguate a lone Escape key.
     --@return boolean True if bytes were consumed; false while waiting for an escape/paste boundary.
@@ -1709,13 +1792,21 @@ function M.new_chat(native, options)
             elseif pending ~= "" and consume(now) then
                 -- Input edits produce no domain event; completed lines enter actions.
                 edits = edits + 1
-            elseif observation_index <= #observations then
-                local event = observations[observation_index]
-                observation_index = observation_index + 1
+            elseif replay_index <= #replay or observation_index <= #observations then
+                local event
+                if replay_index <= #replay then
+                    event = replay[replay_index]
+                    replay[replay_index], replay_index = false, replay_index + 1
+                else
+                    event = observations[observation_index]
+                    observation_index = observation_index + 1
+                end
                 edits = edits + 1
-                if event.kind == "user_action" and event.action == "text" then
+                if clipboard_event(event) then
+                    -- The model/tool loop keeps polling while clipboard input waits.
+                elseif event.kind == "user_action" and event.action == "text" then
                     local parts, size = { event.text }, #pending + #event.text
-                    while observation_index <= #observations do
+                    while replay_index > #replay and observation_index <= #observations do
                         local following = observations[observation_index]
                         if following.kind ~= "user_action" or following.action ~= "text"
                             or size + #following.text > options.maximum_input_bytes then break end
@@ -1725,8 +1816,6 @@ function M.new_chat(native, options)
                     end
                     pending = pending .. table.concat(parts)
                 elseif event.kind == "user_action" and event.action == "paste" then input_result(editor.insert(event.text))
-                elseif event.kind == "user_action" and event.action == "paste-rejected" then
-                    checked(editor.publish("[NOTICE] Clipboard text is unavailable or exceeds the input limit.\n"))
                 elseif event.kind == "user_action" and SUBMISSION_INTENTS[event.action] then submit(event.action)
                 elseif event.kind == "user_action" and event.action == "cancel" then cancel_input()
                 elseif event.kind == "user_action" and event.action == "newline" then input_result(editor.insert("\n"))
@@ -1778,6 +1867,7 @@ function M.new_chat(native, options)
         local reset, reset_error = pcall(release_display)
         base:close()
         pending, actions, observations, history, saved_draft, paste_suffix = "", {}, {}, {}, "", ""
+        clipboard_waiting, clipboard_keys, clipboard_bytes, replay, replay_index = false, {}, 0, {}, 1
         editor, closed = nil, true
         if not reset then error(reset_error, 0) end
         return true

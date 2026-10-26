@@ -1,6 +1,6 @@
 --[[
 Author: WaterRun
-Date: 2026-10-23
+Date: 2026-10-26
 File: chat_input_test.lua
 Description: Checks production chat input selection, editing, bounded submission, paste and draft-preserving output.
 ]]
@@ -77,6 +77,12 @@ local function fixture(kind)
     --@return boolean True cancellation acknowledgment.
     --@effect Enables the fixture's terminal outcome on the next poll.
     function native.terminal_cancel(handle, now) f.cancelled = true; return true, true end
+    -- Discard the fixture's asynchronous paste without cancelling its input owner.
+    --@param handle table Stable fake handle.
+    --@return boolean True native call status.
+    --@return boolean True discard acknowledgment.
+    --@effect Counts discard requests for innermost cancellation assertions.
+    function native.terminal_discard_paste(handle) f.discards = (f.discards or 0) + 1; return true, true end
     -- Join only the fixture owner whose cancellation was requested.
     --@param handle table Stable fake handle.
     --@param deadline integer Monotonic join deadline.
@@ -161,6 +167,105 @@ end
 return {
     name = "integration/chat-input",
     cases = {
+        {
+            name = "delayed paste preserves following edits and Enter while output continues",
+            -- A clipboard barrier must yield to model output and replay keys only after the complete value.
+            --@param none Supplies a split native paste transaction and one-event output budgets.
+            --@return nil Assertions require exact paste/edit/submission order and a preserved draft around output.
+            run = function()
+                local f = fixture("console")
+                feed(f, "pre")
+                f.inputs = { { kind = "action", intent = "paste-start" }, "X",
+                    { kind = "action", intent = "submit-or-queue" } }
+                A.equal(#feed(f, ""), 0)
+                f.display:output("model continues\n")
+                A.equal(f.frames[#f.frames].prefix, ">> pre")
+                f.inputs = { { kind = "action", intent = "paste", text = "中\n" } }
+                local events = feed(f, "", 1)
+                A.equal(#events, 2); A.equal(events[1].text, "pre中\nX")
+                A.equal(events[2].action, "submit-or-queue")
+                close(f)
+            end,
+        },
+        {
+            name = "cancel pending paste discards queued Enter before cancelling model work",
+            -- The first Ctrl-C cancels the paste and draft; a subsequent Ctrl-C can cancel the active model.
+            --@param none Supplies a pending paste, queued partial command, Enter and two separate cancels.
+            --@return nil Assertions require no partial submission and exactly one explicit paste discard.
+            run = function()
+                local f = fixture("console")
+                feed(f, "pre")
+                f.inputs = { { kind = "action", intent = "paste-start" }, "tail",
+                    { kind = "action", intent = "submit-or-queue" }, "\3" }
+                A.equal(#feed(f, ""), 0)
+                A.equal(f.discards, 1); A.equal(f.cancelled, nil)
+                A.equal(f.frames[#f.frames].prefix, ">> ")
+                local events = feed(f, "\3")
+                A.equal(#events, 1); A.equal(events[1].action, "cancel")
+                close(f)
+            end,
+        },
+        {
+            name = "rejected paste drops queued submission and preserves the earlier draft",
+            -- A failed clipboard read must not let a queued Enter submit a command with missing paste text.
+            --@param none Rejects a paste after a preexisting draft and an immediate Enter.
+            --@return nil Assertions require a notice, preserved input and successful fresh typing afterward.
+            run = function()
+                local f = fixture("console")
+                feed(f, "pre")
+                f.inputs = { { kind = "action", intent = "paste-start" }, "tail",
+                    { kind = "action", intent = "submit-or-queue" }, { kind = "action", intent = "paste-rejected" } }
+                A.equal(#feed(f, ""), 0)
+                A.equal(f.frames[#f.frames].prefix, ">> pre")
+                A.truthy(f.frames[#f.frames].append:find("Clipboard text", 1, true))
+                local events = feed(f, "ok\r", 2)
+                A.equal(events[1].text, "preok"); A.equal(events[2].action, "submit-or-queue")
+                close(f)
+            end,
+        },
+        {
+            name = "immediate clipboard rejection discards keys from the same native batch",
+            -- Busy clipboard admission and a deadline observed before key polling must not submit a missing paste.
+            --@param none Supplies rejection followed immediately by native text and Enter in the fetched batch.
+            --@return nil Assertions require no submission and retention of only the earlier draft.
+            run = function()
+                local f = fixture("console")
+                feed(f, "pre")
+                f.inputs = { { kind = "action", intent = "paste-rejected" }, "tail",
+                    { kind = "action", intent = "submit-or-queue" } }
+                A.equal(#feed(f, ""), 0)
+                A.equal(f.frames[#f.frames].prefix, ">> pre")
+                close(f)
+            end,
+        },
+        {
+            name = "clipboard rejection preserves a terminal outcome in the fetched batch",
+            -- Dropping keys after failed paste must not consume the input owner's only terminal fact.
+            --@param none Supplies immediate rejection, an unsafe Enter and completed input truth together.
+            --@return nil Assertions require exactly the terminal event and normal owner cleanup.
+            run = function()
+                local f = fixture("console")
+                f.inputs = { { kind = "action", intent = "paste-rejected" },
+                    { kind = "action", intent = "submit-or-queue" }, { kind = "terminal", outcome = "completed" } }
+                local events = feed(f, "", 2)
+                A.equal(#events, 1); A.equal(events[1].kind, "io_terminal"); A.equal(events[1].outcome, "completed")
+                f.port:restore(); f.port:close(); A.truthy(f.closed)
+            end,
+        },
+        {
+            name = "pending paste key queue stays bounded before submission",
+            -- Overflow must discard the pending native read and fail before any partial Enter is dispatched.
+            --@param none Buffers more than the admitted cap behind an unresolved clipboard barrier.
+            --@return nil Assertions require a typed input-limit failure and independent cleanup.
+            run = function()
+                local f = fixture("console")
+                f.inputs = { { kind = "action", intent = "paste-start" }, string.rep("x", 200), string.rep("y", 100) }
+                local ok, err = pcall(feed, f, "")
+                A.equal(ok, false); A.truthy(tostring(err):find("InputLimit", 1, true))
+                A.equal(f.discards, 1)
+                close(f)
+            end,
+        },
         {
             name = "batched native text Enter and paste preserve ordering under a one-event budget",
             -- Native key batching must not submit an empty draft or merge the next line into the first.
